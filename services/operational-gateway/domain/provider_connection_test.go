@@ -54,27 +54,27 @@ func TestAPIKeyAuth(t *testing.T) {
 	assert.Equal(t, "api_key", auth.AuthType())
 }
 
-// TestBasicAuth verifies BasicAuth stores secret references for username and password.
+// TestBasicAuth verifies BasicAuth stores username as a plain value and password as a secret reference.
 func TestBasicAuth(t *testing.T) {
 	auth := &BasicAuth{
-		UsernameRef: "secrets/tenant-a/provider-username",
+		Username:    "service-account",
 		PasswordRef: "secrets/tenant-a/provider-password",
 	}
-	assert.Equal(t, "secrets/tenant-a/provider-username", auth.UsernameRef)
+	assert.Equal(t, "service-account", auth.Username)
 	assert.Equal(t, "secrets/tenant-a/provider-password", auth.PasswordRef)
 	assert.Equal(t, "basic", auth.AuthType())
 }
 
-// TestOAuth2Auth verifies OAuth2Auth stores secret references and configuration.
+// TestOAuth2Auth verifies OAuth2Auth stores client ID as a plain value and client secret as a secret reference.
 func TestOAuth2Auth(t *testing.T) {
 	auth := &OAuth2Auth{
 		TokenURL:        "https://auth.example.com/oauth/token",
-		ClientIDRef:     "secrets/tenant-a/oauth-client-id",
+		ClientID:        "my-client-id",
 		ClientSecretRef: "secrets/tenant-a/oauth-client-secret",
 		Scopes:          []string{"read", "write"},
 	}
 	assert.Equal(t, "https://auth.example.com/oauth/token", auth.TokenURL)
-	assert.Equal(t, "secrets/tenant-a/oauth-client-id", auth.ClientIDRef)
+	assert.Equal(t, "my-client-id", auth.ClientID)
 	assert.Equal(t, "secrets/tenant-a/oauth-client-secret", auth.ClientSecretRef)
 	assert.Equal(t, []string{"read", "write"}, auth.Scopes)
 	assert.Equal(t, "oauth2", auth.AuthType())
@@ -83,24 +83,36 @@ func TestOAuth2Auth(t *testing.T) {
 // TestHMACAuth verifies HMACAuth stores secret references and algorithm.
 func TestHMACAuth(t *testing.T) {
 	auth := &HMACAuth{
-		SecretRef:  "secrets/tenant-a/hmac-secret",
-		Algorithm:  "SHA256",
-		HeaderName: "X-Signature",
+		SecretRef:       "secrets/tenant-a/hmac-secret",
+		Algorithm:       "sha256",
+		SignatureHeader: "X-Signature",
 	}
 	assert.Equal(t, "secrets/tenant-a/hmac-secret", auth.SecretRef)
-	assert.Equal(t, "SHA256", auth.Algorithm)
-	assert.Equal(t, "X-Signature", auth.HeaderName)
+	assert.Equal(t, "sha256", auth.Algorithm)
+	assert.Equal(t, "X-Signature", auth.SignatureHeader)
 	assert.Equal(t, "hmac", auth.AuthType())
 }
 
-// TestMTLSAuth verifies MTLSAuth stores certificate and key references.
+// TestMTLSAuth verifies MTLSAuth stores certificate, key, and optional CA cert references.
 func TestMTLSAuth(t *testing.T) {
 	auth := &MTLSAuth{
-		CertRef: "secrets/tenant-a/mtls-cert",
-		KeyRef:  "secrets/tenant-a/mtls-key",
+		ClientCertRef: "secrets/tenant-a/mtls-cert",
+		ClientKeyRef:  "secrets/tenant-a/mtls-key",
+		CACertRef:     "secrets/tenant-a/mtls-ca",
 	}
-	assert.Equal(t, "secrets/tenant-a/mtls-cert", auth.CertRef)
-	assert.Equal(t, "secrets/tenant-a/mtls-key", auth.KeyRef)
+	assert.Equal(t, "secrets/tenant-a/mtls-cert", auth.ClientCertRef)
+	assert.Equal(t, "secrets/tenant-a/mtls-key", auth.ClientKeyRef)
+	assert.Equal(t, "secrets/tenant-a/mtls-ca", auth.CACertRef)
+	assert.Equal(t, "mtls", auth.AuthType())
+}
+
+// TestMTLSAuth_OptionalCACert verifies MTLSAuth works without a CA cert (uses system pool).
+func TestMTLSAuth_OptionalCACert(t *testing.T) {
+	auth := &MTLSAuth{
+		ClientCertRef: "secrets/tenant-a/mtls-cert",
+		ClientKeyRef:  "secrets/tenant-a/mtls-key",
+	}
+	assert.Empty(t, auth.CACertRef)
 	assert.Equal(t, "mtls", auth.AuthType())
 }
 
@@ -224,6 +236,16 @@ func TestNewProviderConnectionValidation(t *testing.T) {
 			auth:         nil,
 			expectErr:    ErrAuthConfigRequired,
 		},
+		{
+			name:         "invalid protocol",
+			tenantID:     "tenant-a",
+			providerName: "acme",
+			providerType: "bank",
+			protocol:     Protocol("FTP"),
+			baseURL:      "https://api.acme.com",
+			auth:         validAuth,
+			expectErr:    ErrInvalidProtocol,
+		},
 	}
 
 	for _, tc := range tests {
@@ -243,17 +265,24 @@ func TestNewProviderConnectionValidation(t *testing.T) {
 	}
 }
 
-// TestCircuitBreaker_RecordSuccess verifies that recording success keeps circuit closed
-// and increments the success counter.
-func TestCircuitBreaker_RecordSuccess(t *testing.T) {
+// TestCircuitBreaker_RecordSuccess_ResetFailureCount verifies that RecordSuccess resets
+// the failure count when the circuit is closed (consecutive failure tracking).
+func TestCircuitBreaker_RecordSuccess_ResetFailureCount(t *testing.T) {
 	conn := newTestConnection(t)
-	assert.Equal(t, 0, conn.SuccessCount)
+	threshold := 5
+
+	// Accumulate some failures below the trip threshold
+	for i := 0; i < threshold-1; i++ {
+		require.NoError(t, conn.RecordFailure(threshold))
+	}
+	assert.Equal(t, threshold-1, conn.FailureCount)
 	assert.Equal(t, CircuitStateClosed, conn.CircuitState)
 
+	// A success resets the streak
 	conn.RecordSuccess()
+	assert.Equal(t, 0, conn.FailureCount)
 	assert.Equal(t, 1, conn.SuccessCount)
 	assert.Equal(t, CircuitStateClosed, conn.CircuitState)
-	assert.Equal(t, 0, conn.FailureCount)
 }
 
 // TestCircuitBreaker_RecordFailureBelowThreshold verifies failures below threshold keep circuit closed.
@@ -262,7 +291,7 @@ func TestCircuitBreaker_RecordFailureBelowThreshold(t *testing.T) {
 	threshold := 5
 
 	for i := 1; i < threshold; i++ {
-		conn.RecordFailure(threshold)
+		require.NoError(t, conn.RecordFailure(threshold))
 		assert.Equal(t, i, conn.FailureCount)
 		assert.Equal(t, CircuitStateClosed, conn.CircuitState, "circuit should stay closed below threshold")
 	}
@@ -274,12 +303,19 @@ func TestCircuitBreaker_RecordFailureAtThreshold(t *testing.T) {
 	threshold := 5
 
 	for i := 0; i < threshold; i++ {
-		conn.RecordFailure(threshold)
+		require.NoError(t, conn.RecordFailure(threshold))
 	}
 
 	assert.Equal(t, threshold, conn.FailureCount)
 	assert.Equal(t, CircuitStateOpen, conn.CircuitState)
 	assert.NotNil(t, conn.CircuitOpenedAt)
+}
+
+// TestCircuitBreaker_RecordFailureInvalidThreshold verifies that threshold <= 0 returns an error.
+func TestCircuitBreaker_RecordFailureInvalidThreshold(t *testing.T) {
+	conn := newTestConnection(t)
+	assert.ErrorIs(t, conn.RecordFailure(0), ErrInvalidThreshold)
+	assert.ErrorIs(t, conn.RecordFailure(-1), ErrInvalidThreshold)
 }
 
 // TestCircuitBreaker_IsAvailableWhenClosed verifies circuit is available when closed.
@@ -319,6 +355,17 @@ func TestCircuitBreaker_TripCircuit(t *testing.T) {
 	assert.WithinDuration(t, time.Now(), *conn.CircuitOpenedAt, time.Second)
 }
 
+// TestCircuitBreaker_TripCircuit_PreservesOpenedAt verifies that re-tripping preserves the original time.
+func TestCircuitBreaker_TripCircuit_PreservesOpenedAt(t *testing.T) {
+	conn := newTestConnection(t)
+	conn.TripCircuit()
+	original := *conn.CircuitOpenedAt
+
+	// Trip again — original timestamp must be preserved
+	conn.TripCircuit()
+	assert.Equal(t, original, *conn.CircuitOpenedAt)
+}
+
 // TestCircuitBreaker_AttemptReset verifies AttemptReset transitions open → half-open.
 func TestCircuitBreaker_AttemptReset(t *testing.T) {
 	conn := newTestConnection(t)
@@ -348,7 +395,7 @@ func TestCircuitBreaker_FullCycle(t *testing.T) {
 
 	// Trip the circuit
 	for i := 0; i < threshold; i++ {
-		conn.RecordFailure(threshold)
+		require.NoError(t, conn.RecordFailure(threshold))
 	}
 	assert.Equal(t, CircuitStateOpen, conn.CircuitState)
 	assert.False(t, conn.IsAvailable())
@@ -372,13 +419,13 @@ func TestCircuitBreaker_HalfOpenFailureReopens(t *testing.T) {
 
 	// Trip then allow probe
 	for i := 0; i < threshold; i++ {
-		conn.RecordFailure(threshold)
+		require.NoError(t, conn.RecordFailure(threshold))
 	}
 	conn.AttemptReset()
 	assert.Equal(t, CircuitStateHalfOpen, conn.CircuitState)
 
 	// Failure in half-open re-trips
-	conn.RecordFailure(threshold)
+	require.NoError(t, conn.RecordFailure(threshold))
 	assert.Equal(t, CircuitStateOpen, conn.CircuitState)
 	assert.NotNil(t, conn.CircuitOpenedAt)
 }

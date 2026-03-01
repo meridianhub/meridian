@@ -24,6 +24,15 @@ const (
 	ProtocolAMQP Protocol = "AMQP"
 )
 
+// validProtocols is the set of accepted Protocol values for constructor validation.
+var validProtocols = map[Protocol]struct{}{
+	ProtocolHTTPS:   {},
+	ProtocolGRPC:    {},
+	ProtocolWebhook: {},
+	ProtocolMQTT:    {},
+	ProtocolAMQP:    {},
+}
+
 // CircuitState represents the current state of the circuit breaker.
 type CircuitState string
 
@@ -60,18 +69,22 @@ var (
 	ErrBaseURLRequired = errors.New("base URL is required")
 	// ErrAuthConfigRequired is returned when the auth config is nil.
 	ErrAuthConfigRequired = errors.New("auth config is required")
+	// ErrInvalidProtocol is returned when an unsupported protocol value is provided.
+	ErrInvalidProtocol = errors.New("invalid protocol")
+	// ErrInvalidThreshold is returned when a failure threshold of zero or less is used.
+	ErrInvalidThreshold = errors.New("threshold must be greater than zero")
 )
 
 // AuthConfig is the interface implemented by all authentication configuration types.
-// Implementations store secret references, not raw secret values. The actual secrets
-// are resolved at dispatch time via the SecretStore port.
+// Secret-valued fields store references (resolved at dispatch time via SecretStore).
+// Non-secret fields (e.g., usernames, client IDs) are stored as plain values.
 type AuthConfig interface {
 	// AuthType returns a string identifying the authentication mechanism.
 	AuthType() string
 }
 
 // APIKeyAuth authenticates using a static API key passed in a request header.
-// SecretRef is a reference resolved at dispatch time via SecretStore.
+// SecretRef is resolved at dispatch time via SecretStore.
 type APIKeyAuth struct {
 	// HeaderName is the HTTP header name to use (e.g., "X-API-Key").
 	HeaderName string
@@ -83,10 +96,10 @@ type APIKeyAuth struct {
 func (a *APIKeyAuth) AuthType() string { return "api_key" }
 
 // BasicAuth authenticates using HTTP Basic authentication.
-// UsernameRef and PasswordRef are references resolved at dispatch time via SecretStore.
+// Username is a plain value; PasswordRef is a secret reference resolved via SecretStore.
 type BasicAuth struct {
-	// UsernameRef is the reference to the secret containing the username.
-	UsernameRef string
+	// Username is the Basic auth username (not a secret).
+	Username string
 	// PasswordRef is the reference to the secret containing the password.
 	PasswordRef string
 }
@@ -95,12 +108,12 @@ type BasicAuth struct {
 func (a *BasicAuth) AuthType() string { return "basic" }
 
 // OAuth2Auth authenticates using the OAuth 2.0 client credentials flow.
-// ClientIDRef and ClientSecretRef are references resolved at dispatch time via SecretStore.
+// ClientID is a plain value; ClientSecretRef is a secret reference resolved via SecretStore.
 type OAuth2Auth struct {
 	// TokenURL is the token endpoint URL.
 	TokenURL string
-	// ClientIDRef is the reference to the secret containing the OAuth client ID.
-	ClientIDRef string
+	// ClientID is the OAuth 2.0 client identifier (not a secret).
+	ClientID string
 	// ClientSecretRef is the reference to the secret containing the OAuth client secret.
 	ClientSecretRef string
 	// Scopes is the list of OAuth scopes to request.
@@ -111,26 +124,29 @@ type OAuth2Auth struct {
 func (a *OAuth2Auth) AuthType() string { return "oauth2" }
 
 // HMACAuth authenticates by signing request payloads with HMAC.
-// SecretRef is a reference resolved at dispatch time via SecretStore.
+// SecretRef is resolved at dispatch time via SecretStore.
 type HMACAuth struct {
 	// SecretRef is the reference to the HMAC signing secret.
 	SecretRef string
-	// Algorithm is the HMAC algorithm to use (e.g., "SHA256", "SHA512").
+	// Algorithm is the HMAC algorithm to use (e.g., "sha256", "sha512").
 	Algorithm string
-	// HeaderName is the HTTP header used to send the HMAC signature.
-	HeaderName string
+	// SignatureHeader is the HTTP header where the computed signature is placed.
+	SignatureHeader string
 }
 
 // AuthType implements AuthConfig.
 func (a *HMACAuth) AuthType() string { return "hmac" }
 
 // MTLSAuth authenticates using mutual TLS with a client certificate.
-// CertRef and KeyRef are references resolved at dispatch time via SecretStore.
+// All three fields are secret references resolved at dispatch time via SecretStore.
 type MTLSAuth struct {
-	// CertRef is the reference to the secret containing the PEM-encoded client certificate.
-	CertRef string
-	// KeyRef is the reference to the secret containing the PEM-encoded client private key.
-	KeyRef string
+	// ClientCertRef is the reference to the secret containing the PEM-encoded client certificate.
+	ClientCertRef string
+	// ClientKeyRef is the reference to the secret containing the PEM-encoded client private key.
+	ClientKeyRef string
+	// CACertRef is an optional reference to the secret containing the CA certificate used to
+	// verify the provider's server certificate. Empty string means the system CA pool is used.
+	CACertRef string
 }
 
 // AuthType implements AuthConfig.
@@ -159,7 +175,7 @@ type RateLimitConfig struct {
 
 // ProviderConnection is the aggregate root representing a configured connection to an
 // external provider. It tracks health, circuit breaker state, and authentication
-// configuration. Auth configs store secret references that are resolved at dispatch
+// configuration. Secret-valued auth config fields store references resolved at dispatch
 // time via the SecretStore port — raw secret values are never stored here.
 type ProviderConnection struct {
 	// TenantID is the owning tenant's identifier.
@@ -181,7 +197,6 @@ type ProviderConnection struct {
 	BaseURL string
 
 	// AuthConfig holds the authentication configuration for this connection.
-	// Implementations store secret references, resolved at dispatch time.
 	AuthConfig AuthConfig
 
 	// RetryPolicy defines retry behavior for failed requests.
@@ -199,10 +214,10 @@ type ProviderConnection struct {
 	// CircuitState is the current state of the circuit breaker.
 	CircuitState CircuitState
 
-	// CircuitOpenedAt is the time the circuit was opened, or nil when closed/half-open without prior trip.
+	// CircuitOpenedAt is the time the circuit was opened, or nil when the circuit has not been tripped.
 	CircuitOpenedAt *time.Time
 
-	// FailureCount is the number of consecutive failures recorded since the last success.
+	// FailureCount is the count of consecutive failures since the last RecordSuccess call.
 	FailureCount int
 
 	// SuccessCount is the total number of successes recorded on this connection.
@@ -216,6 +231,7 @@ type ProviderConnection struct {
 }
 
 // NewProviderConnection creates and validates a new ProviderConnection aggregate.
+// Returns ErrInvalidProtocol if the protocol is not one of the known values.
 func NewProviderConnection(
 	tenantID string,
 	providerName string,
@@ -238,6 +254,9 @@ func NewProviderConnection(
 	if authConfig == nil {
 		return nil, ErrAuthConfigRequired
 	}
+	if _, ok := validProtocols[protocol]; !ok {
+		return nil, ErrInvalidProtocol
+	}
 
 	now := time.Now().UTC()
 	return &ProviderConnection{
@@ -259,42 +278,52 @@ func NewProviderConnection(
 	}, nil
 }
 
-// RecordSuccess records a successful request to the provider.
-// When the circuit is half-open, a success closes the circuit and resets failure tracking.
-// In all cases the success counter is incremented.
+// RecordSuccess records a successful request to the provider and increments SuccessCount.
+// When the circuit is closed or half-open, it also resets FailureCount and closes the circuit
+// (the half-open → closed transition confirms recovery).
 func (c *ProviderConnection) RecordSuccess() {
 	c.SuccessCount++
-	if c.CircuitState == CircuitStateHalfOpen {
+	switch c.CircuitState {
+	case CircuitStateHalfOpen:
 		c.CircuitState = CircuitStateClosed
 		c.FailureCount = 0
 		c.CircuitOpenedAt = nil
+	case CircuitStateClosed:
+		c.FailureCount = 0
+	case CircuitStateOpen:
+		// Success during open state is unexpected (IsAvailable returns false).
+		// Record it but do not change circuit state automatically; use AttemptReset first.
 	}
 	c.UpdatedAt = time.Now().UTC()
 }
 
 // RecordFailure records a failed request to the provider and trips the circuit breaker
 // if the failure count reaches the given threshold. In the half-open state any failure
-// immediately re-trips the circuit.
-func (c *ProviderConnection) RecordFailure(threshold int) {
+// immediately re-trips the circuit. Returns ErrInvalidThreshold if threshold <= 0.
+func (c *ProviderConnection) RecordFailure(threshold int) error {
+	if threshold <= 0 {
+		return ErrInvalidThreshold
+	}
 	c.FailureCount++
 	switch c.CircuitState {
 	case CircuitStateClosed:
 		if c.FailureCount >= threshold {
 			c.TripCircuit()
-			return
+			return nil
 		}
 	case CircuitStateHalfOpen:
 		c.TripCircuit()
-		return
+		return nil
 	case CircuitStateOpen:
 		// Circuit already open; failure is recorded but no additional state change needed.
 	}
 	c.UpdatedAt = time.Now().UTC()
+	return nil
 }
 
 // TripCircuit transitions the circuit breaker to the open state, blocking further requests.
-// Calling TripCircuit when the circuit is already open preserves the original CircuitOpenedAt
-// so the open duration is measured from the first failure, not a subsequent re-evaluation.
+// If the circuit is already open, CircuitOpenedAt is preserved so that the open duration
+// is measured from the original trip time, not a subsequent re-evaluation.
 func (c *ProviderConnection) TripCircuit() {
 	now := time.Now().UTC()
 	c.CircuitState = CircuitStateOpen
