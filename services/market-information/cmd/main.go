@@ -97,6 +97,7 @@ func run(logger *slog.Logger) error {
 	// Initialize GORM database connection for outbox pattern.
 	// The existing pgxpool connection is retained for domain persistence operations.
 	gormDBConfig := bootstrap.DefaultDatabaseConfig()
+	gormDBConfig.DSN = dbURL
 	gormDBConfig.Logger = logger
 	gormDB, err := bootstrap.NewDatabase(ctx, gormDBConfig)
 	if err != nil {

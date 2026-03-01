@@ -126,6 +126,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
+	defer bootstrap.CloseDatabase(db, logger)
 
 	logger.Info("database connection established")
 
@@ -628,9 +629,6 @@ func run(logger *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 	defer cancel()
 
-	// Close database connection during shutdown
-	defer bootstrap.CloseDatabase(db, logger)
-
 	// Stop billing workers and wait for goroutines to exit before database close.
 	// Cancel the worker context first to unblock Start() select loops, then
 	// call Stop() to signal internal shutdown channels and drain in-flight work.
@@ -913,7 +911,6 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig), nil
 }
 
-// createKafkaProducer creates the Kafka producer.
 // createRedisClient creates and validates a Redis client connection.
 // Environment variables:
 //   - REDIS_URL: Redis connection URL (default: redis://localhost:6379)
