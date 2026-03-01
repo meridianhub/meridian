@@ -104,18 +104,18 @@ func TestMTLSAuth(t *testing.T) {
 	assert.Equal(t, "mtls", auth.AuthType())
 }
 
-// TestRetryPolicy verifies RetryPolicy stores duration-based configuration.
+// TestRetryPolicy verifies RetryPolicy stores duration-based and numeric configuration.
 func TestRetryPolicy(t *testing.T) {
 	policy := RetryPolicy{
 		MaxAttempts:       3,
 		InitialBackoff:    100 * time.Millisecond,
 		MaxBackoff:        10 * time.Second,
-		BackoffMultiplier: 2 * time.Millisecond,
+		BackoffMultiplier: 2.0,
 	}
 	assert.Equal(t, 3, policy.MaxAttempts)
 	assert.Equal(t, 100*time.Millisecond, policy.InitialBackoff)
 	assert.Equal(t, 10*time.Second, policy.MaxBackoff)
-	assert.Equal(t, 2*time.Millisecond, policy.BackoffMultiplier)
+	assert.Equal(t, 2.0, policy.BackoffMultiplier)
 }
 
 // TestRateLimitConfig verifies RateLimitConfig stores rate limiting parameters.

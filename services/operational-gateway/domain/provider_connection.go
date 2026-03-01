@@ -144,8 +144,9 @@ type RetryPolicy struct {
 	InitialBackoff time.Duration
 	// MaxBackoff is the maximum wait duration between retries.
 	MaxBackoff time.Duration
-	// BackoffMultiplier is the factor by which the backoff duration grows per retry.
-	BackoffMultiplier time.Duration
+	// BackoffMultiplier is the dimensionless scaling factor applied to the backoff duration on each retry
+	// (e.g., 2.0 doubles the backoff). This is a pure numeric multiplier, not a duration.
+	BackoffMultiplier float64
 }
 
 // RateLimitConfig defines the rate limiting policy for outbound requests to a provider.
@@ -292,11 +293,14 @@ func (c *ProviderConnection) RecordFailure(threshold int) {
 }
 
 // TripCircuit transitions the circuit breaker to the open state, blocking further requests.
-// Calling TripCircuit when the circuit is already open is a no-op.
+// Calling TripCircuit when the circuit is already open preserves the original CircuitOpenedAt
+// so the open duration is measured from the first failure, not a subsequent re-evaluation.
 func (c *ProviderConnection) TripCircuit() {
 	now := time.Now().UTC()
 	c.CircuitState = CircuitStateOpen
-	c.CircuitOpenedAt = &now
+	if c.CircuitOpenedAt == nil {
+		c.CircuitOpenedAt = &now
+	}
 	c.UpdatedAt = now
 }
 
