@@ -205,6 +205,7 @@ type Service struct {
 	withdrawalRepo         *persistence.WithdrawalRepository
 	valuationFeatureRepo   *persistence.ValuationFeatureRepository // ValuationFeature repository for valuation method assignments
 	outboxRepo             events.OutboxRepository                 // Outbox repository for reliable event delivery
+	outboxPublisher        *events.OutboxPublisher                 // OutboxPublisher for transactional event writing
 	db                     *gorm.DB                                // Database connection for transaction management
 	posKeepingClient       PositionKeepingClient
 	finAcctClient          FinancialAccountingClient
@@ -214,7 +215,7 @@ type Service struct {
 	valuationEngine        ValuationEngine  // Optional: executes valuation method logic
 	accountConfig          *config.AccountConfig
 	idempotencyService     idempotency.Service
-	eventPublisher         AccountEventPublisher // Optional: publishes lifecycle events to Kafka
+	eventPublisher         AccountEventPublisher // Optional: publishes lifecycle events to Kafka (deprecated: use outboxPublisher)
 	webhookNotifier        WebhookNotifier       // Optional: sends webhook notifications for lifecycle events
 	logger                 *slog.Logger
 	tracer                 *observability.Tracer
@@ -413,6 +414,7 @@ func NewServiceWithExistingClients(
 		lienRepo:               lienRepo,
 		withdrawalRepo:         withdrawalRepo,
 		outboxRepo:             outboxRepo,
+		outboxPublisher:        events.NewOutboxPublisher("current-account"),
 		db:                     db,
 		posKeepingClient:       posKeepingClient,
 		finAcctClient:          finAcctClient,

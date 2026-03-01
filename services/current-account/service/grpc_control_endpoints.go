@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,11 +13,14 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 // ControlCurrentAccount performs lifecycle state transitions on an account.
@@ -156,8 +160,10 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 		return nil, status.Errorf(codes.InvalidArgument, "unknown control action: %v", req.ControlAction)
 	}
 
-	// Persist with optimistic locking
-	if err := s.repo.Save(ctx, account); err != nil {
+	// Atomically persist account state change and write event to outbox.
+	// Using transactional outbox ensures guaranteed at-least-once event delivery
+	// without the fire-and-forget reliability issues of direct Kafka publishing.
+	if err := s.saveWithOutboxEvent(ctx, req, &account, actionTimestamp); err != nil {
 		if errors.Is(err, persistence.ErrVersionConflict) {
 			operationStatus = "version_conflict"
 			s.logger.Warn("version conflict during control action",
@@ -168,11 +174,6 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 		operationStatus = opStatusSaveFailed
 		return nil, status.Errorf(codes.Internal, "failed to save account: %v", err)
 	}
-
-	// Emit Kafka events for account lifecycle changes (fire-and-forget pattern)
-	// Event publishing errors are logged but don't fail the operation to ensure
-	// the business operation completes successfully regardless of messaging issues.
-	s.publishControlActionEvent(ctx, req, &account, actionTimestamp)
 
 	// Emit webhook notifications for FREEZE and CLOSE actions (regulatory compliance)
 	// Webhooks are sent asynchronously with retry logic - errors are logged but don't fail the operation.
@@ -191,18 +192,21 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 	}, nil
 }
 
-// publishControlActionEvent emits lifecycle events to Kafka based on the control action.
-// This method uses fire-and-forget semantics - errors are logged but don't fail the operation.
-// The account balance and reason information is captured from the domain object and request.
-func (s *Service) publishControlActionEvent(
+// saveWithOutboxEvent atomically persists the account state change and writes the
+// corresponding lifecycle event to the outbox within a single database transaction.
+// This replaces the previous fire-and-forget PublishWithTenant pattern, guaranteeing
+// at-least-once event delivery via the background outbox worker.
+//
+// If the outbox publisher is not configured (e.g., in tests), falls back to repo.Save only.
+func (s *Service) saveWithOutboxEvent(
 	ctx context.Context,
 	req *pb.ControlCurrentAccountRequest,
 	account *domain.CurrentAccount,
 	actionTimestamp time.Time,
-) {
-	// Skip if event publisher is not configured
-	if s.eventPublisher == nil {
-		return
+) error {
+	// Fall back to direct save if outbox is not available (e.g., unit tests)
+	if s.outboxPublisher == nil || s.db == nil {
+		return s.repo.Save(ctx, *account)
 	}
 
 	// Extract actor identity from auth context (falls back to "system" if not available)
@@ -211,96 +215,111 @@ func (s *Service) publishControlActionEvent(
 		actorID = userID
 	}
 
-	// Generate correlation ID for event tracing
 	correlationID := uuid.New().String()
-
-	// Generate event timestamp
 	now := time.Now().UTC()
-
-	// Use AccountID() which returns the business account ID as string
 	accountID := account.AccountID()
 
-	switch req.ControlAction {
-	case pb.ControlAction_CONTROL_ACTION_FREEZE:
-		event := &eventsv1.AccountFrozenEvent{
-			EventId:       uuid.New().String(),
-			AccountId:     accountID,
-			Reason:        req.Reason,
-			FrozenAt:      timestamppb.New(actionTimestamp),
-			FrozenBy:      actorID,
-			CorrelationId: correlationID,
-			CausationId:   correlationID,
-			Timestamp:     timestamppb.New(now),
-			Version:       account.Version(),
-		}
-		if err := s.eventPublisher.PublishWithTenant(ctx, TopicAccountFrozen, accountID, event); err != nil {
-			s.logger.Error("failed to publish account frozen event",
-				"account_id", accountID,
-				"error", err)
-		} else {
-			s.logger.Debug("published account frozen event",
-				"account_id", accountID,
-				"event_id", event.EventId,
-				"correlation_id", correlationID)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Save the account state using a transaction-scoped repository
+		txRepo := s.repo.WithTx(tx)
+		if err := txRepo.Save(ctx, *account); err != nil { //nolint:govet // account is a pointer to domain value
+			return err
 		}
 
-	case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
-		event := &eventsv1.AccountUnfrozenEvent{
-			EventId:       uuid.New().String(),
-			AccountId:     accountID,
-			UnfrozenAt:    timestamppb.New(actionTimestamp),
-			UnfrozenBy:    actorID,
-			CorrelationId: correlationID,
-			CausationId:   correlationID,
-			Timestamp:     timestamppb.New(now),
-			Version:       account.Version(),
-		}
-		if err := s.eventPublisher.PublishWithTenant(ctx, TopicAccountUnfrozen, accountID, event); err != nil {
-			s.logger.Error("failed to publish account unfrozen event",
-				"account_id", accountID,
-				"error", err)
-		} else {
-			s.logger.Debug("published account unfrozen event",
-				"account_id", accountID,
-				"event_id", event.EventId,
-				"correlation_id", correlationID)
+		// Build and publish the lifecycle event to the outbox based on the control action
+		switch req.ControlAction {
+		case pb.ControlAction_CONTROL_ACTION_FREEZE:
+			event := &eventsv1.AccountFrozenEvent{
+				EventId:       uuid.New().String(),
+				AccountId:     accountID,
+				Reason:        req.Reason,
+				FrozenAt:      timestamppb.New(actionTimestamp),
+				FrozenBy:      actorID,
+				CorrelationId: correlationID,
+				CausationId:   correlationID,
+				Timestamp:     timestamppb.New(now),
+				Version:       account.Version(),
+			}
+			if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+				EventType:     "current_account.account_frozen.v1",
+				Topic:         topics.CurrentAccountAccountFrozenV1,
+				AggregateType: "CurrentAccount",
+				AggregateID:   accountID,
+				CorrelationID: correlationID,
+				CausationID:   correlationID,
+			}); err != nil {
+				return fmt.Errorf("failed to write account frozen event to outbox: %w", err)
+			}
+
+		case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
+			event := &eventsv1.AccountUnfrozenEvent{
+				EventId:       uuid.New().String(),
+				AccountId:     accountID,
+				UnfrozenAt:    timestamppb.New(actionTimestamp),
+				UnfrozenBy:    actorID,
+				CorrelationId: correlationID,
+				CausationId:   correlationID,
+				Timestamp:     timestamppb.New(now),
+				Version:       account.Version(),
+			}
+			if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+				EventType:     "current_account.account_unfrozen.v1",
+				Topic:         topics.CurrentAccountAccountUnfrozenV1,
+				AggregateType: "CurrentAccount",
+				AggregateID:   accountID,
+				CorrelationID: correlationID,
+				CausationID:   correlationID,
+			}); err != nil {
+				return fmt.Errorf("failed to write account unfrozen event to outbox: %w", err)
+			}
+
+		case pb.ControlAction_CONTROL_ACTION_CLOSE:
+			balanceCents, _ := account.Balance().ToMinorUnits()
+			// Derive the divisor from the account's precision so the conversion is
+			// correct for any currency (e.g., JPY precision=0, GBP precision=2, KWH precision=3).
+			precision := account.Balance().Precision()
+			divisor := int64(1)
+			for i := 0; i < precision; i++ {
+				divisor *= 10
+			}
+			var nanosMultiplier int32
+			if divisor > 0 {
+				nanosMultiplier = int32(1_000_000_000 / divisor)
+			}
+			closingBalance := &money.Money{
+				CurrencyCode: account.Balance().InstrumentCode(),
+				Units:        balanceCents / divisor,
+				Nanos:        int32(balanceCents%divisor) * nanosMultiplier,
+			}
+			event := &eventsv1.AccountClosedEvent{
+				EventId:        uuid.New().String(),
+				AccountId:      accountID,
+				ClosingBalance: closingBalance,
+				ClosureReason:  req.Reason,
+				ClosedBy:       actorID,
+				ClosureDate:    timestamppb.New(actionTimestamp),
+				CorrelationId:  correlationID,
+				CausationId:    correlationID,
+				Timestamp:      timestamppb.New(now),
+				Version:        account.Version(),
+			}
+			if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+				EventType:     "current_account.account_closed.v1",
+				Topic:         topics.CurrentAccountAccountClosedV1,
+				AggregateType: "CurrentAccount",
+				AggregateID:   accountID,
+				CorrelationID: correlationID,
+				CausationID:   correlationID,
+			}); err != nil {
+				return fmt.Errorf("failed to write account closed event to outbox: %w", err)
+			}
+
+		case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+			// No event for unspecified action
 		}
 
-	case pb.ControlAction_CONTROL_ACTION_CLOSE:
-		// Convert domain balance to google.type.Money
-		balanceCents, _ := account.Balance().ToMinorUnits()
-		closingBalance := &money.Money{
-			CurrencyCode: account.Balance().InstrumentCode(),
-			Units:        balanceCents / 100,
-			Nanos:        int32((balanceCents % 100) * 10000000),
-		}
-
-		event := &eventsv1.AccountClosedEvent{
-			EventId:        uuid.New().String(),
-			AccountId:      accountID,
-			ClosingBalance: closingBalance,
-			ClosureReason:  req.Reason,
-			ClosedBy:       actorID,
-			ClosureDate:    timestamppb.New(actionTimestamp),
-			CorrelationId:  correlationID,
-			CausationId:    correlationID,
-			Timestamp:      timestamppb.New(now),
-			Version:        account.Version(),
-		}
-		if err := s.eventPublisher.PublishWithTenant(ctx, TopicAccountClosed, accountID, event); err != nil {
-			s.logger.Error("failed to publish account closed event",
-				"account_id", accountID,
-				"error", err)
-		} else {
-			s.logger.Debug("published account closed event",
-				"account_id", accountID,
-				"event_id", event.EventId,
-				"correlation_id", correlationID)
-		}
-
-	case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
-		// No event for unspecified action (validation catches this earlier)
-	}
+		return nil
+	})
 }
 
 // sendControlActionWebhook sends webhook notifications for regulatory compliance events.
