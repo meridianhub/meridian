@@ -6,7 +6,8 @@
 -- Connections are reused across multiple instructions of matching instruction_types.
 CREATE TABLE provider_connections (
     tenant_id UUID NOT NULL,
-    connection_id VARCHAR(64) NOT NULL,
+    -- connection_id is a UUID identifier matching the proto field definition.
+    connection_id UUID NOT NULL,
     provider_name VARCHAR(255) NOT NULL,
     provider_type VARCHAR(128) NOT NULL,
     -- protocol: HTTPS=1, GRPC=2, WEBHOOK=3, MQTT=4, AMQP=5
@@ -45,7 +46,8 @@ CREATE TABLE instructions (
     -- instruction_type identifies the category of operation (e.g. "payment.initiate", "account.freeze").
     instruction_type VARCHAR(255) NOT NULL,
     -- provider_connection_id references the connection used to dispatch this instruction.
-    provider_connection_id VARCHAR(64) NOT NULL,
+    -- FK enforced as composite (tenant_id, provider_connection_id) to prevent cross-tenant orphans.
+    provider_connection_id UUID NOT NULL,
     -- correlation_id links all events across services for a single user request.
     correlation_id VARCHAR(255) NULL,
     -- causation_id identifies the event or command that caused this instruction to be created.
@@ -54,25 +56,28 @@ CREATE TABLE instructions (
     payload JSONB NOT NULL,
     -- metadata stores additional key-value pairs for routing, filtering, or audit purposes.
     metadata JSONB NULL,
-    -- priority: LOW=1, NORMAL=2, HIGH=3, CRITICAL=4
-    priority VARCHAR(20) NOT NULL DEFAULT 'NORMAL' CHECK (priority IN ('LOW', 'NORMAL', 'HIGH', 'CRITICAL')),
+    -- priority uses SMALLINT to allow correct numeric ordering in the dispatch index.
+    -- LOW=1, NORMAL=2, HIGH=3, CRITICAL=4 (matching the Priority proto enum values).
+    priority SMALLINT NOT NULL DEFAULT 2 CHECK (priority IN (1, 2, 3, 4)),
     -- status follows the InstructionStatus state machine defined in the proto.
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'DISPATCHING', 'DELIVERED', 'ACKNOWLEDGED', 'RETRYING', 'FAILED', 'EXPIRED', 'CANCELLED')),
     scheduled_at TIMESTAMPTZ NULL,
     expires_at TIMESTAMPTZ NULL,
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    max_attempts INTEGER NOT NULL DEFAULT 3,
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts >= 1),
     next_retry_at TIMESTAMPTZ NULL,
     -- idempotency_key ensures exactly-once dispatch of each instruction.
     idempotency_key VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    FOREIGN KEY (tenant_id, provider_connection_id) REFERENCES provider_connections (tenant_id, connection_id)
 );
 
--- Outbox polling index: dispatch worker polls for PENDING/RETRYING instructions ordered by priority
--- then by scheduled_at. Partial index limits scan to actionable rows only.
-CREATE INDEX idx_instructions_outbox ON instructions (status, priority DESC, scheduled_at ASC)
+-- Outbox polling index: dispatch worker polls for PENDING/RETRYING instructions ordered by priority DESC
+-- (CRITICAL=4 first) then by scheduled_at ASC. Partial index limits scan to actionable rows only.
+-- Using numeric priority (SMALLINT) ensures correct ordering: 4 > 3 > 2 > 1.
+CREATE INDEX idx_instructions_outbox ON instructions (priority DESC, scheduled_at ASC)
     WHERE status IN ('PENDING', 'RETRYING');
 
 -- Tenant + type index: used by list and routing queries.
@@ -92,6 +97,7 @@ CREATE TABLE instruction_attempts (
     -- instruction_id references the parent instruction.
     instruction_id UUID NOT NULL,
     -- attempt_number is the 1-based ordinal of this attempt.
+    -- Uniqueness constraint prevents duplicate ordinals from corrupting retry/audit semantics.
     attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
     dispatched_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ NULL,
@@ -107,5 +113,6 @@ CREATE TABLE instruction_attempts (
     FOREIGN KEY (instruction_id) REFERENCES instructions (id)
 );
 
--- Lookup index: used to retrieve all attempts for a given instruction in attempt order.
-CREATE INDEX idx_instruction_attempts_instruction ON instruction_attempts (instruction_id, attempt_number);
+-- Unique index on (instruction_id, attempt_number) ensures ordinals cannot be duplicated,
+-- while also serving as the primary lookup path for attempt retrieval.
+CREATE UNIQUE INDEX idx_instruction_attempts_instruction ON instruction_attempts (instruction_id, attempt_number);
