@@ -13,6 +13,7 @@ type stubSecretStore struct {
 	secrets map[string]string
 }
 
+// Resolve returns the secret for the given tenant and ref, or ErrSecretNotFound.
 func (s *stubSecretStore) Resolve(_ context.Context, tenantID, secretRef string) (string, error) {
 	key := tenantID + ":" + secretRef
 	if v, ok := s.secrets[key]; ok {
@@ -21,11 +22,15 @@ func (s *stubSecretStore) Resolve(_ context.Context, tenantID, secretRef string)
 	return "", ports.ErrSecretNotFound
 }
 
+// TestSecretStore_Interface is a compile-time assertion that stubSecretStore
+// satisfies the SecretStore interface.
 func TestSecretStore_Interface(_ *testing.T) {
 	// Verify stubSecretStore satisfies the interface at compile time.
 	var _ ports.SecretStore = &stubSecretStore{}
 }
 
+// TestErrSecretNotFound_IsSentinel verifies that ErrSecretNotFound can be identified
+// via errors.Is for use in error handling chains.
 func TestErrSecretNotFound_IsSentinel(t *testing.T) {
 	err := ports.ErrSecretNotFound
 	if !errors.Is(err, ports.ErrSecretNotFound) {
@@ -33,6 +38,8 @@ func TestErrSecretNotFound_IsSentinel(t *testing.T) {
 	}
 }
 
+// TestSecretStore_Resolve_ReturnsValue verifies that Resolve returns the correct secret
+// value when the tenant and ref key combination exists.
 func TestSecretStore_Resolve_ReturnsValue(t *testing.T) {
 	store := &stubSecretStore{
 		secrets: map[string]string{
@@ -49,6 +56,8 @@ func TestSecretStore_Resolve_ReturnsValue(t *testing.T) {
 	}
 }
 
+// TestSecretStore_Resolve_ReturnsErrSecretNotFound verifies that Resolve returns
+// ErrSecretNotFound when no secret exists for the given tenant and ref.
 func TestSecretStore_Resolve_ReturnsErrSecretNotFound(t *testing.T) {
 	store := &stubSecretStore{secrets: map[string]string{}}
 

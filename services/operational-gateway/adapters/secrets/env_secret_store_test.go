@@ -15,6 +15,7 @@ type staticSlugResolver struct {
 	err  error
 }
 
+// GetSlug returns the configured slug and error for any input.
 func (r *staticSlugResolver) GetSlug(_ context.Context, _ string) (string, error) {
 	return r.slug, r.err
 }
@@ -22,10 +23,13 @@ func (r *staticSlugResolver) GetSlug(_ context.Context, _ string) (string, error
 // errorSlugResolver always returns an error.
 type errorSlugResolver struct{ err error }
 
+// GetSlug always returns an empty slug and the configured error.
 func (r *errorSlugResolver) GetSlug(_ context.Context, _ string) (string, error) {
 	return "", r.err
 }
 
+// TestEnvSecretStore_Resolve_Success verifies that Resolve returns the correct secret value
+// when the environment variable is set and the slug resolver succeeds.
 func TestEnvSecretStore_Resolve_Success(t *testing.T) {
 	resolver := &staticSlugResolver{slug: "acme-corp"}
 	store := secrets.NewEnvSecretStore(resolver)
@@ -42,6 +46,8 @@ func TestEnvSecretStore_Resolve_Success(t *testing.T) {
 	}
 }
 
+// TestEnvSecretStore_Resolve_SecretNotFound verifies that Resolve returns ErrSecretNotFound
+// when no matching environment variable is set.
 func TestEnvSecretStore_Resolve_SecretNotFound(t *testing.T) {
 	resolver := &staticSlugResolver{slug: "acme"}
 	store := secrets.NewEnvSecretStore(resolver)
@@ -53,6 +59,8 @@ func TestEnvSecretStore_Resolve_SecretNotFound(t *testing.T) {
 	}
 }
 
+// TestEnvSecretStore_Resolve_SlugResolverError verifies that Resolve propagates and wraps
+// errors returned by the TenantSlugResolver.
 func TestEnvSecretStore_Resolve_SlugResolverError(t *testing.T) {
 	slugErr := errors.New("slug lookup failed")
 	resolver := &errorSlugResolver{err: slugErr}
@@ -67,6 +75,8 @@ func TestEnvSecretStore_Resolve_SlugResolverError(t *testing.T) {
 	}
 }
 
+// TestEnvSecretStore_Resolve_HyphensAndUnderscores verifies that hyphens in both the slug
+// and the secret reference are normalised to underscores when building the env var name.
 func TestEnvSecretStore_Resolve_HyphensAndUnderscores(t *testing.T) {
 	// Slugs with hyphens and secret refs with underscores should both normalise correctly.
 	// slug "my-tenant" → "MY_TENANT", ref "WEBHOOK_SECRET" → TENANT_MY_TENANT_WEBHOOK_SECRET
@@ -84,6 +94,8 @@ func TestEnvSecretStore_Resolve_HyphensAndUnderscores(t *testing.T) {
 	}
 }
 
+// TestEnvSecretStore_Resolve_SecretRefWithHyphens verifies that a secret reference
+// containing hyphens is correctly normalised to underscores when building the env var name.
 func TestEnvSecretStore_Resolve_SecretRefWithHyphens(t *testing.T) {
 	// Secret references that contain hyphens should be normalised to underscores.
 	resolver := &staticSlugResolver{slug: "acme"}
@@ -101,6 +113,8 @@ func TestEnvSecretStore_Resolve_SecretRefWithHyphens(t *testing.T) {
 	}
 }
 
+// TestNewEnvSecretStore_ImplementsSecretStore is a compile-time assertion that EnvSecretStore
+// satisfies the ports.SecretStore interface.
 func TestNewEnvSecretStore_ImplementsSecretStore(_ *testing.T) {
 	// Compile-time assertion: EnvSecretStore must satisfy the SecretStore port.
 	var _ ports.SecretStore = secrets.NewEnvSecretStore(&staticSlugResolver{})
