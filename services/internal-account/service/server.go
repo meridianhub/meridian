@@ -51,10 +51,23 @@ const (
 	opStatusPositionKeepingError    = "position_keeping_error"
 )
 
+// Repository extends the domain repository port with infrastructure-layer methods
+// required by the service (e.g. transactional save for atomic outbox publishing).
+// Keeping SaveInTx here rather than in domain.Repository preserves the hexagonal
+// boundary: the domain package stays free of GORM imports.
+type Repository interface {
+	domain.Repository
+
+	// SaveInTx persists a new or updated account within the provided transaction.
+	// Used when the caller manages the transaction boundary (e.g., to atomically
+	// persist the account and publish an outbox event in the same transaction).
+	SaveInTx(ctx context.Context, account domain.InternalAccount, tx *gorm.DB) error
+}
+
 // Service implements the InternalAccountService gRPC service.
 type Service struct {
 	pb.UnimplementedInternalAccountServiceServer
-	repo                  domain.Repository
+	repo                  Repository
 	valuationFeatureRepo  *persistence.ValuationFeatureRepository
 	lienRepo              *persistence.LienRepository
 	positionKeepingClient PositionKeepingClient
@@ -71,7 +84,7 @@ type Service struct {
 // NewService creates a new internal account service with minimal dependencies.
 // This is primarily used for testing. For production use, prefer NewServiceWithClients.
 // Returns an error if repository is nil.
-func NewService(repo domain.Repository) (*Service, error) {
+func NewService(repo Repository) (*Service, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
 	}
@@ -85,7 +98,7 @@ func NewService(repo domain.Repository) (*Service, error) {
 // Use this constructor for production deployments where Position Keeping and Reference Data
 // service integrations are required.
 func NewServiceWithClients(
-	repo domain.Repository,
+	repo Repository,
 	posKeepingClient PositionKeepingClient,
 	refDataClient ReferenceDataClient,
 	logger *slog.Logger,
@@ -111,7 +124,7 @@ func NewServiceWithClients(
 // NewServiceWithValuationFeatures creates a new service with valuation feature support.
 // This constructor is used when the service needs to manage valuation features
 // for internal accounts.
-func NewServiceWithValuationFeatures(repo domain.Repository, valuationFeatureRepo *persistence.ValuationFeatureRepository) (*Service, error) {
+func NewServiceWithValuationFeatures(repo Repository, valuationFeatureRepo *persistence.ValuationFeatureRepository) (*Service, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
 	}
@@ -179,7 +192,7 @@ func (s *Service) SetOutboxPublisher(publisher *events.OutboxPublisher, db *gorm
 
 // NewServiceFull creates a service with all dependencies using functional options.
 func NewServiceFull(
-	repo domain.Repository,
+	repo Repository,
 	posKeepingClient PositionKeepingClient,
 	refDataClient ReferenceDataClient,
 	logger *slog.Logger,
