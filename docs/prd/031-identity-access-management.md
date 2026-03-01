@@ -20,7 +20,7 @@ instructions: |
      - Purpose: Verify customer identity for regulatory compliance
 
   2. Staff/Operator Access Control (IAM path) — Identity + RoleAssignment
-     - Handled by: Party service (new business qualifiers, this PRD 030)
+     - Handled by: Party service (new business qualifiers, this PRD 031)
      - Purpose: Authenticate staff, assign roles, populate JWT claims
      - Dex issues JWTs; Party service owns user CRUD and credentials
 
@@ -41,7 +41,7 @@ instructions: |
   tenant-scoped. Dex is the sole OIDC provider (no Keycloak).
 ---
 
-# PRD 030: Identity and Access Management
+# PRD 031: Identity and Access Management
 
 **Status:** Not Started
 **Version:** 2.0

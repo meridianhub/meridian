@@ -79,7 +79,7 @@ stateDiagram-v2
 | PRD | Description |
 |-----|-------------|
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
-| [Identity and Access Management](030-identity-access-management.md) | Bridge Party service identity to authentication with dynamic user management and RBAC |
+| [Identity and Access Management](031-identity-access-management.md) | Bridge Party service identity to authentication with dynamic user management and RBAC |
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
 | [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
 | [Operational Gateway](029-operational-gateway.md) | Bidirectional asset-agnostic gateway for outbound instructions and inbound messages |
@@ -246,7 +246,7 @@ The Party service handles two distinct access control concerns:
 
 - [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) -
   **Customer access control**: External KYC/AML verification for customer onboarding (regulatory)
-- [Identity and Access Management](030-identity-access-management.md) -
+- [Identity and Access Management](031-identity-access-management.md) -
   **Staff/operator access control**: Dynamic user management, role assignment,
   JWT claims population (operational)
 
