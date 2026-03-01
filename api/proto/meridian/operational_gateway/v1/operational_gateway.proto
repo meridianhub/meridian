@@ -194,6 +194,12 @@ message Instruction {
 
 // RetryPolicy defines the backoff strategy for failed dispatch attempts.
 message RetryPolicy {
+  option (buf.validate.message).cel = {
+    id: "retry_policy_backoff_bounds"
+    message: "max_backoff_seconds must be greater than or equal to initial_backoff_seconds"
+    expression: "this.max_backoff_seconds >= this.initial_backoff_seconds"
+  };
+
   // max_attempts is the total number of dispatch attempts (including the first).
   // A value of 1 means no retries (one attempt only).
   int32 max_attempts = 1 [(buf.validate.field).int32 = {
@@ -208,6 +214,7 @@ message RetryPolicy {
   }];
 
   // max_backoff_seconds caps the computed backoff to prevent unbounded delays.
+  // Must be greater than or equal to initial_backoff_seconds.
   int32 max_backoff_seconds = 3 [(buf.validate.field).int32 = {
     gte: 1
     lte: 86400
@@ -382,8 +389,10 @@ message ProviderConnection {
   }];
 
   // auth_config defines the authentication method for this connection.
-  // Exactly one authentication variant must be set (enforced at the Go service layer).
+  // Exactly one authentication variant must be set.
   oneof auth_config {
+    option (buf.validate.oneof).required = true;
+
     // api_key authenticates using a static API key in a header.
     ApiKeyAuth api_key = 7;
     // basic authenticates using HTTP Basic authentication.
@@ -566,7 +575,13 @@ message ListInstructionsRequest {
   string instruction_type = 1 [(buf.validate.field).string.max_len = 255];
 
   // status filters by instruction status. Empty means all statuses.
-  repeated InstructionStatus status = 2;
+  // INSTRUCTION_STATUS_UNSPECIFIED is not a valid filter value.
+  repeated InstructionStatus status = 2 [(buf.validate.field).repeated.items = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
 
   // provider_connection_id filters by the connection used for dispatch (UUID). Empty means all connections.
   string provider_connection_id = 3 [(buf.validate.field).string = {
@@ -658,8 +673,10 @@ message UpsertConnectionRequest {
   }];
 
   // auth_config defines the authentication method for this connection.
-  // Exactly one authentication variant must be set (enforced at the Go service layer).
+  // Exactly one authentication variant must be set.
   oneof auth_config {
+    option (buf.validate.oneof).required = true;
+
     // api_key authenticates using a static API key in a header.
     ApiKeyAuth api_key = 5;
     // basic authenticates using HTTP Basic authentication.
