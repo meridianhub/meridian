@@ -3,6 +3,8 @@ package kafka
 import (
 	"errors"
 	"os"
+
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 )
 
 const (
@@ -10,15 +12,11 @@ const (
 	DefaultClientID = "meridian-service"
 
 	// AuditEventsTopic is the Kafka topic for audit events.
-	AuditEventsTopic = "audit.events.v1"
+	// References the centralized topic registry in shared/platform/events/topics.
+	AuditEventsTopic = topics.AuditEventsV1
 	// AuditEventsDLQTopic is the dead letter queue for failed audit events.
-	// Matches the suffix-derived name: AuditEventsTopic + ".dlq".
-	AuditEventsDLQTopic = "audit.events.v1.dlq"
-
-	// DeprecatedAuditEventsTopic is the old topic name for migration backwards compatibility.
-	DeprecatedAuditEventsTopic = "audit.events"
-	// DeprecatedAuditEventsDLQTopic is the old DLQ topic name.
-	DeprecatedAuditEventsDLQTopic = "audit.events.dlq"
+	// References the centralized topic registry in shared/platform/events/topics.
+	AuditEventsDLQTopic = topics.AuditEventsDLQV1
 
 	// AuditConsumerGroup is the consumer group for audit event processing.
 	AuditConsumerGroup = "audit-consumer-group"

@@ -1,0 +1,219 @@
+# Meridian Kafka Topic Registry
+#
+# This file is the machine-readable source of truth for all Kafka topics used by Meridian services.
+# It is used by the AsyncAPI specification generator to produce the AsyncAPI 3.0 document.
+#
+# Topic naming convention: <service>.<event-name>.<version>  (ADR-0004)
+# Exceptions to this convention are explicitly marked.
+#
+# Fields:
+#   name:           Kafka topic string (must match the Go constant value in topics.go)
+#   constant:       Go constant name in this package
+#   description:    Human-readable description of the events on this topic
+#   service:        Owning service (publisher)
+#   event_type:     Logical event type identifier (snake_case)
+#   proto_message:  Proto message type published to this topic (if applicable)
+#   deprecated:     true if this topic is pending removal
+#   legacy_naming:  true if this topic does not follow the standard naming convention
+
+services:
+  audit:
+    description: Audit trail events for compliance and observability
+    topics:
+      - name: audit.events.v1
+        constant: AuditEventsV1
+        description: Audit events for all service operations
+        event_type: audit.event.v1
+        proto_message: AuditEvent
+
+      - name: audit.events.v1.dlq
+        constant: AuditEventsDLQV1
+        description: Dead letter queue for audit events that could not be processed
+        event_type: audit.event.v1.dlq
+
+  current-account:
+    description: Account lifecycle and withdrawal events for current (demand deposit) accounts
+    topics:
+      - name: current-account.account-frozen.v1
+        constant: CurrentAccountAccountFrozenV1
+        description: Published when an account is frozen (no debits or credits permitted)
+        event_type: current_account.account_frozen.v1
+        proto_message: AccountFrozenEvent
+
+      - name: current-account.account-unfrozen.v1
+        constant: CurrentAccountAccountUnfrozenV1
+        description: Published when a previously frozen account is unfrozen
+        event_type: current_account.account_unfrozen.v1
+        proto_message: AccountUnfrozenEvent
+
+      - name: current-account.account-closed.v1
+        constant: CurrentAccountAccountClosedV1
+        description: Published when an account is permanently closed
+        event_type: current_account.account_closed.v1
+        proto_message: AccountClosedEvent
+
+      - name: current-account.withdrawal-status.v1
+        constant: CurrentAccountWithdrawalStatusV1
+        description: Published when a withdrawal status changes (initiated, completed, failed, reversed)
+        event_type: current_account.withdrawal_status.v1
+        proto_message: WithdrawalStatusUpdated
+
+  financial-accounting:
+    description: Financial booking log control events
+    topics:
+      - name: financial-accounting.booking-log.controlled
+        constant: FinancialAccountingBookingLogControlled
+        description: Published when a booking log receives a control action (SUSPEND, RESUME, TERMINATE)
+        event_type: financial_accounting.booking_log_controlled.v1
+        proto_message: BookingLogControlledEvent
+        legacy_naming: true
+
+  market-information:
+    description: Market data observation events
+    topics:
+      - name: market-information.observation-recorded.v1
+        constant: MarketInformationObservationRecordedV1
+        description: Published when a new market price observation is recorded
+        event_type: market_information.observation_recorded.v1
+        proto_message: ObservationRecorded
+
+  payment-order:
+    description: Payment order lifecycle state transition events
+    topics:
+      - name: payment-order.initiated.v1
+        constant: PaymentOrderInitiatedV1
+        description: Published when a new payment order is initiated
+        event_type: payment_order.initiated.v1
+        proto_message: PaymentOrderInitiated
+
+      - name: payment-order.reserved.v1
+        constant: PaymentOrderReservedV1
+        description: Published when funds are successfully reserved for a payment order
+        event_type: payment_order.reserved.v1
+        proto_message: PaymentOrderReserved
+
+      - name: payment-order.executing.v1
+        constant: PaymentOrderExecutingV1
+        description: Published when a payment order begins execution with the payment gateway
+        event_type: payment_order.executing.v1
+        proto_message: PaymentOrderExecuting
+
+      - name: payment-order.completed.v1
+        constant: PaymentOrderCompletedV1
+        description: Published when a payment order successfully completes
+        event_type: payment_order.completed.v1
+        proto_message: PaymentOrderCompleted
+
+      - name: payment-order.failed.v1
+        constant: PaymentOrderFailedV1
+        description: Published when a payment order fails and cannot be retried
+        event_type: payment_order.failed.v1
+        proto_message: PaymentOrderFailed
+
+      - name: payment-order.cancelled.v1
+        constant: PaymentOrderCancelledV1
+        description: Published when a payment order is cancelled before execution
+        event_type: payment_order.cancelled.v1
+        proto_message: PaymentOrderCancelled
+
+      - name: payment-order.reversed.v1
+        constant: PaymentOrderReversedV1
+        description: Published when a completed payment order is reversed
+        event_type: payment_order.reversed.v1
+        proto_message: PaymentOrderReversed
+
+  position-keeping:
+    description: Financial position and transaction lifecycle events
+    topics:
+      - name: position-keeping.transaction-captured.v1
+        constant: PositionKeepingTransactionCapturedV1
+        description: Published when a new financial transaction is captured
+        event_type: position_keeping.transaction_captured.v1
+        proto_message: TransactionCaptured
+
+      - name: position-keeping.transaction-amended.v1
+        constant: PositionKeepingTransactionAmendedV1
+        description: Published when a captured transaction is amended
+        event_type: position_keeping.transaction_amended.v1
+        proto_message: TransactionAmended
+
+      - name: position-keeping.transaction-reconciled.v1
+        constant: PositionKeepingTransactionReconciledV1
+        description: Published when a transaction is reconciled against actual settlement data
+        event_type: position_keeping.transaction_reconciled.v1
+        proto_message: TransactionReconciled
+
+      - name: position-keeping.transaction-posted.v1
+        constant: PositionKeepingTransactionPostedV1
+        description: Published when a transaction is posted to the ledger
+        event_type: position_keeping.transaction_posted.v1
+        proto_message: TransactionPosted
+
+      - name: position-keeping.transaction-rejected.v1
+        constant: PositionKeepingTransactionRejectedV1
+        description: Published when a transaction is rejected due to validation failure
+        event_type: position_keeping.transaction_rejected.v1
+        proto_message: TransactionRejected
+
+      - name: position-keeping.transaction-failed.v1
+        constant: PositionKeepingTransactionFailedV1
+        description: Published when a transaction fails due to a system error
+        event_type: position_keeping.transaction_failed.v1
+        proto_message: TransactionFailed
+
+      - name: position-keeping.transaction-cancelled.v1
+        constant: PositionKeepingTransactionCancelledV1
+        description: Published when a transaction is cancelled
+        event_type: position_keeping.transaction_cancelled.v1
+        proto_message: TransactionCancelled
+
+      - name: position-keeping.bulk-transaction-captured.v1
+        constant: PositionKeepingBulkTransactionCapturedV1
+        description: Published when a batch of transactions is captured atomically
+        event_type: position_keeping.bulk_transaction_captured.v1
+        proto_message: BulkTransactionCaptured
+
+      - name: position-keeping.opening-balance-recorded.v1
+        constant: PositionKeepingOpeningBalanceRecordedV1
+        description: Published when an opening balance is recorded for a new account
+        event_type: position_keeping.opening_balance_recorded.v1
+        proto_message: OpeningBalanceRecorded
+
+  reconciliation:
+    description: Settlement reconciliation run and variance detection events
+    topics:
+      - name: reconciliation.run-started.v1
+        constant: ReconciliationRunStartedV1
+        description: Published when a reconciliation run begins
+        event_type: reconciliation.run_started.v1
+        proto_message: ReconciliationRunStarted
+
+      - name: reconciliation.run-completed.v1
+        constant: ReconciliationRunCompletedV1
+        description: Published when a reconciliation run completes (with or without variances)
+        event_type: reconciliation.run_completed.v1
+        proto_message: ReconciliationRunCompleted
+
+      - name: reconciliation.variance-detected.v1
+        constant: ReconciliationVarianceDetectedV1
+        description: Published when a position variance is detected during reconciliation
+        event_type: reconciliation.variance_detected.v1
+        proto_message: VarianceDetected
+
+      - name: reconciliation.position-lock-requested.v1
+        constant: ReconciliationPositionLockRequestedV1
+        description: Published when a position lock is requested to freeze a position for reconciliation
+        event_type: reconciliation.position_lock_requested.v1
+        proto_message: PositionLockRequested
+
+      - name: reconciliation.dispute-created.v1
+        constant: ReconciliationDisputeCreatedV1
+        description: Published when a reconciliation dispute is raised
+        event_type: reconciliation.dispute_created.v1
+        proto_message: DisputeCreated
+
+      - name: reconciliation.dispute-resolved.v1
+        constant: ReconciliationDisputeResolvedV1
+        description: Published when a reconciliation dispute is resolved
+        event_type: reconciliation.dispute_resolved.v1
+        proto_message: DisputeResolved

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -60,15 +61,15 @@ type TopicConfig struct {
 // DefaultTopicConfig returns the default topic configuration for position keeping events.
 func DefaultTopicConfig() TopicConfig {
 	return TopicConfig{
-		TransactionCapturedTopic:     "position-keeping.transaction-captured.v1",
-		TransactionAmendedTopic:      "position-keeping.transaction-amended.v1",
-		TransactionReconciledTopic:   "position-keeping.transaction-reconciled.v1",
-		TransactionPostedTopic:       "position-keeping.transaction-posted.v1",
-		TransactionRejectedTopic:     "position-keeping.transaction-rejected.v1",
-		TransactionFailedTopic:       "position-keeping.transaction-failed.v1",
-		TransactionCancelledTopic:    "position-keeping.transaction-cancelled.v1",
-		BulkTransactionCapturedTopic: "position-keeping.bulk-transaction-captured.v1",
-		OpeningBalanceRecordedTopic:  "position-keeping.opening-balance-recorded.v1",
+		TransactionCapturedTopic:     topics.PositionKeepingTransactionCapturedV1,
+		TransactionAmendedTopic:      topics.PositionKeepingTransactionAmendedV1,
+		TransactionReconciledTopic:   topics.PositionKeepingTransactionReconciledV1,
+		TransactionPostedTopic:       topics.PositionKeepingTransactionPostedV1,
+		TransactionRejectedTopic:     topics.PositionKeepingTransactionRejectedV1,
+		TransactionFailedTopic:       topics.PositionKeepingTransactionFailedV1,
+		TransactionCancelledTopic:    topics.PositionKeepingTransactionCancelledV1,
+		BulkTransactionCapturedTopic: topics.PositionKeepingBulkTransactionCapturedV1,
+		OpeningBalanceRecordedTopic:  topics.PositionKeepingOpeningBalanceRecordedV1,
 	}
 }
 
