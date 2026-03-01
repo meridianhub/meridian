@@ -18,11 +18,6 @@ const (
 	// References the centralized topic registry in shared/platform/events/topics.
 	AuditEventsDLQTopic = topics.AuditEventsDLQV1
 
-	// DeprecatedAuditEventsTopic is the old topic name for migration backwards compatibility.
-	DeprecatedAuditEventsTopic = "audit.events"
-	// DeprecatedAuditEventsDLQTopic is the old DLQ topic name.
-	DeprecatedAuditEventsDLQTopic = "audit.events.dlq"
-
 	// AuditConsumerGroup is the consumer group for audit event processing.
 	AuditConsumerGroup = "audit-consumer-group"
 

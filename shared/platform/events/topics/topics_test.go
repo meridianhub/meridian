@@ -152,10 +152,79 @@ func TestTopicsYAML_NoDuplicates(t *testing.T) {
 	seen := make(map[string]string) // topic name -> service name
 	for svcName, entry := range parsed.Services {
 		for _, topic := range entry.Topics {
+			if topic.Name == "" {
+				continue // Empty names are caught by TestTopicsYAML_NoEmptyTopicNames
+			}
 			if prev, exists := seen[topic.Name]; exists {
 				t.Errorf("duplicate topic %q: defined in both %q and %q", topic.Name, prev, svcName)
 			}
 			seen[topic.Name] = svcName
 		}
+	}
+}
+
+// TestAll_ContainsAllConstants verifies that All() returns exactly the set of
+// canonical topic constants defined in this package. This prevents drift between
+// the const block and the All() slice when new topics are added.
+func TestAll_ContainsAllConstants(t *testing.T) {
+	knownConstants := []string{
+		topics.AuditEventsV1,
+		topics.AuditEventsDLQV1,
+		topics.CurrentAccountAccountFrozenV1,
+		topics.CurrentAccountAccountUnfrozenV1,
+		topics.CurrentAccountAccountClosedV1,
+		topics.CurrentAccountWithdrawalStatusV1,
+		topics.FinancialAccountingBookingLogControlled,
+		topics.MarketInformationObservationRecordedV1,
+		topics.PaymentOrderInitiatedV1,
+		topics.PaymentOrderReservedV1,
+		topics.PaymentOrderExecutingV1,
+		topics.PaymentOrderCompletedV1,
+		topics.PaymentOrderFailedV1,
+		topics.PaymentOrderCancelledV1,
+		topics.PaymentOrderReversedV1,
+		topics.PositionKeepingTransactionCapturedV1,
+		topics.PositionKeepingTransactionAmendedV1,
+		topics.PositionKeepingTransactionReconciledV1,
+		topics.PositionKeepingTransactionPostedV1,
+		topics.PositionKeepingTransactionRejectedV1,
+		topics.PositionKeepingTransactionFailedV1,
+		topics.PositionKeepingTransactionCancelledV1,
+		topics.PositionKeepingBulkTransactionCapturedV1,
+		topics.PositionKeepingOpeningBalanceRecordedV1,
+		topics.ReconciliationRunStartedV1,
+		topics.ReconciliationRunCompletedV1,
+		topics.ReconciliationVarianceDetectedV1,
+		topics.ReconciliationPositionLockRequestedV1,
+		topics.ReconciliationDisputeCreatedV1,
+		topics.ReconciliationDisputeResolvedV1,
+	}
+
+	allSet := make(map[string]bool, len(topics.All()))
+	for _, topic := range topics.All() {
+		allSet[topic] = true
+	}
+
+	// Every known constant must be in All().
+	for _, c := range knownConstants {
+		if !allSet[c] {
+			t.Errorf("constant %q is missing from topics.All()", c)
+		}
+	}
+
+	// All() must not contain any extras beyond the known constants.
+	knownSet := make(map[string]bool, len(knownConstants))
+	for _, c := range knownConstants {
+		knownSet[c] = true
+	}
+	for _, topic := range topics.All() {
+		if !knownSet[topic] {
+			t.Errorf("topics.All() contains unexpected topic %q not in the known constants list", topic)
+		}
+	}
+
+	// Count must match exactly.
+	if len(topics.All()) != len(knownConstants) {
+		t.Errorf("topics.All() has %d entries, expected %d", len(topics.All()), len(knownConstants))
 	}
 }
