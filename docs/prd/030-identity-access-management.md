@@ -369,8 +369,13 @@ without re-authentication.
 ### 6. Platform Admin Bootstrap
 
 On first boot, Meridian creates a platform admin identity from
-`PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` env vars with forced
-password change. Subsequent admins are created via invitation.
+`PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` env vars.
+Bootstrap credentials are one-time use: the first login forces an
+immediate password reset, after which the env var value is no longer
+valid. In production, inject these via a secret manager (e.g.,
+Kubernetes Secrets, Vault) — never store plaintext passwords in
+environment files or container images. Subsequent admins are created
+via the invitation flow.
 
 ## Database Schema
 
