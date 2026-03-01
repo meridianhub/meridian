@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	stripegateway "github.com/meridianhub/meridian/services/payment-order/adapters/gateway/stripe"
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
+	pomessaging "github.com/meridianhub/meridian/services/payment-order/adapters/messaging"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
@@ -32,6 +33,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
@@ -175,12 +177,45 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to load gateway account config: %w", err)
 	}
 
-	// Create Kafka producer
-	kafkaProducer, err := createKafkaProducer(logger)
-	if err != nil {
-		return fmt.Errorf("failed to create Kafka producer: %w", err)
+	// Initialize outbox publisher and worker for transactional event publishing.
+	// Events are written to the outbox table within the same DB transaction as
+	// domain operations, then published to Kafka asynchronously by the outbox worker.
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+	outboxPublisher := events.NewOutboxPublisher("payment-order")
+
+	var outboxWorker *events.Worker
+	var kafkaProducer *kafka.ProtoProducer
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers == "" {
+		// Fall back to legacy KAFKA_BROKERS env var
+		bootstrapServers = env.GetEnvOrDefault("KAFKA_BROKERS", "")
 	}
-	defer kafkaProducer.Close()
+	if bootstrapServers != "" {
+		producer, kafkaErr := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: bootstrapServers,
+			ClientID:         "payment-order-outbox-worker",
+			Acks:             "all",
+			Retries:          3,
+			Compression:      "snappy",
+		})
+		if kafkaErr != nil {
+			logger.Warn("failed to create Kafka producer for outbox worker",
+				"error", kafkaErr)
+		} else {
+			kafkaProducer = producer
+			workerConfig := events.DefaultWorkerConfig("payment-order")
+			outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
+			outboxWorker.Start(ctx)
+			defer outboxWorker.Stop()
+			logger.Info("outbox worker started",
+				"bootstrap_servers", bootstrapServers)
+		}
+	} else {
+		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set")
+	}
+
+	// Create outbox-based event publisher (replaces direct Kafka producer)
+	eventPublisher := pomessaging.NewOutboxPublisher(db, outboxPublisher)
 
 	// Create Redis client and idempotency service.
 	// In production: fail fast if Redis is unavailable (idempotency is critical).
@@ -427,7 +462,7 @@ func run(logger *slog.Logger) error {
 		ReferenceDataClient:       referenceDataClient,   // May be nil if reference-data unavailable
 		PaymentGateway:            paymentGateway,
 		GatewayAccountConfig:      gatewayAccountConfig,
-		KafkaPublisher:            kafkaProducer,
+		KafkaPublisher:            eventPublisher,
 		IdempotencyService:        idempotencyService,
 		Logger:                    logger,
 		Tracer:                    tracer,
@@ -605,6 +640,18 @@ func run(logger *slog.Logger) error {
 		dunningWorker.Stop()
 		billingWg.Wait()
 		logger.Info("billing workers stopped")
+	}
+
+	// Stop outbox worker and flush Kafka producer before shutting down servers
+	if outboxWorker != nil {
+		outboxWorker.Stop()
+		logger.Info("outbox worker stopped")
+	}
+	if kafkaProducer != nil {
+		if remaining := kafkaProducer.FlushWithTimeout(5000); remaining > 0 {
+			logger.Warn("some outbox messages not delivered before close", "remaining", remaining)
+		}
+		kafkaProducer.Close()
 	}
 
 	// Shutdown HTTP server (stop accepting new webhooks)
@@ -878,15 +925,6 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 }
 
 // createKafkaProducer creates the Kafka producer.
-func createKafkaProducer(logger *slog.Logger) (*kafka.ProtoProducer, error) {
-	brokers := env.GetEnvOrDefault("KAFKA_BROKERS", "kafka:9092")
-	logger.Info("connecting to Kafka", "brokers", brokers)
-	return kafka.NewProtoProducer(kafka.ProducerConfig{
-		BootstrapServers: brokers,
-		ClientID:         "payment-order-service",
-	})
-}
-
 // createRedisClient creates and validates a Redis client connection.
 // Environment variables:
 //   - REDIS_URL: Redis connection URL (default: redis://localhost:6379)
