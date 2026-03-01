@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	messagingpkg "github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/services/position-keeping/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
@@ -17,8 +18,9 @@ func TestNewPositionKeepingService(t *testing.T) {
 		measurementRepo := new(MockMeasurementRepository)
 		publisher := domain.NewInMemoryEventPublisher()
 		idempotencySvc := new(MockIdempotencyService)
+		outboxPub := newTestOutboxPublisher(t)
 
-		svc, err := service.NewPositionKeepingService(repo, measurementRepo, publisher, idempotencySvc)
+		svc, err := service.NewPositionKeepingService(repo, measurementRepo, publisher, idempotencySvc, outboxPub)
 		if err != nil {
 			t.Fatalf("Expected no error, got: %v", err)
 		}
@@ -32,12 +34,15 @@ func TestNewPositionKeepingService(t *testing.T) {
 // Rationale: Financial services must validate all dependencies to prevent runtime panics
 // that could cause service outages or data corruption.
 func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
+	validOutboxPub := newTestOutboxPublisher(t)
+
 	tests := []struct {
 		name            string
 		repository      domain.FinancialPositionLogRepository
 		measurementRepo domain.MeasurementRepository
 		eventPub        domain.EventPublisher
 		idempotencySvc  idempotency.Service
+		outboxPub       *messagingpkg.OutboxEventPublisher
 		wantErr         bool
 		wantSentinel    error // Expected sentinel error for errors.Is() verification
 		rationale       string
@@ -48,6 +53,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			measurementRepo: new(MockMeasurementRepository),
 			eventPub:        domain.NewInMemoryEventPublisher(),
 			idempotencySvc:  new(MockIdempotencyService),
+			outboxPub:       validOutboxPub,
 			wantErr:         false,
 			wantSentinel:    nil,
 			rationale:       "Standard valid initialization with all dependencies",
@@ -58,6 +64,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			measurementRepo: new(MockMeasurementRepository),
 			eventPub:        domain.NewInMemoryEventPublisher(),
 			idempotencySvc:  new(MockIdempotencyService),
+			outboxPub:       validOutboxPub,
 			wantErr:         true,
 			wantSentinel:    service.ErrRepositoryNil,
 			rationale:       "Repository is essential - nil would cause panic on first use",
@@ -68,6 +75,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			measurementRepo: nil,
 			eventPub:        domain.NewInMemoryEventPublisher(),
 			idempotencySvc:  new(MockIdempotencyService),
+			outboxPub:       validOutboxPub,
 			wantErr:         true,
 			wantSentinel:    service.ErrMeasurementRepoNil,
 			rationale:       "Measurement repository is essential - nil would cause panic on measurement operations",
@@ -78,6 +86,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			measurementRepo: new(MockMeasurementRepository),
 			eventPub:        nil,
 			idempotencySvc:  new(MockIdempotencyService),
+			outboxPub:       validOutboxPub,
 			wantErr:         true,
 			wantSentinel:    service.ErrEventPublisherNil,
 			rationale:       "Event publisher is essential - nil would cause panic when publishing events",
@@ -88,9 +97,21 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			measurementRepo: new(MockMeasurementRepository),
 			eventPub:        domain.NewInMemoryEventPublisher(),
 			idempotencySvc:  nil,
+			outboxPub:       validOutboxPub,
 			wantErr:         true,
 			wantSentinel:    service.ErrIdempotencyServiceNil,
 			rationale:       "Idempotency service is essential - nil would cause panic on idempotent operations",
+		},
+		{
+			name:            "nil outbox publisher",
+			repository:      new(MockRepository),
+			measurementRepo: new(MockMeasurementRepository),
+			eventPub:        domain.NewInMemoryEventPublisher(),
+			idempotencySvc:  new(MockIdempotencyService),
+			outboxPub:       nil,
+			wantErr:         true,
+			wantSentinel:    service.ErrOutboxPublisherNil,
+			rationale:       "Outbox publisher is essential - nil would cause panic when publishing events transactionally",
 		},
 		{
 			name:            "all dependencies nil",
@@ -98,6 +119,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 			measurementRepo: nil,
 			eventPub:        nil,
 			idempotencySvc:  nil,
+			outboxPub:       nil,
 			wantErr:         true,
 			wantSentinel:    service.ErrRepositoryNil,
 			rationale:       "Should error on first nil check (repository)",
@@ -106,7 +128,7 @@ func TestNewPositionKeepingService_DefensiveTests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc, err := service.NewPositionKeepingService(tt.repository, tt.measurementRepo, tt.eventPub, tt.idempotencySvc)
+			svc, err := service.NewPositionKeepingService(tt.repository, tt.measurementRepo, tt.eventPub, tt.idempotencySvc, tt.outboxPub)
 			if tt.wantErr {
 				assert.Error(t, err, tt.rationale)
 				assert.Nil(t, svc, "Service should be nil when error occurs")
@@ -126,8 +148,9 @@ func TestServiceImplementsGRPCInterface(t *testing.T) {
 		measurementRepo := new(MockMeasurementRepository)
 		publisher := domain.NewInMemoryEventPublisher()
 		idempotencySvc := new(MockIdempotencyService)
+		outboxPub := newTestOutboxPublisher(t)
 
-		svc, err := service.NewPositionKeepingService(repo, measurementRepo, publisher, idempotencySvc)
+		svc, err := service.NewPositionKeepingService(repo, measurementRepo, publisher, idempotencySvc, outboxPub)
 		if err != nil {
 			t.Fatalf("unexpected error creating service: %v", err)
 		}

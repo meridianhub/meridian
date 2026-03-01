@@ -161,6 +161,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 				mockMeasurementRepo,
 				mockEventPublisher,
 				mockIdempotency,
+				newTestOutboxPublisher(t),
 				service.WithCurrentAccountClient(mockCurrentAccount),
 			)
 			require.NoError(t, err)
@@ -230,6 +231,7 @@ func TestGetAccountBalance_ValidationErrors(t *testing.T) {
 				mockMeasurementRepo,
 				mockEventPublisher,
 				mockIdempotency,
+				newTestOutboxPublisher(t),
 			)
 			require.NoError(t, err)
 
@@ -282,6 +284,7 @@ func TestGetAccountBalance_NotFound(t *testing.T) {
 				mockMeasurementRepo,
 				mockEventPublisher,
 				mockIdempotency,
+				newTestOutboxPublisher(t),
 			)
 			require.NoError(t, err)
 
@@ -321,6 +324,7 @@ func TestGetAccountBalance_CurrencyFilter(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 		)
 		require.NoError(t, err)
 
@@ -354,6 +358,7 @@ func TestGetAccountBalance_CurrencyFilter(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 		)
 		require.NoError(t, err)
 
@@ -390,6 +395,7 @@ func TestGetAccountBalance_RepositoryFailure(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 
@@ -433,6 +439,7 @@ func TestGetAccountBalance_NoCurrentAccountClient(t *testing.T) {
 				mockMeasurementRepo,
 				mockEventPublisher,
 				mockIdempotency,
+				newTestOutboxPublisher(t),
 			)
 			require.NoError(t, err)
 
@@ -472,6 +479,7 @@ func TestGetAccountBalances_Success(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithCurrentAccountClient(mockCurrentAccount),
 	)
 	require.NoError(t, err)
@@ -522,6 +530,7 @@ func TestGetAccountBalances_WithoutCurrentAccountClient(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 
@@ -567,6 +576,7 @@ func TestGetAccountBalances_ValidationErrors(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 
@@ -602,6 +612,7 @@ func TestGetAccountBalances_CurrencyFilter(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 		)
 		require.NoError(t, err)
 
@@ -634,6 +645,7 @@ func TestGetAccountBalances_CurrencyFilter(t *testing.T) {
 			mockMeasurementRepo,
 			mockEventPublisher,
 			mockIdempotency,
+			newTestOutboxPublisher(t),
 		)
 		require.NoError(t, err)
 
@@ -668,6 +680,7 @@ func TestGetAccountBalances_NotFound(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 
@@ -719,6 +732,7 @@ func TestGetAccountBalance_WithLiens(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithCurrentAccountClient(mockCurrentAccount),
 	)
 	require.NoError(t, err)

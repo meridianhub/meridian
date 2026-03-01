@@ -22,6 +22,7 @@ func TestUpdatePosition_ReturnsUnimplemented(t *testing.T) {
 		new(MockMeasurementRepository),
 		domain.NewInMemoryEventPublisher(),
 		new(MockIdempotencyService),
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 
@@ -53,6 +54,7 @@ func TestMergePositions_ReturnsUnimplemented(t *testing.T) {
 		new(MockMeasurementRepository),
 		domain.NewInMemoryEventPublisher(),
 		new(MockIdempotencyService),
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 
@@ -84,6 +86,7 @@ func TestUpdatePosition_NilRequest_StillReturnsUnimplemented(t *testing.T) {
 		new(MockMeasurementRepository),
 		domain.NewInMemoryEventPublisher(),
 		new(MockIdempotencyService),
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 
@@ -107,6 +110,7 @@ func TestMergePositions_NilRequest_StillReturnsUnimplemented(t *testing.T) {
 		new(MockMeasurementRepository),
 		domain.NewInMemoryEventPublisher(),
 		new(MockIdempotencyService),
+		newTestOutboxPublisher(t),
 	)
 	require.NoError(t, err)
 

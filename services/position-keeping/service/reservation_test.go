@@ -143,7 +143,7 @@ func newServiceWithReservation(t *testing.T, reservationRepo domain.ReservationR
 		opts = append(opts, service.WithPositionRepository(positionRepo))
 	}
 
-	svc, err := service.NewPositionKeepingService(repo, measurementRepo, publisher, idempotencySvc, opts...)
+	svc, err := service.NewPositionKeepingService(repo, measurementRepo, publisher, idempotencySvc, newTestOutboxPublisher(t), opts...)
 	require.NoError(t, err)
 	return svc
 }

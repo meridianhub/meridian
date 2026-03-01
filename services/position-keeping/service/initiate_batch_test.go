@@ -676,7 +676,7 @@ func TestInitiateFinancialPositionLogBatch_NilPointerRegressionOnValidationFailu
 	mockIdempotency := new(MockIdempotencyService)
 	mockMeasurementRepo := new(MockMeasurementRepository)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	// Create a batch with alternating valid and invalid entries to maximize

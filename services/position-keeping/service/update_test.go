@@ -88,7 +88,7 @@ func TestUpdateFinancialPositionLog_AddNewEntry(t *testing.T) {
 		Return(existingLog, nil)
 
 	// Mock repository Update to succeed
-	mockRepo.On("Update", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("UpdateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	// Mock idempotency store result
@@ -154,7 +154,7 @@ func TestUpdateFinancialPositionLog_UpdateStatus(t *testing.T) {
 		Return(existingLog, nil)
 
 	// Mock repository Update to succeed
-	mockRepo.On("Update", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("UpdateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	// Act

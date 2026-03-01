@@ -57,7 +57,7 @@ func TestInitiateWithOpeningBalance_Success_PositiveBalance(t *testing.T) {
 		Return(nil)
 
 	// Mock repository create
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	// Mock idempotency store result
@@ -80,10 +80,8 @@ func TestInitiateWithOpeningBalance_Success_PositiveBalance(t *testing.T) {
 	// Opening balance is immediately posted
 	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, resp.Log.StatusTracking.CurrentStatus)
 
-	// Verify event was published
-	events := mockEventPublisher.GetPublishedEvents()
-	assert.Len(t, events, 1, "Expected 1 event to be published")
-	assert.Equal(t, "position_keeping.opening_balance_recorded.v1", events[0].EventType())
+	// Verify event was written to outbox transactionally (CreateWithOutbox was called)
+	mockRepo.AssertCalled(t, "CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog"))
 
 	mockRepo.AssertExpectations(t)
 	mockIdempotency.AssertExpectations(t)
@@ -122,7 +120,7 @@ func TestInitiateWithOpeningBalance_Success_NegativeBalance(t *testing.T) {
 	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
 		Return(nil)
 
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).
@@ -197,9 +195,8 @@ func TestInitiateWithOpeningBalance_IdempotencyCheck(t *testing.T) {
 	require.NotNil(t, resp, "Expected non-nil response")
 	assert.Equal(t, cachedLogID, resp.Log.LogId, "Expected cached log ID to be returned")
 
-	// Verify no new events were published
-	events := mockEventPublisher.GetPublishedEvents()
-	assert.Len(t, events, 0, "Expected no new events for idempotent request")
+	// Verify no outbox write occurred (CreateWithOutbox not called for cached response)
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 
 	mockIdempotency.AssertExpectations(t)
 	mockRepo.AssertExpectations(t)
@@ -325,7 +322,7 @@ func TestInitiateWithOpeningBalance_RepositoryError(t *testing.T) {
 		Return(nil)
 
 	// Mock repository create to fail
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(assert.AnError)
 
 	// Mock idempotency delete for cleanup on error
@@ -372,7 +369,7 @@ func TestInitiateWithOpeningBalance_WithoutIdempotencyKey(t *testing.T) {
 	}
 
 	// Mock repository create
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	// Act
@@ -438,7 +435,7 @@ func TestInitiateWithOpeningBalance_StatusPending(t *testing.T) {
 
 	// Verify that MarkPending was NOT called since we returned early
 	mockIdempotency.AssertNotCalled(t, "MarkPending")
-	mockRepo.AssertNotCalled(t, "Create")
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 }
 
 func TestInitiateWithOpeningBalance_ZeroBalance(t *testing.T) {
@@ -465,7 +462,7 @@ func TestInitiateWithOpeningBalance_ZeroBalance(t *testing.T) {
 	}
 
 	// Mock repository create
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).
 		Return(nil)
 
 	// Act
@@ -524,7 +521,7 @@ func TestInitiateWithOpeningBalance_IdempotencyCheckError(t *testing.T) {
 
 	// Verify that MarkPending was NOT called since we returned early
 	mockIdempotency.AssertNotCalled(t, "MarkPending")
-	mockRepo.AssertNotCalled(t, "Create")
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 }
 
 // =============================================================================
@@ -567,6 +564,7 @@ func TestInitiateWithOpeningBalance_CEL_ValidationPasses(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -583,7 +581,7 @@ func TestInitiateWithOpeningBalance_CEL_ValidationPasses(t *testing.T) {
 
 	// Setup mock expectations
 	mockCache.On("GetOrLoad", ctx, "USD", 1).Return(cachedInstrument, nil)
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
 	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
 		AccountId: "migrated-account-001",
@@ -624,6 +622,7 @@ func TestInitiateWithOpeningBalance_CEL_ValidationRejects(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -662,7 +661,7 @@ func TestInitiateWithOpeningBalance_CEL_ValidationRejects(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 	assert.Contains(t, st.Message(), "validation failed")
-	mockRepo.AssertNotCalled(t, "Create")
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 	mockCache.AssertExpectations(t)
 }
 
@@ -679,13 +678,14 @@ func TestInitiateWithOpeningBalance_CEL_NilCacheSkipsValidation(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		// No WithInstrumentCache - cache is nil
 	)
 	require.NoError(t, err)
 
 	effectiveDate := time.Now().Add(-24 * time.Hour)
 
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
 	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
 		AccountId: "migrated-account-001",
@@ -725,13 +725,14 @@ func TestInitiateWithOpeningBalance_CEL_EmptyInstrumentCodeSkipsValidation(t *te
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
 
 	effectiveDate := time.Now().Add(-24 * time.Hour)
 
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
 	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
 		AccountId: "migrated-account-001",
@@ -771,6 +772,7 @@ func TestInitiateWithOpeningBalance_CEL_NilValidationProgramPasses(t *testing.T)
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -784,7 +786,7 @@ func TestInitiateWithOpeningBalance_CEL_NilValidationProgramPasses(t *testing.T)
 	}
 
 	mockCache.On("GetOrLoad", ctx, "USD", 1).Return(cachedInstrument, nil)
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
 	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
 		AccountId: "migrated-account-001",
@@ -822,6 +824,7 @@ func TestInitiateWithOpeningBalance_CEL_InstrumentNotFound(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -852,7 +855,7 @@ func TestInitiateWithOpeningBalance_CEL_InstrumentNotFound(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.NotFound, st.Code())
 	assert.Contains(t, st.Message(), "instrument definition not found")
-	mockRepo.AssertNotCalled(t, "Create")
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 	mockCache.AssertExpectations(t)
 }
 
@@ -870,6 +873,7 @@ func TestInitiateWithOpeningBalance_CEL_CacheFailure(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -900,7 +904,7 @@ func TestInitiateWithOpeningBalance_CEL_CacheFailure(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
 	assert.Contains(t, st.Message(), "failed to load instrument definition")
-	mockRepo.AssertNotCalled(t, "Create")
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 	mockCache.AssertExpectations(t)
 }
 
@@ -917,6 +921,7 @@ func TestInitiateWithOpeningBalance_CEL_ComplexValidationExpression(t *testing.T
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -933,7 +938,7 @@ func TestInitiateWithOpeningBalance_CEL_ComplexValidationExpression(t *testing.T
 	}
 
 	mockCache.On("GetOrLoad", ctx, "ELECTRICITY_KWH", 1).Return(cachedInstrument, nil)
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
 	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{
 		AccountId: "migrated-account-001",
@@ -974,6 +979,7 @@ func TestInitiateWithOpeningBalance_CEL_ComplexValidationFails(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -1015,7 +1021,7 @@ func TestInitiateWithOpeningBalance_CEL_ComplexValidationFails(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 	assert.Contains(t, st.Message(), "validation failed")
-	mockRepo.AssertNotCalled(t, "Create")
+	mockRepo.AssertNotCalled(t, "CreateWithOutbox")
 	mockCache.AssertExpectations(t)
 }
 
@@ -1035,6 +1041,7 @@ func TestInitiateWithOpeningBalance_CEL_NegativeAmountPassesValidation(t *testin
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -1051,7 +1058,7 @@ func TestInitiateWithOpeningBalance_CEL_NegativeAmountPassesValidation(t *testin
 	}
 
 	mockCache.On("GetOrLoad", ctx, "USD", 1).Return(cachedInstrument, nil)
-	mockRepo.On("Create", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
 	// Negative opening balance: -$500.50 (overdraft position)
 	req := &positionkeepingv1.InitiateWithOpeningBalanceRequest{

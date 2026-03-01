@@ -30,7 +30,7 @@ func TestRecordMeasurement_Success(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	logID := uuid.New()
@@ -82,7 +82,7 @@ func TestRecordMeasurement_ValidatesMeasurementTypeRequired(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	req := &positionkeepingv1.RecordMeasurementRequest{
@@ -111,7 +111,7 @@ func TestRecordMeasurement_RejectsNegativeValue(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	logID := uuid.New()
@@ -159,7 +159,7 @@ func TestRecordMeasurement_RejectsFutureTimestamp(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	logID := uuid.New()
@@ -208,7 +208,7 @@ func TestRecordMeasurement_PositionStateNotFound(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	logID := uuid.New()
@@ -241,7 +241,7 @@ func TestRecordMeasurement_InvalidPositionStateId(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	req := &positionkeepingv1.RecordMeasurementRequest{
@@ -269,7 +269,7 @@ func TestRecordMeasurement_Idempotency_DuplicateKeyReturnsCachedResult(t *testin
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 	require.NoError(t, err)
 
 	logID := uuid.New()
@@ -369,7 +369,7 @@ func TestRecordMeasurement_RequiredFieldValidation(t *testing.T) {
 			mockEventPublisher := domain.NewInMemoryEventPublisher()
 			mockIdempotency := new(MockIdempotencyService)
 
-			svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+			svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 			require.NoError(t, err)
 
 			resp, err := svc.RecordMeasurement(ctx, tt.req)
@@ -405,7 +405,7 @@ func TestRecordMeasurement_MeasurementTypes(t *testing.T) {
 			mockEventPublisher := domain.NewInMemoryEventPublisher()
 			mockIdempotency := new(MockIdempotencyService)
 
-			svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency)
+			svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
 			require.NoError(t, err)
 
 			logID := uuid.New()
@@ -570,6 +570,7 @@ func TestRecordMeasurement_CEL_ValidationPasses(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -636,6 +637,7 @@ func TestRecordMeasurement_CEL_ValidationRejects(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -703,6 +705,7 @@ func TestRecordMeasurement_CEL_NilCacheSkipsValidation(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		// No WithInstrumentCache - cache is nil
 	)
 	require.NoError(t, err)
@@ -756,6 +759,7 @@ func TestRecordMeasurement_CEL_NilValidationProgramPasses(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -817,6 +821,7 @@ func TestRecordMeasurement_CEL_InstrumentNotFound(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -907,6 +912,7 @@ func TestRecordMeasurement_BucketKey_GeneratesKey(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -974,6 +980,7 @@ func TestRecordMeasurement_BucketKey_SameAttributesProduceSameKey(t *testing.T) 
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -1055,6 +1062,7 @@ func TestRecordMeasurement_BucketKey_NilProgramProducesEmptyBucketID(t *testing.
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -1123,6 +1131,7 @@ func TestRecordMeasurement_Cardinality_RejectsWhenLimitExceeded(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 		service.WithBucketCounter(mockBucketCounter),
 	)
@@ -1194,6 +1203,7 @@ func TestRecordMeasurement_Cardinality_AllowsUnderLimit(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 		service.WithBucketCounter(mockBucketCounter),
 	)
@@ -1263,6 +1273,7 @@ func TestRecordMeasurement_Cardinality_SkipsCheckWhenNoBucketCounter(t *testing.
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 		// WithBucketCounter NOT called - counter is nil
 	)
@@ -1330,6 +1341,7 @@ func TestRecordMeasurement_Cardinality_SkipsCheckWhenNoBucketKey(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 		service.WithBucketCounter(mockBucketCounter),
 	)
@@ -1397,6 +1409,7 @@ func TestRecordMeasurement_BucketKey_ErrorReturnsInvalidArgument(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -1469,6 +1482,7 @@ func TestRecordMeasurement_BucketID_PassedToDomain(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -1548,6 +1562,7 @@ func TestRecordMeasurement_BucketID_EmptyWhenNoBucketKeyProgram(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		service.WithInstrumentCache(mockCache),
 	)
 	require.NoError(t, err)
@@ -1623,6 +1638,7 @@ func TestRecordMeasurement_BucketID_EmptyWhenNoCacheConfigured(t *testing.T) {
 		mockMeasurementRepo,
 		mockEventPublisher,
 		mockIdempotency,
+		newTestOutboxPublisher(t),
 		// No WithInstrumentCache - cache is nil
 	)
 	require.NoError(t, err)
