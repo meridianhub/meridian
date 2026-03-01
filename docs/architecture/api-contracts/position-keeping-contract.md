@@ -1559,4 +1559,4 @@ For high-traffic accounts, consider:
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0004**: Event Schema Evolution
 - **ADR-0023**: Balance Delegation to Position Keeping
-- **BIAN Reference**: Position Keeping Service Domain (Release 13.0)
+- **BIAN Reference**: Position Keeping Service Domain (Release 14.0)

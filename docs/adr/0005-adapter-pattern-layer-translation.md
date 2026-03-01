@@ -350,20 +350,20 @@ changes.
 
 ### Scenario: BIAN Adds New Behavior Qualifier
 
-#### BIAN 13.0 → 14.0 adds "Suspend" to Current Account
+#### BIAN 14.0 → 15.0 adds "Suspend" to Current Account
 
 #### Step 1: Update domain model (business logic)
 
 ```go
 // internal/domain/current_account.go
 
-// Updated for BIAN 14.0
+// Updated for BIAN 15.0
 type CurrentAccount struct {
     ID              uuid.UUID
     ControlRecordID string
     AccountStatus   AccountStatus
 
-    // New in BIAN 14.0
+    // New in BIAN 15.0
     SuspensionReason string
     SuspendedUntil   time.Time
     SuspendedBy      string
@@ -377,7 +377,7 @@ const (
     AccountStatusSuspended AccountStatus = "suspended"  // New
 )
 
-// New BIAN 14.0 behavior qualifier
+// New BIAN 15.0 behavior qualifier
 func (a *CurrentAccount) Suspend(reason string, until time.Time, by string) error {
     if a.AccountStatus != AccountStatusActive {
         return ErrInvalidStatusTransition
@@ -401,7 +401,7 @@ type CurrentAccountEntity struct {
     // ... existing fields
     AccountStatus    string     `gorm:"not null;size:50;index"`
 
-    // BIAN 14.0 fields (nullable for backward compatibility)
+    // BIAN 15.0 fields (nullable for backward compatibility)
     SuspensionReason *string    `gorm:"size:500"`
     SuspendedUntil   *time.Time `gorm:"index"`
     SuspendedBy      *string    `gorm:"size:255"`
@@ -414,7 +414,7 @@ func (r *CurrentAccountRepository) toEntity(d *domain.CurrentAccount) *CurrentAc
         AccountStatus: string(d.AccountStatus),
     }
 
-    // Map BIAN 14.0 fields (conditional based on status)
+    // Map BIAN 15.0 fields (conditional based on status)
     if d.AccountStatus == domain.AccountStatusSuspended {
         entity.SuspensionReason = &d.SuspensionReason
         entity.SuspendedUntil = &d.SuspendedUntil
@@ -431,7 +431,7 @@ func (r *CurrentAccountRepository) toDomain(e *CurrentAccountEntity) *domain.Cur
         AccountStatus: domain.AccountStatus(e.AccountStatus),
     }
 
-    // Map BIAN 14.0 fields if present
+    // Map BIAN 15.0 fields if present
     if e.SuspensionReason != nil {
         account.SuspensionReason = *e.SuspensionReason
     }
@@ -451,7 +451,7 @@ func (r *CurrentAccountRepository) toDomain(e *CurrentAccountEntity) *domain.Cur
 ```go
 // internal/adapters/events/current_account_publisher.go
 
-// New method for BIAN 14.0 behavior qualifier
+// New method for BIAN 15.0 behavior qualifier
 func (p *CurrentAccountPublisher) PublishSuspended(
     ctx context.Context,
     account *domain.CurrentAccount,
@@ -478,28 +478,28 @@ pace.
 #### 1. Independent layer evolution
 
 ```text
-Domain:      BIAN 14.0 (updated immediately)
+Domain:      BIAN 15.0 (updated immediately)
              ↓
-Persistence: BIAN 13.0 schema + new nullable columns (gradual migration)
+Persistence: BIAN 14.0 schema + new nullable columns (gradual migration)
              ↓
-Events:      New event type with BIAN 14.0 semantics (backward compatible)
+Events:      New event type with BIAN 15.0 semantics (backward compatible)
 ```
 
 #### 2. Backward compatibility
 
-Old consumers (BIAN 13.0) continue working:
+Old consumers (BIAN 14.0) continue working:
 
 * Database: Nullable columns don't break existing queries
 * Events: New event type on new topic (old consumers unaffected)
-* Domain: New behavior qualifiers only used by v14 clients
+* Domain: New behavior qualifiers only used by v15 clients
 
 #### 3. Gradual rollout
 
 ```text
-Week 1: Update CurrentAccount domain (BIAN 14.0)
+Week 1: Update CurrentAccount domain (BIAN 15.0)
 Week 2: Deploy database migration (add suspension columns)
 Week 3: Deploy new event type (account-suspended topic)
-Week 4+: Consuming services adopt BIAN 14.0 independently
+Week 4+: Consuming services adopt BIAN 15.0 independently
 ```
 
 **Without adapters:** Single BIAN upgrade would require coordinated deployment across all services, risking production

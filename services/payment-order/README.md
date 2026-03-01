@@ -261,6 +261,6 @@ kubectl create secret generic payment-order-webhook \
 
 ## References
 
-- [BIAN Payment Order Specification](https://github.com/bian-official/public/blob/main/release13.0.0/semantic-apis/oas3/yamls/PaymentOrder.yaml)
+- [BIAN Payment Order Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/PaymentOrder.yaml)
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/payment_order/v1/)

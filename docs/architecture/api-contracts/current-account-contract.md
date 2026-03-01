@@ -860,4 +860,4 @@ facility.CurrentBalance = mapBalancesToResponse(balances)
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0005**: Adapter Pattern Layer Translation
 - **ADR-0023**: Balance Delegation to Position Keeping
-- **BIAN Reference**: Current Account Service Domain (Release 13.0)
+- **BIAN Reference**: Current Account Service Domain (Release 14.0)

@@ -26,6 +26,8 @@ Supersedes initial decision to use Confluent Schema Registry.
 
 Amended: 2025-11-19 - Added event topic naming convention, outbox pattern, and idempotency pattern
 
+Amended: 2026-02-28 - Added BIAN v14 AsyncAPI specification awareness
+
 ## Context
 
 Meridian uses Apache Kafka for internal coordination between BIAN service domains. Events represent domain state
@@ -382,7 +384,7 @@ fields handle 90% of evolution needs. New event types handle the remaining 10% (
 - [ADR-0006: Schema Management with Adapters](./0006-schema-management-adapters.md)
 - [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
 - [buf CLI Documentation](https://buf.build/docs/)
-- [BIAN Service Landscape 13.0.0](https://bian.org/servicelandscape-13-0-0/)
+- [BIAN Service Landscape 14.0.0](https://bian.org/servicelandscape-14-0-0/)
 - [BIAN Semantic APIs](https://bian.org/semantic-apis/)
 
 ## Notes
@@ -1034,3 +1036,55 @@ func TestIdempotency(t *testing.T) {
 - [Event-Driven Architecture: Idempotent Consumers](../architecture/event-driven-architecture.md#idempotent-consumers)
 - [Outbox Pattern Amendment](#amendment-outbox-pattern-for-reliable-event-publishing-2025-11-19)
 - [CurrentAccount API Contract: Idempotency](../architecture/api-contracts/current-account-contract.md#idempotency)
+
+---
+
+## Amendment: BIAN v14 AsyncAPI Specification Awareness (2026-02-28)
+
+### Context
+
+BIAN v14.0.0 introduces formal [AsyncAPI 3.0.0](https://www.asyncapi.com/docs/reference/specification/v3.0.0) specifications for all 259 service domains. This is the first time BIAN has provided machine-readable event definitions alongside its existing OpenAPI (REST) specs. Each service domain now includes an AsyncAPI YAML defining channels with `Created` and `Updated` message patterns (e.g., `OutboundMessage/Created`, `OutboundMessage/Updated`).
+
+**Example (BIAN AsyncAPI for CurrentAccount):**
+
+```yaml
+channels:
+  OutboundMessage/Created:
+    messages:
+      CurrentAccountOutbound:
+        payload:
+          $ref: '#/components/schemas/CurrentAccountOutbound'
+  OutboundMessage/Updated:
+    messages:
+      CurrentAccountOutbound:
+        payload:
+          $ref: '#/components/schemas/CurrentAccountOutbound'
+```
+
+**BIAN's approach is transport-agnostic**: channel names like `OutboundMessage/Created` are abstract and don't prescribe Kafka topic names, message broker topology, or serialization format.
+
+### Decision
+
+Acknowledge BIAN AsyncAPI specs as a **reference for payload structure** but continue using Meridian's existing topic naming convention (`<service>.<event-name>.<version>`) and protobuf serialization.
+
+**Rationale:**
+
+1. **Topic naming**: Meridian's dot-notation convention (`current-account.account-created.v1`) encodes service ownership directly in the topic name, which is operationally valuable for filtering, access control, and debugging. BIAN's `OutboundMessage/Created` channel naming is transport-agnostic and doesn't provide this operational benefit.
+
+2. **Payload alignment**: BIAN AsyncAPI schemas define JSON payloads matching the OpenAPI models. Meridian's Kafka events use protobuf serialization (per this ADR) with domain-specific event types rather than generic `ServiceDomainOutbound` wrappers. Our adapter layer (ADR-0005) handles the translation between BIAN's model structure and Meridian's internal event schemas.
+
+3. **Serialization**: BIAN AsyncAPI specs assume JSON payloads. Meridian uses protobuf for type safety, performance, and consistency with gRPC APIs (per this ADR's original decision). This remains the correct choice for internal event coordination.
+
+4. **Granularity**: BIAN defines two channels per domain (Created/Updated). Meridian uses fine-grained event types per BIAN behavior qualifier (AccountCreated, AccountSuspended, TransactionInitiated, etc.), which provides better consumer filtering and clearer domain semantics.
+
+### Future Considerations
+
+- **Payload structure review**: When implementing new service domains, cross-reference BIAN AsyncAPI payload schemas to ensure Meridian's protobuf event fields capture equivalent domain data.
+- **External integration**: If Meridian ever exposes event streams to external consumers, BIAN AsyncAPI specs could inform the external-facing contract while the internal protobuf events remain unchanged.
+- **BIAN evolution**: Monitor future BIAN releases for more prescriptive async patterns (e.g., CloudEvents envelope, transport-specific bindings) that may warrant revisiting this position.
+
+### References
+
+- [BIAN v14 AsyncAPI Specs](https://github.com/bian-official/public/tree/main/release14.0.0/semantic-apis/asyncapi)
+- [BIAN v14.0 Release Notes](https://bian.org/wp-content/uploads/2025/01/BIAN-v14.0-Release-Notes-v1.0.pdf)
+- [Topic Naming Amendment](#amendment-event-topic-naming-convention-2025-11-19)
