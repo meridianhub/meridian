@@ -77,6 +77,7 @@ var ServiceDatabases = map[string]ServiceDatabase{
 	"reconciliation":       {Database: "meridian_reconciliation", User: "meridian_reconciliation_user", Password: ""},
 	"forecasting":          {Database: "meridian_forecasting", User: "meridian_forecasting_user", Password: ""},
 	"reference-data":       {Database: "meridian_reference_data", User: "meridian_reference_data_user", Password: ""},
+	"operational-gateway":  {Database: "meridian_operational_gateway", User: "meridian_operational_gateway_user", Password: ""},
 }
 
 // serviceMigration holds a single migration file for a service.

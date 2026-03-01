@@ -361,6 +361,48 @@ func (v *ManifestValidator) validateDuplicates(
 			mappingKeys[key] = i
 		}
 	}
+
+	// Check duplicate operational_gateway connection_ids and instruction_types
+	v.validateOperationalGatewayDuplicates(manifest, result)
+}
+
+// validateOperationalGatewayDuplicates checks for duplicate connection_ids and instruction_types.
+func (v *ManifestValidator) validateOperationalGatewayDuplicates(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	gw := manifest.GetOperationalGateway()
+	if gw == nil {
+		return
+	}
+
+	connectionIDs := make(map[string]int)
+	for i, conn := range gw.GetProviderConnections() {
+		if prev, exists := connectionIDs[conn.GetConnectionId()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("operational_gateway.provider_connections[%d].connection_id", i),
+				Code:     "DUPLICATE_CONNECTION_ID",
+				Message:  fmt.Sprintf("duplicate connection_id %q (first defined at provider_connections[%d])", conn.GetConnectionId(), prev),
+			})
+		} else {
+			connectionIDs[conn.GetConnectionId()] = i
+		}
+	}
+
+	instructionTypes := make(map[string]int)
+	for i, route := range gw.GetInstructionRoutes() {
+		if prev, exists := instructionTypes[route.GetInstructionType()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("operational_gateway.instruction_routes[%d].instruction_type", i),
+				Code:     "DUPLICATE_INSTRUCTION_TYPE",
+				Message:  fmt.Sprintf("duplicate instruction_type %q (first defined at instruction_routes[%d])", route.GetInstructionType(), prev),
+			})
+		} else {
+			instructionTypes[route.GetInstructionType()] = i
+		}
+	}
 }
 
 // validateCELExpressions type-checks CEL expressions in account type policies.
@@ -558,6 +600,159 @@ func (v *ManifestValidator) validateCrossReferences(
 			result,
 		)
 	}
+
+	// Validate operational_gateway cross-references
+	v.validateOperationalGatewayCrossRefs(manifest, result)
+}
+
+// validateOperationalGatewayCrossRefs validates referential integrity for the operational_gateway section.
+// It checks that:
+// - instruction_route.connection_id references an existing provider_connection
+// - instruction_route.fallback_connection_id (if set) references an existing provider_connection
+// - instruction_route.outbound_mapping_id (if set) references an existing mapping
+// - instruction_route.inbound_mapping_id (if set) references an existing mapping
+// - inbound_route.handler_saga references an existing saga
+// - inbound_route.mapping_id (if set) references an existing mapping
+func (v *ManifestValidator) validateOperationalGatewayCrossRefs(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	gw := manifest.GetOperationalGateway()
+	if gw == nil {
+		return
+	}
+
+	// Build lookup sets for valid connection_ids, mapping names, and saga names
+	connectionIDs := make(map[string]bool)
+	for _, conn := range gw.GetProviderConnections() {
+		if id := conn.GetConnectionId(); id != "" {
+			connectionIDs[id] = true
+		}
+	}
+
+	mappingNames := make(map[string]bool)
+	for _, mp := range manifest.GetMappings() {
+		if name := mp.GetName(); name != "" {
+			mappingNames[name] = true
+		}
+	}
+
+	sagaNames := make(map[string]bool)
+	for _, saga := range manifest.GetSagas() {
+		if name := saga.GetName(); name != "" {
+			sagaNames[name] = true
+		}
+	}
+
+	for i, route := range gw.GetInstructionRoutes() {
+		v.validateInstructionRouteRefs(route, i, connectionIDs, mappingNames, result)
+	}
+
+	for i, route := range gw.GetInboundRoutes() {
+		v.validateInboundRouteRefs(route, i, sagaNames, mappingNames, result)
+	}
+}
+
+// validateInstructionRouteRefs checks connection and mapping references for a single InstructionRouteConfig.
+func (v *ManifestValidator) validateInstructionRouteRefs(
+	route *controlplanev1.InstructionRouteConfig,
+	idx int,
+	connectionIDs map[string]bool,
+	mappingNames map[string]bool,
+	result *ValidationResult,
+) {
+	basePath := fmt.Sprintf("operational_gateway.instruction_routes[%d]", idx)
+	connectionIDList := mapKeys(connectionIDs)
+	mappingNameList := mapKeys(mappingNames)
+
+	checkConnectionRef(route.GetConnectionId(), basePath+".connection_id", connectionIDs, connectionIDList, result)
+	if fallbackID := route.GetFallbackConnectionId(); fallbackID != "" {
+		checkConnectionRef(fallbackID, basePath+".fallback_connection_id", connectionIDs, connectionIDList, result)
+	}
+	if id := route.GetOutboundMappingId(); id != "" {
+		checkMappingRef(id, basePath+".outbound_mapping_id", mappingNames, mappingNameList, result)
+	}
+	if id := route.GetInboundMappingId(); id != "" {
+		checkMappingRef(id, basePath+".inbound_mapping_id", mappingNames, mappingNameList, result)
+	}
+}
+
+// validateInboundRouteRefs checks saga and mapping references for a single InboundRouteConfig.
+func (v *ManifestValidator) validateInboundRouteRefs(
+	route *controlplanev1.InboundRouteConfig,
+	idx int,
+	sagaNames map[string]bool,
+	mappingNames map[string]bool,
+	result *ValidationResult,
+) {
+	basePath := fmt.Sprintf("operational_gateway.inbound_routes[%d]", idx)
+	sagaNameList := mapKeys(sagaNames)
+	mappingNameList := mapKeys(mappingNames)
+
+	if sagaName := route.GetHandlerSaga(); sagaName != "" && !sagaNames[sagaName] {
+		ve := ValidationError{
+			Severity:        SeverityError,
+			Path:            basePath + ".handler_saga",
+			Code:            "UNDEFINED_SAGA_REFERENCE",
+			Message:         fmt.Sprintf("handler_saga %q is not defined in sagas[]", sagaName),
+			AvailableFields: sagaNameList,
+		}
+		if suggestion := findClosestMatch(sagaName, sagaNameList); suggestion != "" {
+			ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+		}
+		addError(result, ve)
+	}
+	if id := route.GetMappingId(); id != "" {
+		checkMappingRef(id, basePath+".mapping_id", mappingNames, mappingNameList, result)
+	}
+}
+
+// checkConnectionRef validates that a connection ID string references an existing provider connection.
+func checkConnectionRef(
+	connID string,
+	path string,
+	validIDs map[string]bool,
+	idList []string,
+	result *ValidationResult,
+) {
+	if connID == "" || validIDs[connID] {
+		return
+	}
+	ve := ValidationError{
+		Severity:        SeverityError,
+		Path:            path,
+		Code:            "UNDEFINED_CONNECTION_REFERENCE",
+		Message:         fmt.Sprintf("connection_id %q is not defined in operational_gateway.provider_connections", connID),
+		AvailableFields: idList,
+	}
+	if suggestion := findClosestMatch(connID, idList); suggestion != "" {
+		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+	}
+	addError(result, ve)
+}
+
+// checkMappingRef validates that a mapping name string references an existing mapping.
+func checkMappingRef(
+	mappingID string,
+	path string,
+	validNames map[string]bool,
+	nameList []string,
+	result *ValidationResult,
+) {
+	if mappingID == "" || validNames[mappingID] {
+		return
+	}
+	ve := ValidationError{
+		Severity:        SeverityError,
+		Path:            path,
+		Code:            "UNDEFINED_MAPPING_REFERENCE",
+		Message:         fmt.Sprintf("mapping %q is not defined in mappings[]", mappingID),
+		AvailableFields: nameList,
+	}
+	if suggestion := findClosestMatch(mappingID, nameList); suggestion != "" {
+		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+	}
+	addError(result, ve)
 }
 
 // validateMappings validates all MappingDefinition entries in the manifest.
