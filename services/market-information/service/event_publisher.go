@@ -9,14 +9,15 @@ import (
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/services/market-information/domain"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
 	// ObservationRecordedTopic is the Kafka topic for observation recorded events.
-	// Named using the service-name.event-name.v1 convention for channel derivation.
-	ObservationRecordedTopic = "market-information.observation-recorded.v1"
+	// References the centralized topic registry in shared/platform/events/topics.
+	ObservationRecordedTopic = topics.MarketInformationObservationRecordedV1
 
 	// DeprecatedObservationRecordedTopic is the old topic name retained for
 	// dual-publish during migration.

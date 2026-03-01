@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/reconciliation/observability"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// Topic constants for reconciliation domain events.
-// Named using the service-name.event-name.v1 convention for channel derivation.
+// Topic aliases for reconciliation domain events.
+// These reference the centralized topic registry in shared/platform/events/topics.
 const (
-	TopicReconciliationRunStarted   = "reconciliation.run-started.v1"
-	TopicReconciliationRunCompleted = "reconciliation.run-completed.v1"
-	TopicVarianceDetected           = "reconciliation.variance-detected.v1"
-	TopicPositionLockRequested      = "reconciliation.position-lock-requested.v1"
-	TopicDisputeCreated             = "reconciliation.dispute-created.v1"
-	TopicDisputeResolved            = "reconciliation.dispute-resolved.v1"
+	TopicReconciliationRunStarted   = topics.ReconciliationRunStartedV1
+	TopicReconciliationRunCompleted = topics.ReconciliationRunCompletedV1
+	TopicVarianceDetected           = topics.ReconciliationVarianceDetectedV1
+	TopicPositionLockRequested      = topics.ReconciliationPositionLockRequestedV1
+	TopicDisputeCreated             = topics.ReconciliationDisputeCreatedV1
+	TopicDisputeResolved            = topics.ReconciliationDisputeResolvedV1
 
 	// Deprecated topic names retained for dual-publish migration.
 	DeprecatedTopicReconciliationRunStarted   = "reconciliation.run.started"

@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/proto"
@@ -65,14 +66,15 @@ const (
 	idempotencyResultTTL = 24 * time.Hour
 )
 
-// Kafka topic constants for account lifecycle events
+// Kafka topic aliases for account lifecycle events.
+// These reference the centralized topic registry in shared/platform/events/topics.
 const (
-	// TopicAccountFrozen is the Kafka topic for account frozen events
-	TopicAccountFrozen = "current-account.account-frozen.v1"
-	// TopicAccountUnfrozen is the Kafka topic for account unfrozen events
-	TopicAccountUnfrozen = "current-account.account-unfrozen.v1"
-	// TopicAccountClosed is the Kafka topic for account closed events
-	TopicAccountClosed = "current-account.account-closed.v1"
+	// TopicAccountFrozen is the Kafka topic for account frozen events.
+	TopicAccountFrozen = topics.CurrentAccountAccountFrozenV1
+	// TopicAccountUnfrozen is the Kafka topic for account unfrozen events.
+	TopicAccountUnfrozen = topics.CurrentAccountAccountUnfrozenV1
+	// TopicAccountClosed is the Kafka topic for account closed events.
+	TopicAccountClosed = topics.CurrentAccountAccountClosedV1
 )
 
 // AccountEventPublisher defines the interface for publishing account lifecycle events.

@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 )
 
 // ControlFinancialBookingLog applies a control action (SUSPEND, RESUME, TERMINATE) to a booking log.
@@ -194,7 +195,7 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 			Version:        1,
 		}
 
-		eventTopic := "financial-accounting.booking-log.controlled"
+		eventTopic := topics.FinancialAccountingBookingLogControlled
 		if err := s.outboxPublisher.PublishControlEvent(
 			ctx,
 			tx,

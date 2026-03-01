@@ -21,6 +21,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/protobuf/proto"
 )
@@ -44,15 +45,16 @@ var (
 	ErrUnsupportedCurrency          = errors.New("unsupported currency for ledger posting")
 )
 
-// Kafka topic constants
+// Kafka topic aliases for payment order lifecycle events.
+// These reference the centralized topic registry in shared/platform/events/topics.
 const (
-	TopicPaymentOrderInitiated = "payment-order.initiated.v1"
-	TopicPaymentOrderReserved  = "payment-order.reserved.v1"
-	TopicPaymentOrderExecuting = "payment-order.executing.v1"
-	TopicPaymentOrderCompleted = "payment-order.completed.v1"
-	TopicPaymentOrderFailed    = "payment-order.failed.v1"
-	TopicPaymentOrderCancelled = "payment-order.cancelled.v1"
-	TopicPaymentOrderReversed  = "payment-order.reversed.v1"
+	TopicPaymentOrderInitiated = topics.PaymentOrderInitiatedV1
+	TopicPaymentOrderReserved  = topics.PaymentOrderReservedV1
+	TopicPaymentOrderExecuting = topics.PaymentOrderExecutingV1
+	TopicPaymentOrderCompleted = topics.PaymentOrderCompletedV1
+	TopicPaymentOrderFailed    = topics.PaymentOrderFailedV1
+	TopicPaymentOrderCancelled = topics.PaymentOrderCancelledV1
+	TopicPaymentOrderReversed  = topics.PaymentOrderReversedV1
 )
 
 // Operation result status constants for observability

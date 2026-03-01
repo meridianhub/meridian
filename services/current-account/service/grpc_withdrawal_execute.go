@@ -15,6 +15,7 @@ import (
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -391,7 +392,7 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 			AggregateType: "Withdrawal",
 			EventPayload:  eventPayload,
 			Status:        events.StatusPending,
-			Topic:         "current-account.withdrawal-status.v1",
+			Topic:         topics.CurrentAccountWithdrawalStatusV1,
 			PartitionKey:  accountID.String(),
 			CreatedAt:     time.Now(),
 			RetryCount:    0,
