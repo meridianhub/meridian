@@ -29,9 +29,14 @@ const (
 
 // Financial Accounting topics
 const (
-	// FinancialAccountingBookingLogControlled is the Kafka topic for booking log control events.
-	// Note: This topic does not follow the standard <service>.<event>.<version> pattern
-	// and is retained for backwards compatibility.
+	// FinancialAccountingBookingLogControlledV1 is the canonical Kafka topic for booking log
+	// control events, following the standard <service>.<event-name>.<version> naming convention.
+	FinancialAccountingBookingLogControlledV1 = "financial-accounting.booking-log-controlled.v1"
+
+	// FinancialAccountingBookingLogControlled is the legacy Kafka topic for booking log control events.
+	// Retained for dual-publishing during migration.
+	//
+	// Deprecated: Does not follow the standard naming convention. Use FinancialAccountingBookingLogControlledV1.
 	FinancialAccountingBookingLogControlled = "financial-accounting.booking-log.controlled"
 )
 
@@ -107,7 +112,7 @@ func All() []string {
 		CurrentAccountAccountUnfrozenV1,
 		CurrentAccountAccountClosedV1,
 		CurrentAccountWithdrawalStatusV1,
-		FinancialAccountingBookingLogControlled,
+		FinancialAccountingBookingLogControlledV1,
 		MarketInformationObservationRecordedV1,
 		PaymentOrderInitiatedV1,
 		PaymentOrderReservedV1,
