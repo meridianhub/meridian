@@ -60,6 +60,9 @@ message Manifest {
   // Each mapping describes how an external JSON payload is transformed into an internal
   // Meridian gRPC service call.
   repeated meridian.mapping.v1.MappingDefinition mappings = 10;
+
+  // operational_gateway defines external system integrations for this tenant.
+  OperationalGatewayConfig operational_gateway = 11;
 }
 
 // ========================================
@@ -396,4 +399,338 @@ message PaymentRails {
       }
     }
   }];
+}
+
+// ========================================
+// Operational Gateway Config
+// ========================================
+
+// OperationalGatewayConfig declares the external system integrations for a tenant.
+// It configures provider connections, outbound instruction routing, and inbound event handling.
+message OperationalGatewayConfig {
+  // provider_connections defines the external provider endpoints this tenant connects to.
+  repeated ProviderConnectionConfig provider_connections = 1;
+
+  // instruction_routes maps instruction types to provider connections for outbound dispatch.
+  repeated InstructionRouteConfig instruction_routes = 2;
+
+  // inbound_routes defines how inbound events from external providers are handled (Phase 5 placeholder).
+  repeated InboundRouteConfig inbound_routes = 3;
+}
+
+// ProviderProtocol defines the transport protocol used for a provider connection.
+// Mirrors the runtime Protocol enum but is self-contained in the manifest config.
+enum ProviderProtocol {
+  // PROVIDER_PROTOCOL_UNSPECIFIED means the protocol is unknown.
+  PROVIDER_PROTOCOL_UNSPECIFIED = 0;
+  // PROVIDER_PROTOCOL_HTTPS dispatches instructions via HTTPS REST calls.
+  PROVIDER_PROTOCOL_HTTPS = 1;
+  // PROVIDER_PROTOCOL_GRPC dispatches instructions via gRPC.
+  PROVIDER_PROTOCOL_GRPC = 2;
+  // PROVIDER_PROTOCOL_WEBHOOK sends instructions to a webhook endpoint (HTTPS with specific retry semantics).
+  PROVIDER_PROTOCOL_WEBHOOK = 3;
+  // PROVIDER_PROTOCOL_MQTT publishes instructions to an MQTT topic.
+  PROVIDER_PROTOCOL_MQTT = 4;
+  // PROVIDER_PROTOCOL_AMQP publishes instructions to an AMQP queue or exchange.
+  PROVIDER_PROTOCOL_AMQP = 5;
+}
+
+// RetryPolicyConfig defines the backoff strategy for failed dispatch attempts.
+message RetryPolicyConfig {
+  // max_attempts is the total number of dispatch attempts (including the first).
+  // A value of 1 means no retries (one attempt only).
+  int32 max_attempts = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 20
+  }];
+
+  // initial_backoff_seconds is the delay before the first retry in seconds.
+  int32 initial_backoff_seconds = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 3600
+  }];
+
+  // max_backoff_seconds caps the computed backoff to prevent unbounded delays.
+  int32 max_backoff_seconds = 3 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 86400
+  }];
+
+  // backoff_multiplier is the factor by which the backoff duration grows after each attempt.
+  // Example: initial=1s, multiplier=2.0 → 1s, 2s, 4s, 8s...
+  double backoff_multiplier = 4 [(buf.validate.field).double = {
+    gte: 1.0
+    lte: 10.0
+  }];
+}
+
+// RateLimitConfig controls the outbound dispatch rate for a connection.
+message RateLimitConfig {
+  // requests_per_second is the maximum sustained dispatch rate.
+  double requests_per_second = 1 [(buf.validate.field).double = {
+    gt: 0.0
+    lte: 10000.0
+  }];
+
+  // burst_size is the maximum number of requests allowed to exceed the rate limit momentarily.
+  int32 burst_size = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 10000
+  }];
+}
+
+// ApiKeyAuthConfig configures authentication via a static API key header.
+// All sensitive values are expressed as secret references, never raw values.
+message ApiKeyAuthConfig {
+  // header_name is the HTTP header used to transmit the API key.
+  // Example: "X-API-Key", "Authorization"
+  string header_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // api_key_secret_ref is a reference to the secret store key that holds the API key value.
+  // Example: "sm://stripe/api_key" or "env://STRIPE_API_KEY"
+  string api_key_secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+}
+
+// BasicAuthConfig configures HTTP Basic authentication.
+// All sensitive values are expressed as secret references, never raw values.
+message BasicAuthConfig {
+  // username is the Basic auth username (not sensitive - stored directly).
+  string username = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // password_secret_ref is a reference to the secret store key that holds the password.
+  string password_secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+}
+
+// OAuth2AuthConfig configures OAuth 2.0 client credentials flow authentication.
+// All sensitive values are expressed as secret references, never raw values.
+message OAuth2AuthConfig {
+  // token_url is the OAuth 2.0 token endpoint.
+  string token_url = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+    uri: true
+  }];
+
+  // client_id is the OAuth 2.0 client identifier (not sensitive - stored directly).
+  string client_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // client_secret_ref is a reference to the secret store key that holds the client secret.
+  string client_secret_ref = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // scopes lists the OAuth 2.0 scopes to request.
+  repeated string scopes = 4 [(buf.validate.field).repeated = {
+    max_items: 32
+    items: {string: {max_len: 256}}
+  }];
+}
+
+// HMACAuthConfig configures HMAC-based request signing.
+// All sensitive values are expressed as secret references, never raw values.
+message HMACAuthConfig {
+  // algorithm is the HMAC signing algorithm.
+  // Supported values: "sha256", "sha512"
+  string algorithm = 1 [(buf.validate.field).string = {
+    in: [
+      "sha256",
+      "sha512"
+    ]
+  }];
+
+  // secret_ref is a reference to the secret store key that holds the HMAC signing secret.
+  string secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // signature_header is the HTTP header where the computed signature is placed.
+  // Example: "X-Signature", "X-Hub-Signature-256"
+  string signature_header = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+}
+
+// MTLSAuthConfig configures mutual TLS (mTLS) authentication.
+// All sensitive values are expressed as secret references, never raw values.
+message MTLSAuthConfig {
+  // client_cert_secret_ref is a reference to the secret store key holding the PEM-encoded client certificate.
+  string client_cert_secret_ref = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // client_key_secret_ref is a reference to the secret store key holding the PEM-encoded private key.
+  string client_key_secret_ref = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+
+  // ca_cert_secret_ref is an optional reference to the secret store key holding the CA certificate
+  // for verifying the provider's server certificate.
+  string ca_cert_secret_ref = 3 [(buf.validate.field).string.max_len = 512];
+}
+
+// AuthConfigManifest defines the authentication configuration for a provider connection.
+// Exactly one variant must be set. All sensitive values use secret references.
+message AuthConfigManifest {
+  // auth_config is the authentication variant for this connection.
+  // Exactly one must be set.
+  oneof auth_config {
+    option (buf.validate.oneof).required = true;
+
+    // api_key authenticates using a static API key in a header.
+    ApiKeyAuthConfig api_key = 1;
+    // basic authenticates using HTTP Basic authentication.
+    BasicAuthConfig basic = 2;
+    // oauth2 authenticates using OAuth 2.0 client credentials flow.
+    OAuth2AuthConfig oauth2 = 3;
+    // hmac authenticates by signing requests with HMAC.
+    HMACAuthConfig hmac = 4;
+    // mtls authenticates using mutual TLS client certificates.
+    MTLSAuthConfig mtls = 5;
+  }
+}
+
+// ProviderConnectionConfig declares a single external provider connection within the manifest.
+// Each connection is identified by a stable connection_id used in InstructionRouteConfig.
+message ProviderConnectionConfig {
+  // connection_id is the stable, unique identifier for this connection within the manifest.
+  // Used by InstructionRouteConfig to reference this connection. Must be unique within the manifest.
+  // Example: "stripe-payments", "modulr-uk", "kraken-energy-grid"
+  string connection_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+    pattern: "^[a-z][a-z0-9_-]*$"
+  }];
+
+  // provider_name is the human-readable name for the external provider.
+  // Example: "Stripe", "Modulr", "Kraken Energy Grid"
+  string provider_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_type is a machine-readable classifier for the provider category.
+  // Example: "payment_gateway", "kyc_provider", "energy_scheduler"
+  string provider_type = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
+
+  // protocol is the transport protocol for dispatching instructions to this provider.
+  ProviderProtocol protocol = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // base_url is the root URL of the provider's API endpoint.
+  // Must be a valid URI. Example: "https://api.stripe.com"
+  string base_url = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+    uri: true
+  }];
+
+  // auth is the authentication configuration for this connection.
+  AuthConfigManifest auth = 6 [(buf.validate.field).required = true];
+
+  // retry_policy defines how failed dispatch attempts are retried.
+  // If not set, a default policy is used by the runtime.
+  RetryPolicyConfig retry_policy = 7;
+
+  // rate_limit controls the outbound dispatch rate for this connection.
+  // If not set, no rate limiting is applied.
+  RateLimitConfig rate_limit = 8;
+}
+
+// InstructionRouteConfig maps an instruction_type to a provider connection for outbound dispatch.
+// Routes determine which connection handles a given type of instruction and how the
+// payload is transformed before dispatch.
+message InstructionRouteConfig {
+  // instruction_type is the instruction category this route handles.
+  // Must be unique within the manifest's instruction_routes list.
+  // Example: "payment.initiate", "account.freeze", "kyc.verify"
+  string instruction_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // connection_id references the primary ProviderConnectionConfig used to dispatch matching instructions.
+  // Must match a connection_id defined in operational_gateway.provider_connections.
+  string connection_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // fallback_connection_id references an optional secondary connection used when the primary is unhealthy.
+  // Must match a connection_id defined in operational_gateway.provider_connections, if set.
+  // If not set, instructions fail without fallback when the primary connection is unhealthy.
+  string fallback_connection_id = 3 [(buf.validate.field).string.max_len = 128];
+
+  // outbound_mapping_id is the name of the MappingDefinition applied to transform the instruction
+  // payload from the internal Meridian format to the provider's expected format before dispatch.
+  // Must match a name in the manifest's mappings list. If empty, the payload is sent as-is.
+  string outbound_mapping_id = 4 [(buf.validate.field).string.max_len = 255];
+
+  // inbound_mapping_id is the name of the MappingDefinition applied to transform provider callback
+  // payloads from the provider's format to the internal Meridian format.
+  // Must match a name in the manifest's mappings list. If empty, callback payloads are processed as-is.
+  string inbound_mapping_id = 5 [(buf.validate.field).string.max_len = 255];
+
+  // http_method is the HTTP method used when dispatching via HTTPS or WEBHOOK protocol.
+  // Example: "POST", "PUT", "PATCH"
+  // Required for HTTPS and WEBHOOK protocols; ignored for GRPC, MQTT, AMQP.
+  string http_method = 6 [(buf.validate.field).string = {
+    max_len: 10
+    pattern: "^(GET|POST|PUT|PATCH|DELETE)?$"
+  }];
+
+  // path_template is the URL path template appended to the connection base_url.
+  // Supports simple variable substitution using {field_name} placeholders resolved from the payload.
+  // Example: "/v1/payments/{payment_id}/execute", "/accounts/{account_id}/freeze"
+  string path_template = 7 [(buf.validate.field).string.max_len = 1024];
+}
+
+// InboundRouteConfig declares how inbound events from external providers are handled.
+// This is a Phase 5 placeholder — configuration is captured in the manifest but runtime
+// support is not yet implemented.
+message InboundRouteConfig {
+  // external_type identifies the category of inbound event from the provider.
+  // Example: "stripe.payment_intent.succeeded", "modulr.account.credited"
+  string external_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // handler_saga is the name of the SagaDefinition to invoke when this event is received.
+  // Must match a name in the manifest's sagas list.
+  string handler_saga = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
+
+  // mapping_id is the name of the MappingDefinition applied to transform the inbound event
+  // payload before passing it to the handler saga.
+  // Must match a name in the manifest's mappings list. If empty, the payload is passed as-is.
+  string mapping_id = 3 [(buf.validate.field).string.max_len = 255];
 }
