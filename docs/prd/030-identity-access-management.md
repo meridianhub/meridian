@@ -543,11 +543,10 @@ database, not in dex.yaml static passwords.
 
 ### Token Security
 
-- Access tokens: 15-minute expiry
-- Refresh tokens: 7-day expiry, single-use rotation
-- Invitation tokens: 72-hour expiry, single-use
-- Password reset tokens: 1-hour expiry, single-use
-- All tokens stored as bcrypt hashes
+- Access tokens: stateless JWTs, 15-minute expiry, validated via JWKS
+- Refresh tokens: 7-day expiry, single-use rotation, stored as bcrypt hash
+- Invitation tokens: 72-hour expiry, single-use, stored as bcrypt hash
+- Password reset tokens: 1-hour expiry, single-use, stored as bcrypt hash
 
 ### Audit Trail
 
