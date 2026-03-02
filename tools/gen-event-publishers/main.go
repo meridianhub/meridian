@@ -181,6 +181,11 @@ func main() {
 		log.Fatal("No services generated")
 	}
 
+	// Clean stale packages from prior runs so removed/renamed specs don't linger.
+	if err := os.RemoveAll(outputDir); err != nil {
+		log.Fatalf("Failed to clean %s: %v", outputDir, err)
+	}
+
 	for _, svc := range services {
 		if err := generatePublisher(svc); err != nil {
 			log.Fatalf("Failed to generate %s: %v", svc.PackageName, err)
