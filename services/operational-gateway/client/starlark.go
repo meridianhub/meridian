@@ -125,8 +125,16 @@ func buildDispatchRequest(ctx *saga.StarlarkContext, params map[string]any) (*op
 		IdempotencyKey:  &commonv1.IdempotencyKey{Key: ctx.IdempotencyKey},
 	}
 
-	if priorityStr, ok := params["priority"].(string); ok && priorityStr != "" {
-		req.Priority = stringToPriority(priorityStr)
+	if rawPriority, exists := params["priority"]; exists && rawPriority != nil {
+		priorityStr, ok := rawPriority.(string)
+		if !ok {
+			return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w: priority must be a string, got %T", saga.ErrInvalidParamType, rawPriority)
+		}
+		p, err := stringToPriority(priorityStr)
+		if err != nil {
+			return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+		}
+		req.Priority = p
 	}
 
 	if corrID, ok := params["correlation_id"].(string); ok && corrID != "" {
@@ -250,18 +258,19 @@ func prepareClientContext(ctx *saga.StarlarkContext) context.Context {
 }
 
 // stringToPriority converts a Starlark priority string to the proto Priority enum.
-func stringToPriority(s string) opgatewayv1.Priority {
+// Returns an error for unrecognized values rather than silently defaulting to NORMAL.
+func stringToPriority(s string) (opgatewayv1.Priority, error) {
 	switch s {
 	case "LOW":
-		return opgatewayv1.Priority_PRIORITY_LOW
+		return opgatewayv1.Priority_PRIORITY_LOW, nil
 	case "NORMAL":
-		return opgatewayv1.Priority_PRIORITY_NORMAL
+		return opgatewayv1.Priority_PRIORITY_NORMAL, nil
 	case "HIGH":
-		return opgatewayv1.Priority_PRIORITY_HIGH
+		return opgatewayv1.Priority_PRIORITY_HIGH, nil
 	case "CRITICAL":
-		return opgatewayv1.Priority_PRIORITY_CRITICAL
+		return opgatewayv1.Priority_PRIORITY_CRITICAL, nil
 	default:
-		return opgatewayv1.Priority_PRIORITY_NORMAL
+		return opgatewayv1.Priority_PRIORITY_UNSPECIFIED, fmt.Errorf("%w: priority %q is not valid (expected LOW|NORMAL|HIGH|CRITICAL)", saga.ErrInvalidParamType, s)
 	}
 }
 

@@ -138,7 +138,7 @@ func New(cfg Config) (*Client, func(), error) {
 		}
 	} else if cfg.Target != "" {
 		dialOpts := cfg.DialOptions
-		if dialOpts == nil {
+		if len(dialOpts) == 0 {
 			dialOpts = []grpc.DialOption{
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 			}
