@@ -693,3 +693,92 @@ func TestNewProviderConnectionService_NilConnRepo(t *testing.T) {
 	_, err := NewProviderConnectionService(nil, newMockInstructionRepo(), nil)
 	assert.ErrorIs(t, err, ErrConnectionRepoNil)
 }
+
+// ========== ProcessCallback tests ==========
+
+// makeDeliveredInstruction creates an instruction in DELIVERED state and stores it in the repo.
+func makeDeliveredInstruction(t *testing.T, instRepo *mockInstructionRepo) *domain.Instruction {
+	t.Helper()
+	tid := testTenantID()
+	tenantUUID, err := uuid.Parse(tid)
+	require.NoError(t, err)
+
+	inst, err := domain.NewInstruction(tenantUUID, "payment.initiate", uuid.Nil.String(), map[string]any{"amount": 100.0})
+	require.NoError(t, err)
+	inst.ID = uuid.New()
+	require.NoError(t, inst.MarkDispatching())
+	require.NoError(t, inst.MarkDelivered())
+	stored := *inst
+	instRepo.instructions[inst.ID] = &stored
+	return inst
+}
+
+func TestProcessCallback_AlreadyAcked(t *testing.T) {
+	svc, instRepo, _ := newTestOGService(t)
+	ctx := tenantContext("test-tenant")
+
+	inst := makeDeliveredInstruction(t, instRepo)
+	// Pre-transition to ACKNOWLEDGED.
+	require.NoError(t, inst.MarkAcknowledged())
+	instRepo.instructions[inst.ID] = inst
+
+	resp, err := svc.ProcessCallback(ctx, &opgatewayv1.ProcessCallbackRequest{
+		InstructionId:  inst.ID.String(),
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "idem-ack"},
+		Callback:       &opgatewayv1.CallbackPayload{},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, opgatewayv1.InstructionStatus_INSTRUCTION_STATUS_ACKNOWLEDGED, resp.Instruction.Status)
+}
+
+func TestProcessCallback_Success(t *testing.T) {
+	svc, instRepo, _ := newTestOGService(t)
+	ctx := tenantContext("test-tenant")
+
+	inst := makeDeliveredInstruction(t, instRepo)
+
+	resp, err := svc.ProcessCallback(ctx, &opgatewayv1.ProcessCallbackRequest{
+		InstructionId:  inst.ID.String(),
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "idem-cb-1"},
+		Callback:       &opgatewayv1.CallbackPayload{},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, opgatewayv1.InstructionStatus_INSTRUCTION_STATUS_ACKNOWLEDGED, resp.Instruction.Status)
+}
+
+func TestProcessCallback_ProviderReferenceUnimplemented(t *testing.T) {
+	svc, _, _ := newTestOGService(t)
+	ctx := tenantContext("test-tenant")
+
+	_, err := svc.ProcessCallback(ctx, &opgatewayv1.ProcessCallbackRequest{
+		ProviderReference: "ext-ref-123",
+		IdempotencyKey:    &commonpb.IdempotencyKey{Key: "idem-ref"},
+		Callback:          &opgatewayv1.CallbackPayload{},
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unimplemented, st.Code())
+}
+
+func TestProcessCallback_DuplicateIdempotency(t *testing.T) {
+	svc, instRepo, _ := newTestOGService(t)
+	ctx := tenantContext("test-tenant")
+
+	inst := makeDeliveredInstruction(t, instRepo)
+	instRepo.saveErr = ports.ErrDuplicateIdempotency
+
+	resp, err := svc.ProcessCallback(ctx, &opgatewayv1.ProcessCallbackRequest{
+		InstructionId:  inst.ID.String(),
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "idem-dup"},
+		Callback:       &opgatewayv1.CallbackPayload{},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}

@@ -96,10 +96,14 @@ func (s *OperationalGatewayService) ListInstructions(
 
 	// Parse status filters.
 	for _, s := range req.Status {
-		domainStatus := protoToDomainStatus(s)
-		if domainStatus != "" {
-			params.Statuses = append(params.Statuses, domainStatus)
+		if s == opgatewayv1.InstructionStatus_INSTRUCTION_STATUS_UNSPECIFIED {
+			continue
 		}
+		domainStatus := protoToDomainStatus(s)
+		if domainStatus == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid status filter: %v", s)
+		}
+		params.Statuses = append(params.Statuses, domainStatus)
 	}
 
 	// Parse date range.
