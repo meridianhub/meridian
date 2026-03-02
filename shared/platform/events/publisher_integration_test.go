@@ -4,11 +4,9 @@ import (
 	"context"
 	"testing"
 
-	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 )
 
@@ -33,20 +31,8 @@ func TestOutboxPublisher_ProtovalidateIntegration(t *testing.T) {
 		CorrelationID: "integ-corr-123",
 	}
 
-	validEvent := func() *eventsv1.TransactionCapturedEvent {
-		return &eventsv1.TransactionCapturedEvent{
-			LogId:          "550e8400-e29b-41d4-a716-446655440000",
-			AccountId:      "account-123",
-			TransactionId:  "550e8400-e29b-41d4-a716-446655440001",
-			AmountCents:    100,
-			InstrumentCode: "GBP",
-			Direction:      "DEBIT",
-			Source:         "MANUAL",
-			CorrelationId:  "integ-corr-123",
-			Timestamp:      timestamppb.Now(),
-			Version:        1,
-		}
-	}
+	// Reuse the shared helper from publisher_test.go (same package).
+	validEvent := validTransactionCapturedEvent
 
 	t.Run("valid TransactionCapturedEvent is written to CockroachDB outbox", func(t *testing.T) {
 		db.Where("1=1").Delete(&EventOutbox{})
