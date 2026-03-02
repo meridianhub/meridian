@@ -4,17 +4,20 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/google/uuid"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
+	"github.com/meridianhub/meridian/services/operational-gateway/adapters/persistence"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+	"gorm.io/gorm"
 )
 
 // Pagination defaults.
@@ -32,9 +35,12 @@ var (
 // OperationalGatewayService implements OperationalGatewayServiceServer.
 type OperationalGatewayService struct {
 	opgatewayv1.UnimplementedOperationalGatewayServiceServer
-	instructionRepo ports.InstructionRepository
-	connectionRepo  ports.ConnectionRepository
-	logger          *slog.Logger
+	instructionRepo     ports.InstructionRepository
+	instructionRepoImpl *persistence.InstructionRepository
+	connectionRepo      ports.ConnectionRepository
+	db                  *gorm.DB
+	eventPublisher      ports.InstructionEventPublisher
+	logger              *slog.Logger
 }
 
 // ProviderConnectionService implements ProviderConnectionServiceServer.
@@ -67,6 +73,15 @@ func NewOperationalGatewayService(
 	}, nil
 }
 
+// WithEventPublishing configures transactional event publishing for the service.
+// When set, state-changing operations atomically write events to the outbox within the
+// same database transaction as the instruction save.
+func (s *OperationalGatewayService) WithEventPublishing(db *gorm.DB, impl *persistence.InstructionRepository, publisher ports.InstructionEventPublisher) {
+	s.db = db
+	s.instructionRepoImpl = impl
+	s.eventPublisher = publisher
+}
+
 // NewProviderConnectionService creates a new ProviderConnectionService.
 func NewProviderConnectionService(
 	connectionRepo ports.ConnectionRepository,
@@ -96,6 +111,34 @@ func requireTenant(ctx context.Context) (tenant.TenantID, error) {
 		return "", status.Error(codes.FailedPrecondition, "tenant context is required")
 	}
 	return tid, nil
+}
+
+// saveInstructionWithEvent atomically saves the instruction and publishes a lifecycle event
+// to the transactional outbox within a single database transaction.
+//
+// If event publishing is not configured (db or eventPublisher is nil), falls back to
+// instructionRepo.Save without event publishing. This preserves backwards compatibility
+// for tests and deployments that do not require event publishing.
+func (s *OperationalGatewayService) saveInstructionWithEvent(
+	ctx context.Context,
+	instruction *domain.Instruction,
+	idempotencyKey string,
+	publishEvent func(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error,
+) error {
+	// Fallback: no event publishing configured (e.g., unit tests)
+	if s.db == nil || s.instructionRepoImpl == nil || s.eventPublisher == nil || publishEvent == nil {
+		return s.instructionRepo.Save(ctx, instruction, idempotencyKey)
+	}
+
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.instructionRepoImpl.SaveInTx(ctx, tx, instruction, idempotencyKey); err != nil {
+			return err
+		}
+		if err := publishEvent(ctx, tx, instruction); err != nil {
+			return fmt.Errorf("failed to publish instruction event: %w", err)
+		}
+		return nil
+	})
 }
 
 // DispatchInstruction accepts a new instruction and queues it for dispatch.
@@ -172,7 +215,9 @@ func (s *OperationalGatewayService) DispatchInstruction(
 	// Assign a fresh UUID for this instruction.
 	instruction.ID = uuid.New()
 
-	if err := s.instructionRepo.Save(ctx, instruction, req.IdempotencyKey.Key); err != nil {
+	if err := s.saveInstructionWithEvent(ctx, instruction, req.IdempotencyKey.Key, func(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+		return s.eventPublisher.PublishCreated(ctx, tx, instr)
+	}); err != nil {
 		if errors.Is(err, ports.ErrDuplicateIdempotency) {
 			return nil, status.Error(codes.AlreadyExists, "instruction with this idempotency key already exists")
 		}
@@ -221,7 +266,9 @@ func (s *OperationalGatewayService) CancelInstruction(
 		return nil, status.Errorf(codes.Internal, "failed to cancel instruction: %v", err)
 	}
 
-	if err := s.instructionRepo.Save(ctx, instruction, ""); err != nil {
+	if err := s.saveInstructionWithEvent(ctx, instruction, "", func(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+		return s.eventPublisher.PublishCancelled(ctx, tx, instr)
+	}); err != nil {
 		if errors.Is(err, ports.ErrInstructionConflict) {
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
 		}
