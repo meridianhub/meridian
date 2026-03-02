@@ -14,8 +14,10 @@ import (
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
+	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/clients"
@@ -24,8 +26,6 @@ import (
 	"github.com/meridianhub/meridian/services/mcp-server/internal/server"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
-
-	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 )
 
 // wireServer registers all MCP tools, resources, and prompts onto srv.
@@ -109,6 +109,13 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
 	// require dedicated implementations that don't exist yet. Tools with
 	// nil deps are silently skipped — they'll light up once implemented.
 	tools.RegisterSimulationTools(toolReg, tools.SimulationDeps{})
+
+	// -- Gateway tools (instruction dispatch status, connection health, instruction detail, cancel) --
+	tools.RegisterGatewayTools(toolReg, tools.GatewayClients{
+		InstructionQuerier: gatewayInstructionAdapter{c: mc.OperationalGateway},
+		ConnectionQuerier:  gatewayConnectionAdapter{c: mc.ProviderConnection},
+		InstructionWriter:  gatewayInstructionAdapter{c: mc.OperationalGateway},
+	})
 
 	// Bridge all registered tools to the server.
 	bridgeToolsToServer(srv, toolReg, logger)
@@ -306,4 +313,34 @@ func (a *manifestResourceAdapter) GetCurrentManifestYAML(ctx context.Context) (s
 		return "", fmt.Errorf("marshal manifest: %w", err)
 	}
 	return string(data), nil
+}
+
+// gatewayInstructionAdapter satisfies tools.GatewayInstructionQuerier and tools.GatewayInstructionWriter.
+type gatewayInstructionAdapter struct {
+	c opgatewayv1.OperationalGatewayServiceClient
+}
+
+func (a gatewayInstructionAdapter) ListInstructions(ctx context.Context, req *opgatewayv1.ListInstructionsRequest) (*opgatewayv1.ListInstructionsResponse, error) {
+	return a.c.ListInstructions(ctx, req)
+}
+
+func (a gatewayInstructionAdapter) GetInstruction(ctx context.Context, req *opgatewayv1.GetInstructionRequest) (*opgatewayv1.GetInstructionResponse, error) {
+	return a.c.GetInstruction(ctx, req)
+}
+
+func (a gatewayInstructionAdapter) CancelInstruction(ctx context.Context, req *opgatewayv1.CancelInstructionRequest) (*opgatewayv1.CancelInstructionResponse, error) {
+	return a.c.CancelInstruction(ctx, req)
+}
+
+// gatewayConnectionAdapter satisfies tools.GatewayConnectionQuerier.
+type gatewayConnectionAdapter struct {
+	c opgatewayv1.ProviderConnectionServiceClient
+}
+
+func (a gatewayConnectionAdapter) ListConnections(ctx context.Context, req *opgatewayv1.ListConnectionsRequest) (*opgatewayv1.ListConnectionsResponse, error) {
+	return a.c.ListConnections(ctx, req)
+}
+
+func (a gatewayConnectionAdapter) GetConnection(ctx context.Context, req *opgatewayv1.GetConnectionRequest) (*opgatewayv1.GetConnectionResponse, error) {
+	return a.c.GetConnection(ctx, req)
 }
