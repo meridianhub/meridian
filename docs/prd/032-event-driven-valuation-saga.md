@@ -1,23 +1,25 @@
 ---
 name: prd-032-event-triggered-saga-execution
-description: Add event: trigger type to manifests so sagas execute in response to Kafka domain events
+description: Add event: trigger type to manifests so sagas execute in response to domain events
 triggers:
   - Adding event-driven saga triggers to manifests
-  - Building Kafka consumers that trigger saga execution
+  - Building event consumers that trigger saga execution
   - Extending the saga trigger type system beyond api/webhook/scheduled
   - Connecting position-keeping events to downstream workflows
   - Designing reactive workflows triggered by domain events
 instructions: |
   Meridian's manifest currently supports three saga trigger types: api:, webhook:, scheduled:.
-  This PRD introduces a fourth: event:<topic>, enabling sagas to execute in response to Kafka
-  domain events. The event: trigger is generic platform infrastructure — the saga script
-  determines what happens, not the trigger type.
+  This PRD introduces a fourth: event:<channel>, enabling sagas to execute in response to
+  domain events. The event: trigger is industry-agnostic platform infrastructure — the saga
+  script determines what happens, not the trigger type.
 
   Key design choices:
-  - The event: trigger type is industry-agnostic infrastructure
+  - The event: trigger type is transport-agnostic (hexagonal architecture) — Kafka is one
+    adapter, but the port accepts any proto message from any delivery mechanism
+  - No new service required — the existing saga runtime (control-plane) already has the
+    SagaTrigger port used by Stripe webhooks; event consumption is another input adapter
   - Account type policies can optionally reference a saga to execute when positions are
     captured — this is how tenants wire reactive workflows without custom consumers
-  - The saga itself is standard Starlark declared in the tenant manifest
   - Idempotency uses correlation_id from the source event to prevent duplicate processing
   - Event chain termination: downstream positions that lack a saga policy are dropped cheaply
 ---
@@ -50,21 +52,21 @@ workflows via Starlark sagas in manifests, not by writing Go services.
 
 ### 1.1 Relationship to PRD-030 (AsyncAPI Specification)
 
-PRD-030 formalizes the structure of Kafka event contracts: topic naming, payload schemas
+PRD-030 formalizes the structure of event contracts: channel naming, payload schemas
 (derived from proto), and standard headers (`correlation_id`, `causation_id`, `tenant_id`).
 The `event:` trigger is a direct consumer of those contracts.
 
 | PRD-030 provides | PRD-032 consumes |
 |------------------|------------------|
-| AsyncAPI spec per service domain | Topic validation — manifest `event:` triggers reference real topics |
+| AsyncAPI spec per service domain | Channel validation — manifest `event:` triggers reference real channels |
 | Standard headers (`correlation_id`) | Idempotency key for saga deduplication |
 | Standard headers (`tenant_id`) | Tenant scoping for multi-tenant event routing |
-| Typed event publishers (outbox pattern) | Reliable at-least-once event delivery to the consumer |
+| Typed event publishers (outbox pattern) | Reliable at-least-once event delivery |
 | Payload schemas (proto-derived) | Structured `ctx` passed to Starlark saga scripts |
 
 PRD-030's outbox alignment work (WS1-2) is a prerequisite for PRD-032. Event-triggered
-sagas depend on reliable event delivery — fire-and-forget Kafka writes risk losing the
-event that should have triggered a saga.
+sagas depend on reliable event delivery — fire-and-forget writes risk losing the event
+that should have triggered a saga.
 
 ### 1.2 Decorative Metadata
 
@@ -93,12 +95,12 @@ The platform provides the trigger infrastructure. The tenant provides the saga l
 
 ## 2. Design
 
-### 2.1 New Trigger Type: `event:<topic>`
+### 2.1 New Trigger Type: `event:<channel>`
 
 Add a fourth saga trigger prefix to the manifest schema:
 
 ```text
-event:<topic-pattern>
+event:<channel-name>
 ```
 
 Examples:
@@ -109,8 +111,9 @@ event:payment-order.instruction-completed.v1
 event:party.onboarding-completed.v1
 ```
 
-The trigger binds a saga to a Kafka topic. When an event arrives on that topic, the saga
-runtime evaluates whether to execute the saga (see 2.2 for filtering).
+The trigger binds a saga to an event channel (as defined by PRD-030's AsyncAPI specs).
+When an event arrives on that channel, the saga runtime evaluates whether to execute the
+saga (see 2.2 for filtering).
 
 **Proto change** — update the `SagaDefinition.trigger` validation pattern:
 
@@ -121,11 +124,11 @@ New:     ^(api:|webhook:|scheduled:|event:).+$
 
 ### 2.2 Event Routing via Account Type Policies
 
-Not every event on a topic should trigger a saga. The runtime filters using account type
+Not every event on a channel should trigger a saga. The runtime filters using account type
 metadata that already exists in reference-data:
 
 ```text
-Event arrives on topic
+Event arrives
   → Extract account_id from event payload
   → Look up account → get account_type_code
   → Look up account type policies
@@ -181,18 +184,76 @@ them. The platform wires the two together at runtime.
 
 The connection is indirect:
 
-- `event:` trigger tells the runtime *which topic to consume*
+- `event:` trigger tells the runtime *which channel to subscribe to*
 - Account type `onPositionCaptured.saga` tells the runtime *which saga to invoke for
   positions on this account type*
-- Multiple account types can reference different sagas for the same event topic
+- Multiple account types can reference different sagas for the same event channel
 - Account types without `onPositionCaptured` are ignored (cheap drop)
 
-### 2.4 Idempotency
+### 2.4 Transport-Agnostic Architecture (Hexagonal)
 
-Kafka consumers reprocess events on rebalance/restart. The `correlation_id` standard
+Meridian uses hexagonal architecture. The `event:` trigger defines a **port** — the
+transport that delivers events is an **adapter**. This follows the same pattern as the
+utilization-metering-consumer, where domain logic receives a
+`func(ctx, key, msg proto.Message) error` with no transport references in the signature.
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│                     SAGA RUNTIME                         │
+│                                                          │
+│  SagaTrigger port:                                       │
+│    TriggerSaga(ctx, sagaName, inputData, idempotencyKey) │
+│                                                          │
+│  Already used by:                                        │
+│    • api:    → gRPC/HTTP handler adapter                 │
+│    • webhook: → Stripe PaymentEventConsumer adapter      │
+│    • scheduled: → Platform scheduler adapter             │
+│    • event:  → Event consumer adapter (this PRD)         │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+                          ▲
+                          │ SagaTrigger interface
+                          │
+         ┌────────────────┼────────────────┐
+         │                │                │
+   ┌─────┴──────┐  ┌─────┴──────┐  ┌─────┴──────┐
+   │   Kafka     │  │   Outbox    │  │  In-Process │
+   │   Adapter   │  │   Poller    │  │   (testing) │
+   │             │  │   Adapter   │  │   Adapter   │
+   └─────────────┘  └─────────────┘  └─────────────┘
+```
+
+The event consumer adapter:
+
+1. Receives a proto message from *any* delivery mechanism
+2. Extracts `account_id`, looks up account type policy
+3. If policy matches, calls `SagaTrigger.TriggerSaga()` — the same port Stripe webhooks
+   already use
+4. Saga runtime handles execution, compensation, idempotency
+
+**No new service is required.** The saga runtime in control-plane already has:
+
+- Starlark execution environment
+- Handler registry and typed service clients
+- Compensation logic
+- The `SagaTrigger` interface (already wired for Stripe webhooks)
+
+Adding an event consumer adapter is incremental — same pattern as adding the Stripe
+webhook adapter. The adapter subscribes to events and calls `TriggerSaga()`. The saga
+runtime does the rest.
+
+This also means the event consumer inherits the saga runtime's existing:
+
+- Observability (structured logging, metrics)
+- Multi-tenancy (tenant-scoped execution)
+- Error handling (retry, compensation, dead-letter)
+
+### 2.5 Idempotency
+
+Event consumers reprocess events on restart/rebalance. The `correlation_id` standard
 header (formalized by PRD-030) is the natural idempotency key:
 
-1. Consumer delivers event to saga runtime
+1. Event consumer adapter delivers event to saga runtime via `TriggerSaga()`
 2. Saga checks whether this `correlation_id` has already been processed
 3. If yes, return early (no duplicate work)
 4. If no, proceed with saga execution
@@ -205,10 +266,10 @@ position-keeping or a dedicated idempotency store.
 The `tenant_id` header (also from PRD-030) provides multi-tenant scoping — the consumer
 routes events to the correct tenant's saga definitions and account type policies.
 
-### 2.5 Event Chain Termination
+### 2.6 Event Chain Termination
 
-Sagas that create downstream positions will emit further `transaction-captured` events.
-This creates a potential loop:
+Sagas that create downstream positions will emit further events. This creates a potential
+loop:
 
 ```text
 Position A → event → saga → Position B → event → ???
@@ -224,20 +285,6 @@ Termination is guaranteed by the account type policy lookup:
 This is a single lookup with no saga loading. The "no policy" path handles the majority of
 events in any deployment.
 
-### 2.6 Consumer Architecture
-
-**Recommendation: Saga runtime extension.** The saga runtime already has the Starlark
-execution environment, handler registry, and compensation logic. Adding a Kafka consumer
-group is incremental. A dedicated service would duplicate the saga execution stack.
-
-The consumer follows existing patterns (audit-worker, utilization-metering-consumer):
-
-- Consumer group: `event-saga-trigger` (generic, not workflow-specific)
-- Partition assignment: cooperative-sticky
-- Offset commit: after successful saga execution (or idempotent skip)
-- Error handling: dead-letter topic after N retries (configurable per saga)
-- One consumer group per `event:` trigger topic declared in the manifest
-
 ### 2.7 Eventual Consistency
 
 There is a window (seconds) between the source event and the saga's side effects
@@ -250,55 +297,65 @@ synchronous execution for event-triggered sagas.
 ### 3.1 Position-Keeping Event Emission
 
 - Outbox pattern: position log INSERT + event_outbox INSERT in same DB transaction
-- Background worker polls outbox, publishes to Kafka
-- Topic: `position-keeping.transaction-captured.v1`
+- Background worker polls outbox, publishes to message broker
+- Channel: `position-keeping.transaction-captured.v1`
 - Payload: log_id, account_id, transaction_id, amount, direction, source, description,
   reference, correlation_id, timestamp, version
 
-### 3.2 Valuation Engine
+### 3.2 Saga Runtime and SagaTrigger Port
+
+- Starlark saga orchestration fully implemented (PRD-006, 24/24 tasks)
+- Typed service clients auto-generated from handler schemas
+- Handlers: `position_keeping.initiate_log`, `position_keeping.update_log`, etc.
+- Automatic compensation (if step N fails, steps N-1..1 roll back)
+- `SagaTrigger` interface already used by Stripe webhook adapter in control-plane
+
+### 3.3 Valuation Engine
 
 - `shared/pkg/valuation/` and `shared/pkg/valuationfeature/`
 - Starlark-sandboxed, <5ms target, 5s timeout, 64MB memory limit
 - In-memory cache with 5-minute TTL
 - Available as a service module in Starlark sagas (`valuation_engine.compute(...)`)
 
-### 3.3 Saga Runtime
-
-- Starlark saga orchestration fully implemented (PRD-006, 24/24 tasks)
-- Typed service clients auto-generated from handler schemas
-- Handlers: `position_keeping.initiate_log`, `position_keeping.update_log`, etc.
-- Automatic compensation (if step N fails, steps N-1..1 roll back)
-
 ### 3.4 Account Type Metadata
 
 - `DefaultSagaPrefix`, `DefaultConversionMethodID`, `ValuationMethods` fields exist
 - Currently populated but not consumed by any runtime logic
 
-### 3.5 Existing Kafka Consumers
+### 3.5 Existing Event Consumer Patterns
 
-- audit-worker: consumes `audit.events.*.v1`, writes to audit_log
-- utilization-metering-consumer: consumes `audit.events.*.v1`, transforms to measurements
-- Both provide patterns for consumer group management, offset handling, error recovery
+Two patterns already exist in the codebase:
+
+**Hexagonal consumer (utilization-metering-consumer):**
+- Domain ports: `PositionKeepingClient`, `UtilizationPublisher` (interfaces)
+- Transport adapter: `AuditConsumer` wraps `MessageHandler` — domain never sees Kafka
+- Fan-out: primary output (gRPC to PK) + optional secondary (MDS publisher)
+- Handler signature: `func(ctx context.Context, key []byte, msg proto.Message) error`
+
+**Direct saga trigger (Stripe webhook consumer):**
+- `PaymentEventConsumer` receives HTTP webhook, calls `SagaTrigger.TriggerSaga()`
+- No message broker involved — event arrives via HTTP, saga executes immediately
+- Same `SagaTrigger` port the `event:` trigger would use
 
 ## 4. Scope
 
 ### 4.1 In Scope
 
 - `event:` trigger type in manifest schema (proto + validator + planner + applier)
-- Consumer infrastructure for event-triggered saga execution (generic, reusable)
+- Event consumer adapter wired to the existing `SagaTrigger` port in the saga runtime
 - Account type policy evaluation for saga routing (`onPositionCaptured`)
 - Make existing account type metadata fields (`DefaultSagaPrefix`, etc.) load-bearing
 - Idempotency contract (correlation_id as natural key)
 - Event chain termination via absence of policy
 - Account type caching in consumer (with TTL)
-- Manifest validation: event-triggered sagas reference topics defined in AsyncAPI specs
+- Manifest validation: event-triggered sagas reference channels defined in AsyncAPI specs
   (PRD-030)
 
 ### 4.2 Prerequisites
 
 - **PRD-030 WS1-2 (Outbox Alignment)**: event-triggered sagas depend on reliable
-  at-least-once delivery. Services using fire-and-forget Kafka writes risk losing the
-  event that should have triggered a saga.
+  at-least-once delivery. Services using fire-and-forget writes risk losing the event
+  that should have triggered a saga.
 
 ### 4.3 Out of Scope
 
@@ -307,6 +364,7 @@ synchronous execution for event-triggered sagas.
 - Batch-aware optimizations (individual event processing is sufficient at pilot scale)
 - Custom consumer code for tenants (the whole point is to avoid this)
 - Event contract formalization (covered by PRD-030)
+- New service deployment — the event consumer adapter runs inside the existing saga runtime
 
 ## 5. Reference: Tenant Manifest Examples
 
@@ -424,12 +482,12 @@ routing, and the saga runtime.
    fetch per event via gRPC? Per-event is safer but adds latency. A 60s TTL cache is
    likely sufficient since account type definitions change infrequently.
 
-3. **Multiple sagas per topic**: If two saga definitions declare `event:` triggers on the
-   same topic, should both execute? Or should the account type policy disambiguate (only
-   one saga per account type per event)?
+3. **Multiple sagas per channel**: If two saga definitions declare `event:` triggers on
+   the same channel, should both execute? Or should the account type policy disambiguate
+   (only one saga per account type per event)?
 
 4. **Dead letter handling**: When a saga fails after retries, should the event go to a
-   dead-letter topic for manual review, or should the consumer retry indefinitely with
+   dead-letter queue for manual review, or should the consumer retry indefinitely with
    backoff?
 
 ## 7. Success Criteria
@@ -441,6 +499,7 @@ routing, and the saga runtime.
 - Idempotent: reprocessing the same event produces no duplicate side effects
 - Event chain terminates: downstream positions without policies do not trigger further sagas
 - Saga compensation works: if a step fails, prior steps roll back
+- No new service required — event consumer adapter runs inside existing saga runtime
 
 ### First Deployment
 
@@ -456,7 +515,7 @@ routing, and the saga runtime.
   saga runtime this PRD extends with the `event:` trigger
 - [PRD-011: Valuation Service](011-valuation-service.md) — valuation engine available as
   a service module in event-triggered sagas
-- [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md) — topic naming
-  convention and outbox pattern
+- [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md) — channel
+  naming convention and outbox pattern
 - [ADR-0026: Canonical Ingestion Contract](../adr/0026-canonical-ingestion-contract.md) —
   boundary pattern for external data
