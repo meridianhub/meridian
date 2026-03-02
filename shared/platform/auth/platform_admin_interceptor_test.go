@@ -14,7 +14,7 @@ func TestPlatformAdminInterceptor(t *testing.T) {
 	t.Run("success with platform-admin role and no tenant claim", func(t *testing.T) {
 		claims := &Claims{
 			UserID: "admin-123",
-			Roles:  []string{RolePlatformAdmin},
+			Roles:  []string{RolePlatformAdmin.String()},
 			// No TenantID - correct for platform-layer services
 		}
 		ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
@@ -30,7 +30,7 @@ func TestPlatformAdminInterceptor(t *testing.T) {
 	t.Run("success with super-admin role and no tenant claim", func(t *testing.T) {
 		claims := &Claims{
 			UserID: "admin-123",
-			Roles:  []string{RoleSuperAdmin},
+			Roles:  []string{RoleSuperAdmin.String()},
 			// No TenantID - correct for platform-layer services
 		}
 		ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
@@ -47,7 +47,7 @@ func TestPlatformAdminInterceptor(t *testing.T) {
 		claims := &Claims{
 			UserID:   "user-123",
 			TenantID: "acme_bank", // Has tenant claim - should be rejected
-			Roles:    []string{RolePlatformAdmin},
+			Roles:    []string{RolePlatformAdmin.String()},
 		}
 		ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
 
@@ -124,7 +124,7 @@ func TestPlatformAdminInterceptor(t *testing.T) {
 		claims := &Claims{
 			UserID:   "user-123",
 			TenantID: "acme_bank",
-			Roles:    []string{RolePlatformAdmin, RoleSuperAdmin}, // Both roles!
+			Roles:    []string{RolePlatformAdmin.String(), RoleSuperAdmin.String()}, // Both roles!
 		}
 		ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
 
@@ -145,7 +145,7 @@ func TestPlatformAdminStreamInterceptor(t *testing.T) {
 	t.Run("success with platform-admin role and no tenant claim", func(t *testing.T) {
 		claims := &Claims{
 			UserID: "admin-123",
-			Roles:  []string{RolePlatformAdmin},
+			Roles:  []string{RolePlatformAdmin.String()},
 		}
 		ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
 		stream := &mockServerStream{ctx: ctx}
@@ -166,7 +166,7 @@ func TestPlatformAdminStreamInterceptor(t *testing.T) {
 		claims := &Claims{
 			UserID:   "user-123",
 			TenantID: "acme_bank",
-			Roles:    []string{RolePlatformAdmin},
+			Roles:    []string{RolePlatformAdmin.String()},
 		}
 		ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
 		stream := &mockServerStream{ctx: ctx}

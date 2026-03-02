@@ -477,6 +477,173 @@ func TestAuthorizeHelpers(t *testing.T) {
 	}
 }
 
+func TestNewRoles_IsValid(t *testing.T) {
+	tests := []struct {
+		name  string
+		role  Role
+		valid bool
+	}{
+		{"tenant-owner is valid", RoleTenantOwner, true},
+		{"platform-admin is valid", RolePlatformAdmin, true},
+		{"super-admin is valid", RoleSuperAdmin, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.role.IsValid(); got != tt.valid {
+				t.Errorf("Role.IsValid() = %v, want %v", got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestCanGrantRole(t *testing.T) {
+	tests := []struct {
+		name         string
+		granterRoles []Role
+		targetRole   Role
+		expected     bool
+	}{
+		// super-admin can grant all roles including platform-admin
+		{"super-admin can grant platform-admin", []Role{RoleSuperAdmin}, RolePlatformAdmin, true},
+		{"super-admin can grant tenant-owner", []Role{RoleSuperAdmin}, RoleTenantOwner, true},
+		{"super-admin can grant admin", []Role{RoleSuperAdmin}, RoleAdmin, true},
+		{"super-admin can grant operator", []Role{RoleSuperAdmin}, RoleOperator, true},
+		{"super-admin can grant auditor", []Role{RoleSuperAdmin}, RoleAuditor, true},
+		{"super-admin cannot grant service", []Role{RoleSuperAdmin}, RoleService, false},
+
+		// platform-admin can grant tenant-owner, admin, operator, auditor
+		{"platform-admin can grant tenant-owner", []Role{RolePlatformAdmin}, RoleTenantOwner, true},
+		{"platform-admin can grant admin", []Role{RolePlatformAdmin}, RoleAdmin, true},
+		{"platform-admin can grant operator", []Role{RolePlatformAdmin}, RoleOperator, true},
+		{"platform-admin can grant auditor", []Role{RolePlatformAdmin}, RoleAuditor, true},
+		{"platform-admin cannot grant service", []Role{RolePlatformAdmin}, RoleService, false},
+		{"platform-admin cannot grant super-admin", []Role{RolePlatformAdmin}, RoleSuperAdmin, false},
+
+		// tenant-owner can grant admin, operator, auditor
+		{"tenant-owner can grant admin", []Role{RoleTenantOwner}, RoleAdmin, true},
+		{"tenant-owner can grant operator", []Role{RoleTenantOwner}, RoleOperator, true},
+		{"tenant-owner can grant auditor", []Role{RoleTenantOwner}, RoleAuditor, true},
+		{"tenant-owner cannot grant tenant-owner", []Role{RoleTenantOwner}, RoleTenantOwner, false},
+		{"tenant-owner cannot grant platform-admin", []Role{RoleTenantOwner}, RolePlatformAdmin, false},
+
+		// admin can grant operator, auditor
+		{"admin can grant operator", []Role{RoleAdmin}, RoleOperator, true},
+		{"admin can grant auditor", []Role{RoleAdmin}, RoleAuditor, true},
+		{"admin cannot grant admin", []Role{RoleAdmin}, RoleAdmin, false},
+		{"admin cannot grant tenant-owner", []Role{RoleAdmin}, RoleTenantOwner, false},
+
+		// operator and auditor cannot grant any roles
+		{"operator cannot grant any role", []Role{RoleOperator}, RoleAuditor, false},
+		{"auditor cannot grant any role", []Role{RoleAuditor}, RoleOperator, false},
+
+		// multiple granter roles - highest privilege wins
+		{"tenant-owner + admin can grant tenant-owner via platform-admin not present", []Role{RoleTenantOwner, RoleAdmin}, RoleTenantOwner, false},
+		{"platform-admin + admin can grant tenant-owner", []Role{RolePlatformAdmin, RoleAdmin}, RoleTenantOwner, true},
+
+		// empty granter roles
+		{"empty granter cannot grant anything", []Role{}, RoleAuditor, false},
+		{"nil granter cannot grant anything", nil, RoleAuditor, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CanGrantRole(tt.granterRoles, tt.targetRole); got != tt.expected {
+				t.Errorf("CanGrantRole() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRoleHierarchy_NotNil(t *testing.T) {
+	if roleHierarchy == nil {
+		t.Error("roleHierarchy should not be nil")
+	}
+}
+
+func TestTenantOwnerPermissions(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceType ResourceType
+		permission   Permission
+		expected     bool
+	}{
+		// tenant-owner: same as admin + user management (identity resource)
+		{"tenant-owner can read accounts", ResourceTypeAccount, PermissionRead, true},
+		{"tenant-owner can write accounts", ResourceTypeAccount, PermissionWrite, true},
+		{"tenant-owner can delete accounts", ResourceTypeAccount, PermissionDelete, true},
+		{"tenant-owner can execute accounts", ResourceTypeAccount, PermissionExecute, true},
+		{"tenant-owner can read identity", ResourceTypeIdentity, PermissionRead, true},
+		{"tenant-owner can write identity", ResourceTypeIdentity, PermissionWrite, true},
+		{"tenant-owner can delete identity", ResourceTypeIdentity, PermissionDelete, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := &Claims{Roles: []string{RoleTenantOwner.String()}}
+			if got := HasPermission(claims, tt.resourceType, tt.permission); got != tt.expected {
+				t.Errorf("HasPermission(tenant-owner, %s, %s) = %v, want %v", tt.resourceType, tt.permission, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPlatformAdminPermissions(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceType ResourceType
+		permission   Permission
+		expected     bool
+	}{
+		// platform-admin: cross-tenant access, tenant provisioning
+		{"platform-admin can read accounts", ResourceTypeAccount, PermissionRead, true},
+		{"platform-admin can write system", ResourceTypeSystem, PermissionWrite, true},
+		{"platform-admin can read identity", ResourceTypeIdentity, PermissionRead, true},
+		{"platform-admin can write identity", ResourceTypeIdentity, PermissionWrite, true},
+		{"platform-admin can delete identity", ResourceTypeIdentity, PermissionDelete, true},
+		{"platform-admin can execute identity", ResourceTypeIdentity, PermissionExecute, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := &Claims{Roles: []string{RolePlatformAdmin.String()}}
+			if got := HasPermission(claims, tt.resourceType, tt.permission); got != tt.expected {
+				t.Errorf("HasPermission(platform-admin, %s, %s) = %v, want %v", tt.resourceType, tt.permission, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSuperAdminPermissions(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceType ResourceType
+		permission   Permission
+		expected     bool
+	}{
+		{"super-admin can read accounts", ResourceTypeAccount, PermissionRead, true},
+		{"super-admin can write accounts", ResourceTypeAccount, PermissionWrite, true},
+		{"super-admin can delete accounts", ResourceTypeAccount, PermissionDelete, true},
+		{"super-admin can write system", ResourceTypeSystem, PermissionWrite, true},
+		{"super-admin can execute identity", ResourceTypeIdentity, PermissionExecute, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := &Claims{Roles: []string{RoleSuperAdmin.String()}}
+			if got := HasPermission(claims, tt.resourceType, tt.permission); got != tt.expected {
+				t.Errorf("HasPermission(super-admin, %s, %s) = %v, want %v", tt.resourceType, tt.permission, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestResourceTypeIdentity(t *testing.T) {
+	if ResourceTypeIdentity != "identity" {
+		t.Errorf("ResourceTypeIdentity = %v, want 'identity'", ResourceTypeIdentity)
+	}
+}
+
 // Benchmark tests
 func BenchmarkHasAnyRole(b *testing.B) {
 	claims := &Claims{Roles: []string{"admin", "operator", "auditor"}}

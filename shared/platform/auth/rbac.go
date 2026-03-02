@@ -31,6 +31,12 @@ const (
 	RoleAuditor Role = "auditor"
 	// RoleService represents service-to-service authentication
 	RoleService Role = "service"
+	// RoleTenantOwner has full access within a tenant including user management
+	RoleTenantOwner Role = "tenant-owner"
+	// RolePlatformAdmin has cross-tenant access and tenant provisioning capabilities
+	RolePlatformAdmin Role = "platform-admin"
+	// RoleSuperAdmin has unrestricted platform-wide access
+	RoleSuperAdmin Role = "super-admin"
 )
 
 // String returns the string representation of a Role
@@ -41,11 +47,46 @@ func (r Role) String() string {
 // IsValid checks if a role string is a valid predefined role
 func (r Role) IsValid() bool {
 	switch r {
-	case RoleAdmin, RoleOperator, RoleAuditor, RoleService:
+	case RoleAdmin, RoleOperator, RoleAuditor, RoleService,
+		RoleTenantOwner, RolePlatformAdmin, RoleSuperAdmin:
 		return true
 	default:
 		return false
 	}
+}
+
+// roleHierarchy defines which roles a granter role is permitted to assign.
+// A role may only grant roles listed in its slice.
+// Unexported to prevent external mutation; use CanGrantRole or GetGrantableRoles for access.
+var roleHierarchy = map[Role][]Role{
+	RoleSuperAdmin:    {RolePlatformAdmin, RoleTenantOwner, RoleAdmin, RoleOperator, RoleAuditor},
+	RolePlatformAdmin: {RoleTenantOwner, RoleAdmin, RoleOperator, RoleAuditor},
+	RoleTenantOwner:   {RoleAdmin, RoleOperator, RoleAuditor},
+	RoleAdmin:         {RoleOperator, RoleAuditor},
+}
+
+// GetGrantableRoles returns a copy of the roles that the given granter role is permitted to assign.
+// Returns nil if the granter role has no delegation authority.
+func GetGrantableRoles(granter Role) []Role {
+	grantable := roleHierarchy[granter]
+	if len(grantable) == 0 {
+		return nil
+	}
+	result := make([]Role, len(grantable))
+	copy(result, grantable)
+	return result
+}
+
+// CanGrantRole reports whether any role in granterRoles is permitted to assign targetRole.
+func CanGrantRole(granterRoles []Role, targetRole Role) bool {
+	for _, granter := range granterRoles {
+		for _, grantable := range roleHierarchy[granter] {
+			if grantable == targetRole {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Permission represents an action that can be performed on a resource
@@ -76,6 +117,8 @@ const (
 	ResourceTypeAudit ResourceType = "audit"
 	// ResourceTypeSystem represents system configuration resources
 	ResourceTypeSystem ResourceType = "system"
+	// ResourceTypeIdentity represents identity and user management resources
+	ResourceTypeIdentity ResourceType = "identity"
 )
 
 // rolePermissions defines the permissions for each role
@@ -107,6 +150,33 @@ var rolePermissions = map[Role]map[ResourceType][]Permission{
 		ResourceTypeTransaction: {PermissionRead, PermissionWrite},
 		ResourceTypeAudit:       {PermissionWrite},
 		ResourceTypeSystem:      {PermissionRead},
+	},
+	// RoleTenantOwner: same as admin plus identity/user management within the tenant
+	RoleTenantOwner: {
+		ResourceTypeAccount:     {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypePosition:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeTransaction: {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeAudit:       {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeSystem:      {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeIdentity:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+	},
+	// RolePlatformAdmin: cross-tenant access and tenant provisioning
+	RolePlatformAdmin: {
+		ResourceTypeAccount:     {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypePosition:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeTransaction: {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeAudit:       {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeSystem:      {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeIdentity:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+	},
+	// RoleSuperAdmin: unrestricted platform-wide access
+	RoleSuperAdmin: {
+		ResourceTypeAccount:     {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypePosition:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeTransaction: {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeAudit:       {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeSystem:      {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeIdentity:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
 	},
 }
 

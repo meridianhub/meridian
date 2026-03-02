@@ -311,7 +311,7 @@ func TestAsyncProvisioningFlow(t *testing.T) {
 	claims := &auth.Claims{
 		UserID:   "admin-123",
 		TenantID: testTenantID, // Also set TenantID to test tenant-scoped access path
-		Roles:    []string{auth.RolePlatformAdmin},
+		Roles:    []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -453,7 +453,7 @@ func TestProvisioningFailureRetry(t *testing.T) {
 	claims := &auth.Claims{
 		UserID:   "admin-123",
 		TenantID: testTenantID,
-		Roles:    []string{auth.RolePlatformAdmin},
+		Roles:    []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -597,7 +597,7 @@ func TestConcurrentTenantProvisioning(t *testing.T) {
 	claims := &auth.Claims{
 		UserID:   "admin-concurrent-test",
 		TenantID: "platform",
-		Roles:    []string{auth.RolePlatformAdmin},
+		Roles:    []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -817,7 +817,7 @@ func TestProvisioningPermanentFailure(t *testing.T) {
 	claims := &auth.Claims{
 		UserID:   "admin-123",
 		TenantID: testTenantID,
-		Roles:    []string{auth.RolePlatformAdmin},
+		Roles:    []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
