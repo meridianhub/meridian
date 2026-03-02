@@ -70,15 +70,17 @@ that should have triggered a saga.
 
 ### 1.2 Decorative Metadata
 
-Account type definitions already carry fields that imply reactive behavior:
+Account type definitions carry fields that imply reactive behavior:
 
 - `DefaultSagaPrefix` — saga naming prefix for operations on this account type
 - `DefaultConversionMethodID` / `DefaultConversionMethodVersion` — default valuation method
 - `ValuationMethods` — array of Starlark valuation method references
 
-These fields are populated but not consumed by any runtime logic. Making them load-bearing
-— driving automatic saga execution when positions are captured on accounts of that type —
-is part of this PRD.
+These fields are populated but not consumed by any runtime logic. With event-triggered
+sagas and CEL filters, these fields become queryable context rather than routing
+configuration — a saga's CEL filter can reference account type metadata when deciding
+whether to fire, and the saga script can read them to determine which valuation method
+to use.
 
 ### 1.3 The Pattern is Industry-Agnostic
 
@@ -122,75 +124,126 @@ Current: ^(api:|webhook:|scheduled:).+$
 New:     ^(api:|webhook:|scheduled:|event:).+$
 ```
 
-### 2.2 Event Routing via Account Type Policies
+### 2.2 CEL Filter for Saga Applicability
 
-Not every event on a channel should trigger a saga. The runtime filters using account type
-metadata that already exists in reference-data:
-
-```text
-Event arrives
-  → Extract account_id from event payload
-  → Look up account → get account_type_code
-  → Look up account type policies
-  → Check: does this account type define a saga for this event?
-    → No  → drop event (one lookup, no saga load)
-    → Yes → execute the referenced saga
-```
-
-**The "no match" path must be cheap.** A saga that creates downstream positions will emit
-further events. Those events hit account types with no saga policy and get dropped. This is
-how event chains terminate — by absence of policy, not by special-case logic.
-
-### 2.3 Manifest Declaration
-
-A tenant manifest declares event-triggered sagas alongside the account types that activate
-them. The platform wires the two together at runtime.
+Not every event on a channel should trigger a saga. Each saga definition includes a
+`filter` — a CEL expression evaluated against the event payload. If the filter returns
+true, the saga executes. If false, the event is dropped for that saga.
 
 ```json
 {
-  "accountTypes": [
-    {
-      "code": "METERED_USAGE",
-      "name": "Metered Usage Account",
-      "normalBalance": "NORMAL_BALANCE_DEBIT",
-      "allowedInstruments": ["KWH"],
-      "policies": {
-        "validation": "amount > 0",
-        "onPositionCaptured": {
-          "saga": "usage-to-value",
-          "conversionMethod": "retail_tariff_v1"
-        }
-      }
-    },
-    {
-      "code": "BILLING",
-      "name": "Billing Account",
-      "normalBalance": "NORMAL_BALANCE_DEBIT",
-      "allowedInstruments": ["GBP"],
-      "policies": {
-        "validation": "amount > 0"
-      }
-    }
-  ],
+  "name": "usage-to-value",
+  "trigger": "event:position-keeping.transaction-captured.v1",
+  "filter": "event.instrument_code != 'GBP' && event.direction == 'DEBIT'",
+  "script": "..."
+}
+```
+
+This is the same CEL infrastructure already used for account type validation, bucketing,
+and eligibility — sub-millisecond evaluation, guaranteed termination, no side effects.
+
+**Routing flow:**
+
+```text
+Event arrives on channel
+  → Find all saga definitions with event: trigger matching this channel
+  → For each matching saga:
+    → Evaluate CEL filter against event payload
+    → Filter returns false → skip (sub-millisecond, no saga load)
+    → Filter returns true  → execute saga via SagaTrigger port
+```
+
+**Why CEL instead of account type policies:**
+
+The entity graph is broader than accounts. Events can originate from any service domain:
+
+| Event Source | Example | Routing Logic |
+|-------------|---------|---------------|
+| Position-keeping | kWh position captured | Filter on instrument_code, account_type |
+| Market data | Horse race result recorded | Filter on dataset_code, attributes |
+| Party | Organization onboarded | Filter on party_type, relationship_type |
+| Payment | Instruction completed | Filter on payment_type, status |
+| Reference data | Valuation rule updated | Filter on instrument_code, method |
+
+Hardcoding routing through account type policies would only cover the first case. CEL
+filters handle all of them — the tenant decides what conditions make a saga applicable.
+
+**Event chain termination** is also handled by CEL filters. A valuation saga creates GBP
+positions, which emit further `transaction-captured` events. The saga's filter
+(`event.instrument_code != 'GBP'`) rejects them — no special-case logic needed.
+
+### 2.3 The Entity Graph
+
+Sagas navigate an entity graph stored across reference-data and operational services.
+The graph has two axes: **what things are** (reference data definitions) and **who owns
+them** (operational relationships).
+
+```text
+Reference Data (definitions — the schema)
+├── Instruments        (KWH, GBP, GPU_HOUR, TONNE_CO2E)
+├── Account Types      (METERED_USAGE, BILLING, CLEARING)
+├── Party Types        (PERSON, ORGANIZATION)
+├── Valuation Rules    (KWH→GBP, GPU_HOUR→USD)
+├── Saga Definitions   (event-triggered workflows — this PRD)
+├── Market Data Sets   (observations, rates, race results)
+└── Mappings           (field transformations)
+
+Operational Data (instances — the state)
+├── Accounts           (customer + internal, typed by account type)
+├── Parties            (individuals + organizations)
+│   └── Associations   (BENEFICIAL_OWNER, SYNDICATE_PARTICIPANT, ...)
+├── Positions          (quantities on accounts)
+├── Payments           (instructions between accounts)
+└── Reconciliation     (variance tracking)
+```
+
+Sagas traverse this graph via existing service modules:
+
+- `reference_data.get_instrument(...)` — look up instrument definitions
+- `reference_data.get_account_type(...)` — look up account type and its CEL policies
+- `party.list_participants(org_id, relationship_type)` — traverse party hierarchy
+- `party.get_structuring_data(party_id, org_id, ...)` — get allocation shares
+- `position_keeping.initiate_log(...)` — book positions on accounts
+- `valuation_engine.compute(...)` — convert between instruments
+
+The `event:` trigger fires the saga. The CEL filter decides if it's applicable. The
+Starlark script navigates the graph to do the work. The platform owns the first two;
+the tenant owns the third.
+
+### 2.4 Manifest Declaration
+
+A tenant manifest declares event-triggered sagas with their CEL filters. No changes to
+account type definitions are needed — the routing logic lives on the saga, not the entity.
+
+```json
+{
   "sagas": [
     {
       "name": "usage-to-value",
       "trigger": "event:position-keeping.transaction-captured.v1",
+      "filter": "event.instrument_code != 'GBP' && event.direction == 'DEBIT'",
+      "script": "..."
+    },
+    {
+      "name": "race-result-distribution",
+      "trigger": "event:market-information.observation-recorded.v1",
+      "filter": "event.dataset_code == 'HORSE_RACING' && event.status == 'OFFICIAL'",
+      "script": "..."
+    },
+    {
+      "name": "party-onboarding-provisioning",
+      "trigger": "event:party.created.v1",
+      "filter": "event.party_type == 'ORGANIZATION'",
       "script": "..."
     }
   ]
 }
 ```
 
-The connection is indirect:
+Each saga stands alone — `trigger` says what channel, `filter` says when, `script` says
+what. No indirect wiring through account type policies or party relationships.
 
-- `event:` trigger tells the runtime *which channel to subscribe to*
-- Account type `onPositionCaptured.saga` tells the runtime *which saga to invoke for
-  positions on this account type*
-- Multiple account types can reference different sagas for the same event channel
-- Account types without `onPositionCaptured` are ignored (cheap drop)
-
-### 2.4 Transport-Agnostic Architecture (Hexagonal)
+### 2.5 Transport-Agnostic Architecture (Hexagonal)
 
 Meridian uses hexagonal architecture. The `event:` trigger defines a **port** — the
 transport that delivers events is an **adapter**. This follows the same pattern as the
@@ -226,10 +279,11 @@ utilization-metering-consumer, where domain logic receives a
 The event consumer adapter:
 
 1. Receives a proto message from *any* delivery mechanism
-2. Extracts `account_id`, looks up account type policy
-3. If policy matches, calls `SagaTrigger.TriggerSaga()` — the same port Stripe webhooks
+2. Finds saga definitions with matching `event:` trigger for this channel
+3. Evaluates each saga's CEL filter against the event payload
+4. For each match, calls `SagaTrigger.TriggerSaga()` — the same port Stripe webhooks
    already use
-4. Saga runtime handles execution, compensation, idempotency
+5. Saga runtime handles execution, compensation, idempotency
 
 **No new service is required.** The saga runtime in control-plane already has:
 
@@ -248,7 +302,7 @@ This also means the event consumer inherits the saga runtime's existing:
 - Multi-tenancy (tenant-scoped execution)
 - Error handling (retry, compensation, dead-letter)
 
-### 2.5 Idempotency
+### 2.6 Idempotency
 
 Event consumers reprocess events on restart/rebalance. The `correlation_id` standard
 header (formalized by PRD-030) is the natural idempotency key:
@@ -264,28 +318,27 @@ for prior processing is up to the Starlark script — typically a query against
 position-keeping or a dedicated idempotency store.
 
 The `tenant_id` header (also from PRD-030) provides multi-tenant scoping — the consumer
-routes events to the correct tenant's saga definitions and account type policies.
+routes events to the correct tenant's saga definitions and CEL filters.
 
-### 2.6 Event Chain Termination
+### 2.7 Event Chain Termination
 
-Sagas that create downstream positions will emit further events. This creates a potential
-loop:
+Sagas that create downstream events will potentially re-trigger. This creates a loop risk:
 
 ```text
 Position A → event → saga → Position B → event → ???
 ```
 
-Termination is guaranteed by the account type policy lookup:
+Termination is guaranteed by the CEL filter. A valuation saga with filter
+`event.instrument_code != 'GBP'` naturally rejects the GBP positions it creates.
+No special-case logic — the tenant writes their filter to match only the events they
+want. If no saga's filter matches, the event is dropped after CEL evaluation
+(sub-millisecond, no saga loading).
 
-1. Consumer receives event for Position B
-2. Looks up Position B's account type
-3. Account type has no `onPositionCaptured` policy
-4. Consumer drops the event
+**Tenants own the termination contract.** A poorly written filter could create a loop.
+The platform should enforce a configurable maximum chain depth (e.g., 5) as a safety net,
+tracked via the `causation_id` header from PRD-030.
 
-This is a single lookup with no saga loading. The "no policy" path handles the majority of
-events in any deployment.
-
-### 2.7 Eventual Consistency
+### 2.8 Eventual Consistency
 
 There is a window (seconds) between the source event and the saga's side effects
 materializing. This is inherent to event-driven architectures. Tenants design their
@@ -317,22 +370,34 @@ synchronous execution for event-triggered sagas.
 - In-memory cache with 5-minute TTL
 - Available as a service module in Starlark sagas (`valuation_engine.compute(...)`)
 
-### 3.4 Account Type Metadata
+### 3.4 CEL Infrastructure
 
-- `DefaultSagaPrefix`, `DefaultConversionMethodID`, `ValuationMethods` fields exist
-- Currently populated but not consumed by any runtime logic
+- CEL evaluator already exists (`shared/pkg/saga/cel_evaluator.go`)
+- Three CEL environments in use: validation, bucket_key, eligibility
+- Account type definitions use CEL for validation_cel, bucketing_cel, eligibility_cel
+- Instrument definitions use CEL for validation_expression, fungibility_key_expression
+- Sub-millisecond evaluation, guaranteed termination, no side effects
+
+### 3.5 Entity Graph Navigation (Starlark Service Modules)
+
+- `party.list_participants(org_id, relationship_type)` — traverse party hierarchy
+- `party.get_structuring_data(party_id, org_id, ...)` — get allocation metadata
+- `reference_data.get_instrument(...)` / `reference_data.get_account_type(...)` — lookups
+- Results cached in saga LookupCache for deterministic replay
 
 ### 3.5 Existing Event Consumer Patterns
 
 Two patterns already exist in the codebase:
 
 **Hexagonal consumer (utilization-metering-consumer):**
+
 - Domain ports: `PositionKeepingClient`, `UtilizationPublisher` (interfaces)
 - Transport adapter: `AuditConsumer` wraps `MessageHandler` — domain never sees Kafka
 - Fan-out: primary output (gRPC to PK) + optional secondary (MDS publisher)
 - Handler signature: `func(ctx context.Context, key []byte, msg proto.Message) error`
 
 **Direct saga trigger (Stripe webhook consumer):**
+
 - `PaymentEventConsumer` receives HTTP webhook, calls `SagaTrigger.TriggerSaga()`
 - No message broker involved — event arrives via HTTP, saga executes immediately
 - Same `SagaTrigger` port the `event:` trigger would use
@@ -342,14 +407,14 @@ Two patterns already exist in the codebase:
 ### 4.1 In Scope
 
 - `event:` trigger type in manifest schema (proto + validator + planner + applier)
+- `filter` field on saga definitions — CEL expression for applicability
+- New CEL environment (`event_filter`) with event payload variables
 - Event consumer adapter wired to the existing `SagaTrigger` port in the saga runtime
-- Account type policy evaluation for saga routing (`onPositionCaptured`)
-- Make existing account type metadata fields (`DefaultSagaPrefix`, etc.) load-bearing
 - Idempotency contract (correlation_id as natural key)
-- Event chain termination via absence of policy
-- Account type caching in consumer (with TTL)
+- Event chain termination via CEL filters + max chain depth safety net
+- Saga definition caching in consumer (with TTL — definitions change infrequently)
 - Manifest validation: event-triggered sagas reference channels defined in AsyncAPI specs
-  (PRD-030)
+  (PRD-030), and filter expressions compile in the `event_filter` CEL environment
 
 ### 4.2 Prerequisites
 
@@ -459,7 +524,64 @@ def execute(ctx):
     return {"status": "BILLED", "amount": str(charge.amount)}
 ```
 
-### 5.3 Pilot Context: Outfox Energy
+### 5.3 Betting: Market Event Triggers Party Distribution
+
+A betting platform distributes pot winnings across an organization's syndicate members
+when a horse race completes. The event comes from market data, not position-keeping —
+the saga navigates the party hierarchy to determine payouts.
+
+```python
+def execute(ctx):
+    # ctx.event contains the market data observation
+    race_id = ctx.event.reference
+    results = ctx.event.attributes
+
+    # Find the syndicate organization that placed bets on this race
+    step()
+    syndicate = reference_data.query(
+        entity_type="party",
+        filter="attributes.active_race_id == '" + race_id + "'",
+    )
+    if syndicate.count == 0:
+        return {"status": "NO_SYNDICATE", "race_id": race_id}
+
+    # Traverse party hierarchy — get all syndicate participants
+    step()
+    participants = party.list_participants(
+        org_id=syndicate.items[0].party_id,
+        relationship_type="SYNDICATE_PARTICIPANT",
+    )
+
+    # Calculate pot and distribute by allocation share
+    pot = Decimal(results.total_pot)
+    for p in participants:
+        step()
+        structuring = party.get_structuring_data(
+            party_id=p.party_id,
+            org_id=syndicate.items[0].party_id,
+            relationship_type="SYNDICATE_PARTICIPANT",
+        )
+        payout = pot * Decimal(structuring.allocation_share)
+
+        step()
+        position_keeping.initiate_log(
+            account_id=p.metadata.payout_account_id,
+            instrument_code="GBP",
+            direction="CREDIT",
+            amount=payout,
+            correlation_id=ctx.correlation_id,
+            description="Race " + race_id + " payout: " + str(structuring.allocation_share),
+        )
+
+    return {"status": "DISTRIBUTED", "race_id": race_id, "participants": len(participants)}
+```
+
+This saga demonstrates the full entity graph traversal: market data event triggers
+lookup of a party organization, traversal of its syndicate hierarchy, retrieval of each
+participant's structuring data (allocation shares), and position booking on each
+participant's account.
+
+### 5.4 Pilot Context: Outfox Energy
 
 The first deployment of event-triggered sagas is the Outfox reconciliation pilot:
 
@@ -469,37 +591,46 @@ The first deployment of event-triggered sagas is the Outfox reconciliation pilot
 - Reconcilable output for dual-publish comparison
 
 This validates the platform infrastructure with real data. The saga script and manifest
-configuration are tenant-owned — Meridian provides the `event:` trigger, the account type
-routing, and the saga runtime.
+configuration are tenant-owned — Meridian provides the `event:` trigger, the CEL filter,
+and the saga runtime.
 
 ## 6. Open Questions
 
-1. **Account type policy schema**: The `onPositionCaptured` policy shape proposed in 2.3
-   is new. Should it reuse the existing `DefaultSagaPrefix` / `ValuationMethods` fields,
-   or is a cleaner schema worth the migration?
+1. **CEL environment for event filters**: The `event_filter` environment needs access to
+   the event payload fields. Should it also have access to reference data (e.g., account
+   type lookups) for richer filtering, or should filters be pure event-payload expressions
+   to keep evaluation cheap?
 
-2. **Account type caching**: Should the consumer cache account type lookups with TTL, or
-   fetch per event via gRPC? Per-event is safer but adds latency. A 60s TTL cache is
-   likely sufficient since account type definitions change infrequently.
+2. **Multiple sagas per channel**: If two saga definitions both match the same event
+   (same channel, both CEL filters return true), should both execute independently? This
+   seems correct (each saga has its own compensation chain) but needs explicit design.
 
-3. **Multiple sagas per channel**: If two saga definitions declare `event:` triggers on
-   the same channel, should both execute? Or should the account type policy disambiguate
-   (only one saga per account type per event)?
+3. **Max chain depth**: What should the default max chain depth be for safety? 5?
+   Should it be configurable per tenant or per saga?
 
 4. **Dead letter handling**: When a saga fails after retries, should the event go to a
    dead-letter queue for manual review, or should the consumer retry indefinitely with
    backoff?
 
+5. **Filter compilation at manifest apply**: CEL filters should be compiled and validated
+   when the manifest is applied (like Starlark scripts). What variables should the
+   `event_filter` environment expose? At minimum: `event.*` fields from the channel's
+   proto payload schema.
+
 ## 7. Success Criteria
 
 ### Platform
 
-- Event-triggered sagas are declarable in tenant manifests using the `event:` trigger
-- Account types without saga policies drop events in <5ms (one lookup, no saga load)
+- Event-triggered sagas are declarable in tenant manifests using `event:` trigger + CEL
+  `filter`
+- CEL filters compiled and validated at manifest apply time (same as Starlark scripts)
+- Events with no matching saga filter are dropped in <1ms (CEL evaluation only)
 - Idempotent: reprocessing the same event produces no duplicate side effects
-- Event chain terminates: downstream positions without policies do not trigger further sagas
+- Event chains terminate via CEL filters + max chain depth safety net
 - Saga compensation works: if a step fails, prior steps roll back
 - No new service required — event consumer adapter runs inside existing saga runtime
+- Sagas can navigate the full entity graph (accounts, parties, hierarchies) via existing
+  service modules
 
 ### First Deployment
 
