@@ -10,6 +10,7 @@ import (
 	"ariga.io/atlas-provider-gorm/gormschema"
 	capersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	fapersistence "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	partypersistence "github.com/meridianhub/meridian/services/party/adapters/persistence"
 	popersistence "github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
@@ -23,6 +24,7 @@ const (
 	schemaCurrentAccount      = "current_account"
 	schemaPositionKeeping     = "position_keeping"
 	schemaFinancialAccounting = "financial_accounting"
+	schemaIdentity            = "identity"
 	schemaParty               = "party"
 	schemaPaymentOrder        = "payment_order"
 	schemaPlatform            = "platform"
@@ -30,7 +32,7 @@ const (
 
 func main() {
 	// Parse schema filter flag
-	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping, financial_accounting, party, payment_order, platform)")
+	schemaFilter := flag.String("schema", "", "Filter models by schema (current_account, position_keeping, financial_accounting, identity, party, payment_order, platform)")
 	flag.Parse()
 
 	// Determine which models to load based on schema filter
@@ -62,6 +64,13 @@ func main() {
 		modelList = []interface{}{
 			&fapersistence.FinancialBookingLogEntity{},
 			&fapersistence.LedgerPostingEntity{},
+		}
+	case schemaIdentity:
+		// Identity service for platform user accounts, roles, and invitations
+		modelList = []interface{}{
+			&identitypersistence.IdentityEntity{},
+			&identitypersistence.RoleAssignmentEntity{},
+			&identitypersistence.InvitationEntity{},
 		}
 	case schemaParty:
 		// Party service for customer/organization identity management
