@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"buf.build/go/protovalidate"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
@@ -15,16 +16,23 @@ import (
 // The background Worker then processes these events asynchronously and publishes them to Kafka.
 type OutboxPublisher struct {
 	serviceName string
+	validator   protovalidate.Validator
 }
 
 // NewOutboxPublisher creates a new OutboxPublisher for the given service.
 // Panics if serviceName is empty to fail fast during initialization.
+// Panics if the protovalidate validator cannot be created.
 func NewOutboxPublisher(serviceName string) *OutboxPublisher {
 	if serviceName == "" {
 		panic("events: " + ErrEmptyServiceName.Error())
 	}
+	validator, err := protovalidate.New()
+	if err != nil {
+		panic(fmt.Sprintf("events: failed to create protovalidate validator: %v", err))
+	}
 	return &OutboxPublisher{
 		serviceName: serviceName,
+		validator:   validator,
 	}
 }
 
@@ -98,6 +106,13 @@ func (p *OutboxPublisher) Publish(
 	}
 	if config.AggregateType == "" {
 		return ErrEmptyAggregateType
+	}
+
+	// Validate the protobuf event against its buf/validate constraints.
+	// This enforces schema correctness before the event enters the outbox.
+	// Once in the outbox, events are considered proven valid.
+	if err := p.validator.Validate(event); err != nil {
+		return fmt.Errorf("event payload validation failed: %w", err)
 	}
 
 	// Serialize the protobuf event

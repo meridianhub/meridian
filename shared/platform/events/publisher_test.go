@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -351,5 +352,139 @@ func TestOutboxPublisher_AtomicWithBusinessOperation(t *testing.T) {
 		var outboxCount int64
 		db.Model(&EventOutbox{}).Where("aggregate_id = ?", "entity-3").Count(&outboxCount)
 		assert.Equal(t, int64(0), outboxCount)
+	})
+}
+
+// validTransactionCapturedEvent returns a TransactionCapturedEvent that satisfies all
+// buf/validate constraints defined in position_keeping_events.proto.
+func validTransactionCapturedEvent() *eventsv1.TransactionCapturedEvent {
+	return &eventsv1.TransactionCapturedEvent{
+		LogId:          "550e8400-e29b-41d4-a716-446655440000",
+		AccountId:      "account-123",
+		TransactionId:  "550e8400-e29b-41d4-a716-446655440001",
+		AmountCents:    100,
+		InstrumentCode: "GBP",
+		Direction:      "DEBIT",
+		Source:         "MANUAL",
+		CorrelationId:  "corr-123",
+		Timestamp:      timestamppb.Now(),
+		Version:        1,
+	}
+}
+
+func TestOutboxPublisher_ProtovalidateEnforcement(t *testing.T) {
+	db := setupPublisherTestDB(t)
+	publisher := NewOutboxPublisher("test-service")
+	ctx := context.Background()
+
+	baseConfig := PublishConfig{
+		EventType:     "events.transaction_captured.v1",
+		AggregateID:   "550e8400-e29b-41d4-a716-446655440000",
+		AggregateType: "FinancialPositionLog",
+		Topic:         "position-keeping.events.v1",
+		CorrelationID: "corr-123",
+	}
+
+	t.Run("valid event passes validation and is written to outbox", func(t *testing.T) {
+		// Clear outbox before test
+		db.Where("1=1").Delete(&EventOutbox{})
+
+		event := validTransactionCapturedEvent()
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			return publisher.Publish(ctx, tx, event, baseConfig)
+		})
+
+		require.NoError(t, err)
+
+		var count int64
+		db.Model(&EventOutbox{}).Count(&count)
+		assert.Equal(t, int64(1), count, "valid event should be written to outbox")
+	})
+
+	t.Run("invalid UUID field is rejected before outbox insert", func(t *testing.T) {
+		// Clear outbox before test
+		db.Where("1=1").Delete(&EventOutbox{})
+
+		event := validTransactionCapturedEvent()
+		event.LogId = "not-a-uuid" // violates (buf.validate.field).string.uuid = true
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			return publisher.Publish(ctx, tx, event, baseConfig)
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "event payload validation failed")
+
+		// Verify nothing was written to outbox
+		var count int64
+		db.Model(&EventOutbox{}).Count(&count)
+		assert.Equal(t, int64(0), count, "invalid event must not enter the outbox")
+	})
+
+	t.Run("required field missing is rejected before outbox insert", func(t *testing.T) {
+		// Clear outbox before test
+		db.Where("1=1").Delete(&EventOutbox{})
+
+		event := validTransactionCapturedEvent()
+		event.Timestamp = nil // violates (buf.validate.field).required = true
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			return publisher.Publish(ctx, tx, event, baseConfig)
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "event payload validation failed")
+
+		var count int64
+		db.Model(&EventOutbox{}).Count(&count)
+		assert.Equal(t, int64(0), count, "event with missing required field must not enter the outbox")
+	})
+
+	t.Run("invalid enum value is rejected before outbox insert", func(t *testing.T) {
+		// Clear outbox before test
+		db.Where("1=1").Delete(&EventOutbox{})
+
+		event := validTransactionCapturedEvent()
+		event.Direction = "SIDEWAYS" // violates (buf.validate.field).string.in constraint
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			return publisher.Publish(ctx, tx, event, baseConfig)
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "event payload validation failed")
+
+		var count int64
+		db.Model(&EventOutbox{}).Count(&count)
+		assert.Equal(t, int64(0), count, "event with invalid enum value must not enter the outbox")
+	})
+
+	t.Run("validation error rolls back business operation atomically", func(t *testing.T) {
+		// Create a simple business entity table
+		type BizEntity struct {
+			ID string `gorm:"primaryKey"`
+		}
+		db.AutoMigrate(&BizEntity{})
+		db.Where("1=1").Delete(&BizEntity{})
+		db.Where("1=1").Delete(&EventOutbox{})
+
+		event := validTransactionCapturedEvent()
+		event.LogId = "bad-uuid" // will fail validation
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			// Business operation first
+			if err := tx.Create(&BizEntity{ID: "entity-val-test"}).Error; err != nil {
+				return err
+			}
+			return publisher.Publish(ctx, tx, event, baseConfig)
+		})
+
+		require.Error(t, err)
+
+		// Business entity must also be rolled back
+		var entityCount int64
+		db.Model(&BizEntity{}).Where("id = ?", "entity-val-test").Count(&entityCount)
+		assert.Equal(t, int64(0), entityCount, "business operation must be rolled back on validation failure")
 	})
 }
