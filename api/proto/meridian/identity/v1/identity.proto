@@ -47,6 +47,19 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   }
 };
 
+// AuthenticationFailureReason is a coarse classification of why authentication failed.
+// Detailed reasons are recorded in internal audit logs only.
+enum AuthenticationFailureReason {
+  // AUTHENTICATION_FAILURE_REASON_UNSPECIFIED means no failure; authentication succeeded.
+  AUTHENTICATION_FAILURE_REASON_UNSPECIFIED = 0;
+  // AUTHENTICATION_FAILURE_REASON_INVALID_CREDENTIALS means the supplied credentials were not accepted.
+  AUTHENTICATION_FAILURE_REASON_INVALID_CREDENTIALS = 1;
+  // AUTHENTICATION_FAILURE_REASON_ACCOUNT_NOT_ACTIVE means the identity is not in ACTIVE status.
+  AUTHENTICATION_FAILURE_REASON_ACCOUNT_NOT_ACTIVE = 2;
+  // AUTHENTICATION_FAILURE_REASON_ACCOUNT_LOCKED means the identity is temporarily locked.
+  AUTHENTICATION_FAILURE_REASON_ACCOUNT_LOCKED = 3;
+}
+
 // IdentityStatus defines the lifecycle state of an identity.
 enum IdentityStatus {
   // IDENTITY_STATUS_UNSPECIFIED means the status is unknown.
@@ -329,8 +342,9 @@ message AuthenticateResponse {
   // authenticated indicates whether the provided credentials are valid.
   bool authenticated = 2;
 
-  // failure_reason describes why authentication failed. Present only when authenticated is false.
-  string failure_reason = 3;
+  // failure_reason is a coarse classification of why authentication failed.
+  // Detailed reasons are logged server-side only and not exposed in this response.
+  AuthenticationFailureReason failure_reason = 3;
 }
 
 // --- Password Management ---
@@ -428,6 +442,8 @@ message CompletePasswordResetResponse {
 // --- Role Management ---
 
 // GrantRoleRequest is the request to grant a role to an identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
 message GrantRoleRequest {
   // identity_id is the identifier of the identity receiving the role.
   string identity_id = 1 [(buf.validate.field).string = {
@@ -442,15 +458,8 @@ message GrantRoleRequest {
     not_in: [0] // Prevent UNSPECIFIED
   }];
 
-  // granted_by is the identity id of the administrator granting this role.
-  string granted_by = 3 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
-  }];
-
   // expires_at is the optional expiry timestamp for this role assignment.
-  google.protobuf.Timestamp expires_at = 4;
+  google.protobuf.Timestamp expires_at = 3;
 }
 
 // GrantRoleResponse is the response after granting a role.
@@ -460,6 +469,8 @@ message GrantRoleResponse {
 }
 
 // RevokeRoleRequest is the request to revoke a role from an identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
 message RevokeRoleRequest {
   // identity_id is the identifier of the identity whose role is being revoked.
   string identity_id = 1 [(buf.validate.field).string = {
@@ -470,13 +481,6 @@ message RevokeRoleRequest {
 
   // role_assignment_id is the identifier of the role assignment to revoke.
   string role_assignment_id = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
-  }];
-
-  // revoked_by is the identity id of the administrator revoking this role.
-  string revoked_by = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]+$"
@@ -512,6 +516,8 @@ message ListRoleAssignmentsResponse {
 
 // InviteUserRequest is the request to invite a new user to the platform.
 // Creates both an Identity in PENDING_INVITE status and an Invitation record.
+// The actor sending the invitation is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
 message InviteUserRequest {
   // email is the email address of the user to invite.
   string email = 1 [(buf.validate.field).string = {
@@ -520,15 +526,8 @@ message InviteUserRequest {
     email: true
   }];
 
-  // invited_by is the identity id of the administrator sending the invitation.
-  string invited_by = 2 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
-  }];
-
   // role is the initial role to assign to the invited user upon acceptance.
-  Role role = 3 [(buf.validate.field).enum = {
+  Role role = 2 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0] // Prevent UNSPECIFIED
   }];
@@ -568,6 +567,8 @@ message AcceptInvitationResponse {
 // --- Lifecycle Management ---
 
 // SuspendIdentityRequest is the request to suspend an active identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
 message SuspendIdentityRequest {
   // id is the unique identifier of the identity to suspend.
   string id = 1 [(buf.validate.field).string = {
@@ -581,13 +582,6 @@ message SuspendIdentityRequest {
     min_len: 1
     max_len: 500
   }];
-
-  // suspended_by is the identity id of the administrator performing the suspension.
-  string suspended_by = 3 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
-  }];
 }
 
 // SuspendIdentityResponse is the response after suspending an identity.
@@ -597,6 +591,8 @@ message SuspendIdentityResponse {
 }
 
 // ReactivateIdentityRequest is the request to reactivate a suspended identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
 message ReactivateIdentityRequest {
   // id is the unique identifier of the identity to reactivate.
   string id = 1 [(buf.validate.field).string = {
@@ -609,13 +605,6 @@ message ReactivateIdentityRequest {
   string reason = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 500
-  }];
-
-  // reactivated_by is the identity id of the administrator performing the reactivation.
-  string reactivated_by = 3 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
   }];
 }
 
