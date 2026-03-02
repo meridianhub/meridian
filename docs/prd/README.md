@@ -240,7 +240,7 @@ material.
 
 ### Identity & Access Control
 
-The Party service handles two distinct access control concerns:
+Meridian separates access control into two service domains:
 
 <!-- markdownlint-disable MD013 -->
 
