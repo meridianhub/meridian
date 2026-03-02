@@ -18,10 +18,11 @@ instructions: |
     adapter, but the port accepts any proto message from any delivery mechanism
   - No new service required — the existing saga runtime (control-plane) already has the
     SagaTrigger port used by Stripe webhooks; event consumption is another input adapter
-  - Account type policies can optionally reference a saga to execute when positions are
-    captured — this is how tenants wire reactive workflows without custom consumers
+  - CEL filters on saga definitions determine applicability — the tenant decides what
+    conditions make a saga fire, not the entity type. This handles events from any domain.
   - Idempotency uses correlation_id from the source event to prevent duplicate processing
-  - Event chain termination: downstream positions that lack a saga policy are dropped cheaply
+  - Event chain termination: CEL filters naturally reject downstream events + max chain
+    depth safety net via causation_id
 ---
 
 # PRD-032: Event-Triggered Saga Execution
@@ -360,7 +361,7 @@ synchronous execution for event-triggered sagas.
 - Starlark saga orchestration fully implemented (PRD-006, 24/24 tasks)
 - Typed service clients auto-generated from handler schemas
 - Handlers: `position_keeping.initiate_log`, `position_keeping.update_log`, etc.
-- Automatic compensation (if step N fails, steps N-1..1 roll back)
+- Automatic compensation (if step N fails, steps N-1 to 1 roll back)
 - `SagaTrigger` interface already used by Stripe webhook adapter in control-plane
 
 ### 3.3 Valuation Engine
@@ -385,7 +386,7 @@ synchronous execution for event-triggered sagas.
 - `reference_data.get_instrument(...)` / `reference_data.get_account_type(...)` — lookups
 - Results cached in saga LookupCache for deterministic replay
 
-### 3.5 Existing Event Consumer Patterns
+### 3.6 Existing Event Consumer Patterns
 
 Two patterns already exist in the codebase:
 
@@ -444,11 +445,18 @@ An energy retailer values kWh meter reads at retail and wholesale rates:
 ```python
 def execute(ctx):
     # Idempotency: skip if already valued
-    existing = position_keeping.query_logs(
+    # Idempotency: check both legs are complete (not just one)
+    retail_logs = position_keeping.query_logs(
         correlation_id=ctx.correlation_id,
         instrument_code="GBP",
+        account_id=ctx.metadata.billing_account_id,
     )
-    if existing.count > 0:
+    wholesale_logs = position_keeping.query_logs(
+        correlation_id=ctx.correlation_id,
+        instrument_code="GBP",
+        account_id=ctx.metadata.counterparty_account_id,
+    )
+    if retail_logs.count > 0 and wholesale_logs.count > 0:
         return {"status": "ALREADY_PROCESSED"}
 
     # Value at retail rate
