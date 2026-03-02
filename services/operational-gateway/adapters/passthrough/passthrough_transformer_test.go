@@ -128,3 +128,25 @@ func TestTransformer_TransformInbound_IgnoresBody(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ACCEPTED", outcome.ProviderStatus)
 }
+
+// TestTransformer_TransformOutbound_ReturnsError_WhenInstructionNil verifies that a nil
+// instruction results in a wrapped ErrTransformFailed.
+func TestTransformer_TransformOutbound_ReturnsError_WhenInstructionNil(t *testing.T) {
+	tr := passthrough.NewTransformer()
+	route := &ports.InstructionRoute{}
+
+	_, _, err := tr.TransformOutbound(context.Background(), nil, route)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ports.ErrTransformFailed)
+}
+
+// TestTransformer_TransformOutbound_ReturnsError_WhenRouteNil verifies that a nil route
+// results in a wrapped ErrTransformFailed.
+func TestTransformer_TransformOutbound_ReturnsError_WhenRouteNil(t *testing.T) {
+	tr := passthrough.NewTransformer()
+	inst := newTestInstruction(map[string]any{"k": "v"})
+
+	_, _, err := tr.TransformOutbound(context.Background(), inst, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ports.ErrTransformFailed)
+}

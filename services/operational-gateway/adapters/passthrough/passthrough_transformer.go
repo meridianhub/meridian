@@ -25,6 +25,12 @@ func NewTransformer() *Transformer {
 // TransformOutbound serializes the instruction payload to JSON without modification.
 // Returns static headers from the route and the raw JSON payload.
 func (t *Transformer) TransformOutbound(_ context.Context, instruction *domain.Instruction, route *ports.InstructionRoute) ([]byte, map[string]string, error) {
+	if instruction == nil {
+		return nil, nil, fmt.Errorf("%w: instruction is nil", ports.ErrTransformFailed)
+	}
+	if route == nil {
+		return nil, nil, fmt.Errorf("%w: route is nil", ports.ErrTransformFailed)
+	}
 	body, err := json.Marshal(instruction.Payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: marshaling instruction payload: %w", ports.ErrTransformFailed, err)

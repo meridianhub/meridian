@@ -307,6 +307,54 @@ func TestTransformer_TransformInbound_ReturnsError_WhenMappingNotFound(t *testin
 	assert.ErrorIs(t, err, ports.ErrMappingNotFound)
 }
 
+// --- Nil guard tests ---
+
+func TestNewTransformer_PanicsOnNilResolver(t *testing.T) {
+	engine := newEngine(t)
+	assert.Panics(t, func() {
+		mapping.NewTransformer(nil, engine, nil)
+	})
+}
+
+func TestNewTransformer_PanicsOnNilEngine(t *testing.T) {
+	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
+	assert.Panics(t, func() {
+		mapping.NewTransformer(resolver, nil, nil)
+	})
+}
+
+func TestTransformer_TransformOutbound_ReturnsError_WhenInstructionNil(t *testing.T) {
+	engine := newEngine(t)
+	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
+	tr := mapping.NewTransformer(resolver, engine, nil)
+
+	route := &ports.InstructionRoute{}
+	_, _, err := tr.TransformOutbound(context.Background(), nil, route)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ports.ErrTransformFailed)
+}
+
+func TestTransformer_TransformOutbound_ReturnsError_WhenRouteNil(t *testing.T) {
+	engine := newEngine(t)
+	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
+	tr := mapping.NewTransformer(resolver, engine, nil)
+
+	inst := newTestInstruction(map[string]any{"x": 1})
+	_, _, err := tr.TransformOutbound(context.Background(), inst, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ports.ErrTransformFailed)
+}
+
+func TestTransformer_TransformInbound_ReturnsError_WhenRouteNil(t *testing.T) {
+	engine := newEngine(t)
+	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
+	tr := mapping.NewTransformer(resolver, engine, nil)
+
+	_, err := tr.TransformInbound(context.Background(), 200, []byte(`{}`), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ports.ErrTransformFailed)
+}
+
 // --- Interface compliance ---
 
 func TestTransformer_ImplementsPayloadTransformer(_ *testing.T) {

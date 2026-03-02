@@ -35,6 +35,12 @@ type Transformer struct {
 
 // NewTransformer creates a new mapping Transformer.
 func NewTransformer(resolver DefinitionResolver, engine *sharedmapping.Engine, logger *slog.Logger) *Transformer {
+	if resolver == nil {
+		panic("mapping.NewTransformer: resolver must not be nil")
+	}
+	if engine == nil {
+		panic("mapping.NewTransformer: engine must not be nil")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -50,6 +56,12 @@ func NewTransformer(resolver DefinitionResolver, engine *sharedmapping.Engine, l
 // When route.OutboundMapping is empty, the instruction payload is returned as-is (passthrough).
 // Returns the transformed body bytes and any static route headers.
 func (t *Transformer) TransformOutbound(ctx context.Context, instruction *domain.Instruction, route *ports.InstructionRoute) ([]byte, map[string]string, error) {
+	if instruction == nil {
+		return nil, nil, fmt.Errorf("%w: instruction is nil", ports.ErrTransformFailed)
+	}
+	if route == nil {
+		return nil, nil, fmt.Errorf("%w: route is nil", ports.ErrTransformFailed)
+	}
 	payloadBytes, err := json.Marshal(instruction.Payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: marshaling instruction payload: %w", ports.ErrTransformFailed, err)
@@ -82,6 +94,9 @@ func (t *Transformer) TransformOutbound(ctx context.Context, instruction *domain
 // When route.InboundMapping is empty, a default InstructionOutcome is derived from the HTTP
 // status code: 2xx is treated as success with no external ID, anything else as a failure.
 func (t *Transformer) TransformInbound(ctx context.Context, statusCode int, body []byte, route *ports.InstructionRoute) (*ports.InstructionOutcome, error) {
+	if route == nil {
+		return nil, fmt.Errorf("%w: route is nil", ports.ErrTransformFailed)
+	}
 	if route.InboundMapping == "" {
 		return defaultOutcome(statusCode), nil
 	}
