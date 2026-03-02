@@ -8,12 +8,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Platform role constants used for authorization checks.
-const (
-	RolePlatformAdmin = "platform-admin"
-	RoleSuperAdmin    = "super-admin"
-)
-
 // validatePlatformAdminClaims extracts claims from context and validates that:
 // 1. Claims exist (populated by auth interceptor)
 // 2. No tenant_id claim is present (platform services are tenant-agnostic)
@@ -29,7 +23,7 @@ func validatePlatformAdminClaims(ctx context.Context) error {
 			"platform services do not accept tenant-scoped credentials")
 	}
 
-	if !claims.HasRole(RolePlatformAdmin) && !claims.HasRole(RoleSuperAdmin) {
+	if !claims.HasRole(RolePlatformAdmin.String()) && !claims.HasRole(RoleSuperAdmin.String()) {
 		return status.Error(codes.PermissionDenied,
 			"platform-admin or super-admin role required")
 	}
