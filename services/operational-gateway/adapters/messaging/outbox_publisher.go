@@ -31,6 +31,12 @@ var topicToEventType = map[string]string{
 // ErrUnknownTopic is returned when a topic has no mapping in the outbox publisher.
 var ErrUnknownTopic = errors.New("unknown topic for outbox publishing")
 
+// ErrPublisherNil is returned when the outbox publisher is not configured.
+var ErrPublisherNil = errors.New("outbox publisher is not configured")
+
+// ErrInstructionNil is returned when a nil instruction is passed to a publish method.
+var ErrInstructionNil = errors.New("instruction must not be nil")
+
 // InstructionEventPublisher publishes instruction lifecycle events to the transactional outbox.
 // Events are written to the event_outbox table within the same database transaction as the
 // business operation, ensuring at-least-once delivery via the background outbox worker.
@@ -45,6 +51,9 @@ func NewInstructionEventPublisher(publisher *events.OutboxPublisher) *Instructio
 
 // PublishCreated writes an instruction-created event to the outbox within the provided transaction.
 func (p *InstructionEventPublisher) PublishCreated(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+	if instr == nil {
+		return ErrInstructionNil
+	}
 	event := &eventsv1.InstructionCreatedEvent{
 		EventId:              uuid.New().String(),
 		InstructionId:        instr.ID.String(),
@@ -61,6 +70,9 @@ func (p *InstructionEventPublisher) PublishCreated(ctx context.Context, tx *gorm
 
 // PublishDispatched writes an instruction-dispatched event to the outbox within the provided transaction.
 func (p *InstructionEventPublisher) PublishDispatched(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+	if instr == nil {
+		return ErrInstructionNil
+	}
 	event := &eventsv1.InstructionDispatchedEvent{
 		EventId:              uuid.New().String(),
 		InstructionId:        instr.ID.String(),
@@ -78,6 +90,9 @@ func (p *InstructionEventPublisher) PublishDispatched(ctx context.Context, tx *g
 
 // PublishDelivered writes an instruction-delivered event to the outbox within the provided transaction.
 func (p *InstructionEventPublisher) PublishDelivered(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+	if instr == nil {
+		return ErrInstructionNil
+	}
 	event := &eventsv1.InstructionDeliveredEvent{
 		EventId:              uuid.New().String(),
 		InstructionId:        instr.ID.String(),
@@ -94,6 +109,9 @@ func (p *InstructionEventPublisher) PublishDelivered(ctx context.Context, tx *go
 
 // PublishAcknowledged writes an instruction-acknowledged event to the outbox within the provided transaction.
 func (p *InstructionEventPublisher) PublishAcknowledged(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+	if instr == nil {
+		return ErrInstructionNil
+	}
 	event := &eventsv1.InstructionAcknowledgedEvent{
 		EventId:              uuid.New().String(),
 		InstructionId:        instr.ID.String(),
@@ -110,6 +128,9 @@ func (p *InstructionEventPublisher) PublishAcknowledged(ctx context.Context, tx 
 
 // PublishFailed writes an instruction-failed event to the outbox within the provided transaction.
 func (p *InstructionEventPublisher) PublishFailed(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+	if instr == nil {
+		return ErrInstructionNil
+	}
 	event := &eventsv1.InstructionFailedEvent{
 		EventId:              uuid.New().String(),
 		InstructionId:        instr.ID.String(),
@@ -129,6 +150,9 @@ func (p *InstructionEventPublisher) PublishFailed(ctx context.Context, tx *gorm.
 
 // PublishExpired writes an instruction-expired event to the outbox within the provided transaction.
 func (p *InstructionEventPublisher) PublishExpired(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+	if instr == nil {
+		return ErrInstructionNil
+	}
 	event := &eventsv1.InstructionExpiredEvent{
 		EventId:              uuid.New().String(),
 		InstructionId:        instr.ID.String(),
@@ -145,6 +169,9 @@ func (p *InstructionEventPublisher) PublishExpired(ctx context.Context, tx *gorm
 
 // PublishCancelled writes an instruction-cancelled event to the outbox within the provided transaction.
 func (p *InstructionEventPublisher) PublishCancelled(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
+	if instr == nil {
+		return ErrInstructionNil
+	}
 	event := &eventsv1.InstructionCancelledEvent{
 		EventId:              uuid.New().String(),
 		InstructionId:        instr.ID.String(),
@@ -169,6 +196,10 @@ func (p *InstructionEventPublisher) publish(
 	correlationID string,
 	causationID string,
 ) error {
+	if p.publisher == nil {
+		return ErrPublisherNil
+	}
+
 	eventType, ok := topicToEventType[topic]
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownTopic, topic)

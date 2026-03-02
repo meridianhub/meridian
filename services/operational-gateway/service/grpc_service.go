@@ -28,8 +28,9 @@ const (
 
 // Service errors.
 var (
-	ErrInstructionRepoNil = errors.New("instruction repository cannot be nil")
-	ErrConnectionRepoNil  = errors.New("connection repository cannot be nil")
+	ErrInstructionRepoNil           = errors.New("instruction repository cannot be nil")
+	ErrConnectionRepoNil            = errors.New("connection repository cannot be nil")
+	ErrEventPublishingPartialConfig = errors.New("event publishing is partially configured")
 )
 
 // OperationalGatewayService implements OperationalGatewayServiceServer.
@@ -116,17 +117,41 @@ func requireTenant(ctx context.Context) (tenant.TenantID, error) {
 // saveInstructionWithEvent atomically saves the instruction and publishes a lifecycle event
 // to the transactional outbox within a single database transaction.
 //
-// If event publishing is not configured (db or eventPublisher is nil), falls back to
-// instructionRepo.Save without event publishing. This preserves backwards compatibility
-// for tests and deployments that do not require event publishing.
+// If event publishing is not configured at all (db, instructionRepoImpl, and eventPublisher
+// are all nil), falls back to instructionRepo.Save without event publishing. This preserves
+// backwards compatibility for tests and deployments that do not require event publishing.
+// Partial configuration (some but not all dependencies set) is treated as a misconfiguration
+// and returns an error to prevent silently dropping lifecycle events.
 func (s *OperationalGatewayService) saveInstructionWithEvent(
 	ctx context.Context,
 	instruction *domain.Instruction,
 	idempotencyKey string,
 	publishEvent func(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error,
 ) error {
-	// Fallback: no event publishing configured (e.g., unit tests)
-	if s.db == nil || s.instructionRepoImpl == nil || s.eventPublisher == nil || publishEvent == nil {
+	// Detect partial configuration: if any (but not all) event publishing dependencies
+	// are set, the wiring is incomplete and events would be silently dropped.
+	configuredCount := 0
+	if s.db != nil {
+		configuredCount++
+	}
+	if s.instructionRepoImpl != nil {
+		configuredCount++
+	}
+	if s.eventPublisher != nil {
+		configuredCount++
+	}
+	if configuredCount > 0 && configuredCount < 3 {
+		s.logger.Warn("event publishing is partially configured; lifecycle events will not be published",
+			"db_set", s.db != nil,
+			"impl_set", s.instructionRepoImpl != nil,
+			"publisher_set", s.eventPublisher != nil,
+		)
+		return fmt.Errorf("%w: db=%v, instructionRepoImpl=%v, eventPublisher=%v",
+			ErrEventPublishingPartialConfig, s.db != nil, s.instructionRepoImpl != nil, s.eventPublisher != nil)
+	}
+
+	// No event publishing configured (e.g., unit tests): fall back to plain save.
+	if configuredCount == 0 || publishEvent == nil {
 		return s.instructionRepo.Save(ctx, instruction, idempotencyKey)
 	}
 
