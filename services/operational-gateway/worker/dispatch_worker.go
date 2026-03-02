@@ -145,6 +145,15 @@ func (w *DispatchWorker) processBatch(ctx context.Context) {
 
 	var processed, failed int
 	for _, instr := range instructions {
+		if ctx.Err() != nil {
+			w.logger.InfoContext(ctx, "batch interrupted by context cancellation",
+				"processed", processed,
+				"failed", failed,
+				"remaining", len(instructions)-processed-failed,
+			)
+			return
+		}
+
 		if err := w.processInstruction(ctx, instr); err != nil {
 			w.logger.ErrorContext(ctx, "failed to process instruction",
 				"instruction_id", instr.ID,
