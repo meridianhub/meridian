@@ -196,7 +196,7 @@ type httpDispatcherAdapter struct {
 func (d *httpDispatcherAdapter) Dispatch(ctx context.Context, instruction *domain.Instruction, conn *domain.ProviderConnection, route *ports.InstructionRoute) ports.DispatchResult {
 	start := time.Now()
 
-	body, _, err := d.transformer.TransformOutbound(ctx, instruction, route)
+	body, transformHeaders, err := d.transformer.TransformOutbound(ctx, instruction, route)
 	if err != nil {
 		return ports.DispatchResult{Duration: time.Since(start), Error: fmt.Errorf("outbound transform: %w", err)}
 	}
@@ -208,6 +208,9 @@ func (d *httpDispatcherAdapter) Dispatch(ctx context.Context, instruction *domai
 		return ports.DispatchResult{Duration: time.Since(start), Error: fmt.Errorf("building request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range transformHeaders {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {
@@ -649,7 +652,7 @@ func TestConcurrentDispatch(t *testing.T) {
 	})
 	require.NoError(t, err, "not all instructions reached DELIVERED within timeout")
 
-	// Verify all 100 were delivered
+	// Verify all instructions were delivered
 	for i, id := range instructionIDs {
 		instr, err := h.instructionRepo.FindByID(context.Background(), id)
 		require.NoError(t, err, "instruction %d", i)
