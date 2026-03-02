@@ -1,31 +1,28 @@
 ---
-name: prd-032-event-driven-valuation-saga
-description: Event-triggered saga execution for automatic cross-instrument valuation when positions are captured
+name: prd-032-event-triggered-saga-execution
+description: Add event: trigger type to manifests so sagas execute in response to Kafka domain events
 triggers:
   - Adding event-driven saga triggers to manifests
-  - Working on valuation pipelines or kWh-to-GBP conversion
   - Building Kafka consumers that trigger saga execution
   - Extending the saga trigger type system beyond api/webhook/scheduled
-  - Working on the Outfox energy pilot or HH settlement data
   - Connecting position-keeping events to downstream workflows
+  - Designing reactive workflows triggered by domain events
 instructions: |
   Meridian's manifest currently supports three saga trigger types: api:, webhook:, scheduled:.
   This PRD introduces a fourth: event:<topic>, enabling sagas to execute in response to Kafka
-  domain events. The first use case is automatic valuation: when a kWh position is logged,
-  the system looks up the account type's valuation configuration and executes a saga that
-  converts the position to GBP using the tenant's Starlark valuation methods.
+  domain events. The event: trigger is generic platform infrastructure — the saga script
+  determines what happens, not the trigger type.
 
   Key design choices:
-  - The event: trigger type is generic infrastructure, not valuation-specific
-  - Account type metadata (DefaultSagaPrefix, ValuationMethods) determines whether a
-    captured position triggers valuation — accounts without valuation hooks are dropped cheaply
-  - The valuation saga is a standard Starlark saga declared in the manifest
-  - Idempotency uses correlation_id from the source event to prevent double-booking
-  - Event chain termination: GBP positions emit their own events but the GBP account type
-    has no valuation hook, so the consumer drops them (one lookup, no saga load)
+  - The event: trigger type is industry-agnostic infrastructure
+  - Account type policies can optionally reference a saga to execute when positions are
+    captured — this is how tenants wire reactive workflows without custom consumers
+  - The saga itself is standard Starlark declared in the tenant manifest
+  - Idempotency uses correlation_id from the source event to prevent duplicate processing
+  - Event chain termination: downstream positions that lack a saga policy are dropped cheaply
 ---
 
-# PRD-032: Event-Driven Valuation Saga
+# PRD-032: Event-Triggered Saga Execution
 
 **Author:** Meridian Platform Team
 **Status:** Not Started
@@ -34,14 +31,6 @@ instructions: |
 ---
 
 ## 1. Problem Statement
-
-When a kWh position is logged against a customer account in position-keeping, nothing
-currently triggers valuation to convert it to a GBP position. The demo works around this by
-manually booking both sides (two separate REST deposits). For the pilot, this must be
-automatic: HH meter read arrives as kWh, the system values it via the tenant's Starlark
-tariff script, and GBP positions appear on both the customer and GSP accounts.
-
-### 1.1 Missing Trigger Type
 
 Meridian's manifest supports three saga trigger types:
 
@@ -54,25 +43,35 @@ Meridian's manifest supports three saga trigger types:
 There is no way to declare a saga that fires in response to a **domain event**. This is the
 fourth and arguably most important trigger type for an event-driven architecture.
 
-### 1.2 Decorative Metadata
+Without it, any reactive workflow — position captured triggers valuation, payment received
+triggers settlement, party onboarded triggers account provisioning — requires custom
+consumer code outside the manifest. That breaks the core promise: tenants configure
+workflows via Starlark sagas in manifests, not by writing Go services.
 
-Account type definitions already carry valuation-related fields:
+### 1.1 Decorative Metadata
+
+Account type definitions already carry fields that imply reactive behavior:
 
 - `DefaultSagaPrefix` — saga naming prefix for operations on this account type
 - `DefaultConversionMethodID` / `DefaultConversionMethodVersion` — default valuation method
 - `ValuationMethods` — array of Starlark valuation method references
 
-These fields are currently decorative. Making them load-bearing — driving automatic saga
-execution — is the core of this PRD.
+These fields are populated but not consumed by any runtime logic. Making them load-bearing
+— driving automatic saga execution when positions are captured on accounts of that type —
+is part of this PRD.
 
-### 1.3 Pilot Requirement
+### 1.2 The Pattern is Industry-Agnostic
 
-The Outfox reconciliation pilot requires:
+The `event:` trigger enables any reactive workflow a tenant defines in Starlark:
 
-- CSV-imported HH reads (48 settlement periods/day, already demonstrated in demo)
-- Automatic valuation at the customer's retail tariff (account-type-specific Starlark)
-- Automatic GSP wholesale-side booking
-- Reconcilable output: positions queryable by MPAN reference, grouped by settlement period
+| Industry | Event | Saga | Effect |
+|----------|-------|------|--------|
+| Energy | kWh position captured | Cross-instrument valuation | GBP positions booked |
+| Carbon | TONNE_CO2E position captured | Credit verification | Verified status updated |
+| Compute | GPU_HOUR position captured | Usage billing | USD charge posted |
+| Banking | Payment received | Settlement initiation | Clearing entries posted |
+
+The platform provides the trigger infrastructure. The tenant provides the saga logic.
 
 ## 2. Design
 
@@ -89,6 +88,7 @@ Examples:
 ```text
 event:position-keeping.transaction-captured.v1
 event:payment-order.instruction-completed.v1
+event:party.onboarding-completed.v1
 ```
 
 The trigger binds a saga to a Kafka topic. When an event arrives on that topic, the saga
@@ -101,54 +101,49 @@ Current: ^(api:|webhook:|scheduled:).+$
 New:     ^(api:|webhook:|scheduled:|event:).+$
 ```
 
-### 2.2 Event Filtering via Account Type Metadata
+### 2.2 Event Routing via Account Type Policies
 
-Not every `transaction-captured` event should trigger a saga. The consumer must filter
-cheaply:
+Not every event on a topic should trigger a saga. The runtime filters using account type
+metadata that already exists in reference-data:
 
 ```text
-Event arrives
-  → Extract account_id
+Event arrives on topic
+  → Extract account_id from event payload
   → Look up account → get account_type_code
-  → Look up account type definition
-  → Check: does this account type define a valuation hook?
-    → No hook  → drop event (one gRPC call, no saga load)
-    → Has hook → execute saga referenced by DefaultSagaPrefix
+  → Look up account type policies
+  → Check: does this account type define a saga for this event?
+    → No  → drop event (one lookup, no saga load)
+    → Yes → execute the referenced saga
 ```
 
-**The "no hook" path must be cheap.** GBP positions created by the valuation saga will
-themselves emit `transaction-captured` events. The consumer picks them up, finds no
-valuation hook on the GBP account type, and drops them. This is how the event chain
-terminates.
+**The "no match" path must be cheap.** A saga that creates downstream positions will emit
+further events. Those events hit account types with no saga policy and get dropped. This is
+how event chains terminate — by absence of policy, not by special-case logic.
 
 ### 2.3 Manifest Declaration
 
-A tenant manifest declares the event-triggered valuation saga alongside the account types
-that activate it:
+A tenant manifest declares event-triggered sagas alongside the account types that activate
+them. The platform wires the two together at runtime.
 
 ```json
 {
-  "instruments": [
-    { "code": "KWH", "name": "Kilowatt Hour", "type": "INSTRUMENT_TYPE_COMMODITY",
-      "dimensions": { "unit": "KWH", "precision": 3 } },
-    { "code": "GBP", "name": "British Pound Sterling", "type": "INSTRUMENT_TYPE_FIAT",
-      "dimensions": { "unit": "GBP", "precision": 2 } }
-  ],
   "accountTypes": [
     {
-      "code": "CUSTOMER_ENERGY",
-      "name": "Customer Energy Account",
+      "code": "METERED_USAGE",
+      "name": "Metered Usage Account",
       "normalBalance": "NORMAL_BALANCE_DEBIT",
       "allowedInstruments": ["KWH"],
       "policies": {
         "validation": "amount > 0",
-        "valuationSagaPrefix": "meter-read-to-cash",
-        "defaultConversionMethod": "retail_tariff_v1"
+        "onPositionCaptured": {
+          "saga": "usage-to-value",
+          "conversionMethod": "retail_tariff_v1"
+        }
       }
     },
     {
-      "code": "CUSTOMER_BILLING",
-      "name": "Customer Billing Account",
+      "code": "BILLING",
+      "name": "Billing Account",
       "normalBalance": "NORMAL_BALANCE_DEBIT",
       "allowedInstruments": ["GBP"],
       "policies": {
@@ -158,7 +153,7 @@ that activate it:
   ],
   "sagas": [
     {
-      "name": "meter-read-to-cash",
+      "name": "usage-to-value",
       "trigger": "event:position-keeping.transaction-captured.v1",
       "script": "..."
     }
@@ -166,145 +161,68 @@ that activate it:
 }
 ```
 
-The connection between event and saga is indirect: the `event:` trigger tells the runtime
-*which topic to consume*; the account type's `valuationSagaPrefix` tells the consumer
-*which saga to invoke for this account*. This allows multiple account types to use different
-sagas for the same event topic.
+The connection is indirect:
 
-### 2.4 Valuation Saga: meter-read-to-cash
+- `event:` trigger tells the runtime *which topic to consume*
+- Account type `onPositionCaptured.saga` tells the runtime *which saga to invoke for
+  positions on this account type*
+- Multiple account types can reference different sagas for the same event topic
+- Account types without `onPositionCaptured` are ignored (cheap drop)
 
-The Starlark saga executed when a kWh position triggers valuation:
-
-```python
-def execute(ctx):
-    # 1. Idempotency check — has this correlation_id already produced a GBP position?
-    existing = position_keeping.query_logs(
-        correlation_id=ctx.correlation_id,
-        instrument_code="GBP",
-    )
-    if existing.count > 0:
-        return {"status": "ALREADY_VALUED", "correlation_id": ctx.correlation_id}
-
-    # 2. Look up valuation method for this account type
-    method = valuation_engine.get_method(
-        account_type_code=ctx.account_type_code,
-        from_instrument="KWH",
-        to_instrument="GBP",
-    )
-
-    # 3. Value at customer retail rate
-    customer_valuation = valuation_engine.compute(
-        method_id=method.id,
-        amount=ctx.amount,
-        from_instrument="KWH",
-        to_instrument="GBP",
-        context={"mpan": ctx.reference, "settlement_period": ctx.metadata.settlement_period},
-    )
-
-    # 4. Book GBP on customer billing account
-    step()
-    position_keeping.initiate_log(
-        account_id=ctx.customer_billing_account_id,
-        instrument_code="GBP",
-        direction="DEBIT",
-        amount=customer_valuation.amount,
-        reference=ctx.reference,
-        correlation_id=ctx.correlation_id,
-        description="Valued kWH: " + str(ctx.amount) + " KWH @ " + str(customer_valuation.rate),
-    )
-
-    # 5. Determine GSP counterparty
-    gsp_account = reference_data.resolve_counterparty(
-        account_id=ctx.account_id,
-        relationship_type="GSP_SUPPLIER",
-    )
-
-    # 6. Value at wholesale rate
-    wholesale_valuation = valuation_engine.compute(
-        method_id=method.wholesale_method_id,
-        amount=ctx.amount,
-        from_instrument="KWH",
-        to_instrument="GBP",
-        context={"gsp_group": gsp_account.metadata.gsp_group},
-    )
-
-    # 7. Book GBP on GSP account
-    step()
-    position_keeping.initiate_log(
-        account_id=gsp_account.account_id,
-        instrument_code="GBP",
-        direction="CREDIT",
-        amount=wholesale_valuation.amount,
-        reference=ctx.reference,
-        correlation_id=ctx.correlation_id,
-        description="GSP wholesale: " + str(ctx.amount) + " KWH @ " + str(wholesale_valuation.rate),
-    )
-
-    return {
-        "status": "VALUED",
-        "customer_gbp": str(customer_valuation.amount),
-        "gsp_gbp": str(wholesale_valuation.amount),
-        "margin": str(customer_valuation.amount - wholesale_valuation.amount),
-        "correlation_id": ctx.correlation_id,
-    }
-```
-
-### 2.5 Idempotency
+### 2.4 Idempotency
 
 Kafka consumers reprocess events on rebalance/restart. The correlation_id in the source
 event is the natural idempotency key:
 
 1. Consumer delivers event to saga runtime
-2. Saga queries position-keeping: "has this correlation_id already produced a GBP position?"
-3. If yes, return early (no double-booking)
-4. If no, proceed with valuation and booking
+2. Saga checks whether this correlation_id has already been processed
+3. If yes, return early (no duplicate work)
+4. If no, proceed with saga execution
 
-This is saga-level idempotency, not consumer-level. The consumer itself is at-least-once;
-the saga guarantees exactly-once semantics for the business operation.
+This is saga-level idempotency, not consumer-level. The consumer is at-least-once; the
+saga guarantees exactly-once semantics for the business operation. How the saga checks
+for prior processing is up to the Starlark script — typically a query against
+position-keeping or a dedicated idempotency store.
 
-### 2.6 Event Chain Termination
+### 2.5 Event Chain Termination
 
-The GBP positions created by the valuation saga emit their own `transaction-captured`
-events. This creates a potential infinite loop:
+Sagas that create downstream positions will emit further `transaction-captured` events.
+This creates a potential loop:
 
 ```text
-kWH position → event → valuation saga → GBP position → event → ???
+Position A → event → saga → Position B → event → ???
 ```
 
-Termination is guaranteed by the account type lookup:
+Termination is guaranteed by the account type policy lookup:
 
-1. Consumer receives GBP `transaction-captured` event
-2. Looks up the GBP account type (e.g., `CUSTOMER_BILLING`)
-3. `CUSTOMER_BILLING` has no `valuationSagaPrefix` defined
+1. Consumer receives event for Position B
+2. Looks up Position B's account type
+3. Account type has no `onPositionCaptured` policy
 4. Consumer drops the event
 
-This is a single gRPC call with no saga loading. The "no hook" path must remain cheap
-because it handles the majority of events (every GBP booking, every non-energy account).
+This is a single lookup with no saga loading. The "no policy" path handles the majority of
+events in any deployment.
 
-### 2.7 Consumer Architecture
+### 2.6 Consumer Architecture
 
-**Option A: Dedicated service** — a new `valuation-trigger` service with its own deployment.
+**Recommendation: Saga runtime extension.** The saga runtime already has the Starlark
+execution environment, handler registry, and compensation logic. Adding a Kafka consumer
+group is incremental. A dedicated service would duplicate the saga execution stack.
 
-**Option B: Saga runtime extension** — add event-trigger handling to the existing saga
-runtime (control-plane or a shared saga executor).
+The consumer follows existing patterns (audit-worker, utilization-metering-consumer):
 
-**Recommendation: Option B.** The saga runtime already has the Starlark execution
-environment, handler registry, and compensation logic. Adding a Kafka consumer group is
-incremental. A dedicated service would duplicate the saga execution stack.
-
-The consumer follows the same patterns as existing consumers (audit-worker,
-utilization-metering-consumer):
-
-- Consumer group: `valuation-trigger`
+- Consumer group: `event-saga-trigger` (generic, not workflow-specific)
 - Partition assignment: cooperative-sticky
 - Offset commit: after successful saga execution (or idempotent skip)
-- Error handling: dead-letter topic after N retries (configurable)
+- Error handling: dead-letter topic after N retries (configurable per saga)
+- One consumer group per `event:` trigger topic declared in the manifest
 
-### 2.8 Eventual Consistency
+### 2.7 Eventual Consistency
 
-There is a window (seconds) between kWh position appearing and GBP position materializing.
-This is acceptable for energy settlement where settlement periods are 30 minutes.
-The reconciliation service handles D+1/D+5 corrections downstream.
+There is a window (seconds) between the source event and the saga's side effects
+materializing. This is inherent to event-driven architectures. Tenants design their
+settlement periods and reconciliation cycles around this — the platform does not promise
+synchronous execution for event-triggered sagas.
 
 ## 3. What Already Exists
 
@@ -321,7 +239,7 @@ The reconciliation service handles D+1/D+5 corrections downstream.
 - `shared/pkg/valuation/` and `shared/pkg/valuationfeature/`
 - Starlark-sandboxed, <5ms target, 5s timeout, 64MB memory limit
 - In-memory cache with 5-minute TTL
-- Already used by reconciliation service for variance valuation
+- Available as a service module in Starlark sagas (`valuation_engine.compute(...)`)
 
 ### 3.3 Saga Runtime
 
@@ -346,65 +264,165 @@ The reconciliation service handles D+1/D+5 corrections downstream.
 ### 4.1 In Scope
 
 - `event:` trigger type in manifest schema (proto + validator + planner + applier)
-- Consumer infrastructure for event-triggered saga execution
-- Account type valuation hook evaluation (make decorative fields load-bearing)
-- `meter-read-to-cash` reference saga in Starlark
-- Idempotency via correlation_id
-- Event chain termination via account type lookup
-- Account type caching in consumer (with TTL, refreshed per-event is too expensive)
-- Manifest validation: ensure event-triggered sagas reference valid topics
+- Consumer infrastructure for event-triggered saga execution (generic, reusable)
+- Account type policy evaluation for saga routing (`onPositionCaptured`)
+- Make existing account type metadata fields (`DefaultSagaPrefix`, etc.) load-bearing
+- Idempotency contract (correlation_id as natural key)
+- Event chain termination via absence of policy
+- Account type caching in consumer (with TTL)
+- Manifest validation: event-triggered sagas reference valid topics
 
 ### 4.2 Out of Scope
 
-- DCC adapter for live meter data ingestion (pilot uses CSV import)
-- Customer acquisition / CSS adapter / DTN flows
-- Demand forecasting
-- Dynamic per-customer tariffs (second-order feature)
-- Workflow management / exception handling UI
-- MPAN-to-GSP mapping data model (open question — needs separate design)
+- Tenant-specific saga scripts (tenants write these in their manifests)
+- Industry-specific data models (MPAN mappings, tariff structures, etc.)
+- Batch-aware optimizations (individual event processing is sufficient at pilot scale)
+- Custom consumer code for tenants (the whole point is to avoid this)
 
-## 5. Open Questions
+## 5. Reference: Tenant Manifest Examples
 
-1. **MPAN-to-GSP mapping**: Where does this live? Options: (a) party relationship in
-   reference-data, (b) account metadata field, (c) dedicated mapping table. This affects
-   step 5 of the saga.
+These examples illustrate how tenants in different industries would use the `event:`
+trigger. They are **tenant configuration, not platform code** — included here to
+validate that the platform infrastructure is sufficiently general.
+
+### 5.1 Energy: Position Valuation
+
+An energy retailer values kWh meter reads at retail and wholesale rates:
+
+```python
+def execute(ctx):
+    # Idempotency: skip if already valued
+    existing = position_keeping.query_logs(
+        correlation_id=ctx.correlation_id,
+        instrument_code="GBP",
+    )
+    if existing.count > 0:
+        return {"status": "ALREADY_PROCESSED"}
+
+    # Value at retail rate
+    step()
+    retail = valuation_engine.compute(
+        method_id=ctx.policy.conversion_method,
+        amount=ctx.amount,
+        from_instrument=ctx.instrument_code,
+        to_instrument="GBP",
+    )
+
+    # Book customer billing position
+    step()
+    position_keeping.initiate_log(
+        account_id=ctx.metadata.billing_account_id,
+        instrument_code="GBP",
+        direction="DEBIT",
+        amount=retail.amount,
+        correlation_id=ctx.correlation_id,
+    )
+
+    # Value at wholesale rate and book counterparty
+    step()
+    wholesale = valuation_engine.compute(
+        method_id=ctx.policy.wholesale_method,
+        amount=ctx.amount,
+        from_instrument=ctx.instrument_code,
+        to_instrument="GBP",
+    )
+
+    step()
+    position_keeping.initiate_log(
+        account_id=ctx.metadata.counterparty_account_id,
+        instrument_code="GBP",
+        direction="CREDIT",
+        amount=wholesale.amount,
+        correlation_id=ctx.correlation_id,
+    )
+
+    return {"status": "VALUED", "retail": str(retail.amount), "wholesale": str(wholesale.amount)}
+```
+
+### 5.2 Compute: Usage Billing
+
+A cloud provider converts GPU-hours to USD charges:
+
+```python
+def execute(ctx):
+    existing = position_keeping.query_logs(
+        correlation_id=ctx.correlation_id,
+        instrument_code="USD",
+    )
+    if existing.count > 0:
+        return {"status": "ALREADY_BILLED"}
+
+    step()
+    charge = valuation_engine.compute(
+        method_id=ctx.policy.conversion_method,
+        amount=ctx.amount,
+        from_instrument="GPU_HOUR",
+        to_instrument="USD",
+    )
+
+    step()
+    position_keeping.initiate_log(
+        account_id=ctx.metadata.billing_account_id,
+        instrument_code="USD",
+        direction="DEBIT",
+        amount=charge.amount,
+        correlation_id=ctx.correlation_id,
+    )
+
+    return {"status": "BILLED", "amount": str(charge.amount)}
+```
+
+### 5.3 Pilot Context: Outfox Energy
+
+The first deployment of event-triggered sagas is the Outfox reconciliation pilot:
+
+- CSV-imported HH reads (48 settlement periods/day per MPAN)
+- Automatic valuation at customer retail tariff
+- Automatic GSP wholesale-side booking
+- Reconcilable output for dual-publish comparison
+
+This validates the platform infrastructure with real data. The saga script and manifest
+configuration are tenant-owned — Meridian provides the `event:` trigger, the account type
+routing, and the saga runtime.
+
+## 6. Open Questions
+
+1. **Account type policy schema**: The `onPositionCaptured` policy shape proposed in 2.3
+   is new. Should it reuse the existing `DefaultSagaPrefix` / `ValuationMethods` fields,
+   or is a cleaner schema worth the migration?
 
 2. **Account type caching**: Should the consumer cache account type lookups with TTL, or
-   fetch per event via gRPC? Per-event is safer but adds latency to every event. A 60s TTL
-   cache is likely sufficient since account type definitions change infrequently.
+   fetch per event via gRPC? Per-event is safer but adds latency. A 60s TTL cache is
+   likely sufficient since account type definitions change infrequently.
 
-3. **Batch import path**: CSV batch import already goes through position-keeping (which
-   emits events). Confirm this is the intended flow — each row produces a
-   `transaction-captured` event, which triggers individual saga executions. For 48 HH
-   periods, that is 48 saga executions per MPAN per day. At pilot scale (small set of
-   MPANs) this is fine; at production scale, batch-aware optimizations may be needed.
+3. **Multiple sagas per topic**: If two saga definitions declare `event:` triggers on the
+   same topic, should both execute? Or should the account type policy disambiguate (only
+   one saga per account type per event)?
 
-4. **Dead letter handling**: When a valuation saga fails (method not found, valuation
-   engine error, position-keeping unavailable), should the event go to a dead-letter topic
-   for manual review, or should the consumer retry with backoff?
+4. **Dead letter handling**: When a saga fails after retries, should the event go to a
+   dead-letter topic for manual review, or should the consumer retry indefinitely with
+   backoff?
 
-## 6. Success Criteria
+## 7. Success Criteria
 
-### Business
+### Platform
 
-- HH meter reads imported via CSV are automatically valued and booked to GBP accounts
-  within 10 seconds of position capture
-- Both customer retail and GSP wholesale positions appear without manual intervention
-- Reconciliation service can compare Meridian GBP positions against Outfox's existing
-  system for the pilot MPAN set
+- Event-triggered sagas are declarable in tenant manifests using the `event:` trigger
+- Account types without saga policies drop events in <5ms (one lookup, no saga load)
+- Idempotent: reprocessing the same event produces no duplicate side effects
+- Event chain terminates: downstream positions without policies do not trigger further sagas
+- Saga compensation works: if a step fails, prior steps roll back
 
-### Technical
+### First Deployment
 
-- Event-triggered sagas are declarable in tenant manifests using the `event:` trigger prefix
-- Account types without valuation hooks drop events in <5ms (one lookup, no saga load)
-- Idempotent: reprocessing the same event produces no duplicate positions
-- Event chain terminates: GBP bookings do not trigger further valuation
-- Saga compensation works: if wholesale booking fails, customer booking is reversed
+- Tenant-configured saga successfully values positions end-to-end
+- Consumer handles at-least-once delivery without duplicate bookings
+- Event chain terminates correctly (output positions are not re-processed)
 
-## 7. Related Documents
+## 8. Related Documents
 
 - [PRD-006: Starlark Saga Orchestration (Core)](006-starlark-saga-orchestration-core.md)
 - [PRD-011: Valuation Service](011-valuation-service.md)
-- [PRD-030: AsyncAPI Specification](030-asyncapi-specification.md) — event topic documentation
+- [PRD-030: AsyncAPI Specification](030-asyncapi-specification.md) — event topic docs
 - [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md) — topic naming
-- [ADR-0026: Canonical Ingestion Contract](../adr/0026-canonical-ingestion-contract.md) — boundary pattern
+- [ADR-0026: Canonical Ingestion Contract](../adr/0026-canonical-ingestion-contract.md)
