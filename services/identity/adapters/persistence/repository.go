@@ -134,7 +134,7 @@ func (r *Repository) ListByTenant(ctx context.Context) ([]*domain.Identity, erro
 	var identities []*domain.Identity
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var entities []IdentityEntity
-		if err := tx.Where("deleted_at IS NULL").Find(&entities).Error; err != nil {
+		if err := tx.Where("deleted_at IS NULL").Order("created_at ASC").Find(&entities).Error; err != nil {
 			return err
 		}
 		identities = make([]*domain.Identity, len(entities))
