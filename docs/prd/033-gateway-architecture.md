@@ -246,7 +246,7 @@ before financial-gateway is created.
 - `internal/stripe/consumer.go` → Event queue consumption
 - `internal/stripe/publisher.go` → Internal event publishing
 
-**Extract from reconciliation (optional, Phase 3):**
+**Extract from reconciliation (optional, future phase):**
 
 - `adapters/stripe/settlement_ingestor.go` → Settlement data fetch
 - `adapters/stripe/balance_transaction_client.go` → Balance transaction API
@@ -316,7 +316,7 @@ Operational-gateway retains:
 | `payment-order/adapters/gateway/stripe/` | Move | `financial-gateway/adapters/stripe/` |
 | `payment-order/adapters/gateway/resilient_gateway.go` | Move | `shared/pkg/dispatch/` (generalized) |
 | `payment-order/adapters/gateway/payment_gateway.go` | Keep | Interface stays, impl becomes gRPC client |
-| `reconciliation/adapters/stripe/` | Keep (Phase 3) | Eventually moves to financial-gateway |
+| `reconciliation/adapters/stripe/` | Keep (future) | Eventually moves to financial-gateway |
 | `control-plane/internal/stripe/` | Move | `financial-gateway/adapters/stripe/webhook/` |
 | `party/verification/stripe_provider.go` | Keep | KYC is non-financial, stays in party domain |
 | `reference-data/saga/defaults/stripe_payment/` | Update | Saga calls financial-gateway, not operational-gateway |
@@ -407,5 +407,5 @@ Operational-gateway retains:
 | 4 | Clean operational-gateway scope | 2 points | Phase 2 |
 
 Phases 1 and 3 can run in parallel. Phase 2 is the critical path.
-Total: ~13 points on the critical path (Phases 1 → 2 → 4),
+Total: ~15 points on the critical path (Phases 1 → 2 → 4),
 with Phase 3 independent.
