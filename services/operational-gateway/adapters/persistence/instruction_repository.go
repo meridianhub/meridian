@@ -198,6 +198,68 @@ func (r *InstructionRepository) FetchDispatchable(ctx context.Context, params po
 	return results, nil
 }
 
+// ListByTenant retrieves instructions for a tenant with optional filtering and pagination.
+// Returns the matching instructions and the total count matching the filter (before pagination).
+// Results are ordered by created_at DESC, id DESC for stable cursor-based pagination.
+func (r *InstructionRepository) ListByTenant(ctx context.Context, params ports.ListInstructionsParams) ([]*domain.Instruction, int64, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	query := r.db.WithContext(ctx).Model(&InstructionEntity{}).
+		Where("tenant_id = ?", params.TenantID)
+
+	if params.InstructionType != "" {
+		query = query.Where("instruction_type = ?", params.InstructionType)
+	}
+	if params.ProviderConnectionID != "" {
+		query = query.Where("provider_connection_id = ?", params.ProviderConnectionID)
+	}
+	if len(params.Statuses) > 0 {
+		statusStrs := make([]string, len(params.Statuses))
+		for i, s := range params.Statuses {
+			statusStrs[i] = string(s)
+		}
+		query = query.Where("status IN ?", statusStrs)
+	}
+	if !params.CreatedAfter.IsZero() {
+		query = query.Where("created_at >= ?", params.CreatedAfter)
+	}
+	if !params.CreatedBefore.IsZero() {
+		query = query.Where("created_at <= ?", params.CreatedBefore)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var entities []InstructionEntity
+	if err := query.
+		Order("created_at DESC, id DESC").
+		Limit(limit).
+		Offset(params.Offset).
+		Find(&entities).Error; err != nil {
+		return nil, 0, err
+	}
+
+	results := make([]*domain.Instruction, 0, len(entities))
+	for i := range entities {
+		attempts, err := r.fetchAttempts(ctx, entities[i].ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		inst, err := instructionFromEntity(&entities[i], attempts)
+		if err != nil {
+			return nil, 0, err
+		}
+		results = append(results, inst)
+	}
+
+	return results, total, nil
+}
+
 // fetchAttempts loads instruction_attempts for a given instruction ID.
 func (r *InstructionRepository) fetchAttempts(ctx context.Context, instructionID uuid.UUID) ([]InstructionAttemptEntity, error) {
 	var attempts []InstructionAttemptEntity

@@ -32,6 +32,26 @@ type FetchDispatchableParams struct {
 	AsOf time.Time
 }
 
+// ListInstructionsParams holds the parameters for listing instructions.
+type ListInstructionsParams struct {
+	// TenantID scopes the query to a specific tenant.
+	TenantID string
+	// InstructionType filters by instruction type. Empty means all types.
+	InstructionType string
+	// Statuses filters by instruction status. Empty means all statuses.
+	Statuses []domain.InstructionStatus
+	// ProviderConnectionID filters by provider connection. Empty means all connections.
+	ProviderConnectionID string
+	// CreatedAfter filters instructions created at or after this time. Zero means no lower bound.
+	CreatedAfter time.Time
+	// CreatedBefore filters instructions created at or before this time. Zero means no upper bound.
+	CreatedBefore time.Time
+	// Limit is the maximum number of instructions to return.
+	Limit int
+	// Offset is the number of instructions to skip (for cursor-based pagination).
+	Offset int
+}
+
 // InstructionRepository defines persistence operations for instructions.
 type InstructionRepository interface {
 	// Save creates or updates an instruction with optimistic locking via the version field.
@@ -42,6 +62,10 @@ type InstructionRepository interface {
 	// FindByID retrieves an instruction by its UUID.
 	// Returns ErrInstructionNotFound if no matching instruction exists.
 	FindByID(ctx context.Context, id uuid.UUID) (*domain.Instruction, error)
+
+	// ListByTenant retrieves instructions for a tenant with optional filtering and pagination.
+	// Results are ordered by created_at DESC, id DESC for stable cursor-based pagination.
+	ListByTenant(ctx context.Context, params ListInstructionsParams) ([]*domain.Instruction, int64, error)
 
 	// FetchDispatchable atomically fetches a batch of PENDING or RETRYING instructions
 	// that are ready for dispatch and locks them using SELECT FOR UPDATE SKIP LOCKED.
