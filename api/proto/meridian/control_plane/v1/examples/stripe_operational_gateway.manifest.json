@@ -1,0 +1,228 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Stripe Payments via Operational Gateway",
+    "industry": "fintech",
+    "description": "Reference manifest demonstrating Stripe payment integration migrated from direct API calls to the Operational Gateway abstraction layer. Includes outbound/inbound mappings, provider connection, and instruction routing."
+  },
+  "instruments": [
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "GBP",
+        "precision": 2
+      }
+    },
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "USD",
+        "precision": 2
+      }
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "EUR",
+        "precision": 2
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "CUSTOMER_CURRENT",
+      "name": "Customer Current Account",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": ["GBP", "USD", "EUR"],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "PAYMENT_CLEARING",
+      "name": "Payment Clearing Account",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": ["GBP", "USD", "EUR"],
+      "policies": {
+        "validation": "",
+        "bucketing": ""
+      }
+    }
+  ],
+  "valuationRules": [],
+  "sagas": [
+    {
+      "name": "stripe_payment_via_gateway",
+      "trigger": "api:/v1/payments/stripe",
+      "script": "# Saga: stripe_payment_via_gateway\n# Version: 1.0.0\n# Previous: none\n# Changed: Migrated from direct Stripe API calls to Operational Gateway dispatch\n# Author: Platform Team\n# Date: 2026-03-02\n#\n# This saga demonstrates the migration from direct payment_order.send_to_gateway\n# calls to operational_gateway.dispatch_instruction. The Operational Gateway\n# handles payload transformation (via MappingDefinitions), authentication,\n# retry logic, and circuit breaking transparently.\n#\n# The key change is Step 3: instead of calling payment_order.send_to_gateway\n# (which directly invokes the Stripe API), we dispatch an instruction of type\n# \"payment.collect\" to the Operational Gateway. The gateway resolves the\n# instruction route, applies the outbound mapping (payment-collect-to-stripe)\n# to transform the payload into Stripe's format, dispatches to the configured\n# provider connection (stripe-payments), and applies the inbound mapping\n# (stripe-response-to-ack) to normalize the response.\n#\n# Steps:\n#   1. get_payment_method  - Resolve party's default Stripe payment method\n#   2. create_lien         - Reserve funds with payment_attributes\n#   3. dispatch_to_gateway - Send via Operational Gateway (replaces send_to_gateway)\n#   4. post_ledger         - Post double-entry ledger records (webhook-triggered)\n#   5. execute_lien        - Finalize lien after ledger posted (webhook-triggered)\n#\n# Input parameters (from input_data dict):\n#   - party_id: string (required) - party whose default payment method to use\n#   - payment_order_id: string (required)\n#   - debtor_account_id: string (required)\n#   - creditor_reference: string (required)\n#   - amount_cents: int64 (required)\n#   - currency: string (required, e.g., \"GBP\", \"USD\")\n#   - idempotency_key: string (required)\n#   - instrument_code: string (optional, for bucket evaluation)\n#   - payment_attributes: dict (optional, base attributes for CEL bucket expression)\n#   - should_post_ledger: bool (optional, default false - set by webhook)\n#   - should_execute_lien: bool (optional, default false - set by webhook)\n#   - internal_clearing_enabled: bool (optional, for 4-posting ledger flow)\n\ndef stripe_payment_via_gateway():\n    ctx = input_data\n\n    # Step 1: Resolve the party's default payment method\n    step(name=\"get_payment_method\")\n    pm_result = party.get_default_payment_method(\n        party_id=ctx.get(\"party_id\"),\n    )\n\n    # Build payment_attributes by merging resolved payment method details\n    payment_attrs = dict(ctx.get(\"payment_attributes\") or {})\n    payment_attrs[\"provider\"] = pm_result.provider\n    payment_attrs[\"provider_customer_id\"] = pm_result.provider_customer_id\n    payment_attrs[\"provider_method_id\"] = pm_result.provider_method_id\n    payment_attrs[\"method_type\"] = pm_result.method_type\n\n    # Step 2: Reserve funds via lien with payment method attributes\n    step(name=\"create_lien\")\n    lien_result = payment_order.create_lien(\n        account_id=ctx.get(\"debtor_account_id\"),\n        amount_cents=ctx.get(\"amount_cents\"),\n        currency=ctx.get(\"currency\"),\n        payment_order_id=ctx.get(\"payment_order_id\"),\n        instrument_code=ctx.get(\"instrument_code\", \"\"),\n        payment_attributes=payment_attrs,\n    )\n\n    lien_id = lien_result.lien_id\n\n    # Step 3: Dispatch payment via Operational Gateway\n    # This replaces the direct payment_order.send_to_gateway call.\n    # The Operational Gateway will:\n    #   a) Resolve instruction route for \"payment.collect\" -> stripe-payments connection\n    #   b) Apply outbound mapping \"payment-collect-to-stripe\" (amount -> cents, currency -> lowercase)\n    #   c) Dispatch HTTPS POST to https://api.stripe.com/v1/payment_intents\n    #   d) Apply inbound mapping \"stripe-response-to-ack\" (normalize Stripe status)\n    #   e) Handle retries (3 attempts, exponential backoff) and circuit breaking\n    step(name=\"dispatch_to_gateway\")\n    gateway_result = operational_gateway.dispatch_instruction(\n        instruction_type=\"payment.collect\",\n        payload={\n            \"payment_order_id\": ctx.get(\"payment_order_id\"),\n            \"amount_cents\": ctx.get(\"amount_cents\"),\n            \"currency\": ctx.get(\"currency\"),\n            \"customer_id\": pm_result.provider_customer_id,\n            \"payment_method_id\": pm_result.provider_method_id,\n            \"creditor_reference\": ctx.get(\"creditor_reference\"),\n            \"metadata\": {\n                \"payment_order_id\": ctx.get(\"payment_order_id\"),\n                \"debtor_account_id\": ctx.get(\"debtor_account_id\"),\n            },\n        },\n        priority=\"HIGH\",\n        correlation_id=ctx.get(\"payment_order_id\"),\n    )\n\n    instruction_id = gateway_result.instruction_id\n\n    result = {\n        \"lien_id\": lien_id,\n        \"instruction_id\": instruction_id,\n        \"gateway_status\": gateway_result.status,\n        \"provider\": pm_result.provider,\n        \"provider_customer_id\": pm_result.provider_customer_id,\n        \"provider_method_id\": pm_result.provider_method_id,\n    }\n\n    # Step 4: Post ledger entries (conditional - triggered by webhook)\n    if ctx.get(\"should_post_ledger\", False):\n        step(name=\"post_ledger\")\n        ledger_result = payment_order.post_ledger_entries(\n            payment_order_id=ctx.get(\"payment_order_id\"),\n            debtor_account_id=ctx.get(\"debtor_account_id\"),\n            gateway_reference_id=instruction_id,\n            amount_cents=ctx.get(\"amount_cents\"),\n            currency=ctx.get(\"currency\"),\n            idempotency_key=ctx.get(\"idempotency_key\"),\n            internal_clearing_enabled=ctx.get(\"internal_clearing_enabled\", False),\n        )\n        result[\"booking_log_id\"] = ledger_result.booking_log_id\n\n    # Step 5: Execute lien (conditional - triggered by webhook after ledger posted)\n    if ctx.get(\"should_execute_lien\", False):\n        if lien_id:\n            step(name=\"execute_lien\")\n            execution_result = payment_order.execute_lien(\n                lien_id=lien_id,\n            )\n            result[\"lien_execution_status\"] = execution_result.execution_status\n\n    return result\n\n# Execute the saga\noutput = stripe_payment_via_gateway()\n"
+    }
+  ],
+  "paymentRails": [],
+  "mappings": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "tenantId": "00000000-0000-0000-0000-000000000000",
+      "name": "payment-collect-to-stripe",
+      "targetService": "external.stripe",
+      "targetRpc": "CreatePaymentIntent",
+      "version": 1,
+      "status": "MAPPING_STATUS_ACTIVE",
+      "externalSchema": "{\"type\":\"object\",\"properties\":{\"amount\":{\"type\":\"integer\"},\"currency\":{\"type\":\"string\"},\"customer\":{\"type\":\"string\"},\"payment_method\":{\"type\":\"string\"},\"confirm\":{\"type\":\"boolean\"},\"metadata\":{\"type\":\"object\"}},\"required\":[\"amount\",\"currency\"]}",
+      "fields": [
+        {
+          "externalPath": "amount",
+          "internalPath": "amount_cents",
+          "transform": {
+            "cel": {
+              "inboundCel": "int(value)",
+              "outboundCel": "int(value)"
+            }
+          }
+        },
+        {
+          "externalPath": "currency",
+          "internalPath": "currency",
+          "transform": {
+            "cel": {
+              "inboundCel": "value.upperAscii()",
+              "outboundCel": "value.lowerAscii()"
+            }
+          }
+        },
+        {
+          "externalPath": "customer",
+          "internalPath": "customer_id"
+        },
+        {
+          "externalPath": "payment_method",
+          "internalPath": "payment_method_id"
+        },
+        {
+          "externalPath": "metadata.payment_order_id",
+          "internalPath": "metadata.payment_order_id"
+        },
+        {
+          "externalPath": "metadata.debtor_account_id",
+          "internalPath": "metadata.debtor_account_id"
+        }
+      ],
+      "outboundComputedFields": [
+        {
+          "targetPath": "confirm",
+          "celExpression": "true"
+        }
+      ],
+      "inboundComputedFields": [],
+      "inboundValidationCel": "has(payload.amount_cents) && payload.amount_cents > 0",
+      "outboundValidationCel": "",
+      "idempotency": {
+        "sourceSelector": "metadata.payment_order_id",
+        "useContentHash": false,
+        "contentHashFields": []
+      }
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "tenantId": "00000000-0000-0000-0000-000000000000",
+      "name": "stripe-response-to-ack",
+      "targetService": "internal.operational_gateway",
+      "targetRpc": "AcknowledgeInstruction",
+      "version": 1,
+      "status": "MAPPING_STATUS_ACTIVE",
+      "externalSchema": "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"amount\":{\"type\":\"integer\"},\"currency\":{\"type\":\"string\"}}}",
+      "fields": [
+        {
+          "externalPath": "id",
+          "internalPath": "provider_reference_id"
+        },
+        {
+          "externalPath": "status",
+          "internalPath": "provider_status",
+          "transform": {
+            "enumMapping": {
+              "values": {
+                "requires_payment_method": "PENDING",
+                "requires_confirmation": "PENDING",
+                "requires_action": "PENDING",
+                "processing": "PROCESSING",
+                "requires_capture": "DELIVERED",
+                "succeeded": "ACKNOWLEDGED",
+                "canceled": "FAILED"
+              },
+              "fallback": "UNKNOWN"
+            }
+          }
+        },
+        {
+          "externalPath": "amount",
+          "internalPath": "amount_cents",
+          "transform": {
+            "cel": {
+              "inboundCel": "int(value)",
+              "outboundCel": "int(value)"
+            }
+          }
+        },
+        {
+          "externalPath": "currency",
+          "internalPath": "currency",
+          "transform": {
+            "cel": {
+              "inboundCel": "value.upperAscii()",
+              "outboundCel": "value.lowerAscii()"
+            }
+          }
+        }
+      ],
+      "inboundComputedFields": [],
+      "outboundComputedFields": [],
+      "inboundValidationCel": "has(payload.id) && has(payload.status)",
+      "outboundValidationCel": ""
+    }
+  ],
+  "operationalGateway": {
+    "providerConnections": [
+      {
+        "connectionId": "stripe-payments",
+        "providerName": "Stripe",
+        "providerType": "payment_gateway",
+        "protocol": "PROVIDER_PROTOCOL_HTTPS",
+        "baseUrl": "https://api.stripe.com/v1",
+        "auth": {
+          "apiKey": {
+            "headerName": "Authorization",
+            "apiKeySecretRef": "sm://stripe/api_key",
+            "_note": "Secret must include 'Bearer ' prefix, e.g. 'Bearer sk_live_xxx'. APIKeyAuth sets the header value verbatim."
+          }
+        },
+        "retryPolicy": {
+          "maxAttempts": 3,
+          "initialBackoffSeconds": 1,
+          "maxBackoffSeconds": 30,
+          "backoffMultiplier": 2.0
+        },
+        "rateLimit": {
+          "requestsPerSecond": 25.0,
+          "burstSize": 50
+        }
+      }
+    ],
+    "instructionRoutes": [
+      {
+        "instructionType": "payment.collect",
+        "connectionId": "stripe-payments",
+        "outboundMappingId": "payment-collect-to-stripe",
+        "inboundMappingId": "stripe-response-to-ack",
+        "httpMethod": "POST",
+        "pathTemplate": "/payment_intents"
+      }
+    ]
+  }
+}
