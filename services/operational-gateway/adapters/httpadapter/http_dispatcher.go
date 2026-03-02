@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -76,6 +77,9 @@ type HTTPDispatcher struct {
 	secretStore ports.SecretStore
 	transformer ports.PayloadTransformer
 	logger      *slog.Logger
+	// skipAppLevelAuth skips applyAuth when the dispatcher uses mTLS transport-level
+	// authentication instead of application-level credentials. Set by NewMTLSHTTPDispatcher.
+	skipAppLevelAuth bool
 }
 
 // NewHTTPDispatcher creates a new HTTPDispatcher with connection pooling configured for
@@ -153,15 +157,8 @@ func (d *HTTPDispatcher) Dispatch(
 		}
 	}
 
-	// Apply transport-level authentication.
-	if err := d.applyAuth(ctx, req, body, instruction.TenantID.String(), conn.AuthConfig); err != nil {
-		return ports.DispatchResult{
-			Duration: time.Since(start),
-			Error:    fmt.Errorf("applying auth: %w", err),
-		}
-	}
-
-	// Standard headers.
+	// Set standard headers first so that auth headers applied below take precedence
+	// and cannot be overwritten by route or transform headers.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", uuid.New().String())
 
@@ -173,6 +170,18 @@ func (d *HTTPDispatcher) Dispatch(
 	// Route-level static headers defined on the InstructionRoute.
 	for k, v := range route.Headers {
 		req.Header.Set(k, v)
+	}
+
+	// Apply transport-level authentication last so that auth headers cannot be
+	// overridden by route or transform headers set above.
+	// Skipped for mTLS dispatchers where authentication is handled by the TLS handshake.
+	if !d.skipAppLevelAuth {
+		if err := d.applyAuth(ctx, req, body, instruction.TenantID.String(), conn.AuthConfig); err != nil {
+			return ports.DispatchResult{
+				Duration: time.Since(start),
+				Error:    fmt.Errorf("applying auth: %w", err),
+			}
+		}
 	}
 
 	resp, err := d.client.Do(req)
@@ -211,11 +220,15 @@ func (d *HTTPDispatcher) Dispatch(
 		}
 	}
 
+	var providerStatus string
+	if outcome != nil {
+		providerStatus = outcome.ProviderStatus
+	}
 	d.logger.DebugContext(ctx, "dispatch completed",
 		"instruction_id", instruction.ID.String(),
 		"status_code", resp.StatusCode,
 		"duration_ms", time.Since(start).Milliseconds(),
-		"provider_status", outcome.ProviderStatus,
+		"provider_status", providerStatus,
 	)
 
 	return ports.DispatchResult{
@@ -325,15 +338,18 @@ func buildURL(baseURL, pathTemplate string) string {
 }
 
 // buildOAuth2FormBody constructs the application/x-www-form-urlencoded body for a
-// client credentials token request.
+// client credentials token request. All values are URL-encoded to handle special
+// characters in client IDs, secrets, and scope strings.
 func buildOAuth2FormBody(clientID, clientSecret string, scopes []string) string {
-	body := "grant_type=" + oauth2GrantType +
-		"&client_id=" + clientID +
-		"&client_secret=" + clientSecret
-	if len(scopes) > 0 {
-		body += "&scope=" + strings.Join(scopes, " ")
+	values := url.Values{
+		"grant_type":    {oauth2GrantType},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
 	}
-	return body
+	if len(scopes) > 0 {
+		values.Set("scope", strings.Join(scopes, " "))
+	}
+	return values.Encode()
 }
 
 // extractBearerToken parses an OAuth 2.0 token response JSON and returns the access_token.
@@ -387,12 +403,22 @@ func computeHMAC(algorithm string, key, body []byte) (string, error) {
 // This constructor exists as a separate entry point because mTLS requires modifying the
 // TLS configuration of the underlying http.Transport, which cannot be done per-request.
 // Callers should create one MTLSHTTPDispatcher per distinct client certificate identity.
+//
+// The returned dispatcher skips application-level auth (applyAuth) because authentication
+// is handled by the TLS handshake itself.
 func NewMTLSHTTPDispatcher(
 	secretStore ports.SecretStore,
 	transformer ports.PayloadTransformer,
 	logger *slog.Logger,
 	clientCertPEM, clientKeyPEM, caCertPEM []byte,
 ) (*HTTPDispatcher, error) {
+	if secretStore == nil {
+		panic("httpadapter.NewMTLSHTTPDispatcher: secretStore must not be nil")
+	}
+	if transformer == nil {
+		panic("httpadapter.NewMTLSHTTPDispatcher: transformer must not be nil")
+	}
+
 	cert, err := tls.X509KeyPair(clientCertPEM, clientKeyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("loading client certificate: %w", err)
@@ -427,9 +453,10 @@ func NewMTLSHTTPDispatcher(
 	}
 
 	return &HTTPDispatcher{
-		client:      client,
-		secretStore: secretStore,
-		transformer: transformer,
-		logger:      logger,
+		client:           client,
+		secretStore:      secretStore,
+		transformer:      transformer,
+		logger:           logger,
+		skipAppLevelAuth: true,
 	}, nil
 }

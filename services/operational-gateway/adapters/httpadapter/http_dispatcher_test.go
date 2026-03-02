@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -675,12 +676,18 @@ func TestDispatch_InboundTransformFails_ReturnsPartialResult(t *testing.T) {
 // --- Network error ---
 
 func TestDispatch_NetworkError_ReturnsError(t *testing.T) {
-	// Use a port that nothing is listening on.
+	// Start a server and immediately close it to get a port that is no longer listening.
+	lc := &net.ListenConfig{}
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	ln.Close() // Close immediately so the port is no longer accepting connections.
+
 	ss := &stubSecretStore{secrets: map[string]string{"KEY": "val"}}
 	tr := &stubTransformer{}
 	d := httpadapter.NewHTTPDispatcher(ss, tr, nil)
 
-	conn := newConn(t, "http://127.0.0.1:19999", &domain.APIKeyAuth{
+	conn := newConn(t, "http://"+addr, &domain.APIKeyAuth{
 		HeaderName: "X-API-Key",
 		SecretRef:  "KEY",
 	})
