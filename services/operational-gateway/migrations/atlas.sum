@@ -1,3 +1,4 @@
-h1:C7BjbVig/DMJAAJBwp/wZUrQNlJMpL1dyFfvJp/YNOA=
+h1:2rCMGoNgklzorlhUuhxOj7mMcVpcX4T6taaSxMFAUzg=
 20260301000001_operational_gateway_initial.sql h1:0k52bq50GAdIbOVr4HTX9BEzFkbbL/RA4EQGSI0HnnU=
 20260302000001_instruction_routes.sql h1:K5HIZmhIbMVCAMhDQSmXk8Wl+4AOKhufus9cDS/jF5w=
+20260302000002_circuit_breaker_and_lifecycle_columns.sql h1:2MCSfhCpJhnUjT+F03lwihFQsSa8qQhMhqoozpJWnSg=
