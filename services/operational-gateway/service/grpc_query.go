@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
+	"github.com/meridianhub/meridian/services/operational-gateway/domain"
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -115,7 +116,8 @@ func (s *OperationalGatewayService) ListInstructions(
 			if parseErr != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "invalid date_range.end_date: %v", parseErr)
 			}
-			params.CreatedBefore = t
+			// Include records created through the end of the specified day.
+			params.CreatedBefore = t.Add(24*time.Hour - time.Nanosecond)
 		}
 	}
 
@@ -164,13 +166,17 @@ func (s *OperationalGatewayService) ProcessCallback(
 	}
 
 	// Resolve the instruction by ID or provider_reference.
+	// provider_reference lookup requires a repository method not yet implemented; return
+	// Unimplemented until that capability is added in a future iteration.
 	var id uuid.UUID
 	if req.InstructionId != "" {
 		id, err = uuid.Parse(req.InstructionId)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid instruction_id: %v", err)
 		}
-	} else if req.ProviderReference == "" {
+	} else if req.ProviderReference != "" {
+		return nil, status.Error(codes.Unimplemented, "lookup by provider_reference is not yet supported; provide instruction_id instead")
+	} else {
 		return nil, status.Error(codes.InvalidArgument, "at least one of instruction_id or provider_reference must be provided")
 	}
 
@@ -186,6 +192,13 @@ func (s *OperationalGatewayService) ProcessCallback(
 	// Verify tenant ownership.
 	if instruction.TenantID.String() != tenantIDToUUID(tid) {
 		return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.InstructionId)
+	}
+
+	// Idempotency: if already acknowledged, return the current state without re-applying.
+	if instruction.Status == domain.InstructionStatusAcknowledged {
+		return &opgatewayv1.ProcessCallbackResponse{
+			Instruction: instructionToProto(instruction),
+		}, nil
 	}
 
 	// Transition to ACKNOWLEDGED from DELIVERED.

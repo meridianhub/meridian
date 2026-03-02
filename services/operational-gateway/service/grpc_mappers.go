@@ -307,21 +307,31 @@ func protoToDomainAuthConfig(req *opgatewayv1.UpsertConnectionRequest) domain.Au
 }
 
 // protoToDomainRetryPolicy converts a proto RetryPolicy to domain RetryPolicy.
+// Zero-valued fields in the proto message fall back to safe defaults so that callers
+// do not need to fully populate the policy in order to get sensible behavior.
 func protoToDomainRetryPolicy(r *opgatewayv1.RetryPolicy) domain.RetryPolicy {
+	p := domain.RetryPolicy{
+		MaxAttempts:       3,
+		InitialBackoff:    1 * time.Second,
+		MaxBackoff:        60 * time.Second,
+		BackoffMultiplier: 2.0,
+	}
 	if r == nil {
-		return domain.RetryPolicy{
-			MaxAttempts:       3,
-			InitialBackoff:    1 * time.Second,
-			MaxBackoff:        60 * time.Second,
-			BackoffMultiplier: 2.0,
-		}
+		return p
 	}
-	return domain.RetryPolicy{
-		MaxAttempts:       int(r.MaxAttempts),
-		InitialBackoff:    time.Duration(r.InitialBackoffSeconds) * time.Second,
-		MaxBackoff:        time.Duration(r.MaxBackoffSeconds) * time.Second,
-		BackoffMultiplier: r.BackoffMultiplier,
+	if r.MaxAttempts > 0 {
+		p.MaxAttempts = int(r.MaxAttempts)
 	}
+	if r.InitialBackoffSeconds > 0 {
+		p.InitialBackoff = time.Duration(r.InitialBackoffSeconds) * time.Second
+	}
+	if r.MaxBackoffSeconds > 0 {
+		p.MaxBackoff = time.Duration(r.MaxBackoffSeconds) * time.Second
+	}
+	if r.BackoffMultiplier > 0 {
+		p.BackoffMultiplier = r.BackoffMultiplier
+	}
+	return p
 }
 
 // protoToDomainRateLimit converts a proto RateLimit to domain RateLimitConfig.

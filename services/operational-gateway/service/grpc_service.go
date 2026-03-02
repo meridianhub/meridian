@@ -154,13 +154,13 @@ func (s *OperationalGatewayService) DispatchInstruction(
 	}
 
 	// Resolve provider connection: for dispatch, we don't require a connection_id upfront —
-	// the worker resolves it via InstructionRoute. We use an empty string placeholder that
-	// the dispatcher will fill in. The domain constructor requires a non-empty value, so we
-	// use "pending" as the sentinel that the dispatcher replaces.
+	// the worker resolves it via InstructionRoute. We use uuid.Nil as the sentinel that
+	// the dispatcher replaces. uuid.Nil is a valid UUID string so it passes persistence
+	// layer parsing and is clearly distinguishable from a real connection ID.
 	instruction, err := domain.NewInstruction(
 		tenantUUID,
 		req.InstructionType,
-		"pending",
+		uuid.Nil.String(),
 		payload,
 		opts...,
 	)

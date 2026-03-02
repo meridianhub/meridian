@@ -94,8 +94,8 @@ func (m *mockInstructionRepo) ListByTenant(_ context.Context, params ports.ListI
 
 	total := int64(len(result))
 	// Apply offset and limit.
-	if params.Offset > len(result) {
-		return []*domain.Instruction{}, 0, nil
+	if params.Offset >= len(result) {
+		return []*domain.Instruction{}, total, nil
 	}
 	result = result[params.Offset:]
 	if params.Limit > 0 && len(result) > params.Limit {
