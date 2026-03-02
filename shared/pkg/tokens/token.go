@@ -5,6 +5,7 @@ package tokens
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -45,9 +46,11 @@ func HashToken(plaintext string) string {
 }
 
 // ValidateTokenHash returns true if the SHA256 hash of plaintext matches the stored hash.
+// Uses constant-time comparison to prevent timing attacks.
 func ValidateTokenHash(plaintext, hash string) bool {
 	if plaintext == "" || hash == "" {
 		return false
 	}
-	return HashToken(plaintext) == hash
+	computed := HashToken(plaintext)
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(hash)) == 1
 }
