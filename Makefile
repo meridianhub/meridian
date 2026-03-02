@@ -32,7 +32,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build seed-dev seed-dev-build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean asyncapi
+.PHONY: all help build seed-dev seed-dev-build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean asyncapi gen-event-publishers
 
 # Default target
 all: help
@@ -495,6 +495,10 @@ asyncapi:
 	@echo "Generating AsyncAPI specs..."
 	@./scripts/gen-asyncapi.sh
 	@echo "AsyncAPI specs generated in api/asyncapi/"
+
+## gen-event-publishers: Generate typed event publishers from AsyncAPI specs
+gen-event-publishers:
+	@$(GOCMD) run ./tools/gen-event-publishers
 
 ## validate-manifests: Validate example manifests against protobuf schema, CEL, and Starlark
 validate-manifests:
