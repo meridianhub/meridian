@@ -74,6 +74,25 @@ type InstructionRepository interface {
 	FetchDispatchable(ctx context.Context, params FetchDispatchableParams) ([]*domain.Instruction, error)
 }
 
+// Route repository errors.
+var (
+	ErrRouteNotFound = errors.New("instruction route not found")
+)
+
+// RouteRepository defines persistence operations for instruction routes.
+type RouteRepository interface {
+	// Upsert creates or fully replaces an instruction route configuration.
+	// Uses INSERT ... ON CONFLICT (tenant_id, instruction_type) DO UPDATE for idempotency.
+	Upsert(ctx context.Context, route *domain.Route) error
+
+	// FindByInstructionType retrieves an instruction route by tenant and instruction type.
+	// Returns ErrRouteNotFound if no matching route exists.
+	FindByInstructionType(ctx context.Context, tenantID string, instructionType string) (*domain.Route, error)
+
+	// ListByTenant retrieves all instruction routes for a tenant.
+	ListByTenant(ctx context.Context, tenantID string) ([]*domain.Route, error)
+}
+
 // ConnectionRepository defines persistence operations for provider connections.
 type ConnectionRepository interface {
 	// Upsert creates or replaces a provider connection.

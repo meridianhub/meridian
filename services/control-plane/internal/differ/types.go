@@ -28,12 +28,14 @@ type ResourceType string
 
 // Resource type constants matching manifest sections.
 const (
-	ResourceInstrument    ResourceType = "instrument"
-	ResourceAccountType   ResourceType = "account_type"
-	ResourceValuationRule ResourceType = "valuation_rule"
-	ResourceSaga          ResourceType = "saga"
-	ResourcePartyType     ResourceType = "party_type"
-	ResourceMapping       ResourceType = "mapping"
+	ResourceInstrument         ResourceType = "instrument"
+	ResourceAccountType        ResourceType = "account_type"
+	ResourceValuationRule      ResourceType = "valuation_rule"
+	ResourceSaga               ResourceType = "saga"
+	ResourcePartyType          ResourceType = "party_type"
+	ResourceMapping            ResourceType = "mapping"
+	ResourceProviderConnection ResourceType = "provider_connection"
+	ResourceInstructionRoute   ResourceType = "instruction_route"
 )
 
 // PlannedAction represents a single action in the diff plan.

@@ -148,7 +148,7 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 	// Step 1: Load embedded saga script (simulates platform default fallback)
 	script, version, err := loadEmbeddedApplyManifest()
 	require.NoError(t, err, "embedded apply_manifest saga must be loadable")
-	assert.Equal(t, "1.1.0", version)
+	assert.Equal(t, "1.2.0", version)
 	assert.Contains(t, script, "execute_apply_manifest")
 
 	// Step 2: Set up handler registry with mock handlers

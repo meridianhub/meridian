@@ -107,6 +107,10 @@ func phaseForResource(rt differ.ResourceType) Phase {
 		return PhasePartyTypes
 	case differ.ResourceMapping:
 		return PhaseMappings
+	case differ.ResourceProviderConnection:
+		return PhaseOperationalGateway
+	case differ.ResourceInstructionRoute:
+		return PhaseOperationalGateway
 	default:
 		return PhaseSeedData
 	}
@@ -164,6 +168,16 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceMapping, differ.ActionCreate}: MethodCreateMapping,
 	{differ.ResourceMapping, differ.ActionUpdate}: MethodUpdateMapping,
 	{differ.ResourceMapping, differ.ActionDelete}: MethodDeprecateMapping,
+
+	// Provider Connections (Operational Gateway)
+	{differ.ResourceProviderConnection, differ.ActionCreate}: MethodUpsertProviderConnection,
+	{differ.ResourceProviderConnection, differ.ActionUpdate}: MethodUpsertProviderConnection,
+	{differ.ResourceProviderConnection, differ.ActionDelete}: MethodDeleteProviderConnection,
+
+	// Instruction Routes (Operational Gateway)
+	{differ.ResourceInstructionRoute, differ.ActionCreate}: MethodUpsertInstructionRoute,
+	{differ.ResourceInstructionRoute, differ.ActionUpdate}: MethodUpsertInstructionRoute,
+	{differ.ResourceInstructionRoute, differ.ActionDelete}: MethodDeleteInstructionRoute,
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.
