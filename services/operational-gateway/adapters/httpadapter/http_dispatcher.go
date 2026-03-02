@@ -46,6 +46,20 @@ var (
 	// Use NewMTLSHTTPDispatcher to create a dispatcher with a dedicated mTLS transport.
 	ErrMTLSNotSupported = errors.New("mtls auth requires a dedicated per-connection client: use NewMTLSHTTPDispatcher")
 
+	// ErrMTLSAuthRequired is returned when an mTLS dispatcher is used with a connection
+	// that does not have MTLSAuth as its auth config. This prevents silently sending
+	// unauthenticated requests when a connection is misconfigured.
+	ErrMTLSAuthRequired = errors.New("mtls dispatcher requires connection auth type MTLSAuth")
+
+	// ErrNilInstruction is returned when Dispatch is called with a nil instruction.
+	ErrNilInstruction = errors.New("dispatch: instruction must not be nil")
+
+	// ErrNilConnection is returned when Dispatch is called with a nil provider connection.
+	ErrNilConnection = errors.New("dispatch: provider connection must not be nil")
+
+	// ErrNilRoute is returned when Dispatch is called with a nil instruction route.
+	ErrNilRoute = errors.New("dispatch: route must not be nil")
+
 	// ErrUnsupportedAuthType is returned when an unknown AuthConfig implementation is encountered.
 	ErrUnsupportedAuthType = errors.New("unsupported auth type")
 
@@ -139,6 +153,25 @@ func (d *HTTPDispatcher) Dispatch(
 ) ports.DispatchResult {
 	start := time.Now()
 
+	if instruction == nil {
+		return ports.DispatchResult{
+			Duration: time.Since(start),
+			Error:    ErrNilInstruction,
+		}
+	}
+	if conn == nil {
+		return ports.DispatchResult{
+			Duration: time.Since(start),
+			Error:    ErrNilConnection,
+		}
+	}
+	if route == nil {
+		return ports.DispatchResult{
+			Duration: time.Since(start),
+			Error:    ErrNilRoute,
+		}
+	}
+
 	body, transformHeaders, err := d.transformer.TransformOutbound(ctx, instruction, route)
 	if err != nil {
 		return ports.DispatchResult{
@@ -174,8 +207,17 @@ func (d *HTTPDispatcher) Dispatch(
 
 	// Apply transport-level authentication last so that auth headers cannot be
 	// overridden by route or transform headers set above.
-	// Skipped for mTLS dispatchers where authentication is handled by the TLS handshake.
-	if !d.skipAppLevelAuth {
+	// For mTLS dispatchers, authentication is handled by the TLS handshake; fail fast
+	// if the connection is misconfigured with a non-mTLS auth type to avoid sending
+	// unauthenticated requests.
+	if d.skipAppLevelAuth {
+		if _, ok := conn.AuthConfig.(*domain.MTLSAuth); !ok {
+			return ports.DispatchResult{
+				Duration: time.Since(start),
+				Error:    fmt.Errorf("%w: got %T", ErrMTLSAuthRequired, conn.AuthConfig),
+			}
+		}
+	} else {
 		if err := d.applyAuth(ctx, req, body, instruction.TenantID.String(), conn.AuthConfig); err != nil {
 			return ports.DispatchResult{
 				Duration: time.Since(start),

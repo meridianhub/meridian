@@ -1,13 +1,22 @@
 package httpadapter_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -454,6 +463,193 @@ func TestDispatch_MTLSAuth_ReturnsError(t *testing.T) {
 	assert.ErrorIs(t, result.Error, httpadapter.ErrMTLSNotSupported)
 }
 
+// --- NewMTLSHTTPDispatcher: positive dispatch path ---
+
+// testPKI holds the PEM-encoded materials for a small test certificate authority.
+type testPKI struct {
+	caCertPEM     []byte
+	caKey         *ecdsa.PrivateKey
+	caCert        *x509.Certificate
+	clientCertPEM []byte
+	clientKeyPEM  []byte
+}
+
+// generateTestPKI generates a self-signed CA and a client certificate signed by it.
+func generateTestPKI(t *testing.T) *testPKI {
+	t.Helper()
+
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+	}
+	caCertDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caCertDER)
+	require.NoError(t, err)
+	var caBuf bytes.Buffer
+	require.NoError(t, pem.Encode(&caBuf, &pem.Block{Type: "CERTIFICATE", Bytes: caCertDER}))
+
+	clientKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	clientTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "test-client"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	clientCertDER, err := x509.CreateCertificate(rand.Reader, clientTemplate, caCert, &clientKey.PublicKey, caKey)
+	require.NoError(t, err)
+	var certBuf bytes.Buffer
+	require.NoError(t, pem.Encode(&certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: clientCertDER}))
+
+	clientKeyDER, err := x509.MarshalECPrivateKey(clientKey)
+	require.NoError(t, err)
+	var keyBuf bytes.Buffer
+	require.NoError(t, pem.Encode(&keyBuf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: clientKeyDER}))
+
+	return &testPKI{
+		caCertPEM:     caBuf.Bytes(),
+		caKey:         caKey,
+		caCert:        caCert,
+		clientCertPEM: certBuf.Bytes(),
+		clientKeyPEM:  keyBuf.Bytes(),
+	}
+}
+
+// newMTLSTLSServer starts a TLS httptest.Server that requires client certs verified by pki.caCert.
+// The server uses a cert signed by the same CA so that the mTLS client can verify it.
+func newMTLSTLSServer(t *testing.T, pki *testPKI, handler http.Handler) *httptest.Server {
+	t.Helper()
+
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	serverTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(3),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		DNSNames:     []string{"127.0.0.1"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	serverCertDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, pki.caCert, &serverKey.PublicKey, pki.caKey)
+	require.NoError(t, err)
+
+	tlsCert := tls.Certificate{
+		Certificate: [][]byte{serverCertDER},
+		PrivateKey:  serverKey,
+	}
+
+	caPool := x509.NewCertPool()
+	require.True(t, caPool.AppendCertsFromPEM(pki.caCertPEM))
+
+	srv := httptest.NewUnstartedServer(handler)
+	srv.TLS = &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		ClientCAs:    caPool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+	}
+	srv.StartTLS()
+	return srv
+}
+
+func TestNewMTLSHTTPDispatcher_Dispatches(t *testing.T) {
+	pki := generateTestPKI(t)
+
+	server := newMTLSTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	ss := &stubSecretStore{secrets: map[string]string{}}
+	tr := &stubTransformer{}
+
+	d, err := httpadapter.NewMTLSHTTPDispatcher(ss, tr, nil, pki.clientCertPEM, pki.clientKeyPEM, pki.caCertPEM)
+	require.NoError(t, err)
+
+	conn := newConn(t, server.URL, &domain.MTLSAuth{
+		ClientCertRef: "CERT_REF",
+		ClientKeyRef:  "KEY_REF",
+	})
+	result := d.Dispatch(context.Background(), newInstruction(t), conn, simpleRoute("POST"))
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, http.StatusOK, result.StatusCode)
+}
+
+func TestNewMTLSHTTPDispatcher_NonMTLSAuthConfig_ReturnsError(t *testing.T) {
+	pki := generateTestPKI(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	ss := &stubSecretStore{secrets: map[string]string{"KEY": "val"}}
+	tr := &stubTransformer{}
+	d, err := httpadapter.NewMTLSHTTPDispatcher(ss, tr, nil, pki.clientCertPEM, pki.clientKeyPEM, pki.caCertPEM)
+	require.NoError(t, err)
+
+	// Use non-mTLS auth config with the mTLS dispatcher - should fail fast.
+	conn := newConn(t, server.URL, &domain.APIKeyAuth{
+		HeaderName: "X-API-Key",
+		SecretRef:  "KEY",
+	})
+	result := d.Dispatch(context.Background(), newInstruction(t), conn, simpleRoute("POST"))
+
+	require.Error(t, result.Error)
+	assert.ErrorIs(t, result.Error, httpadapter.ErrMTLSAuthRequired)
+}
+
+// --- Nil input guard tests ---
+
+func TestDispatch_NilInstruction_ReturnsError(t *testing.T) {
+	ss := &stubSecretStore{secrets: map[string]string{"KEY": "val"}}
+	tr := &stubTransformer{}
+	d := httpadapter.NewHTTPDispatcher(ss, tr, nil)
+	conn := newConn(t, "http://localhost", &domain.APIKeyAuth{HeaderName: "X-API-Key", SecretRef: "KEY"})
+
+	result := d.Dispatch(context.Background(), nil, conn, simpleRoute("POST"))
+
+	require.Error(t, result.Error)
+	assert.ErrorIs(t, result.Error, httpadapter.ErrNilInstruction)
+}
+
+func TestDispatch_NilConnection_ReturnsError(t *testing.T) {
+	ss := &stubSecretStore{secrets: map[string]string{}}
+	tr := &stubTransformer{}
+	d := httpadapter.NewHTTPDispatcher(ss, tr, nil)
+
+	result := d.Dispatch(context.Background(), newInstruction(t), nil, simpleRoute("POST"))
+
+	require.Error(t, result.Error)
+	assert.ErrorIs(t, result.Error, httpadapter.ErrNilConnection)
+}
+
+func TestDispatch_NilRoute_ReturnsError(t *testing.T) {
+	ss := &stubSecretStore{secrets: map[string]string{}}
+	tr := &stubTransformer{}
+	d := httpadapter.NewHTTPDispatcher(ss, tr, nil)
+	conn := newConn(t, "http://localhost", &domain.APIKeyAuth{HeaderName: "X-API-Key", SecretRef: "KEY"})
+
+	result := d.Dispatch(context.Background(), newInstruction(t), conn, nil)
+
+	require.Error(t, result.Error)
+	assert.ErrorIs(t, result.Error, httpadapter.ErrNilRoute)
+}
+
 // --- Header handling ---
 
 func TestDispatch_SetsStandardHeaders(t *testing.T) {
@@ -592,8 +788,10 @@ func TestDispatch_LargeResponseBody_TruncatesAt1MiB(t *testing.T) {
 	})
 	result := d.Dispatch(context.Background(), newInstruction(t), conn, simpleRoute("GET"))
 
-	// Body is truncated to at most 1 MiB.
-	assert.LessOrEqual(t, len(result.ResponseBody), 1<<20)
+	require.NoError(t, result.Error)
+	assert.Equal(t, http.StatusOK, result.StatusCode)
+	// Over-limit payload should be truncated exactly at 1 MiB.
+	assert.Equal(t, 1<<20, len(result.ResponseBody))
 }
 
 // --- Timeout handling ---
