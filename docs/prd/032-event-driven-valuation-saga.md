@@ -48,7 +48,25 @@ triggers settlement, party onboarded triggers account provisioning — requires 
 consumer code outside the manifest. That breaks the core promise: tenants configure
 workflows via Starlark sagas in manifests, not by writing Go services.
 
-### 1.1 Decorative Metadata
+### 1.1 Relationship to PRD-030 (AsyncAPI Specification)
+
+PRD-030 formalizes the structure of Kafka event contracts: topic naming, payload schemas
+(derived from proto), and standard headers (`correlation_id`, `causation_id`, `tenant_id`).
+The `event:` trigger is a direct consumer of those contracts.
+
+| PRD-030 provides | PRD-032 consumes |
+|------------------|------------------|
+| AsyncAPI spec per service domain | Topic validation — manifest `event:` triggers reference real topics |
+| Standard headers (`correlation_id`) | Idempotency key for saga deduplication |
+| Standard headers (`tenant_id`) | Tenant scoping for multi-tenant event routing |
+| Typed event publishers (outbox pattern) | Reliable at-least-once event delivery to the consumer |
+| Payload schemas (proto-derived) | Structured `ctx` passed to Starlark saga scripts |
+
+PRD-030's outbox alignment work (WS1-2) is a prerequisite for PRD-032. Event-triggered
+sagas depend on reliable event delivery — fire-and-forget Kafka writes risk losing the
+event that should have triggered a saga.
+
+### 1.2 Decorative Metadata
 
 Account type definitions already carry fields that imply reactive behavior:
 
@@ -60,7 +78,7 @@ These fields are populated but not consumed by any runtime logic. Making them lo
 — driving automatic saga execution when positions are captured on accounts of that type —
 is part of this PRD.
 
-### 1.2 The Pattern is Industry-Agnostic
+### 1.3 The Pattern is Industry-Agnostic
 
 The `event:` trigger enables any reactive workflow a tenant defines in Starlark:
 
@@ -171,11 +189,11 @@ The connection is indirect:
 
 ### 2.4 Idempotency
 
-Kafka consumers reprocess events on rebalance/restart. The correlation_id in the source
-event is the natural idempotency key:
+Kafka consumers reprocess events on rebalance/restart. The `correlation_id` standard
+header (formalized by PRD-030) is the natural idempotency key:
 
 1. Consumer delivers event to saga runtime
-2. Saga checks whether this correlation_id has already been processed
+2. Saga checks whether this `correlation_id` has already been processed
 3. If yes, return early (no duplicate work)
 4. If no, proceed with saga execution
 
@@ -183,6 +201,9 @@ This is saga-level idempotency, not consumer-level. The consumer is at-least-onc
 saga guarantees exactly-once semantics for the business operation. How the saga checks
 for prior processing is up to the Starlark script — typically a query against
 position-keeping or a dedicated idempotency store.
+
+The `tenant_id` header (also from PRD-030) provides multi-tenant scoping — the consumer
+routes events to the correct tenant's saga definitions and account type policies.
 
 ### 2.5 Event Chain Termination
 
@@ -270,14 +291,22 @@ synchronous execution for event-triggered sagas.
 - Idempotency contract (correlation_id as natural key)
 - Event chain termination via absence of policy
 - Account type caching in consumer (with TTL)
-- Manifest validation: event-triggered sagas reference valid topics
+- Manifest validation: event-triggered sagas reference topics defined in AsyncAPI specs
+  (PRD-030)
 
-### 4.2 Out of Scope
+### 4.2 Prerequisites
+
+- **PRD-030 WS1-2 (Outbox Alignment)**: event-triggered sagas depend on reliable
+  at-least-once delivery. Services using fire-and-forget Kafka writes risk losing the
+  event that should have triggered a saga.
+
+### 4.3 Out of Scope
 
 - Tenant-specific saga scripts (tenants write these in their manifests)
 - Industry-specific data models (MPAN mappings, tariff structures, etc.)
 - Batch-aware optimizations (individual event processing is sufficient at pilot scale)
 - Custom consumer code for tenants (the whole point is to avoid this)
+- Event contract formalization (covered by PRD-030)
 
 ## 5. Reference: Tenant Manifest Examples
 
@@ -421,8 +450,13 @@ routing, and the saga runtime.
 
 ## 8. Related Documents
 
-- [PRD-006: Starlark Saga Orchestration (Core)](006-starlark-saga-orchestration-core.md)
-- [PRD-011: Valuation Service](011-valuation-service.md)
-- [PRD-030: AsyncAPI Specification](030-asyncapi-specification.md) — event topic docs
+- [PRD-030: AsyncAPI Specification](030-asyncapi-specification.md) — **prerequisite**:
+  formalizes event contracts, outbox alignment, standard headers that this PRD consumes
+- [PRD-006: Starlark Saga Orchestration (Core)](006-starlark-saga-orchestration-core.md) —
+  saga runtime this PRD extends with the `event:` trigger
+- [PRD-011: Valuation Service](011-valuation-service.md) — valuation engine available as
+  a service module in event-triggered sagas
 - [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md) — topic naming
-- [ADR-0026: Canonical Ingestion Contract](../adr/0026-canonical-ingestion-contract.md)
+  convention and outbox pattern
+- [ADR-0026: Canonical Ingestion Contract](../adr/0026-canonical-ingestion-contract.md) —
+  boundary pattern for external data
