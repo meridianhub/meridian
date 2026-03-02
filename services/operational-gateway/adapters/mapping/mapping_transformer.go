@@ -157,6 +157,11 @@ func extractOutcome(mappedJSON []byte, statusCode int) (*ports.InstructionOutcom
 			if outcome.FailureReason == "" {
 				outcome.FailureReason = fmt.Sprintf("provider returned HTTP %d", statusCode)
 			}
+			// Only set ShouldRetry from HTTP semantics when the mapping did not
+			// explicitly set it (i.e. it is still false/zero).
+			if !outcome.ShouldRetry {
+				outcome.ShouldRetry = isTransient(statusCode)
+			}
 		}
 	}
 
@@ -174,12 +179,19 @@ func defaultOutcome(statusCode int) *ports.InstructionOutcome {
 	return &ports.InstructionOutcome{
 		ProviderStatus: "REJECTED",
 		FailureReason:  fmt.Sprintf("provider returned HTTP %d", statusCode),
+		ShouldRetry:    isTransient(statusCode),
 	}
 }
 
 // isSuccess returns true if the HTTP status code indicates a successful response (2xx).
 func isSuccess(statusCode int) bool {
 	return statusCode >= 200 && statusCode < 300
+}
+
+// isTransient returns true for HTTP status codes that indicate a transient failure
+// which warrants a retry: 429 (rate limit) and 5xx (server errors).
+func isTransient(statusCode int) bool {
+	return statusCode == 429 || (statusCode >= 500 && statusCode < 600)
 }
 
 // copyHeaders returns a shallow copy of the header map, or nil if the map is empty.

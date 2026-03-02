@@ -274,14 +274,57 @@ func TestTransformer_TransformInbound_FallsBackToHTTPStatus_WhenNoProviderStatus
 	require.NoError(t, err)
 	assert.Equal(t, "pmt-777", outcome.ExternalID)
 	assert.Equal(t, "ACCEPTED", outcome.ProviderStatus)
+	assert.False(t, outcome.ShouldRetry)
 
-	// 400 Bad Request - should be treated as failure
+	// 400 Bad Request - permanent failure, no retry
 	body400 := []byte(`{"id":"pmt-888"}`)
 	outcome400, err := tr.TransformInbound(context.Background(), 400, body400, route)
 	require.NoError(t, err)
 	assert.Equal(t, "pmt-888", outcome400.ExternalID)
 	assert.Equal(t, "REJECTED", outcome400.ProviderStatus)
 	assert.Contains(t, outcome400.FailureReason, "400")
+	assert.False(t, outcome400.ShouldRetry)
+}
+
+func TestTransformer_TransformInbound_SetsRetry_ForTransientCodes_NoMapping(t *testing.T) {
+	engine := newEngine(t)
+	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
+	tr := mapping.NewTransformer(resolver, engine, nil)
+
+	// No inbound mapping — defaultOutcome path
+	route := &ports.InstructionRoute{}
+
+	for _, code := range []int{429, 500, 502, 503} {
+		outcome, err := tr.TransformInbound(context.Background(), code, []byte(`{}`), route)
+		require.NoError(t, err, "status %d should not error", code)
+		assert.Equal(t, "REJECTED", outcome.ProviderStatus, "status %d", code)
+		assert.True(t, outcome.ShouldRetry, "status %d should retry (transient)", code)
+	}
+}
+
+func TestTransformer_TransformInbound_SetsRetry_ForTransientCodes_WithMapping(t *testing.T) {
+	engine := newEngine(t)
+	// Mapping that only extracts external_id — no provider_status, so HTTP fallback runs
+	def := &mappingv1.MappingDefinition{
+		Name: "id-only-transient",
+		Fields: []*mappingv1.FieldCorrespondence{
+			{ExternalPath: "id", InternalPath: "external_id"},
+		},
+	}
+	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{
+		"id-only-transient": def,
+	}}
+	tr := mapping.NewTransformer(resolver, engine, nil)
+
+	route := &ports.InstructionRoute{InboundMapping: "id-only-transient"}
+
+	for _, code := range []int{429, 500, 503} {
+		body := []byte(`{"id":"pmt-retry"}`)
+		outcome, err := tr.TransformInbound(context.Background(), code, body, route)
+		require.NoError(t, err, "status %d should not error", code)
+		assert.Equal(t, "REJECTED", outcome.ProviderStatus, "status %d", code)
+		assert.True(t, outcome.ShouldRetry, "status %d should retry (transient)", code)
+	}
 }
 
 func TestTransformer_TransformInbound_ReturnsError_WhenResolverFails(t *testing.T) {
