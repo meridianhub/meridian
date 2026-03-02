@@ -167,8 +167,7 @@ func main() {
 
 		svc, err := processAsyncAPIFile(filepath.Join(asyncAPIDir, entry.Name()), knownProtoTypes)
 		if err != nil {
-			log.Printf("WARN: skipping %s: %v", entry.Name(), err)
-			continue
+			log.Fatalf("Failed to process %s: %v", entry.Name(), err)
 		}
 		if svc == nil {
 			continue
@@ -243,6 +242,7 @@ func processAsyncAPIFile(path string, knownProtoTypes map[string]bool) (*Service
 		channelKey := strings.TrimPrefix(op.Channel.Ref, "#/channels/")
 		channel, ok := spec.Channels[channelKey]
 		if !ok {
+			log.Printf("WARN: %s: operation references unknown channel %q", filename, channelKey)
 			continue
 		}
 
@@ -285,12 +285,14 @@ func resolveChannelEvents(channel Channel, components Components, schemaToProto 
 		componentName := strings.TrimPrefix(msg.Ref, "#/components/messages/")
 		component, ok := components.Messages[componentName]
 		if !ok {
+			log.Printf("WARN: channel %q references unknown component message %q", channel.Address, componentName)
 			continue
 		}
 		schemaName := strings.TrimPrefix(component.Payload.Ref, "#/components/schemas/")
 
 		protoType, ok := schemaToProto[schemaName]
 		if !ok {
+			// Schema exists but has no valid proto type mapping (already logged during schema scan).
 			continue
 		}
 
