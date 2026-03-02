@@ -7,8 +7,10 @@ ALTER TABLE provider_connections ADD COLUMN IF NOT EXISTS failure_count INT NOT 
 ALTER TABLE provider_connections ADD COLUMN IF NOT EXISTS success_count INT NOT NULL DEFAULT 0;
 
 -- Fix health_status: domain uses UNKNOWN, initial migration used UNSPECIFIED.
--- Drop the old CHECK, update the default, and add the corrected CHECK.
+-- CockroachDB auto-generates CHECK constraint names; try both PostgreSQL and
+-- CockroachDB naming conventions to ensure the drop succeeds.
 ALTER TABLE provider_connections DROP CONSTRAINT IF EXISTS provider_connections_health_status_check;
+ALTER TABLE provider_connections DROP CONSTRAINT IF EXISTS check_health_status;
 ALTER TABLE provider_connections ALTER COLUMN health_status SET DEFAULT 'UNKNOWN';
 ALTER TABLE provider_connections ADD CONSTRAINT provider_connections_health_status_check
     CHECK (health_status IN ('UNKNOWN', 'HEALTHY', 'DEGRADED', 'UNHEALTHY'));
