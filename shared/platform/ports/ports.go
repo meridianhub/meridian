@@ -124,6 +124,12 @@ const (
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
 	ControlPlane = 50062
+
+	// OperationalGateway is the gRPC port for the Operational Gateway service.
+	// Manages outbound instruction dispatch, provider connections, and routing.
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	OperationalGateway = 50063
 )
 
 // HTTP service ports (various protocols).
