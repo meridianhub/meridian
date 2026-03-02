@@ -84,6 +84,7 @@ stateDiagram-v2
 | [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
 | [Operational Gateway](029-operational-gateway.md) | Bidirectional asset-agnostic gateway for outbound instructions and inbound messages |
 | [AsyncAPI Specification](030-asyncapi-specification.md) | Formal AsyncAPI 3.0 specs for Kafka event contracts, mirroring OpenAPI for sync APIs |
+| [Event-Driven Valuation Saga](032-event-driven-valuation-saga.md) | Event-triggered saga execution for automatic cross-instrument valuation |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -213,6 +214,8 @@ material.
 - [Durable Execution Engine](005-durable-execution-engine.md) - Resilience layer for saga execution
 - [Starlark Service Bindings](008-starlark-service-bindings.md) - Service binding layer for Starlark saga scripts
 - [Starlark Testing Framework](010-starlark-testing-framework.md) - Auto-validate Starlark scripts at upload time
+- [Event-Driven Valuation Saga](032-event-driven-valuation-saga.md) -
+  Event-triggered saga execution for cross-instrument valuation
 
 ### Settlement & Reconciliation
 
