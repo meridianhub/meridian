@@ -365,6 +365,56 @@ func TestProcessInstruction_ConnectionNotFound_MarksFailed(t *testing.T) {
 	assert.Equal(t, "CONNECTION_NOT_FOUND", saved[0].ErrorCode)
 }
 
+func TestProcessInstruction_RouteTransientError_ReturnsError(t *testing.T) {
+	instr := dispatchingInstruction()
+
+	instrRepo := &mockInstructionRepo{}
+	connRepo := &mockConnectionRepo{}
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, _ string) (*ports.InstructionRoute, error) {
+			return nil, errors.New("database connection lost")
+		},
+	}
+	dispatcher := &mockDispatcher{}
+
+	w := NewDispatchWorker(instrRepo, connRepo, resolver, dispatcher, DispatchWorkerConfig{}, nil)
+
+	err := w.processInstruction(context.Background(), instr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "route resolution transient error")
+
+	// Instruction should NOT be marked failed — stays DISPATCHING for reaper.
+	saved := instrRepo.getSavedInstructions()
+	assert.Len(t, saved, 0)
+}
+
+func TestProcessInstruction_ConnectionTransientError_ReturnsError(t *testing.T) {
+	instr := dispatchingInstruction()
+
+	instrRepo := &mockInstructionRepo{}
+	connRepo := &mockConnectionRepo{
+		findByID: func(_ context.Context, _, _ string) (*domain.ProviderConnection, error) {
+			return nil, errors.New("network timeout")
+		},
+	}
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, _ string) (*ports.InstructionRoute, error) {
+			return testRoute(), nil
+		},
+	}
+	dispatcher := &mockDispatcher{}
+
+	w := NewDispatchWorker(instrRepo, connRepo, resolver, dispatcher, DispatchWorkerConfig{}, nil)
+
+	err := w.processInstruction(context.Background(), instr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "connection lookup transient error")
+
+	// Instruction should NOT be marked failed — stays DISPATCHING for reaper.
+	saved := instrRepo.getSavedInstructions()
+	assert.Len(t, saved, 0)
+}
+
 func TestProcessInstruction_CircuitOpen_RetriesWhenPossible(t *testing.T) {
 	instr := dispatchingInstruction()
 	conn := testConnection()

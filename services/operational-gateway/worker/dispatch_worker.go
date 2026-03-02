@@ -172,13 +172,22 @@ func (w *DispatchWorker) processInstruction(ctx context.Context, instr *domain.I
 	// 1. Resolve route for this instruction type.
 	route, err := w.routeResolver.Resolve(ctx, instr.TenantID.String(), instr.InstructionType)
 	if err != nil {
-		return w.handleFailure(ctx, instr, fmt.Sprintf("route resolution failed: %v", err), "ROUTE_NOT_FOUND")
+		if errors.Is(err, ports.ErrRouteNotFound) {
+			return w.handleFailure(ctx, instr, fmt.Sprintf("route resolution failed: %v", err), "ROUTE_NOT_FOUND")
+		}
+		// Transient error (e.g., DB/network) — return error so the instruction stays
+		// DISPATCHING and will be picked up by the stuck-instruction reaper for retry.
+		return fmt.Errorf("route resolution transient error: %w", err)
 	}
 
 	// 2. Look up the provider connection.
 	conn, err := w.connectionRepo.FindByID(ctx, instr.TenantID.String(), instr.ProviderConnectionID)
 	if err != nil {
-		return w.handleFailure(ctx, instr, fmt.Sprintf("connection lookup failed: %v", err), "CONNECTION_NOT_FOUND")
+		if errors.Is(err, ports.ErrConnectionNotFound) {
+			return w.handleFailure(ctx, instr, fmt.Sprintf("connection lookup failed: %v", err), "CONNECTION_NOT_FOUND")
+		}
+		// Transient error — leave instruction in DISPATCHING for reaper.
+		return fmt.Errorf("connection lookup transient error: %w", err)
 	}
 
 	// 3. Check circuit breaker.
