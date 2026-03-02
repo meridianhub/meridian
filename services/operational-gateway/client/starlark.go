@@ -81,7 +81,7 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 //   - priority (string, optional): Dispatch priority: LOW, NORMAL, HIGH, CRITICAL (default: NORMAL)
 //   - correlation_id (string, optional): Links to originating saga/event
 //   - causation_id (string, optional): Identifies the event that caused this instruction
-//   - scheduled_at (string, optional): ISO 8601 timestamp for deferred dispatch
+//   - scheduled_at (string, optional): RFC3339 timestamp for deferred dispatch (e.g. "2026-01-15T10:30:00Z")
 //
 // Returns a map containing:
 //   - instruction_id: UUID of the created instruction
@@ -93,7 +93,7 @@ func dispatchInstructionHandler(c *Client) saga.Handler {
 			return nil, err
 		}
 
-		clientCtx := prepareClientContext(ctx)
+		clientCtx := prepareClientContext(ctx, req.GetCorrelationId())
 		resp, err := c.DispatchInstruction(clientCtx, req)
 		if err != nil {
 			return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
@@ -137,17 +137,29 @@ func buildDispatchRequest(ctx *saga.StarlarkContext, params map[string]any) (*op
 		req.Priority = p
 	}
 
-	if corrID, ok := params["correlation_id"].(string); ok && corrID != "" {
+	corrID, _, err := optionalStringParam(params, "correlation_id")
+	if err != nil {
+		return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+	}
+	if corrID != "" {
 		req.CorrelationId = corrID
 	} else {
 		req.CorrelationId = ctx.CorrelationID.String()
 	}
 
-	if causationID, ok := params["causation_id"].(string); ok && causationID != "" {
+	causationID, _, err := optionalStringParam(params, "causation_id")
+	if err != nil {
+		return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+	}
+	if causationID != "" {
 		req.CausationId = causationID
 	}
 
-	if scheduledAtStr, ok := params["scheduled_at"].(string); ok && scheduledAtStr != "" {
+	scheduledAtStr, _, err := optionalStringParam(params, "scheduled_at")
+	if err != nil {
+		return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+	}
+	if scheduledAtStr != "" {
 		t, parseErr := time.Parse(time.RFC3339, scheduledAtStr)
 		if parseErr != nil {
 			return nil, fmt.Errorf("operational_gateway.dispatch_instruction: invalid scheduled_at %q: %w", scheduledAtStr, parseErr)
@@ -196,11 +208,15 @@ func cancelInstructionHandler(c *Client) saga.Handler {
 			InstructionId: instructionID,
 		}
 
-		if reason, ok := params["reason"].(string); ok && reason != "" {
+		reason, _, err := optionalStringParam(params, "reason")
+		if err != nil {
+			return nil, fmt.Errorf("operational_gateway.cancel_instruction: %w", err)
+		}
+		if reason != "" {
 			req.CancellationReason = reason
 		}
 
-		clientCtx := prepareClientContext(ctx)
+		clientCtx := prepareClientContext(ctx, ctx.CorrelationID.String())
 		_, err = c.CancelInstruction(clientCtx, req)
 		if err != nil {
 			return nil, fmt.Errorf("operational_gateway.cancel_instruction: %w", err)
@@ -229,7 +245,7 @@ func getInstructionHandler(c *Client) saga.Handler {
 			return nil, err
 		}
 
-		clientCtx := prepareClientContext(ctx)
+		clientCtx := prepareClientContext(ctx, ctx.CorrelationID.String())
 		resp, err := c.GetInstruction(clientCtx, &opgatewayv1.GetInstructionRequest{
 			InstructionId: instructionID,
 		})
@@ -247,14 +263,31 @@ func getInstructionHandler(c *Client) saga.Handler {
 }
 
 // prepareClientContext enriches the gRPC client context with saga metadata.
-func prepareClientContext(ctx *saga.StarlarkContext) context.Context {
+// correlationID is the resolved correlation ID to propagate; pass req.GetCorrelationId()
+// so that any caller-supplied override is consistent with the transport metadata.
+func prepareClientContext(ctx *saga.StarlarkContext, correlationID string) context.Context {
 	clientCtx := ctx.Context
 
-	clientCtx = context.WithValue(clientCtx, correlationIDContextKey, ctx.CorrelationID.String())
+	clientCtx = context.WithValue(clientCtx, correlationIDContextKey, correlationID)
 	clientCtx = clients.PropagateIdempotencyKey(clientCtx, ctx.IdempotencyKey)
 	clientCtx = clients.PropagateKnowledgeAt(clientCtx, ctx.KnowledgeAt)
 
 	return clientCtx
+}
+
+// optionalStringParam looks up key in params. If absent or nil, it returns ("", false, nil).
+// If present with a non-string type, it returns a typed ErrInvalidParamType error so that
+// script bugs are caught immediately rather than silently ignored.
+func optionalStringParam(params map[string]any, key string) (string, bool, error) {
+	raw, exists := params[key]
+	if !exists || raw == nil {
+		return "", false, nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", true, fmt.Errorf("%w: %s must be a string, got %T", saga.ErrInvalidParamType, key, raw)
+	}
+	return s, true, nil
 }
 
 // stringToPriority converts a Starlark priority string to the proto Priority enum.
