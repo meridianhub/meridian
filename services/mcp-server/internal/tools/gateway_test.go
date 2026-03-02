@@ -363,9 +363,9 @@ func TestGatewayInstructionDetail_NotFound_ReturnsFormattedError(t *testing.T) {
 	assert.Equal(t, false, m["valid"])
 }
 
-// --- meridian_gateway_retry_instruction (cancel) tests ---
+// --- meridian_gateway_cancel_instruction tests ---
 
-func TestGatewayRetryInstruction_ValidID_CancelsInstruction(t *testing.T) {
+func TestGatewayCancelInstruction_ValidID_CancelsInstruction(t *testing.T) {
 	instructionID := "550e8400-e29b-41d4-a716-446655440000"
 	now := timestamppb.Now()
 	mock := &mockGatewayInstructionWriter{
@@ -385,7 +385,7 @@ func TestGatewayRetryInstruction_ValidID_CancelsInstruction(t *testing.T) {
 		},
 	}
 
-	result := callGatewayTool(t, tools.GatewayClients{InstructionWriter: mock}, "meridian_gateway_retry_instruction", map[string]interface{}{
+	result := callGatewayTool(t, tools.GatewayClients{InstructionWriter: mock}, "meridian_gateway_cancel_instruction", map[string]interface{}{
 		"instruction_id":      instructionID,
 		"cancellation_reason": "duplicate request",
 	})
@@ -396,7 +396,7 @@ func TestGatewayRetryInstruction_ValidID_CancelsInstruction(t *testing.T) {
 	assert.Equal(t, "CANCELLED", instr["status"])
 }
 
-func TestGatewayRetryInstruction_FailedPrecondition_ReturnsFormattedError(t *testing.T) {
+func TestGatewayCancelInstruction_FailedPrecondition_ReturnsFormattedError(t *testing.T) {
 	instructionID := "550e8400-e29b-41d4-a716-446655440000"
 	mock := &mockGatewayInstructionWriter{
 		cancelInstructionFn: func(_ context.Context, _ *opgatewayv1.CancelInstructionRequest) (*opgatewayv1.CancelInstructionResponse, error) {
@@ -410,7 +410,7 @@ func TestGatewayRetryInstruction_FailedPrecondition_ReturnsFormattedError(t *tes
 	raw, err := json.Marshal(map[string]interface{}{"instruction_id": instructionID})
 	require.NoError(t, err)
 
-	result, callErr := reg.Call(context.Background(), "meridian_gateway_retry_instruction", raw)
+	result, callErr := reg.Call(context.Background(), "meridian_gateway_cancel_instruction", raw)
 	require.NoError(t, callErr, "gRPC errors should be returned as formatted result, not error")
 	require.NotNil(t, result)
 	data, marshalErr := json.Marshal(result)
@@ -451,5 +451,5 @@ func TestRegisterGatewayTools_OnlyInstructionQuerier_RegistersReadTools(t *testi
 	assert.Contains(t, names, "meridian_gateway_dispatch_status")
 	assert.Contains(t, names, "meridian_gateway_instruction_detail")
 	assert.NotContains(t, names, "meridian_gateway_connection_health")
-	assert.NotContains(t, names, "meridian_gateway_retry_instruction")
+	assert.NotContains(t, names, "meridian_gateway_cancel_instruction")
 }

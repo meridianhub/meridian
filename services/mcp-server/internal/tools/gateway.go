@@ -50,7 +50,7 @@ func RegisterGatewayTools(r *Registry, clients GatewayClients) {
 		candidates = append(candidates, buildGatewayConnectionHealthTool(clients.ConnectionQuerier))
 	}
 	if clients.InstructionWriter != nil {
-		candidates = append(candidates, buildGatewayRetryInstructionTool(clients.InstructionWriter))
+		candidates = append(candidates, buildGatewayCancelInstructionTool(clients.InstructionWriter))
 	}
 
 	for _, t := range candidates {
@@ -396,10 +396,10 @@ func handleGatewayInstructionDetail(ctx context.Context, client GatewayInstructi
 	}, nil
 }
 
-// buildGatewayRetryInstructionTool returns the meridian_gateway_retry_instruction tool.
-func buildGatewayRetryInstructionTool(client GatewayInstructionWriter) Tool {
+// buildGatewayCancelInstructionTool returns the meridian_gateway_cancel_instruction tool.
+func buildGatewayCancelInstructionTool(client GatewayInstructionWriter) Tool {
 	return Tool{
-		Name:     "meridian_gateway_retry_instruction",
+		Name:     "meridian_gateway_cancel_instruction",
 		Category: CategoryWrite,
 		Description: "Cancel a pending instruction before it is dispatched. " +
 			"Only instructions in PENDING status can be cancelled. " +
@@ -420,13 +420,13 @@ func buildGatewayRetryInstructionTool(client GatewayInstructionWriter) Tool {
 			"required": []interface{}{"instruction_id"},
 		},
 		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
-			return handleGatewayRetryInstruction(ctx, client, params)
+			return handleGatewayCancelInstruction(ctx, client, params)
 		},
 	}
 }
 
-// handleGatewayRetryInstruction implements the meridian_gateway_retry_instruction handler logic.
-func handleGatewayRetryInstruction(ctx context.Context, client GatewayInstructionWriter, params json.RawMessage) (interface{}, error) {
+// handleGatewayCancelInstruction implements the meridian_gateway_cancel_instruction handler logic.
+func handleGatewayCancelInstruction(ctx context.Context, client GatewayInstructionWriter, params json.RawMessage) (interface{}, error) {
 	var p struct {
 		InstructionID      string `json:"instruction_id"`
 		CancellationReason string `json:"cancellation_reason"`
