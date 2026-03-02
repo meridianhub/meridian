@@ -350,13 +350,15 @@ message AuthenticateResponse {
 // --- Password Management ---
 
 // SetPasswordRequest is the request to set an initial password for an identity.
-// Used during invitation acceptance to establish credentials for the first time.
+// The token proves possession of the invitation and authorises password creation.
+// The server resolves the target identity from the token rather than accepting
+// a client-supplied identity identifier.
 message SetPasswordRequest {
-  // identity_id is the identifier of the identity whose password is being set.
-  string identity_id = 1 [(buf.validate.field).string = {
+  // token is the one-time invitation token delivered to the invitee's email address.
+  // This serves as proof-of-possession and determines which identity receives the password.
+  string token = 1 [(buf.validate.field).string = {
     min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
+    max_len: 1000
   }];
 
   // password is the new plaintext password to hash and store.
@@ -373,23 +375,17 @@ message SetPasswordResponse {
 }
 
 // ChangePasswordRequest is the request to change an existing password.
-// Requires verification of the current password before accepting the new one.
+// The target identity is derived from the authenticated principal in the
+// server-side interceptor; callers cannot change another identity's password.
 message ChangePasswordRequest {
-  // identity_id is the identifier of the identity changing their password.
-  string identity_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[a-zA-Z0-9_-]+$"
-  }];
-
   // current_password is the identity's existing password for verification.
-  string current_password = 2 [(buf.validate.field).string = {
+  string current_password = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 1000
   }];
 
   // new_password is the replacement password to hash and store.
-  string new_password = 3 [(buf.validate.field).string = {
+  string new_password = 2 [(buf.validate.field).string = {
     min_len: 8
     max_len: 1000
   }];
@@ -673,11 +669,11 @@ service IdentityService {
 
   // --- Password Management ---
 
-  // SetPassword sets the initial password for an identity.
-  // Intended for use during invitation acceptance before a credential exists.
+  // SetPassword sets the initial password for an identity using an invitation token.
+  // The token determines the target identity; no authenticated principal is required.
   rpc SetPassword(SetPasswordRequest) returns (SetPasswordResponse) {
     option (google.api.http) = {
-      post: "/v1/identities/{identity_id}/password"
+      post: "/v1/identities/password"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -686,10 +682,11 @@ service IdentityService {
     };
   }
 
-  // ChangePassword changes the password for an identity after verifying the current password.
+  // ChangePassword changes the password for the authenticated identity.
+  // The target identity is derived from the authenticated principal.
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
     option (google.api.http) = {
-      put: "/v1/identities/{identity_id}/password"
+      put: "/v1/identities/me/password"
       body: "*"
     };
   }
