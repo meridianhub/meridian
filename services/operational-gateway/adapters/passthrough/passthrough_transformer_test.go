@@ -56,7 +56,7 @@ func TestTransformer_TransformOutbound_ReturnsRawJSON(t *testing.T) {
 }
 
 // TestTransformer_TransformOutbound_IncludesStaticHeaders verifies that static headers
-// defined on the route are returned unchanged.
+// defined on the route are returned unchanged and that the returned map is a defensive copy.
 func TestTransformer_TransformOutbound_IncludesStaticHeaders(t *testing.T) {
 	tr := passthrough.NewTransformer()
 
@@ -72,6 +72,10 @@ func TestTransformer_TransformOutbound_IncludesStaticHeaders(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1", headers["X-Version"])
 	assert.Equal(t, "application/json", headers["Accept"])
+
+	// Mutating the returned map must not affect the original route headers.
+	headers["X-Version"] = "mutated"
+	assert.Equal(t, "1", route.Headers["X-Version"])
 }
 
 // TestTransformer_TransformOutbound_EmptyHeaders verifies nil is returned when the route
@@ -103,19 +107,35 @@ func TestTransformer_TransformInbound_Success_2xx(t *testing.T) {
 	}
 }
 
-// TestTransformer_TransformInbound_Failure_non2xx verifies that non-2xx responses
-// produce a REJECTED outcome with the status code in the failure reason.
-func TestTransformer_TransformInbound_Failure_non2xx(t *testing.T) {
+// TestTransformer_TransformInbound_Failure_TerminalNon2xx verifies that permanent non-2xx
+// responses produce a REJECTED outcome with ShouldRetry false.
+func TestTransformer_TransformInbound_Failure_TerminalNon2xx(t *testing.T) {
 	tr := passthrough.NewTransformer()
 	route := &ports.InstructionRoute{}
 
-	for _, code := range []int{400, 401, 403, 404, 422, 429, 500, 502, 503} {
+	for _, code := range []int{400, 401, 403, 404, 422} {
 		outcome, err := tr.TransformInbound(context.Background(), code, []byte(`{"error":"msg"}`), route)
 		require.NoError(t, err, "status %d should not error", code)
 		require.NotNil(t, outcome)
 		assert.Equal(t, "REJECTED", outcome.ProviderStatus, "status %d", code)
 		assert.Contains(t, outcome.FailureReason, "HTTP", "status %d failure reason should mention HTTP", code)
-		assert.False(t, outcome.ShouldRetry, "status %d ShouldRetry should be false (passthrough has no retry logic)", code)
+		assert.False(t, outcome.ShouldRetry, "status %d should not retry", code)
+	}
+}
+
+// TestTransformer_TransformInbound_Failure_TransientNon2xx verifies that transient non-2xx
+// responses (429 and 5xx) produce a REJECTED outcome with ShouldRetry true.
+func TestTransformer_TransformInbound_Failure_TransientNon2xx(t *testing.T) {
+	tr := passthrough.NewTransformer()
+	route := &ports.InstructionRoute{}
+
+	for _, code := range []int{429, 500, 502, 503} {
+		outcome, err := tr.TransformInbound(context.Background(), code, []byte(`{"error":"msg"}`), route)
+		require.NoError(t, err, "status %d should not error", code)
+		require.NotNil(t, outcome)
+		assert.Equal(t, "REJECTED", outcome.ProviderStatus, "status %d", code)
+		assert.Contains(t, outcome.FailureReason, "HTTP", "status %d failure reason should mention HTTP", code)
+		assert.True(t, outcome.ShouldRetry, "status %d should retry (transient)", code)
 	}
 }
 

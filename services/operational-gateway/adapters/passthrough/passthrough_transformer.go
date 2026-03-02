@@ -42,16 +42,19 @@ func (t *Transformer) TransformOutbound(_ context.Context, instruction *domain.I
 
 // TransformInbound derives an InstructionOutcome from the HTTP status code.
 // HTTP 2xx responses map to ProviderStatus "ACCEPTED"; all other codes map to "REJECTED"
-// with a failure reason containing the status code.
+// with a failure reason containing the status code. Transient failures (429 and 5xx)
+// additionally set ShouldRetry to true.
 func (t *Transformer) TransformInbound(_ context.Context, statusCode int, _ []byte, _ *ports.InstructionRoute) (*ports.InstructionOutcome, error) {
 	if statusCode >= 200 && statusCode < 300 {
 		return &ports.InstructionOutcome{
 			ProviderStatus: "ACCEPTED",
 		}, nil
 	}
+	shouldRetry := statusCode == 429 || (statusCode >= 500 && statusCode < 600)
 	return &ports.InstructionOutcome{
 		ProviderStatus: "REJECTED",
 		FailureReason:  fmt.Sprintf("provider returned HTTP %d", statusCode),
+		ShouldRetry:    shouldRetry,
 	}, nil
 }
 
