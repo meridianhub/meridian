@@ -204,6 +204,13 @@ func TestAll_ContainsAllConstants(t *testing.T) {
 		topics.ReconciliationPositionLockRequestedV1,
 		topics.ReconciliationDisputeCreatedV1,
 		topics.ReconciliationDisputeResolvedV1,
+		topics.OperationalGatewayInstructionCreatedV1,
+		topics.OperationalGatewayInstructionDispatchedV1,
+		topics.OperationalGatewayInstructionDeliveredV1,
+		topics.OperationalGatewayInstructionAcknowledgedV1,
+		topics.OperationalGatewayInstructionFailedV1,
+		topics.OperationalGatewayInstructionExpiredV1,
+		topics.OperationalGatewayInstructionCancelledV1,
 	}
 
 	allSet := make(map[string]bool, len(topics.All()))
