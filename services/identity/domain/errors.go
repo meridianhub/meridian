@@ -12,6 +12,7 @@ var (
 	ErrInvitationExpired           = errors.New("invitation has expired")
 	ErrInvitationAlreadyAccepted   = errors.New("invitation has already been accepted")
 	ErrRoleAlreadyRevoked          = errors.New("role assignment has already been revoked")
+	ErrInvitationNotFound          = errors.New("invitation not found")
 	ErrInvalidEmail                = errors.New("invalid email address")
 	ErrPasswordHashEmpty           = errors.New("password hash must not be empty")
 	ErrExternalIDPEmpty            = errors.New("external IDP provider and subject must not be empty")

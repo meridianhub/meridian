@@ -206,7 +206,20 @@ func (i *Identity) Unlock() error {
 // RecordLoginAttempt records a login attempt result. On success it resets the
 // failed attempts counter. On failure it increments the counter and locks the
 // account when the threshold is reached.
+// Returns ErrAccountLocked if the identity is already locked, and
+// ErrInvalidStatusTransition if the identity is not in ACTIVE status.
 func (i *Identity) RecordLoginAttempt(success bool) error {
+	switch i.status {
+	case IdentityStatusLocked:
+		return ErrAccountLocked
+	case IdentityStatusPendingInvite, IdentityStatusSuspended:
+		return ErrInvalidStatusTransition
+	case IdentityStatusActive:
+		// valid — proceed below
+	default:
+		return ErrInvalidStatusTransition
+	}
+
 	if success {
 		i.failedAttempts = 0
 		i.updatedAt = time.Now()

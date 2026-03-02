@@ -38,6 +38,6 @@ type Repository interface {
 	SaveInvitation(ctx context.Context, invitation *Invitation) error
 
 	// FindInvitationByTokenHash retrieves an invitation by the SHA256 hash of its token.
-	// Returns ErrIdentityNotFound if no matching record exists.
+	// Returns ErrInvitationNotFound if no matching invitation exists.
 	FindInvitationByTokenHash(ctx context.Context, tokenHash string) (*Invitation, error)
 }

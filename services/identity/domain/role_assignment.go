@@ -48,17 +48,24 @@ type RoleAssignment struct {
 }
 
 // NewRoleAssignment creates a new active role assignment.
-// Returns ErrInvalidRole if the role is not recognized.
-func NewRoleAssignment(identityID, grantedBy uuid.UUID, role string) (*RoleAssignment, error) {
-	if !IsValidRole(role) {
+// granterRole is the role held by the identity performing the grant; it is used
+// to enforce the privilege hierarchy via CanGrant so that high-privilege roles
+// cannot be assigned without proper authorization.
+// Returns ErrInvalidRole if targetRole is not recognized, and
+// ErrInsufficientRolePermissions if the granter lacks authority to assign targetRole.
+func NewRoleAssignment(identityID, grantedBy uuid.UUID, granterRole, targetRole string) (*RoleAssignment, error) {
+	if !IsValidRole(targetRole) {
 		return nil, ErrInvalidRole
+	}
+	if !CanGrant(granterRole, targetRole) {
+		return nil, ErrInsufficientRolePermissions
 	}
 	now := time.Now()
 	return &RoleAssignment{
 		id:         uuid.New(),
 		identityID: identityID,
 		grantedBy:  grantedBy,
-		role:       Role(role),
+		role:       Role(targetRole),
 		createdAt:  now,
 		updatedAt:  now,
 	}, nil

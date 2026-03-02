@@ -10,24 +10,28 @@ import (
 )
 
 func TestNewRoleAssignment_ValidRole(t *testing.T) {
-	roles := []string{
-		string(RoleViewer),
-		string(RoleOperator),
-		string(RoleAdmin),
-		string(RoleTenantOwner),
-		string(RolePlatform),
+	tests := []struct {
+		granter string
+		target  string
+	}{
+		{string(RolePlatform), string(RoleTenantOwner)},
+		{string(RolePlatform), string(RoleAdmin)},
+		{string(RolePlatform), string(RoleOperator)},
+		{string(RolePlatform), string(RoleViewer)},
+		{string(RoleTenantOwner), string(RoleAdmin)},
+		{string(RoleAdmin), string(RoleViewer)},
 	}
 	identityID := uuid.New()
 	grantedBy := uuid.New()
 
-	for _, role := range roles {
-		t.Run(role, func(t *testing.T) {
-			ra, err := NewRoleAssignment(identityID, grantedBy, role)
+	for _, tt := range tests {
+		t.Run(tt.granter+"->"+tt.target, func(t *testing.T) {
+			ra, err := NewRoleAssignment(identityID, grantedBy, tt.granter, tt.target)
 			require.NoError(t, err)
 			assert.NotEqual(t, uuid.Nil, ra.ID())
 			assert.Equal(t, identityID, ra.IdentityID())
 			assert.Equal(t, grantedBy, ra.GrantedBy())
-			assert.Equal(t, Role(role), ra.Role())
+			assert.Equal(t, Role(tt.target), ra.Role())
 			assert.True(t, ra.IsActive())
 			assert.Nil(t, ra.RevokedAt())
 			assert.Nil(t, ra.RevokedBy())
@@ -37,12 +41,35 @@ func TestNewRoleAssignment_ValidRole(t *testing.T) {
 }
 
 func TestNewRoleAssignment_InvalidRole(t *testing.T) {
-	_, err := NewRoleAssignment(uuid.New(), uuid.New(), "SUPERUSER")
+	_, err := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), "SUPERUSER")
 	assert.ErrorIs(t, err, ErrInvalidRole)
 }
 
+func TestNewRoleAssignment_InsufficientPermissions(t *testing.T) {
+	tests := []struct {
+		granter string
+		target  string
+	}{
+		// Operator cannot grant anyone
+		{string(RoleOperator), string(RoleViewer)},
+		// Viewer cannot grant anyone
+		{string(RoleViewer), string(RoleViewer)},
+		// Admin cannot grant itself or above
+		{string(RoleAdmin), string(RoleAdmin)},
+		{string(RoleAdmin), string(RoleTenantOwner)},
+		// TenantOwner cannot grant Platform
+		{string(RoleTenantOwner), string(RolePlatform)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.granter+"->"+tt.target, func(t *testing.T) {
+			_, err := NewRoleAssignment(uuid.New(), uuid.New(), tt.granter, tt.target)
+			assert.ErrorIs(t, err, ErrInsufficientRolePermissions)
+		})
+	}
+}
+
 func TestRoleAssignment_Revoke(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RoleViewer))
+	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RoleAdmin), string(RoleViewer))
 	assert.True(t, ra.IsActive())
 
 	revokedBy := uuid.New()
@@ -55,7 +82,7 @@ func TestRoleAssignment_Revoke(t *testing.T) {
 }
 
 func TestRoleAssignment_RevokeAlreadyRevoked(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RoleAdmin))
+	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), string(RoleAdmin))
 	_ = ra.Revoke(uuid.New())
 
 	err := ra.Revoke(uuid.New())
@@ -63,7 +90,7 @@ func TestRoleAssignment_RevokeAlreadyRevoked(t *testing.T) {
 }
 
 func TestRoleAssignment_IsActive_Expired(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RoleOperator))
+	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), string(RoleOperator))
 	// Set expiry in the past via reconstruction
 	past := time.Now().Add(-time.Hour)
 	ra2 := ReconstructRoleAssignment(
@@ -74,7 +101,7 @@ func TestRoleAssignment_IsActive_Expired(t *testing.T) {
 }
 
 func TestRoleAssignment_IsActive_NotExpired(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RoleOperator))
+	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), string(RoleOperator))
 	future := time.Now().Add(time.Hour)
 	ra2 := ReconstructRoleAssignment(
 		ra.ID(), ra.IdentityID(), ra.GrantedBy(), ra.Role(),

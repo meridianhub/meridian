@@ -215,6 +215,44 @@ func TestIdentity_UnlockResetFailedAttempts(t *testing.T) {
 	assert.Equal(t, IdentityStatusActive, identity.Status())
 }
 
+func TestIdentity_RecordLoginAttempt_GuardsNonActiveStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(*Identity)
+		expectedErr error
+	}{
+		{
+			name:        "pending invite",
+			setup:       func(_ *Identity) {},
+			expectedErr: ErrInvalidStatusTransition,
+		},
+		{
+			name: "suspended",
+			setup: func(id *Identity) {
+				_ = id.Activate()
+				_ = id.Suspend()
+			},
+			expectedErr: ErrInvalidStatusTransition,
+		},
+		{
+			name: "locked",
+			setup: func(id *Identity) {
+				_ = id.Activate()
+				_ = id.Lock()
+			},
+			expectedErr: ErrAccountLocked,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			identity, _ := NewIdentity("user@example.com")
+			tt.setup(identity)
+			err := identity.RecordLoginAttempt(false)
+			assert.ErrorIs(t, err, tt.expectedErr)
+		})
+	}
+}
+
 func TestIdentity_SetPassword(t *testing.T) {
 	identity, _ := NewIdentity("user@example.com")
 
