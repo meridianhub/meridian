@@ -59,6 +59,7 @@ func (r Role) IsValid() bool {
 // A role may only grant roles listed in its slice.
 // Unexported to prevent external mutation; use CanGrantRole or GetGrantableRoles for access.
 var roleHierarchy = map[Role][]Role{
+	RoleSuperAdmin:    {RolePlatformAdmin, RoleTenantOwner, RoleAdmin, RoleOperator, RoleAuditor},
 	RolePlatformAdmin: {RoleTenantOwner, RoleAdmin, RoleOperator, RoleAuditor},
 	RoleTenantOwner:   {RoleAdmin, RoleOperator, RoleAuditor},
 	RoleAdmin:         {RoleOperator, RoleAuditor},
@@ -161,6 +162,15 @@ var rolePermissions = map[Role]map[ResourceType][]Permission{
 	},
 	// RolePlatformAdmin: cross-tenant access and tenant provisioning
 	RolePlatformAdmin: {
+		ResourceTypeAccount:     {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypePosition:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeTransaction: {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeAudit:       {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeSystem:      {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+		ResourceTypeIdentity:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
+	},
+	// RoleSuperAdmin: unrestricted platform-wide access
+	RoleSuperAdmin: {
 		ResourceTypeAccount:     {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
 		ResourceTypePosition:    {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
 		ResourceTypeTransaction: {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},

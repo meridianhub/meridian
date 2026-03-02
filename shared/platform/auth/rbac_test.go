@@ -504,6 +504,14 @@ func TestCanGrantRole(t *testing.T) {
 		targetRole   Role
 		expected     bool
 	}{
+		// super-admin can grant all roles including platform-admin
+		{"super-admin can grant platform-admin", []Role{RoleSuperAdmin}, RolePlatformAdmin, true},
+		{"super-admin can grant tenant-owner", []Role{RoleSuperAdmin}, RoleTenantOwner, true},
+		{"super-admin can grant admin", []Role{RoleSuperAdmin}, RoleAdmin, true},
+		{"super-admin can grant operator", []Role{RoleSuperAdmin}, RoleOperator, true},
+		{"super-admin can grant auditor", []Role{RoleSuperAdmin}, RoleAuditor, true},
+		{"super-admin cannot grant service", []Role{RoleSuperAdmin}, RoleService, false},
+
 		// platform-admin can grant tenant-owner, admin, operator, auditor
 		{"platform-admin can grant tenant-owner", []Role{RolePlatformAdmin}, RoleTenantOwner, true},
 		{"platform-admin can grant admin", []Role{RolePlatformAdmin}, RoleAdmin, true},
@@ -601,6 +609,30 @@ func TestPlatformAdminPermissions(t *testing.T) {
 			claims := &Claims{Roles: []string{RolePlatformAdmin.String()}}
 			if got := HasPermission(claims, tt.resourceType, tt.permission); got != tt.expected {
 				t.Errorf("HasPermission(platform-admin, %s, %s) = %v, want %v", tt.resourceType, tt.permission, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSuperAdminPermissions(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceType ResourceType
+		permission   Permission
+		expected     bool
+	}{
+		{"super-admin can read accounts", ResourceTypeAccount, PermissionRead, true},
+		{"super-admin can write accounts", ResourceTypeAccount, PermissionWrite, true},
+		{"super-admin can delete accounts", ResourceTypeAccount, PermissionDelete, true},
+		{"super-admin can write system", ResourceTypeSystem, PermissionWrite, true},
+		{"super-admin can execute identity", ResourceTypeIdentity, PermissionExecute, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := &Claims{Roles: []string{RoleSuperAdmin.String()}}
+			if got := HasPermission(claims, tt.resourceType, tt.permission); got != tt.expected {
+				t.Errorf("HasPermission(super-admin, %s, %s) = %v, want %v", tt.resourceType, tt.permission, got, tt.expected)
 			}
 		})
 	}
