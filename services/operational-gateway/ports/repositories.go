@@ -74,11 +74,6 @@ type InstructionRepository interface {
 	FetchDispatchable(ctx context.Context, params FetchDispatchableParams) ([]*domain.Instruction, error)
 }
 
-// Route repository errors.
-var (
-	ErrRouteNotFound = errors.New("instruction route not found")
-)
-
 // RouteRepository defines persistence operations for instruction routes.
 type RouteRepository interface {
 	// Upsert creates or fully replaces an instruction route configuration.
