@@ -133,6 +133,47 @@ func createSchema(db *gorm.DB) error {
 			}
 		}
 	}
+
+	// Fix health_status CHECK: initial migration used UNSPECIFIED but the domain uses UNKNOWN.
+	// Query the actual constraint name from information_schema since CockroachDB auto-generates
+	// names that differ from PostgreSQL conventions.
+	if err := fixHealthStatusCheck(db); err != nil {
+		return fmt.Errorf("fix health_status check: %w", err)
+	}
+
+	return nil
+}
+
+// fixHealthStatusCheck drops the old health_status CHECK constraint (which allows UNSPECIFIED)
+// and replaces it with one that allows UNKNOWN, matching the domain model.
+func fixHealthStatusCheck(db *gorm.DB) error {
+	var constraintName string
+	if err := db.Raw(`
+		SELECT tc.constraint_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.check_constraints cc
+		  ON tc.constraint_name = cc.constraint_name
+		  AND tc.constraint_schema = cc.constraint_schema
+		WHERE tc.table_name = 'provider_connections'
+		  AND tc.constraint_type = 'CHECK'
+		  AND cc.check_clause LIKE '%UNSPECIFIED%'
+		LIMIT 1
+	`).Scan(&constraintName).Error; err != nil {
+		return fmt.Errorf("query CHECK constraint: %w", err)
+	}
+	if constraintName == "" {
+		return nil // no constraint to fix
+	}
+
+	if err := db.Exec("ALTER TABLE provider_connections DROP CONSTRAINT " + constraintName).Error; err != nil {
+		return fmt.Errorf("drop old CHECK: %w", err)
+	}
+	if err := db.Exec("ALTER TABLE provider_connections ALTER COLUMN health_status SET DEFAULT 'UNKNOWN'").Error; err != nil {
+		return fmt.Errorf("set default: %w", err)
+	}
+	if err := db.Exec("ALTER TABLE provider_connections ADD CONSTRAINT provider_connections_health_status_check CHECK (health_status IN ('UNKNOWN', 'HEALTHY', 'DEGRADED', 'UNHEALTHY'))").Error; err != nil {
+		return fmt.Errorf("add new CHECK: %w", err)
+	}
 	return nil
 }
 
