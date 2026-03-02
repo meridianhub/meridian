@@ -209,6 +209,7 @@ write_schema_properties() {
   local output="$3"
 
   if [ -z "$proto_file" ] || [ ! -f "$proto_file" ]; then
+    echo "  WARNING: unresolved proto message '${proto_msg}' — schema will use placeholder" >&2
     cat >> "$output" <<'PROPEOF'
         event_type:
           type: string
