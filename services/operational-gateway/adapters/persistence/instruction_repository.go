@@ -292,7 +292,7 @@ func (r *InstructionRepository) FindExpired(ctx context.Context, batchSize int) 
 
 	var entities []InstructionEntity
 	err := r.db.WithContext(ctx).
-		Where("expires_at IS NOT NULL AND expires_at < ? AND status IN ?", time.Now(), []string{
+		Where("expires_at IS NOT NULL AND expires_at < ? AND status IN ?", gorm.Expr("NOW()"), []string{
 			string(domain.InstructionStatusPending),
 			string(domain.InstructionStatusRetrying),
 		}).
