@@ -55,18 +55,31 @@ func (r Role) IsValid() bool {
 	}
 }
 
-// RoleHierarchy defines which roles a granter role is permitted to assign.
+// roleHierarchy defines which roles a granter role is permitted to assign.
 // A role may only grant roles listed in its slice.
-var RoleHierarchy = map[Role][]Role{
+// Unexported to prevent external mutation; use CanGrantRole or GetGrantableRoles for access.
+var roleHierarchy = map[Role][]Role{
 	RolePlatformAdmin: {RoleTenantOwner, RoleAdmin, RoleOperator, RoleAuditor},
 	RoleTenantOwner:   {RoleAdmin, RoleOperator, RoleAuditor},
 	RoleAdmin:         {RoleOperator, RoleAuditor},
 }
 
+// GetGrantableRoles returns a copy of the roles that the given granter role is permitted to assign.
+// Returns nil if the granter role has no delegation authority.
+func GetGrantableRoles(granter Role) []Role {
+	grantable := roleHierarchy[granter]
+	if len(grantable) == 0 {
+		return nil
+	}
+	result := make([]Role, len(grantable))
+	copy(result, grantable)
+	return result
+}
+
 // CanGrantRole reports whether any role in granterRoles is permitted to assign targetRole.
 func CanGrantRole(granterRoles []Role, targetRole Role) bool {
 	for _, granter := range granterRoles {
-		for _, grantable := range RoleHierarchy[granter] {
+		for _, grantable := range roleHierarchy[granter] {
 			if grantable == targetRole {
 				return true
 			}

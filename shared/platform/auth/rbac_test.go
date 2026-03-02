@@ -548,8 +548,8 @@ func TestCanGrantRole(t *testing.T) {
 }
 
 func TestRoleHierarchy_NotNil(t *testing.T) {
-	if RoleHierarchy == nil {
-		t.Error("RoleHierarchy should not be nil")
+	if roleHierarchy == nil {
+		t.Error("roleHierarchy should not be nil")
 	}
 }
 
