@@ -64,7 +64,8 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	ctx := context.Background()
+	ctx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
 	cfg := config.LoadConfig()
 
 	// Initialize OpenTelemetry tracer.
@@ -176,16 +177,16 @@ func run(logger *slog.Logger) error {
 		logger,
 	)
 
-	// Start background workers.
-	dispatchWorker.Start(ctx)
-	expiryWorker.Start(ctx)
-
-	// Create listener.
+	// Create listener before starting workers to fail fast if the port is unavailable.
 	address := fmt.Sprintf(":%s", cfg.GRPCPort)
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", address)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", address, err)
 	}
+
+	// Start background workers after listener is ready.
+	dispatchWorker.Start(ctx)
+	expiryWorker.Start(ctx)
 
 	// Start gRPC server in background.
 	serverErrors := make(chan error, 1)
@@ -210,7 +211,7 @@ func run(logger *slog.Logger) error {
 	})
 
 	orchestrator.AddCleanup(func() error {
-		bootstrap.CloseDatabase(db, logger)
+		runCancel()
 		return nil
 	})
 
