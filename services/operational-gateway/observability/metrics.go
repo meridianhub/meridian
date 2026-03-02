@@ -38,11 +38,11 @@ var (
 	)
 
 	// circuitBreakerState tracks the circuit breaker state per connection.
-	// Values: 0 = CLOSED, 1 = HALF_OPEN, 2 = OPEN.
+	// One time series per state label: active state is 1, inactive states are 0.
 	circuitBreakerState = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "meridian_gateway_circuit_breaker_state",
-			Help: "Current circuit breaker state per provider connection (0=closed, 1=half-open, 2=open).",
+			Help: "One-hot circuit breaker state per provider connection and state label (1=active, 0=inactive).",
 		},
 		[]string{"tenant", "connection_id", "state"},
 	)

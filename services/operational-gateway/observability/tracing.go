@@ -27,10 +27,11 @@ func StartSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (c
 
 // RecordError marks a span as having errored and records the error message.
 func RecordError(span trace.Span, err error) {
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+	if err == nil || span == nil {
+		return
 	}
+	span.RecordError(err)
+	span.SetStatus(codes.Error, "error")
 }
 
 // Common attribute keys for operational gateway spans.
