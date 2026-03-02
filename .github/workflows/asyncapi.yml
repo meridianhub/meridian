@@ -1,0 +1,85 @@
+name: AsyncAPI Contract Validation
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'api/asyncapi/**'
+      - 'gen/events/**'
+      - 'tools/gen-event-publishers/**'
+      - 'shared/platform/events/topics/**'
+      - 'api/proto/meridian/events/**'
+      - '.github/workflows/asyncapi.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'api/asyncapi/**'
+      - 'gen/events/**'
+      - 'tools/gen-event-publishers/**'
+      - 'shared/platform/events/topics/**'
+      - 'api/proto/meridian/events/**'
+      - '.github/workflows/asyncapi.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  asyncapi-validate:
+    name: AsyncAPI Contract Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install AsyncAPI CLI
+        run: npm install -g @asyncapi/cli@latest
+
+      - name: Validate AsyncAPI specs
+        run: |
+          echo "Validating AsyncAPI spec files..."
+          FAILED=0
+          for spec in api/asyncapi/*.yaml; do
+            echo "Validating $spec..."
+            if asyncapi validate "$spec"; then
+              echo "  PASSED: $spec"
+            else
+              echo "  FAILED: $spec"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "ERROR: One or more AsyncAPI specs failed validation."
+            echo "Fix the errors above, then re-run."
+            exit 1
+          fi
+          echo ""
+          echo "All AsyncAPI specs are valid."
+
+      - name: Verify generated event publishers are in sync
+        run: |
+          go run ./tools/gen-event-publishers
+          if ! git diff --exit-code gen/events/; then
+            echo ""
+            echo "ERROR: Generated event publishers are out of sync with AsyncAPI specs."
+            echo "Run 'make gen-event-publishers' locally and commit the result."
+            exit 1
+          fi
+          echo "Generated event publishers are in sync."

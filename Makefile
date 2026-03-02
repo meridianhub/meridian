@@ -32,7 +32,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build seed-dev seed-dev-build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean asyncapi gen-event-publishers
+.PHONY: all help build seed-dev seed-dev-build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean asyncapi asyncapi-validate gen-event-publishers
 
 # Default target
 all: help
@@ -88,6 +88,7 @@ help:
 	@echo "Documentation targets:"
 	@echo "  make generate-saga-docs        - Generate Markdown and JSON Schema docs for saga handlers"
 	@echo "  make gen-event-publishers      - Generate typed event publishers from AsyncAPI specs"
+	@echo "  make asyncapi-validate         - Validate AsyncAPI specs and check generated publishers are in sync"
 	@echo ""
 	@echo "API Explorer targets:"
 	@echo "  make swagger-split             - Split monolithic swagger into per-service files"
@@ -496,6 +497,23 @@ asyncapi:
 	@echo "Generating AsyncAPI specs..."
 	@./scripts/gen-asyncapi.sh
 	@echo "AsyncAPI specs generated in api/asyncapi/"
+
+## asyncapi-validate: Validate AsyncAPI specs and check generated publishers are in sync
+asyncapi-validate:
+	@echo "Validating AsyncAPI specs..."
+	@FAILED=0; \
+	for spec in api/asyncapi/*.yaml; do \
+	  echo "  Validating $$spec..."; \
+	  asyncapi validate "$$spec" || FAILED=1; \
+	done; \
+	if [ "$$FAILED" -eq 1 ]; then \
+	  echo "ERROR: One or more AsyncAPI specs failed validation."; \
+	  exit 1; \
+	fi
+	@echo "Checking generated event publishers are in sync..."
+	@$(GOCMD) run ./tools/gen-event-publishers
+	@git diff --exit-code gen/events/ || (echo "ERROR: Generated event publishers are out of sync. Run 'make gen-event-publishers' to regenerate." && exit 1)
+	@echo "All AsyncAPI specs valid and generated publishers are in sync."
 
 ## gen-event-publishers: Generate typed event publishers from AsyncAPI specs
 gen-event-publishers:
