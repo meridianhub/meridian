@@ -1,0 +1,443 @@
+asyncapi: 3.0.0
+info:
+  title: "Payment Order Events"
+  version: 1.0.0
+  description: "Payment order lifecycle state transition events"
+servers:
+  kafka:
+    host: kafka:9092
+    protocol: kafka
+channels:
+  payment-order.initiated.v1:
+    address: "payment-order.initiated.v1"
+    description: "Published when a new payment order is initiated"
+    messages:
+      PaymentOrderInitiated:
+        $ref: '#/components/messages/PaymentOrderInitiated'
+  payment-order.reserved.v1:
+    address: "payment-order.reserved.v1"
+    description: "Published when funds are successfully reserved for a payment order"
+    messages:
+      PaymentOrderReserved:
+        $ref: '#/components/messages/PaymentOrderReserved'
+  payment-order.executing.v1:
+    address: "payment-order.executing.v1"
+    description: "Published when a payment order begins execution with the payment gateway"
+    messages:
+      PaymentOrderExecuting:
+        $ref: '#/components/messages/PaymentOrderExecuting'
+  payment-order.completed.v1:
+    address: "payment-order.completed.v1"
+    description: "Published when a payment order successfully completes"
+    messages:
+      PaymentOrderCompleted:
+        $ref: '#/components/messages/PaymentOrderCompleted'
+  payment-order.failed.v1:
+    address: "payment-order.failed.v1"
+    description: "Published when a payment order fails and cannot be retried"
+    messages:
+      PaymentOrderFailed:
+        $ref: '#/components/messages/PaymentOrderFailed'
+  payment-order.cancelled.v1:
+    address: "payment-order.cancelled.v1"
+    description: "Published when a payment order is cancelled before execution"
+    messages:
+      PaymentOrderCancelled:
+        $ref: '#/components/messages/PaymentOrderCancelled'
+  payment-order.reversed.v1:
+    address: "payment-order.reversed.v1"
+    description: "Published when a completed payment order is reversed"
+    messages:
+      PaymentOrderReversed:
+        $ref: '#/components/messages/PaymentOrderReversed'
+operations:
+  publishInitiated:
+    action: send
+    channel:
+      $ref: '#/channels/payment-order.initiated.v1'
+  publishReserved:
+    action: send
+    channel:
+      $ref: '#/channels/payment-order.reserved.v1'
+  publishExecuting:
+    action: send
+    channel:
+      $ref: '#/channels/payment-order.executing.v1'
+  publishCompleted:
+    action: send
+    channel:
+      $ref: '#/channels/payment-order.completed.v1'
+  publishFailed:
+    action: send
+    channel:
+      $ref: '#/channels/payment-order.failed.v1'
+  publishCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/payment-order.cancelled.v1'
+  publishReversed:
+    action: send
+    channel:
+      $ref: '#/channels/payment-order.reversed.v1'
+components:
+  messages:
+    PaymentOrderInitiated:
+      name: "PaymentOrderInitiated"
+      title: "PaymentOrderInitiated"
+      description: "Published when a new payment order is initiated"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "payment_order_id"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PaymentOrderInitiated'
+    PaymentOrderReserved:
+      name: "PaymentOrderReserved"
+      title: "PaymentOrderReserved"
+      description: "Published when funds are successfully reserved for a payment order"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "payment_order_id"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PaymentOrderReserved'
+    PaymentOrderExecuting:
+      name: "PaymentOrderExecuting"
+      title: "PaymentOrderExecuting"
+      description: "Published when a payment order begins execution with the payment gateway"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "payment_order_id"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PaymentOrderExecuting'
+    PaymentOrderCompleted:
+      name: "PaymentOrderCompleted"
+      title: "PaymentOrderCompleted"
+      description: "Published when a payment order successfully completes"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "payment_order_id"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PaymentOrderCompleted'
+    PaymentOrderFailed:
+      name: "PaymentOrderFailed"
+      title: "PaymentOrderFailed"
+      description: "Published when a payment order fails and cannot be retried"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "payment_order_id"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PaymentOrderFailed'
+    PaymentOrderCancelled:
+      name: "PaymentOrderCancelled"
+      title: "PaymentOrderCancelled"
+      description: "Published when a payment order is cancelled before execution"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "payment_order_id"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PaymentOrderCancelled'
+    PaymentOrderReversed:
+      name: "PaymentOrderReversed"
+      title: "PaymentOrderReversed"
+      description: "Published when a completed payment order is reversed"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "payment_order_id"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PaymentOrderReversed'
+  schemas:
+    PaymentOrderInitiated:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PaymentOrderInitiatedEvent"
+      properties:
+        event_id:
+          type: string
+        payment_order_id:
+          type: string
+        debtor_account_id:
+          type: string
+        creditor_reference:
+          type: string
+        amount:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        idempotency_key:
+          type: string
+    PaymentOrderReserved:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PaymentOrderReservedEvent"
+      properties:
+        event_id:
+          type: string
+        payment_order_id:
+          type: string
+        debtor_account_id:
+          type: string
+        lien_id:
+          type: string
+        amount:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        idempotency_key:
+          type: string
+    PaymentOrderExecuting:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PaymentOrderExecutingEvent"
+      properties:
+        event_id:
+          type: string
+        payment_order_id:
+          type: string
+        gateway_reference_id:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        idempotency_key:
+          type: string
+    PaymentOrderCompleted:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PaymentOrderCompletedEvent"
+      properties:
+        event_id:
+          type: string
+        payment_order_id:
+          type: string
+        debtor_account_id:
+          type: string
+        amount:
+          type: string
+        lien_id:
+          type: string
+        gateway_reference_id:
+          type: string
+        ledger_booking_id:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        idempotency_key:
+          type: string
+    PaymentOrderFailed:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PaymentOrderFailedEvent"
+      properties:
+        event_id:
+          type: string
+        payment_order_id:
+          type: string
+        debtor_account_id:
+          type: string
+        amount:
+          type: string
+        failure_reason:
+          type: string
+        error_code:
+          type: string
+        failed_at_status:
+          type: string
+        lien_id:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        idempotency_key:
+          type: string
+    PaymentOrderCancelled:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PaymentOrderCancelledEvent"
+      properties:
+        event_id:
+          type: string
+        payment_order_id:
+          type: string
+        debtor_account_id:
+          type: string
+        amount:
+          type: string
+        cancellation_reason:
+          type: string
+        cancelled_by:
+          type: string
+        lien_id:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        idempotency_key:
+          type: string
+    PaymentOrderReversed:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PaymentOrderReversedEvent"
+      properties:
+        event_id:
+          type: string
+        payment_order_id:
+          type: string
+        debtor_account_id:
+          type: string
+        amount:
+          type: string
+        reversal_reason:
+          type: string
+        reversed_by:
+          type: string
+        original_ledger_booking_id:
+          type: string
+        compensating_ledger_booking_id:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        idempotency_key:
+          type: string

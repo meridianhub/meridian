@@ -1,0 +1,58 @@
+asyncapi: 3.0.0
+info:
+  title: "Audit Events"
+  version: 1.0.0
+  description: "Audit trail events for compliance and observability"
+servers:
+  kafka:
+    host: kafka:9092
+    protocol: kafka
+channels:
+  audit.events.v1:
+    address: "audit.events.v1"
+    description: "Audit events for all service operations"
+    messages:
+      AuditEvent:
+        $ref: '#/components/messages/AuditEvent'
+  audit.events.v1.dlq:
+    address: "audit.events.v1.dlq"
+    description: "Dead letter queue for audit events that could not be processed"
+operations:
+  publishEvents:
+    action: send
+    channel:
+      $ref: '#/channels/audit.events.v1'
+  publishEventsDlq:
+    action: send
+    channel:
+      $ref: '#/channels/audit.events.v1.dlq'
+components:
+  messages:
+    AuditEvent:
+      name: "AuditEvent"
+      title: "AuditEvent"
+      description: "Audit events for all service operations"
+      contentType: application/protobuf
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/AuditEvent'
+  schemas:
+    AuditEvent:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.AuditEvent"
+      properties:
+        event_type:
+          type: string
+          description: "Proto definition not yet available in api/proto/meridian/events/v1/"
