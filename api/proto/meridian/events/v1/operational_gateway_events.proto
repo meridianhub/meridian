@@ -1,0 +1,251 @@
+syntax = "proto3";
+
+package meridian.events.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v1;eventsv1";
+
+// InstructionCreatedEvent is published when a new instruction is accepted and enters PENDING state.
+message InstructionCreatedEvent {
+  // event_id uniquely identifies this event instance.
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // instruction_id is the unique identifier for the instruction.
+  string instruction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction.
+  string tenant_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection that will be used for dispatch.
+  string provider_connection_id = 5 [(buf.validate.field).string.max_len = 36];
+
+  // correlation_id links related events across services.
+  string correlation_id = 6 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction.
+  string causation_id = 7 [(buf.validate.field).string.max_len = 255];
+
+  // occurred_at is when the instruction was created.
+  google.protobuf.Timestamp occurred_at = 8 [(buf.validate.field).required = true];
+
+  // version is the aggregate version at the time of this event.
+  int64 version = 9 [(buf.validate.field).int64.gte = 0];
+}
+
+// InstructionDispatchedEvent is published when an instruction transitions to DISPATCHING state.
+message InstructionDispatchedEvent {
+  // event_id uniquely identifies this event instance.
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // instruction_id is the unique identifier for the instruction.
+  string instruction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction.
+  string tenant_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection being used for dispatch.
+  string provider_connection_id = 5 [(buf.validate.field).string.max_len = 36];
+
+  // attempt_number is the 1-based attempt ordinal for this dispatch.
+  int32 attempt_number = 6 [(buf.validate.field).int32.gte = 1];
+
+  // correlation_id links related events across services.
+  string correlation_id = 7 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction.
+  string causation_id = 8 [(buf.validate.field).string.max_len = 255];
+
+  // occurred_at is when the dispatch was initiated.
+  google.protobuf.Timestamp occurred_at = 9 [(buf.validate.field).required = true];
+
+  // version is the aggregate version at the time of this event.
+  int64 version = 10 [(buf.validate.field).int64.gte = 0];
+}
+
+// InstructionDeliveredEvent is published when an instruction is successfully delivered to the provider.
+message InstructionDeliveredEvent {
+  // event_id uniquely identifies this event instance.
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // instruction_id is the unique identifier for the instruction.
+  string instruction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction.
+  string tenant_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection that was used for dispatch.
+  string provider_connection_id = 5 [(buf.validate.field).string.max_len = 36];
+
+  // correlation_id links related events across services.
+  string correlation_id = 6 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction.
+  string causation_id = 7 [(buf.validate.field).string.max_len = 255];
+
+  // occurred_at is when delivery was confirmed.
+  google.protobuf.Timestamp occurred_at = 8 [(buf.validate.field).required = true];
+
+  // version is the aggregate version at the time of this event.
+  int64 version = 9 [(buf.validate.field).int64.gte = 0];
+}
+
+// InstructionAcknowledgedEvent is published when a provider confirms it has processed the instruction.
+message InstructionAcknowledgedEvent {
+  // event_id uniquely identifies this event instance.
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // instruction_id is the unique identifier for the instruction.
+  string instruction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction.
+  string tenant_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection that was used for dispatch.
+  string provider_connection_id = 5 [(buf.validate.field).string.max_len = 36];
+
+  // correlation_id links related events across services.
+  string correlation_id = 6 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction.
+  string causation_id = 7 [(buf.validate.field).string.max_len = 255];
+
+  // occurred_at is when the acknowledgement was received.
+  google.protobuf.Timestamp occurred_at = 8 [(buf.validate.field).required = true];
+
+  // version is the aggregate version at the time of this event.
+  int64 version = 9 [(buf.validate.field).int64.gte = 0];
+}
+
+// InstructionFailedEvent is published when an instruction permanently fails after exhausting retries.
+message InstructionFailedEvent {
+  // event_id uniquely identifies this event instance.
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // instruction_id is the unique identifier for the instruction.
+  string instruction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction.
+  string tenant_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection that was used for dispatch.
+  string provider_connection_id = 5 [(buf.validate.field).string.max_len = 36];
+
+  // failure_reason describes why the instruction failed.
+  string failure_reason = 6 [(buf.validate.field).string.max_len = 2048];
+
+  // error_code is the provider-specific or system error code.
+  string error_code = 7 [(buf.validate.field).string.max_len = 128];
+
+  // attempt_count is the total number of dispatch attempts made.
+  int32 attempt_count = 8 [(buf.validate.field).int32.gte = 0];
+
+  // correlation_id links related events across services.
+  string correlation_id = 9 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction.
+  string causation_id = 10 [(buf.validate.field).string.max_len = 255];
+
+  // occurred_at is when the instruction entered FAILED state.
+  google.protobuf.Timestamp occurred_at = 11 [(buf.validate.field).required = true];
+
+  // version is the aggregate version at the time of this event.
+  int64 version = 12 [(buf.validate.field).int64.gte = 0];
+}
+
+// InstructionExpiredEvent is published when an instruction expires before being delivered.
+message InstructionExpiredEvent {
+  // event_id uniquely identifies this event instance.
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // instruction_id is the unique identifier for the instruction.
+  string instruction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction.
+  string tenant_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection associated with this instruction.
+  string provider_connection_id = 5 [(buf.validate.field).string.max_len = 36];
+
+  // correlation_id links related events across services.
+  string correlation_id = 6 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction.
+  string causation_id = 7 [(buf.validate.field).string.max_len = 255];
+
+  // occurred_at is when the instruction expired.
+  google.protobuf.Timestamp occurred_at = 8 [(buf.validate.field).required = true];
+
+  // version is the aggregate version at the time of this event.
+  int64 version = 9 [(buf.validate.field).int64.gte = 0];
+}
+
+// InstructionCancelledEvent is published when a pending instruction is explicitly cancelled.
+message InstructionCancelledEvent {
+  // event_id uniquely identifies this event instance.
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // instruction_id is the unique identifier for the instruction.
+  string instruction_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // tenant_id is the tenant that owns this instruction.
+  string tenant_id = 3 [(buf.validate.field).string.uuid = true];
+
+  // instruction_type identifies the category of operation being requested.
+  string instruction_type = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // provider_connection_id is the connection associated with this instruction.
+  string provider_connection_id = 5 [(buf.validate.field).string.max_len = 36];
+
+  // correlation_id links related events across services.
+  string correlation_id = 6 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that caused this instruction.
+  string causation_id = 7 [(buf.validate.field).string.max_len = 255];
+
+  // occurred_at is when the instruction was cancelled.
+  google.protobuf.Timestamp occurred_at = 8 [(buf.validate.field).required = true];
+
+  // version is the aggregate version at the time of this event.
+  int64 version = 9 [(buf.validate.field).int64.gte = 0];
+}
