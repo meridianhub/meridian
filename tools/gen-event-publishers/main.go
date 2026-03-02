@@ -241,33 +241,7 @@ func processAsyncAPIFile(path string, knownProtoTypes map[string]bool) (*Service
 			continue
 		}
 
-		// Get the first (and typically only) message key from the channel.
-		var msgKey string
-		for k := range channel.Messages {
-			msgKey = k
-			break
-		}
-		if msgKey == "" {
-			continue
-		}
-
-		// Look up the proto type from the schema name.
-		protoType, ok := schemaToProto[msgKey]
-		if !ok {
-			continue
-		}
-
-		topic := channel.Address
-		eventType := topicToEventType(topic)
-		methodName := "Publish" + msgKey
-
-		events = append(events, EventDef{
-			MethodName:  methodName,
-			ProtoType:   protoType,
-			Topic:       topic,
-			EventType:   eventType,
-			Description: channel.Description,
-		})
+		events = append(events, resolveChannelEvents(channel, spec.Components, schemaToProto)...)
 	}
 
 	if len(events) == 0 {
@@ -286,6 +260,48 @@ func processAsyncAPIFile(path string, knownProtoTypes map[string]bool) (*Service
 		Events:       events,
 		ModulePath:   modulePath,
 	}, nil
+}
+
+// resolveChannelEvents follows the $ref chain for each message in a channel
+// and returns EventDefs for messages with known proto types.
+func resolveChannelEvents(channel Channel, components Components, schemaToProto map[string]string) []EventDef {
+	// Iterate messages deterministically by sorting keys.
+	msgKeys := make([]string, 0, len(channel.Messages))
+	for k := range channel.Messages {
+		msgKeys = append(msgKeys, k)
+	}
+	sort.Strings(msgKeys)
+
+	var out []EventDef
+	for _, msgKey := range msgKeys {
+		msg := channel.Messages[msgKey]
+
+		// Follow the explicit $ref chain: message -> component message -> payload schema.
+		componentName := strings.TrimPrefix(msg.Ref, "#/components/messages/")
+		component, ok := components.Messages[componentName]
+		if !ok {
+			continue
+		}
+		schemaName := strings.TrimPrefix(component.Payload.Ref, "#/components/schemas/")
+
+		protoType, ok := schemaToProto[schemaName]
+		if !ok {
+			continue
+		}
+
+		topic := channel.Address
+		eventType := topicToEventType(topic)
+		methodName := "Publish" + componentName
+
+		out = append(out, EventDef{
+			MethodName:  methodName,
+			ProtoType:   protoType,
+			Topic:       topic,
+			EventType:   eventType,
+			Description: channel.Description,
+		})
+	}
+	return out
 }
 
 // topicToEventType converts "position-keeping.transaction-captured.v1" to "position_keeping.transaction_captured.v1".

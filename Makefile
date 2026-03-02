@@ -87,6 +87,7 @@ help:
 	@echo ""
 	@echo "Documentation targets:"
 	@echo "  make generate-saga-docs        - Generate Markdown and JSON Schema docs for saga handlers"
+	@echo "  make gen-event-publishers      - Generate typed event publishers from AsyncAPI specs"
 	@echo ""
 	@echo "API Explorer targets:"
 	@echo "  make swagger-split             - Split monolithic swagger into per-service files"
