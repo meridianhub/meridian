@@ -98,8 +98,15 @@ func run(logger *slog.Logger) error {
 		WithAuthInterceptor(authInterceptor).
 		Build()
 
-	// Register ApplyManifestService
-	if err := service.RegisterApplyManifestService(grpcServer, pool, nil, logger); err != nil {
+	// Register ApplyManifestService.
+	// HandlerDeps is nil here: this binary validates, diffs, and plans manifests
+	// but defers saga execution to the unified binary which has access to downstream
+	// service connections (reference_data, internal_account, operational_gateway).
+	if err := service.RegisterApplyManifestService(grpcServer, service.ApplyManifestServiceConfig{
+		Pool:        pool,
+		Logger:      logger,
+		HandlerDeps: nil,
+	}); err != nil {
 		return fmt.Errorf("failed to register control-plane service: %w", err)
 	}
 

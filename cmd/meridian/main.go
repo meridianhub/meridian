@@ -799,9 +799,13 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 
 func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
 	// Register ApplyManifestService without executor for now.
-	// The executor requires gRPC client adapters for downstream services
-	// (reference-data, internal-account) which will be wired in a follow-up.
-	if err := controlplaneservice.RegisterApplyManifestService(server, pool, nil, logger); err != nil {
+	// HandlerDeps (reference-data, internal-account, operational-gateway gRPC clients)
+	// will be wired in a follow-up once cross-service connections are established here.
+	if err := controlplaneservice.RegisterApplyManifestService(server, controlplaneservice.ApplyManifestServiceConfig{
+		Pool:        pool,
+		Logger:      logger,
+		HandlerDeps: nil,
+	}); err != nil {
 		return err
 	}
 	logger.Info("registered control-plane service (ApplyManifestService)")

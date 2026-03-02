@@ -365,14 +365,14 @@ func (h *ApplyManifestHandler) execute(
 	execPlan *planner.ExecutionPlan,
 ) executeOutput {
 	if h.executor == nil {
-		// No executor configured - this is valid for lightweight deployments
-		// where the RPC just validates + plans without saga execution.
+		// No executor configured - reject non-dry-run applies to prevent
+		// acknowledging applies without actually executing them.
 		return executeOutput{
-			jobID: uuid.New().String(),
+			err: ErrExecutorNotConfigured,
 			stepResult: &controlplanev1.StepResult{
 				StepName: "execute",
-				Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_SUCCESS,
-				Message:  fmt.Sprintf("Plan accepted: %d calls across %d phases (executor not configured)", len(execPlan.Calls), len(execPlan.Phases())),
+				Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
+				Message:  "Executor not configured: this deployment only supports validation and dry-run",
 			},
 		}
 	}
@@ -485,5 +485,85 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 		})
 	}
 
+	if gw := mf.GetOperationalGateway(); gw != nil {
+		for _, conn := range gw.GetProviderConnections() {
+			pc := ProviderConnectionInput{
+				ConnectionID: conn.GetConnectionId(),
+				ProviderName: conn.GetProviderName(),
+				ProviderType: conn.GetProviderType(),
+				Protocol:     conn.GetProtocol().String(),
+				BaseURL:      conn.GetBaseUrl(),
+			}
+			pc.AuthType, pc.AuthConfig = extractAuthConfig(conn.GetAuth())
+			if rp := conn.GetRetryPolicy(); rp != nil {
+				pc.RetryPolicy = map[string]any{
+					"max_attempts":            rp.GetMaxAttempts(),
+					"initial_backoff_seconds": rp.GetInitialBackoffSeconds(),
+					"max_backoff_seconds":     rp.GetMaxBackoffSeconds(),
+					"backoff_multiplier":      rp.GetBackoffMultiplier(),
+				}
+			}
+			if rl := conn.GetRateLimit(); rl != nil {
+				pc.RateLimitConfig = map[string]any{
+					"requests_per_second": rl.GetRequestsPerSecond(),
+					"burst_size":          rl.GetBurstSize(),
+				}
+			}
+			input.ProviderConnections = append(input.ProviderConnections, pc)
+		}
+
+		for _, route := range gw.GetInstructionRoutes() {
+			input.InstructionRoutes = append(input.InstructionRoutes, InstructionRouteInput{
+				InstructionType:      route.GetInstructionType(),
+				ConnectionID:         route.GetConnectionId(),
+				FallbackConnectionID: route.GetFallbackConnectionId(),
+				OutboundMapping:      route.GetOutboundMappingId(),
+				InboundMapping:       route.GetInboundMappingId(),
+				HTTPMethod:           route.GetHttpMethod(),
+				PathTemplate:         route.GetPathTemplate(),
+			})
+		}
+	}
+
 	return input
+}
+
+// extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).
+func extractAuthConfig(auth *controlplanev1.AuthConfigManifest) (string, map[string]any) {
+	if auth == nil {
+		return "", nil
+	}
+	switch v := auth.GetAuthConfig().(type) {
+	case *controlplanev1.AuthConfigManifest_ApiKey:
+		return "api_key", map[string]any{
+			"header_name": v.ApiKey.GetHeaderName(),
+			"secret_ref":  v.ApiKey.GetApiKeySecretRef(),
+		}
+	case *controlplanev1.AuthConfigManifest_Basic:
+		return "basic", map[string]any{
+			"username":     v.Basic.GetUsername(),
+			"password_ref": v.Basic.GetPasswordSecretRef(),
+		}
+	case *controlplanev1.AuthConfigManifest_Oauth2:
+		return "oauth2", map[string]any{
+			"token_url":         v.Oauth2.GetTokenUrl(),
+			"client_id":         v.Oauth2.GetClientId(),
+			"client_secret_ref": v.Oauth2.GetClientSecretRef(),
+			"scopes":            v.Oauth2.GetScopes(),
+		}
+	case *controlplanev1.AuthConfigManifest_Hmac:
+		return "hmac", map[string]any{
+			"algorithm":        v.Hmac.GetAlgorithm(),
+			"secret_ref":       v.Hmac.GetSecretRef(),
+			"signature_header": v.Hmac.GetSignatureHeader(),
+		}
+	case *controlplanev1.AuthConfigManifest_Mtls:
+		return "mtls", map[string]any{
+			"client_cert_ref": v.Mtls.GetClientCertSecretRef(),
+			"client_key_ref":  v.Mtls.GetClientKeySecretRef(),
+			"ca_cert_ref":     v.Mtls.GetCaCertSecretRef(),
+		}
+	default:
+		return "", nil
+	}
 }

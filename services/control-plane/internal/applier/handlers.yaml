@@ -198,6 +198,96 @@ handlers:
         type: string
         description: "Registration status (REGISTERED)"
 
+  # Operational Gateway - Provider Connection Management
+  operational_gateway.upsert_connection:
+    description: "Create or update a provider connection in the Operational Gateway service"
+    params:
+      connection_id:
+        type: string
+        required: true
+        description: "Stable connection identifier from the manifest (e.g., 'stripe-payments')"
+      provider_name:
+        type: string
+        required: true
+        description: "Human-readable provider name (e.g., 'Stripe')"
+      provider_type:
+        type: string
+        required: false
+        description: "Machine-readable provider category (e.g., 'payment_gateway')"
+      protocol:
+        type: enum
+        values: [PROVIDER_PROTOCOL_HTTPS, PROVIDER_PROTOCOL_GRPC, PROVIDER_PROTOCOL_WEBHOOK, PROVIDER_PROTOCOL_MQTT, PROVIDER_PROTOCOL_AMQP]
+        required: true
+        description: "Transport protocol for dispatching to this provider"
+      base_url:
+        type: string
+        required: true
+        description: "Root URL of the provider's API endpoint"
+      auth_type:
+        type: enum
+        values: [api_key, basic, oauth2, hmac, mtls]
+        required: true
+        description: "Authentication variant identifier"
+      auth_config:
+        type: map
+        required: true
+        description: "Authentication configuration fields (variant-specific)"
+      retry_policy:
+        type: map
+        required: false
+        description: "Retry policy fields: max_attempts, initial_backoff_seconds, max_backoff_seconds, backoff_multiplier"
+      rate_limit_config:
+        type: map
+        required: false
+        description: "Rate limit fields: requests_per_second, burst_size"
+    returns:
+      connection_id:
+        type: string
+        description: "The upserted connection UUID"
+      status:
+        type: string
+        description: "Upsert status (UPSERTED)"
+
+  # Operational Gateway - Instruction Route Management
+  operational_gateway.upsert_route:
+    description: "Create or update an instruction route in the Operational Gateway service"
+    params:
+      instruction_type:
+        type: string
+        required: true
+        description: "Instruction type this route handles (e.g., 'payment.initiate')"
+      connection_id:
+        type: string
+        required: true
+        description: "Primary provider connection UUID for dispatch"
+      fallback_connection_id:
+        type: string
+        required: false
+        description: "Optional fallback connection UUID when primary is unhealthy"
+      outbound_mapping:
+        type: string
+        required: false
+        description: "MappingDefinition name for outbound payload transformation"
+      inbound_mapping:
+        type: string
+        required: false
+        description: "MappingDefinition name for inbound response transformation"
+      http_method:
+        type: string
+        required: false
+        description: "HTTP method for HTTPS/WEBHOOK protocols (e.g., POST, PUT)"
+      path_template:
+        type: string
+        required: false
+        description: "URL path template appended to the connection base_url"
+    returns:
+      instruction_type:
+        type: string
+        description: "The upserted instruction type"
+      status:
+        type: string
+        description: "Upsert status (UPSERTED)"
+
   # Internal Account - Account Provisioning
   internal_account.initiate:
     description: "Initiate a new internal account"

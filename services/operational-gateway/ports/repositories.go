@@ -75,6 +75,20 @@ type InstructionRepository interface {
 	FetchDispatchable(ctx context.Context, params FetchDispatchableParams) ([]*domain.Instruction, error)
 }
 
+// RouteRepository defines persistence operations for instruction routes.
+type RouteRepository interface {
+	// Upsert creates or fully replaces an instruction route configuration.
+	// Uses INSERT ... ON CONFLICT (tenant_id, instruction_type) DO UPDATE for idempotency.
+	Upsert(ctx context.Context, route *domain.Route) error
+
+	// FindByInstructionType retrieves an instruction route by tenant and instruction type.
+	// Returns ports.ErrRouteNotFound if no matching route exists.
+	FindByInstructionType(ctx context.Context, tenantID string, instructionType string) (*domain.Route, error)
+
+	// ListByTenant retrieves all instruction routes for a tenant.
+	ListByTenant(ctx context.Context, tenantID string) ([]*domain.Route, error)
+}
+
 // InstructionEventPublisher defines the interface for publishing instruction lifecycle events.
 // Implementations must write events to the transactional outbox within a provided transaction,
 // ensuring atomic consistency with the instruction state change.

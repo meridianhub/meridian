@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 )
 
 // ManifestExecutor orchestrates the ApplyManifest saga for a tenant.
@@ -45,6 +46,68 @@ func NewManifestExecutor(cfg ManifestExecutorConfig) *ManifestExecutor {
 	}
 }
 
+// ManifestExecutorDepsConfig contains all service dependencies needed to build
+// a fully wired ManifestExecutor. It assembles the handler registry, schema modules,
+// and saga runner from the provided service clients.
+type ManifestExecutorDepsConfig struct {
+	Pool   *pgxpool.Pool
+	Deps   *HandlerDependencies
+	Logger *slog.Logger
+}
+
+// NewManifestExecutorFromDeps creates a ManifestExecutor with a fully wired saga runner.
+// It registers all manifest handlers from deps, loads the handlers.yaml schema,
+// builds typed Starlark service modules, and assembles the StarlarkSagaRunner.
+//
+// This is the preferred factory for production use. The simpler NewManifestExecutor
+// is available for callers that pre-build their own saga runner.
+func NewManifestExecutorFromDeps(cfg ManifestExecutorDepsConfig) (*ManifestExecutor, error) {
+	if cfg.Pool == nil {
+		return nil, ErrPoolRequired
+	}
+
+	registry := saga.NewHandlerRegistry()
+	if err := RegisterManifestHandlers(registry, cfg.Deps); err != nil {
+		return nil, fmt.Errorf("register manifest handlers: %w", err)
+	}
+
+	handlersYAML, err := handlersYAMLFS.ReadFile("handlers.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("read handlers.yaml: %w", err)
+	}
+
+	schemaReg := schema.NewRegistry()
+	if err := schemaReg.LoadFromYAML(handlersYAML); err != nil {
+		return nil, fmt.Errorf("load handlers schema: %w", err)
+	}
+
+	serviceModules, err := schema.BuildServiceModules(registry, schemaReg)
+	if err != nil {
+		return nil, fmt.Errorf("build service modules: %w", err)
+	}
+
+	runtime, err := saga.NewRuntime(nil)
+	if err != nil {
+		return nil, fmt.Errorf("create saga runtime: %w", err)
+	}
+
+	runner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       registry,
+		ServiceModules: serviceModules,
+		Logger:         cfg.Logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create saga runner: %w", err)
+	}
+
+	return NewManifestExecutor(ManifestExecutorConfig{
+		Pool:   cfg.Pool,
+		Runner: runner,
+		Logger: cfg.Logger,
+	}), nil
+}
+
 // ApplyManifestInput contains the input for a manifest application.
 type ApplyManifestInput struct {
 	// ManifestVersion is the version being applied.
@@ -61,6 +124,12 @@ type ApplyManifestInput struct {
 
 	// SagaDefinitions to register in Phase 4.
 	SagaDefinitions []SagaDefinitionInput
+
+	// ProviderConnections to upsert in Phase 5 (Operational Gateway).
+	ProviderConnections []ProviderConnectionInput
+
+	// InstructionRoutes to upsert in Phase 5 (Operational Gateway).
+	InstructionRoutes []InstructionRouteInput
 
 	// TenantID is the tenant for cross-tenant execution.
 	TenantID string
@@ -116,6 +185,30 @@ type SagaDefinitionInput struct {
 	Version     string
 }
 
+// ProviderConnectionInput represents a provider connection to upsert.
+type ProviderConnectionInput struct {
+	ConnectionID    string
+	ProviderName    string
+	ProviderType    string
+	Protocol        string
+	BaseURL         string
+	AuthType        string
+	AuthConfig      map[string]any
+	RetryPolicy     map[string]any
+	RateLimitConfig map[string]any
+}
+
+// InstructionRouteInput represents an instruction route to upsert.
+type InstructionRouteInput struct {
+	InstructionType      string
+	ConnectionID         string
+	FallbackConnectionID string
+	OutboundMapping      string
+	InboundMapping       string
+	HTTPMethod           string
+	PathTemplate         string
+}
+
 // ApplyManifestResult contains the result of a manifest application.
 type ApplyManifestResult struct {
 	// JobID is the tracking job identifier.
@@ -150,6 +243,16 @@ var (
 
 	// ErrMissingTenantID is returned when tenant_id is empty.
 	ErrMissingTenantID = errors.New("apply manifest: tenant_id is required")
+
+	// ErrPoolRequired is returned when the database pool is nil.
+	ErrPoolRequired = errors.New("manifest executor: pool is required")
+
+	// ErrExecutorNotConfigured is returned when a non-dry-run apply is attempted without an executor.
+	ErrExecutorNotConfigured = errors.New("executor not configured: cannot execute non-dry-run apply")
+
+	// ErrOperationalGatewayNotConfigured is returned when a handler requires the operational
+	// gateway service but it was not provided in HandlerDependencies.
+	ErrOperationalGatewayNotConfigured = errors.New("operational_gateway service not configured")
 )
 
 // Apply executes the apply_manifest saga for a tenant.
@@ -353,6 +456,38 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 		}
 	}
 	sagaInput["saga_definitions"] = sagaDefs
+
+	// Convert provider connections
+	providerConns := make([]interface{}, len(input.ProviderConnections))
+	for i, pc := range input.ProviderConnections {
+		providerConns[i] = map[string]interface{}{
+			"connection_id":     pc.ConnectionID,
+			"provider_name":     pc.ProviderName,
+			"provider_type":     pc.ProviderType,
+			"protocol":          pc.Protocol,
+			"base_url":          pc.BaseURL,
+			"auth_type":         pc.AuthType,
+			"auth_config":       pc.AuthConfig,
+			"retry_policy":      pc.RetryPolicy,
+			"rate_limit_config": pc.RateLimitConfig,
+		}
+	}
+	sagaInput["provider_connections"] = providerConns
+
+	// Convert instruction routes
+	routes := make([]interface{}, len(input.InstructionRoutes))
+	for i, r := range input.InstructionRoutes {
+		routes[i] = map[string]interface{}{
+			"instruction_type":       r.InstructionType,
+			"connection_id":          r.ConnectionID,
+			"fallback_connection_id": r.FallbackConnectionID,
+			"outbound_mapping":       r.OutboundMapping,
+			"inbound_mapping":        r.InboundMapping,
+			"http_method":            r.HTTPMethod,
+			"path_template":          r.PathTemplate,
+		}
+	}
+	sagaInput["instruction_routes"] = routes
 
 	return sagaInput
 }

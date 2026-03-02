@@ -56,6 +56,7 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 	d.diffSagas(lastApplied, newManifest, plan)
 	d.diffPartyTypes(lastApplied, newManifest, plan)
 	d.diffMappings(lastApplied, newManifest, plan)
+	d.diffOperationalGateway(lastApplied, newManifest, plan)
 
 	// Run safety checks on all DELETE actions
 	if err := d.runSafetyChecks(ctx, plan); err != nil {
@@ -331,6 +332,10 @@ func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) er
 			// Party types have no downstream dependencies to check via safety checker
 		case ResourceMapping:
 			// Mappings have no downstream dependencies to check
+		case ResourceProviderConnection:
+			// Provider connections may have active instructions but deletions are allowed
+		case ResourceInstructionRoute:
+			// Instruction routes have no downstream dependencies to check
 		}
 
 		if err != nil {
@@ -387,6 +392,99 @@ func (d *ManifestDiffer) diffMappings(lastApplied, newManifest *controlplanev1.M
 	}
 }
 
+func (d *ManifestDiffer) diffOperationalGateway(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	d.diffProviderConnections(lastApplied, newManifest, plan)
+	d.diffInstructionRoutes(lastApplied, newManifest, plan)
+}
+
+func (d *ManifestDiffer) diffProviderConnections(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := providerConnectionMap(getProviderConnections(lastApplied))
+	newMap := providerConnectionMap(newManifest.GetOperationalGateway().GetProviderConnections())
+
+	for id, updated := range newMap {
+		prev, exists := oldMap[id]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceProviderConnection,
+				ResourceCode: id,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create provider connection %s (%s)", id, updated.GetProviderName()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceProviderConnection,
+				ResourceCode: id,
+				Action:       ActionUpdate,
+				Description:  fmt.Sprintf("Update provider connection %s", id),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceProviderConnection,
+				ResourceCode: id,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Provider connection %s unchanged", id),
+			})
+		}
+	}
+
+	for id := range oldMap {
+		if _, exists := newMap[id]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceProviderConnection,
+				ResourceCode: id,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete provider connection %s", id),
+			})
+		}
+	}
+}
+
+func (d *ManifestDiffer) diffInstructionRoutes(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := instructionRouteMap(getInstructionRoutes(lastApplied))
+	newMap := instructionRouteMap(newManifest.GetOperationalGateway().GetInstructionRoutes())
+
+	for key, updated := range newMap {
+		prev, exists := oldMap[key]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstructionRoute,
+				ResourceCode: key,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create instruction route %s → %s", key, updated.GetConnectionId()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstructionRoute,
+				ResourceCode: key,
+				Action:       ActionUpdate,
+				Description:  fmt.Sprintf("Update instruction route %s", key),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstructionRoute,
+				ResourceCode: key,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Instruction route %s unchanged", key),
+			})
+		}
+	}
+
+	for key := range oldMap {
+		if _, exists := newMap[key]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInstructionRoute,
+				ResourceCode: key,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete instruction route %s", key),
+			})
+		}
+	}
+}
+
 // Helper functions to safely extract slices from possibly-nil manifests.
 
 func getInstruments(m *controlplanev1.Manifest) []*controlplanev1.InstrumentDefinition {
@@ -429,6 +527,20 @@ func getMappings(m *controlplanev1.Manifest) []*mappingv1.MappingDefinition {
 		return nil
 	}
 	return m.GetMappings()
+}
+
+func getProviderConnections(m *controlplanev1.Manifest) []*controlplanev1.ProviderConnectionConfig {
+	if m == nil {
+		return nil
+	}
+	return m.GetOperationalGateway().GetProviderConnections()
+}
+
+func getInstructionRoutes(m *controlplanev1.Manifest) []*controlplanev1.InstructionRouteConfig {
+	if m == nil {
+		return nil
+	}
+	return m.GetOperationalGateway().GetInstructionRoutes()
 }
 
 // Map-building helpers keyed by stable identifiers.
@@ -488,6 +600,22 @@ func mappingMap(mappings []*mappingv1.MappingDefinition) map[string]*mappingv1.M
 	m := make(map[string]*mappingv1.MappingDefinition, len(mappings))
 	for _, mp := range mappings {
 		m[mappingKey(mp.GetName(), mp.GetVersion())] = mp
+	}
+	return m
+}
+
+func providerConnectionMap(conns []*controlplanev1.ProviderConnectionConfig) map[string]*controlplanev1.ProviderConnectionConfig {
+	m := make(map[string]*controlplanev1.ProviderConnectionConfig, len(conns))
+	for _, c := range conns {
+		m[c.GetConnectionId()] = c
+	}
+	return m
+}
+
+func instructionRouteMap(routes []*controlplanev1.InstructionRouteConfig) map[string]*controlplanev1.InstructionRouteConfig {
+	m := make(map[string]*controlplanev1.InstructionRouteConfig, len(routes))
+	for _, r := range routes {
+		m[r.GetInstructionType()] = r
 	}
 	return m
 }

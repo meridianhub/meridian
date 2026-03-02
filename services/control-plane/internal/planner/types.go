@@ -37,6 +37,10 @@ const (
 	// PhaseSeedData provisions seed data via various service calls
 	// (depends on all above being registered first).
 	PhaseSeedData Phase = 7
+
+	// PhaseOperationalGateway configures provider connections and instruction routes
+	// in the Operational Gateway service (can run after mappings are registered).
+	PhaseOperationalGateway Phase = 8
 )
 
 // PhaseLabel returns a human-readable label for a phase.
@@ -56,6 +60,8 @@ func PhaseLabel(p Phase) string {
 		return "Seed Data"
 	case PhasePartyTypes:
 		return "Party Types"
+	case PhaseOperationalGateway:
+		return "Operational Gateway"
 	default:
 		return fmt.Sprintf("Phase(%d)", p)
 	}
@@ -89,6 +95,10 @@ const (
 	MethodCreateMapping    GRPCMethod = "meridian.mapping.v1.MappingService/CreateMapping"
 	MethodUpdateMapping    GRPCMethod = "meridian.mapping.v1.MappingService/UpdateMapping"
 	MethodDeprecateMapping GRPCMethod = "meridian.mapping.v1.MappingService/DeprecateMapping"
+
+	// Operational Gateway Service
+	MethodUpsertProviderConnection GRPCMethod = "meridian.operational_gateway.v1.ProviderConnectionService/UpsertConnection"
+	MethodUpsertInstructionRoute   GRPCMethod = "meridian.operational_gateway.v1.InstructionRouteService/UpsertRoute"
 )
 
 // PlannedCall represents a single gRPC call in the execution plan.
@@ -192,7 +202,7 @@ func (p *ExecutionPlan) Visualize() string {
 	fmt.Fprintf(&b, "Total calls: %d\n\n", len(p.Calls))
 
 	byPhase := p.ByPhase()
-	for phase := PhaseInstruments; phase <= PhaseSeedData; phase++ { //nolint:intrange
+	for phase := PhaseInstruments; phase <= PhaseOperationalGateway; phase++ { //nolint:intrange
 		calls, ok := byPhase[phase]
 		if !ok {
 			continue

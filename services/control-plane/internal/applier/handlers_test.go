@@ -101,6 +101,26 @@ func (m *mockInternalAccount) InitiateAccount(ctx *saga.StarlarkContext, params 
 	}, nil
 }
 
+// mockOperationalGateway implements OperationalGatewayService for testing.
+type mockOperationalGateway struct {
+	upsertConnectionFn func(*saga.StarlarkContext, map[string]any) (any, error)
+	upsertRouteFn      func(*saga.StarlarkContext, map[string]any) (any, error)
+}
+
+func (m *mockOperationalGateway) UpsertConnection(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.upsertConnectionFn != nil {
+		return m.upsertConnectionFn(ctx, params)
+	}
+	return map[string]any{"connection_id": params["connection_id"], "status": "UPSERTED"}, nil
+}
+
+func (m *mockOperationalGateway) UpsertRoute(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.upsertRouteFn != nil {
+		return m.upsertRouteFn(ctx, params)
+	}
+	return map[string]any{"instruction_type": params["instruction_type"], "status": "UPSERTED"}, nil
+}
+
 func newTestStarlarkContext() *saga.StarlarkContext {
 	return &saga.StarlarkContext{
 		Context:         context.Background(),
@@ -128,6 +148,8 @@ func TestRegisterManifestHandlers(t *testing.T) {
 		"reference_data.register_valuation_rule",
 		"reference_data.register_saga_definition",
 		"internal_account.initiate",
+		"operational_gateway.upsert_connection",
+		"operational_gateway.upsert_route",
 	}
 
 	for _, name := range expectedHandlers {
@@ -511,4 +533,115 @@ func TestAccountTypeHandler_ConversionMethodWithoutService(t *testing.T) {
 	_, err = handler(ctx, params)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no ValuationMethodService configured")
+}
+
+// TestUpsertConnectionHandler verifies the handler delegates to OperationalGatewayService.
+func TestUpsertConnectionHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:      &mockReferenceData{},
+		InternalAccount:    &mockInternalAccount{},
+		OperationalGateway: &mockOperationalGateway{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("operational_gateway.upsert_connection")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"connection_id": "stripe-payments",
+		"provider_name": "Stripe",
+		"protocol":      "PROTOCOL_HTTPS",
+		"base_url":      "https://api.stripe.com",
+		"auth_type":     "api_key",
+		"auth_config": map[string]any{
+			"header_name": "Authorization",
+			"secret_ref":  "stripe-api-key",
+		},
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "stripe-payments", resultMap["connection_id"])
+	assert.Equal(t, "UPSERTED", resultMap["status"])
+}
+
+// TestUpsertConnectionHandler_NilService verifies error when service is nil.
+func TestUpsertConnectionHandler_NilService(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:      &mockReferenceData{},
+		InternalAccount:    &mockInternalAccount{},
+		OperationalGateway: nil, // not configured
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("operational_gateway.upsert_connection")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{"connection_id": "stripe-payments"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operational_gateway service not configured")
+}
+
+// TestUpsertRouteHandler verifies the handler delegates to OperationalGatewayService.
+func TestUpsertRouteHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:      &mockReferenceData{},
+		InternalAccount:    &mockInternalAccount{},
+		OperationalGateway: &mockOperationalGateway{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("operational_gateway.upsert_route")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"instruction_type": "payment.initiate",
+		"connection_id":    "stripe-payments",
+		"http_method":      "POST",
+		"path_template":    "/v1/payment_intents",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "payment.initiate", resultMap["instruction_type"])
+	assert.Equal(t, "UPSERTED", resultMap["status"])
+}
+
+// TestUpsertRouteHandler_NilService verifies error when service is nil.
+func TestUpsertRouteHandler_NilService(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:      &mockReferenceData{},
+		InternalAccount:    &mockInternalAccount{},
+		OperationalGateway: nil, // not configured
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("operational_gateway.upsert_route")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{"instruction_type": "payment.initiate"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operational_gateway service not configured")
 }

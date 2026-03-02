@@ -866,3 +866,98 @@ service ProviderConnectionService {
     };
   }
 }
+
+// InstructionRouteService manages the routing configuration that maps instruction types
+// to provider connections for outbound dispatch. Routes are typically configured via
+// manifest apply and consumed at runtime by the dispatch worker.
+service InstructionRouteService {
+  // UpsertRoute creates or updates an instruction route.
+  // If a route for the given instruction_type already exists for this tenant, it is replaced.
+  // Idempotent: repeated calls with the same data produce the same result.
+  rpc UpsertRoute(UpsertRouteRequest) returns (UpsertRouteResponse) {
+    option (google.api.http) = {
+      put: "/v1/operational-gateway/routes"
+      body: "*"
+    };
+  }
+
+  // GetRoute retrieves an instruction route by instruction_type.
+  // Returns NOT_FOUND if no route exists for the given instruction_type.
+  rpc GetRoute(GetRouteRequest) returns (GetRouteResponse) {
+    option (google.api.http) = {
+      get: "/v1/operational-gateway/routes/{instruction_type}"
+    };
+  }
+
+  // ListRoutes returns all instruction routes for the tenant.
+  rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse) {
+    option (google.api.http) = {
+      get: "/v1/operational-gateway/routes"
+    };
+  }
+}
+
+// UpsertRouteRequest creates or replaces an instruction route for the authenticated tenant.
+message UpsertRouteRequest {
+  // instruction_type is the unique key for this route (e.g. "payment.initiate").
+  string instruction_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // connection_id is the primary ProviderConnection UUID to use for dispatch.
+  string connection_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // fallback_connection_id is an optional secondary connection UUID used when the primary is unhealthy.
+  string fallback_connection_id = 3 [(buf.validate.field).string = {
+    max_len: 36
+    pattern: "^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+  }];
+
+  // outbound_mapping is the name of the MappingDefinition for outbound payload transformation.
+  // Empty means passthrough (no transformation applied).
+  string outbound_mapping = 4 [(buf.validate.field).string.max_len = 255];
+
+  // inbound_mapping is the name of the MappingDefinition for inbound response transformation.
+  // Empty means passthrough (no transformation applied).
+  string inbound_mapping = 5 [(buf.validate.field).string.max_len = 255];
+
+  // http_method is the HTTP verb for HTTPS/WEBHOOK protocols (e.g. "POST", "PUT").
+  string http_method = 6 [(buf.validate.field).string = {
+    max_len: 10
+    pattern: "^(GET|POST|PUT|PATCH|DELETE)?$"
+  }];
+
+  // path_template is the URL path template appended to the connection base_url.
+  string path_template = 7 [(buf.validate.field).string.max_len = 1024];
+}
+
+// UpsertRouteResponse returns the created or updated route.
+message UpsertRouteResponse {
+  // route is the created or updated instruction route.
+  InstructionRoute route = 1 [(buf.validate.field).required = true];
+}
+
+// GetRouteRequest retrieves a specific instruction route by instruction_type.
+message GetRouteRequest {
+  // instruction_type identifies the route to retrieve.
+  string instruction_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// GetRouteResponse returns the requested instruction route.
+message GetRouteResponse {
+  // route is the requested instruction route.
+  InstructionRoute route = 1 [(buf.validate.field).required = true];
+}
+
+// ListRoutesRequest retrieves all instruction routes for the authenticated tenant.
+message ListRoutesRequest {}
+
+// ListRoutesResponse returns all instruction routes for the tenant.
+message ListRoutesResponse {
+  // routes is the list of all instruction routes for the tenant.
+  repeated InstructionRoute routes = 1;
+}

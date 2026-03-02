@@ -84,6 +84,22 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				ProducesInstruments: []string{},
 			},
 		},
+		// Operational Gateway - Provider Connection Management
+		"operational_gateway.upsert_connection": {
+			handler: upsertConnectionHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:            saga.HandlerCategorySettlement,
+				ProducesInstruments: []string{},
+			},
+		},
+		// Operational Gateway - Instruction Route Management
+		"operational_gateway.upsert_route": {
+			handler: upsertRouteHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:            saga.HandlerCategorySettlement,
+				ProducesInstruments: []string{},
+			},
+		},
 	}
 
 	for name, h := range handlers {
@@ -104,6 +120,9 @@ type HandlerDependencies struct {
 	// ValuationMethod provides UUID resolution for named valuation methods.
 	// May be nil if no default_conversion_method resolution is needed.
 	ValuationMethod ValuationMethodService
+	// OperationalGateway provides provider connection and instruction route management.
+	// May be nil if no operational_gateway section is present in the manifest.
+	OperationalGateway OperationalGatewayService
 }
 
 // ReferenceDataService abstracts the Reference Data gRPC client for testing.
@@ -130,6 +149,15 @@ type ValuationMethodService interface {
 	// ResolveMethod looks up a valuation method by name and returns its UUID string and version.
 	// Returns (uuid, version, suggestions, error) where suggestions is populated on miss.
 	ResolveMethod(ctx *saga.StarlarkContext, name string) (id string, version int, suggestions []string, err error)
+}
+
+// OperationalGatewayService abstracts the Operational Gateway gRPC client for manifest apply.
+// It provides idempotent upsert operations for provider connections and instruction routes.
+type OperationalGatewayService interface {
+	// UpsertConnection creates or updates a provider connection configuration.
+	UpsertConnection(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+	// UpsertRoute creates or updates an instruction route configuration.
+	UpsertRoute(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 }
 
 // registerInstrumentHandler creates a handler that registers an instrument via Reference Data.
@@ -205,6 +233,30 @@ func registerSagaDefinitionHandler(deps *HandlerDependencies) saga.Handler {
 func initiateAccountHandler(deps *HandlerDependencies) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		return deps.InternalAccount.InitiateAccount(ctx, params)
+	}
+}
+
+// upsertConnectionHandler creates a handler that upserts a provider connection.
+// Returns an error if OperationalGateway is nil to prevent silent skipping of
+// gateway configuration during manifest apply.
+func upsertConnectionHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		if deps.OperationalGateway == nil {
+			return nil, ErrOperationalGatewayNotConfigured
+		}
+		return deps.OperationalGateway.UpsertConnection(ctx, params)
+	}
+}
+
+// upsertRouteHandler creates a handler that upserts an instruction route.
+// Returns an error if OperationalGateway is nil to prevent silent skipping of
+// route configuration during manifest apply.
+func upsertRouteHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		if deps.OperationalGateway == nil {
+			return nil, ErrOperationalGatewayNotConfigured
+		}
+		return deps.OperationalGateway.UpsertRoute(ctx, params)
 	}
 }
 
