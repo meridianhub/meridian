@@ -31,6 +31,11 @@ if ! command -v yq &>/dev/null; then
   exit 1
 fi
 
+if ! command -v python3 &>/dev/null; then
+  echo "Error: python3 is required for JSON processing." >&2
+  exit 1
+fi
+
 mkdir -p "$OUTPUT_DIR"
 
 # --- Helper: convert service key to title ---
@@ -182,17 +187,18 @@ infer_partition_key() {
 describe_partition_key() {
   local key="$1"
   case "$key" in
-    account_id)    echo "Account ID" ;;
-    log_id)        echo "Position log ID" ;;
-    batch_id)      echo "Batch operation ID" ;;
-    withdrawal_id) echo "Withdrawal ID" ;;
-    transaction_id) echo "Transaction ID" ;;
-    facility_id)   echo "Facility ID" ;;
-    party_id)      echo "Party ID" ;;
-    order_id)      echo "Payment order ID" ;;
-    run_id)        echo "Reconciliation run ID" ;;
-    dispute_id)    echo "Dispute ID" ;;
-    *)             echo "$key" ;;
+    account_id)        echo "Account ID" ;;
+    log_id)            echo "Position log ID" ;;
+    batch_id)          echo "Batch operation ID" ;;
+    withdrawal_id)     echo "Withdrawal ID" ;;
+    transaction_id)    echo "Transaction ID" ;;
+    facility_id)       echo "Facility ID" ;;
+    party_id)          echo "Party ID" ;;
+    order_id)          echo "Payment order ID" ;;
+    payment_order_id)  echo "Payment order ID" ;;
+    run_id)            echo "Reconciliation run ID" ;;
+    dispute_id)        echo "Dispute ID" ;;
+    *)                 echo "$key" ;;
   esac
 }
 

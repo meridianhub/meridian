@@ -90,7 +90,7 @@ components:
         kafka:
           key:
             type: string
-            description: "payment_order_id"
+            description: "Payment order ID"
       headers:
         type: object
         properties:
@@ -115,7 +115,7 @@ components:
         kafka:
           key:
             type: string
-            description: "payment_order_id"
+            description: "Payment order ID"
       headers:
         type: object
         properties:
@@ -140,7 +140,7 @@ components:
         kafka:
           key:
             type: string
-            description: "payment_order_id"
+            description: "Payment order ID"
       headers:
         type: object
         properties:
@@ -165,7 +165,7 @@ components:
         kafka:
           key:
             type: string
-            description: "payment_order_id"
+            description: "Payment order ID"
       headers:
         type: object
         properties:
@@ -190,7 +190,7 @@ components:
         kafka:
           key:
             type: string
-            description: "payment_order_id"
+            description: "Payment order ID"
       headers:
         type: object
         properties:
@@ -215,7 +215,7 @@ components:
         kafka:
           key:
             type: string
-            description: "payment_order_id"
+            description: "Payment order ID"
       headers:
         type: object
         properties:
@@ -240,7 +240,7 @@ components:
         kafka:
           key:
             type: string
-            description: "payment_order_id"
+            description: "Payment order ID"
       headers:
         type: object
         properties:
