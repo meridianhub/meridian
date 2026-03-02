@@ -130,6 +130,11 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 
 		// Party handlers (stubs - defined in schema for party service)
 		{"party.get_default_payment_method", stubNotImplemented("party.get_default_payment_method")},
+
+		// Operational Gateway handlers (stubs - defined in schema for operational gateway service)
+		{"operational_gateway.dispatch_instruction", stubNotImplemented("operational_gateway.dispatch_instruction")},
+		{"operational_gateway.cancel_instruction", stubNotImplemented("operational_gateway.cancel_instruction")},
+		{"operational_gateway.get_instruction", stubNotImplemented("operational_gateway.get_instruction")},
 	}
 
 	for _, h := range handlers {

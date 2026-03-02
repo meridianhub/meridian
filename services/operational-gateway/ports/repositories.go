@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
+	"gorm.io/gorm"
 )
 
 // Instruction repository errors.
@@ -86,6 +87,32 @@ type RouteRepository interface {
 
 	// ListByTenant retrieves all instruction routes for a tenant.
 	ListByTenant(ctx context.Context, tenantID string) ([]*domain.Route, error)
+}
+
+// InstructionEventPublisher defines the interface for publishing instruction lifecycle events.
+// Implementations must write events to the transactional outbox within a provided transaction,
+// ensuring atomic consistency with the instruction state change.
+type InstructionEventPublisher interface {
+	// PublishCreated publishes an instruction-created event within the provided transaction.
+	PublishCreated(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error
+
+	// PublishDispatched publishes an instruction-dispatched event within the provided transaction.
+	PublishDispatched(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error
+
+	// PublishDelivered publishes an instruction-delivered event within the provided transaction.
+	PublishDelivered(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error
+
+	// PublishAcknowledged publishes an instruction-acknowledged event within the provided transaction.
+	PublishAcknowledged(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error
+
+	// PublishFailed publishes an instruction-failed event within the provided transaction.
+	PublishFailed(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error
+
+	// PublishExpired publishes an instruction-expired event within the provided transaction.
+	PublishExpired(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error
+
+	// PublishCancelled publishes an instruction-cancelled event within the provided transaction.
+	PublishCancelled(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error
 }
 
 // ConnectionRepository defines persistence operations for provider connections.
