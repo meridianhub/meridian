@@ -444,52 +444,60 @@ An energy retailer values kWh meter reads at retail and wholesale rates:
 
 ```python
 def execute(ctx):
-    # Idempotency: skip if already valued
     # Idempotency: check both legs are complete (not just one)
     retail_logs = position_keeping.query_logs(
         correlation_id=ctx.correlation_id,
         instrument_code="GBP",
-        account_id=ctx.metadata.billing_account_id,
+        account_id=ctx.event.metadata.billing_account_id,
     )
     wholesale_logs = position_keeping.query_logs(
         correlation_id=ctx.correlation_id,
         instrument_code="GBP",
-        account_id=ctx.metadata.counterparty_account_id,
+        account_id=ctx.event.metadata.counterparty_account_id,
     )
     if retail_logs.count > 0 and wholesale_logs.count > 0:
         return {"status": "ALREADY_PROCESSED"}
 
-    # Value at retail rate
+    # Look up account type to get valuation method references
+    # These are the DefaultConversionMethodID and ValuationMethods fields
+    # defined on the account type in reference-data
+    step()
+    account_type = reference_data.get_account_type(
+        code=ctx.event.account_type_code,
+    )
+
+    # Value at retail rate using the account type's default conversion method
     step()
     retail = valuation_engine.compute(
-        method_id=ctx.policy.conversion_method,
-        amount=ctx.amount,
-        from_instrument=ctx.instrument_code,
+        method_id=account_type.default_conversion_method_id,
+        amount=ctx.event.amount,
+        from_instrument=ctx.event.instrument_code,
         to_instrument="GBP",
     )
 
     # Book customer billing position
     step()
     position_keeping.initiate_log(
-        account_id=ctx.metadata.billing_account_id,
+        account_id=ctx.event.metadata.billing_account_id,
         instrument_code="GBP",
         direction="DEBIT",
         amount=retail.amount,
         correlation_id=ctx.correlation_id,
     )
 
-    # Value at wholesale rate and book counterparty
+    # Value at wholesale rate (second entry in ValuationMethods array)
+    wholesale_method = account_type.valuation_methods[1]
     step()
     wholesale = valuation_engine.compute(
-        method_id=ctx.policy.wholesale_method,
-        amount=ctx.amount,
-        from_instrument=ctx.instrument_code,
+        method_id=wholesale_method.method_id,
+        amount=ctx.event.amount,
+        from_instrument=ctx.event.instrument_code,
         to_instrument="GBP",
     )
 
     step()
     position_keeping.initiate_log(
-        account_id=ctx.metadata.counterparty_account_id,
+        account_id=ctx.event.metadata.counterparty_account_id,
         instrument_code="GBP",
         direction="CREDIT",
         amount=wholesale.amount,
@@ -508,21 +516,28 @@ def execute(ctx):
     existing = position_keeping.query_logs(
         correlation_id=ctx.correlation_id,
         instrument_code="USD",
+        account_id=ctx.event.metadata.billing_account_id,
     )
     if existing.count > 0:
         return {"status": "ALREADY_BILLED"}
 
+    # Look up account type for its default conversion method
+    step()
+    account_type = reference_data.get_account_type(
+        code=ctx.event.account_type_code,
+    )
+
     step()
     charge = valuation_engine.compute(
-        method_id=ctx.policy.conversion_method,
-        amount=ctx.amount,
+        method_id=account_type.default_conversion_method_id,
+        amount=ctx.event.amount,
         from_instrument="GPU_HOUR",
         to_instrument="USD",
     )
 
     step()
     position_keeping.initiate_log(
-        account_id=ctx.metadata.billing_account_id,
+        account_id=ctx.event.metadata.billing_account_id,
         instrument_code="USD",
         direction="DEBIT",
         amount=charge.amount,
