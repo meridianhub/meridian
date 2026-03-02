@@ -299,7 +299,7 @@ func hasPlatformAdminRole(claims *platformauth.Claims) bool {
 	if claims == nil {
 		return false
 	}
-	return claims.HasRole(platformauth.RolePlatformAdmin) || claims.HasRole(platformauth.RoleSuperAdmin)
+	return claims.HasRole(platformauth.RolePlatformAdmin.String()) || claims.HasRole(platformauth.RoleSuperAdmin.String())
 }
 
 // tenantsMatch compares JWT tenant ID (string) with resolved tenant ID.

@@ -502,7 +502,7 @@ func (s *Service) ReconcileMigrations(ctx context.Context, req *pb.ReconcileMigr
 		return nil, status.Error(codes.Unauthenticated, "authentication required")
 	}
 
-	if !claims.HasRole(auth.RolePlatformAdmin) && !claims.HasRole(auth.RoleSuperAdmin) {
+	if !claims.HasRole(auth.RolePlatformAdmin.String()) && !claims.HasRole(auth.RoleSuperAdmin.String()) {
 		s.logger.Warn("unauthorized migration reconciliation attempt",
 			"user_id", claims.UserID,
 			"roles", claims.Roles)
@@ -589,7 +589,7 @@ func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTe
 	claims, ok := auth.GetClaimsFromContext(ctx)
 	if ok {
 		// Check authorization: either tenant-scoped access OR platform admin role
-		hasAdminRole := claims.HasRole(auth.RolePlatformAdmin) || claims.HasRole(auth.RoleSuperAdmin)
+		hasAdminRole := claims.HasRole(auth.RolePlatformAdmin.String()) || claims.HasRole(auth.RoleSuperAdmin.String())
 		hasTenantAccess := claims.HasTenantID() && claims.TenantID == req.TenantId
 
 		if !hasAdminRole && !hasTenantAccess {

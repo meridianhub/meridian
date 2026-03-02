@@ -603,7 +603,7 @@ func TestReconcileMigrations_Authorization(t *testing.T) {
 			name: "platform-admin allowed",
 			claims: &auth.Claims{
 				UserID: "admin-123",
-				Roles:  []string{auth.RolePlatformAdmin},
+				Roles:  []string{auth.RolePlatformAdmin.String()},
 			},
 			expectError: false,
 		},
@@ -611,7 +611,7 @@ func TestReconcileMigrations_Authorization(t *testing.T) {
 			name: "super-admin allowed",
 			claims: &auth.Claims{
 				UserID: "admin-456",
-				Roles:  []string{auth.RoleSuperAdmin},
+				Roles:  []string{auth.RoleSuperAdmin.String()},
 			},
 			expectError: false,
 		},
@@ -619,7 +619,7 @@ func TestReconcileMigrations_Authorization(t *testing.T) {
 			name: "platform-admin with other roles allowed",
 			claims: &auth.Claims{
 				UserID: "admin-789",
-				Roles:  []string{"user", auth.RolePlatformAdmin, "viewer"},
+				Roles:  []string{"user", auth.RolePlatformAdmin.String(), "viewer"},
 			},
 			expectError: false,
 		},
@@ -720,7 +720,7 @@ func TestReconcileMigrations_NoProvisioner(t *testing.T) {
 	// Create context with valid claims
 	claims := &auth.Claims{
 		UserID: "admin-123",
-		Roles:  []string{auth.RolePlatformAdmin},
+		Roles:  []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -787,7 +787,7 @@ func TestReconcileMigrations_SuccessfulReconciliation(t *testing.T) {
 	// Create context with platform-admin claims
 	claims := &auth.Claims{
 		UserID: "admin-123",
-		Roles:  []string{auth.RolePlatformAdmin},
+		Roles:  []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -1220,7 +1220,7 @@ func TestService_GetTenantProvisioningStatus_Success(t *testing.T) {
 	// Create context with platform-admin claims for cross-tenant access
 	claims := &auth.Claims{
 		UserID: "admin-123",
-		Roles:  []string{auth.RolePlatformAdmin},
+		Roles:  []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -1308,7 +1308,7 @@ func TestService_GetTenantProvisioningStatus_TenantNotFound(t *testing.T) {
 	// Create context with platform-admin claims
 	claims := &auth.Claims{
 		UserID: "admin-123",
-		Roles:  []string{auth.RolePlatformAdmin},
+		Roles:  []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -1343,7 +1343,7 @@ func TestService_GetTenantProvisioningStatus_EmptyServicesList(t *testing.T) {
 	// Create context with platform-admin claims for GetTenantProvisioningStatus
 	claims := &auth.Claims{
 		UserID: "admin-123",
-		Roles:  []string{auth.RolePlatformAdmin},
+		Roles:  []string{auth.RolePlatformAdmin.String()},
 	}
 	authCtx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -1384,7 +1384,7 @@ func TestService_GetTenantProvisioningStatus_WithFailedService(t *testing.T) {
 	// Create context with platform-admin claims for GetTenantProvisioningStatus
 	claims := &auth.Claims{
 		UserID: "admin-123",
-		Roles:  []string{auth.RolePlatformAdmin},
+		Roles:  []string{auth.RolePlatformAdmin.String()},
 	}
 	authCtx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -1440,7 +1440,7 @@ func TestService_GetTenantProvisioningStatus_InvalidTenantID(t *testing.T) {
 	// Create context with platform-admin claims
 	claims := &auth.Claims{
 		UserID: "admin-123",
-		Roles:  []string{auth.RolePlatformAdmin},
+		Roles:  []string{auth.RolePlatformAdmin.String()},
 	}
 	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 
@@ -1475,7 +1475,7 @@ func TestGetTenantProvisioningStatus_Authorization(t *testing.T) {
 			name: "platform-admin allowed",
 			claims: &auth.Claims{
 				UserID: "admin-123",
-				Roles:  []string{auth.RolePlatformAdmin},
+				Roles:  []string{auth.RolePlatformAdmin.String()},
 			},
 			tenantID:    "test_tenant",
 			expectError: false,
@@ -1484,7 +1484,7 @@ func TestGetTenantProvisioningStatus_Authorization(t *testing.T) {
 			name: "super-admin allowed",
 			claims: &auth.Claims{
 				UserID: "super-123",
-				Roles:  []string{auth.RoleSuperAdmin},
+				Roles:  []string{auth.RoleSuperAdmin.String()},
 			},
 			tenantID:    "test_tenant",
 			expectError: false,
