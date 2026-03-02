@@ -33,7 +33,7 @@ func (s *OperationalGatewayService) GetInstruction(
 		return nil, err
 	}
 
-	id, err := uuid.Parse(req.InstructionId)
+	id, err := uuid.Parse(req.GetInstructionId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid instruction_id: %v", err)
 	}
@@ -41,7 +41,7 @@ func (s *OperationalGatewayService) GetInstruction(
 	instruction, err := s.instructionRepo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, ports.ErrInstructionNotFound) {
-			return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.InstructionId)
+			return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.GetInstructionId())
 		}
 		s.logger.Error("failed to retrieve instruction", "error", err)
 		return nil, status.Error(codes.Internal, "failed to retrieve instruction")
@@ -49,7 +49,7 @@ func (s *OperationalGatewayService) GetInstruction(
 
 	// Verify tenant ownership.
 	if instruction.TenantID.String() != tenantIDToUUID(tid) {
-		return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.InstructionId)
+		return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.GetInstructionId())
 	}
 
 	return &opgatewayv1.GetInstructionResponse{
@@ -70,15 +70,15 @@ func (s *OperationalGatewayService) ListInstructions(
 	// Parse pagination.
 	pageSize := defaultPageSize
 	offset := 0
-	if req.Pagination != nil {
-		if req.Pagination.PageSize > 0 {
-			pageSize = int(req.Pagination.PageSize)
+	if req.GetPagination() != nil {
+		if req.GetPagination().GetPageSize() > 0 {
+			pageSize = int(req.GetPagination().GetPageSize())
 			if pageSize > maxPageSize {
 				pageSize = maxPageSize
 			}
 		}
-		if req.Pagination.PageToken != "" {
-			offset, err = decodeOffsetToken(req.Pagination.PageToken)
+		if req.GetPagination().GetPageToken() != "" {
+			offset, err = decodeOffsetToken(req.GetPagination().GetPageToken())
 			if err != nil {
 				return nil, status.Error(codes.InvalidArgument, "invalid page_token")
 			}
@@ -88,14 +88,14 @@ func (s *OperationalGatewayService) ListInstructions(
 	// Build list params.
 	params := ports.ListInstructionsParams{
 		TenantID:             tenantIDToUUID(tid),
-		InstructionType:      req.InstructionType,
-		ProviderConnectionID: req.ProviderConnectionId,
+		InstructionType:      req.GetInstructionType(),
+		ProviderConnectionID: req.GetProviderConnectionId(),
 		Limit:                pageSize,
 		Offset:               offset,
 	}
 
 	// Parse status filters.
-	for _, s := range req.Status {
+	for _, s := range req.GetStatus() {
 		if s == opgatewayv1.InstructionStatus_INSTRUCTION_STATUS_UNSPECIFIED {
 			continue
 		}
@@ -107,21 +107,28 @@ func (s *OperationalGatewayService) ListInstructions(
 	}
 
 	// Parse date range.
-	if req.DateRange != nil {
-		if req.DateRange.StartDate != "" {
-			t, parseErr := parseDate(req.DateRange.StartDate)
+	if req.GetDateRange() != nil {
+		var startDate, endDate time.Time
+		if req.GetDateRange().GetStartDate() != "" {
+			t, parseErr := parseDate(req.GetDateRange().GetStartDate())
 			if parseErr != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "invalid date_range.start_date: %v", parseErr)
 			}
+			startDate = t
 			params.CreatedAfter = t
 		}
-		if req.DateRange.EndDate != "" {
-			t, parseErr := parseDate(req.DateRange.EndDate)
+		if req.GetDateRange().GetEndDate() != "" {
+			t, parseErr := parseDate(req.GetDateRange().GetEndDate())
 			if parseErr != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "invalid date_range.end_date: %v", parseErr)
 			}
 			// Include records created through the end of the specified day.
-			params.CreatedBefore = t.Add(24*time.Hour - time.Nanosecond)
+			endDate = t.Add(24*time.Hour - time.Nanosecond)
+			params.CreatedBefore = endDate
+		}
+		// Reject inverted ranges eagerly to avoid contradictory queries.
+		if !startDate.IsZero() && !endDate.IsZero() && startDate.After(endDate) {
+			return nil, status.Error(codes.InvalidArgument, "date_range.start_date must not be after date_range.end_date")
 		}
 	}
 
@@ -162,10 +169,10 @@ func (s *OperationalGatewayService) ProcessCallback(
 		return nil, err
 	}
 
-	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+	if req.GetIdempotencyKey() == nil || req.GetIdempotencyKey().GetKey() == "" {
 		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
 	}
-	if req.Callback == nil {
+	if req.GetCallback() == nil {
 		return nil, status.Error(codes.InvalidArgument, "callback is required")
 	}
 
@@ -173,12 +180,12 @@ func (s *OperationalGatewayService) ProcessCallback(
 	// provider_reference lookup requires a repository method not yet implemented; return
 	// Unimplemented until that capability is added in a future iteration.
 	var id uuid.UUID
-	if req.InstructionId != "" {
-		id, err = uuid.Parse(req.InstructionId)
+	if req.GetInstructionId() != "" {
+		id, err = uuid.Parse(req.GetInstructionId())
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid instruction_id: %v", err)
 		}
-	} else if req.ProviderReference != "" {
+	} else if req.GetProviderReference() != "" {
 		return nil, status.Error(codes.Unimplemented, "lookup by provider_reference is not yet supported; provide instruction_id instead")
 	} else {
 		return nil, status.Error(codes.InvalidArgument, "at least one of instruction_id or provider_reference must be provided")
@@ -187,7 +194,7 @@ func (s *OperationalGatewayService) ProcessCallback(
 	instruction, err := s.instructionRepo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, ports.ErrInstructionNotFound) {
-			return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.InstructionId)
+			return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.GetInstructionId())
 		}
 		s.logger.Error("failed to retrieve instruction for callback", "error", err)
 		return nil, status.Error(codes.Internal, "failed to retrieve instruction")
@@ -195,7 +202,7 @@ func (s *OperationalGatewayService) ProcessCallback(
 
 	// Verify tenant ownership.
 	if instruction.TenantID.String() != tenantIDToUUID(tid) {
-		return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.InstructionId)
+		return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.GetInstructionId())
 	}
 
 	// Idempotency: if already acknowledged, return the current state without re-applying.
@@ -210,7 +217,7 @@ func (s *OperationalGatewayService) ProcessCallback(
 		return nil, status.Errorf(codes.FailedPrecondition, "instruction cannot be acknowledged in status %s", instruction.Status)
 	}
 
-	if err := s.instructionRepo.Save(ctx, instruction, req.IdempotencyKey.Key); err != nil {
+	if err := s.instructionRepo.Save(ctx, instruction, req.GetIdempotencyKey().GetKey()); err != nil {
 		if errors.Is(err, ports.ErrInstructionConflict) {
 			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
 		}
