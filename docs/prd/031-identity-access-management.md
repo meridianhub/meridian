@@ -597,6 +597,10 @@ use them without coupling:
    tenant from env vars
 9. Remove `DEFAULT_TENANT_ID` and `DEFAULT_ROLES` env vars
 10. JWT claims populated from tenant-scoped RoleAssignment table
+11. Verify demo environment supports per-tenant subdomains
+    (`*.demo.meridianhub.cloud`) — wildcard DNS and Caddy TLS are
+    already configured; validate end-to-end tenant resolution via
+    subdomain in the demo stack
 
 **Demo and local dev work identically**, but credentials are in the
 database, not in dex.yaml static passwords.
@@ -647,6 +651,35 @@ database, not in dex.yaml static passwords.
 - Invitation tokens: 72-hour expiry, single-use, stored as bcrypt hash
 - Password reset tokens: 1-hour expiry, single-use, stored as bcrypt
   hash
+
+### Subdomain Security
+
+Subdomain-based tenant isolation is the foundation of the auth flow.
+The gateway already enforces these controls
+(`shared/platform/gateway/tenant_resolver.go`):
+
+- **Host header validation** — `BASE_DOMAIN` suffix check rejects
+  requests where the Host header doesn't end with
+  `.<base_domain>` (e.g., `acme.meridianhub.cloud` is valid;
+  `evil.attacker.com` is rejected)
+- **Slug format validation** — regex `^[a-z0-9]+([-.][a-z0-9]+)*$`
+  rejects injection attempts in subdomain component
+- **JWT-subdomain mismatch** — tenant authorization middleware returns
+  403 if the JWT `tenant_id` claim doesn't match the
+  subdomain-resolved tenant
+- **Header stripping** — `metadataPropagationMiddleware` strips
+  incoming identity headers (x-tenant-id, x-user-id, x-roles) before
+  re-injecting from authenticated context. Clients cannot forge
+  tenant identity via headers
+- **IP/localhost bypass prevention** — direct IP addresses and
+  localhost without subdomain return empty tenant (rejected)
+- **LOCAL_DEV_MODE guarded** — `ValidateForNamespace()` blocks
+  `LOCAL_DEV_MODE=true` in production Kubernetes namespaces
+
+The Identity service must operate within this existing trust boundary.
+Dex receives tenant context from the gateway's subdomain resolution,
+not from user-supplied parameters. Phase 1 must include end-to-end
+verification that DNS spoofing cannot bypass tenant isolation.
 
 ### Audit Trail
 
