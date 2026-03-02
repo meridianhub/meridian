@@ -35,7 +35,10 @@ CREATE TABLE "role_assignment" (
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY ("id"),
-  CONSTRAINT "chk_role_assignment_role" CHECK (role IN ('VIEWER', 'OPERATOR', 'ADMIN', 'TENANT_OWNER', 'PLATFORM'))
+  CONSTRAINT "chk_role_assignment_role" CHECK (role IN ('VIEWER', 'OPERATOR', 'ADMIN', 'TENANT_OWNER', 'PLATFORM')),
+  CONSTRAINT "fk_role_assignment_identity" FOREIGN KEY ("identity_id") REFERENCES "identity" ("id") ON UPDATE NO ACTION ON DELETE RESTRICT,
+  CONSTRAINT "fk_role_assignment_granted_by" FOREIGN KEY ("granted_by") REFERENCES "identity" ("id") ON UPDATE NO ACTION ON DELETE RESTRICT,
+  CONSTRAINT "fk_role_assignment_revoked_by" FOREIGN KEY ("revoked_by") REFERENCES "identity" ("id") ON UPDATE NO ACTION ON DELETE RESTRICT
 );
 -- Indexes for role_assignment
 CREATE INDEX "idx_role_assignment_identity" ON "role_assignment" ("identity_id");
@@ -54,7 +57,9 @@ CREATE TABLE "invitation" (
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY ("id"),
-  CONSTRAINT "chk_invitation_status" CHECK (status IN ('PENDING', 'ACCEPTED'))
+  CONSTRAINT "chk_invitation_status" CHECK (status IN ('PENDING', 'ACCEPTED')),
+  CONSTRAINT "fk_invitation_identity" FOREIGN KEY ("identity_id") REFERENCES "identity" ("id") ON UPDATE NO ACTION ON DELETE RESTRICT,
+  CONSTRAINT "fk_invitation_invited_by" FOREIGN KEY ("invited_by") REFERENCES "identity" ("id") ON UPDATE NO ACTION ON DELETE RESTRICT
 );
 -- Indexes for invitation
 CREATE INDEX "idx_invitation_identity" ON "invitation" ("identity_id");
