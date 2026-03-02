@@ -52,7 +52,7 @@ type Route struct {
 // NewRoute constructs a new Route with required fields validated.
 func NewRoute(tenantID, instructionType, connectionID string) (*Route, error) {
 	if tenantID == "" {
-		return nil, ErrConnectionIDRequired
+		return nil, ErrTenantIDRequired
 	}
 	if instructionType == "" {
 		return nil, ErrInstructionTypeRequired

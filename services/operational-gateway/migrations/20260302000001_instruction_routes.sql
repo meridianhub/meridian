@@ -21,6 +21,3 @@ CREATE TABLE instruction_routes (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, instruction_type)
 );
-
--- Index for listing routes per tenant.
-CREATE INDEX idx_instruction_routes_tenant ON instruction_routes (tenant_id);
