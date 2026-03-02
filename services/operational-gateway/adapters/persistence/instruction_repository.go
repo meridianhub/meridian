@@ -282,6 +282,45 @@ func (r *InstructionRepository) ListByTenant(ctx context.Context, params ports.L
 	return results, total, nil
 }
 
+// FindExpired returns up to batchSize instructions whose expires_at has passed and whose
+// status is PENDING or RETRYING. Results are ordered by expires_at ASC so the oldest
+// expirations are processed first.
+func (r *InstructionRepository) FindExpired(ctx context.Context, batchSize int) ([]*domain.Instruction, error) {
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	var entities []InstructionEntity
+	err := r.db.WithContext(ctx).
+		Where("expires_at IS NOT NULL AND expires_at < ? AND status IN ?", gorm.Expr("NOW()"), []string{
+			string(domain.InstructionStatusPending),
+			string(domain.InstructionStatusRetrying),
+		}).
+		Order("expires_at ASC").
+		Limit(batchSize).
+		Find(&entities).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(entities) == 0 {
+		return nil, nil
+	}
+
+	results := make([]*domain.Instruction, 0, len(entities))
+	for i := range entities {
+		attempts, err := r.fetchAttempts(ctx, entities[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		inst, err := instructionFromEntity(&entities[i], attempts)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, inst)
+	}
+	return results, nil
+}
+
 // fetchAttempts loads instruction_attempts for a given instruction ID.
 func (r *InstructionRepository) fetchAttempts(ctx context.Context, instructionID uuid.UUID) ([]InstructionAttemptEntity, error) {
 	var attempts []InstructionAttemptEntity

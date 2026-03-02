@@ -108,6 +108,10 @@ func (m *mockInstructionRepo) FetchDispatchable(_ context.Context, _ ports.Fetch
 	return nil, nil
 }
 
+func (m *mockInstructionRepo) FindExpired(_ context.Context, _ int) ([]*domain.Instruction, error) {
+	return nil, nil
+}
+
 // mockConnectionRepo is an in-memory implementation of ports.ConnectionRepository for testing.
 type mockConnectionRepo struct {
 	mu          sync.RWMutex

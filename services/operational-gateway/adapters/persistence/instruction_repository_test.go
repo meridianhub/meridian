@@ -302,6 +302,121 @@ func TestInstructionRepository_RoundTrip_AllPriorities(t *testing.T) {
 	}
 }
 
+// TestInstructionRepository_FindExpired verifies that FindExpired returns only PENDING
+// and RETRYING instructions whose expires_at has passed, ordered by expires_at ASC.
+func TestInstructionRepository_FindExpired(t *testing.T) {
+	db, ctx := setupTestDB(t)
+
+	tenantID := uuid.New()
+	connID := uuid.New()
+	insertTestConnection(t, db, tenantID, connID)
+
+	repo := NewInstructionRepository(db)
+
+	past1 := time.Now().Add(-2 * time.Minute)
+	past2 := time.Now().Add(-1 * time.Minute)
+	future := time.Now().Add(10 * time.Minute)
+
+	// expired PENDING - oldest (past1)
+	expiredPending1, err := domain.NewInstruction(
+		tenantID, "payment.initiate", connID.String(),
+		map[string]any{"amount": "10"},
+		domain.WithExpiresAt(past1),
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, expiredPending1, fmt.Sprintf("idem-%s", expiredPending1.ID)))
+
+	// expired PENDING - newer (past2)
+	expiredPending2, err := domain.NewInstruction(
+		tenantID, "payment.initiate", connID.String(),
+		map[string]any{"amount": "20"},
+		domain.WithExpiresAt(past2),
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, expiredPending2, fmt.Sprintf("idem-%s", expiredPending2.ID)))
+
+	// PENDING with future expiry - should NOT be returned
+	notYetExpired, err := domain.NewInstruction(
+		tenantID, "payment.initiate", connID.String(),
+		map[string]any{"amount": "30"},
+		domain.WithExpiresAt(future),
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, notYetExpired, fmt.Sprintf("idem-%s", notYetExpired.ID)))
+
+	// PENDING with no expiry - should NOT be returned
+	noExpiry := makeInstruction(t, tenantID, connID.String(), domain.PriorityNormal)
+	require.NoError(t, repo.Save(ctx, noExpiry, fmt.Sprintf("idem-%s", noExpiry.ID)))
+
+	// RETRYING with past expiry - should be returned
+	retryID := uuid.New()
+	require.NoError(t, db.Exec(`
+		INSERT INTO instructions
+			(id, tenant_id, instruction_type, provider_connection_id, payload, priority, status, expires_at, attempt_count, max_attempts, idempotency_key, version)
+		VALUES (?, ?, 'payment.initiate', ?, '{"amount":"40"}', 2, 'RETRYING', ?, 1, 3, ?, 1)
+	`, retryID, tenantID, connID, past2, fmt.Sprintf("idem-retry-%s", retryID)).Error)
+
+	// FAILED with past expiry - should NOT be returned (terminal)
+	failedID := uuid.New()
+	require.NoError(t, db.Exec(`
+		INSERT INTO instructions
+			(id, tenant_id, instruction_type, provider_connection_id, payload, priority, status, expires_at, attempt_count, max_attempts, idempotency_key, version, failure_reason, error_code)
+		VALUES (?, ?, 'payment.initiate', ?, '{"amount":"50"}', 2, 'FAILED', ?, 3, 3, ?, 1, 'some error', 'ERR')
+	`, failedID, tenantID, connID, past1, fmt.Sprintf("idem-failed-%s", failedID)).Error)
+
+	results, err := repo.FindExpired(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, results, 3) // expiredPending1, expiredPending2, retrying
+
+	// Results should be ordered by expires_at ASC.
+	assert.True(t, results[0].ExpiresAt.Before(*results[1].ExpiresAt) || results[0].ExpiresAt.Equal(*results[1].ExpiresAt))
+	assert.True(t, results[1].ExpiresAt.Before(*results[2].ExpiresAt) || results[1].ExpiresAt.Equal(*results[2].ExpiresAt))
+
+	// Verify all returned instructions are expirable.
+	for _, r := range results {
+		assert.Contains(t, []domain.InstructionStatus{
+			domain.InstructionStatusPending,
+			domain.InstructionStatusRetrying,
+		}, r.Status)
+	}
+}
+
+// TestInstructionRepository_FindExpired_LimitEnforced verifies the batchSize parameter.
+func TestInstructionRepository_FindExpired_LimitEnforced(t *testing.T) {
+	db, ctx := setupTestDB(t)
+
+	tenantID := uuid.New()
+	connID := uuid.New()
+	insertTestConnection(t, db, tenantID, connID)
+
+	repo := NewInstructionRepository(db)
+
+	past := time.Now().Add(-1 * time.Minute)
+	for i := 0; i < 5; i++ {
+		inst, err := domain.NewInstruction(
+			tenantID, "payment.initiate", connID.String(),
+			map[string]any{"i": i},
+			domain.WithExpiresAt(past),
+		)
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, inst, fmt.Sprintf("idem-%d-%s", i, inst.ID)))
+	}
+
+	results, err := repo.FindExpired(ctx, 3)
+	require.NoError(t, err)
+	assert.Len(t, results, 3)
+}
+
+// TestInstructionRepository_FindExpired_ReturnsNilWhenEmpty verifies empty result handling.
+func TestInstructionRepository_FindExpired_ReturnsNilWhenEmpty(t *testing.T) {
+	db, ctx := setupTestDB(t)
+	repo := NewInstructionRepository(db)
+
+	results, err := repo.FindExpired(ctx, 100)
+	require.NoError(t, err)
+	assert.Nil(t, results)
+}
+
 // TestInstructionRepository_FetchDispatchable_RespectsNextRetryAt verifies that
 // RETRYING instructions with a future next_retry_at are not fetched until the backoff expires.
 func TestInstructionRepository_FetchDispatchable_RespectsNextRetryAt(t *testing.T) {
