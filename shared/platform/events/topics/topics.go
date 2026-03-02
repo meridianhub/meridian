@@ -104,6 +104,24 @@ const (
 	InternalAccountBookingCreatedV1 = "internal-account.booking-created.v1"
 )
 
+// Operational Gateway topics
+const (
+	// OperationalGatewayInstructionCreatedV1 is the Kafka topic for instruction created events.
+	OperationalGatewayInstructionCreatedV1 = "operational-gateway.instruction-created.v1"
+	// OperationalGatewayInstructionDispatchedV1 is the Kafka topic for instruction dispatched events.
+	OperationalGatewayInstructionDispatchedV1 = "operational-gateway.instruction-dispatched.v1"
+	// OperationalGatewayInstructionDeliveredV1 is the Kafka topic for instruction delivered events.
+	OperationalGatewayInstructionDeliveredV1 = "operational-gateway.instruction-delivered.v1"
+	// OperationalGatewayInstructionAcknowledgedV1 is the Kafka topic for instruction acknowledged events.
+	OperationalGatewayInstructionAcknowledgedV1 = "operational-gateway.instruction-acknowledged.v1"
+	// OperationalGatewayInstructionFailedV1 is the Kafka topic for instruction failed events.
+	OperationalGatewayInstructionFailedV1 = "operational-gateway.instruction-failed.v1"
+	// OperationalGatewayInstructionExpiredV1 is the Kafka topic for instruction expired events.
+	OperationalGatewayInstructionExpiredV1 = "operational-gateway.instruction-expired.v1"
+	// OperationalGatewayInstructionCancelledV1 is the Kafka topic for instruction cancelled events.
+	OperationalGatewayInstructionCancelledV1 = "operational-gateway.instruction-cancelled.v1"
+)
+
 // Reconciliation topics
 const (
 	// ReconciliationRunStartedV1 is the Kafka topic for reconciliation run started events.
@@ -159,5 +177,12 @@ func All() []string {
 		ReconciliationPositionLockRequestedV1,
 		ReconciliationDisputeCreatedV1,
 		ReconciliationDisputeResolvedV1,
+		OperationalGatewayInstructionCreatedV1,
+		OperationalGatewayInstructionDispatchedV1,
+		OperationalGatewayInstructionDeliveredV1,
+		OperationalGatewayInstructionAcknowledgedV1,
+		OperationalGatewayInstructionFailedV1,
+		OperationalGatewayInstructionExpiredV1,
+		OperationalGatewayInstructionCancelledV1,
 	}
 }

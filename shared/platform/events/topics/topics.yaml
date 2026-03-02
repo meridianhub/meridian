@@ -260,3 +260,48 @@ services:
         description: Published when a reconciliation dispute is resolved
         event_type: reconciliation.dispute_resolved.v1
         proto_message: DisputeResolved
+
+  operational-gateway:
+    description: Instruction lifecycle events for the operational gateway service
+    topics:
+      - name: operational-gateway.instruction-created.v1
+        constant: OperationalGatewayInstructionCreatedV1
+        description: Published when a new instruction is accepted and created in PENDING state
+        event_type: operational_gateway.instruction_created.v1
+        proto_message: InstructionCreatedEvent
+
+      - name: operational-gateway.instruction-dispatched.v1
+        constant: OperationalGatewayInstructionDispatchedV1
+        description: Published when an instruction transitions to DISPATCHING state
+        event_type: operational_gateway.instruction_dispatched.v1
+        proto_message: InstructionDispatchedEvent
+
+      - name: operational-gateway.instruction-delivered.v1
+        constant: OperationalGatewayInstructionDeliveredV1
+        description: Published when an instruction is successfully delivered to the provider
+        event_type: operational_gateway.instruction_delivered.v1
+        proto_message: InstructionDeliveredEvent
+
+      - name: operational-gateway.instruction-acknowledged.v1
+        constant: OperationalGatewayInstructionAcknowledgedV1
+        description: Published when a provider confirms it has processed the instruction
+        event_type: operational_gateway.instruction_acknowledged.v1
+        proto_message: InstructionAcknowledgedEvent
+
+      - name: operational-gateway.instruction-failed.v1
+        constant: OperationalGatewayInstructionFailedV1
+        description: Published when an instruction permanently fails after exhausting retries
+        event_type: operational_gateway.instruction_failed.v1
+        proto_message: InstructionFailedEvent
+
+      - name: operational-gateway.instruction-expired.v1
+        constant: OperationalGatewayInstructionExpiredV1
+        description: Published when an instruction expires before being delivered
+        event_type: operational_gateway.instruction_expired.v1
+        proto_message: InstructionExpiredEvent
+
+      - name: operational-gateway.instruction-cancelled.v1
+        constant: OperationalGatewayInstructionCancelledV1
+        description: Published when a pending instruction is explicitly cancelled
+        event_type: operational_gateway.instruction_cancelled.v1
+        proto_message: InstructionCancelledEvent
