@@ -665,6 +665,10 @@ service IdentityService {
       post: "/v1/identities/authenticate"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
+    };
   }
 
   // --- Password Management ---
@@ -675,6 +679,10 @@ service IdentityService {
     option (google.api.http) = {
       post: "/v1/identities/{identity_id}/password"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
     };
   }
 
@@ -692,6 +700,10 @@ service IdentityService {
       post: "/v1/identities/password-reset"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
+    };
   }
 
   // CompletePasswordReset finalises the password reset by verifying the token and storing the new password.
@@ -699,6 +711,10 @@ service IdentityService {
     option (google.api.http) = {
       put: "/v1/identities/password-reset"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
     };
   }
 
@@ -757,6 +773,10 @@ service IdentityService {
     option (google.api.http) = {
       post: "/v1/identities/invite/accept"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
     };
   }
 
