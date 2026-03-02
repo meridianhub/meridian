@@ -21,7 +21,7 @@ CREATE TABLE instruction_routes (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, instruction_type),
     FOREIGN KEY (tenant_id, connection_id) REFERENCES provider_connections (tenant_id, connection_id) ON DELETE RESTRICT,
-    FOREIGN KEY (tenant_id, fallback_connection_id) REFERENCES provider_connections (tenant_id, connection_id) ON DELETE SET NULL
+    FOREIGN KEY (tenant_id, fallback_connection_id) REFERENCES provider_connections (tenant_id, connection_id) ON DELETE RESTRICT
 );
 
 -- Index for finding routes by connection (e.g. validating impact before deleting a connection).
