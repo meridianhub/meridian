@@ -1,0 +1,797 @@
+syntax = "proto3";
+
+package meridian.identity.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/identity/v1;identityv1";
+
+// OpenAPI specification metadata for the Identity and Access Management Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Identity and Access Management Service API"
+    version: "1.0"
+    description: "Identity lifecycle management including authentication, role-based access control, "
+                 "and user invitation workflows for the Meridian platform."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+  security_definitions: {
+    security: {
+      key: "Bearer"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "Bearer token authentication"
+      }
+    }
+  }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
+};
+
+// AuthenticationFailureReason is a coarse classification of why authentication failed.
+// Detailed reasons are recorded in internal audit logs only.
+enum AuthenticationFailureReason {
+  // AUTHENTICATION_FAILURE_REASON_UNSPECIFIED means no failure; authentication succeeded.
+  AUTHENTICATION_FAILURE_REASON_UNSPECIFIED = 0;
+  // AUTHENTICATION_FAILURE_REASON_INVALID_CREDENTIALS means the supplied credentials were not accepted.
+  AUTHENTICATION_FAILURE_REASON_INVALID_CREDENTIALS = 1;
+  // AUTHENTICATION_FAILURE_REASON_ACCOUNT_NOT_ACTIVE means the identity is not in ACTIVE status.
+  AUTHENTICATION_FAILURE_REASON_ACCOUNT_NOT_ACTIVE = 2;
+  // AUTHENTICATION_FAILURE_REASON_ACCOUNT_LOCKED means the identity is temporarily locked.
+  AUTHENTICATION_FAILURE_REASON_ACCOUNT_LOCKED = 3;
+}
+
+// IdentityStatus defines the lifecycle state of an identity.
+enum IdentityStatus {
+  // IDENTITY_STATUS_UNSPECIFIED means the status is unknown.
+  IDENTITY_STATUS_UNSPECIFIED = 0;
+  // IDENTITY_STATUS_PENDING_INVITE means the identity has been created but the user has not yet accepted their invitation.
+  IDENTITY_STATUS_PENDING_INVITE = 1;
+  // IDENTITY_STATUS_ACTIVE means the identity is active and the user can authenticate.
+  IDENTITY_STATUS_ACTIVE = 2;
+  // IDENTITY_STATUS_SUSPENDED means the identity has been temporarily disabled by an administrator.
+  IDENTITY_STATUS_SUSPENDED = 3;
+  // IDENTITY_STATUS_LOCKED means the identity has been locked due to excessive failed authentication attempts.
+  IDENTITY_STATUS_LOCKED = 4;
+}
+
+// Role defines the set of predefined roles that can be assigned to an identity.
+enum Role {
+  // ROLE_UNSPECIFIED means the role is unknown.
+  ROLE_UNSPECIFIED = 0;
+  // ROLE_ADMIN is a tenant administrator with full management capabilities.
+  ROLE_ADMIN = 1;
+  // ROLE_OPERATOR is a tenant operator with day-to-day operational access.
+  ROLE_OPERATOR = 2;
+  // ROLE_AUDITOR is a read-only role for compliance and audit purposes.
+  ROLE_AUDITOR = 3;
+  // ROLE_TENANT_OWNER is the owner of a tenant with billing and configuration rights.
+  ROLE_TENANT_OWNER = 4;
+  // ROLE_PLATFORM_ADMIN is a platform-level administrator across all tenants.
+  ROLE_PLATFORM_ADMIN = 5;
+  // ROLE_SUPER_ADMIN is the highest privilege level with unrestricted access.
+  ROLE_SUPER_ADMIN = 6;
+}
+
+// Identity represents a user account in the Meridian platform.
+// An identity holds authentication credentials and is associated with one or more roles.
+message Identity {
+  // id is the unique identifier for this identity.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // email is the primary email address for this identity, used as the login identifier.
+  string email = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    email: true
+  }];
+
+  // external_idp is the external identity provider issuer (e.g. "https://accounts.google.com").
+  // Present when the identity was federated from an external provider.
+  string external_idp = 3 [(buf.validate.field).string = {max_len: 500}];
+
+  // external_idp_sub is the subject identifier issued by the external identity provider.
+  // Combined with external_idp to uniquely identify a federated user.
+  string external_idp_sub = 4 [(buf.validate.field).string = {max_len: 255}];
+
+  // status is the current lifecycle state of the identity.
+  IdentityStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // last_login_at is the timestamp of the most recent successful authentication.
+  google.protobuf.Timestamp last_login_at = 6;
+
+  // failed_attempts is the count of consecutive failed authentication attempts since last success.
+  int32 failed_attempts = 7 [(buf.validate.field).int32 = {gte: 0}];
+
+  // locked_until is the timestamp until which the identity is locked after excessive failed attempts.
+  // Only set when status is IDENTITY_STATUS_LOCKED.
+  google.protobuf.Timestamp locked_until = 8;
+
+  // mfa_enabled indicates whether multi-factor authentication is configured for this identity.
+  bool mfa_enabled = 9;
+
+  // created_at is when the identity was created.
+  google.protobuf.Timestamp created_at = 10;
+
+  // updated_at is when the identity record was last modified.
+  google.protobuf.Timestamp updated_at = 11;
+
+  // version is for optimistic locking.
+  int32 version = 12 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// RoleAssignment represents a role granted to an identity.
+message RoleAssignment {
+  // id is the unique identifier for this role assignment.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // identity_id is the identifier of the identity that holds this role.
+  string identity_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // role is the assigned role.
+  Role role = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // granted_by is the identity id of the administrator who granted this role.
+  string granted_by = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // granted_at is when the role was granted.
+  google.protobuf.Timestamp granted_at = 5;
+
+  // expires_at is the optional timestamp after which this role assignment is no longer valid.
+  google.protobuf.Timestamp expires_at = 6;
+
+  // revoked indicates whether this role assignment has been revoked.
+  bool revoked = 7;
+
+  // revoked_at is when the role was revoked. Only set when revoked is true.
+  google.protobuf.Timestamp revoked_at = 8;
+
+  // revoked_by is the identity id of the administrator who revoked this role. Only set when revoked is true.
+  string revoked_by = 9 [(buf.validate.field).string = {max_len: 100}];
+}
+
+// Invitation represents a pending user invitation to join the platform.
+message Invitation {
+  // id is the unique identifier for this invitation.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // identity_id is the identifier of the identity that was created for the invitee.
+  string identity_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // invited_by is the identity id of the administrator who sent the invitation.
+  string invited_by = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // expires_at is when the invitation token expires.
+  google.protobuf.Timestamp expires_at = 4;
+
+  // accepted_at is when the invitee accepted the invitation. Absent until the invitation is accepted.
+  google.protobuf.Timestamp accepted_at = 5;
+
+  // created_at is when the invitation was created.
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// --- CRUD Operations ---
+
+// CreateIdentityRequest is the request to create a new identity.
+message CreateIdentityRequest {
+  // email is the primary email address for the new identity.
+  string email = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    email: true
+  }];
+}
+
+// CreateIdentityResponse is the response after creating a new identity.
+message CreateIdentityResponse {
+  // identity is the newly created identity.
+  Identity identity = 1 [(buf.validate.field).required = true];
+}
+
+// RetrieveIdentityRequest is the request to retrieve an identity by ID.
+message RetrieveIdentityRequest {
+  // id is the unique identifier of the identity to retrieve.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RetrieveIdentityResponse is the response containing the requested identity.
+message RetrieveIdentityResponse {
+  // identity is the requested identity.
+  Identity identity = 1 [(buf.validate.field).required = true];
+}
+
+// UpdateIdentityRequest is the request to update an identity's mutable fields.
+message UpdateIdentityRequest {
+  // id is the unique identifier of the identity to update.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // email is the updated email address (optional).
+  // IGNORE_IF_ZERO_VALUE allows partial updates that do not modify the email field.
+  string email = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 255
+      email: true
+    }
+  ];
+
+  // version is for optimistic locking.
+  int32 version = 3 [(buf.validate.field).int32 = {gte: 0}];
+}
+
+// UpdateIdentityResponse is the response after updating an identity.
+message UpdateIdentityResponse {
+  // identity is the updated identity.
+  Identity identity = 1 [(buf.validate.field).required = true];
+}
+
+// ListIdentitiesRequest is the request to list identities with optional filters.
+message ListIdentitiesRequest {
+  // page_size is the maximum number of results to return per page.
+  int32 page_size = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+
+  // page_token is the pagination token from a previous response.
+  string page_token = 2 [(buf.validate.field).string = {max_len: 500}];
+
+  // status_filter optionally filters identities by lifecycle status.
+  IdentityStatus status_filter = 3 [(buf.validate.field).enum = {defined_only: true}];
+}
+
+// ListIdentitiesResponse is the paginated response for listing identities.
+message ListIdentitiesResponse {
+  // identities is the list of identities in the current page.
+  repeated Identity identities = 1;
+
+  // next_page_token is the token to retrieve the next page of results.
+  // Empty when there are no more results.
+  string next_page_token = 2;
+
+  // total_count is the total number of identities matching the filter.
+  int32 total_count = 3;
+}
+
+// --- Authentication ---
+
+// AuthenticateRequest is the request to authenticate an identity using username/password credentials.
+// This RPC is called by the Dex gRPC connector during the authentication flow.
+message AuthenticateRequest {
+  // email is the email address of the identity attempting to authenticate.
+  string email = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    email: true
+  }];
+
+  // password is the plaintext password to verify against the stored credential.
+  string password = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+}
+
+// AuthenticateResponse is the response from an authentication attempt.
+message AuthenticateResponse {
+  // identity is the authenticated identity. Present only when authentication succeeds.
+  Identity identity = 1;
+
+  // authenticated indicates whether the provided credentials are valid.
+  bool authenticated = 2;
+
+  // failure_reason is a coarse classification of why authentication failed.
+  // Detailed reasons are logged server-side only and not exposed in this response.
+  AuthenticationFailureReason failure_reason = 3;
+}
+
+// --- Password Management ---
+
+// SetPasswordRequest is the request to set an initial password for an identity.
+// The token proves possession of the invitation and authorises password creation.
+// The server resolves the target identity from the token rather than accepting
+// a client-supplied identity identifier.
+message SetPasswordRequest {
+  // token is the one-time invitation token delivered to the invitee's email address.
+  // This serves as proof-of-possession and determines which identity receives the password.
+  string token = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // password is the new plaintext password to hash and store.
+  string password = 2 [(buf.validate.field).string = {
+    min_len: 8
+    max_len: 1000
+  }];
+}
+
+// SetPasswordResponse is the response after setting a password.
+message SetPasswordResponse {
+  // identity_id is the identifier of the identity whose password was set.
+  string identity_id = 1;
+}
+
+// ChangePasswordRequest is the request to change an existing password.
+// The target identity is derived from the authenticated principal in the
+// server-side interceptor; callers cannot change another identity's password.
+message ChangePasswordRequest {
+  // current_password is the identity's existing password for verification.
+  string current_password = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // new_password is the replacement password to hash and store.
+  string new_password = 2 [(buf.validate.field).string = {
+    min_len: 8
+    max_len: 1000
+  }];
+}
+
+// ChangePasswordResponse is the response after a successful password change.
+message ChangePasswordResponse {
+  // identity_id is the identifier of the identity whose password was changed.
+  string identity_id = 1;
+}
+
+// RequestPasswordResetRequest is the request to initiate a password reset flow.
+// A reset token is generated and delivered out-of-band to the email address.
+message RequestPasswordResetRequest {
+  // email is the email address of the identity requesting a password reset.
+  string email = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    email: true
+  }];
+}
+
+// RequestPasswordResetResponse is the response after initiating a password reset.
+message RequestPasswordResetResponse {
+  // email is the email address to which the reset token was sent.
+  string email = 1;
+}
+
+// CompletePasswordResetRequest is the request to complete a password reset using a reset token.
+message CompletePasswordResetRequest {
+  // reset_token is the one-time token delivered to the identity's email address.
+  string reset_token = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // new_password is the replacement password to hash and store.
+  string new_password = 2 [(buf.validate.field).string = {
+    min_len: 8
+    max_len: 1000
+  }];
+}
+
+// CompletePasswordResetResponse is the response after completing a password reset.
+message CompletePasswordResetResponse {
+  // identity_id is the identifier of the identity whose password was reset.
+  string identity_id = 1;
+}
+
+// --- Role Management ---
+
+// GrantRoleRequest is the request to grant a role to an identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
+message GrantRoleRequest {
+  // identity_id is the identifier of the identity receiving the role.
+  string identity_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // role is the role to grant.
+  Role role = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+
+  // expires_at is the optional expiry timestamp for this role assignment.
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+// GrantRoleResponse is the response after granting a role.
+message GrantRoleResponse {
+  // role_assignment is the newly created role assignment.
+  RoleAssignment role_assignment = 1 [(buf.validate.field).required = true];
+}
+
+// RevokeRoleRequest is the request to revoke a role from an identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
+message RevokeRoleRequest {
+  // identity_id is the identifier of the identity whose role is being revoked.
+  string identity_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // role_assignment_id is the identifier of the role assignment to revoke.
+  string role_assignment_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+}
+
+// RevokeRoleResponse is the response after revoking a role.
+message RevokeRoleResponse {
+  // role_assignment is the updated role assignment reflecting the revocation.
+  RoleAssignment role_assignment = 1 [(buf.validate.field).required = true];
+}
+
+// ListRoleAssignmentsRequest is the request to list role assignments for an identity.
+message ListRoleAssignmentsRequest {
+  // identity_id is the identifier of the identity whose role assignments to list.
+  string identity_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // include_revoked controls whether revoked role assignments are included in the response.
+  bool include_revoked = 2;
+}
+
+// ListRoleAssignmentsResponse is the response containing role assignments for an identity.
+message ListRoleAssignmentsResponse {
+  // role_assignments is the list of role assignments for the requested identity.
+  repeated RoleAssignment role_assignments = 1;
+}
+
+// --- Invitation Management ---
+
+// InviteUserRequest is the request to invite a new user to the platform.
+// Creates both an Identity in PENDING_INVITE status and an Invitation record.
+// The actor sending the invitation is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
+message InviteUserRequest {
+  // email is the email address of the user to invite.
+  string email = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    email: true
+  }];
+
+  // role is the initial role to assign to the invited user upon acceptance.
+  Role role = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0] // Prevent UNSPECIFIED
+  }];
+}
+
+// InviteUserResponse is the response after sending an invitation.
+message InviteUserResponse {
+  // invitation is the newly created invitation record.
+  Invitation invitation = 1 [(buf.validate.field).required = true];
+
+  // identity is the newly created identity in PENDING_INVITE status.
+  Identity identity = 2 [(buf.validate.field).required = true];
+}
+
+// AcceptInvitationRequest is the request to accept a pending invitation.
+// Transitions the identity from PENDING_INVITE to ACTIVE and sets initial password.
+message AcceptInvitationRequest {
+  // token is the invitation token delivered to the invitee's email address.
+  string token = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1000
+  }];
+
+  // password is the initial password the invitee is establishing for their account.
+  string password = 2 [(buf.validate.field).string = {
+    min_len: 8
+    max_len: 1000
+  }];
+}
+
+// AcceptInvitationResponse is the response after accepting an invitation.
+message AcceptInvitationResponse {
+  // identity is the activated identity.
+  Identity identity = 1 [(buf.validate.field).required = true];
+}
+
+// --- Lifecycle Management ---
+
+// SuspendIdentityRequest is the request to suspend an active identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
+message SuspendIdentityRequest {
+  // id is the unique identifier of the identity to suspend.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // reason is the explanation for the suspension, recorded in the audit trail.
+  string reason = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+}
+
+// SuspendIdentityResponse is the response after suspending an identity.
+message SuspendIdentityResponse {
+  // identity is the suspended identity with updated status.
+  Identity identity = 1 [(buf.validate.field).required = true];
+}
+
+// ReactivateIdentityRequest is the request to reactivate a suspended identity.
+// The actor performing this action is derived from the authenticated principal
+// in the server-side interceptor, not from the request payload.
+message ReactivateIdentityRequest {
+  // id is the unique identifier of the identity to reactivate.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
+  // reason is the explanation for the reactivation, recorded in the audit trail.
+  string reason = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+}
+
+// ReactivateIdentityResponse is the response after reactivating an identity.
+message ReactivateIdentityResponse {
+  // identity is the reactivated identity with updated status.
+  Identity identity = 1 [(buf.validate.field).required = true];
+}
+
+// IdentityService manages identity lifecycle, authentication, and role-based access control.
+service IdentityService {
+  // --- CRUD Operations ---
+
+  // CreateIdentity creates a new identity in the system.
+  rpc CreateIdentity(CreateIdentityRequest) returns (CreateIdentityResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Identity created successfully"
+        }
+      }
+    };
+  }
+
+  // RetrieveIdentity retrieves an identity by its unique identifier.
+  rpc RetrieveIdentity(RetrieveIdentityRequest) returns (RetrieveIdentityResponse) {
+    option (google.api.http) = {
+      get: "/v1/identities/{id}"
+    };
+  }
+
+  // UpdateIdentity updates mutable fields on an existing identity.
+  rpc UpdateIdentity(UpdateIdentityRequest) returns (UpdateIdentityResponse) {
+    option (google.api.http) = {
+      patch: "/v1/identities/{id}"
+      body: "*"
+    };
+  }
+
+  // ListIdentities returns a paginated list of identities with optional status filtering.
+  rpc ListIdentities(ListIdentitiesRequest) returns (ListIdentitiesResponse) {
+    option (google.api.http) = {
+      get: "/v1/identities"
+    };
+  }
+
+  // --- Authentication ---
+
+  // Authenticate verifies identity credentials and returns the authenticated identity.
+  // This RPC is used by the Dex gRPC connector to validate username/password during login.
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/authenticate"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
+    };
+  }
+
+  // --- Password Management ---
+
+  // SetPassword sets the initial password for an identity using an invitation token.
+  // The token determines the target identity; no authenticated principal is required.
+  rpc SetPassword(SetPasswordRequest) returns (SetPasswordResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/password"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
+    };
+  }
+
+  // ChangePassword changes the password for the authenticated identity.
+  // The target identity is derived from the authenticated principal.
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
+    option (google.api.http) = {
+      put: "/v1/identities/me/password"
+      body: "*"
+    };
+  }
+
+  // RequestPasswordReset initiates the password reset flow by generating a reset token.
+  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/password-reset"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
+    };
+  }
+
+  // CompletePasswordReset finalises the password reset by verifying the token and storing the new password.
+  rpc CompletePasswordReset(CompletePasswordResetRequest) returns (CompletePasswordResetResponse) {
+    option (google.api.http) = {
+      put: "/v1/identities/password-reset"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
+    };
+  }
+
+  // --- Role Management ---
+
+  // GrantRole assigns a role to an identity.
+  rpc GrantRole(GrantRoleRequest) returns (GrantRoleResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/{identity_id}/roles"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Role granted successfully"
+        }
+      }
+    };
+  }
+
+  // RevokeRole revokes a role assignment from an identity.
+  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse) {
+    option (google.api.http) = {
+      delete: "/v1/identities/{identity_id}/roles/{role_assignment_id}"
+    };
+  }
+
+  // ListRoleAssignments lists the role assignments for an identity.
+  rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse) {
+    option (google.api.http) = {
+      get: "/v1/identities/{identity_id}/roles"
+    };
+  }
+
+  // --- Invitation Management ---
+
+  // InviteUser creates an invitation and a PENDING_INVITE identity for a new user.
+  rpc InviteUser(InviteUserRequest) returns (InviteUserResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/invite"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      responses: {
+        key: "201"
+        value: {
+          description: "Invitation sent successfully"
+        }
+      }
+    };
+  }
+
+  // AcceptInvitation accepts a pending invitation and activates the associated identity.
+  rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/invite/accept"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Pre-auth endpoint: no Bearer token required.
+      security: {}
+    };
+  }
+
+  // --- Lifecycle Management ---
+
+  // SuspendIdentity suspends an active identity, preventing further authentication.
+  rpc SuspendIdentity(SuspendIdentityRequest) returns (SuspendIdentityResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/{id}/suspend"
+      body: "*"
+    };
+  }
+
+  // ReactivateIdentity reactivates a suspended identity.
+  rpc ReactivateIdentity(ReactivateIdentityRequest) returns (ReactivateIdentityResponse) {
+    option (google.api.http) = {
+      post: "/v1/identities/{id}/reactivate"
+      body: "*"
+    };
+  }
+}
