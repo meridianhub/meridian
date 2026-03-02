@@ -112,11 +112,20 @@ func createSchema(db *gorm.DB) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
 		}
-		// Execute each statement in the migration file.
-		// Split on semicolons to handle multi-statement files.
-		for _, stmt := range strings.Split(string(content), ";") {
+		// Strip single-line SQL comments before splitting on semicolons,
+		// since comments can appear within and between statements.
+		var cleaned []string
+		for _, line := range strings.Split(string(content), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+				continue
+			}
+			cleaned = append(cleaned, line)
+		}
+		sql := strings.Join(cleaned, "\n")
+		for _, stmt := range strings.Split(sql, ";") {
 			stmt = strings.TrimSpace(stmt)
-			if stmt == "" || strings.HasPrefix(stmt, "--") {
+			if stmt == "" {
 				continue
 			}
 			if err := db.Exec(stmt).Error; err != nil {
