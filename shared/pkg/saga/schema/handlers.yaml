@@ -778,3 +778,78 @@ handlers:
       status:
         type: string
         description: "Status of the dispute (OPEN)"
+
+  # Operational Gateway Service
+  operational_gateway.dispatch_instruction:
+    description: "Queue an instruction for dispatch to an external provider"
+    params:
+      instruction_type:
+        type: string
+        required: true
+        description: "Type of instruction (e.g., payment.collect, notification.sms)"
+      payload:
+        type: map
+        required: true
+        description: "Instruction-specific data sent to the provider"
+      priority:
+        type: enum
+        values: [LOW, NORMAL, HIGH, CRITICAL]
+        required: false
+        description: "Dispatch priority (default: NORMAL)"
+      correlation_id:
+        type: string
+        required: false
+        description: "Links to originating saga/event for distributed tracing"
+      causation_id:
+        type: string
+        required: false
+        description: "Identifies the event or command that caused this instruction"
+      scheduled_at:
+        type: string
+        required: false
+        description: "ISO 8601 timestamp: when to dispatch (null = immediate)"
+    returns:
+      instruction_id:
+        type: string
+        description: "UUID of the created instruction"
+      status:
+        type: string
+        description: "Status of the instruction (PENDING)"
+    compensate: operational_gateway.cancel_instruction
+
+  operational_gateway.cancel_instruction:
+    description: "Cancel a pending instruction before it is dispatched (compensation handler)"
+    params:
+      instruction_id:
+        type: string
+        required: true
+        description: "UUID of the instruction to cancel"
+      reason:
+        type: string
+        required: false
+        description: "Reason for cancellation (for audit trail)"
+    returns:
+      instruction_id:
+        type: string
+        description: "Echo of the input instruction ID"
+      status:
+        type: string
+        description: "Status of the instruction (CANCELLED)"
+
+  operational_gateway.get_instruction:
+    description: "Get instruction status and details by ID"
+    params:
+      instruction_id:
+        type: string
+        required: true
+        description: "UUID of the instruction to retrieve"
+    returns:
+      instruction_id:
+        type: string
+        description: "UUID of the instruction"
+      instruction_type:
+        type: string
+        description: "Type of instruction"
+      status:
+        type: string
+        description: "Current lifecycle status of the instruction"
