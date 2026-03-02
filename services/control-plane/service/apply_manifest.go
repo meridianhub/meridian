@@ -3,6 +3,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -30,6 +31,9 @@ type ApplyManifestServiceConfig struct {
 	HandlerDeps *applier.HandlerDependencies
 }
 
+// ErrPoolRequired is returned when Pool is nil during service registration.
+var ErrPoolRequired = errors.New("apply manifest service: pool is required")
+
 // RegisterApplyManifestService creates and registers the ApplyManifestService
 // on the given gRPC server. It wires together the validator, differ, planner,
 // and optionally an executor for saga-based manifest application.
@@ -37,6 +41,10 @@ type ApplyManifestServiceConfig struct {
 // When cfg.HandlerDeps is nil, the handler validates, diffs, and plans manifests
 // but does not execute them (suitable for lightweight deployments).
 func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceConfig) error {
+	if cfg.Pool == nil {
+		return ErrPoolRequired
+	}
+
 	v, err := validator.New()
 	if err != nil {
 		return fmt.Errorf("manifest validator: %w", err)

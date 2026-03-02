@@ -172,12 +172,12 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	// Provider Connections (Operational Gateway)
 	{differ.ResourceProviderConnection, differ.ActionCreate}: MethodUpsertProviderConnection,
 	{differ.ResourceProviderConnection, differ.ActionUpdate}: MethodUpsertProviderConnection,
-	{differ.ResourceProviderConnection, differ.ActionDelete}: MethodDeleteProviderConnection,
+	// No delete method: proto does not define DeleteConnection RPC.
 
 	// Instruction Routes (Operational Gateway)
 	{differ.ResourceInstructionRoute, differ.ActionCreate}: MethodUpsertInstructionRoute,
 	{differ.ResourceInstructionRoute, differ.ActionUpdate}: MethodUpsertInstructionRoute,
-	{differ.ResourceInstructionRoute, differ.ActionDelete}: MethodDeleteInstructionRoute,
+	// No delete method: proto does not define DeleteRoute RPC.
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.

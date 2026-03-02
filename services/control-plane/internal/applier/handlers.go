@@ -237,24 +237,24 @@ func initiateAccountHandler(deps *HandlerDependencies) saga.Handler {
 }
 
 // upsertConnectionHandler creates a handler that upserts a provider connection.
-// If OperationalGateway is nil in deps, the handler is a no-op (returns success).
-// This allows control-plane deployments without the operational-gateway client to still
-// apply manifests for other sections.
+// Returns an error if OperationalGateway is nil to prevent silent skipping of
+// gateway configuration during manifest apply.
 func upsertConnectionHandler(deps *HandlerDependencies) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		if deps.OperationalGateway == nil {
-			return map[string]any{"status": "SKIPPED", "reason": "operational_gateway not configured"}, nil
+			return nil, ErrOperationalGatewayNotConfigured
 		}
 		return deps.OperationalGateway.UpsertConnection(ctx, params)
 	}
 }
 
 // upsertRouteHandler creates a handler that upserts an instruction route.
-// If OperationalGateway is nil in deps, the handler is a no-op (returns success).
+// Returns an error if OperationalGateway is nil to prevent silent skipping of
+// route configuration during manifest apply.
 func upsertRouteHandler(deps *HandlerDependencies) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		if deps.OperationalGateway == nil {
-			return map[string]any{"status": "SKIPPED", "reason": "operational_gateway not configured"}, nil
+			return nil, ErrOperationalGatewayNotConfigured
 		}
 		return deps.OperationalGateway.UpsertRoute(ctx, params)
 	}

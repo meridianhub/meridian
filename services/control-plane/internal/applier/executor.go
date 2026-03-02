@@ -62,6 +62,10 @@ type ManifestExecutorDepsConfig struct {
 // This is the preferred factory for production use. The simpler NewManifestExecutor
 // is available for callers that pre-build their own saga runner.
 func NewManifestExecutorFromDeps(cfg ManifestExecutorDepsConfig) (*ManifestExecutor, error) {
+	if cfg.Pool == nil {
+		return nil, ErrPoolRequired
+	}
+
 	registry := saga.NewHandlerRegistry()
 	if err := RegisterManifestHandlers(registry, cfg.Deps); err != nil {
 		return nil, fmt.Errorf("register manifest handlers: %w", err)
@@ -239,6 +243,16 @@ var (
 
 	// ErrMissingTenantID is returned when tenant_id is empty.
 	ErrMissingTenantID = errors.New("apply manifest: tenant_id is required")
+
+	// ErrPoolRequired is returned when the database pool is nil.
+	ErrPoolRequired = errors.New("manifest executor: pool is required")
+
+	// ErrExecutorNotConfigured is returned when a non-dry-run apply is attempted without an executor.
+	ErrExecutorNotConfigured = errors.New("executor not configured: cannot execute non-dry-run apply")
+
+	// ErrOperationalGatewayNotConfigured is returned when a handler requires the operational
+	// gateway service but it was not provided in HandlerDependencies.
+	ErrOperationalGatewayNotConfigured = errors.New("operational_gateway service not configured")
 )
 
 // Apply executes the apply_manifest saga for a tenant.

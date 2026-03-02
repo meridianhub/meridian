@@ -1,11 +1,11 @@
 package persistence
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
-	"github.com/meridianhub/meridian/services/operational-gateway/ports"
 )
 
 // RouteEntity is the GORM persistence model for the instruction_routes table.
@@ -32,11 +32,11 @@ func (RouteEntity) TableName() string {
 func routeToEntity(r *domain.Route) (*RouteEntity, error) {
 	tenantUUID, err := uuid.Parse(r.TenantID)
 	if err != nil {
-		return nil, ports.ErrRouteNotFound
+		return nil, fmt.Errorf("invalid tenant_id %q: %w", r.TenantID, err)
 	}
 	connUUID, err := uuid.Parse(r.ConnectionID)
 	if err != nil {
-		return nil, ports.ErrRouteNotFound
+		return nil, fmt.Errorf("invalid connection_id %q: %w", r.ConnectionID, err)
 	}
 
 	entity := &RouteEntity{
@@ -54,7 +54,7 @@ func routeToEntity(r *domain.Route) (*RouteEntity, error) {
 	if r.FallbackConnectionID != "" {
 		fallbackUUID, err := uuid.Parse(r.FallbackConnectionID)
 		if err != nil {
-			return nil, ports.ErrRouteNotFound
+			return nil, fmt.Errorf("invalid fallback_connection_id %q: %w", r.FallbackConnectionID, err)
 		}
 		entity.FallbackConnectionID = &fallbackUUID
 	}

@@ -365,14 +365,14 @@ func (h *ApplyManifestHandler) execute(
 	execPlan *planner.ExecutionPlan,
 ) executeOutput {
 	if h.executor == nil {
-		// No executor configured - this is valid for lightweight deployments
-		// where the RPC just validates + plans without saga execution.
+		// No executor configured - reject non-dry-run applies to prevent
+		// acknowledging applies without actually executing them.
 		return executeOutput{
-			jobID: uuid.New().String(),
+			err: ErrExecutorNotConfigured,
 			stepResult: &controlplanev1.StepResult{
 				StepName: "execute",
-				Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_SUCCESS,
-				Message:  fmt.Sprintf("Plan accepted: %d calls across %d phases (executor not configured)", len(execPlan.Calls), len(execPlan.Phases())),
+				Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
+				Message:  "Executor not configured: this deployment only supports validation and dry-run",
 			},
 		}
 	}

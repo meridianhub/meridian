@@ -229,9 +229,8 @@ func TestApplyManifest_ValidManifest_NoExecutor(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Without executor configured, it should still succeed (plan accepted)
-	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED, resp.Status)
-	assert.NotEmpty(t, resp.JobId)
+	// Without executor configured, non-dry-run applies should fail
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED, resp.Status)
 }
 
 func TestApplyManifest_CELValidationError(t *testing.T) {

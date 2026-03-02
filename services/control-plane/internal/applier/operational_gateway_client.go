@@ -3,8 +3,10 @@ package applier
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
+	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
 )
@@ -38,7 +40,8 @@ func (c *OperationalGatewayClient) UpsertConnection(ctx *saga.StarlarkContext, p
 		return nil, fmt.Errorf("build upsert connection request: %w", err)
 	}
 
-	resp, err := c.connClient.UpsertConnection(ctx.Context, req)
+	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	resp, err := c.connClient.UpsertConnection(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert connection: %w", err)
 	}
@@ -58,7 +61,8 @@ func (c *OperationalGatewayClient) UpsertRoute(ctx *saga.StarlarkContext, params
 		return nil, fmt.Errorf("build upsert route request: %w", err)
 	}
 
-	resp, err := c.routeClient.UpsertRoute(ctx.Context, req)
+	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	resp, err := c.routeClient.UpsertRoute(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert route: %w", err)
 	}
@@ -236,20 +240,35 @@ func stringFromMap(m map[string]any, key string) string {
 }
 
 // toInt32 converts a numeric value from a map to int32.
+// Returns (0, false) for out-of-range values or non-integral floats.
 func toInt32(v any) (int32, bool) {
 	switch n := v.(type) {
 	case int:
-		return int32(n), true // #nosec G115 — bounded domain value
+		if n < math.MinInt32 || n > math.MaxInt32 {
+			return 0, false
+		}
+		return int32(n), true
 	case int32:
 		return n, true
 	case int64:
-		return int32(n), true // #nosec G115 — bounded domain value
+		if n < math.MinInt32 || n > math.MaxInt32 {
+			return 0, false
+		}
+		return int32(n), true
 	case float64:
-		return int32(n), true // #nosec G115 — bounded domain value
+		return floatToInt32(n)
 	case float32:
-		return int32(n), true // #nosec G115 — bounded domain value
+		return floatToInt32(float64(n))
 	}
 	return 0, false
+}
+
+// floatToInt32 converts a float64 to int32 with bounds and integrality checks.
+func floatToInt32(f float64) (int32, bool) {
+	if math.Trunc(f) != f || f < math.MinInt32 || f > math.MaxInt32 {
+		return 0, false
+	}
+	return int32(f), true
 }
 
 // toFloat64 converts a numeric value from a map to float64.

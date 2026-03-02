@@ -2,8 +2,8 @@
 # Version: 1.2.0
 # Previous: 1.1.0
 # Changed: Added Phase 5 for Operational Gateway configuration —
-#          provider connections and instruction routes are now applied
-#          after all reference data (mappings) are registered.
+#          provider connections and instruction routes are applied
+#          after all reference data and saga definitions are registered.
 # Author: Platform Team
 # Date: 2026-03-02
 #

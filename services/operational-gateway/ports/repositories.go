@@ -81,7 +81,7 @@ type RouteRepository interface {
 	Upsert(ctx context.Context, route *domain.Route) error
 
 	// FindByInstructionType retrieves an instruction route by tenant and instruction type.
-	// Returns ErrRouteNotFound if no matching route exists.
+	// Returns ports.ErrRouteNotFound if no matching route exists.
 	FindByInstructionType(ctx context.Context, tenantID string, instructionType string) (*domain.Route, error)
 
 	// ListByTenant retrieves all instruction routes for a tenant.

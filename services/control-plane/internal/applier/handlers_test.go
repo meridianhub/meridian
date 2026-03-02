@@ -572,7 +572,7 @@ func TestUpsertConnectionHandler(t *testing.T) {
 	assert.Equal(t, "UPSERTED", resultMap["status"])
 }
 
-// TestUpsertConnectionHandler_NilService verifies no-op behavior when service is nil.
+// TestUpsertConnectionHandler_NilService verifies error when service is nil.
 func TestUpsertConnectionHandler_NilService(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
@@ -588,12 +588,9 @@ func TestUpsertConnectionHandler_NilService(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := newTestStarlarkContext()
-	result, err := handler(ctx, map[string]any{"connection_id": "stripe-payments"})
-	require.NoError(t, err)
-
-	resultMap, ok := result.(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "SKIPPED", resultMap["status"])
+	_, err = handler(ctx, map[string]any{"connection_id": "stripe-payments"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operational_gateway service not configured")
 }
 
 // TestUpsertRouteHandler verifies the handler delegates to OperationalGatewayService.
@@ -628,7 +625,7 @@ func TestUpsertRouteHandler(t *testing.T) {
 	assert.Equal(t, "UPSERTED", resultMap["status"])
 }
 
-// TestUpsertRouteHandler_NilService verifies no-op behavior when service is nil.
+// TestUpsertRouteHandler_NilService verifies error when service is nil.
 func TestUpsertRouteHandler_NilService(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 	deps := &HandlerDependencies{
@@ -644,10 +641,7 @@ func TestUpsertRouteHandler_NilService(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := newTestStarlarkContext()
-	result, err := handler(ctx, map[string]any{"instruction_type": "payment.initiate"})
-	require.NoError(t, err)
-
-	resultMap, ok := result.(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "SKIPPED", resultMap["status"])
+	_, err = handler(ctx, map[string]any{"instruction_type": "payment.initiate"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operational_gateway service not configured")
 }

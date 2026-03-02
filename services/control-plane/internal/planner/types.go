@@ -98,9 +98,7 @@ const (
 
 	// Operational Gateway Service
 	MethodUpsertProviderConnection GRPCMethod = "meridian.operational_gateway.v1.ProviderConnectionService/UpsertConnection"
-	MethodDeleteProviderConnection GRPCMethod = "meridian.operational_gateway.v1.ProviderConnectionService/DeleteConnection"
 	MethodUpsertInstructionRoute   GRPCMethod = "meridian.operational_gateway.v1.InstructionRouteService/UpsertRoute"
-	MethodDeleteInstructionRoute   GRPCMethod = "meridian.operational_gateway.v1.InstructionRouteService/DeleteRoute"
 )
 
 // PlannedCall represents a single gRPC call in the execution plan.

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"os"
 
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
@@ -16,7 +18,7 @@ type InstructionRouteService struct {
 	opgatewayv1.UnimplementedInstructionRouteServiceServer
 	routeRepo      ports.RouteRepository
 	connectionRepo ports.ConnectionRepository
-	logger         interface{ Error(msg string, args ...any) }
+	logger         *slog.Logger
 }
 
 // ErrRouteRepoNil is returned when the route repository is nil.
@@ -26,13 +28,16 @@ var ErrRouteRepoNil = errors.New("route repository cannot be nil")
 func NewInstructionRouteService(
 	routeRepo ports.RouteRepository,
 	connectionRepo ports.ConnectionRepository,
-	logger interface{ Error(msg string, args ...any) },
+	logger *slog.Logger,
 ) (*InstructionRouteService, error) {
 	if routeRepo == nil {
 		return nil, ErrRouteRepoNil
 	}
 	if connectionRepo == nil {
 		return nil, ErrConnectionRepoNil
+	}
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 	return &InstructionRouteService{
 		routeRepo:      routeRepo,
@@ -105,6 +110,10 @@ func (s *InstructionRouteService) GetRoute(
 	ctx context.Context,
 	req *opgatewayv1.GetRouteRequest,
 ) (*opgatewayv1.GetRouteResponse, error) {
+	if req.InstructionType == "" {
+		return nil, status.Error(codes.InvalidArgument, "instruction_type is required")
+	}
+
 	tid, err := requireTenant(ctx)
 	if err != nil {
 		return nil, err
