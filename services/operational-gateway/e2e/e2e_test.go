@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -93,86 +95,33 @@ func initSharedContainer() error {
 	return nil
 }
 
+// createSchema applies the actual migration files from the migrations directory,
+// ensuring the E2E test schema stays in sync with production.
 func createSchema(db *gorm.DB) error {
-	ddl := []string{
-		`CREATE TABLE IF NOT EXISTS provider_connections (
-            tenant_id UUID NOT NULL,
-            connection_id UUID NOT NULL,
-            provider_name VARCHAR(255) NOT NULL,
-            provider_type VARCHAR(128) NOT NULL,
-            protocol VARCHAR(20) NOT NULL,
-            base_url VARCHAR(2048) NOT NULL,
-            auth_config JSONB NOT NULL,
-            retry_policy JSONB NULL,
-            rate_limit_config JSONB NULL,
-            health_status VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN',
-            last_health_check_at TIMESTAMPTZ NULL,
-            circuit_state VARCHAR(20) NOT NULL DEFAULT 'CLOSED',
-            circuit_opened_at TIMESTAMPTZ NULL,
-            failure_count INT NOT NULL DEFAULT 0,
-            success_count INT NOT NULL DEFAULT 0,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (tenant_id, connection_id)
-        )`,
-		`CREATE TABLE IF NOT EXISTS instructions (
-            id UUID NOT NULL DEFAULT gen_random_uuid(),
-            tenant_id UUID NOT NULL,
-            instruction_type VARCHAR(255) NOT NULL,
-            provider_connection_id UUID NOT NULL,
-            correlation_id VARCHAR(255) NULL,
-            causation_id VARCHAR(255) NULL,
-            payload JSONB NOT NULL,
-            metadata JSONB NULL,
-            priority SMALLINT NOT NULL DEFAULT 2,
-            status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-            scheduled_at TIMESTAMPTZ NULL,
-            expires_at TIMESTAMPTZ NULL,
-            attempt_count INTEGER NOT NULL DEFAULT 0,
-            max_attempts INTEGER NOT NULL DEFAULT 3,
-            next_retry_at TIMESTAMPTZ NULL,
-            idempotency_key VARCHAR(255) NOT NULL,
-            dispatched_at TIMESTAMPTZ NULL,
-            completed_at TIMESTAMPTZ NULL,
-            failure_reason TEXT NULL,
-            error_code VARCHAR(64) NULL,
-            version BIGINT NOT NULL DEFAULT 1,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (id)
-        )`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_instructions_idempotency ON instructions (tenant_id, idempotency_key)`,
-		`CREATE TABLE IF NOT EXISTS instruction_attempts (
-            id UUID NOT NULL DEFAULT gen_random_uuid(),
-            instruction_id UUID NOT NULL,
-            attempt_number INTEGER NOT NULL,
-            dispatched_at TIMESTAMPTZ NOT NULL,
-            completed_at TIMESTAMPTZ NULL,
-            response_status_code INTEGER NULL,
-            response_body_preview VARCHAR(1024) NULL,
-            error_message TEXT NULL,
-            duration_ms BIGINT NULL,
-            PRIMARY KEY (id)
-        )`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_instruction_attempts_instruction ON instruction_attempts (instruction_id, attempt_number)`,
-		`CREATE TABLE IF NOT EXISTS instruction_routes (
-            tenant_id UUID NOT NULL,
-            instruction_type VARCHAR(255) NOT NULL,
-            connection_id UUID NOT NULL,
-            fallback_connection_id UUID NULL,
-            outbound_mapping VARCHAR(255) NOT NULL DEFAULT '',
-            inbound_mapping VARCHAR(255) NOT NULL DEFAULT '',
-            http_method VARCHAR(10) NOT NULL DEFAULT '',
-            path_template VARCHAR(1024) NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (tenant_id, instruction_type)
-        )`,
+	migrationsDir := "../migrations"
+	entries, err := os.ReadDir(migrationsDir)
+	if err != nil {
+		return fmt.Errorf("read migrations dir: %w", err)
 	}
 
-	for _, stmt := range ddl {
-		if err := db.Exec(stmt).Error; err != nil {
-			return fmt.Errorf("DDL failed: %w\nSQL: %s", err, stmt)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".sql" {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(migrationsDir, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
+		}
+		// Execute each statement in the migration file.
+		// Split on semicolons to handle multi-statement files.
+		for _, stmt := range strings.Split(string(content), ";") {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" || strings.HasPrefix(stmt, "--") {
+				continue
+			}
+			if err := db.Exec(stmt).Error; err != nil {
+				return fmt.Errorf("migration %s failed: %w\nSQL: %s", entry.Name(), err, stmt)
+			}
 		}
 	}
 	return nil
@@ -698,6 +647,12 @@ func TestConcurrentDispatch(t *testing.T) {
 		assert.Equal(t, domain.InstructionStatusDelivered, instr.Status, "instruction %d should be DELIVERED", i)
 	}
 
-	// Verify the mock provider was called for each instruction
-	assert.GreaterOrEqual(t, int(providerCalls.Load()), numInstructions)
+	// Verify the mock provider was called exactly once per instruction (no double-dispatch).
+	assert.Equal(t, numInstructions, int(providerCalls.Load()))
+	// Verify each instruction was dispatched exactly once.
+	for i, id := range instructionIDs {
+		instr, err := h.instructionRepo.FindByID(context.Background(), id)
+		require.NoError(t, err, "instruction %d", i)
+		assert.Equal(t, 1, instr.AttemptCount, "instruction %d should have exactly 1 attempt", i)
+	}
 }
