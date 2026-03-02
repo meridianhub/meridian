@@ -1,0 +1,181 @@
+asyncapi: 3.0.0
+info:
+  title: "Party Events"
+  version: 1.0.0
+  description: "Party registration and lifecycle events"
+servers:
+  kafka:
+    host: kafka:9092
+    protocol: kafka
+channels:
+  party.created.v1:
+    address: "party.created.v1"
+    description: "Published when a new party is registered in the system"
+    messages:
+      PartyCreatedEvent:
+        $ref: '#/components/messages/PartyCreatedEvent'
+  party.updated.v1:
+    address: "party.updated.v1"
+    description: "Published when an existing party's details are updated"
+    messages:
+      PartyUpdatedEvent:
+        $ref: '#/components/messages/PartyUpdatedEvent'
+  party.verification-completed.v1:
+    address: "party.verification-completed.v1"
+    description: "Published when a KYC/AML verification reaches a terminal state (APPROVED, REJECTED, MANUAL_REVIEW)"
+    messages:
+      PartyVerificationCompletedEvent:
+        $ref: '#/components/messages/PartyVerificationCompletedEvent'
+operations:
+  publishCreated:
+    action: send
+    channel:
+      $ref: '#/channels/party.created.v1'
+  publishUpdated:
+    action: send
+    channel:
+      $ref: '#/channels/party.updated.v1'
+  publishVerificationCompleted:
+    action: send
+    channel:
+      $ref: '#/channels/party.verification-completed.v1'
+components:
+  messages:
+    PartyCreatedEvent:
+      name: "PartyCreatedEvent"
+      title: "PartyCreatedEvent"
+      description: "Published when a new party is registered in the system"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Party ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PartyCreatedEvent'
+    PartyUpdatedEvent:
+      name: "PartyUpdatedEvent"
+      title: "PartyUpdatedEvent"
+      description: "Published when an existing party's details are updated"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Party ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PartyUpdatedEvent'
+    PartyVerificationCompletedEvent:
+      name: "PartyVerificationCompletedEvent"
+      title: "PartyVerificationCompletedEvent"
+      description: "Published when a KYC/AML verification reaches a terminal state (APPROVED, REJECTED, MANUAL_REVIEW)"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Party ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/PartyVerificationCompletedEvent'
+  schemas:
+    PartyCreatedEvent:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PartyCreatedEvent"
+      properties:
+        event_id:
+          type: string
+        party_id:
+          type: string
+        party_type:
+          type: string
+        legal_name:
+          type: string
+        status:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+    PartyUpdatedEvent:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PartyUpdatedEvent"
+      properties:
+        event_id:
+          type: string
+        party_id:
+          type: string
+        party_type:
+          type: string
+        status:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+    PartyVerificationCompletedEvent:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.PartyVerificationCompletedEvent"
+      properties:
+        event_id:
+          type: string
+        party_id:
+          type: string
+        verification_id:
+          type: string
+        provider:
+          type: string
+        status:
+          type: string
+        completed_at:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+        idempotency_key:
+          type: string

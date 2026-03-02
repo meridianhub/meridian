@@ -1,0 +1,517 @@
+asyncapi: 3.0.0
+info:
+  title: "Position Keeping Events"
+  version: 1.0.0
+  description: "Financial position and transaction lifecycle events"
+servers:
+  kafka:
+    host: kafka:9092
+    protocol: kafka
+channels:
+  position-keeping.transaction-captured.v1:
+    address: "position-keeping.transaction-captured.v1"
+    description: "Published when a new financial transaction is captured"
+    messages:
+      TransactionCaptured:
+        $ref: '#/components/messages/TransactionCaptured'
+  position-keeping.transaction-amended.v1:
+    address: "position-keeping.transaction-amended.v1"
+    description: "Published when a captured transaction is amended"
+    messages:
+      TransactionAmended:
+        $ref: '#/components/messages/TransactionAmended'
+  position-keeping.transaction-reconciled.v1:
+    address: "position-keeping.transaction-reconciled.v1"
+    description: "Published when a transaction is reconciled against actual settlement data"
+    messages:
+      TransactionReconciled:
+        $ref: '#/components/messages/TransactionReconciled'
+  position-keeping.transaction-posted.v1:
+    address: "position-keeping.transaction-posted.v1"
+    description: "Published when a transaction is posted to the ledger"
+    messages:
+      TransactionPosted:
+        $ref: '#/components/messages/TransactionPosted'
+  position-keeping.transaction-rejected.v1:
+    address: "position-keeping.transaction-rejected.v1"
+    description: "Published when a transaction is rejected due to validation failure"
+    messages:
+      TransactionRejected:
+        $ref: '#/components/messages/TransactionRejected'
+  position-keeping.transaction-failed.v1:
+    address: "position-keeping.transaction-failed.v1"
+    description: "Published when a transaction fails due to a system error"
+    messages:
+      TransactionFailed:
+        $ref: '#/components/messages/TransactionFailed'
+  position-keeping.transaction-cancelled.v1:
+    address: "position-keeping.transaction-cancelled.v1"
+    description: "Published when a transaction is cancelled"
+    messages:
+      TransactionCancelled:
+        $ref: '#/components/messages/TransactionCancelled'
+  position-keeping.bulk-transaction-captured.v1:
+    address: "position-keeping.bulk-transaction-captured.v1"
+    description: "Published when a batch of transactions is captured atomically"
+    messages:
+      BulkTransactionCaptured:
+        $ref: '#/components/messages/BulkTransactionCaptured'
+  position-keeping.opening-balance-recorded.v1:
+    address: "position-keeping.opening-balance-recorded.v1"
+    description: "Published when an opening balance is recorded for a new account"
+    messages:
+      OpeningBalanceRecorded:
+        $ref: '#/components/messages/OpeningBalanceRecorded'
+operations:
+  publishTransactionCaptured:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.transaction-captured.v1'
+  publishTransactionAmended:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.transaction-amended.v1'
+  publishTransactionReconciled:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.transaction-reconciled.v1'
+  publishTransactionPosted:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.transaction-posted.v1'
+  publishTransactionRejected:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.transaction-rejected.v1'
+  publishTransactionFailed:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.transaction-failed.v1'
+  publishTransactionCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.transaction-cancelled.v1'
+  publishBulkTransactionCaptured:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.bulk-transaction-captured.v1'
+  publishOpeningBalanceRecorded:
+    action: send
+    channel:
+      $ref: '#/channels/position-keeping.opening-balance-recorded.v1'
+components:
+  messages:
+    TransactionCaptured:
+      name: "TransactionCaptured"
+      title: "TransactionCaptured"
+      description: "Published when a new financial transaction is captured"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/TransactionCaptured'
+    TransactionAmended:
+      name: "TransactionAmended"
+      title: "TransactionAmended"
+      description: "Published when a captured transaction is amended"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/TransactionAmended'
+    TransactionReconciled:
+      name: "TransactionReconciled"
+      title: "TransactionReconciled"
+      description: "Published when a transaction is reconciled against actual settlement data"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/TransactionReconciled'
+    TransactionPosted:
+      name: "TransactionPosted"
+      title: "TransactionPosted"
+      description: "Published when a transaction is posted to the ledger"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/TransactionPosted'
+    TransactionRejected:
+      name: "TransactionRejected"
+      title: "TransactionRejected"
+      description: "Published when a transaction is rejected due to validation failure"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/TransactionRejected'
+    TransactionFailed:
+      name: "TransactionFailed"
+      title: "TransactionFailed"
+      description: "Published when a transaction fails due to a system error"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/TransactionFailed'
+    TransactionCancelled:
+      name: "TransactionCancelled"
+      title: "TransactionCancelled"
+      description: "Published when a transaction is cancelled"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/TransactionCancelled'
+    BulkTransactionCaptured:
+      name: "BulkTransactionCaptured"
+      title: "BulkTransactionCaptured"
+      description: "Published when a batch of transactions is captured atomically"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Batch operation ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/BulkTransactionCaptured'
+    OpeningBalanceRecorded:
+      name: "OpeningBalanceRecorded"
+      title: "OpeningBalanceRecorded"
+      description: "Published when an opening balance is recorded for a new account"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Position log ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/OpeningBalanceRecorded'
+  schemas:
+    TransactionCaptured:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.TransactionCapturedEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        transaction_id:
+          type: string
+        amount_cents:
+          type: integer
+        instrument_code:
+          type: string
+        direction:
+          type: string
+        source:
+          type: string
+        description:
+          type: string
+        reference:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        instrument_amount:
+          type: string
+    TransactionAmended:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.TransactionAmendedEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        reason:
+          type: string
+        amended_by:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+    TransactionReconciled:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.TransactionReconciledEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        reconciliation_status:
+          type: string
+        reason:
+          type: string
+        reconciled_by:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+    TransactionPosted:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.TransactionPostedEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        posting_reference:
+          type: string
+        reason:
+          type: string
+        posted_by:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+    TransactionRejected:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.TransactionRejectedEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        reason:
+          type: string
+        rejected_by:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+    TransactionFailed:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.TransactionFailedEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        failure_reason:
+          type: string
+        error_code:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        error_code_enum:
+          type: string
+    TransactionCancelled:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.TransactionCancelledEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        reason:
+          type: string
+        cancelled_by:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+    BulkTransactionCaptured:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.BulkTransactionCapturedEvent"
+      properties:
+        batch_id:
+          type: string
+        transaction_count:
+          type: integer
+        log_ids:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+    OpeningBalanceRecorded:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.OpeningBalanceRecordedEvent"
+      properties:
+        log_id:
+          type: string
+        account_id:
+          type: string
+        amount_cents:
+          type: integer
+        instrument_code:
+          type: string
+        effective_date:
+          type: string
+        migration_reference:
+          type: string
+        correlation_id:
+          type: string
+        timestamp:
+          type: string
+        version:
+          type: integer
+        instrument_amount:
+          type: string

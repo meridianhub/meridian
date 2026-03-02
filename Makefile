@@ -32,7 +32,7 @@ GOMOD=$(GOCMD) mod
 GOGET=$(GOCMD) get
 GOFMT=$(GOCMD) fmt
 
-.PHONY: all help build seed-dev seed-dev-build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean
+.PHONY: all help build seed-dev seed-dev-build test lint clean proto proto-v1 proto-v2 proto-openapi proto-lint proto-breaking proto-descriptors docker deploy-local fmt tidy deps coverage install proto-validate proto-deps-update proto-deps-graph proto-plugins-info validate-tilt validate-semconv validate-sagas proto-jsonschema validate-manifest-jsonschema validate-manifests control-plane-ci test-control-plane migrate-diff-all migrate-diff-current migrate-diff-position migrate-apply-all migrate-status-all migrate-lint-all migrate-hash-all migrate-apply-orgs migrate-status-orgs docs generate-saga-docs swagger-split swagger-ui dev-up dev-down dev-clean asyncapi
 
 # Default target
 all: help
@@ -489,6 +489,12 @@ generate-saga-docs:
 	@echo "Generating saga handler documentation..."
 	@go run tools/saga-doc-gen/main.go tools/saga-doc-gen/generator.go -schema-dir=shared/pkg/saga/schema -output-dir=docs
 	@echo "Documentation generated successfully"
+
+## asyncapi: Generate AsyncAPI 3.0.0 specs from topic registry and proto definitions
+asyncapi:
+	@echo "Generating AsyncAPI specs..."
+	@./scripts/gen-asyncapi.sh
+	@echo "AsyncAPI specs generated in api/asyncapi/"
 
 ## validate-manifests: Validate example manifests against protobuf schema, CEL, and Starlark
 validate-manifests:

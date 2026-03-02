@@ -1,0 +1,122 @@
+asyncapi: 3.0.0
+info:
+  title: "Internal Account Events"
+  version: 1.0.0
+  description: "Internal account facility lifecycle and booking events"
+servers:
+  kafka:
+    host: kafka:9092
+    protocol: kafka
+channels:
+  internal-account.facility-created.v1:
+    address: "internal-account.facility-created.v1"
+    description: "Published when a new internal account facility is initiated"
+    messages:
+      FacilityCreatedEvent:
+        $ref: '#/components/messages/FacilityCreatedEvent'
+  internal-account.booking-created.v1:
+    address: "internal-account.booking-created.v1"
+    description: "Published when a new booking is posted to an internal account"
+    messages:
+      BookingCreatedEvent:
+        $ref: '#/components/messages/BookingCreatedEvent'
+operations:
+  publishFacilityCreated:
+    action: send
+    channel:
+      $ref: '#/channels/internal-account.facility-created.v1'
+  publishBookingCreated:
+    action: send
+    channel:
+      $ref: '#/channels/internal-account.booking-created.v1'
+components:
+  messages:
+    FacilityCreatedEvent:
+      name: "FacilityCreatedEvent"
+      title: "FacilityCreatedEvent"
+      description: "Published when a new internal account facility is initiated"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Account ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/FacilityCreatedEvent'
+    BookingCreatedEvent:
+      name: "BookingCreatedEvent"
+      title: "BookingCreatedEvent"
+      description: "Published when a new booking is posted to an internal account"
+      contentType: application/protobuf
+      bindings:
+        kafka:
+          key:
+            type: string
+            description: "Account ID"
+      headers:
+        type: object
+        properties:
+          event_type:
+            type: string
+            description: Logical event type identifier
+          correlation_id:
+            type: string
+            format: uuid
+            description: Links related events across services
+          tenant_id:
+            type: string
+            description: Tenant identifier for multi-tenant isolation
+      payload:
+        $ref: '#/components/schemas/BookingCreatedEvent'
+  schemas:
+    FacilityCreatedEvent:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.FacilityCreatedEvent"
+      properties:
+        event_id:
+          type: string
+        account_id:
+          type: string
+        account_code:
+          type: string
+        account_type:
+          type: string
+        instrument_code:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
+    BookingCreatedEvent:
+      type: object
+      description: "Derived from protobuf message meridian.events.v1.BookingCreatedEvent"
+      properties:
+        event_id:
+          type: string
+        account_id:
+          type: string
+        transaction_id:
+          type: string
+        instrument_code:
+          type: string
+        correlation_id:
+          type: string
+        causation_id:
+          type: string
+        timestamp:
+          type: string
