@@ -37,13 +37,15 @@ func (r *stubResolver) Resolve(_ context.Context, name string) (*mappingv1.Mappi
 }
 
 // newTestInstruction creates an Instruction with a simple payload for testing.
-func newTestInstruction(payload map[string]any) *domain.Instruction {
-	inst, _ := domain.NewInstruction(
+func newTestInstruction(t *testing.T, payload map[string]any) *domain.Instruction {
+	t.Helper()
+	inst, err := domain.NewInstruction(
 		uuid.New(),
 		"payment.create",
 		"conn-001",
 		payload,
 	)
+	require.NoError(t, err)
 	return inst
 }
 
@@ -63,7 +65,7 @@ func TestTransformer_TransformOutbound_Passthrough_WhenNoMapping(t *testing.T) {
 	tr := mapping.NewTransformer(resolver, engine, nil)
 
 	payload := map[string]any{"amount": "100.00", "currency": "GBP"}
-	inst := newTestInstruction(payload)
+	inst := newTestInstruction(t, payload)
 	route := &ports.InstructionRoute{
 		HTTPMethod:      "POST",
 		PathTemplate:    "/payments",
@@ -96,7 +98,7 @@ func TestTransformer_TransformOutbound_AppliesMapping(t *testing.T) {
 	tr := mapping.NewTransformer(resolver, engine, nil)
 
 	payload := map[string]any{"amount": "200.00", "currency": "USD"}
-	inst := newTestInstruction(payload)
+	inst := newTestInstruction(t, payload)
 	route := &ports.InstructionRoute{
 		OutboundMapping: "outbound-test",
 	}
@@ -119,7 +121,7 @@ func TestTransformer_TransformOutbound_IncludesStaticHeaders(t *testing.T) {
 	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
 	tr := mapping.NewTransformer(resolver, engine, nil)
 
-	inst := newTestInstruction(map[string]any{"x": 1})
+	inst := newTestInstruction(t, map[string]any{"x": 1})
 	route := &ports.InstructionRoute{
 		OutboundMapping: "",
 		Headers: map[string]string{
@@ -140,7 +142,7 @@ func TestTransformer_TransformOutbound_ReturnsError_WhenResolverFails(t *testing
 	resolver := &stubResolver{err: resolverErr}
 	tr := mapping.NewTransformer(resolver, engine, nil)
 
-	inst := newTestInstruction(map[string]any{"x": 1})
+	inst := newTestInstruction(t, map[string]any{"x": 1})
 	route := &ports.InstructionRoute{OutboundMapping: "some-mapping"}
 
 	_, _, err := tr.TransformOutbound(context.Background(), inst, route)
@@ -154,7 +156,7 @@ func TestTransformer_TransformOutbound_ReturnsError_WhenMappingNotFound(t *testi
 	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
 	tr := mapping.NewTransformer(resolver, engine, nil)
 
-	inst := newTestInstruction(map[string]any{"x": 1})
+	inst := newTestInstruction(t, map[string]any{"x": 1})
 	route := &ports.InstructionRoute{OutboundMapping: "missing-mapping"}
 
 	_, _, err := tr.TransformOutbound(context.Background(), inst, route)
@@ -339,7 +341,7 @@ func TestTransformer_TransformOutbound_ReturnsError_WhenRouteNil(t *testing.T) {
 	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
 	tr := mapping.NewTransformer(resolver, engine, nil)
 
-	inst := newTestInstruction(map[string]any{"x": 1})
+	inst := newTestInstruction(t, map[string]any{"x": 1})
 	_, _, err := tr.TransformOutbound(context.Background(), inst, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ports.ErrTransformFailed)
@@ -357,8 +359,8 @@ func TestTransformer_TransformInbound_ReturnsError_WhenRouteNil(t *testing.T) {
 
 // --- Interface compliance ---
 
-func TestTransformer_ImplementsPayloadTransformer(_ *testing.T) {
-	engine, _ := sharedmapping.NewEngine()
+func TestTransformer_ImplementsPayloadTransformer(t *testing.T) {
+	engine := newEngine(t)
 	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{}}
 	var _ ports.PayloadTransformer = mapping.NewTransformer(resolver, engine, nil)
 }
@@ -381,20 +383,14 @@ func BenchmarkTransformer_TransformOutbound(b *testing.B) {
 	resolver := &stubResolver{defs: map[string]*mappingv1.MappingDefinition{"bench-outbound": def}}
 	tr := mapping.NewTransformer(resolver, engine, nil)
 
-	inst := newTestInstruction(map[string]any{
+	inst2, err := domain.NewInstruction(uuid.New(), "payment.create", "conn-001", map[string]any{
 		"amount":              "500.00",
 		"currency":            "GBP",
 		"destination_account": "GB29NWBK60161331926819",
 	})
-	// Attach a dummy time so the instruction is fully formed
-	_ = inst.MarkDispatching()
-	_ = inst.MarkDelivered()
-	// Reset status for benchmark
-	inst2, _ := domain.NewInstruction(uuid.New(), "payment.create", "conn-001", map[string]any{
-		"amount":              "500.00",
-		"currency":            "GBP",
-		"destination_account": "GB29NWBK60161331926819",
-	})
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	route := &ports.InstructionRoute{OutboundMapping: "bench-outbound"}
 	ctx := context.Background()

@@ -15,13 +15,15 @@ import (
 )
 
 // newTestInstruction creates an Instruction with the given payload for testing.
-func newTestInstruction(payload map[string]any) *domain.Instruction {
-	inst, _ := domain.NewInstruction(
+func newTestInstruction(t *testing.T, payload map[string]any) *domain.Instruction {
+	t.Helper()
+	inst, err := domain.NewInstruction(
 		uuid.New(),
 		"payment.create",
 		"conn-001",
 		payload,
 	)
+	require.NoError(t, err)
 	return inst
 }
 
@@ -37,7 +39,7 @@ func TestTransformer_TransformOutbound_ReturnsRawJSON(t *testing.T) {
 	tr := passthrough.NewTransformer()
 
 	payload := map[string]any{"amount": "100.00", "currency": "GBP"}
-	inst := newTestInstruction(payload)
+	inst := newTestInstruction(t, payload)
 	route := &ports.InstructionRoute{
 		HTTPMethod:   "POST",
 		PathTemplate: "/payments",
@@ -58,7 +60,7 @@ func TestTransformer_TransformOutbound_ReturnsRawJSON(t *testing.T) {
 func TestTransformer_TransformOutbound_IncludesStaticHeaders(t *testing.T) {
 	tr := passthrough.NewTransformer()
 
-	inst := newTestInstruction(map[string]any{"x": 1})
+	inst := newTestInstruction(t, map[string]any{"x": 1})
 	route := &ports.InstructionRoute{
 		Headers: map[string]string{
 			"X-Version": "1",
@@ -77,7 +79,7 @@ func TestTransformer_TransformOutbound_IncludesStaticHeaders(t *testing.T) {
 func TestTransformer_TransformOutbound_EmptyHeaders(t *testing.T) {
 	tr := passthrough.NewTransformer()
 
-	inst := newTestInstruction(map[string]any{"k": "v"})
+	inst := newTestInstruction(t, map[string]any{"k": "v"})
 	route := &ports.InstructionRoute{}
 
 	_, headers, err := tr.TransformOutbound(context.Background(), inst, route)
@@ -144,7 +146,7 @@ func TestTransformer_TransformOutbound_ReturnsError_WhenInstructionNil(t *testin
 // results in a wrapped ErrTransformFailed.
 func TestTransformer_TransformOutbound_ReturnsError_WhenRouteNil(t *testing.T) {
 	tr := passthrough.NewTransformer()
-	inst := newTestInstruction(map[string]any{"k": "v"})
+	inst := newTestInstruction(t, map[string]any{"k": "v"})
 
 	_, _, err := tr.TransformOutbound(context.Background(), inst, nil)
 	require.Error(t, err)
