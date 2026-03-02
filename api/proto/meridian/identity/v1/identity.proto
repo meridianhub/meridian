@@ -461,15 +461,22 @@ message GrantRoleResponse {
 
 // RevokeRoleRequest is the request to revoke a role from an identity.
 message RevokeRoleRequest {
+  // identity_id is the identifier of the identity whose role is being revoked.
+  string identity_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+  }];
+
   // role_assignment_id is the identifier of the role assignment to revoke.
-  string role_assignment_id = 1 [(buf.validate.field).string = {
+  string role_assignment_id = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
   // revoked_by is the identity id of the administrator revoking this role.
-  string revoked_by = 2 [(buf.validate.field).string = {
+  string revoked_by = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]+$"
@@ -598,8 +605,14 @@ message ReactivateIdentityRequest {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
+  // reason is the explanation for the reactivation, recorded in the audit trail.
+  string reason = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
   // reactivated_by is the identity id of the administrator performing the reactivation.
-  string reactivated_by = 2 [(buf.validate.field).string = {
+  string reactivated_by = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]+$"
@@ -721,7 +734,7 @@ service IdentityService {
   // RevokeRole revokes a role assignment from an identity.
   rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse) {
     option (google.api.http) = {
-      delete: "/v1/identities/roles/{role_assignment_id}"
+      delete: "/v1/identities/{identity_id}/roles/{role_assignment_id}"
     };
   }
 
