@@ -139,9 +139,14 @@ extract_proto_fields() {
       }
       # Repeated field: repeated type name = N
       else if (n >= 5 && parts[1] == "repeated" && parts[4] == "=") {
+        elem = parts[2]
         name = parts[3]
+        item_type = "string"
+        if (elem ~ /^(int32|int64|uint32|uint64|sint32|sint64|fixed32|fixed64|sfixed32|sfixed64)$/) item_type = "integer"
+        else if (elem ~ /^(float|double)$/) item_type = "number"
+        else if (elem == "bool") item_type = "boolean"
         if (first) printf ","
-        printf "\n  {\"name\":\"%s\",\"type\":\"array\"}", name
+        printf "\n  {\"name\":\"%s\",\"type\":\"array\",\"items_type\":\"%s\"}", name, item_type
         first = 1
       }
     }
@@ -221,7 +226,10 @@ PROPEOF
   local fields_json
   fields_json=$(extract_proto_fields "$proto_file" "$proto_msg")
   local field_count
-  field_count=$(echo "$fields_json" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+  if ! field_count=$(echo "$fields_json" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null); then
+    echo "  WARNING: failed to parse extracted fields for '${proto_msg}' from '${proto_file}'; using placeholder schema" >&2
+    field_count=0
+  fi
 
   if [ "$field_count" -gt 0 ]; then
     echo "$fields_json" | python3 -c "
@@ -231,10 +239,11 @@ for f in fields:
     name = f['name']
     ftype = f['type']
     if ftype == 'array':
+        items_type = f.get('items_type', 'string')
         print(f'        {name}:')
         print(f'          type: array')
         print(f'          items:')
-        print(f'            type: string')
+        print(f'            type: {items_type}')
     elif ftype == 'object':
         print(f'        {name}:')
         print(f'          type: object')
