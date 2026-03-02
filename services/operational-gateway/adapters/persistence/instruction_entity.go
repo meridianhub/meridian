@@ -74,9 +74,10 @@ const priorityNormal = "NORMAL"
 type JSONB map[string]any
 
 // Value implements driver.Valuer for database writes.
+// Returns an empty JSON object ("{}") for nil maps to satisfy NOT NULL JSONB constraints.
 func (j JSONB) Value() (driver.Value, error) {
 	if j == nil {
-		return driver.Value(nil), nil
+		return "{}", nil
 	}
 	b, err := json.Marshal(j)
 	if err != nil {

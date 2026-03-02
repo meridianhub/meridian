@@ -24,8 +24,9 @@ func NewInstructionRepository(db *gorm.DB) *InstructionRepository {
 
 // Save creates or updates an instruction with optimistic locking.
 //
-// For new instructions (version == 0 on entity), performs an INSERT.
-// For existing instructions, performs an UPDATE guarded by the previous version.
+// For new instructions (Version == 0), performs an INSERT and sets inst.Version = 1.
+// For existing instructions, performs an UPDATE guarded by the caller's Version.
+// On success, inst.Version is updated to the new DB value so subsequent Saves work correctly.
 // Returns ports.ErrInstructionConflict when a concurrent modification is detected.
 // Returns ports.ErrDuplicateIdempotency on unique constraint violation for the idempotency key.
 func (r *InstructionRepository) Save(ctx context.Context, inst *domain.Instruction, idempotencyKey string) error {
@@ -51,6 +52,8 @@ func (r *InstructionRepository) Save(ctx context.Context, inst *domain.Instructi
 				}
 				return err
 			}
+			// Propagate the assigned version back so the caller doesn't hold a stale 0.
+			inst.Version = entity.Version
 			return nil
 		}
 
@@ -58,7 +61,8 @@ func (r *InstructionRepository) Save(ctx context.Context, inst *domain.Instructi
 		// entity.Version carries the version the caller loaded from the DB (set by instructionFromEntity).
 		// We require the DB row still has that version; on match we increment to entity.Version+1.
 		expectedVersion := entity.Version
-		entity.Version = expectedVersion + 1
+		newVersion := expectedVersion + 1
+		entity.Version = newVersion
 		entity.CreatedAt = existing.CreatedAt
 
 		updateResult := tx.Model(&InstructionEntity{}).
@@ -71,7 +75,7 @@ func (r *InstructionRepository) Save(ctx context.Context, inst *domain.Instructi
 				"completed_at":   entity.CompletedAt,
 				"failure_reason": entity.FailureReason,
 				"error_code":     entity.ErrorCode,
-				"version":        entity.Version,
+				"version":        newVersion,
 				"updated_at":     entity.UpdatedAt,
 			})
 
@@ -83,6 +87,8 @@ func (r *InstructionRepository) Save(ctx context.Context, inst *domain.Instructi
 			return ports.ErrInstructionConflict
 		}
 
+		// Propagate the new version back so the caller can make further Saves without reloading.
+		inst.Version = newVersion
 		return nil
 	})
 }
@@ -106,9 +112,15 @@ func (r *InstructionRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 	return instructionFromEntity(&entity, attempts)
 }
 
-// FetchDispatchable atomically fetches a batch of PENDING/RETRYING instructions
-// ready for dispatch using SELECT FOR UPDATE SKIP LOCKED.
-// Instructions are ordered by priority DESC then scheduled_at ASC (matching the outbox index).
+// FetchDispatchable atomically claims a batch of PENDING/RETRYING instructions ready for
+// dispatch. Within a single transaction it:
+//  1. Locks candidate rows with SELECT FOR UPDATE SKIP LOCKED so concurrent workers skip them.
+//  2. Marks them DISPATCHING and increments attempt_count and version within the same tx.
+//  3. Returns the updated rows to the caller.
+//
+// PENDING instructions are gated on scheduled_at.
+// RETRYING instructions are additionally gated on next_retry_at.
+// Instructions are evaluated in priority DESC, scheduled_at ASC order.
 func (r *InstructionRepository) FetchDispatchable(ctx context.Context, params ports.FetchDispatchableParams) ([]*domain.Instruction, error) {
 	limit := params.Limit
 	if limit <= 0 {
@@ -122,17 +134,45 @@ func (r *InstructionRepository) FetchDispatchable(ctx context.Context, params po
 	var entities []InstructionEntity
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// SELECT FOR UPDATE SKIP LOCKED - same pattern as events/outbox.go.
-		// Partial index idx_instructions_outbox covers status IN ('PENDING','RETRYING').
-		rawSQL := `
-            SELECT * FROM instructions
-            WHERE status IN ('PENDING', 'RETRYING')
-              AND (scheduled_at IS NULL OR scheduled_at <= ?)
+		// Step 1: Lock candidate IDs. RETRYING rows are only eligible when next_retry_at has passed.
+		lockSQL := `
+            SELECT id FROM instructions
+            WHERE (
+                (status = 'PENDING' AND (scheduled_at IS NULL OR scheduled_at <= ?))
+                OR
+                (status = 'RETRYING' AND (next_retry_at IS NULL OR next_retry_at <= ?))
+            )
             ORDER BY priority DESC, scheduled_at ASC NULLS FIRST
             LIMIT ?
             FOR UPDATE SKIP LOCKED`
 
-		return tx.Raw(rawSQL, asOf, limit).Scan(&entities).Error
+		var ids []uuid.UUID
+		if err := tx.Raw(lockSQL, asOf, asOf, limit).Scan(&ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+
+		// Step 2: Mark locked rows as DISPATCHING within the same transaction.
+		// This prevents any other worker from picking them up even after the tx commits.
+		if err := tx.Model(&InstructionEntity{}).
+			Where("id IN ?", ids).
+			Updates(map[string]interface{}{
+				"status":        string(domain.InstructionStatusDispatching),
+				"attempt_count": gorm.Expr("attempt_count + 1"),
+				"dispatched_at": asOf,
+				"updated_at":    asOf,
+				"version":       gorm.Expr("version + 1"),
+			}).Error; err != nil {
+			return err
+		}
+
+		// Step 3: Read the updated rows back within the same tx so callers see DISPATCHING state.
+		// Preserve the priority DESC, scheduled_at ASC ordering from step 1.
+		return tx.Where("id IN ?", ids).
+			Order("priority DESC, scheduled_at ASC NULLS FIRST").
+			Find(&entities).Error
 	})
 	if err != nil {
 		return nil, err

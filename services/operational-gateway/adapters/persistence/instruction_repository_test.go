@@ -71,21 +71,22 @@ func TestInstructionRepository_Save_Update_OptimisticLock(t *testing.T) {
 	inst := makeInstruction(t, tenantID, connID.String(), domain.PriorityHigh)
 	idemKey := fmt.Sprintf("idem-%s", inst.ID)
 
-	// Create - after this inst.Version is still 0 (we only track it on load).
+	// Create - Save propagates version=1 back to inst.
 	require.NoError(t, repo.Save(ctx, inst, idemKey))
+	require.Equal(t, int64(1), inst.Version)
 
-	// Load the saved instruction so inst.Version is populated from DB (version=1).
+	// Simulate two concurrent readers loading the same version=1 copy.
 	loaded, err := repo.FindByID(ctx, inst.ID)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), loaded.Version)
 
-	// Simulate two concurrent readers loading the same version=1 copy.
 	writerA := *loaded // copy
 	writerB := *loaded // stale copy
 
 	// Writer A succeeds first: marks dispatching and saves → DB version becomes 2.
 	require.NoError(t, writerA.MarkDispatching())
 	require.NoError(t, repo.Save(ctx, &writerA, idemKey))
+	require.Equal(t, int64(2), writerA.Version)
 
 	// Writer B (stale copy at version=1) tries to save → version=1 no longer matches DB → conflict.
 	require.NoError(t, writerB.MarkDispatching())
@@ -121,7 +122,8 @@ func TestInstructionRepository_FindByID_NotFound(t *testing.T) {
 }
 
 // TestInstructionRepository_FetchDispatchable_PriorityOrdering verifies that CRITICAL
-// instructions are returned before NORMAL ones.
+// instructions are returned before NORMAL ones, and that FetchDispatchable atomically
+// marks the returned instructions as DISPATCHING.
 func TestInstructionRepository_FetchDispatchable_PriorityOrdering(t *testing.T) {
 	db, ctx := setupTestDB(t)
 
@@ -147,11 +149,23 @@ func TestInstructionRepository_FetchDispatchable_PriorityOrdering(t *testing.T) 
 	assert.Equal(t, domain.PriorityCritical, results[0].Priority)
 	assert.Equal(t, domain.PriorityNormal, results[1].Priority)
 	assert.Equal(t, domain.PriorityLow, results[2].Priority)
+
+	// FetchDispatchable atomically marks all returned instructions DISPATCHING.
+	for _, r := range results {
+		assert.Equal(t, domain.InstructionStatusDispatching, r.Status)
+	}
+
+	// A second call should return nothing (all already DISPATCHING).
+	results2, err := repo.FetchDispatchable(ctx, ports.FetchDispatchableParams{Limit: 10})
+	require.NoError(t, err)
+	assert.Empty(t, results2)
 }
 
-// TestInstructionRepository_FetchDispatchable_SkipsNonPendingRetrying verifies that only
-// PENDING and RETRYING instructions are returned (DISPATCHING is excluded).
-func TestInstructionRepository_FetchDispatchable_SkipsNonPendingRetrying(t *testing.T) {
+// TestInstructionRepository_FetchDispatchable_SkipsAlreadyDispatching verifies that
+// instructions already in DISPATCHING state are not returned by FetchDispatchable.
+// FetchDispatchable atomically marks claimed instructions DISPATCHING, so a second call
+// should return nothing.
+func TestInstructionRepository_FetchDispatchable_SkipsAlreadyDispatching(t *testing.T) {
 	db, ctx := setupTestDB(t)
 
 	tenantID := uuid.New()
@@ -160,21 +174,19 @@ func TestInstructionRepository_FetchDispatchable_SkipsNonPendingRetrying(t *test
 
 	repo := NewInstructionRepository(db)
 
-	pending := makeInstruction(t, tenantID, connID.String(), domain.PriorityNormal)
-	require.NoError(t, repo.Save(ctx, pending, fmt.Sprintf("idem-%s", pending.ID)))
+	inst := makeInstruction(t, tenantID, connID.String(), domain.PriorityNormal)
+	require.NoError(t, repo.Save(ctx, inst, fmt.Sprintf("idem-%s", inst.ID)))
 
-	dispatching := makeInstruction(t, tenantID, connID.String(), domain.PriorityNormal)
-	require.NoError(t, repo.Save(ctx, dispatching, fmt.Sprintf("idem-%s", dispatching.ID)))
-	// Reload to get version populated before updating
-	dispatchingLoaded, err := repo.FindByID(ctx, dispatching.ID)
-	require.NoError(t, err)
-	require.NoError(t, dispatchingLoaded.MarkDispatching())
-	require.NoError(t, repo.Save(ctx, dispatchingLoaded, fmt.Sprintf("idem-%s", dispatching.ID)))
-
+	// First fetch claims and marks DISPATCHING.
 	results, err := repo.FetchDispatchable(ctx, ports.FetchDispatchableParams{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	assert.Equal(t, pending.ID, results[0].ID)
+	assert.Equal(t, domain.InstructionStatusDispatching, results[0].Status)
+
+	// Second fetch should find nothing - the instruction is now DISPATCHING.
+	results2, err := repo.FetchDispatchable(ctx, ports.FetchDispatchableParams{Limit: 10})
+	require.NoError(t, err)
+	assert.Empty(t, results2)
 }
 
 // TestInstructionRepository_FetchDispatchable_RespectsScheduledAt verifies that
@@ -288,4 +300,48 @@ func TestInstructionRepository_RoundTrip_AllPriorities(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, p, found.Priority, "priority %q did not round-trip", p)
 	}
+}
+
+// TestInstructionRepository_FetchDispatchable_RespectsNextRetryAt verifies that
+// RETRYING instructions with a future next_retry_at are not fetched until the backoff expires.
+func TestInstructionRepository_FetchDispatchable_RespectsNextRetryAt(t *testing.T) {
+	db, ctx := setupTestDB(t)
+
+	tenantID := uuid.New()
+	connID := uuid.New()
+	insertTestConnection(t, db, tenantID, connID)
+
+	repo := NewInstructionRepository(db)
+
+	// Insert a RETRYING instruction with next_retry_at 10 minutes in the future.
+	// We do this via direct DB insert to set the status without going through state machine.
+	futureRetry := time.Now().Add(10 * time.Minute)
+	retryID := uuid.New()
+	require.NoError(t, db.Exec(`
+		INSERT INTO instructions
+			(id, tenant_id, instruction_type, provider_connection_id, payload, priority, status, next_retry_at, attempt_count, max_attempts, idempotency_key, version)
+		VALUES (?, ?, 'payment.initiate', ?, '{"amount":"10"}', 2, 'RETRYING', ?, 1, 3, ?, 1)
+	`, retryID, tenantID, connID, futureRetry, fmt.Sprintf("idem-retry-%s", retryID)).Error)
+
+	// Also insert a ready PENDING instruction.
+	ready := makeInstruction(t, tenantID, connID.String(), domain.PriorityNormal)
+	require.NoError(t, repo.Save(ctx, ready, fmt.Sprintf("idem-%s", ready.ID)))
+
+	// FetchDispatchable with asOf=now should only return the PENDING instruction.
+	results, err := repo.FetchDispatchable(ctx, ports.FetchDispatchableParams{
+		Limit: 10,
+		AsOf:  time.Now(),
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, ready.ID, results[0].ID)
+
+	// FetchDispatchable with asOf far in the future should return both.
+	results2, err := repo.FetchDispatchable(ctx, ports.FetchDispatchableParams{
+		Limit: 10,
+		AsOf:  time.Now().Add(20 * time.Minute),
+	})
+	require.NoError(t, err)
+	assert.Len(t, results2, 1) // only the RETRYING (PENDING is now DISPATCHING)
+	assert.Equal(t, retryID, results2[0].ID)
 }

@@ -107,6 +107,9 @@ type Instruction struct {
 	Attempts             []InstructionAttempt
 	FailureReason        string
 	ErrorCode            string
+	// NextRetryAt is the earliest time at which a RETRYING instruction should be
+	// re-dispatched. Set by the retry policy; nil means retry immediately.
+	NextRetryAt *time.Time
 	// Version is the optimistic locking counter. The persistence layer sets this field
 	// when loading from the database and increments it on each successful Save. Callers
 	// must not modify Version directly; it is managed entirely by the repository.

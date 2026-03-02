@@ -84,10 +84,12 @@ func (r *ConnectionRepository) FindByID(ctx context.Context, tenantID string, co
 }
 
 // ListByTenant retrieves all provider connections for a tenant, ordered by provider_name.
+// Returns an empty slice (not an error) when tenantID is not a valid UUID, because no
+// records can possibly match a malformed identifier.
 func (r *ConnectionRepository) ListByTenant(ctx context.Context, tenantID string) ([]*domain.ProviderConnection, error) {
-	tenantUUID, err := uuid.Parse(tenantID)
-	if err != nil {
-		return nil, err
+	tenantUUID, parseErr := uuid.Parse(tenantID)
+	if parseErr != nil {
+		return []*domain.ProviderConnection{}, nil //nolint:nilerr // malformed UUID cannot match any row; empty list is the correct result
 	}
 
 	var entities []ConnectionEntity
