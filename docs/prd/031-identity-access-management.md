@@ -3,6 +3,7 @@ name: prd-identity-access-management
 description: >-
   Standalone Identity service (BIAN Employee Access) for staff/operator
   authentication, role assignment, and multi-level access control.
+  Tenant-scoped — each tenant manages its own staff.
   Dex as sole OIDC provider across all environments.
 triggers:
   - Working on authentication, authorization, or access control
@@ -28,6 +29,10 @@ instructions: |
      - Dex issues JWTs; Identity service owns user CRUD and credentials
      - BIAN: Employee Access service domain
 
+  Both services are tenant-scoped. Each tenant has its own subdomain
+  and manages its own staff and customers independently. Platform admins
+  are staff of the meridian_master tenant.
+
   Key files:
   - services/identity/ (NEW — Identity + RoleAssignment)
   - shared/pkg/credentials/ (NEW — shared password hashing, validation)
@@ -37,15 +42,14 @@ instructions: |
   - services/gateway/auth/ (HTTP auth middleware)
   - deploy/demo/dex.yaml (static users to be replaced)
 
-  Identity and RoleAssignment tables live in the Identity service's own
-  database (cross-tenant, like the Tenant service). Dex is the sole
-  OIDC provider (no Keycloak).
+  Identity data lives in per-tenant schemas (org_{tenant_id}), same
+  pattern as Party. Dex is the sole OIDC provider (no Keycloak).
 ---
 
 # PRD 031: Identity and Access Management
 
 **Status:** Not Started
-**Version:** 3.0
+**Version:** 4.0
 **Date:** 2026-03-02
 **Author:** Architecture Team
 **Task Master Tag:** TBD
@@ -106,26 +110,39 @@ different service domains. Meridian follows this guidance.
 | **BIAN domain** | Employee Access |
 | **PRD** | 031 — Identity and Access Management |
 | **Purpose** | Authenticate staff/operators, assign roles, populate JWT claims |
-| **Scope** | Cross-tenant — a user may have roles in multiple tenants |
-| **Data location** | Identity service database (cross-tenant) |
+| **Scope** | Tenant-scoped — each tenant manages their own staff |
+| **Data location** | Tenant schema (`org_{tenant_id}`) |
 
 <!-- markdownlint-enable MD013 -->
 
 ### Why Two Services
 
-A customer logging in to view their account balance and a platform admin
+A customer logging in to view their account balance and a tenant admin
 applying a manifest are categorically different operations:
 
 - **Different security profiles** — customer auth is regulatory
   (KYC/AML), staff auth is operational (RBAC)
-- **Different lifecycle** — customers are onboarded per-tenant, staff
-  may span tenants
+- **Different lifecycle** — customers go through KYC verification,
+  staff are invited by admins and assigned roles
 - **Different audit requirements** — customer identity is PII under
   GDPR, staff access is SOC2/operational audit
-- **Different schemas** — customer data is tenant-isolated, staff
-  identity is cross-tenant
+- **Different BIAN domains** — Party Authentication vs Employee Access
 
 The fact that both need "a login" doesn't make them the same domain.
+
+### Tenant Isolation
+
+Each tenant has its own subdomain (`acme.meridianhub.cloud`) and
+manages its own staff independently. There is no cross-tenant identity:
+
+- Tenant A's staff cannot see Tenant B's staff
+- If a person works for two tenants, they have two separate identities
+  (one per tenant, one per subdomain)
+- Platform administrators are staff of the `meridian_master` tenant
+- The subdomain determines which tenant's Identity service authenticates
+  the user — no "tenant selection" step at login
+
+This follows the same isolation model as every other Meridian service.
 
 ### Shared Libraries
 
@@ -138,8 +155,8 @@ shared/platform/auth/      — RBAC, JWT claims, interceptors (existing)
 ```
 
 This avoids duplication while preserving domain separation. If the
-Party service later needs customer login credentials (Phase 4+), it
-imports the same shared packages.
+Party service later needs customer login credentials, it imports the
+same shared packages.
 
 ---
 
@@ -155,14 +172,15 @@ Meridian has two halves of an access control system that don't connect:
 - Schema-based multi-tenant isolation with subdomain-hopping prevention
 - Party service with Organization, Individual, KYC verification,
   references
-- Tenant service with provisioning, lifecycle, Party.Organization linkage
+- Tenant service with provisioning, lifecycle, Party.Organization
+  linkage
 - Platform admin vs tenant admin interceptor separation
 
 **What's missing:**
 
 - No dynamic user management (Dex has 2 hard-coded users)
 - No way to create, invite, or onboard staff/operators
-- No storage for "which user has which roles in which tenant"
+- No storage for "which user has which roles"
 - No self-service: tenants can't manage their own staff
 - Roles come from JWT claims, but nothing populates those claims
   dynamically
@@ -178,7 +196,7 @@ Meridian requires four distinct access tiers:
 
 | Level | Name | Scope | Who | Role |
 |-------|------|-------|-----|------|
-| 0 | Platform Administrator | `meridian_master` | Meridian operators | `platform-admin`, `super-admin` |
+| 0 | Platform Administrator | `meridian_master` tenant | Meridian operators (staff of master tenant) | `platform-admin`, `super-admin` |
 | 1 | Tenant Owner | Single tenant | Organization that contracted Meridian | `tenant-owner` (new) |
 | 2 | Tenant Administrator | Single tenant | Staff appointed by tenant owner | `admin` |
 | 3 | Tenant Operator | Single tenant, restricted | Staff with scoped access | `operator`, `auditor`, custom |
@@ -186,7 +204,8 @@ Meridian requires four distinct access tiers:
 <!-- markdownlint-enable MD013 -->
 
 **Level 0** creates/suspends tenants, applies platform manifests,
-views cross-tenant metrics.
+views cross-tenant metrics. These are Identity records within the
+`meridian_master` tenant.
 **Level 1** manages tenant admins, views billing, applies tenant
 manifests.
 **Level 2** manages users, configures account types, runs operations.
@@ -205,7 +224,7 @@ Keycloak is removed entirely.
 
 | Responsibility | Owner |
 |---------------|-------|
-| User CRUD (create, invite, suspend) | Identity service |
+| User CRUD (create, invite, suspend) | Identity service (per tenant) |
 | Password storage + validation | Identity service (via `shared/pkg/credentials`) |
 | Role assignment | Identity service (RoleAssignment table) |
 | JWT issuance + signing | Dex |
@@ -244,18 +263,26 @@ Every user gets the same tenant and same roles.
 ### Target Authentication Flow
 
 ```text
-User → Dex (gRPC connector → Identity service)
-  → Identity validates credentials, looks up RoleAssignments
+User navigates to acme.meridianhub.cloud
+  → Gateway resolves subdomain → tenant_id
+  → Redirect to Dex with tenant context
+  → Dex (gRPC connector → Identity service, tenant-scoped)
+  → Identity validates credentials in org_acme schema
+  → Identity looks up RoleAssignments
+  → Returns: sub, email, roles[]
   → Dex issues JWT (sub, email, x-tenant-id, roles)
   → Gateway validates JWT (no defaults needed)
-  → Interceptor injects claims into context
   → RBAC enforcement (unchanged)
 ```
+
+The tenant is determined by the subdomain, not by user selection.
+No `DEFAULT_TENANT_ID` or `DEFAULT_ROLES` env vars needed.
 
 For production with external IdPs:
 
 ```text
-User → Dex (upstream connector → Auth0/Okta/Google)
+User navigates to acme.meridianhub.cloud
+  → Dex (upstream connector → Acme's Auth0/Okta/Google)
   → Dex calls Identity service to enrich claims
   → JWT (sub, email, x-tenant-id, roles)
   → Gateway validates JWT
@@ -296,26 +323,26 @@ services/identity/
   ├── grpc/                 # gRPC handlers
   ├── connector/            # Dex gRPC connector implementation
   ├── observability/        # Metrics, health checks
-  ├── migrations/           # Atlas migrations (own database)
+  ├── migrations/           # Atlas migrations (per-tenant schema)
   ├── atlas/                # Atlas config
   └── k8s/                  # Kubernetes manifests
 ```
 
-The Identity service has its own database (same pattern as Tenant,
-Party, and other services). Identity data is inherently cross-tenant,
-so it does not use per-tenant schemas.
+The Identity service uses **per-tenant schemas** (`org_{tenant_id}`),
+the same pattern as Party and other tenant-scoped services. Migrations
+run per-tenant during tenant provisioning.
 
 ## Core Features
 
 ### 1. Identity — Staff Authentication Record
 
 An Identity represents a staff member or operator who can authenticate
-to Meridian.
+to a specific tenant's Meridian instance.
 
 ```go
 type Identity struct {
     ID             uuid.UUID
-    Email          string          // Global login identifier
+    Email          string          // Unique within tenant
     PasswordHash   string          // bcrypt (via shared/pkg/credentials)
     ExternalIDPSub string          // Subject from external IdP
     ExternalIDP    string          // "google", "auth0", "okta"
@@ -332,20 +359,22 @@ type Identity struct {
 
 **Constraints:**
 
-- Email is globally unique (one identity per person)
+- Email is unique within a tenant (same person can have separate
+  identities in different tenants)
 - Password-based and federated auth are mutually exclusive per identity
-- Identity exists independently of Party.Individual (different domain)
+- Identity exists independently of Party.Individual (different domain,
+  different service)
+- Tenant scoping is implicit (per-tenant schema, not a column)
 
 ### 2. RoleAssignment — Dynamic Authorization
 
-Stores which roles a user has within which tenant. Replaces the static
+Stores which roles a user has within their tenant. Replaces the static
 `DEFAULT_ROLES` mechanism.
 
 ```go
 type RoleAssignment struct {
     ID         uuid.UUID
     IdentityID uuid.UUID
-    TenantID   tenant.TenantID
     Role       auth.Role       // admin, operator, auditor, tenant-owner
     GrantedBy  uuid.UUID
     GrantedAt  time.Time
@@ -368,23 +397,28 @@ auditor        → can grant: (nothing)
 
 Role changes take effect at next token refresh (not mid-session).
 
+**Note:** `TenantID` is not a column — it's implicit from the
+per-tenant schema. RoleAssignment is always within a single tenant.
+
 ### 3. Dex gRPC Connector — Claims Population
 
 When a user authenticates, Dex calls the Identity service's gRPC
 connector to validate credentials and populate JWT claims:
 
 ```text
-Dex receives login request (email + password)
-  → Calls Identity service Authenticate RPC
-  → Identity validates password hash
-  → Identity looks up RoleAssignments for this identity
-  → Returns: sub, email, name, x-tenant-id, roles[]
-  → Dex signs JWT with these claims
+User navigates to acme.meridianhub.cloud
+  → Gateway resolves subdomain → tenant_id = "acme"
+  → Dex receives login request (email + password + tenant context)
+  → Calls Identity service Authenticate RPC (tenant-scoped)
+  → Identity validates password hash in org_acme schema
+  → Identity looks up RoleAssignments in org_acme schema
+  → Returns: sub, email, name, roles[]
+  → Dex signs JWT with claims + x-tenant-id from subdomain
 ```
 
 For federated auth (Phase 3), Dex's upstream connectors handle the
 external IdP interaction, then call the Identity service to enrich
-claims with tenant and role information.
+claims with role information for that tenant.
 
 ### 4. User Lifecycle Operations
 
@@ -399,30 +433,26 @@ webhook.
 **Lifecycle:** Suspend (disable login), reactivate, deprovision
 (soft-delete with PII anonymization after retention).
 
-### 5. Multi-Tenant User Resolution
+### 5. Platform Admin Bootstrap
 
-A user with roles in multiple tenants selects their tenant at login
-time. Single-tenant users are auto-selected. Tenant switching issues
-a new JWT without re-authentication.
-
-### 6. Platform Admin Bootstrap
-
-On first boot, Meridian creates a platform admin identity from
-`PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` env vars.
-Bootstrap credentials are one-time use: the first login forces an
-immediate password reset, after which the env var value is no longer
-valid. In production, inject these via a secret manager (e.g.,
-Kubernetes Secrets, Vault) — never store plaintext passwords in
-environment files or container images. Subsequent admins are created
-via the invitation flow.
+On first boot, Meridian creates a platform admin identity within the
+`meridian_master` tenant from `PLATFORM_ADMIN_EMAIL` and
+`PLATFORM_ADMIN_PASSWORD` env vars. Bootstrap credentials are one-time
+use: the first login forces an immediate password reset, after which
+the env var value is no longer valid. In production, inject these via
+a secret manager (e.g., Kubernetes Secrets, Vault) — never store
+plaintext passwords in environment files or container images.
+Subsequent admins are created via the invitation flow.
 
 ## Database Schema
 
-The Identity service owns its own database. Identity data is
-inherently cross-tenant (a user may have roles in multiple tenants),
-so tables do not use per-tenant schemas.
+The Identity service uses **per-tenant schemas** (`org_{tenant_id}`),
+the same isolation model as Party and other services. No `tenant_id`
+columns needed — the schema provides isolation.
 
 ```sql
+-- Runs in each tenant's schema (org_{tenant_id})
+
 CREATE TABLE identity (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email           VARCHAR(255) NOT NULL UNIQUE,
@@ -445,7 +475,6 @@ CREATE TABLE identity (
 CREATE TABLE role_assignment (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     identity_id  UUID NOT NULL REFERENCES identity(id),
-    tenant_id    VARCHAR(50) NOT NULL,
     role         VARCHAR(30) NOT NULL,
     granted_by   UUID NOT NULL REFERENCES identity(id),
     granted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -454,7 +483,7 @@ CREATE TABLE role_assignment (
     revoked_at   TIMESTAMPTZ,
     revoked_by   UUID REFERENCES identity(id),
 
-    UNIQUE (identity_id, tenant_id, role)
+    UNIQUE (identity_id, role)
       WHERE revoked = false
 );
 
@@ -469,11 +498,13 @@ CREATE TABLE invitation (
 );
 ```
 
-**Key simplifications vs v2.0:**
+**Key simplifications vs v3.0:**
 
-- `email` is globally unique (not per-tenant) — one identity per person
-- No `tenant_id` on Identity — tenant scoping lives in RoleAssignment
-- No `party_id` — Identity and Party are separate domains
+- No `tenant_id` columns anywhere — schema provides tenant isolation
+- `email` unique within tenant (not globally)
+- No cross-tenant queries — each tenant is fully independent
+- RoleAssignment simplified (no `tenant_id` column)
+- Platform admins are records in the `meridian_master` tenant schema
 
 ## Proto Definition
 
@@ -494,8 +525,6 @@ service IdentityService {
   // Authentication (called by Dex gRPC connector)
   rpc Authenticate(AuthenticateRequest)
       returns (AuthenticateResponse);
-  rpc RefreshToken(RefreshTokenRequest)
-      returns (RefreshTokenResponse);
 
   // Password management
   rpc SetPassword(SetPasswordRequest)
@@ -521,12 +550,6 @@ service IdentityService {
   rpc AcceptInvitation(AcceptInvitationRequest)
       returns (AcceptInvitationResponse);
 
-  // Tenant resolution
-  rpc ListUserTenants(ListUserTenantsRequest)
-      returns (ListUserTenantsResponse);
-  rpc SwitchTenant(SwitchTenantRequest)
-      returns (SwitchTenantResponse);
-
   // Lifecycle
   rpc SuspendIdentity(SuspendIdentityRequest)
       returns (SuspendIdentityResponse);
@@ -534,6 +557,10 @@ service IdentityService {
       returns (ReactivateIdentityResponse);
 }
 ```
+
+**Removed vs v3.0:** `ListUserTenants`, `SwitchTenant`, `RefreshToken`
+— no cross-tenant identity means no tenant switching. Token refresh is
+handled by Dex directly.
 
 ## Shared Libraries
 
@@ -560,14 +587,16 @@ use them without coupling:
    (proto, domain, adapters, service, gRPC, atlas, k8s, Tilt)
 2. Extract `shared/pkg/credentials` and `shared/pkg/tokens`
 3. Create Identity + RoleAssignment + Invitation tables (Atlas
-   migrations)
-4. Implement Authenticate RPC
-5. Write Dex gRPC connector that calls Identity service
+   migrations, per-tenant schema)
+4. Implement Authenticate RPC (tenant-scoped)
+5. Write Dex gRPC connector that calls Identity service with tenant
+   context from subdomain
 6. Remove Keycloak from Tilt; add Dex to local dev stack
 7. Enable `AUTH_ENABLED=true` by default in all environments
-8. Bootstrap creates platform admin identity from env vars
+8. Bootstrap creates platform admin identity in `meridian_master`
+   tenant from env vars
 9. Remove `DEFAULT_TENANT_ID` and `DEFAULT_ROLES` env vars
-10. JWT claims populated from RoleAssignment table
+10. JWT claims populated from tenant-scoped RoleAssignment table
 
 **Demo and local dev work identically**, but credentials are in the
 database, not in dex.yaml static passwords.
@@ -629,13 +658,13 @@ database, not in dex.yaml static passwords.
 ## Success Criteria
 
 1. Identity service operational as a standalone BIAN Employee Access
-   service
+   service with per-tenant schema isolation
 2. Dex is sole OIDC provider (local, demo, production) — no Keycloak
 3. Demo works with dynamic users (no hard-coded Dex passwords)
-4. Platform admin bootstrapped from env var, subsequent admins invited
+4. Platform admin bootstrapped in `meridian_master` tenant from env var
 5. Tenant owner can invite admins, admins can invite operators
 6. JWT claims reflect actual RoleAssignments, not env var defaults
-7. User with roles in multiple tenants can switch between them
+7. Subdomain determines tenant — no tenant selection at login
 8. All auth events appear in audit trail
 9. Party service unchanged — remains customer-only (KYC/AML)
 
@@ -645,11 +674,12 @@ database, not in dex.yaml static passwords.
 - SSO/SAML support (OIDC via Dex connectors only)
 - Custom permission definitions (Phase 4)
 - Customer authentication (Party service concern, PRD 020)
+- Cross-tenant identity (one identity per tenant, by design)
 - Session management (stateless JWT)
 
 ## Dependencies
 
 - Dex (gRPC connector for Phase 1)
-- Tenant service (tenant validation)
+- Tenant service (tenant validation, subdomain resolution)
 - Audit service (auth event logging)
-- Gateway (remove DEFAULT_TENANT_ID / DEFAULT_ROLES fallback)
+- Gateway (subdomain → tenant resolution, remove DEFAULT_* fallback)
