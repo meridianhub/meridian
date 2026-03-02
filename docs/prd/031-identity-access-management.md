@@ -53,6 +53,7 @@ instructions: |
 **ADRs:**
 
 - [0002 - Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
+- [0015 - Standard Service Directory Structure](../adr/0015-standard-service-directory-structure.md)
 
 **Related PRDs:**
 
@@ -281,19 +282,23 @@ BIAN explicitly separates these into distinct service domains:
 
 ## Service Structure
 
-The Identity service follows the same patterns as other Meridian
-services:
+The Identity service follows
+[ADR-015](../adr/0015-standard-service-directory-structure.md) and the
+[New BIAN Service Checklist](../guides/new-bian-service-checklist.md).
+Use `services/party/` as the primary reference implementation.
 
 ```text
 services/identity/
   ├── cmd/                  # Service entrypoint
   ├── domain/               # Identity, RoleAssignment, Invitation entities
-  ├── repository/           # Database access
+  ├── adapters/persistence/ # Repository implementations
   ├── service/              # Business logic
   ├── grpc/                 # gRPC handlers
   ├── connector/            # Dex gRPC connector implementation
+  ├── observability/        # Metrics, health checks
   ├── migrations/           # Atlas migrations (own database)
-  └── atlas/                # Atlas config
+  ├── atlas/                # Atlas config
+  └── k8s/                  # Kubernetes manifests
 ```
 
 The Identity service has its own database (same pattern as Tenant,
@@ -550,8 +555,9 @@ use them without coupling:
 
 ### Phase 1: Identity Service + Dex Everywhere (Critical Path)
 
-1. Create `services/identity/` service scaffold (domain, repo, service,
-   gRPC layers)
+1. Scaffold `services/identity/` per the
+   [New BIAN Service Checklist](../guides/new-bian-service-checklist.md)
+   (proto, domain, adapters, service, gRPC, atlas, k8s, Tilt)
 2. Extract `shared/pkg/credentials` and `shared/pkg/tokens`
 3. Create Identity + RoleAssignment + Invitation tables (Atlas
    migrations)
