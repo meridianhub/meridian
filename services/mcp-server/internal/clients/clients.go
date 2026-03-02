@@ -9,6 +9,7 @@ import (
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
+	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
@@ -43,6 +44,10 @@ type MeridianClients struct {
 	SagaAdmin sagav1.SagaAdminServiceClient
 	// SagaRegistry queries saga definitions and lifecycle.
 	SagaRegistry sagav1.SagaRegistryServiceClient
+	// OperationalGateway manages instruction dispatch and provider connections.
+	OperationalGateway opgatewayv1.OperationalGatewayServiceClient
+	// ProviderConnection manages provider connection configuration and health.
+	ProviderConnection opgatewayv1.ProviderConnectionServiceClient
 	// Health allows the MCP server to check gateway liveness.
 	Health grpc_health_v1.HealthClient
 
@@ -78,17 +83,19 @@ func New(cfg *auth.Config) (*MeridianClients, error) {
 	}
 
 	return &MeridianClients{
-		ApplyManifest:   controlplanev1.NewApplyManifestServiceClient(conn),
-		ManifestHistory: controlplanev1.NewManifestHistoryServiceClient(conn),
-		ReferenceData:   referencedatav1.NewReferenceDataServiceClient(conn),
-		PositionKeeping: positionkeepingv1.NewPositionKeepingServiceClient(conn),
-		Accounting:      financialaccountingv1.NewFinancialAccountingServiceClient(conn),
-		Reconciliation:  reconciliationv1.NewAccountReconciliationServiceClient(conn),
-		MarketInfo:      marketinformationv1.NewMarketInformationServiceClient(conn),
-		SagaAdmin:       sagav1.NewSagaAdminServiceClient(conn),
-		SagaRegistry:    sagav1.NewSagaRegistryServiceClient(conn),
-		Health:          grpc_health_v1.NewHealthClient(conn),
-		conn:            conn,
+		ApplyManifest:      controlplanev1.NewApplyManifestServiceClient(conn),
+		ManifestHistory:    controlplanev1.NewManifestHistoryServiceClient(conn),
+		ReferenceData:      referencedatav1.NewReferenceDataServiceClient(conn),
+		PositionKeeping:    positionkeepingv1.NewPositionKeepingServiceClient(conn),
+		Accounting:         financialaccountingv1.NewFinancialAccountingServiceClient(conn),
+		Reconciliation:     reconciliationv1.NewAccountReconciliationServiceClient(conn),
+		MarketInfo:         marketinformationv1.NewMarketInformationServiceClient(conn),
+		SagaAdmin:          sagav1.NewSagaAdminServiceClient(conn),
+		SagaRegistry:       sagav1.NewSagaRegistryServiceClient(conn),
+		OperationalGateway: opgatewayv1.NewOperationalGatewayServiceClient(conn),
+		ProviderConnection: opgatewayv1.NewProviderConnectionServiceClient(conn),
+		Health:             grpc_health_v1.NewHealthClient(conn),
+		conn:               conn,
 	}, nil
 }
 
