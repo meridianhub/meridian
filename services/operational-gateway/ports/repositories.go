@@ -72,6 +72,10 @@ type InstructionRepository interface {
 	// Instructions are returned ordered by priority DESC (CRITICAL first), then scheduled_at ASC.
 	// The caller must call Save to update instruction state after dispatch.
 	FetchDispatchable(ctx context.Context, params FetchDispatchableParams) ([]*domain.Instruction, error)
+
+	// FindExpired returns up to batchSize instructions whose expires_at has passed and
+	// whose status is PENDING or RETRYING (non-terminal, expirable states).
+	FindExpired(ctx context.Context, batchSize int) ([]*domain.Instruction, error)
 }
 
 // ConnectionRepository defines persistence operations for provider connections.

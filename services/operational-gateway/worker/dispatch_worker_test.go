@@ -55,6 +55,10 @@ func (m *mockInstructionRepo) ListByTenant(_ context.Context, _ ports.ListInstru
 	return nil, 0, nil
 }
 
+func (m *mockInstructionRepo) FindExpired(_ context.Context, _ int) ([]*domain.Instruction, error) {
+	return nil, nil
+}
+
 func (m *mockInstructionRepo) getSavedInstructions() []*domain.Instruction {
 	m.mu.Lock()
 	defer m.mu.Unlock()
