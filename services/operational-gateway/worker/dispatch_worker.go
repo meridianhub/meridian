@@ -56,6 +56,7 @@ type DispatchWorker struct {
 	logger          *slog.Logger
 	shutdown        chan struct{}
 	shutdownOnce    sync.Once
+	startOnce       sync.Once
 	wg              sync.WaitGroup
 }
 
@@ -86,14 +87,17 @@ func NewDispatchWorker(
 
 // Start begins the background polling loop. Returns immediately; the loop runs
 // in a separate goroutine until Stop is called or ctx is cancelled.
+// Calling Start more than once is a no-op.
 func (w *DispatchWorker) Start(ctx context.Context) {
-	w.wg.Add(1)
-	go w.run(ctx)
+	w.startOnce.Do(func() {
+		w.wg.Add(1)
+		go w.run(ctx)
 
-	w.logger.InfoContext(ctx, "dispatch worker started",
-		"batch_size", w.config.BatchSize,
-		"poll_interval", w.config.PollInterval,
-	)
+		w.logger.InfoContext(ctx, "dispatch worker started",
+			"batch_size", w.config.BatchSize,
+			"poll_interval", w.config.PollInterval,
+		)
+	})
 }
 
 // Stop signals the worker to shut down and blocks until the current batch completes.
