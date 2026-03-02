@@ -81,7 +81,7 @@
           "internalPath": "amount_cents",
           "transform": {
             "cel": {
-              "inboundCel": "int(value) / 100",
+              "inboundCel": "int(value)",
               "outboundCel": "int(value)"
             }
           }
@@ -198,7 +198,8 @@
         "auth": {
           "apiKey": {
             "headerName": "Authorization",
-            "apiKeySecretRef": "sm://stripe/api_key"
+            "apiKeySecretRef": "sm://stripe/api_key",
+            "_note": "Secret must include 'Bearer ' prefix, e.g. 'Bearer sk_live_xxx'. APIKeyAuth sets the header value verbatim."
           }
         },
         "retryPolicy": {
