@@ -59,7 +59,13 @@ other Meridian config surface:
 1. **Stored in tenant config** (alongside existing tenant
    entity or manifest)
 2. **Loaded at login** (fetched with tenant context, cached
-   in React Query)
+   in React Query with cache key including tenant slug)
+   - On tenant switch or logout, config cache is
+     invalidated and re-fetched
+   - On fetch failure, app falls back to default UI config
+     and shows a non-blocking warning banner
+   - Background revalidation on window focus applies
+     updates without requiring page reload
 3. **Applied immediately** (CSS variables for theme, feature
    flags for visibility, layout config for dashboard
    composition)
@@ -354,7 +360,10 @@ ui:
 **Runtime flow**: `TenantProvider` fetches tenant config,
 extracts `ui.theme`, applies CSS variable overrides to
 `document.documentElement`. Entire app re-themes without
-reload.
+reload. If config fetch fails or returns invalid data,
+`TenantProvider` applies safe defaults (platform theme,
+all features visible) and records an observability event
+(`tenant_ui_config_fallback`).
 
 **Asset security**: Tenant-supplied URLs (`logo_url`,
 `favicon_url`) must not be loaded directly from arbitrary
