@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -34,6 +35,11 @@ var protoJSONMarshaler = protojson.MarshalOptions{
 // zero-valued fields are omitted. Timestamp fields are serialized as RFC3339 strings.
 func EventToInputData(event proto.Message, metadata map[string]string) (map[string]any, error) {
 	if event == nil {
+		return nil, ErrNilEvent
+	}
+	// Guard against typed-nil: a (*T)(nil) passed as proto.Message satisfies
+	// event != nil (non-nil interface) but holds a nil pointer that Marshal panics on.
+	if v := reflect.ValueOf(event); v.Kind() == reflect.Ptr && v.IsNil() {
 		return nil, ErrNilEvent
 	}
 

@@ -303,6 +303,15 @@ func TestEventToInputData_NilEvent(t *testing.T) {
 	require.ErrorIs(t, err, ErrNilEvent)
 }
 
+// TestEventToInputData_TypedNilEvent verifies a typed-nil proto.Message also returns ErrNilEvent.
+// In Go, a (*T)(nil) assigned to an interface is not equal to the untyped nil interface value,
+// so an explicit reflect-based check is required to catch this case.
+func TestEventToInputData_TypedNilEvent(t *testing.T) {
+	var typedNil *eventsv1.TransactionCapturedEvent // typed nil pointer
+	_, err := EventToInputData(typedNil, nil)
+	require.ErrorIs(t, err, ErrNilEvent)
+}
+
 // TestEventToInputData_CELCompatibility verifies the output structure matches
 // what CEL filters expect: event.field_name notation.
 func TestEventToInputData_CELCompatibility(t *testing.T) {
