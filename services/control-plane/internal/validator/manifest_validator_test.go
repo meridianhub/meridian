@@ -249,6 +249,64 @@ func TestValidateDuplicate_SagaNames(t *testing.T) {
 	}
 }
 
+func TestValidate_EventTriggerWithoutFilter_Warning(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_captured",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		// No Filter set - should produce a warning
+	})
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest (missing event filter is a warning), got errors: %v", result.Errors)
+	}
+
+	found := false
+	for _, w := range result.Warnings {
+		if w.Code == "MISSING_EVENT_FILTER" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected MISSING_EVENT_FILTER warning, got warnings: %v", result.Warnings)
+	}
+}
+
+func TestValidate_EventTriggerWithFilter_NoWarning(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	filter := `event.amount > 0 && event.currency == "GBP"`
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_captured",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	result := v.Validate(m, nil)
+	if !result.Valid {
+		t.Errorf("expected valid manifest, got errors: %v", result.Errors)
+	}
+
+	for _, w := range result.Warnings {
+		if w.Code == "MISSING_EVENT_FILTER" {
+			t.Errorf("unexpected MISSING_EVENT_FILTER warning when filter is set")
+		}
+	}
+}
+
 func TestValidateCEL_ValidExpression(t *testing.T) {
 	v, err := New()
 	if err != nil {

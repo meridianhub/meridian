@@ -263,7 +263,7 @@ message ValuationRule {
 // ========================================
 
 // SagaDefinition declares a workflow within the manifest.
-// Sagas are triggered by API calls, webhooks, or scheduled events,
+// Sagas are triggered by API calls, webhooks, scheduled events, or internal domain events,
 // and contain inline Starlark scripts that orchestrate service interactions.
 message SagaDefinition {
   // name is the unique identifier for this saga (e.g., "process_energy_settlement").
@@ -279,10 +279,11 @@ message SagaDefinition {
   //   "api:" - triggered by an API call (e.g., "api:/v1/settlements")
   //   "webhook:" - triggered by an external webhook (e.g., "webhook:stripe_payment")
   //   "scheduled:" - triggered on a schedule (e.g., "scheduled:daily_reconciliation")
+  //   "event:" - triggered by an internal domain event (e.g., "event:position-keeping.transaction-captured.v1")
   string trigger = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
-    pattern: "^(api:|webhook:|scheduled:).+$"
+    pattern: "^(api:|webhook:|scheduled:|event:).+$"
   }];
 
   // script is the inline Starlark source code defining the saga workflow.
@@ -291,6 +292,17 @@ message SagaDefinition {
   string script = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 65536
+  }];
+
+  // filter is a CEL expression evaluated against the event payload to determine
+  // whether this saga should execute. Recommended when trigger starts with "event:";
+  // omitting it causes a validation warning because the saga will execute for every
+  // matching event. The expression must return a boolean; the saga executes only when
+  // it returns true. Must be non-empty when present.
+  // Example: `event.amount > 0 && event.currency == "GBP"`
+  optional string filter = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
   }];
 }
 

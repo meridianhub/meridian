@@ -849,17 +849,21 @@
                 },
                 "trigger": {
                     "type": "string",
-                    "description": "trigger defines what initiates this saga. Supported prefixes:   \"api:\" - triggered by an API call (e.g., \"api:/v1/settlements\")   \"webhook:\" - triggered by an external webhook (e.g., \"webhook:stripe_payment\")   \"scheduled:\" - triggered on a schedule (e.g., \"scheduled:daily_reconciliation\")"
+                    "description": "trigger defines what initiates this saga. Supported prefixes:   \"api:\" - triggered by an API call (e.g., \"api:/v1/settlements\")   \"webhook:\" - triggered by an external webhook (e.g., \"webhook:stripe_payment\")   \"scheduled:\" - triggered on a schedule (e.g., \"scheduled:daily_reconciliation\")   \"event:\" - triggered by an internal domain event (e.g., \"event:position-keeping.transaction-captured.v1\")"
                 },
                 "script": {
                     "type": "string",
                     "description": "script is the inline Starlark source code defining the saga workflow. Must not be empty - all saga logic is defined inline in the manifest. Starlark guarantees termination (no while loops, no recursion)."
+                },
+                "filter": {
+                    "type": "string",
+                    "description": "filter is a CEL expression evaluated against the event payload to determine whether this saga should execute. Recommended when trigger starts with \"event:\"; omitting it causes a validation warning because the saga will execute for every matching event. The expression must return a boolean; the saga executes only when it returns true. Must be non-empty when present. Example: `event.amount \u003e 0 \u0026\u0026 event.currency == \"GBP\"`"
                 }
             },
             "additionalProperties": false,
             "type": "object",
             "title": "========================================\n Saga Definitions\n ========================================",
-            "description": "======================================== Saga Definitions ========================================  SagaDefinition declares a workflow within the manifest. Sagas are triggered by API calls, webhooks, or scheduled events, and contain inline Starlark scripts that orchestrate service interactions."
+            "description": "======================================== Saga Definitions ========================================  SagaDefinition declares a workflow within the manifest. Sagas are triggered by API calls, webhooks, scheduled events, or internal domain events, and contain inline Starlark scripts that orchestrate service interactions."
         },
         "meridian.control_plane.v1.ValuationRule": {
             "required": [

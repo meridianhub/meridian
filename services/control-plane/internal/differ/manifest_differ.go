@@ -664,6 +664,9 @@ func describeSagaChanges(name string, prev, updated *controlplanev1.SagaDefiniti
 	if prev.GetScript() != updated.GetScript() {
 		changes = append(changes, "script changed")
 	}
+	if prev.GetFilter() != updated.GetFilter() {
+		changes = append(changes, "filter changed")
+	}
 	if len(changes) == 0 {
 		return fmt.Sprintf("Update saga %s", name)
 	}

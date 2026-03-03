@@ -612,6 +612,43 @@ func TestHandlersDescribe_TriggerFilter(t *testing.T) {
 	}
 }
 
+func TestHandlersDescribe_EventTriggerFilter(t *testing.T) {
+	filter := `event.amount > 0 && event.currency == "GBP"`
+	manifest := buildTestManifest()
+	manifest.Sagas = append(manifest.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_captured",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "# event saga script",
+		Filter:  &filter,
+	})
+	client := &mockManifestHistoryClient{
+		resp: &controlplanev1.GetCurrentManifestResponse{
+			Version: &controlplanev1.ManifestVersion{
+				Version:  "1.0",
+				Manifest: manifest,
+			},
+		},
+	}
+	r := mustRegisterRefdata(t, tools.ReferenceDataDeps{ManifestHistory: client})
+
+	// Filter by "event" trigger only - should return the event saga
+	result := callTool(t, r, "meridian_handlers_describe", `{"trigger_prefix":"event"}`)
+	m := resultMap(t, result)
+
+	triggerCount, _ := m["saga_trigger_count"].(int)
+	if triggerCount != 1 {
+		t.Errorf("expected 1 event saga trigger, got %v", m["saga_trigger_count"])
+	}
+
+	// Unfiltered result should include all 3 sagas now
+	result = callTool(t, r, "meridian_handlers_describe", `{}`)
+	m = resultMap(t, result)
+	triggerCount, _ = m["saga_trigger_count"].(int)
+	if triggerCount != 3 {
+		t.Errorf("expected 3 saga triggers (api + scheduled + event), got %v", m["saga_trigger_count"])
+	}
+}
+
 func TestHandlersDescribe_GRPCError(t *testing.T) {
 	client := &mockManifestHistoryClient{
 		err: errors.New("rpc error: unavailable"),
