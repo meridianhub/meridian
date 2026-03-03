@@ -20,7 +20,7 @@ var (
 	ErrTenantZeroIDRequired = errors.New("TENANT_ZERO_ID environment variable is required")
 )
 
-// Config holds the configuration for the utilization-metering-consumer service.
+// Config holds the configuration for the event-router service.
 type Config struct {
 	// Kafka configuration
 	KafkaBootstrapServers string   // Required: Kafka broker addresses (e.g., "kafka:9092")
@@ -61,7 +61,7 @@ func LoadConfig() (*Config, error) {
 
 	config := &Config{
 		KafkaBootstrapServers:   env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", ""),
-		ConsumerGroupID:         env.GetEnvOrDefault("CONSUMER_GROUP_ID", "utilization-metering-consumer"),
+		ConsumerGroupID:         env.GetEnvOrDefault("CONSUMER_GROUP_ID", "event-router"),
 		AuditTopics:             defaultAuditTopics, // Use default topics
 		PositionKeepingEndpoint: env.GetEnvOrDefault("POSITION_KEEPING_ENDPOINT", ""),
 		TenantZeroID:            env.GetEnvOrDefault("TENANT_ZERO_ID", ""),

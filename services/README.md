@@ -41,7 +41,7 @@ flowchart LR
             Tenant["Tenant<br/>:50056"]
             CP["ControlPlane"]
             AW["audit-worker<br/>:8080"]
-            UMC["utilization-metering<br/>-consumer :8080"]
+            UMC["event-router<br/>:8080"]
             DB[("CockroachDB<br/>:26257")]
             Kafka["Kafka<br/>:9092"]
             Redis["Redis<br/>:6379"]
@@ -264,7 +264,7 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Forecasting | 50061 | - | 9090 |
 | ControlPlane | - | - | - |
 | audit-worker | - | 8080 | 8080 |
-| utilization-metering-consumer | - | 8080 | 8080 |
+| event-router | - | 8080 | 8080 |
 
 ## Observability
 
@@ -392,8 +392,8 @@ The Utilization Metering Consumer is a centralized Kafka consumer for platform b
 - **HPA scaling** based on Kafka consumer lag (1-5 replicas)
 - **Tenant-zero isolation** for platform billing data
 
-See [services/utilization-metering-consumer/README.md](utilization-metering-consumer/README.md) for full
-documentation and [k8s/README.md](utilization-metering-consumer/k8s/README.md) for deployment details.
+See [services/event-router/README.md](event-router/README.md) for full
+documentation and [k8s/README.md](event-router/k8s/README.md) for deployment details.
 
 ### Internal Account Service
 

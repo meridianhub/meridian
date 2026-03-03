@@ -9,7 +9,7 @@ import (
 	"time"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	"github.com/meridianhub/meridian/services/event-router/domain"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/shopspring/decimal"

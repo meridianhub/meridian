@@ -13,7 +13,7 @@ import (
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	"github.com/meridianhub/meridian/services/event-router/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"

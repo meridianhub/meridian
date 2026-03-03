@@ -421,32 +421,32 @@ k8s_resource(
 )
 
 # =============================================================================
-# Utilization Metering Consumer
+# Event Router
 # =============================================================================
 
-# Standard build args for utilization-metering-consumer
-utilization_metering_build_args = {
+# Standard build args for event-router
+event_router_build_args = {
   'VERSION': 'dev',
   'COMMIT': local('git rev-parse --short HEAD'),
   'BUILD_DATE': get_build_date(),
 }
 
-# Build utilization-metering-consumer Docker image
+# Build event-router Docker image
 docker_build(
-  'utilization-metering-consumer',
+  'event-router',
   context='.',
-  dockerfile='services/utilization-metering-consumer/cmd/Dockerfile',
-  build_args=utilization_metering_build_args,
+  dockerfile='services/event-router/cmd/Dockerfile',
+  build_args=event_router_build_args,
 )
 
-# Deploy utilization-metering-consumer K8s manifests
-k8s_yaml('services/utilization-metering-consumer/k8s/configmap.yaml')
-k8s_yaml('services/utilization-metering-consumer/k8s/deployment.yaml')
-k8s_yaml('services/utilization-metering-consumer/k8s/service.yaml')
+# Deploy event-router K8s manifests
+k8s_yaml('services/event-router/k8s/configmap.yaml')
+k8s_yaml('services/event-router/k8s/deployment.yaml')
+k8s_yaml('services/event-router/k8s/service.yaml')
 
-# Configure utilization-metering-consumer resource
+# Configure event-router resource
 k8s_resource(
-  'utilization-metering-consumer',
+  'event-router',
   port_forwards=[
     '8081:8080',  # HTTP/metrics (using 8081 to avoid conflict with audit-worker)
   ],
@@ -457,7 +457,7 @@ k8s_resource(
   ],
   labels=['infrastructure'],
   objects=[
-    'utilization-metering-consumer-config:configmap',
+    'event-router-config:configmap',
   ],
 )
 

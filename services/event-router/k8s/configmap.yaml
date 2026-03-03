@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: utilization-metering-consumer-config
+  name: event-router-config
   labels:
-    app: utilization-metering-consumer
+    app: event-router
     component: consumer
 data:
   # Logging configuration
@@ -15,7 +15,7 @@ data:
 
   # Kafka consumer configuration
   KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
-  CONSUMER_GROUP_ID: "utilization-metering-consumer"
+  CONSUMER_GROUP_ID: "event-router"
 
   # Kafka consumer performance tuning
   # Max messages to fetch per poll (higher = more throughput, higher memory)
@@ -54,7 +54,7 @@ data:
   TENANT_ACCOUNT_MAPPING: ""
 
   # OpenTelemetry configuration
-  OTEL_SERVICE_NAME: "utilization-metering-consumer"
+  OTEL_SERVICE_NAME: "event-router"
   OTEL_SAMPLING_RATE: "0.1"
 
   # Metrics collection interval (for consumer lag, pool stats, etc.)

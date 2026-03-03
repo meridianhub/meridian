@@ -1,4 +1,4 @@
-// Package domain provides core domain logic for the utilization-metering-consumer service.
+// Package domain provides core domain logic for the event-router service.
 package domain
 
 import (
