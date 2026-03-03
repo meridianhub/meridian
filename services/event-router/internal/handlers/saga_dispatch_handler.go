@@ -178,14 +178,15 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 	return nil
 }
 
-// extractChainDepth reads the chain depth from metadata, returning 0 if absent or unparseable.
+// extractChainDepth reads the chain depth from metadata, returning 0 if absent,
+// unparseable, or negative.
 func extractChainDepth(metadata map[string]string) int {
 	raw, ok := metadata[chainDepthHeader]
 	if !ok {
 		return 0
 	}
 	depth, err := strconv.Atoi(raw)
-	if err != nil {
+	if err != nil || depth < 0 {
 		return 0
 	}
 	return depth
