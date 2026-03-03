@@ -146,6 +146,34 @@ func TestJWTMiddleware_Handler_ValidToken(t *testing.T) {
 	assert.Equal(t, tenant.TenantID("acme_bank"), tenantFromPkg)
 }
 
+func TestJWTMiddleware_Handler_MissingTenantID(t *testing.T) {
+	claims := &platformauth.Claims{
+		UserID: "user-123",
+		// TenantID intentionally absent
+		Roles: []string{"admin"},
+	}
+	validator := &mockValidator{claims: claims}
+	logger := testLogger()
+
+	middleware, err := NewJWTMiddleware(validator, logger)
+	require.NoError(t, err)
+
+	nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("next handler should not be called")
+	})
+
+	handler := middleware.Handler(nextHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	assert.Contains(t, rr.Body.String(), "x-tenant-id claim required")
+}
+
 func TestJWTMiddleware_Handler_ExpiredToken(t *testing.T) {
 	validator := &mockValidator{err: platformauth.ErrTokenExpired}
 	logger := testLogger()
