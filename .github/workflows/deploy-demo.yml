@@ -118,7 +118,7 @@ jobs:
         run: npx vite build
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
           path: frontend/dist/
@@ -137,13 +137,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download frontend artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: frontend-dist/
 
       - name: Deploy frontend via SCP
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: root
@@ -154,7 +154,7 @@ jobs:
           overwrite: true
 
       - name: Deploy config files via SCP
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: root
