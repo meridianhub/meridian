@@ -429,6 +429,26 @@ ui:
 Dashboard reads widget list, `DataTable` reads column/sort
 defaults. Tenants change layout, refresh, done.
 
+**Component validation**: Widget component names are
+validated against a registry of allowed components per
+context (staff/customer). The registry maps string names to
+lazy-loaded component imports:
+
+```typescript
+const STAFF_DASHBOARD_WIDGETS: Record<string, () => Promise<ComponentType>> = {
+  AccountSummaryCard: () => import('@/features/accounts/...'),
+  RecentPayments: () => import('@/features/payments/...'),
+}
+```
+
+Validation occurs at two points:
+
+- **Config write time** (manifest apply or tenant entity
+  update): reject configurations referencing unknown
+  component names with a descriptive error
+- **Render time**: skip unresolvable components with a
+  warning log, render remaining widgets normally
+
 #### Layer 4: Customer Portal (same SPA, different shell)
 
 A `CustomerShell` component (vs `AppShell`) that uses the
@@ -560,10 +580,11 @@ changes naturally prompt UI parity discussion.
    SPA, different shell based on JWT lens), but it affects
    investment in Layer 4 now vs later.
 
-6. **Tenant asset storage**: Where do tenant logos,
-   favicons, and custom assets live? Options: object storage
-   (S3/GCS) with CDN, or served from the gateway with a
-   `/tenant-assets/:slug/` prefix.
+6. **Tenant asset backend storage**: The gateway serves
+   assets via `/tenant-assets/:slug/` (per security
+   requirements above). The open question is backend
+   storage: local filesystem (dev/demo), object storage
+   (S3/GCS) for production? Is a CDN layer needed?
 
 ## Success Criteria
 
