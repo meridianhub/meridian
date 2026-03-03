@@ -35,16 +35,22 @@ func TestWithGormTenantScope_SetsSearchPath(t *testing.T) {
 	tenantID := tenant.TenantID("acme_bank")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
-	// Expect the SET LOCAL query
+	// WithGormTenantScope requires an active transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
 
 	// Execute
-	result, err := WithGormTenantScope(ctx, gormDB)
+	result, err := WithGormTenantScope(ctx, tx)
 
 	// Assert
 	require.NoError(t, err)
 	assert.NotNil(t, result)
+	_ = tx.Rollback()
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -201,17 +207,23 @@ func TestWithGormTenantScope_SpecialCharacters_QuotedProperly(t *testing.T) {
 			tenantID := tenant.TenantID(tc.tenantID)
 			ctx := tenant.WithTenant(context.Background(), tenantID)
 
-			// Expect the SET LOCAL query with properly quoted schema
+			// WithGormTenantScope requires an active transaction
+			mock.ExpectBegin()
 			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
 			mock.ExpectExec(expected).
 				WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectRollback()
+
+			tx := gormDB.WithContext(ctx).Begin()
+			require.NoError(t, tx.Error)
 
 			// Execute
-			result, err := WithGormTenantScope(ctx, gormDB)
+			result, err := WithGormTenantScope(ctx, tx)
 
 			// Assert
 			require.NoError(t, err)
 			assert.NotNil(t, result)
+			_ = tx.Rollback()
 			assert.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
@@ -232,18 +244,24 @@ func TestWithGormTenantScope_DatabaseError_ReturnsError(t *testing.T) {
 	tenantID := tenant.TenantID("acme_bank")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
-	// Simulate database error on SET LOCAL query
+	// WithGormTenantScope requires an active transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnError(errDatabaseConnectionLost)
+	mock.ExpectRollback()
+
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
 
 	// Execute
-	result, err := WithGormTenantScope(ctx, gormDB)
+	result, err := WithGormTenantScope(ctx, tx)
 
 	// Assert - should return error when SET LOCAL fails
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "failed to set tenant schema scope")
 	assert.ErrorIs(t, err, errDatabaseConnectionLost)
+	_ = tx.Rollback()
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -344,19 +362,24 @@ func TestWithGormTenantScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) 
 			tenantID := tenant.TenantID(tc.tenantID)
 			ctx := tenant.WithTenant(context.Background(), tenantID)
 
-			// Expect the SET LOCAL query with properly escaped schema
-			// The schema should be safely quoted by pq.QuoteIdentifier
+			// WithGormTenantScope requires an active transaction
+			mock.ExpectBegin()
 			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
 			mock.ExpectExec(expected).
 				WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectRollback()
+
+			tx := gormDB.WithContext(ctx).Begin()
+			require.NoError(t, tx.Error)
 
 			// Execute
-			result, err := WithGormTenantScope(ctx, gormDB)
+			result, err := WithGormTenantScope(ctx, tx)
 
 			// Assert - even with malicious input, the function should work
 			// because pq.QuoteIdentifier properly escapes the schema name
 			require.NoError(t, err)
 			assert.NotNil(t, result)
+			_ = tx.Rollback()
 			assert.NoError(t, mock.ExpectationsWereMet())
 		})
 	}

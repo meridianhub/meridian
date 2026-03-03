@@ -143,7 +143,7 @@ jobs:
 
       - name: Upload validation output
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tilt-validation-output
           path: tilt-output.txt

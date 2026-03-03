@@ -1,9 +1,9 @@
 // Package main is the entry point for the Meridian unified binary.
 //
-// It wires all 11 Meridian services into a single Go process with a shared gRPC
+// It wires all Meridian services into a single Go process with a shared gRPC
 // server and gateway HTTP server. Services are initialized in tier dependency order:
 //
-//   - Tier 0 (no deps): party, reference-data, market-information, tenant, internal-account
+//   - Tier 0 (no deps): party, reference-data, market-information, tenant, internal-account, identity
 //   - Tier 1 (Tier 0 deps): financial-accounting, position-keeping, forecasting
 //   - Tier 2 (Tier 1 deps): current-account
 //   - Tier 3 (Tier 2 deps): payment-order, reconciliation
@@ -36,6 +36,7 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
+	identityv1 "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
@@ -59,6 +60,9 @@ import (
 	forecastingpersistence "github.com/meridianhub/meridian/services/forecasting/adapters/persistence"
 	forecastinghandler "github.com/meridianhub/meridian/services/forecasting/handler"
 	forecastingstarlark "github.com/meridianhub/meridian/services/forecasting/starlark"
+	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
+	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
+	identityservice "github.com/meridianhub/meridian/services/identity/service"
 	internalaccountpersistence "github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	internalaccountservice "github.com/meridianhub/meridian/services/internal-account/service"
 	marketinformationpersistence "github.com/meridianhub/meridian/services/market-information/adapters/persistence"
@@ -263,7 +267,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Register All Services ──────────────────────────────────────────
 
-	if err := registerServices(grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, tracer, logger); err != nil {
+	if err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, tracer, logger); err != nil {
 		return err
 	}
 
@@ -333,9 +337,10 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	return nil
 }
 
-// registerServices wires all 11 gRPC services into the shared server in tier dependency order,
+// registerServices wires all gRPC services into the shared server in tier dependency order,
 // then enables health checking and reflection.
 func registerServices(
+	ctx context.Context,
 	grpcServer *grpc.Server,
 	conns *serviceConns,
 	idempotencySvc idempotency.Service,
@@ -368,12 +373,20 @@ func registerServices(
 		}},
 		{"control-plane", func() error { return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), logger) }},
 		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
+		{"identity", func() error { return wireIdentity(grpcServer, conns.gormDB("identity"), logger) }},
 	} {
 		if err := wire.fn(); err != nil {
 			return fmt.Errorf("%s: %w", wire.name, err)
 		}
 	}
 	logger.Info("Tier 0 services registered")
+
+	// Run identity bootstrap: provisions the platform admin identity on first boot.
+	// This is a no-op if the admin already exists or if env vars are not set.
+	identityRepo := identitypersistence.NewRepository(conns.gormDB("identity"))
+	if err := identitybootstrap.Run(ctx, identityRepo); err != nil {
+		logger.Warn("identity bootstrap failed, service startup continues", "error", err)
+	}
 
 	// Tier 1: Depend on Tier 0 via loopback
 	for _, wire := range []struct {
@@ -795,6 +808,19 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	return nil
 }
 
+// ─── Identity Wiring ─────────────────────────────────────────────────────────
+
+func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+	repo := identitypersistence.NewRepository(db)
+	svc, err := identityservice.NewService(repo, logger)
+	if err != nil {
+		return err
+	}
+	identityv1.RegisterIdentityServiceServer(server, svc)
+	logger.Info("registered identity service")
+	return nil
+}
+
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
 func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
@@ -887,6 +913,7 @@ var serviceNames = []string{
 	"meridian.reference_data.v1.AccountTypeRegistryService",
 	"meridian.mapping.v1.MappingService",
 	"meridian.audit.v1.AuditService",
+	"meridian.identity.v1.IdentityService",
 }
 
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder
@@ -1078,7 +1105,7 @@ func newServiceConns(ctx context.Context, baseDSN string, logger *slog.Logger) (
 	gormServices := []string{
 		"party", "tenant", "internal-account",
 		"financial-accounting", "current-account",
-		"payment-order", "reconciliation",
+		"payment-order", "reconciliation", "identity",
 	}
 
 	// Services requiring pgxpool connections.

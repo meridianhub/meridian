@@ -45,6 +45,7 @@ func (r *Repository) Save(ctx context.Context, identity *domain.Identity) error 
 				}
 				return err
 			}
+			identity.UpdateBaseVersion(entity.Version)
 			return nil
 		}
 
@@ -53,12 +54,12 @@ func (r *Repository) Save(ctx context.Context, identity *domain.Identity) error 
 		}
 
 		// Existing identity — optimistic locking update.
-		// The domain increments Version on each mutation, so entity.Version is the
-		// target version and the expected DB version is entity.Version-1.
-		expectedDBVersion := entity.Version - 1
-
+		// We use identity.BaseVersion() as the WHERE guard: it records the version
+		// that was in the DB when the identity was loaded (set by ReconstructIdentity or
+		// after a prior successful save via UpdateBaseVersion).
+		// This correctly handles multiple domain mutations between load and save.
 		updateResult := tx.Model(&IdentityEntity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, expectedDBVersion).
+			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, identity.BaseVersion()).
 			Updates(map[string]interface{}{
 				"email":           entity.Email,
 				"status":          entity.Status,
@@ -81,6 +82,7 @@ func (r *Repository) Save(ctx context.Context, identity *domain.Identity) error 
 			return ErrVersionConflict
 		}
 
+		identity.UpdateBaseVersion(entity.Version)
 		return nil
 	})
 }
@@ -197,6 +199,79 @@ func (r *Repository) FindRoleAssignments(ctx context.Context, identityID uuid.UU
 	return assignments, nil
 }
 
+// SaveIdentityWithInvitation atomically persists both an identity and an
+// invitation within a single transaction.
+func (r *Repository) SaveIdentityWithInvitation(ctx context.Context, identity *domain.Identity, invitation *domain.Invitation) error {
+	identEntity := ToEntity(identity)
+	invEntity := toInvitationEntity(invitation)
+
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Save invitation first (mark token as consumed)
+		var existingInv InvitationEntity
+		invResult := tx.Where("id = ?", invEntity.ID).First(&existingInv)
+		if errors.Is(invResult.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Create(invEntity).Error; err != nil {
+				return err
+			}
+		} else if invResult.Error != nil {
+			return invResult.Error
+		} else {
+			if err := tx.Model(&InvitationEntity{}).
+				Where("id = ?", invEntity.ID).
+				Updates(map[string]interface{}{
+					"status":     invEntity.Status,
+					"updated_at": invEntity.UpdatedAt,
+				}).Error; err != nil {
+				return err
+			}
+		}
+
+		// Save identity
+		var existingIdent IdentityEntity
+		identResult := tx.Where("id = ? AND deleted_at IS NULL", identEntity.ID).First(&existingIdent)
+		if errors.Is(identResult.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Create(identEntity).Error; err != nil {
+				if isDuplicateKeyError(err) {
+					return domain.ErrEmailAlreadyExists
+				}
+				return err
+			}
+			identity.UpdateBaseVersion(identEntity.Version)
+			return nil
+		}
+		if identResult.Error != nil {
+			return identResult.Error
+		}
+
+		// Use identity.BaseVersion() as the optimistic lock guard.
+		// BaseVersion records the DB version at load time; multiple mutations may
+		// occur between load and save, so this is more correct than identEntity.Version-1.
+		updateResult := tx.Model(&IdentityEntity{}).
+			Where("id = ? AND version = ? AND deleted_at IS NULL", identEntity.ID, identity.BaseVersion()).
+			Updates(map[string]interface{}{
+				"email":           identEntity.Email,
+				"status":          identEntity.Status,
+				"password_hash":   identEntity.PasswordHash,
+				"external_idp":    identEntity.ExternalIDP,
+				"external_sub":    identEntity.ExternalSub,
+				"failed_attempts": identEntity.FailedAttempts,
+				"version":         identEntity.Version,
+				"updated_at":      identEntity.UpdatedAt,
+			})
+		if updateResult.Error != nil {
+			if isDuplicateKeyError(updateResult.Error) {
+				return domain.ErrEmailAlreadyExists
+			}
+			return updateResult.Error
+		}
+		if updateResult.RowsAffected == 0 {
+			return ErrVersionConflict
+		}
+		identity.UpdateBaseVersion(identEntity.Version)
+		return nil
+	})
+}
+
 // SaveInvitation persists a new or updated invitation.
 func (r *Repository) SaveInvitation(ctx context.Context, invitation *domain.Invitation) error {
 	entity := toInvitationEntity(invitation)
@@ -245,8 +320,48 @@ func (r *Repository) FindInvitationByTokenHash(ctx context.Context, tokenHash st
 	return invitation, nil
 }
 
+// SaveIdentityWithRoles atomically persists an identity and its role assignments
+// within a single transaction.
+func (r *Repository) SaveIdentityWithRoles(ctx context.Context, identity *domain.Identity, roles []*domain.RoleAssignment) error {
+	identEntity := ToEntity(identity)
+
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Insert identity (bootstrap always creates a new one).
+		if err := tx.Create(identEntity).Error; err != nil {
+			if isDuplicateKeyError(err) {
+				return domain.ErrEmailAlreadyExists
+			}
+			return err
+		}
+		identity.UpdateBaseVersion(identEntity.Version)
+
+		// Insert all role assignments.
+		for _, ra := range roles {
+			entity := toRoleAssignmentEntity(ra)
+			if err := tx.Create(entity).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// SaveRoleAssignments atomically persists multiple role assignments within a
+// single transaction.
+func (r *Repository) SaveRoleAssignments(ctx context.Context, assignments []*domain.RoleAssignment) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		for _, ra := range assignments {
+			entity := toRoleAssignmentEntity(ra)
+			if err := tx.Create(entity).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // ErrVersionConflict is returned when an optimistic locking conflict is detected.
-var ErrVersionConflict = errors.New("version conflict: identity was modified by another transaction")
+var ErrVersionConflict = domain.ErrVersionConflict
 
 // isDuplicateKeyError returns true when err represents a unique constraint violation.
 func isDuplicateKeyError(err error) bool {

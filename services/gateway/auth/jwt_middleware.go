@@ -63,27 +63,20 @@ type JWTValidator interface {
 }
 
 // JWTMiddlewareConfig holds optional configuration for the JWT middleware.
-type JWTMiddlewareConfig struct {
-	// DefaultTenantID is injected into context when the token lacks an x-tenant-id claim.
-	DefaultTenantID string
-	// DefaultRoles are injected into context when the token lacks a roles claim.
-	DefaultRoles []string
-}
+// Kept for API compatibility; all fields have been removed.
+type JWTMiddlewareConfig struct{}
 
 // JWTMiddleware provides HTTP middleware for JWT authentication.
 // It extracts the Authorization header, validates the Bearer token,
 // and injects verified claims into the request context.
 type JWTMiddleware struct {
-	validator       JWTValidator
-	logger          *slog.Logger
-	defaultTenantID string
-	defaultRoles    []string
+	validator JWTValidator
+	logger    *slog.Logger
 }
 
 // NewJWTMiddleware creates a new JWT authentication middleware.
 // Both validator and logger are required parameters.
-// An optional config can be provided for OIDC claim defaults.
-func NewJWTMiddleware(validator JWTValidator, logger *slog.Logger, configs ...JWTMiddlewareConfig) (*JWTMiddleware, error) {
+func NewJWTMiddleware(validator JWTValidator, logger *slog.Logger, _ ...JWTMiddlewareConfig) (*JWTMiddleware, error) {
 	if validator == nil {
 		return nil, ErrNilValidator
 	}
@@ -91,17 +84,10 @@ func NewJWTMiddleware(validator JWTValidator, logger *slog.Logger, configs ...JW
 		return nil, ErrNilLogger
 	}
 
-	m := &JWTMiddleware{
+	return &JWTMiddleware{
 		validator: validator,
 		logger:    logger,
-	}
-
-	if len(configs) > 0 {
-		m.defaultTenantID = configs[0].DefaultTenantID
-		m.defaultRoles = configs[0].DefaultRoles
-	}
-
-	return m, nil
+	}, nil
 }
 
 // Handler returns an http.Handler that performs JWT authentication.
@@ -135,20 +121,19 @@ func (m *JWTMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Step 3: Apply OIDC defaults for standard tokens missing custom claims.
+		// Step 3: Guard against nil claims (defensive — shouldn't happen with a valid validator).
+		if claims == nil {
+			m.logger.Warn("JWT validation returned nil claims",
+				slog.String("path", r.URL.Path),
+			)
+			writeUnauthorized(w, "invalid token")
+			return
+		}
+
 		// Create a shallow copy so the original token claims are not mutated,
-		// but downstream middleware (e.g., TenantAuthorizationMiddleware) sees
-		// the effective values when reading claims from context.
+		// but downstream middleware sees the effective values when reading from context.
 		effectiveClaims := *claims
 		effectiveClaims.UserID = claims.EffectiveUserID()
-
-		if effectiveClaims.TenantID == "" && m.defaultTenantID != "" {
-			effectiveClaims.TenantID = m.defaultTenantID
-		}
-		if len(effectiveClaims.Roles) == 0 && len(m.defaultRoles) > 0 {
-			effectiveClaims.Roles = make([]string, len(m.defaultRoles))
-			copy(effectiveClaims.Roles, m.defaultRoles)
-		}
 
 		// Step 4: Inject effective claims into context
 		ctx := injectClaimsToContext(r.Context(), &effectiveClaims)

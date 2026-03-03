@@ -32,6 +32,22 @@ type Repository interface {
 	// FindRoleAssignments returns all role assignments for the given identity.
 	FindRoleAssignments(ctx context.Context, identityID uuid.UUID) ([]*RoleAssignment, error)
 
+	// Compound operations
+
+	// SaveIdentityWithInvitation atomically persists both an identity and an
+	// invitation within a single transaction. This prevents partial commits
+	// where one entity is saved but the other fails.
+	SaveIdentityWithInvitation(ctx context.Context, identity *Identity, invitation *Invitation) error
+
+	// SaveIdentityWithRoles atomically persists an identity and its role assignments
+	// within a single transaction. This prevents partial commits where the identity
+	// is saved but some role assignments fail.
+	SaveIdentityWithRoles(ctx context.Context, identity *Identity, roles []*RoleAssignment) error
+
+	// SaveRoleAssignments atomically persists multiple role assignments within a
+	// single transaction.
+	SaveRoleAssignments(ctx context.Context, assignments []*RoleAssignment) error
+
 	// Invitation operations
 
 	// SaveInvitation persists a new or updated invitation.
