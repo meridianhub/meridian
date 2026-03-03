@@ -27,7 +27,9 @@ var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-
 // Identity represents a platform identity (user account) within a tenant.
 //
 // The Version field implements optimistic concurrency control to prevent lost updates.
-// The persistence layer should use this field in UPDATE statements to detect conflicts.
+// The persistence layer should use BaseVersion() as the WHERE condition on update,
+// and Version() as the value to write. This allows multiple domain mutations to
+// occur between a load and a save while still detecting concurrent modifications.
 type Identity struct {
 	id             uuid.UUID
 	email          string
@@ -39,6 +41,8 @@ type Identity struct {
 	createdAt      time.Time
 	updatedAt      time.Time
 	version        int64
+	// baseVersion is the version as read from the DB. Zero for new (unsaved) identities.
+	baseVersion int64
 }
 
 // NewIdentity creates a new identity in PENDING_INVITE status.
@@ -60,6 +64,7 @@ func NewIdentity(email string) (*Identity, error) {
 
 // ReconstructIdentity recreates an Identity from persistence layer data.
 // This should only be used by repositories when loading from the database.
+// baseVersion is set to version so the repository can detect concurrent modifications.
 func ReconstructIdentity(
 	id uuid.UUID,
 	email string,
@@ -83,6 +88,7 @@ func ReconstructIdentity(
 		createdAt:      createdAt,
 		updatedAt:      updatedAt,
 		version:        version,
+		baseVersion:    version,
 	}
 }
 
@@ -134,6 +140,21 @@ func (i *Identity) UpdatedAt() time.Time {
 // Version returns the optimistic locking version.
 func (i *Identity) Version() int64 {
 	return i.version
+}
+
+// BaseVersion returns the version as it was when last loaded from or saved to the database.
+// Zero for identities that have never been persisted.
+// Repositories should use this as the WHERE condition on updates to correctly
+// detect concurrent modifications even when multiple mutations occur before save.
+func (i *Identity) BaseVersion() int64 {
+	return i.baseVersion
+}
+
+// UpdateBaseVersion records the version after a successful save.
+// Repositories must call this after every successful INSERT or UPDATE so that
+// subsequent mutations correctly track the new base for optimistic locking.
+func (i *Identity) UpdateBaseVersion(v int64) {
+	i.baseVersion = v
 }
 
 // IsLocked returns true when the account is in LOCKED status.

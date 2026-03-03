@@ -110,15 +110,6 @@ type AuthConfig struct {
 	// RateLimitBurst is the maximum burst size for rate limiting.
 	// Defaults to 200 if not set.
 	RateLimitBurst int
-
-	// DefaultTenantID is injected into JWT context when the token lacks an x-tenant-id claim.
-	// This enables standard OIDC providers (like Dex) that don't issue custom tenant claims
-	// to work with Meridian's tenant authorization middleware.
-	DefaultTenantID string
-
-	// DefaultRoles are injected into JWT context when the token lacks a roles claim.
-	// This enables standard OIDC providers to work with Meridian's role-based access control.
-	DefaultRoles []string
 }
 
 // VersionInfo holds build metadata injected at compile time via ldflags.
@@ -214,8 +205,6 @@ func LoadConfig() (*Config, error) {
 //   - API_KEYS: Comma-separated list of "key:identity" pairs
 //   - API_KEY_RATE_LIMIT_PER_SECOND: Requests per second per key (default: 100)
 //   - API_KEY_RATE_LIMIT_BURST: Burst size for rate limiting (default: 200)
-//   - DEFAULT_TENANT_ID: Fallback tenant ID for standard OIDC tokens (optional)
-//   - DEFAULT_ROLES: Comma-separated fallback roles for standard OIDC tokens (optional)
 func LoadAuthConfig() AuthConfig {
 	config := AuthConfig{
 		Enabled:            env.GetEnvAsBool("AUTH_ENABLED", false),
@@ -264,10 +253,6 @@ func LoadAuthConfig() AuthConfig {
 			config.RateLimitBurst = v
 		}
 	}
-
-	// Parse OIDC fallback defaults
-	config.DefaultTenantID = strings.TrimSpace(os.Getenv("DEFAULT_TENANT_ID"))
-	config.DefaultRoles = env.GetEnvAsSlice("DEFAULT_ROLES", nil)
 
 	return config
 }
