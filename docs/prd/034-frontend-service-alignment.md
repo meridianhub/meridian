@@ -158,6 +158,7 @@ src/
 | control-plane | `/manifests` | `manifestHistory` |
 | saga | `/starlark-config` | `sagaRegistry` |
 | mapping | `/gateway-mappings` | `mapping` |
+| mcp-server | `/mcp-config` | (static config) |
 | (cross-service) | `/dashboard` | multiple |
 | (audit-worker) | `/audit-log` | REST/events |
 
@@ -210,6 +211,7 @@ src/
 │   ├── manifests/
 │   ├── mappings/
 │   ├── audit/
+│   ├── mcp-config/             # MCP server configuration
 │   └── dashboard/              # Cross-service aggregation
 │
 ├── shared/                     # Cross-cutting components
@@ -281,7 +283,6 @@ export function AccountsPage() {
 
 | Component | From | To |
 |-----------|------|-----|
-| `audit-trail` | `shared/` | `features/audit/` |
 | `cel-editor` | `shared/` | `features/sagas/` |
 | `starlark-editor` | `shared/` | `features/sagas/` |
 | `saga-timeline` | `shared/` | `features/sagas/` |
@@ -290,7 +291,12 @@ export function AccountsPage() {
 
 **Keep in `shared/`** (used across 2+ features): DataTable,
 MoneyDisplay, DirectionBadge, StatusBadge, EntityLink,
-DetailSkeleton, Breadcrumbs, TimeDisplay, HandlerReference.
+DetailSkeleton, Breadcrumbs, TimeDisplay, HandlerReference,
+AuditTrail. Note: `audit-trail` is rendered on entity detail
+pages across many services (accounts, payments, etc.), making
+it a cross-cutting concern. The `features/audit/` module owns
+the dedicated `/audit-log` page but the reusable component
+stays in shared.
 
 ### Storybook
 
@@ -350,6 +356,20 @@ extracts `ui.theme`, applies CSS variable overrides to
 `document.documentElement`. Entire app re-themes without
 reload.
 
+**Asset security**: Tenant-supplied URLs (`logo_url`,
+`favicon_url`) must not be loaded directly from arbitrary
+origins. Requirements:
+
+- Assets served through the gateway proxy
+  (`/tenant-assets/:slug/`) or from an allowlisted CDN
+  origin
+- Server-side validation: content-type allowlist (SVG, PNG,
+  ICO, WEBP), file size limit (e.g., 512 KB)
+- CSP `img-src` directive restricted to `'self'` and the
+  configured asset origin
+- Tenant config validation rejects non-allowlisted URLs at
+  write time
+
 #### Layer 2: Feature Visibility (route + sidebar, loaded at login)
 
 Tenant configuration controls which feature modules are
@@ -373,6 +393,15 @@ ui:
 **Runtime flow**: `useTenantFeatures()` hook reads config,
 `Sidebar` filters nav items, `App.tsx` route guards redirect
 disabled features to 404. No rebuild needed.
+
+**Security note**: Feature visibility is a **UX concern**,
+not a security boundary. The compiled SPA ships all feature
+code to every tenant. All authorization is enforced at the
+gateway/service layer via RBAC (see
+`shared/platform/auth/rbac.go`). Route guards prevent
+accidental navigation to irrelevant features, not
+unauthorized access. Backend services must deny access and
+return appropriate errors regardless of UI visibility.
 
 #### Layer 3: Layout Composition (dashboard + table config)
 
@@ -410,10 +439,18 @@ same feature components but with:
 - Different auth scopes (customer JWT vs staff JWT)
 - Tenant theme applied by default
 
-**Runtime flow**: Auth context inspects JWT claims,
-determines `lens: 'staff' | 'customer'`, renders `AppShell`
-or `CustomerShell`. Same feature components, different
-wrapping. No separate deployment.
+**Runtime flow**: Auth context determines the lens from the
+token, renders `AppShell` or `CustomerShell`. Same feature
+components, different wrapping. No separate deployment.
+
+**Dependency on PRD-031 (IAM)**: The staff/customer lens
+determination depends on the identity architecture defined
+in PRD-031. Staff tokens come from the Identity service
+(Employee Access via Dex OIDC), while customer tokens may
+come from a separate Party Authentication flow. The lens
+may be derived from the token issuer or audience rather
+than a claim within a single JWT type. This is an open
+dependency to resolve before implementing Layer 4.
 
 The feature module structure makes this possible because
 components are decoupled from the shell.
