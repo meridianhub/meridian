@@ -134,23 +134,23 @@ func buildOAuthConfig(baseURL string) (mcpauth.OAuthConfig, bool) {
 // using Dex public keys — suitable for production. When MCP_JWKS_URL is absent
 // (development / CI), it falls back to the passthroughValidator.
 //
-// Returns the validator and an optional cleanup function that must be called on shutdown.
-func buildBearerValidator(ctx context.Context, logger *slog.Logger) (mcpauth.BearerValidator, func()) {
+// Returns the validator, an optional cleanup function, and an error. When MCP_JWKS_URL
+// is explicitly configured but initialisation fails, an error is returned to prevent
+// a fail-open auth path.
+func buildBearerValidator(ctx context.Context, logger *slog.Logger) (mcpauth.BearerValidator, func(), error) {
 	jwksURL := env.GetEnvOrDefault(mcpauth.EnvJWKSURL, "")
 	if jwksURL == "" {
 		logger.Warn("MCP_JWKS_URL not set — bearer token validation is disabled (passthrough mode)")
-		return &passthroughValidator{logger: logger}, nil
+		return &passthroughValidator{logger: logger}, nil, nil
 	}
 
 	v, err := mcpauth.NewJWKSBearerValidator(ctx, jwksURL)
 	if err != nil {
-		logger.Warn("failed to create JWKS bearer validator — falling back to passthrough",
-			"jwks_url", jwksURL, "error", err)
-		return &passthroughValidator{logger: logger}, nil
+		return nil, nil, fmt.Errorf("JWKS bearer validator initialisation failed (fail-closed): %w", err)
 	}
 
 	logger.Info("JWKS bearer validation enabled", "jwks_url", jwksURL)
-	return v, func() { _ = v.Close() }
+	return v, func() { _ = v.Close() }, nil
 }
 
 // passthroughValidator accepts every token without verification.
@@ -229,7 +229,10 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 		// Use a background context for JWKS initialisation: srvCtx doesn't exist
 		// yet at this point (it is created below). The JWKS provider uses its own
 		// Close() to stop the background refresh goroutine on shutdown.
-		validator, validatorCleanup := buildBearerValidator(context.Background(), logger)
+		validator, validatorCleanup, err := buildBearerValidator(context.Background(), logger)
+		if err != nil {
+			return fmt.Errorf("bearer validator: %w", err)
+		}
 		if validatorCleanup != nil {
 			defer validatorCleanup()
 		}

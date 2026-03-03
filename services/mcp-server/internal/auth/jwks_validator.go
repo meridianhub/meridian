@@ -17,10 +17,6 @@ const (
 	// EnvJWKSURL is the environment variable for the JWKS endpoint URL.
 	// When set, JWKS-based bearer token validation is used instead of the passthrough.
 	EnvJWKSURL = "MCP_JWKS_URL"
-	// EnvExpectedIssuer is the environment variable for the expected JWT issuer.
-	EnvExpectedIssuer = "MCP_EXPECTED_ISSUER"
-	// EnvExpectedAudience is the environment variable for the expected JWT audience.
-	EnvExpectedAudience = "MCP_EXPECTED_AUDIENCE"
 
 	jwksCacheTTL    = 24 * time.Hour
 	jwksRefreshTTL  = 1 * time.Hour
