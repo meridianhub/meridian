@@ -857,7 +857,7 @@
                 },
                 "filter": {
                     "type": "string",
-                    "description": "filter is a CEL expression evaluated against the event payload to determine whether this saga should execute. Required when trigger starts with \"event:\". The expression must return a boolean; the saga executes only when it returns true. Example: `event.amount \u003e 0 \u0026\u0026 event.currency == \"GBP\"`"
+                    "description": "filter is a CEL expression evaluated against the event payload to determine whether this saga should execute. Recommended when trigger starts with \"event:\"; omitting it causes a validation warning because the saga will execute for every matching event. The expression must return a boolean; the saga executes only when it returns true. Must be non-empty when present. Example: `event.amount \u003e 0 \u0026\u0026 event.currency == \"GBP\"`"
                 }
             },
             "additionalProperties": false,

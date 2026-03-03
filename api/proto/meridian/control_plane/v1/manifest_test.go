@@ -672,6 +672,16 @@ func TestSagaDefinitionValidation(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "invalid: filter set to empty string",
+			saga: &controlplanev1.SagaDefinition{
+				Name:    "test_saga",
+				Trigger: "event:some.event.v1",
+				Script:  "def execute(ctx):\n    return {}\n",
+				Filter:  proto.String(""),
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
