@@ -65,7 +65,7 @@ The `event:` trigger is a direct consumer of those contracts.
 | Standard headers (`tenant_id`) | Tenant scoping for multi-tenant event routing |
 | Typed event publishers (outbox pattern) | Reliable at-least-once event delivery |
 | Payload schemas (proto-derived) | `input_data` dict passed to Starlark saga scripts (2.10) |
-| Channel → proto type registry | Upfront validation of saga `input_data` accesses at manifest apply (2.11) |
+| Channel → proto type registry | Bidirectional validation: saga accesses vs spec fields, spec changes vs active sagas (2.11) |
 
 PRD-030's outbox alignment work (WS1-2) is a prerequisite for PRD-032. Event-triggered
 sagas depend on reliable event delivery — fire-and-forget writes risk losing the event
@@ -455,23 +455,32 @@ This is a deliberate design choice:
 to preserve proto field names (snake_case) in the `input_data` dictionary, matching
 Starlark/Python naming conventions.
 
-### 2.11 Upfront Schema Validation at Manifest Apply
+### 2.11 Bidirectional Schema Validation
 
-When a saga declares an `event:<channel>` trigger, the platform has enough information
-at manifest apply time to validate compatibility between the saga script and the event
-schema — without waiting for a live event.
+Saga definitions and AsyncAPI specs are both versioned artifacts stored in
+**reference-data**. Co-locating them enables bidirectional validation — changes to
+either side are checked against the other before they take effect.
 
-**What the platform knows at apply time:**
+**Why reference-data:** The service already stores saga definitions (manifests), account
+types, instruments, and other versioned configuration. AsyncAPI channel schemas are the
+same kind of artifact — they describe the structure of events that sagas consume. Storing
+both together means the validation logic has local access to both sides of the contract
+without cross-service calls.
+
+#### Direction 1: Saga → Spec (forward, at manifest apply)
+
+When a saga declares an `event:<channel>` trigger, the platform validates that the
+Starlark script only accesses fields that exist in the channel's payload schema.
+
+What the platform knows at apply time:
 
 1. **The channel** the saga subscribes to (from the `trigger` declaration)
-2. **The payload schema** for that channel (from the AsyncAPI spec, derived from proto)
+2. **The payload schema** for that channel (from the AsyncAPI spec stored in reference-data)
 3. **The fields** the saga accesses via `input_data` (from static analysis of the Starlark script)
 
-**Validation rule:** Every `input_data["field_name"]` access in the Starlark script must
+Validation rule: every `input_data["field_name"]` access in the Starlark script must
 reference a field that exists in the channel's AsyncAPI payload schema or in the standard
 header set (`correlation_id`, `causation_id`, `tenant_id`).
-
-**Validation flow:**
 
 ```text
 Manifest apply: saga "usage-to-value"
@@ -486,7 +495,7 @@ Manifest apply: saga "usage-to-value"
   → Apply succeeds
 ```
 
-**Rejection example:**
+Rejection example:
 
 ```text
 Manifest apply: saga "bad-saga"
@@ -496,6 +505,51 @@ Manifest apply: saga "bad-saga"
   → Apply REJECTED: "saga 'bad-saga' accesses input_data['billing_account_id']
     but channel 'position-keeping.transaction-captured.v1' schema has no field
     'billing_account_id'. Available fields: log_id, account_id, ..."
+```
+
+#### Direction 2: Spec → Saga (backward, at schema evolution)
+
+When an AsyncAPI spec is updated (e.g., a proto field is removed or renamed), the
+platform validates that no active saga would break. This is the reverse check — the
+spec change is the input, existing sagas are the constraint.
+
+```text
+Schema update: remove "amount_cents" from TransactionCapturedEvent
+  → Find all active sagas with trigger "event:position-keeping.transaction-captured.v1"
+  → Check each saga's input_data accesses against the proposed new field set
+  → Saga "usage-to-value" accesses {correlation_id, account_id, instrument_amount, ...}
+    → "amount_cents" not accessed → compatible ✓
+  → Saga "legacy-billing" accesses {correlation_id, amount_cents, ...}
+    → "amount_cents" IS accessed → BREAKING ✗
+  → Update REJECTED: "removing 'amount_cents' from channel
+    'position-keeping.transaction-captured.v1' would break 1 active saga(s):
+    'legacy-billing' (accesses input_data['amount_cents'])"
+```
+
+This is analogous to a database migration that refuses to drop a column while a view
+still references it. The AsyncAPI spec is the schema, the sagas are the views.
+
+**The bidirectional constraint:**
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│                    reference-data                        │
+│                                                         │
+│  AsyncAPI Specs              Saga Definitions            │
+│  (channel schemas)           (Starlark scripts)          │
+│                                                         │
+│  ┌──────────────┐    ←──→    ┌──────────────┐           │
+│  │ channel:     │  validate  │ trigger:     │           │
+│  │   fields     │  both ways │   input_data │           │
+│  │   types      │            │   accesses   │           │
+│  └──────────────┘            └──────────────┘           │
+│                                                         │
+│  Version N                   Version M                   │
+│  (spec evolution)            (saga evolution)             │
+│                                                         │
+│  Neither side can break the other without explicit       │
+│  acknowledgement (force flag or migration plan)          │
+└─────────────────────────────────────────────────────────┘
 ```
 
 **Scope of static analysis:**
@@ -512,10 +566,18 @@ This is a best-effort lint, not a full type checker. It catches the common case 
 in field names and assumptions about fields that don't exist in the event. Dynamic key
 construction (rare in practice) bypasses the check.
 
-**Relationship to CEL filter validation:** The same apply-time validation already compiles
-CEL filter expressions (section 2.2). Upfront schema validation extends this to the
-Starlark script's `input_data` accesses. Both share the principle: catch errors at deploy
-time, not at runtime.
+**Relationship to CEL filter validation:** The same bidirectional validation applies to
+CEL filter expressions (section 2.2). If a CEL filter references `event.amount_cents`
+and a spec change removes that field, the backward check catches it. Both Starlark
+`input_data` accesses and CEL filter field references are validated against the same
+channel schema.
+
+**Breaking change workflow:** When a spec change would break active sagas, the platform
+can offer:
+
+- **Reject** — refuse the spec update until sagas are migrated
+- **Warn** — accept with explicit acknowledgement (force flag), log affected sagas
+- **Migration plan** — list which sagas need updating, what fields they access
 
 ## 3. What Already Exists
 
@@ -592,6 +654,9 @@ The service to be generalized into the event-router (see 2.5):
 - Manifest validation: event-triggered sagas reference channels defined in AsyncAPI specs
   (PRD-030), filter expressions compile in the `event_filter` CEL environment, and Starlark
   `input_data` field accesses are validated against the channel's payload schema (2.11)
+- AsyncAPI channel schemas stored in reference-data alongside saga definitions, enabling
+  bidirectional validation (2.11) — saga changes checked against specs, spec changes
+  checked against active sagas
 
 ### 4.2 Prerequisites
 
@@ -942,8 +1007,11 @@ and the saga runtime.
 - Platform metering continues to function unchanged (compiled Go, tenant-zero schema)
 - Sagas can navigate the full entity graph (accounts, parties, hierarchies) via existing
   service modules
-- Upfront validation at manifest apply: Starlark `input_data` field accesses validated
-  against the AsyncAPI channel schema — deploy-time errors for missing fields
+- Bidirectional schema validation: Starlark `input_data` field accesses validated against
+  AsyncAPI channel schemas at saga apply, and schema changes validated against active sagas
+  at spec update — deploy-time errors in both directions
+- AsyncAPI channel schemas and saga definitions co-located in reference-data with version
+  tracking — neither side can break the other without explicit acknowledgement
 - Event payloads deserialized via AsyncAPI channel → proto type registry using
   `protojson.MarshalOptions{UseProtoNames: true}` for snake_case field naming
 
