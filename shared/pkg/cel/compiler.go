@@ -58,6 +58,9 @@ var (
 
 	// ErrValidationNotBool is returned when a validation expression does not return a boolean.
 	ErrValidationNotBool = errors.New("validation expression must return boolean")
+
+	// ErrEventFilterNotBool is returned when an event filter expression does not return a boolean.
+	ErrEventFilterNotBool = errors.New("event filter expression must return boolean")
 )
 
 // Compiler provides CEL expression compilation with security constraints.
@@ -65,6 +68,7 @@ type Compiler struct {
 	validationEnv  *cel.Env
 	bucketKeyEnv   *cel.Env
 	eligibilityEnv *cel.Env
+	eventFilterEnv *cel.Env
 }
 
 // NewCompiler creates a new CEL Compiler with configured environments.
@@ -84,10 +88,16 @@ func NewCompiler() (*Compiler, error) {
 		return nil, errors.Join(ErrEnvironmentCreation, fmt.Errorf("eligibility env: %w", err))
 	}
 
+	eventFilterEnv, err := createEventFilterEnv()
+	if err != nil {
+		return nil, errors.Join(ErrEnvironmentCreation, fmt.Errorf("event filter env: %w", err))
+	}
+
 	return &Compiler{
 		validationEnv:  validationEnv,
 		bucketKeyEnv:   bucketKeyEnv,
 		eligibilityEnv: eligibilityEnv,
+		eventFilterEnv: eventFilterEnv,
 	}, nil
 }
 
@@ -132,6 +142,19 @@ func createEligibilityEnv() (*cel.Env, error) {
 	return cel.NewEnv(
 		cel.Variable("party", cel.MapType(cel.StringType, cel.StringType)),
 		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+	)
+}
+
+// createEventFilterEnv creates the CEL environment for event filter expressions.
+// Variables available:
+//   - event: dyn - the full event payload as a dynamic map (any event proto or JSON object)
+//   - metadata: map[string]string - Kafka message headers and other event metadata
+//
+// The expression must return a boolean indicating whether the saga should trigger.
+func createEventFilterEnv() (*cel.Env, error) {
+	return cel.NewEnv(
+		cel.Variable("event", cel.DynType),
+		cel.Variable("metadata", cel.MapType(cel.StringType, cel.StringType)),
 	)
 }
 
@@ -225,6 +248,31 @@ func (c *Compiler) CompileEligibility(expression string) (cel.Program, error) {
 	}
 
 	prg, err := c.eligibilityEnv.Program(ast, cel.CostLimit(CostLimit))
+	if err != nil {
+		return nil, errors.Join(ErrCompilation, err)
+	}
+
+	return prg, nil
+}
+
+// CompileEventFilter compiles a boolean event filter expression against the event filter environment.
+// Returns a cel.Program that can be evaluated with event and metadata input values.
+// The expression must return a boolean indicating whether the saga should be triggered.
+func (c *Compiler) CompileEventFilter(expression string) (cel.Program, error) {
+	if err := validateExpressionConstraints(expression); err != nil {
+		return nil, err
+	}
+
+	ast, issues := c.eventFilterEnv.Compile(expression)
+	if issues != nil && issues.Err() != nil {
+		return nil, errors.Join(ErrCompilation, issues.Err())
+	}
+
+	if ast.OutputType() != cel.BoolType {
+		return nil, errors.Join(ErrCompilation, ErrEventFilterNotBool)
+	}
+
+	prg, err := c.eventFilterEnv.Program(ast, cel.CostLimit(CostLimit))
 	if err != nil {
 		return nil, errors.Join(ErrCompilation, err)
 	}
