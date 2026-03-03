@@ -1,7 +1,7 @@
 # Saga: race_result_distribution
-# Version: 1.0.0
-# Previous: none
-# Changed: Initial version
+# Version: 2.0.0
+# Previous: 1.0.0
+# Changed: Thin event pattern — use actual ObservationRecorded proto fields
 # Author: Tenant Configuration (Betting/Syndicate)
 # Date: 2026-03-03
 #
@@ -11,15 +11,27 @@
 # structuring data (allocation shares) -> position booking per participant.
 #
 # Trigger: event:market-information.observation-recorded.v1
-# Filter:  event.dataset_code == 'HORSE_RACING' && event.status == 'OFFICIAL'
+# Filter:  event.dataset_code == 'HORSE_RACING' && event.quality == 'ACTUAL'
 #
 # The event originates from market data, not position-keeping. The saga navigates
 # the party hierarchy to determine who gets paid and how much.
 #
-# Input data (from event payload via input_data dictionary):
-#   - correlation_id: string - Idempotency key from source event
-#   - reference: string - Race identifier
-#   - attributes: dict - Race results including total_pot
+# Input data (from ObservationRecorded via AsyncAPI-driven deserialization):
+#   - correlation_id: string - Idempotency key from standard headers
+#   - observation_id: string (UUID) - Observation identifier
+#   - dataset_code: string - "HORSE_RACING"
+#   - resolution_key_value: string - Race identifier (e.g., "CHELTENHAM-GOLD-CUP-2026")
+#   - observed_at: string - ISO 8601 timestamp of race completion
+#   - quality: string - Quality level ("ACTUAL" for official results)
+#   - value: string - Observation value (total pot amount as decimal string)
+#   - source_id: string (UUID) - Data source identifier
+#   - recorded_at: string - ISO 8601 timestamp of recording
+#
+# Entity graph resolution (via service module calls):
+#   - syndicate party: from reference_data.query(entity_type="party", ...)
+#   - participants: from party.list_participants(org_id, relationship_type)
+#   - allocation shares: from party.get_structuring_data(...)
+#   - payout accounts: from participant metadata
 
 # Define the saga
 race_distribution_saga = saga(name="race_result_distribution")
@@ -28,8 +40,8 @@ def execute_race_distribution():
     ctx = input_data
 
     correlation_id = ctx["correlation_id"]
-    race_id = ctx["reference"]
-    results = ctx["attributes"]
+    race_id = ctx["resolution_key_value"]
+    pot = Decimal(ctx["value"])
 
     # Idempotency check: has this race already been distributed?
     step(name="check_idempotency")
@@ -41,7 +53,9 @@ def execute_race_distribution():
     if existing.count > 0:
         return {"status": "ALREADY_DISTRIBUTED", "correlation_id": correlation_id}
 
-    # Find the syndicate organization that placed bets on this race
+    # Find the syndicate organization that placed bets on this race.
+    # The race identifier from the observation's resolution_key_value
+    # is used to locate the syndicate via reference data query.
     step(name="find_syndicate")
     syndicate = reference_data.query(
         entity_type="party",
@@ -60,8 +74,7 @@ def execute_race_distribution():
         relationship_type="SYNDICATE_PARTICIPANT",
     )
 
-    # Calculate pot and distribute by allocation share
-    pot = Decimal(results["total_pot"])
+    # Distribute pot by allocation share
     distributed_count = 0
 
     for p in participants:

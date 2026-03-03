@@ -1,7 +1,7 @@
 # Saga: dynamic_capacity_billing
-# Version: 1.0.0
-# Previous: none
-# Changed: Initial version
+# Version: 2.0.0
+# Previous: 1.0.0
+# Changed: Thin event pattern — resolve billing account and region from entity graph
 # Author: Tenant Configuration (Cloud Compute)
 # Date: 2026-03-03
 #
@@ -30,12 +30,15 @@
 # This demonstrates the market data query pattern for time-and-region-specific
 # dynamic pricing.
 #
-# Input data (from event payload via input_data dictionary):
-#   - correlation_id: string - Idempotency key from source event
-#   - amount: string - Decimal amount (tokens consumed)
-#   - region_code: string - Data centre region (e.g., "US_EAST_1", "EU_WEST_1")
-#   - billing_account_id: string - Customer billing account for USD charge
-#   - value_date: string - ISO 8601 timestamp of consumption
+# Input data (from TransactionCapturedEvent via AsyncAPI-driven deserialization):
+#   - correlation_id: string - Idempotency key from standard headers
+#   - account_id: string - The usage account that triggered the event
+#   - instrument_amount: dict - Multi-asset amount {amount, instrument_code}
+#   - timestamp: string - ISO 8601 timestamp of consumption
+#
+# Entity graph resolution (via service module calls):
+#   - billing_account_id: from account.metadata
+#   - region_code: from account.metadata (each usage account is per-region)
 
 # Define the saga
 dynamic_billing_saga = saga(name="dynamic_capacity_billing")
@@ -44,8 +47,18 @@ def execute_dynamic_billing():
     ctx = input_data
 
     correlation_id = ctx["correlation_id"]
-    billing_account_id = ctx["billing_account_id"]
-    region_code = ctx["region_code"]
+    source_account_id = ctx["account_id"]
+    tokens = Decimal(ctx["instrument_amount"]["amount"])
+    consumption_time = ctx["timestamp"]
+
+    # Resolve account details from entity graph.
+    # Each usage account is scoped to a specific data centre region.
+    # The region_code in account metadata determines which price curve to query.
+    step(name="lookup_account")
+    account = reference_data.get_account(id=source_account_id)
+
+    billing_account_id = account.metadata["billing_account_id"]
+    region_code = account.metadata["region_code"]
 
     # Idempotency check
     step(name="check_idempotency")
@@ -66,11 +79,10 @@ def execute_dynamic_billing():
     step(name="lookup_regional_price")
     price_observation = market_data.get_observation(
         dataset_code=dataset_code,
-        effective_at=ctx["value_date"],
+        effective_at=consumption_time,
     )
 
     # Compute charge: tokens x dynamic regional rate
-    tokens = Decimal(ctx["amount"])
     rate = Decimal(price_observation.value)
     charge_amount = tokens * rate
 

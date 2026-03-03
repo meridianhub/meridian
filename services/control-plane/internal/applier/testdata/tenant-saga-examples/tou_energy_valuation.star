@@ -1,7 +1,8 @@
 # Saga: tou_energy_valuation
-# Version: 1.0.0
-# Previous: none
-# Changed: Initial version
+# Version: 2.0.0
+# Previous: 1.0.0
+# Changed: Thin event pattern — resolve billing account from entity graph,
+#          use event timestamp as settlement period for temporal rate lookup
 # Author: Tenant Configuration (Energy)
 # Date: 2026-03-03
 #
@@ -25,12 +26,17 @@
 # Different settlement periods map to different rates (peak, off-peak,
 # overnight) based on the forecast curve published by the Forecasting Service.
 #
-# Input data (from event payload via input_data dictionary):
-#   - correlation_id: string - Idempotency key from source event
-#   - account_type_code: string - Account type code for valuation method lookup
-#   - amount: string - Decimal amount (kWh consumed in this settlement period)
-#   - settlement_period_start: string - ISO 8601 start of the half-hour period
-#   - billing_account_id: string - Customer billing account for GBP charge
+# Input data (from TransactionCapturedEvent via AsyncAPI-driven deserialization):
+#   - correlation_id: string - Idempotency key from standard headers
+#   - account_id: string - The metered account that triggered the event
+#   - instrument_amount: dict - Multi-asset amount {amount, instrument_code}
+#   - timestamp: string - ISO 8601 event timestamp (used as settlement period)
+#   - reference: string - External reference (e.g., MPAN identifier)
+#
+# Entity graph resolution (via service module calls):
+#   - billing_account_id: from account.metadata
+#   - account_type_code: from reference_data.get_account(id=account_id)
+#   - conversion method: from reference_data.get_account_type(code=...)
 
 # Define the saga
 tou_valuation_saga = saga(name="tou_energy_valuation")
@@ -39,7 +45,17 @@ def execute_tou_valuation():
     ctx = input_data
 
     correlation_id = ctx["correlation_id"]
-    billing_account_id = ctx["billing_account_id"]
+    source_account_id = ctx["account_id"]
+    amount = Decimal(ctx["instrument_amount"]["amount"])
+    # The event timestamp represents the settlement period start.
+    # For half-hourly reads, this is the start of the 30-minute window.
+    settlement_period = ctx["timestamp"]
+
+    # Resolve account details from entity graph
+    step(name="lookup_account")
+    account = reference_data.get_account(id=source_account_id)
+
+    billing_account_id = account.metadata["billing_account_id"]
 
     # Idempotency check
     step(name="check_idempotency")
@@ -55,7 +71,7 @@ def execute_tou_valuation():
     # Look up account type for its time-of-use valuation method
     step(name="lookup_account_type")
     account_type = reference_data.get_account_type(
-        code=ctx["account_type_code"],
+        code=account.account_type_code,
     )
 
     # Compute value at the time-of-use rate for this settlement period.
@@ -65,10 +81,10 @@ def execute_tou_valuation():
     step(name="compute_tou_valuation")
     charge = valuation_engine.compute(
         method_id=account_type.default_conversion_method_id,
-        amount=Decimal(ctx["amount"]),
+        amount=amount,
         from_instrument="KWH",
         to_instrument="GBP",
-        value_date=ctx["settlement_period_start"],
+        value_date=settlement_period,
     )
 
     # Book GBP charge on customer billing account
@@ -79,13 +95,13 @@ def execute_tou_valuation():
         direction="DEBIT",
         amount=charge.amount,
         correlation_id=correlation_id,
-        description="ToU charge: " + ctx["settlement_period_start"],
+        description="ToU charge: " + settlement_period,
     )
 
     return {
         "status": "VALUED",
         "amount": str(charge.amount),
-        "settlement_period": ctx["settlement_period_start"],
+        "settlement_period": settlement_period,
         "correlation_id": correlation_id,
     }
 

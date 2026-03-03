@@ -1,7 +1,7 @@
 # Saga: corporate_action_cost_adjustment
-# Version: 1.0.0
-# Previous: none
-# Changed: Initial version
+# Version: 2.0.0
+# Previous: 1.0.0
+# Changed: Clarify this consumes a hypothetical corporate-action event type
 # Author: Tenant Configuration (Wealth Management)
 # Date: 2026-03-03
 #
@@ -12,6 +12,12 @@
 # Trigger: event:market-information.corporate-action.v1
 # Filter:  event.action_type == 'ACCUMULATING_DIVIDEND'
 #
+# NOTE: The corporate-action.v1 channel is aspirational — it does not exist in
+# the current event inventory. When implemented, the proto would define fields
+# such as instrument_code, action_type, amount_per_unit, and ex_date. This
+# example validates the platform's ability to support wealth management use cases
+# once the event is defined.
+#
 # Account model:
 #   - Custody Account (instrument units): what you own (unchanged by this saga)
 #   - Cost Basis Account (GBP): what it cost (adjusted by this saga)
@@ -21,11 +27,17 @@
 # changes when economic reality changes, even when no cash or units move.
 # The position log on this account IS the audit trail for HMRC.
 #
-# Input data (from event payload via input_data dictionary):
-#   - correlation_id: string - Idempotency key from source event
+# Input data (from hypothetical CorporateActionEvent):
+#   - correlation_id: string - Idempotency key from standard headers
 #   - instrument_code: string - Instrument affected by the corporate action
-#   - amount_per_unit: string - Dividend amount per unit
-#   - ex_date: string - Ex-dividend date
+#   - action_type: string - Type of corporate action (filtered by CEL)
+#   - amount_per_unit: string - Dividend amount per unit as decimal string
+#   - ex_date: string - Ex-dividend date (ISO 8601)
+#
+# Entity graph resolution (via service module calls):
+#   - holdings: from position_keeping.query_accounts(instrument_code=...)
+#   - balances: from position_keeping.get_balance(account_id=...)
+#   - cost_basis_account_id: from holding metadata
 
 # Define the saga
 cost_adjustment_saga = saga(name="corporate_action_cost_adjustment")

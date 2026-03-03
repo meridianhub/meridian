@@ -64,7 +64,8 @@ The `event:` trigger is a direct consumer of those contracts.
 | Standard headers (`correlation_id`) | Idempotency key for saga deduplication |
 | Standard headers (`tenant_id`) | Tenant scoping for multi-tenant event routing |
 | Typed event publishers (outbox pattern) | Reliable at-least-once event delivery |
-| Payload schemas (proto-derived) | Structured `ctx` passed to Starlark saga scripts |
+| Payload schemas (proto-derived) | `input_data` dict passed to Starlark saga scripts (2.10) |
+| Channel → proto type registry | Upfront validation of saga `input_data` accesses at manifest apply (2.11) |
 
 PRD-030's outbox alignment work (WS1-2) is a prerequisite for PRD-032. Event-triggered
 sagas depend on reliable event delivery — fire-and-forget writes risk losing the event
@@ -230,7 +231,7 @@ account type definitions are needed — the routing logic lives on the saga, not
     {
       "name": "race-result-distribution",
       "trigger": "event:market-information.observation-recorded.v1",
-      "filter": "event.dataset_code == 'HORSE_RACING' && event.status == 'OFFICIAL'",
+      "filter": "event.dataset_code == 'HORSE_RACING' && event.quality == 'ACTUAL'",
       "script": "..."
     },
     {
@@ -385,6 +386,137 @@ The event-router adds saga dispatch alongside the existing metering. The two
 responsibilities coexist in the same service but serve different masters: metering
 serves the platform owner, saga dispatch serves the tenant.
 
+### 2.10 Event Payload to `input_data` Mapping
+
+The event-router deserializes event payloads into the Starlark `input_data` dictionary
+using the AsyncAPI specification (PRD-030) as the type registry. This is the same registry
+that drives typed publishers on the sending side (WS7) — a single source of truth for
+both producers and consumers.
+
+**Deserialization flow:**
+
+```text
+Event arrives (proto bytes + Kafka headers)
+  → Channel name → AsyncAPI spec → Proto message type
+  → proto.Unmarshal(bytes, typed proto message)
+  → protojson.Marshal(message, UseProtoNames: true) → JSON
+  → json.Unmarshal(JSON) → map[string]interface{}
+  → goToStarlark(map) → Starlark Dict
+  → Available as input_data in the saga script
+```
+
+Standard headers from PRD-030 (`correlation_id`, `causation_id`, `tenant_id`) are
+extracted from Kafka headers and merged into the `input_data` dictionary alongside the
+payload fields. The saga script receives a flat dictionary containing exactly the fields
+defined in the proto message for that channel.
+
+**Example: `position-keeping.transaction-captured.v1` → `input_data`**
+
+The AsyncAPI spec maps this channel to `TransactionCapturedEvent`. After deserialization,
+the saga receives:
+
+```python
+input_data = {
+    # Standard headers (from Kafka headers, per PRD-030)
+    "correlation_id": "abc-123-def-456",
+    "causation_id": "parent-saga-id",
+    "tenant_id": "tenant-001",
+    # Proto payload fields (from TransactionCapturedEvent)
+    "log_id": "550e8400-e29b-41d4-a716-446655440000",
+    "account_id": "acct-metered-001",
+    "transaction_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "amount_cents": 250000,
+    "instrument_code": "KWH",
+    "direction": "DEBIT",
+    "source": "IMPORTED",
+    "description": "HH read SP23 2026-03-03",
+    "reference": "MPAN-1234567890",
+    "timestamp": "2026-03-03T11:30:00Z",
+    "version": 1,
+    "instrument_amount": {"amount": "2500.000", "instrument_code": "KWH"},
+}
+```
+
+**Thin events, rich sagas.** The event carries only what happened: a transaction was
+captured on account X for Y units of instrument Z. Fields not in the event —
+`billing_account_id`, `account_type_code`, `counterparty_account_id` — are resolved
+by the saga script via service module calls against the entity graph (section 2.3).
+
+This is a deliberate design choice:
+
+- **Decoupled schemas.** Adding a new saga doesn't require changing the event publisher.
+  The event schema remains stable; the saga adapts by querying reference data.
+- **Single responsibility.** The event publisher records what happened. The saga decides
+  what to do about it.
+- **Smaller payloads.** Events stay small (core facts only). Rich context is fetched
+  on-demand, not broadcast to all consumers.
+
+**protojson field naming:** The event-router uses `protojson.MarshalOptions{UseProtoNames: true}`
+to preserve proto field names (snake_case) in the `input_data` dictionary, matching
+Starlark/Python naming conventions.
+
+### 2.11 Upfront Schema Validation at Manifest Apply
+
+When a saga declares an `event:<channel>` trigger, the platform has enough information
+at manifest apply time to validate compatibility between the saga script and the event
+schema — without waiting for a live event.
+
+**What the platform knows at apply time:**
+
+1. **The channel** the saga subscribes to (from the `trigger` declaration)
+2. **The payload schema** for that channel (from the AsyncAPI spec, derived from proto)
+3. **The fields** the saga accesses via `input_data` (from static analysis of the Starlark script)
+
+**Validation rule:** Every `input_data["field_name"]` access in the Starlark script must
+reference a field that exists in the channel's AsyncAPI payload schema or in the standard
+header set (`correlation_id`, `causation_id`, `tenant_id`).
+
+**Validation flow:**
+
+```text
+Manifest apply: saga "usage-to-value"
+  → trigger: "event:position-keeping.transaction-captured.v1"
+  → AsyncAPI lookup: {log_id, account_id, transaction_id, amount_cents,
+                      instrument_code, direction, source, description,
+                      reference, correlation_id, timestamp, version,
+                      instrument_amount}
+  → Starlark parse: input_data accesses = {correlation_id, account_id,
+                     instrument_code, instrument_amount, timestamp}
+  → Validate: accessed ⊆ available ✓
+  → Apply succeeds
+```
+
+**Rejection example:**
+
+```text
+Manifest apply: saga "bad-saga"
+  → trigger: "event:position-keeping.transaction-captured.v1"
+  → Starlark parse: input_data accesses = {correlation_id, billing_account_id}
+  → Validate: "billing_account_id" ∉ available fields
+  → Apply REJECTED: "saga 'bad-saga' accesses input_data['billing_account_id']
+    but channel 'position-keeping.transaction-captured.v1' schema has no field
+    'billing_account_id'. Available fields: log_id, account_id, ..."
+```
+
+**Scope of static analysis:**
+
+| Pattern | Validated | Example |
+|---------|-----------|---------|
+| Direct access | Yes | `input_data["account_id"]` |
+| Aliased access | Yes | `ctx = input_data; ctx["account_id"]` |
+| Dynamic keys | No | `input_data[variable_name]` |
+| Nested access | Best-effort | `input_data["instrument_amount"]["amount"]` |
+| Type correctness | No | int vs string not checked (preserved by protojson) |
+
+This is a best-effort lint, not a full type checker. It catches the common case — typos
+in field names and assumptions about fields that don't exist in the event. Dynamic key
+construction (rare in practice) bypasses the check.
+
+**Relationship to CEL filter validation:** The same apply-time validation already compiles
+CEL filter expressions (section 2.2). Upfront schema validation extends this to the
+Starlark script's `input_data` accesses. Both share the principle: catch errors at deploy
+time, not at runtime.
+
 ## 3. What Already Exists
 
 ### 3.1 Position-Keeping Event Emission
@@ -458,7 +590,8 @@ The service to be generalized into the event-router (see 2.5):
 - Event chain termination via CEL filters + max chain depth safety net
 - Saga definition caching in consumer (with TTL — definitions change infrequently)
 - Manifest validation: event-triggered sagas reference channels defined in AsyncAPI specs
-  (PRD-030), and filter expressions compile in the `event_filter` CEL environment
+  (PRD-030), filter expressions compile in the `event_filter` CEL environment, and Starlark
+  `input_data` field accesses are validated against the channel's payload schema (2.11)
 
 ### 4.2 Prerequisites
 
@@ -481,6 +614,14 @@ The service to be generalized into the event-router (see 2.5):
 These examples illustrate how tenants in different industries would use the `event:`
 trigger. They are **tenant configuration, not platform code** — included here to
 validate that the platform infrastructure is sufficiently general.
+
+> **Note on event payload access:** The pseudocode in sections 5.1-5.4 uses abbreviated
+> access patterns (e.g., `ctx.event.metadata.billing_account_id`) for readability. In
+> practice, the Starlark `input_data` dictionary contains only the fields from the event
+> proto (section 2.10) — fields like `billing_account_id` and `account_type_code` are
+> resolved via entity graph lookups using service module calls. See the reference Starlark
+> files in `services/control-plane/internal/applier/testdata/tenant-saga-examples/` for
+> the complete pattern with entity graph resolution.
 
 ### 5.1 Energy: Position Valuation
 
@@ -801,6 +942,10 @@ and the saga runtime.
 - Platform metering continues to function unchanged (compiled Go, tenant-zero schema)
 - Sagas can navigate the full entity graph (accounts, parties, hierarchies) via existing
   service modules
+- Upfront validation at manifest apply: Starlark `input_data` field accesses validated
+  against the AsyncAPI channel schema — deploy-time errors for missing fields
+- Event payloads deserialized via AsyncAPI channel → proto type registry using
+  `protojson.MarshalOptions{UseProtoNames: true}` for snake_case field naming
 
 ### First Deployment
 

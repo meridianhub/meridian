@@ -1,7 +1,7 @@
 # Saga: compute_billing
-# Version: 1.0.0
-# Previous: none
-# Changed: Initial version
+# Version: 2.0.0
+# Previous: 1.0.0
+# Changed: Thin event pattern — resolve billing account from entity graph
 # Author: Tenant Configuration (Cloud Compute)
 # Date: 2026-03-03
 #
@@ -14,11 +14,16 @@
 #
 # Single-leg valuation (simpler than energy which has retail + wholesale).
 #
-# Input data (from event payload via input_data dictionary):
-#   - correlation_id: string - Idempotency key from source event
-#   - account_type_code: string - Account type code for valuation method lookup
-#   - amount: string - Decimal amount as string (GPU hours)
-#   - billing_account_id: string - Customer billing account for USD charge
+# Input data (from TransactionCapturedEvent via AsyncAPI-driven deserialization):
+#   - correlation_id: string - Idempotency key from standard headers
+#   - account_id: string - The usage account that triggered the event
+#   - instrument_code: string - "GPU_HOUR"
+#   - instrument_amount: dict - Multi-asset amount {amount, instrument_code}
+#
+# Entity graph resolution (via service module calls):
+#   - account_type_code: from reference_data.get_account(id=account_id)
+#   - billing_account_id: from account.metadata
+#   - conversion method: from reference_data.get_account_type(code=...)
 
 # Define the saga
 compute_billing_saga = saga(name="compute_billing")
@@ -27,7 +32,14 @@ def execute_compute_billing():
     ctx = input_data
 
     correlation_id = ctx["correlation_id"]
-    billing_account_id = ctx["billing_account_id"]
+    source_account_id = ctx["account_id"]
+    amount = Decimal(ctx["instrument_amount"]["amount"])
+
+    # Resolve account details from entity graph
+    step(name="lookup_account")
+    account = reference_data.get_account(id=source_account_id)
+
+    billing_account_id = account.metadata["billing_account_id"]
 
     # Idempotency check
     step(name="check_idempotency")
@@ -43,14 +55,14 @@ def execute_compute_billing():
     # Look up account type for its default conversion method
     step(name="lookup_account_type")
     account_type = reference_data.get_account_type(
-        code=ctx["account_type_code"],
+        code=account.account_type_code,
     )
 
     # Convert GPU hours to USD
     step(name="compute_charge")
     charge = valuation_engine.compute(
         method_id=account_type.default_conversion_method_id,
-        amount=Decimal(ctx["amount"]),
+        amount=amount,
         from_instrument="GPU_HOUR",
         to_instrument="USD",
     )
