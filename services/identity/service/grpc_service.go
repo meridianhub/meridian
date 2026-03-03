@@ -103,21 +103,24 @@ func (s *Service) UpdateIdentity(ctx context.Context, req *pb.UpdateIdentityRequ
 		return nil, status.Errorf(codes.Aborted, "version conflict: expected %d, got %d", identity.Version(), req.GetVersion())
 	}
 
-	// No mutable fields to update beyond email at this point.
-	// The proto defines email as the only updatable field; since the domain
-	// model treats email as immutable (set at creation), we return the
-	// current identity unchanged. Future fields can be added here.
+	// The proto allows email to be sent, but the domain treats email as
+	// immutable (set at creation). Reject explicit email change requests.
+	if req.GetEmail() != "" && req.GetEmail() != identity.Email() {
+		return nil, status.Errorf(codes.FailedPrecondition, "email is immutable and cannot be changed")
+	}
 
 	return &pb.UpdateIdentityResponse{
 		Identity: identityToProto(identity),
 	}, nil
 }
 
-// ListIdentities returns a paginated list of identities within the tenant.
-// TODO: Implement pagination (page_size, page_token) and status_filter once
-// the repository layer supports paginated queries.
+// ListIdentities returns all identities within the tenant.
+// Pagination and status filtering are not yet implemented.
 func (s *Service) ListIdentities(ctx context.Context, req *pb.ListIdentitiesRequest) (*pb.ListIdentitiesResponse, error) {
-	_ = req // pagination parameters not yet implemented in repository
+	if req.GetPageSize() > 0 || req.GetPageToken() != "" || req.GetStatusFilter() != pb.IdentityStatus_IDENTITY_STATUS_UNSPECIFIED {
+		return nil, status.Errorf(codes.Unimplemented, "pagination and status filtering are not yet supported")
+	}
+
 	identities, err := s.repo.ListByTenant(ctx)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to list identities", "error", err)
@@ -304,37 +307,41 @@ func (s *Service) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequ
 }
 
 // RequestPasswordReset initiates the password reset flow by generating a reset token.
-// For security, always returns success even if the email is not found.
+// Returns success with no token when the email is not found (prevents enumeration).
+// Returns an error for unexpected repository failures.
 func (s *Service) RequestPasswordReset(ctx context.Context, req *pb.RequestPasswordResetRequest) (*pb.RequestPasswordResetResponse, error) {
-	// Attempt to find identity. If not found, return success to prevent email enumeration.
-	// Non-not-found errors are logged but still return success to avoid information leakage.
 	identity, findErr := s.repo.FindByEmail(ctx, req.GetEmail())
-	if findErr != nil && !errors.Is(findErr, domain.ErrIdentityNotFound) {
+	if findErr != nil {
+		if errors.Is(findErr, domain.ErrIdentityNotFound) {
+			// Return success without a token to prevent email enumeration.
+			return &pb.RequestPasswordResetResponse{Email: req.GetEmail()}, nil
+		}
 		s.logger.ErrorContext(ctx, "unexpected error during password reset lookup",
 			"error", findErr)
-	}
-	if findErr == nil {
-		// TODO: Send plaintext token to user via email service.
-		// The plaintext token is captured here but not yet delivered.
-		// An email/notification integration is needed to complete this flow.
-		plaintext, invitation, tokenErr := s.createResetInvitation(ctx, identity.ID())
-		_ = plaintext // Token must be delivered via email service (not yet integrated)
-		if tokenErr != nil {
-			s.logger.ErrorContext(ctx, "failed to create password reset token",
-				"identity_id", identity.ID(),
-				"error", tokenErr)
-		} else if saveErr := s.repo.SaveInvitation(ctx, invitation); saveErr != nil {
-			s.logger.ErrorContext(ctx, "failed to save password reset invitation",
-				"identity_id", identity.ID(),
-				"error", saveErr)
-		} else {
-			s.logger.DebugContext(ctx, "password reset token generated",
-				"identity_id", identity.ID())
-		}
+		return nil, status.Errorf(codes.Internal, "failed to initiate password reset")
 	}
 
+	plaintext, invitation, tokenErr := s.createResetInvitation(ctx, identity.ID())
+	if tokenErr != nil {
+		s.logger.ErrorContext(ctx, "failed to create password reset token",
+			"identity_id", identity.ID(),
+			"error", tokenErr)
+		return nil, status.Errorf(codes.Internal, "failed to create reset token")
+	}
+
+	if saveErr := s.repo.SaveInvitation(ctx, invitation); saveErr != nil {
+		s.logger.ErrorContext(ctx, "failed to save password reset invitation",
+			"identity_id", identity.ID(),
+			"error", saveErr)
+		return nil, status.Errorf(codes.Internal, "failed to save reset token")
+	}
+
+	s.logger.DebugContext(ctx, "password reset token generated",
+		"identity_id", identity.ID())
+
 	return &pb.RequestPasswordResetResponse{
-		Email: req.GetEmail(),
+		Email:      req.GetEmail(),
+		ResetToken: plaintext,
 	}, nil
 }
 
@@ -567,16 +574,6 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 		return nil, status.Errorf(codes.InvalidArgument, "invalid email: %v", err)
 	}
 
-	if err := s.repo.Save(ctx, identity); err != nil {
-		if errors.Is(err, domain.ErrEmailAlreadyExists) {
-			return nil, status.Errorf(codes.AlreadyExists, "email already registered")
-		}
-		s.logger.ErrorContext(ctx, "failed to save invited identity",
-			"identity_id", identity.ID(),
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to create identity")
-	}
-
 	invitation, plaintextToken, err := domain.NewInvitation(identity.ID(), inviterID)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to create invitation",
@@ -585,18 +582,15 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 		return nil, status.Errorf(codes.Internal, "failed to create invitation")
 	}
 
-	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save invitation",
+	if err := s.repo.SaveIdentityWithInvitation(ctx, identity, invitation); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save identity and invitation",
 			"identity_id", identity.ID(),
+			"invitation_id", invitation.ID(),
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to save invitation")
+		return nil, mapDomainError(err, "identity")
 	}
 
-	// TODO: Send plaintextToken to the invited user via email service.
-	// The plaintext token is captured here but not yet delivered.
-	// An email/notification integration is needed to complete this flow.
-	_ = plaintextToken // Token must be delivered via email service (not yet integrated)
-	s.logger.DebugContext(ctx, "invitation created",
+	s.logger.InfoContext(ctx, "invitation created",
 		"identity_id", identity.ID())
 
 	// Grant the initial role if specified.
@@ -619,8 +613,9 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 	}
 
 	return &pb.InviteUserResponse{
-		Invitation: invitationToProto(invitation),
-		Identity:   identityToProto(identity),
+		Invitation:      invitationToProto(invitation),
+		Identity:        identityToProto(identity),
+		InvitationToken: plaintextToken,
 	}, nil
 }
 
