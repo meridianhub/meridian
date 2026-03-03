@@ -143,7 +143,7 @@ jobs:
           path: frontend-dist/
 
       - name: Deploy frontend via SCP
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: root
@@ -154,7 +154,7 @@ jobs:
           overwrite: true
 
       - name: Deploy config files via SCP
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: root
