@@ -10,6 +10,20 @@
 #     -d "scope=openid email profile" \
 #     -d "username=admin@volterra.energy" \
 #     -d "password=demo2026"
+#
+# Integration architecture note:
+#
+# Dex does not have a network "grpc" connector type. The Meridian identity
+# connector (services/identity/connector/) is a Go-level integration that is
+# wired directly into the Dex PasswordConnector interface at process startup
+# (services/identity/bootstrap/ or cmd/meridian/main.go). It validates
+# credentials by calling the identity domain repository in-process — no
+# network hop required.
+#
+# When the identity service is fully bootstrapped and the Dex server is
+# initialised with the MeridianConnector (replacing enablePasswordDB), the
+# staticPasswords block below can be removed. Until then, it serves as the
+# demo fallback and is kept here for reference.
 
 issuer: https://demo.meridianhub.cloud/dex
 
@@ -22,6 +36,9 @@ web:
   http: 0.0.0.0:5556
 
 oauth2:
+  # "local" routes password grants through the built-in password DB.
+  # Once the Meridian identity connector is wired into the Dex server binary,
+  # change this to the connector ID registered at startup (e.g. "meridian").
   passwordConnector: local
   skipApprovalScreen: true
 
@@ -30,15 +47,18 @@ staticClients:
     name: Meridian
     redirectURIs:
       - "https://demo.meridianhub.cloud/callback"
+      # Subdomain-based tenants — e.g. volterra.demo.meridianhub.cloud
+      - "https://volterra.demo.meridianhub.cloud/callback"
       - "http://localhost:8090/callback"
     public: true
 
 enablePasswordDB: true
 
+# Demo credentials. Managed by the Meridian identity service in production.
+# To generate a new hash: htpasswd -nbBC 10 "" '<password>' | tr -d ':\n' | sed 's/$2y/$2a/'
 staticPasswords:
   - email: "admin@volterra.energy"
     # Password: demo2026
-    # Generate with: htpasswd -nbBC 10 "" 'demo2026' | tr -d ':\n' | sed 's/$2y/$2a/'
     hash: "$2a$10$lIDConGp2.xX/KXg31kHoezV2HN/hDeF/aVLlAZh4LDX9q9uaj5y."
     username: "Admin"
     userID: "admin-volterra-001"
