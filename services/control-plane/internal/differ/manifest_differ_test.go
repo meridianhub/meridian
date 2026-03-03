@@ -860,3 +860,46 @@ func TestDiff_NilLastApplied_WithPartyTypes_AllCreates(t *testing.T) {
 	assert.Len(t, creates, 1)
 	assert.Equal(t, "tenant-1:PERSON", creates[0].ResourceCode)
 }
+
+func TestDiff_AddedEventSaga_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	filter := `event.amount > 0 && event.currency == "GBP"`
+	newManifest := testManifest()
+	newManifest.Sagas = append(newManifest.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_captured",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourceSaga)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "on_transaction_captured", creates[0].ResourceCode)
+	assert.Contains(t, creates[0].Description, "trigger: event:")
+}
+
+func TestDiff_ModifiedSagaFilter_DescribesChange(t *testing.T) {
+	d := New(nil, nil)
+
+	filter := `event.amount > 0`
+	oldManifest := testManifest()
+	oldManifest.Sagas[0].Trigger = "event:position-keeping.transaction-captured.v1"
+	oldManifest.Sagas[0].Filter = &filter
+
+	newFilter := `event.amount > 100`
+	newManifest := testManifest()
+	newManifest.Sagas[0].Trigger = "event:position-keeping.transaction-captured.v1"
+	newManifest.Sagas[0].Filter = &newFilter
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceSaga)
+	assert.Len(t, updates, 1)
+	assert.Contains(t, updates[0].Description, "filter changed")
+}

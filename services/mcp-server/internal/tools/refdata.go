@@ -365,7 +365,7 @@ func buildSagaDescribeTool(client SagaRegistryClient) Tool {
 func buildHandlersDescribeTool(client ManifestHistoryClient) Tool {
 	return Tool{
 		Name:        "meridian_handlers_describe",
-		Description: "Returns the tenant's available saga triggers and account type policies from the current manifest. Shows which handlers are wired to API endpoints, webhooks, and scheduled jobs.",
+		Description: "Returns the tenant's available saga triggers and account type policies from the current manifest. Shows which handlers are wired to API endpoints, webhooks, scheduled jobs, and domain events.",
 		Category:    CategoryRead,
 		InputSchema: map[string]interface{}{
 			"type":                 "object",
@@ -373,8 +373,8 @@ func buildHandlersDescribeTool(client ManifestHistoryClient) Tool {
 			"properties": map[string]interface{}{
 				"trigger_prefix": map[string]interface{}{
 					"type":        "string",
-					"description": "Filter saga triggers by prefix: api, webhook, or scheduled. Omit to return all.",
-					"enum":        []interface{}{"api", "webhook", "scheduled"},
+					"description": "Filter saga triggers by prefix: api, webhook, scheduled, or event. Omit to return all.",
+					"enum":        []interface{}{"api", "webhook", "scheduled", "event"},
 				},
 			},
 		},

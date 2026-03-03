@@ -327,7 +327,7 @@ func (v *ManifestValidator) validateDuplicates(
 		}
 	}
 
-	// Check duplicate saga names
+	// Check duplicate saga names and event trigger filter requirements
 	sagaNames := make(map[string]int)
 	for i, saga := range manifest.GetSagas() {
 		if prev, exists := sagaNames[saga.GetName()]; exists {
@@ -339,6 +339,16 @@ func (v *ManifestValidator) validateDuplicates(
 			})
 		} else {
 			sagaNames[saga.GetName()] = i
+		}
+		// Warn when an event-triggered saga has no filter; all events will trigger the saga
+		if strings.HasPrefix(saga.GetTrigger(), "event:") && saga.Filter == nil {
+			addError(result, ValidationError{
+				Severity:   SeverityWarning,
+				Path:       fmt.Sprintf("sagas[%d].filter", i),
+				Code:       "MISSING_EVENT_FILTER",
+				Message:    fmt.Sprintf("saga %q subscribes to event trigger %q without a filter; the saga will execute for every matching event", saga.GetName(), saga.GetTrigger()),
+				Suggestion: `Add a CEL filter expression, e.g. filter: 'event.amount > 0'`,
+			})
 		}
 	}
 

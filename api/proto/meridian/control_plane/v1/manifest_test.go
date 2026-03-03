@@ -643,6 +643,35 @@ func TestSagaDefinitionValidation(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid event trigger with filter",
+			saga: &controlplanev1.SagaDefinition{
+				Name:    "on_transaction_captured",
+				Trigger: "event:position-keeping.transaction-captured.v1",
+				Script:  "def execute(ctx):\n    return {}\n",
+				Filter:  proto.String(`event.amount > 0 && event.currency == "GBP"`),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid event trigger without filter",
+			saga: &controlplanev1.SagaDefinition{
+				Name:    "on_transaction_captured",
+				Trigger: "event:position-keeping.transaction-captured.v1",
+				Script:  "def execute(ctx):\n    return {}\n",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid: filter exceeds max length",
+			saga: &controlplanev1.SagaDefinition{
+				Name:    "test_saga",
+				Trigger: "event:some.event.v1",
+				Script:  "def execute(ctx):\n    return {}\n",
+				Filter:  proto.String(strings.Repeat("x", 4097)),
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -652,6 +681,34 @@ func TestSagaDefinitionValidation(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestSagaDefinitionEventTrigger verifies event trigger round-trip serialization.
+func TestSagaDefinitionEventTrigger(t *testing.T) {
+	filter := `event.amount > 0 && event.currency == "GBP"`
+	original := &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_captured",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  proto.String(filter),
+	}
+
+	data, err := proto.Marshal(original)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	decoded := &controlplanev1.SagaDefinition{}
+	if err := proto.Unmarshal(data, decoded); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if !proto.Equal(original, decoded) {
+		t.Error("round-trip proto serialization produced different message")
+	}
+	if decoded.GetFilter() != filter {
+		t.Errorf("expected filter %q, got %q", filter, decoded.GetFilter())
 	}
 }
 
