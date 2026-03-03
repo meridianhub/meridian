@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -11,6 +12,11 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
+
+// ErrTenantScopeRequiresTransaction is returned when WithGormTenantScope is called
+// outside an active database transaction. SET LOCAL has no effect without a transaction,
+// so allowing this would silently skip tenant isolation.
+var ErrTenantScopeRequiresTransaction = errors.New("tenant scope requires an active transaction: SET LOCAL has no effect outside a transaction")
 
 // hashTenantID creates a short, privacy-preserving hash of the tenant ID for logging.
 // This allows correlation in logs without exposing the actual tenant ID.
@@ -46,30 +52,66 @@ func hashTenantID(tenantID tenant.TenantID) string {
 //	    return tx.Create(&entity).Error
 //	})
 func WithGormTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
+	return WithGormTenantScopeAndLogger(ctx, tx, slog.Default())
+}
+
+// WithGormTenantScopeAndLogger is like WithGormTenantScope but accepts an explicit logger.
+// This enables structured audit logging with service-level attributes pre-configured
+// on the logger (e.g., service name).
+//
+// On success, emits an INFO-level "tenant.schema.access" audit log with tenant and schema fields.
+func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog.Logger) (*gorm.DB, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
-		slog.DebugContext(ctx, "tenant scope: missing tenant context, returning error")
+		logger.DebugContext(ctx, "tenant scope: missing tenant context, returning error")
 		return nil, tenant.ErrMissingTenantContext
+	}
+
+	schema := tenantID.SchemaName()
+
+	// Reject if called outside a transaction — SET LOCAL has no effect without one.
+	// Without this check, the guard flag would be set but the database scope would not
+	// actually be enforced, creating a false sense of tenant isolation.
+	if tx.Statement == nil || tx.Statement.ConnPool == nil {
+		return nil, ErrTenantScopeRequiresTransaction
+	}
+	if _, isTx := tx.Statement.ConnPool.(gorm.TxCommitter); !isTx {
+		return nil, ErrTenantScopeRequiresTransaction
 	}
 
 	// Quote the schema name to prevent SQL injection
 	// pq.QuoteIdentifier handles special characters safely
-	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
+	quotedSchema := pq.QuoteIdentifier(schema)
 
 	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback.
-	// fmt.Sprintf is safe here because schemaName is already quoted by pq.QuoteIdentifier above,
+	// fmt.Sprintf is safe here because quotedSchema is already quoted by pq.QuoteIdentifier above,
 	// which properly escapes any special characters including quotes and null bytes.
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
-	if err := tx.Exec(query).Error; err != nil {
-		slog.ErrorContext(ctx, "tenant scope: failed to set search_path",
+	// Bypass the TenantGuard for this SET LOCAL exec — this IS the operation that
+	// establishes tenant scope, so it must execute before the guard flag is set.
+	bypassCtx := WithTenantGuardBypass(ctx)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", quotedSchema)
+	if err := tx.WithContext(bypassCtx).Exec(query).Error; err != nil {
+		logger.ErrorContext(ctx, "tenant scope: failed to set search_path",
 			"tenant_hash", hashTenantID(tenantID),
 			"error", err)
 		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
 	}
 
-	slog.DebugContext(ctx, "tenant scope: search_path set successfully",
-		"tenant_hash", hashTenantID(tenantID))
-	return tx, nil
+	// Audit log: emitted on every successful schema access for forensic traceability.
+	// Uses hashed tenant ID for privacy-preserving correlation (consistent with error-path logging).
+	// Service-level attributes (e.g., "service") should be pre-set on the logger at startup.
+	logger.InfoContext(ctx, "tenant.schema.access",
+		"tenant_hash", hashTenantID(tenantID),
+		"schema", schema,
+	)
+
+	// Mark context so TenantGuard knows scope was applied
+	scopedCtx := withTenantScopeSet(ctx)
+	return tx.WithContext(scopedCtx), nil
 }
 
 // MustWithGormTenantScope is like WithGormTenantScope but panics on error.
