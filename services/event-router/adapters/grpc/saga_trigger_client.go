@@ -16,6 +16,9 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// ErrSagaTriggerConfigRequired is returned when a nil config is passed to NewSagaTriggerClient.
+var ErrSagaTriggerConfigRequired = fmt.Errorf("SagaTriggerClientConfig is required")
+
 // ErrSagaTriggerServiceNameRequired is returned when ServiceName is not provided.
 var ErrSagaTriggerServiceNameRequired = fmt.Errorf("ServiceName is required for saga trigger client")
 
@@ -60,8 +63,8 @@ type SagaTriggerClientConfig struct {
 //
 // The client uses DNS-based service discovery and round-robin load balancing.
 // TriggerSaga calls include retry logic with exponential backoff for transient
-// failures (UNAVAILABLE, INTERNAL, DEADLINE_EXCEEDED) and skip retries for
-// permanent errors (INVALID_ARGUMENT, NOT_FOUND).
+// failures (UNAVAILABLE, INTERNAL, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED) and
+// skip retries for permanent errors (INVALID_ARGUMENT, NOT_FOUND).
 //
 // Example:
 //
@@ -74,6 +77,10 @@ type SagaTriggerClientConfig struct {
 //	}
 //	client, err := grpc.NewSagaTriggerClient(config)
 func NewSagaTriggerClient(cfg *SagaTriggerClientConfig) (*SagaTriggerClient, error) {
+	if cfg == nil {
+		return nil, ErrSagaTriggerConfigRequired
+	}
+
 	if cfg.ServiceName == "" {
 		return nil, ErrSagaTriggerServiceNameRequired
 	}
@@ -123,7 +130,7 @@ func NewSagaTriggerClient(cfg *SagaTriggerClientConfig) (*SagaTriggerClient, err
 // Error handling:
 //   - INVALID_ARGUMENT errors are not retried (bad saga name or input)
 //   - NOT_FOUND errors are not retried (saga definition does not exist)
-//   - UNAVAILABLE / INTERNAL / DEADLINE_EXCEEDED errors are retried with backoff
+//   - UNAVAILABLE / INTERNAL / DEADLINE_EXCEEDED / RESOURCE_EXHAUSTED errors are retried with backoff
 //   - Context cancellation stops retries immediately
 func (c *SagaTriggerClient) TriggerSaga(ctx context.Context, sagaName string, inputData map[string]any, idempotencyKey string) (string, error) {
 	ctx, cancel := sharedclients.WithTimeout(ctx, c.timeout)

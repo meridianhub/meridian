@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/services/event-router/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -401,6 +402,12 @@ func TestNewSagaTriggerClient_ValidationErrors(t *testing.T) {
 		errContains string
 	}{
 		{
+			name:        "nil config",
+			config:      nil,
+			wantErr:     true,
+			errContains: "SagaTriggerClientConfig is required",
+		},
+		{
 			name: "missing service name",
 			config: &SagaTriggerClientConfig{
 				ServiceName: "",
@@ -429,9 +436,9 @@ func TestNewSagaTriggerClient_ValidationErrors(t *testing.T) {
 				}
 				return
 			}
-			if err == nil && client != nil {
-				_ = client.Close()
-			}
+			require.NoError(t, err)
+			require.NotNil(t, client)
+			_ = client.Close()
 		})
 	}
 }
@@ -473,10 +480,7 @@ func TestSagaTriggerClient_buildRequest_NestedData(t *testing.T) {
 }
 
 // Ensure SagaTriggerClient satisfies the domain.SagaTrigger interface at compile time.
-var _ interface {
-	TriggerSaga(ctx context.Context, sagaName string, inputData map[string]any, idempotencyKey string) (string, error)
-	Close() error
-} = (*SagaTriggerClient)(nil)
+var _ domain.SagaTrigger = (*SagaTriggerClient)(nil)
 
 // Ensure structpb is imported (used by buildRequest tests indirectly).
 var _ = (*structpb.Struct)(nil)
