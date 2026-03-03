@@ -38,17 +38,22 @@ type SagaDispatchHandler struct {
 type Option func(*SagaDispatchHandler)
 
 // WithMaxChainDepth sets the maximum allowed chain depth. Events with a chain
-// depth >= this value are dropped with a warning log.
+// depth >= this value are dropped with a warning log. Non-positive values are
+// ignored and the default is kept to prevent accidentally disabling dispatch.
 func WithMaxChainDepth(depth int) Option {
 	return func(h *SagaDispatchHandler) {
-		h.maxChainDepth = depth
+		if depth > 0 {
+			h.maxChainDepth = depth
+		}
 	}
 }
 
-// WithLogger sets the structured logger.
+// WithLogger sets the structured logger. A nil logger is ignored.
 func WithLogger(logger *slog.Logger) Option {
 	return func(h *SagaDispatchHandler) {
-		h.logger = logger
+		if logger != nil {
+			h.logger = logger
+		}
 	}
 }
 
