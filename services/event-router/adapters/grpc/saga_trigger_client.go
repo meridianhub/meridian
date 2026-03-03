@@ -163,18 +163,21 @@ func (c *SagaTriggerClient) TriggerSaga(ctx context.Context, sagaName string, in
 			c.logger.Debug("saga trigger was duplicate, returning existing instance",
 				"saga_name", sagaName,
 				"saga_id", sagaID,
-				"idempotency_key", idempotencyKey,
 			)
 		} else {
 			c.logger.Debug("saga triggered successfully",
 				"saga_name", sagaName,
 				"saga_id", sagaID,
-				"idempotency_key", idempotencyKey,
 			)
 		}
 		return nil
 	})
 	if err != nil {
+		// If the context was cancelled or timed out, return the context error
+		// rather than the last RPC error which may be stale.
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		if lastErr != nil {
 			return "", lastErr
 		}
