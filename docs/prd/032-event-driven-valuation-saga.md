@@ -315,7 +315,7 @@ header (formalized by PRD-030) is the natural idempotency key:
 4. If no, proceed with saga execution
 
 This is saga-level idempotency, not consumer-level. The consumer is at-least-once; the
-saga guarantees exactly-once semantics for the business operation. How the saga checks
+saga provides effectively-once business behavior through idempotency checks. How the saga checks
 for prior processing is up to the Starlark script — typically a query against
 position-keeping or a dedicated idempotency store.
 

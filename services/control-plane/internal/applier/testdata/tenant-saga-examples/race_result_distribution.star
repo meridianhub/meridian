@@ -31,6 +31,16 @@ def execute_race_distribution():
     race_id = ctx["reference"]
     results = ctx["attributes"]
 
+    # Idempotency check: has this race already been distributed?
+    step(name="check_idempotency")
+    existing = position_keeping.query_logs(
+        correlation_id=correlation_id,
+        instrument_code="GBP",
+    )
+
+    if existing.count > 0:
+        return {"status": "ALREADY_DISTRIBUTED", "correlation_id": correlation_id}
+
     # Find the syndicate organization that placed bets on this race
     step(name="find_syndicate")
     syndicate = reference_data.query(

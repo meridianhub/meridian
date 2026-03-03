@@ -38,6 +38,16 @@ def execute_cost_adjustment():
     amount_per_unit = Decimal(ctx["amount_per_unit"])
     ex_date = ctx["ex_date"]
 
+    # Idempotency check: has this corporate action already been processed?
+    step(name="check_idempotency")
+    existing = position_keeping.query_logs(
+        correlation_id=correlation_id,
+        instrument_code="GBP",
+    )
+
+    if existing.count > 0:
+        return {"status": "ALREADY_ADJUSTED", "correlation_id": correlation_id}
+
     # Find all custody accounts holding this instrument
     step(name="find_holdings")
     holdings = position_keeping.query_accounts(
