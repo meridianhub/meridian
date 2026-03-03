@@ -18,4 +18,5 @@ var (
 	ErrExternalIDPEmpty            = errors.New("external IDP provider and subject must not be empty")
 	ErrInvalidRole                 = errors.New("invalid role")
 	ErrInsufficientRolePermissions = errors.New("insufficient permissions to grant this role")
+	ErrVersionConflict             = errors.New("version conflict: resource was modified by another transaction")
 )

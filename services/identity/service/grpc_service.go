@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
-	"github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
 	"github.com/meridianhub/meridian/shared/pkg/tokens"
@@ -111,7 +110,7 @@ func (s *Service) UpdateIdentity(ctx context.Context, req *pb.UpdateIdentityRequ
 	// Future fields can be added here.
 
 	if err := s.repo.Save(ctx, identity); err != nil {
-		if errors.Is(err, persistence.ErrVersionConflict) {
+		if errors.Is(err, domain.ErrVersionConflict) {
 			return nil, status.Errorf(codes.Aborted, "version conflict: identity was modified by another transaction")
 		}
 		s.logger.ErrorContext(ctx, "failed to save identity",
@@ -327,7 +326,11 @@ func (s *Service) RequestPasswordReset(ctx context.Context, req *pb.RequestPassw
 	// Attempt to find identity. If not found, return success to prevent email enumeration.
 	identity, findErr := s.repo.FindByEmail(ctx, req.GetEmail())
 	if findErr == nil {
+		// TODO: Send plaintext token to user via email service.
+		// The plaintext token is captured here but not yet delivered.
+		// An email/notification integration is needed to complete this flow.
 		plaintext, invitation, tokenErr := s.createResetInvitation(ctx, identity.ID())
+		_ = plaintext // Token must be delivered via email service (not yet integrated)
 		if tokenErr != nil {
 			s.logger.ErrorContext(ctx, "failed to create password reset token",
 				"identity_id", identity.ID(),
@@ -337,13 +340,8 @@ func (s *Service) RequestPasswordReset(ctx context.Context, req *pb.RequestPassw
 				"identity_id", identity.ID(),
 				"error", saveErr)
 		} else {
-			// TODO: Send plaintext token to user via email service.
-			// Until an email service is integrated, the token is logged at debug
-			// level for development/testing purposes only. This log line must be
-			// removed before production deployment.
 			s.logger.DebugContext(ctx, "password reset token generated",
-				"identity_id", identity.ID(),
-				"reset_token", plaintext)
+				"identity_id", identity.ID())
 		}
 	}
 
@@ -615,12 +613,11 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 	}
 
 	// TODO: Send plaintextToken to the invited user via email service.
-	// Until an email service is integrated, the token is logged at debug
-	// level for development/testing purposes only. This log line must be
-	// removed before production deployment.
-	s.logger.DebugContext(ctx, "invitation token generated",
-		"identity_id", identity.ID(),
-		"invitation_token", plaintextToken)
+	// The plaintext token is captured here but not yet delivered.
+	// An email/notification integration is needed to complete this flow.
+	_ = plaintextToken // Token must be delivered via email service (not yet integrated)
+	s.logger.DebugContext(ctx, "invitation created",
+		"identity_id", identity.ID())
 
 	// Grant the initial role if specified.
 	if req.GetRole() != pb.Role_ROLE_UNSPECIFIED {
@@ -692,17 +689,20 @@ func (s *Service) AcceptInvitation(ctx context.Context, req *pb.AcceptInvitation
 		return nil, status.Errorf(codes.FailedPrecondition, "cannot activate identity: %v", err)
 	}
 
+	// Save invitation first to mark the token as consumed, preventing reuse
+	// if the subsequent identity save fails.
+	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save accepted invitation",
+			"invitation_id", invitation.ID(),
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to save invitation")
+	}
+
 	if err := s.repo.Save(ctx, identity); err != nil {
 		s.logger.ErrorContext(ctx, "failed to save identity after invitation acceptance",
 			"identity_id", identity.ID(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save identity")
-	}
-
-	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save accepted invitation",
-			"invitation_id", invitation.ID(),
-			"error", err)
 	}
 
 	return &pb.AcceptInvitationResponse{
@@ -853,7 +853,7 @@ func mapDomainError(err error, entity string) error {
 		return status.Errorf(codes.FailedPrecondition, "invitation has expired")
 	case errors.Is(err, domain.ErrInvitationAlreadyAccepted):
 		return status.Errorf(codes.FailedPrecondition, "invitation has already been accepted")
-	case errors.Is(err, persistence.ErrVersionConflict):
+	case errors.Is(err, domain.ErrVersionConflict):
 		return status.Errorf(codes.Aborted, "version conflict: resource was modified by another transaction")
 	default:
 		return status.Errorf(codes.Internal, "internal error")

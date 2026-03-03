@@ -246,7 +246,7 @@ func (r *Repository) FindInvitationByTokenHash(ctx context.Context, tokenHash st
 }
 
 // ErrVersionConflict is returned when an optimistic locking conflict is detected.
-var ErrVersionConflict = errors.New("version conflict: identity was modified by another transaction")
+var ErrVersionConflict = domain.ErrVersionConflict
 
 // isDuplicateKeyError returns true when err represents a unique constraint violation.
 func isDuplicateKeyError(err error) bool {
