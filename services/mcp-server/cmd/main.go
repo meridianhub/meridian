@@ -128,15 +128,40 @@ func buildOAuthConfig(baseURL string) (mcpauth.OAuthConfig, bool) {
 	}, true
 }
 
+// buildBearerValidator constructs the BearerValidator to use for OAuth-protected endpoints.
+//
+// When MCP_JWKS_URL is set, it creates a JWKSBearerValidator that validates tokens
+// using Dex public keys — suitable for production. When MCP_JWKS_URL is absent
+// (development / CI), it falls back to the passthroughValidator.
+//
+// Returns the validator, an optional cleanup function, and an error. When MCP_JWKS_URL
+// is explicitly configured but initialisation fails, an error is returned to prevent
+// a fail-open auth path.
+func buildBearerValidator(ctx context.Context, logger *slog.Logger) (mcpauth.BearerValidator, func(), error) {
+	jwksURL := env.GetEnvOrDefault(mcpauth.EnvJWKSURL, "")
+	if jwksURL == "" {
+		logger.Warn("MCP_JWKS_URL not set — bearer token validation is disabled (passthrough mode)")
+		return &passthroughValidator{logger: logger}, nil, nil
+	}
+
+	v, err := mcpauth.NewJWKSBearerValidator(ctx, jwksURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("JWKS bearer validator initialisation failed (fail-closed): %w", err)
+	}
+
+	logger.Info("JWKS bearer validation enabled", "jwks_url", jwksURL)
+	return v, func() { _ = v.Close() }, nil
+}
+
 // passthroughValidator accepts every token without verification.
-// Used when MCP_OAUTH_ENABLED=true but no JWT validator is configured —
-// a full JWT validator should be wired here for production deployments.
+// Used when MCP_JWKS_URL is not configured — development and CI only.
+// For production deployments, set MCP_JWKS_URL to enable JWKS validation.
 type passthroughValidator struct {
 	logger *slog.Logger
 }
 
 func (p *passthroughValidator) ValidateBearer(_ string) error {
-	p.logger.Warn("bearer token validation skipped — configure a JWT validator for production")
+	p.logger.Warn("bearer token validation skipped — set MCP_JWKS_URL for production")
 	return nil
 }
 
@@ -200,7 +225,17 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 			AuthorizationURL: oauthCfg.AuthorizationURL,
 			TokenURL:         oauthCfg.TokenURL,
 		}
-		validator := &passthroughValidator{logger: logger}
+
+		// Use a background context for JWKS initialisation: srvCtx doesn't exist
+		// yet at this point (it is created below). The JWKS provider uses its own
+		// Close() to stop the background refresh goroutine on shutdown.
+		validator, validatorCleanup, err := buildBearerValidator(context.Background(), logger)
+		if err != nil {
+			return fmt.Errorf("bearer validator: %w", err)
+		}
+		if validatorCleanup != nil {
+			defer validatorCleanup()
+		}
 		bearerMW := mcpauth.NewBearerMiddleware(validator, meta)
 
 		mux.Handle("/mcp", bearerMW.Handler(streamableHandler))
@@ -223,11 +258,11 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 
 	// Start MCP server loop in background
 	serverErrors := bootstrap.ServerErrorChannel(2)
-	ctx, cancel := context.WithCancel(context.Background())
+	srvCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
-		if err := srv.Run(ctx); err != nil {
+		if err := srv.Run(srvCtx); err != nil {
 			serverErrors <- fmt.Errorf("mcp server: %w", err)
 		}
 	}()
