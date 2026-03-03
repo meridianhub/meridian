@@ -90,6 +90,7 @@ The `event:` trigger enables any reactive workflow a tenant defines in Starlark:
 | Industry | Event | Saga | Effect |
 |----------|-------|------|--------|
 | Energy | kWh position captured | Cross-instrument valuation | GBP positions booked |
+| Wealth | Corporate action recorded | Cost basis adjustment | GBP cost basis updated |
 | Carbon | TONNE_CO2E position captured | Credit verification | Verified status updated |
 | Compute | GPU_HOUR position captured | Usage billing | USD charge posted |
 | Banking | Payment received | Settlement initiation | Clearing entries posted |
@@ -604,7 +605,108 @@ lookup of a party organization, traversal of its syndicate hierarchy, retrieval 
 participant's structuring data (allocation shares), and position booking on each
 participant's account.
 
-### 5.4 Pilot Context: Outfox Energy
+### 5.4 Wealth: Corporate Action Cost Basis Tracking
+
+A wealth platform tracks portfolio holdings with both market value and cost basis views.
+The position is one set of units on a custody account. Market value is a valuation engine
+computation (units x latest price). Cost basis is a separate GBP account that adjusts
+when purchases or corporate actions occur — even when no cash or units move.
+
+Account structure per client per instrument:
+
+```text
+Custody Account (VANGUARD_FTSE_GLOBAL)   ← what you own (units)
+Cost Basis Account (GBP)                 ← what it cost (adjusted for phantom events)
+Market Value                             ← not an account — valuation engine computation
+```
+
+The phantom event problem: an accumulating ETF dividend reinvests automatically. No
+cash moves. No units change. But the cost basis increases, affecting CGT on eventual
+disposal. Traditional systems miss this. Meridian records it as a position on the cost
+basis account.
+
+Manifest declaration:
+
+```json
+{
+  "sagas": [
+    {
+      "name": "corporate-action-cost-adjustment",
+      "trigger": "event:market-information.corporate-action.v1",
+      "filter": "event.action_type == 'ACCUMULATING_DIVIDEND'",
+      "script": "corporate_action_cost_adjustment.star"
+    },
+    {
+      "name": "stock-split-adjustment",
+      "trigger": "event:market-information.corporate-action.v1",
+      "filter": "event.action_type == 'STOCK_SPLIT'",
+      "script": "stock_split_adjustment.star"
+    }
+  ]
+}
+```
+
+Saga script (`corporate_action_cost_adjustment.star`):
+
+```python
+def execute(ctx):
+    # Find all custody accounts holding this instrument
+    step()
+    holdings = position_keeping.query_accounts(
+        instrument_code=ctx.event.instrument_code,
+    )
+
+    adjustments = []
+    for holding in holdings:
+        # Get current units on this account
+        step()
+        position = position_keeping.get_balance(
+            account_id=holding.account_id,
+        )
+        if position.amount == 0:
+            continue
+
+        # Cost basis adjustment: units x dividend per unit
+        # No cash moves. No units change. But the tax position changed.
+        adjustment = position.amount * Decimal(ctx.event.amount_per_unit)
+
+        step()
+        position_keeping.initiate_log(
+            account_id=holding.metadata.cost_basis_account_id,
+            instrument_code="GBP",
+            direction="CREDIT",
+            amount=adjustment,
+            correlation_id=ctx.correlation_id,
+            description="Accumulating dividend: " + ctx.event.instrument_code,
+            reference=ctx.event.ex_date,
+        )
+        adjustments.append({"account": holding.account_id, "adjustment": str(adjustment)})
+
+    return {"status": "ADJUSTED", "holdings": len(adjustments)}
+```
+
+Resulting cost basis position log (the audit trail):
+
+| Date | Event | Cost Basis | Change |
+|------|-------|-----------|--------|
+| 2023-01-15 | Purchase | £8,000 | +£8,000 |
+| 2023-04-01 | Accumulating dividend | £8,320 | +£320 |
+| 2023-07-01 | Accumulating dividend | £8,660 | +£340 |
+| 2023-09-20 | Purchase | £9,800 | +£1,140 |
+| 2023-10-01 | Accumulating dividend | £10,150 | +£350 |
+
+That table IS the position log on the cost basis account. Not reconstructed — retrieved.
+
+The two truths, from the same instant:
+
+- Market value: 450 units x £27.56 (latest price) = **£12,400**
+- Cost basis: sum of cost basis account = **£9,800**
+- Unrealised gain: £12,400 - £9,800 = **£2,600**
+
+A market price change affects the first number. A corporate action affects the second.
+Neither touches the custody account's unit count. One position, multiple views.
+
+### 5.5 Pilot Context: Outfox Energy
 
 The first deployment of event-triggered sagas is the Outfox reconciliation pilot:
 
