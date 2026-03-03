@@ -21,10 +21,7 @@ import (
 func setupMasterTenantDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupCockroachDB(t, nil)
-
-	masterTenantID := tenant.MustNewTenantID(bootstrap.MasterTenantID)
-	setupTenantSchema(t, db, masterTenantID)
-
+	setupTenantSchema(t, db, tenant.MustNewTenantID(bootstrap.MasterTenantID))
 	return db, cleanup
 }
 
@@ -92,10 +89,10 @@ func TestBootstrapPlatformAdmin_CreatesAdmin(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
 
-	err := bootstrap.Run(context.Background(), db)
+	repo := persistence.NewRepository(db)
+	err := bootstrap.Run(context.Background(), repo)
 	require.NoError(t, err)
 
-	repo := persistence.NewRepository(db)
 	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
 	require.NoError(t, err)
 	assert.Equal(t, domain.IdentityStatusActive, identity.Status())
@@ -110,15 +107,13 @@ func TestBootstrapPlatformAdmin_Idempotent(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
 
-	err := bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
+	repo := persistence.NewRepository(db)
 
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
 	// Second call must not fail.
-	err = bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
 
 	// Exactly one identity should exist.
-	repo := persistence.NewRepository(db)
 	identities, err := repo.ListByTenant(masterCtx())
 	require.NoError(t, err)
 	assert.Len(t, identities, 1)
@@ -133,10 +128,9 @@ func TestBootstrapPlatformAdmin_SkipsWhenEnvVarsEmpty(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "")
 
-	err := bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
-
 	repo := persistence.NewRepository(db)
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
+
 	identities, err := repo.ListByTenant(masterCtx())
 	require.NoError(t, err)
 	assert.Empty(t, identities)
@@ -151,10 +145,9 @@ func TestBootstrapPlatformAdmin_SkipsWhenOnlyEmailSet(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "")
 
-	err := bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
-
 	repo := persistence.NewRepository(db)
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
+
 	identities, err := repo.ListByTenant(masterCtx())
 	require.NoError(t, err)
 	assert.Empty(t, identities)
@@ -170,10 +163,9 @@ func TestBootstrapPlatformAdmin_PasswordIsHashed(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", plaintext)
 
-	err := bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
-
 	repo := persistence.NewRepository(db)
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
+
 	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
 	require.NoError(t, err)
 
@@ -181,8 +173,7 @@ func TestBootstrapPlatformAdmin_PasswordIsHashed(t *testing.T) {
 	assert.NotEqual(t, plaintext, identity.PasswordHash())
 
 	// The hash must validate correctly against the plaintext.
-	err = credentials.ValidatePassword(plaintext, identity.PasswordHash())
-	require.NoError(t, err)
+	require.NoError(t, credentials.ValidatePassword(plaintext, identity.PasswordHash()))
 }
 
 // TestBootstrapPlatformAdmin_RolesAssigned verifies that the expected roles are assigned
@@ -194,10 +185,9 @@ func TestBootstrapPlatformAdmin_RolesAssigned(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
 
-	err := bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
-
 	repo := persistence.NewRepository(db)
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
+
 	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
 	require.NoError(t, err)
 
@@ -209,14 +199,13 @@ func TestBootstrapPlatformAdmin_RolesAssigned(t *testing.T) {
 	for _, ra := range assignments {
 		roleStrings = append(roleStrings, string(ra.Role()))
 	}
-
 	assert.Contains(t, roleStrings, "platform-admin")
 	assert.Contains(t, roleStrings, "super-admin")
 	assert.Contains(t, roleStrings, "tenant-owner")
 }
 
 // TestBootstrapPlatformAdmin_ReconcilesMissingRoles verifies that when an admin already
-// exists but is missing roles, subsequent bootstrap calls add the missing roles.
+// exists but is missing roles, subsequent bootstrap calls add the missing roles atomically.
 func TestBootstrapPlatformAdmin_ReconcilesMissingRoles(t *testing.T) {
 	db, cleanup := setupMasterTenantDB(t)
 	defer cleanup()
@@ -224,11 +213,11 @@ func TestBootstrapPlatformAdmin_ReconcilesMissingRoles(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
 
-	// First call: creates admin with all roles.
-	err := bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
-
 	repo := persistence.NewRepository(db)
+
+	// First call: creates admin with all roles.
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
+
 	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
 	require.NoError(t, err)
 
@@ -237,13 +226,11 @@ func TestBootstrapPlatformAdmin_ReconcilesMissingRoles(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, assignments)
 
-	// Revoke the first role.
 	require.NoError(t, assignments[0].Revoke(identity.ID()))
 	require.NoError(t, repo.SaveRoleAssignment(masterCtx(), assignments[0]))
 
 	// Second call: should reconcile and restore the missing role.
-	err = bootstrap.Run(context.Background(), db)
-	require.NoError(t, err)
+	require.NoError(t, bootstrap.Run(context.Background(), repo))
 
 	// All 3 roles must be active after reconciliation.
 	all, err := repo.FindRoleAssignments(masterCtx(), identity.ID())
@@ -255,7 +242,6 @@ func TestBootstrapPlatformAdmin_ReconcilesMissingRoles(t *testing.T) {
 			activeRoles = append(activeRoles, string(ra.Role()))
 		}
 	}
-
 	assert.Contains(t, activeRoles, "platform-admin")
 	assert.Contains(t, activeRoles, "super-admin")
 	assert.Contains(t, activeRoles, "tenant-owner")

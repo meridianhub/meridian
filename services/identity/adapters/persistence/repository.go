@@ -314,6 +314,45 @@ func (r *Repository) FindInvitationByTokenHash(ctx context.Context, tokenHash st
 	return invitation, nil
 }
 
+// SaveIdentityWithRoles atomically persists an identity and its role assignments
+// within a single transaction.
+func (r *Repository) SaveIdentityWithRoles(ctx context.Context, identity *domain.Identity, roles []*domain.RoleAssignment) error {
+	identEntity := ToEntity(identity)
+
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		// Insert identity (bootstrap always creates a new one).
+		if err := tx.Create(identEntity).Error; err != nil {
+			if isDuplicateKeyError(err) {
+				return domain.ErrEmailAlreadyExists
+			}
+			return err
+		}
+
+		// Insert all role assignments.
+		for _, ra := range roles {
+			entity := toRoleAssignmentEntity(ra)
+			if err := tx.Create(entity).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// SaveRoleAssignments atomically persists multiple role assignments within a
+// single transaction.
+func (r *Repository) SaveRoleAssignments(ctx context.Context, assignments []*domain.RoleAssignment) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		for _, ra := range assignments {
+			entity := toRoleAssignmentEntity(ra)
+			if err := tx.Create(entity).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // ErrVersionConflict is returned when an optimistic locking conflict is detected.
 var ErrVersionConflict = domain.ErrVersionConflict
 
