@@ -21,7 +21,7 @@ func TestSetServiceName(t *testing.T) {
 		{
 			name:     "sets default when empty",
 			input:    "",
-			expected: "utilization-metering-consumer",
+			expected: "event-router",
 		},
 	}
 

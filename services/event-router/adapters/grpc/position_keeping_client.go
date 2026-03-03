@@ -9,7 +9,7 @@ import (
 
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	"github.com/meridianhub/meridian/services/event-router/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"google.golang.org/grpc"

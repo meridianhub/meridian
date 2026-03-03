@@ -1,5 +1,5 @@
-// Package domain provides Prometheus metrics for the utilization-metering-consumer service.
-// This centralized consumer aggregates audit events from all services as utilization measurements.
+// Package domain provides Prometheus metrics for the event-router service.
+// This service routes events from Kafka channels to registered handlers.
 package domain
 
 import (
@@ -12,7 +12,7 @@ import (
 var (
 	// serviceName tracks which service the audit event originated from.
 	// This helps distinguish event sources in a centralized consumer.
-	serviceName   = "utilization-metering-consumer"
+	serviceName   = "event-router"
 	serviceNameMu sync.RWMutex
 
 	// eventsConsumedTotal counts audit events successfully consumed from Kafka.
@@ -122,7 +122,7 @@ var (
 // Not actively used in labels but maintained for consistency with other services.
 func SetServiceName(name string) {
 	if name == "" {
-		name = "utilization-metering-consumer"
+		name = "event-router"
 	}
 	serviceNameMu.Lock()
 	defer serviceNameMu.Unlock()

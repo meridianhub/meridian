@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	"github.com/meridianhub/meridian/services/event-router/domain"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/stretchr/testify/assert"

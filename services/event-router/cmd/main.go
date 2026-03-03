@@ -1,5 +1,6 @@
-// Package main is the entry point for the utilization-metering-consumer service.
-// This service consumes audit events from all services and transforms them into
+// Package main is the entry point for the event-router service.
+// This service routes events from Kafka channels to registered handlers.
+// The platform metering handler consumes audit events and transforms them into
 // utilization measurements for Meridian's tenant-zero position-keeping billing.
 package main
 
@@ -17,11 +18,11 @@ import (
 	"github.com/google/uuid"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/grpc"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/mds"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/adapters/messaging"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/app"
-	"github.com/meridianhub/meridian/services/utilization-metering-consumer/domain"
+	"github.com/meridianhub/meridian/services/event-router/adapters/grpc"
+	"github.com/meridianhub/meridian/services/event-router/adapters/mds"
+	"github.com/meridianhub/meridian/services/event-router/adapters/messaging"
+	"github.com/meridianhub/meridian/services/event-router/app"
+	"github.com/meridianhub/meridian/services/event-router/domain"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -101,7 +102,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting utilization-metering-consumer service",
+	logger.Info("starting event-router service",
 		"version", Version,
 		"commit", Commit,
 		"build_date", BuildDate)
@@ -260,7 +261,7 @@ func run(logger *slog.Logger) error {
 	kafkaConfig := kafka.ConsumerConfig{
 		BootstrapServers: config.KafkaBootstrapServers,
 		GroupID:          config.ConsumerGroupID,
-		ClientID:         "utilization-metering-consumer",
+		ClientID:         "event-router",
 		AutoOffsetReset:  "earliest",
 		EnableAutoCommit: false, // Manual commit for at-least-once semantics
 	}

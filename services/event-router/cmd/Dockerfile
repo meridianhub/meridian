@@ -1,4 +1,4 @@
-# Utilization Metering Consumer - Multi-Stage Dockerfile
+# Event Router - Multi-Stage Dockerfile
 # Optimized for security, size, and performance
 # Uses distroless base image (~2MB) enabled by pure-Go franz-go Kafka client
 
@@ -29,11 +29,11 @@ ARG BUILD_DATE=unknown
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags="-w -s -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
-    -o utilization-metering-consumer \
-    ./services/utilization-metering-consumer/cmd
+    -o event-router \
+    ./services/event-router/cmd
 
 # Verify the binary exists and is executable
-RUN test -x utilization-metering-consumer && echo "Binary built successfully"
+RUN test -x event-router && echo "Binary built successfully"
 
 # Runtime stage - distroless for minimal attack surface (~2MB base)
 FROM gcr.io/distroless/static-debian12
@@ -42,7 +42,7 @@ FROM gcr.io/distroless/static-debian12
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 # Copy binary from builder
-COPY --from=builder /build/utilization-metering-consumer /utilization-metering-consumer
+COPY --from=builder /build/event-router /event-router
 
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
@@ -53,4 +53,4 @@ EXPOSE 8080
 # Note: Health checks handled by HTTP endpoints (/healthz, /ready, /metrics)
 
 # Run the binary
-ENTRYPOINT ["/utilization-metering-consumer"]
+ENTRYPOINT ["/event-router"]

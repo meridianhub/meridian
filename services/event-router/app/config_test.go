@@ -11,7 +11,7 @@ func TestLoadConfig_Success(t *testing.T) {
 	// Set required environment variables
 	envVars := map[string]string{
 		"KAFKA_BOOTSTRAP_SERVERS":   "kafka:9092",
-		"CONSUMER_GROUP_ID":         "utilization-metering-consumer",
+		"CONSUMER_GROUP_ID":         "event-router",
 		"POSITION_KEEPING_ENDPOINT": "position-keeping:50051",
 		"TENANT_ZERO_ID":            "00000000-0000-0000-0000-000000000000",
 	}
@@ -43,8 +43,8 @@ func TestLoadConfig_Success(t *testing.T) {
 	if config.KafkaBootstrapServers != "kafka:9092" {
 		t.Errorf("Expected KafkaBootstrapServers to be 'kafka:9092', got '%s'", config.KafkaBootstrapServers)
 	}
-	if config.ConsumerGroupID != "utilization-metering-consumer" {
-		t.Errorf("Expected ConsumerGroupID to be 'utilization-metering-consumer', got '%s'", config.ConsumerGroupID)
+	if config.ConsumerGroupID != "event-router" {
+		t.Errorf("Expected ConsumerGroupID to be 'event-router', got '%s'", config.ConsumerGroupID)
 	}
 	if config.PositionKeepingEndpoint != "position-keeping:50051" {
 		t.Errorf("Expected PositionKeepingEndpoint to be 'position-keeping:50051', got '%s'", config.PositionKeepingEndpoint)
@@ -278,8 +278,8 @@ func TestLoadConfig_DefaultConsumerGroupID(t *testing.T) {
 		t.Fatalf("LoadConfig() failed: %v", err)
 	}
 
-	if config.ConsumerGroupID != "utilization-metering-consumer" {
-		t.Errorf("Expected ConsumerGroupID to be 'utilization-metering-consumer' (default), got '%s'", config.ConsumerGroupID)
+	if config.ConsumerGroupID != "event-router" {
+		t.Errorf("Expected ConsumerGroupID to be 'event-router' (default), got '%s'", config.ConsumerGroupID)
 	}
 }
 
