@@ -85,6 +85,8 @@ stateDiagram-v2
 | [Operational Gateway](029-operational-gateway.md) | Bidirectional asset-agnostic gateway for outbound instructions and inbound messages |
 | [AsyncAPI Specification](030-asyncapi-specification.md) | Formal AsyncAPI 3.0 specs for Kafka event contracts, mirroring OpenAPI for sync APIs |
 | [Event-Triggered Saga Execution](032-event-driven-valuation-saga.md) | Fourth saga trigger type (event:) for reactive workflows via domain events |
+| [Gateway Architecture](033-gateway-architecture.md) | Unified gateway architecture consolidating API, operational, and admin gateways |
+| [Frontend Service Alignment](034-frontend-service-alignment.md) | Service-aligned frontend modules, Storybook, and runtime tenant UI customisation |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -230,6 +232,8 @@ material.
 ### Integration & External Systems
 
 - [Operational Gateway](029-operational-gateway.md) - Asset-agnostic control signal gateway for outbound instructions
+- [Gateway Architecture](033-gateway-architecture.md) -
+  Unified gateway architecture consolidating API, operational, and admin gateways
 - [Structured Mapping Layer](024-structured-inbound-mapping.md) - Bidirectional JSON mapping engine for data transformation
 - [Real-Time Event Streaming](025-real-time-event-streaming.md) - WebSocket event delivery for operations console
 - [AsyncAPI Specification](030-asyncapi-specification.md) - Formal AsyncAPI 3.0 specs for Kafka event contracts
@@ -237,6 +241,8 @@ material.
 ### Operations & SaaS
 
 - [Control Plane](014-control-plane.md) - SaaS operations layer for manifest management
+- [Frontend Service Alignment](034-frontend-service-alignment.md) -
+  Service-aligned frontend modules, Storybook, and runtime tenant UI customisation
 - [MCP Server](027-mcp-server.md) - Model Context Protocol server bridging LLMs to Meridian Core
 - [Codebase Health Audit](012-codebase-health-audit.md) - Remediation for documentation, CI/CD, and code hygiene
 - [Production Readiness Review](009-production-readiness-review.md) - Audit and remediation for production gaps
