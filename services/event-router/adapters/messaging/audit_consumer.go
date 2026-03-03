@@ -83,9 +83,10 @@ func NewAuditConsumer(
 		return &auditv1.AuditEvent{}
 	}
 
-	// Handler delegates to the PlatformMeteringHandler via EventHandler interface
+	// Handler delegates to the PlatformMeteringHandler via EventHandler interface.
+	// Channel is set to "audit.events" as this consumer always handles audit event topics.
 	kafkaHandler := func(ctx context.Context, _ []byte, msg proto.Message) error {
-		return ac.handler.Handle(ctx, "", msg, nil)
+		return ac.handler.Handle(ctx, "audit.events", msg, nil)
 	}
 
 	consumer, err := kafka.NewProtoConsumer(config, msgFactory, kafkaHandler)
@@ -97,8 +98,14 @@ func NewAuditConsumer(
 	return ac, nil
 }
 
+// ErrNoTopics is returned when Start is called with an empty topics list.
+var ErrNoTopics = errors.New("at least one topic is required")
+
 // Start begins consuming AuditEvent messages from the specified topics.
 func (ac *AuditConsumer) Start(topics []string) error {
+	if len(topics) == 0 {
+		return ErrNoTopics
+	}
 	ac.logger.Info("starting audit consumer",
 		"topics", topics,
 		"mds_enabled", ac.handler.HasMDSPublisher())

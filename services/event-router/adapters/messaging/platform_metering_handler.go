@@ -97,8 +97,11 @@ func (h *PlatformMeteringHandler) handleAuditEvent(ctx context.Context, channel 
 		"operation", event.Operation.String(),
 		"channel", channel)
 
-	// Derive topic from schema name (format: "<schema-name>.audit.events")
-	topic := event.SchemaName + ".audit.events"
+	// Use channel as topic label when available, otherwise derive from schema name
+	topic := channel
+	if topic == "" {
+		topic = event.SchemaName + ".audit.events"
+	}
 
 	domain.RecordEventConsumed(event.SchemaName, topic)
 
