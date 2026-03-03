@@ -131,7 +131,7 @@ jobs:
           echo "✅ All $TOTAL_SCRIPTS saga script(s) validated successfully"
 
       - name: Upload validation report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: saga-validation-report

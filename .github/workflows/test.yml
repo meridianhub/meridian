@@ -68,7 +68,7 @@ jobs:
             -- -short -race -coverprofile=coverage/coverage.out -covermode=atomic $shard_pkgs
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-shard-${{ matrix.shard_index }}
@@ -76,7 +76,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload test results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-shard-${{ matrix.shard_index }}
@@ -162,7 +162,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/

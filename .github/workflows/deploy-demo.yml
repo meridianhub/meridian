@@ -118,7 +118,7 @@ jobs:
         run: npx vite build
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
           path: frontend/dist/
