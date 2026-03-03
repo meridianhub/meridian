@@ -116,6 +116,28 @@ func (m *mockRepository) SaveIdentityWithInvitation(_ context.Context, identity 
 	return nil
 }
 
+func (m *mockRepository) SaveIdentityWithRoles(_ context.Context, identity *domain.Identity, roles []*domain.RoleAssignment) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.identities[identity.ID()] = identity
+	m.identByEmail[identity.Email()] = identity
+	for _, ra := range roles {
+		m.roles[ra.IdentityID()] = append(m.roles[ra.IdentityID()], ra)
+	}
+	return nil
+}
+
+func (m *mockRepository) SaveRoleAssignments(_ context.Context, assignments []*domain.RoleAssignment) error {
+	if m.saveRoleErr != nil {
+		return m.saveRoleErr
+	}
+	for _, ra := range assignments {
+		m.roles[ra.IdentityID()] = append(m.roles[ra.IdentityID()], ra)
+	}
+	return nil
+}
+
 func (m *mockRepository) SaveInvitation(_ context.Context, invitation *domain.Invitation) error {
 	if m.saveInvitationErr != nil {
 		return m.saveInvitationErr
