@@ -44,7 +44,7 @@ func celValidateTool() Tool {
 				},
 				"environment": map[string]interface{}{
 					"type":        "string",
-					"enum":        []interface{}{"validation", "bucket_key", "eligibility"},
+					"enum":        []interface{}{"validation", "bucket_key", "eligibility", "event_filter"},
 					"description": "Which CEL environment to compile against (determines available variables)",
 				},
 			},
@@ -138,8 +138,13 @@ func createCELEnvironment(envName string) (*cel.Env, error) {
 			cel.Variable("party", cel.MapType(cel.StringType, cel.StringType)),
 			cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
 		)
+	case "event_filter":
+		return cel.NewEnv(
+			cel.Variable("event", cel.DynType),
+			cel.Variable("metadata", cel.MapType(cel.StringType, cel.StringType)),
+		)
 	default:
-		return nil, fmt.Errorf("%w: %q (must be one of validation, bucket_key, eligibility)", ErrUnknownCELEnvironment, envName)
+		return nil, fmt.Errorf("%w: %q (must be one of validation, bucket_key, eligibility, event_filter)", ErrUnknownCELEnvironment, envName)
 	}
 }
 
