@@ -1,0 +1,207 @@
+// Package connector implements a local Dex password connector that validates
+// credentials directly against the identity domain layer without a network hop.
+//
+// Dex supports pluggable connectors via the connector.PasswordConnector interface.
+// Since Meridian runs Dex in the same process (or tightly coupled), this connector
+// bypasses HTTP/gRPC overhead by calling the domain repository directly.
+//
+// The connector:
+//   - Resolves the tenant from context metadata (set by the gateway from subdomain)
+//   - Looks up the identity by email within that tenant scope
+//   - Validates the password using bcrypt via the credentials package
+//   - Checks account status (locked, suspended, pending invite → reject)
+//   - Queries active role assignments and maps them to Dex groups
+//   - Returns a connector.Identity with groups populated for JWT claim injection
+package connector
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+
+	"github.com/meridianhub/meridian/services/identity/domain"
+	"github.com/meridianhub/meridian/shared/pkg/credentials"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
+)
+
+// Identity represents the result of a successful authentication, compatible with
+// Dex's connector.Identity shape. Groups are populated with the identity's active roles
+// and are injected into the JWT as the "groups" claim by Dex.
+type Identity struct {
+	// UserID is the stable identifier for the user (UUID string).
+	UserID string
+	// Username is the display name, defaulting to email if not set.
+	Username string
+	// Email is the verified email address.
+	Email string
+	// EmailVerified indicates whether the email has been verified.
+	EmailVerified bool
+	// Groups contains active role assignments, used to populate JWT group claims.
+	Groups []string
+	// ConnectorData is opaque bytes stored by Dex for refresh token support.
+	ConnectorData []byte
+}
+
+// LoginResult is returned by Login to convey both success state and the identity.
+type LoginResult struct {
+	Identity Identity
+	// Valid is true when authentication succeeded.
+	Valid bool
+}
+
+// PasswordConnector validates username/password credentials.
+// This interface mirrors Dex's connector.PasswordConnector to keep the implementation
+// decoupled from the Dex library (which is not a declared Go module dependency).
+type PasswordConnector interface {
+	// Login validates credentials and returns the identity on success.
+	// valid is false when credentials are incorrect without an underlying error.
+	Login(ctx context.Context, scopes []string, username, password string) (identity Identity, valid bool, err error)
+}
+
+// ErrRepositoryNil is returned by New when a nil repository is provided.
+var ErrRepositoryNil = errors.New("connector: repository must not be nil")
+
+// Connector is the local implementation of PasswordConnector.
+// It performs credential validation and role resolution directly against the
+// identity domain repository, avoiding any network hop.
+type Connector struct {
+	repo   domain.Repository
+	logger *slog.Logger
+}
+
+// New creates a Connector with the given repository. If logger is nil a default
+// JSON logger writing to stdout is used.
+func New(repo domain.Repository, logger *slog.Logger) (*Connector, error) {
+	if repo == nil {
+		return nil, ErrRepositoryNil
+	}
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	}
+	return &Connector{repo: repo, logger: logger}, nil
+}
+
+// Login validates the supplied username (email) and password against the identity
+// domain within the tenant derived from ctx.
+//
+// Returns:
+//   - (identity, true, nil) on success
+//   - (zero, false, nil) when credentials are simply wrong (no programming error)
+//   - (zero, false, err) only for unexpected infrastructure errors
+func (c *Connector) Login(ctx context.Context, _ []string, username, password string) (Identity, bool, error) {
+	tenantID, err := tenant.RequireFromContext(ctx)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "connector: tenant context missing during login",
+			"username", username,
+			"error", err)
+		return Identity{}, false, fmt.Errorf("connector: %w", err)
+	}
+
+	identity, err := c.repo.FindByEmail(ctx, username)
+	if err != nil {
+		if errors.Is(err, domain.ErrIdentityNotFound) {
+			c.logger.InfoContext(ctx, "connector: identity not found",
+				"tenant_id", tenantID,
+				"username", username)
+			return Identity{}, false, nil
+		}
+		c.logger.ErrorContext(ctx, "connector: repository error looking up identity",
+			"tenant_id", tenantID,
+			"username", username,
+			"error", err)
+		return Identity{}, false, fmt.Errorf("connector: lookup identity: %w", err)
+	}
+
+	// Reject non-active accounts before any password check.
+	switch identity.Status() {
+	case domain.IdentityStatusLocked:
+		c.logger.InfoContext(ctx, "connector: login rejected — account locked",
+			"tenant_id", tenantID,
+			"identity_id", identity.ID())
+		return Identity{}, false, nil
+	case domain.IdentityStatusSuspended:
+		c.logger.InfoContext(ctx, "connector: login rejected — account suspended",
+			"tenant_id", tenantID,
+			"identity_id", identity.ID())
+		return Identity{}, false, nil
+	case domain.IdentityStatusPendingInvite:
+		c.logger.InfoContext(ctx, "connector: login rejected — account not yet activated",
+			"tenant_id", tenantID,
+			"identity_id", identity.ID())
+		return Identity{}, false, nil
+	case domain.IdentityStatusActive:
+		// valid — proceed to password verification
+	default:
+		c.logger.WarnContext(ctx, "connector: login rejected — unknown account status",
+			"tenant_id", tenantID,
+			"identity_id", identity.ID(),
+			"status", identity.Status())
+		return Identity{}, false, nil
+	}
+
+	if err := credentials.ValidatePassword(password, identity.PasswordHash()); err != nil {
+		// Record the failed attempt; best-effort — do not surface save errors to caller.
+		_ = identity.RecordLoginAttempt(false)
+		if saveErr := c.repo.Save(ctx, identity); saveErr != nil {
+			c.logger.ErrorContext(ctx, "connector: failed to persist failed login attempt",
+				"identity_id", identity.ID(),
+				"error", saveErr)
+		}
+		c.logger.InfoContext(ctx, "connector: invalid password",
+			"tenant_id", tenantID,
+			"identity_id", identity.ID())
+		return Identity{}, false, nil
+	}
+
+	// Record successful login; best-effort.
+	_ = identity.RecordLoginAttempt(true)
+	if saveErr := c.repo.Save(ctx, identity); saveErr != nil {
+		c.logger.ErrorContext(ctx, "connector: failed to persist successful login",
+			"identity_id", identity.ID(),
+			"error", saveErr)
+	}
+
+	// Resolve active role assignments → Dex groups.
+	groups, err := c.activeRoles(ctx, identity)
+	if err != nil {
+		// Non-fatal: log and proceed with empty groups rather than denying login.
+		c.logger.ErrorContext(ctx, "connector: failed to load role assignments",
+			"identity_id", identity.ID(),
+			"error", err)
+		groups = []string{}
+	}
+
+	connIdentity := Identity{
+		UserID:        identity.ID().String(),
+		Username:      identity.Email(),
+		Email:         identity.Email(),
+		EmailVerified: true,
+		Groups:        groups,
+	}
+
+	c.logger.InfoContext(ctx, "connector: login successful",
+		"tenant_id", tenantID,
+		"identity_id", identity.ID(),
+		"roles", groups)
+
+	return connIdentity, true, nil
+}
+
+// activeRoles returns the string role names for all non-revoked, non-expired
+// role assignments associated with the given identity.
+func (c *Connector) activeRoles(ctx context.Context, identity *domain.Identity) ([]string, error) {
+	assignments, err := c.repo.FindRoleAssignments(ctx, identity.ID())
+	if err != nil {
+		return nil, fmt.Errorf("find role assignments: %w", err)
+	}
+
+	roles := make([]string, 0, len(assignments))
+	for _, a := range assignments {
+		if a.IsActive() {
+			roles = append(roles, string(a.Role()))
+		}
+	}
+	return roles, nil
+}
