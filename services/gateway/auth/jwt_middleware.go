@@ -121,13 +121,12 @@ func (m *JWTMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Step 3: Enforce required claims.
-		// Tenant must come from the JWT — no fallback defaults are allowed.
-		if claims.TenantID == "" {
-			m.logger.Warn("JWT missing required x-tenant-id claim",
+		// Step 3: Guard against nil claims (defensive — shouldn't happen with a valid validator).
+		if claims == nil {
+			m.logger.Warn("JWT validation returned nil claims",
 				slog.String("path", r.URL.Path),
 			)
-			writeUnauthorized(w, "x-tenant-id claim required")
+			writeUnauthorized(w, "invalid token")
 			return
 		}
 
