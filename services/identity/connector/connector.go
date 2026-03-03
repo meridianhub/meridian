@@ -94,7 +94,6 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 	tenantID, err := tenant.RequireFromContext(ctx)
 	if err != nil {
 		c.logger.ErrorContext(ctx, "connector: tenant context missing during login",
-			"username", username,
 			"error", err)
 		return Identity{}, false, fmt.Errorf("connector: %w", err)
 	}
@@ -103,8 +102,7 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 	if err != nil {
 		if errors.Is(err, domain.ErrIdentityNotFound) {
 			c.logger.InfoContext(ctx, "connector: identity not found",
-				"tenant_id", tenantID,
-				"username", username)
+				"tenant_id", tenantID)
 			return Identity{}, false, nil
 		}
 		c.logger.ErrorContext(ctx, "connector: repository error looking up identity",
