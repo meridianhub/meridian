@@ -46,30 +46,48 @@ func hashTenantID(tenantID tenant.TenantID) string {
 //	    return tx.Create(&entity).Error
 //	})
 func WithGormTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
+	return WithGormTenantScopeAndLogger(ctx, tx, slog.Default())
+}
+
+// WithGormTenantScopeAndLogger is like WithGormTenantScope but accepts an explicit logger.
+// This enables structured audit logging with service-level attributes pre-configured
+// on the logger (e.g., service name).
+//
+// On success, emits an INFO-level "tenant.schema.access" audit log with tenant and schema fields.
+func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog.Logger) (*gorm.DB, error) {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
-		slog.DebugContext(ctx, "tenant scope: missing tenant context, returning error")
+		logger.DebugContext(ctx, "tenant scope: missing tenant context, returning error")
 		return nil, tenant.ErrMissingTenantContext
 	}
 
+	schema := tenantID.SchemaName()
+
 	// Quote the schema name to prevent SQL injection
 	// pq.QuoteIdentifier handles special characters safely
-	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
+	quotedSchema := pq.QuoteIdentifier(schema)
 
 	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback.
-	// fmt.Sprintf is safe here because schemaName is already quoted by pq.QuoteIdentifier above,
+	// fmt.Sprintf is safe here because quotedSchema is already quoted by pq.QuoteIdentifier above,
 	// which properly escapes any special characters including quotes and null bytes.
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", quotedSchema)
 	if err := tx.Exec(query).Error; err != nil {
-		slog.ErrorContext(ctx, "tenant scope: failed to set search_path",
+		logger.ErrorContext(ctx, "tenant scope: failed to set search_path",
 			"tenant_hash", hashTenantID(tenantID),
 			"error", err)
 		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
 	}
 
-	slog.DebugContext(ctx, "tenant scope: search_path set successfully",
-		"tenant_hash", hashTenantID(tenantID))
-	return tx, nil
+	// Audit log: emitted on every successful schema access for forensic traceability.
+	// Service-level attributes (e.g., "service") should be pre-set on the logger at startup.
+	logger.InfoContext(ctx, "tenant.schema.access",
+		"tenant", tenantID.String(),
+		"schema", schema,
+	)
+
+	// Mark context so TenantGuard knows scope was applied
+	scopedCtx := withTenantScopeSet(ctx)
+	return tx.WithContext(scopedCtx), nil
 }
 
 // MustWithGormTenantScope is like WithGormTenantScope but panics on error.
