@@ -45,6 +45,7 @@ func (r *Repository) Save(ctx context.Context, identity *domain.Identity) error 
 				}
 				return err
 			}
+			identity.UpdateBaseVersion(entity.Version)
 			return nil
 		}
 
@@ -53,12 +54,12 @@ func (r *Repository) Save(ctx context.Context, identity *domain.Identity) error 
 		}
 
 		// Existing identity — optimistic locking update.
-		// The domain increments Version on each mutation, so entity.Version is the
-		// target version and the expected DB version is entity.Version-1.
-		expectedDBVersion := entity.Version - 1
-
+		// We use identity.BaseVersion() as the WHERE guard: it records the version
+		// that was in the DB when the identity was loaded (set by ReconstructIdentity or
+		// after a prior successful save via UpdateBaseVersion).
+		// This correctly handles multiple domain mutations between load and save.
 		updateResult := tx.Model(&IdentityEntity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, expectedDBVersion).
+			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, identity.BaseVersion()).
 			Updates(map[string]interface{}{
 				"email":           entity.Email,
 				"status":          entity.Status,
@@ -81,6 +82,7 @@ func (r *Repository) Save(ctx context.Context, identity *domain.Identity) error 
 			return ErrVersionConflict
 		}
 
+		identity.UpdateBaseVersion(entity.Version)
 		return nil
 	})
 }
@@ -234,15 +236,18 @@ func (r *Repository) SaveIdentityWithInvitation(ctx context.Context, identity *d
 				}
 				return err
 			}
+			identity.UpdateBaseVersion(identEntity.Version)
 			return nil
 		}
 		if identResult.Error != nil {
 			return identResult.Error
 		}
 
-		expectedDBVersion := identEntity.Version - 1
+		// Use identity.BaseVersion() as the optimistic lock guard.
+		// BaseVersion records the DB version at load time; multiple mutations may
+		// occur between load and save, so this is more correct than identEntity.Version-1.
 		updateResult := tx.Model(&IdentityEntity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", identEntity.ID, expectedDBVersion).
+			Where("id = ? AND version = ? AND deleted_at IS NULL", identEntity.ID, identity.BaseVersion()).
 			Updates(map[string]interface{}{
 				"email":           identEntity.Email,
 				"status":          identEntity.Status,
@@ -262,6 +267,7 @@ func (r *Repository) SaveIdentityWithInvitation(ctx context.Context, identity *d
 		if updateResult.RowsAffected == 0 {
 			return ErrVersionConflict
 		}
+		identity.UpdateBaseVersion(identEntity.Version)
 		return nil
 	})
 }
@@ -327,6 +333,7 @@ func (r *Repository) SaveIdentityWithRoles(ctx context.Context, identity *domain
 			}
 			return err
 		}
+		identity.UpdateBaseVersion(identEntity.Version)
 
 		// Insert all role assignments.
 		for _, ra := range roles {
