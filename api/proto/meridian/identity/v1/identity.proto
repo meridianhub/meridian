@@ -412,6 +412,11 @@ message RequestPasswordResetRequest {
 message RequestPasswordResetResponse {
   // email is the email address to which the reset token was sent.
   string email = 1;
+
+  // reset_token is the plaintext reset token. In production this would be
+  // delivered out-of-band (email); it is included in the response until an
+  // email delivery integration is available.
+  string reset_token = 2;
 }
 
 // CompletePasswordResetRequest is the request to complete a password reset using a reset token.
@@ -536,6 +541,11 @@ message InviteUserResponse {
 
   // identity is the newly created identity in PENDING_INVITE status.
   Identity identity = 2 [(buf.validate.field).required = true];
+
+  // invitation_token is the plaintext invitation token. In production this
+  // would be delivered out-of-band (email); it is included in the response
+  // until an email delivery integration is available.
+  string invitation_token = 3;
 }
 
 // AcceptInvitationRequest is the request to accept a pending invitation.
