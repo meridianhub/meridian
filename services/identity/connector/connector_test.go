@@ -70,6 +70,14 @@ func (m *mockRepo) SaveIdentityWithInvitation(_ context.Context, _ *domain.Ident
 	return errors.New("not implemented")
 }
 
+func (m *mockRepo) SaveIdentityWithRoles(_ context.Context, _ *domain.Identity, _ []*domain.RoleAssignment) error {
+	return errors.New("not implemented")
+}
+
+func (m *mockRepo) SaveRoleAssignments(_ context.Context, _ []*domain.RoleAssignment) error {
+	return errors.New("not implemented")
+}
+
 func (m *mockRepo) SaveInvitation(_ context.Context, _ *domain.Invitation) error {
 	return errors.New("not implemented")
 }
