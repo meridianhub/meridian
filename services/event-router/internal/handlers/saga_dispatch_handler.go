@@ -109,6 +109,13 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 	}
 
 	idempotencyKey := extractCorrelationID(metadata)
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.New().String()
+		h.logger.WarnContext(ctx, "no correlation ID in metadata, generated UUID as idempotency key — Kafka redelivery may cause duplicate saga executions",
+			"channel", channel,
+			"generated_key", idempotencyKey,
+		)
+	}
 
 	for _, cs := range sagas {
 		sagaName := cs.Definition.GetName()
@@ -179,10 +186,11 @@ func extractChainDepth(metadata map[string]string) int {
 	return depth
 }
 
-// extractCorrelationID reads the correlation ID from metadata, generating a UUID if absent.
+// extractCorrelationID reads the correlation ID from metadata.
+// Returns empty string if absent — caller is responsible for fallback and logging.
 func extractCorrelationID(metadata map[string]string) string {
 	if id, ok := metadata[correlationIDHeader]; ok && id != "" {
 		return id
 	}
-	return uuid.New().String()
+	return ""
 }
