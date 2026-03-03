@@ -3,16 +3,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: utilization-metering-consumer
+  name: event-router
   labels:
-    app: utilization-metering-consumer
+    app: event-router
     component: consumer
     tier: backend
 spec:
   replicas: 1  # Single deployment for centralized consumption
   selector:
     matchLabels:
-      app: utilization-metering-consumer
+      app: event-router
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -21,7 +21,7 @@ spec:
   template:
     metadata:
       labels:
-        app: utilization-metering-consumer
+        app: event-router
         component: consumer
         tier: backend
     spec:
@@ -60,8 +60,8 @@ spec:
             drop:
             - ALL
       containers:
-      - name: utilization-metering-consumer
-        image: utilization-metering-consumer:latest
+      - name: event-router
+        image: event-router:latest
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
@@ -69,7 +69,7 @@ spec:
           protocol: TCP
         envFrom:
         - configMapRef:
-            name: utilization-metering-consumer-config
+            name: event-router-config
         env:
         - name: POD_NAME
           valueFrom:
@@ -141,14 +141,14 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: utilization-metering-consumer-hpa
+  name: event-router-hpa
   labels:
-    app: utilization-metering-consumer
+    app: event-router
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: utilization-metering-consumer
+    name: event-router
   minReplicas: 1
   maxReplicas: 5
   metrics:
