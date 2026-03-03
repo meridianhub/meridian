@@ -529,13 +529,31 @@ Schema update: remove "amount_cents" from TransactionCapturedEvent
 This is analogous to a database migration that refuses to drop a column while a view
 still references it. The AsyncAPI spec is the schema, the sagas are the views.
 
+**Tenancy scoping:**
+
+AsyncAPI specs are **platform-level** — `TransactionCapturedEvent` has the same fields
+regardless of tenant. Saga definitions are **tenant-level** — different tenants configure
+different scripts against the same channels. This means the two validation directions
+have different blast radii:
+
+| Direction | Trigger | Scope | Frequency |
+|-----------|---------|-------|-----------|
+| Saga → Spec (forward) | Tenant applies manifest | Single tenant's sagas | Per tenant deployment |
+| Spec → Saga (backward) | Platform evolves event proto | ALL tenants' sagas on affected channel | Per platform release |
+
+The backward check (spec → sagas) is cross-tenant: when the platform removes a field
+from `TransactionCapturedEvent`, every tenant's sagas subscribing to
+`position-keeping.transaction-captured.v1` must be checked. This happens at platform
+deployment time (rare, planned), not at runtime (frequent). The scan is bounded by the
+number of active sagas per channel.
+
 **The bidirectional constraint:**
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
 │                    reference-data                        │
 │                                                         │
-│  AsyncAPI Specs              Saga Definitions            │
+│  AsyncAPI Specs (platform)   Saga Definitions (tenant)   │
 │  (channel schemas)           (Starlark scripts)          │
 │                                                         │
 │  ┌──────────────┐    ←──→    ┌──────────────┐           │
@@ -544,7 +562,7 @@ still references it. The AsyncAPI spec is the schema, the sagas are the views.
 │  │   types      │            │   accesses   │           │
 │  └──────────────┘            └──────────────┘           │
 │                                                         │
-│  Version N                   Version M                   │
+│  Version N (platform)        Version M (per tenant)      │
 │  (spec evolution)            (saga evolution)             │
 │                                                         │
 │  Neither side can break the other without explicit       │
@@ -578,6 +596,41 @@ can offer:
 - **Reject** — refuse the spec update until sagas are migrated
 - **Warn** — accept with explicit acknowledgement (force flag), log affected sagas
 - **Migration plan** — list which sagas need updating, what fields they access
+
+#### Validation layers
+
+The event schema is platform-level (same proto for all tenants), but the entities that
+sagas resolve from the event are tenant-configured. This creates three validation layers:
+
+| Layer | Example | Scope | At manifest apply? |
+|-------|---------|-------|-------------------|
+| Event schema | `input_data["instrument_code"]` exists in proto | Platform | Yes — AsyncAPI spec |
+| Entity definitions | `reference_data.get_account_type("METERED_USAGE")` resolves | Tenant | Yes — tenant's ref data exists |
+| Entity attributes | `account_type.metadata["billing_account_id"]` exists | Tenant | Partial — if entity schema defines expected keys |
+
+Layer 1 (event schema) is the bidirectional validation described above — AsyncAPI specs
+vs saga `input_data` accesses.
+
+Layer 2 (entity definitions) is also validateable at manifest apply time: if a saga
+hard-codes `reference_data.get_account_type(code="METERED_USAGE")`, the platform can
+check that the tenant's reference data contains an account type with that code. The
+backward direction also applies: if a tenant deletes an account type that an active saga
+references, the deletion can be rejected or flagged.
+
+Layer 3 (entity attributes) depends on how structured the entity definitions are. An
+instrument definition with a formal attribute schema (e.g., `KWH` instrument declares
+`settlement_period: string`) enables validation of attribute accesses in saga scripts. An
+instrument with free-form metadata (`map<string, string>`) cannot be statically validated.
+
+The AsyncAPI spec is tenant-agnostic because the event proto is the same for all tenants.
+But the sagas that consume those events are tenant-specific — they reference
+tenant-configured instruments, account types, and party structures. The entity graph
+definitions in reference-data bridge this gap: they are tenant-scoped and their schemas
+can be used for deeper validation beyond what the event payload alone provides.
+
+All three layers share the same principle: reference-data stores both the definitions
+(specs, entity schemas) and the consumers (saga scripts), enabling bidirectional checks
+at each layer.
 
 ## 3. What Already Exists
 
