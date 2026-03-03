@@ -1020,14 +1020,15 @@ func (v *ManifestValidator) validateEventTrigger(
 	channel := strings.TrimPrefix(saga.GetTrigger(), "event:")
 
 	if !v.channelRegistry[channel] {
+		availableChans := v.availableChannels()
 		ve := ValidationError{
 			Severity:        SeverityError,
 			Path:            path + ".trigger",
 			Code:            "INVALID_EVENT_CHANNEL",
 			Message:         fmt.Sprintf("unknown event channel %q; must be a registered topic", channel),
-			AvailableFields: v.availableChannels(),
+			AvailableFields: availableChans,
 		}
-		if suggestion := findClosestMatch(channel, v.availableChannels()); suggestion != "" {
+		if suggestion := findClosestMatch(channel, availableChans); suggestion != "" {
 			ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
 		}
 		addError(result, ve)
