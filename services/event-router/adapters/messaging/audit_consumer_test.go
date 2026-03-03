@@ -218,7 +218,7 @@ func TestNewAuditConsumer_WithMDSPublisher(t *testing.T) {
 		_ = consumer.Close()
 	}()
 
-	assert.NotNil(t, consumer.mdPublisher, "MDS publisher should be set via option")
+	assert.True(t, consumer.handler.HasMDSPublisher(), "MDS publisher should be set via option")
 }
 
 func TestAuditConsumer_handleAuditEvent_ValidEvent(t *testing.T) {
@@ -251,7 +251,7 @@ func TestAuditConsumer_handleAuditEvent_ValidEvent(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 
 	require.NoError(t, err)
 
@@ -291,22 +291,12 @@ func TestAuditConsumer_handleAuditEvent_InvalidProto(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid audit event")
 	assert.Empty(t, mockPK.getMeasurements(), "No measurements should be recorded for invalid events")
 }
-
-// TestAuditConsumer_handleAuditEvent_TransformationError is tested indirectly
-// through the transformer's own unit tests which validate error scenarios.
-// The real transformer returns ErrInvalidAuditEvent for nil events.
-
-// TestAuditConsumer_handleAuditEvent_TransformerReturnsNil tests the scenario
-// where the transformer filters out an event (returns nil measurement).
-// Note: Current transformer implementation never returns nil, but the consumer
-// is designed to handle it. This test documents expected behavior for when
-// filtering is implemented in the transformer.
 
 func TestAuditConsumer_handleAuditEvent_PositionKeepingError(t *testing.T) {
 	transformer := newTestTransformer()
@@ -342,7 +332,7 @@ func TestAuditConsumer_handleAuditEvent_PositionKeepingError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to record measurement")
@@ -392,7 +382,7 @@ func TestAuditConsumer_handleAuditEvent_AllServiceTypes(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			err = consumer.handleAuditEvent(ctx, event)
+			err = consumer.handler.Handle(ctx, "", event, nil)
 
 			require.NoError(t, err)
 			require.Len(t, mockPK.getMeasurements(), 1)
@@ -439,7 +429,7 @@ func TestAuditConsumer_handleAuditEvent_AllOperationTypes(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			err = consumer.handleAuditEvent(ctx, event)
+			err = consumer.handler.Handle(ctx, "", event, nil)
 
 			require.NoError(t, err)
 			require.Len(t, mockPK.getMeasurements(), 1)
@@ -493,7 +483,7 @@ func TestAuditConsumer_handleAuditEvent_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to record measurement")
@@ -653,7 +643,7 @@ func TestAuditConsumer_DualOutput_BothReceiveCalls(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 	require.NoError(t, err)
 
 	// Verify PK received the measurement
@@ -720,7 +710,7 @@ func TestAuditConsumer_DualOutput_PKFailurePreventsOnlyMDSCall(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 
 	require.Error(t, err, "PK failure should short-circuit")
 	assert.Contains(t, err.Error(), "failed to record measurement")
@@ -769,7 +759,7 @@ func TestAuditConsumer_DualOutput_MDSFailureDoesNotBlockPK(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 
 	// Should succeed - MDS panic should NOT block the handler
 	require.NoError(t, err, "MDS failure should not block PK path")
@@ -817,7 +807,7 @@ func TestAuditConsumer_DualOutput_WithoutMDSPublisher(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = consumer.handleAuditEvent(ctx, event)
+	err = consumer.handler.Handle(ctx, "", event, nil)
 
 	require.NoError(t, err, "Should work fine without MDS publisher")
 
@@ -867,7 +857,7 @@ func TestAuditConsumer_DualOutput_MultipleEvents(t *testing.T) {
 				"tenant_id": "00000000-0000-0000-0000-000000000000",
 			},
 		}
-		err = consumer.handleAuditEvent(ctx, event)
+		err = consumer.handler.Handle(ctx, "", event, nil)
 		require.NoError(t, err, "Event %d should succeed", i)
 	}
 
@@ -877,4 +867,16 @@ func TestAuditConsumer_DualOutput_MultipleEvents(t *testing.T) {
 			len(mockMDS.getMeasurements()) == eventCount
 	})
 	require.NoError(t, err, "Both PK and MDS should receive all %d events", eventCount)
+}
+
+// TestPlatformMeteringHandler_ImplementsEventHandler verifies the interface contract.
+func TestPlatformMeteringHandler_ImplementsEventHandler(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	handler, err := NewPlatformMeteringHandler(transformer, mockPK)
+	require.NoError(t, err)
+
+	// Verify it implements domain.EventHandler
+	var _ domain.EventHandler = handler
 }
