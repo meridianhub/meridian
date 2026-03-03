@@ -34,7 +34,8 @@ type ManifestClientConfig struct {
 	// ServiceName is the Kubernetes service name (e.g., "control-plane").
 	ServiceName string
 
-	// Namespace is the Kubernetes namespace (defaults to "default" if empty).
+	// Namespace is the Kubernetes namespace. Empty string defaults to "default"
+	// (handled by platformgrpc.NewClient).
 	Namespace string
 
 	// Port is the service gRPC port number.
