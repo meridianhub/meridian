@@ -14,10 +14,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	platformdb "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"gorm.io/gorm"
 )
 
 // MasterTenantID is the well-known tenant ID for the master/platform tenant.
@@ -38,9 +41,10 @@ var platformAdminRoles = []auth.Role{
 //   - PLATFORM_ADMIN_PASSWORD: Initial password for the platform admin
 //
 // If either variable is empty, the function logs an info message and returns nil.
-// If an admin identity already exists in meridian_master, the function skips
-// creation and returns nil (idempotent).
-func Run(ctx context.Context, repo domain.Repository) error {
+// The function is idempotent:
+//   - If an admin already exists, any missing roles are reconciled.
+//   - Identity creation and role assignments are committed atomically.
+func Run(ctx context.Context, db *gorm.DB) error {
 	email := os.Getenv("PLATFORM_ADMIN_EMAIL")
 	password := os.Getenv("PLATFORM_ADMIN_PASSWORD")
 
@@ -55,50 +59,121 @@ func Run(ctx context.Context, repo domain.Repository) error {
 	}
 	masterCtx := tenant.WithTenant(ctx, masterTenantID)
 
-	// Check if an admin already exists.
+	repo := persistence.NewRepository(db)
+
+	// Check if an admin already exists (outside the transaction — idempotency guard).
 	existing, err := repo.FindByEmail(masterCtx, email)
 	if err != nil && !errors.Is(err, domain.ErrIdentityNotFound) {
 		return fmt.Errorf("checking for existing platform admin: %w", err)
 	}
+
 	if existing != nil {
-		slog.InfoContext(masterCtx, "platform admin already exists, skipping bootstrap",
-			"email", email)
-		return nil
+		// Admin already exists — reconcile any missing roles atomically.
+		return reconcileRoles(masterCtx, db, existing)
 	}
 
-	// Hash the password before creating the identity.
+	// Hash the password before opening the transaction.
 	hash, err := credentials.HashPassword(password)
 	if err != nil {
 		return fmt.Errorf("hashing platform admin password: %w", err)
 	}
 
-	// Create the identity.
+	// Build the domain objects before the transaction.
 	identity, err := domain.NewIdentity(email)
 	if err != nil {
 		return fmt.Errorf("creating platform admin identity: %w", err)
 	}
-
 	if err := identity.SetPassword(hash); err != nil {
 		return fmt.Errorf("setting platform admin password: %w", err)
 	}
-
 	if err := identity.Activate(); err != nil {
 		return fmt.Errorf("activating platform admin identity: %w", err)
 	}
 
-	if err := repo.Save(masterCtx, identity); err != nil {
-		return fmt.Errorf("saving platform admin identity: %w", err)
+	roleAssignments := buildRoleAssignments(identity.ID(), platformAdminRoles)
+
+	// Persist identity and all role assignments atomically.
+	if err := platformdb.WithGormTenantTransaction(masterCtx, db, func(tx *gorm.DB) error {
+		txRepo := persistence.NewRepository(tx)
+		if err := txRepo.Save(masterCtx, identity); err != nil {
+			return fmt.Errorf("save identity: %w", err)
+		}
+		for _, ra := range roleAssignments {
+			if err := txRepo.SaveRoleAssignment(masterCtx, ra); err != nil {
+				return fmt.Errorf("save role assignment %s: %w", ra.Role(), err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("bootstrapping platform admin: %w", err)
 	}
 
-	// Assign platform admin roles. Bootstrap is a trusted system operation,
-	// so we use ReconstructRoleAssignment to bypass the privilege hierarchy check.
-	systemID := identity.ID()
-	now := time.Now()
+	slog.InfoContext(masterCtx, "platform admin bootstrapped successfully",
+		"email", email,
+		"roles", len(platformAdminRoles))
+	return nil
+}
+
+// reconcileRoles ensures the existing platform admin has all required roles,
+// creating any that are missing. All changes are committed atomically.
+func reconcileRoles(ctx context.Context, db *gorm.DB, identity *domain.Identity) error {
+	repo := persistence.NewRepository(db)
+
+	existing, err := repo.FindRoleAssignments(ctx, identity.ID())
+	if err != nil {
+		return fmt.Errorf("fetching existing role assignments: %w", err)
+	}
+
+	// Build a set of active roles already assigned.
+	assigned := make(map[string]bool, len(existing))
+	for _, ra := range existing {
+		if ra.IsActive() {
+			assigned[string(ra.Role())] = true
+		}
+	}
+
+	// Determine which roles are missing.
+	var missing []auth.Role
 	for _, role := range platformAdminRoles {
+		if !assigned[role.String()] {
+			missing = append(missing, role)
+		}
+	}
+
+	if len(missing) == 0 {
+		slog.InfoContext(ctx, "platform admin already exists with all required roles, skipping bootstrap",
+			"email", identity.Email())
+		return nil
+	}
+
+	slog.InfoContext(ctx, "platform admin exists but is missing roles, reconciling",
+		"email", identity.Email(),
+		"missing_roles", len(missing))
+
+	roleAssignments := buildRoleAssignments(identity.ID(), missing)
+
+	return platformdb.WithGormTenantTransaction(ctx, db, func(tx *gorm.DB) error {
+		txRepo := persistence.NewRepository(tx)
+		for _, ra := range roleAssignments {
+			if err := txRepo.SaveRoleAssignment(ctx, ra); err != nil {
+				return fmt.Errorf("save missing role assignment %s: %w", ra.Role(), err)
+			}
+		}
+		return nil
+	})
+}
+
+// buildRoleAssignments constructs RoleAssignment domain objects for each role.
+// Bootstrap is a trusted system operation; ReconstructRoleAssignment is used to
+// bypass the privilege hierarchy check that would otherwise require a granting identity.
+func buildRoleAssignments(identityID uuid.UUID, roles []auth.Role) []*domain.RoleAssignment {
+	now := time.Now()
+	assignments := make([]*domain.RoleAssignment, 0, len(roles))
+	for _, role := range roles {
 		ra := domain.ReconstructRoleAssignment(
 			uuid.New(),
-			identity.ID(),
-			systemID,
+			identityID,
+			identityID, // self-granted by the system identity
 			domain.Role(role.String()),
 			nil,
 			nil,
@@ -106,13 +181,7 @@ func Run(ctx context.Context, repo domain.Repository) error {
 			now,
 			now,
 		)
-		if err := repo.SaveRoleAssignment(masterCtx, ra); err != nil {
-			return fmt.Errorf("saving role assignment %s: %w", role, err)
-		}
+		assignments = append(assignments, ra)
 	}
-
-	slog.InfoContext(masterCtx, "platform admin bootstrapped successfully",
-		"email", email,
-		"roles", len(platformAdminRoles))
-	return nil
+	return assignments
 }
