@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package meridian.control_plane.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
+
+// SagaExecutionService provides an API for triggering saga workflows.
+// External services (e.g., event-router) use this to start saga instances
+// in response to domain events without requiring direct Starlark runtime access.
+service SagaExecutionService {
+  // ExecuteSaga triggers a new saga instance by name with the given input data.
+  // Uses idempotency key to prevent duplicate saga instances from concurrent or
+  // retry triggers (e.g., Kafka at-least-once delivery).
+  rpc ExecuteSaga(ExecuteSagaRequest) returns (ExecuteSagaResponse) {
+    option (google.api.http) = {
+      post: "/v1/sagas/execute"
+      body: "*"
+    };
+  }
+}
+
+// ExecuteSagaRequest contains the saga to trigger and its input.
+message ExecuteSagaRequest {
+  // saga_name is the registered saga name (e.g., "energy_settlement").
+  string saga_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
+
+  // input_data contains the saga input parameters as a JSON-compatible struct.
+  // Keys and values correspond to the saga's input schema.
+  google.protobuf.Struct input_data = 2;
+
+  // idempotency_key is a unique key for this trigger event.
+  // If a saga was already started with this key, the existing saga_id is returned
+  // without starting a new instance.
+  string idempotency_key = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// ExecuteSagaResponse contains the result of the saga trigger.
+message ExecuteSagaResponse {
+  // saga_id is the UUID of the saga instance that was started or found.
+  string saga_id = 1;
+
+  // was_duplicate is true if the saga was already started with this idempotency key.
+  // When true, saga_id refers to the existing instance, no new execution was started.
+  bool was_duplicate = 2;
+}
