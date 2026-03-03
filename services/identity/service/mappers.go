@@ -97,6 +97,10 @@ func domainStatusToProto(s domain.IdentityStatus) pb.IdentityStatus {
 }
 
 // domainRoleToProto maps a domain Role to its proto enum value.
+// Note: The domain model defines 5 privilege levels (VIEWER through PLATFORM).
+// The proto API exposes SUPER_ADMIN as an alias for PLATFORM_ADMIN; both map to
+// the domain's highest privilege level (RolePlatform). On output, RolePlatform
+// always maps to ROLE_PLATFORM_ADMIN. See protoRoleToDomain for input handling.
 func domainRoleToProto(r domain.Role) pb.Role {
 	switch r {
 	case domain.RoleViewer:
@@ -115,6 +119,10 @@ func domainRoleToProto(r domain.Role) pb.Role {
 }
 
 // protoRoleToDomain maps a proto Role enum to a domain role string.
+// SUPER_ADMIN is an API-level alias that intentionally maps to the domain's
+// highest privilege level (RolePlatform), the same as PLATFORM_ADMIN. This is
+// by design: the domain model treats them as equivalent. On roundtrip, a
+// SUPER_ADMIN grant is stored as PLATFORM and returned as PLATFORM_ADMIN.
 func protoRoleToDomain(r pb.Role) string {
 	switch r {
 	case pb.Role_ROLE_UNSPECIFIED:
@@ -130,7 +138,7 @@ func protoRoleToDomain(r pb.Role) string {
 	case pb.Role_ROLE_PLATFORM_ADMIN:
 		return string(domain.RolePlatform)
 	case pb.Role_ROLE_SUPER_ADMIN:
-		return string(domain.RolePlatform) // SUPER_ADMIN maps to highest domain role
+		return string(domain.RolePlatform) // Alias for PLATFORM_ADMIN (see func doc)
 	default:
 		return ""
 	}

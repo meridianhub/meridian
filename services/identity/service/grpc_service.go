@@ -52,17 +52,16 @@ func (s *Service) CreateIdentity(ctx context.Context, req *pb.CreateIdentityRequ
 	identity, err := domain.NewIdentity(req.GetEmail())
 	if err != nil {
 		s.logger.ErrorContext(ctx, "invalid email for identity creation",
-			"email", req.GetEmail(),
 			"error", err)
 		return nil, status.Errorf(codes.InvalidArgument, "invalid email: %v", err)
 	}
 
 	if err := s.repo.Save(ctx, identity); err != nil {
 		if errors.Is(err, domain.ErrEmailAlreadyExists) {
-			return nil, status.Errorf(codes.AlreadyExists, "email already exists: %s", req.GetEmail())
+			return nil, status.Errorf(codes.AlreadyExists, "email already registered")
 		}
 		s.logger.ErrorContext(ctx, "failed to save identity",
-			"email", req.GetEmail(),
+			"identity_id", identity.ID(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create identity")
 	}
@@ -127,7 +126,10 @@ func (s *Service) UpdateIdentity(ctx context.Context, req *pb.UpdateIdentityRequ
 }
 
 // ListIdentities returns a paginated list of identities within the tenant.
-func (s *Service) ListIdentities(ctx context.Context, _ *pb.ListIdentitiesRequest) (*pb.ListIdentitiesResponse, error) {
+// TODO: Implement pagination (page_size, page_token) and status_filter once
+// the repository layer supports paginated queries.
+func (s *Service) ListIdentities(ctx context.Context, req *pb.ListIdentitiesRequest) (*pb.ListIdentitiesResponse, error) {
+	_ = req // pagination parameters not yet implemented in repository
 	identities, err := s.repo.ListByTenant(ctx)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to list identities", "error", err)
@@ -159,7 +161,6 @@ func (s *Service) Authenticate(ctx context.Context, req *pb.AuthenticateRequest)
 			}, nil
 		}
 		s.logger.ErrorContext(ctx, "failed to find identity by email",
-			"email", req.GetEmail(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "authentication failed")
 	}
@@ -198,18 +199,8 @@ func (s *Service) Authenticate(ctx context.Context, req *pb.AuthenticateRequest)
 			"error", saveErr)
 	}
 
-	roles, err := s.repo.FindRoleAssignments(ctx, identity.ID())
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to fetch role assignments for authenticated identity",
-			"identity_id", identity.ID(),
-			"error", err)
-	}
-
-	pbIdentity := identityToProto(identity)
-	_ = roles // roles are available for future use in claims; for now we return the identity
-
 	return &pb.AuthenticateResponse{
-		Identity:      pbIdentity,
+		Identity:      identityToProto(identity),
 		Authenticated: true,
 	}, nil
 }
@@ -264,17 +255,18 @@ func (s *Service) SetPassword(ctx context.Context, req *pb.SetPasswordRequest) (
 		return nil, status.Errorf(codes.FailedPrecondition, "cannot activate identity: %v", err)
 	}
 
+	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save invitation after acceptance",
+			"invitation_id", invitation.ID(),
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to save invitation")
+	}
+
 	if err := s.repo.Save(ctx, identity); err != nil {
 		s.logger.ErrorContext(ctx, "failed to save identity after password set",
 			"identity_id", identity.ID(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save identity")
-	}
-
-	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save invitation after acceptance",
-			"invitation_id", invitation.ID(),
-			"error", err)
 	}
 
 	return &pb.SetPasswordResponse{
@@ -335,7 +327,7 @@ func (s *Service) RequestPasswordReset(ctx context.Context, req *pb.RequestPassw
 	// Attempt to find identity. If not found, return success to prevent email enumeration.
 	identity, findErr := s.repo.FindByEmail(ctx, req.GetEmail())
 	if findErr == nil {
-		_, invitation, tokenErr := s.createResetInvitation(ctx, identity.ID())
+		plaintext, invitation, tokenErr := s.createResetInvitation(ctx, identity.ID())
 		if tokenErr != nil {
 			s.logger.ErrorContext(ctx, "failed to create password reset token",
 				"identity_id", identity.ID(),
@@ -345,8 +337,13 @@ func (s *Service) RequestPasswordReset(ctx context.Context, req *pb.RequestPassw
 				"identity_id", identity.ID(),
 				"error", saveErr)
 		} else {
+			// TODO: Send plaintext token to user via email service.
+			// Until an email service is integrated, the token is logged at debug
+			// level for development/testing purposes only. This log line must be
+			// removed before production deployment.
 			s.logger.DebugContext(ctx, "password reset token generated",
-				"identity_id", identity.ID())
+				"identity_id", identity.ID(),
+				"reset_token", plaintext)
 		}
 	}
 
@@ -406,17 +403,20 @@ func (s *Service) CompletePasswordReset(ctx context.Context, req *pb.CompletePas
 		return nil, status.Errorf(codes.Internal, "failed to set password on identity")
 	}
 
+	// Save invitation first to mark the token as consumed, preventing reuse
+	// if the subsequent identity save fails.
+	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save invitation after reset completion",
+			"invitation_id", invitation.ID(),
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to complete password reset")
+	}
+
 	if err := s.repo.Save(ctx, identity); err != nil {
 		s.logger.ErrorContext(ctx, "failed to save identity after password reset",
 			"identity_id", identity.ID(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save identity")
-	}
-
-	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save invitation after reset completion",
-			"invitation_id", invitation.ID(),
-			"error", err)
 	}
 
 	return &pb.CompletePasswordResetResponse{
@@ -517,6 +517,12 @@ func (s *Service) RevokeRole(ctx context.Context, req *pb.RevokeRoleRequest) (*p
 		return nil, status.Errorf(codes.NotFound, "role assignment not found")
 	}
 
+	// Enforce role hierarchy: revoker must hold a higher privilege than the target role.
+	revokerRole := s.getCallerHighestRole(ctx)
+	if !domain.CanGrant(revokerRole, string(target.Role())) {
+		return nil, status.Errorf(codes.PermissionDenied, "insufficient permissions to revoke this role")
+	}
+
 	if err := target.Revoke(revokerID); err != nil {
 		if errors.Is(err, domain.ErrRoleAlreadyRevoked) {
 			return nil, status.Errorf(codes.FailedPrecondition, "role assignment has already been revoked")
@@ -585,15 +591,15 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 
 	if err := s.repo.Save(ctx, identity); err != nil {
 		if errors.Is(err, domain.ErrEmailAlreadyExists) {
-			return nil, status.Errorf(codes.AlreadyExists, "email already exists: %s", req.GetEmail())
+			return nil, status.Errorf(codes.AlreadyExists, "email already registered")
 		}
 		s.logger.ErrorContext(ctx, "failed to save invited identity",
-			"email", req.GetEmail(),
+			"identity_id", identity.ID(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create identity")
 	}
 
-	invitation, _, err := domain.NewInvitation(identity.ID(), inviterID)
+	invitation, plaintextToken, err := domain.NewInvitation(identity.ID(), inviterID)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to create invitation",
 			"identity_id", identity.ID(),
@@ -607,6 +613,14 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save invitation")
 	}
+
+	// TODO: Send plaintextToken to the invited user via email service.
+	// Until an email service is integrated, the token is logged at debug
+	// level for development/testing purposes only. This log line must be
+	// removed before production deployment.
+	s.logger.DebugContext(ctx, "invitation token generated",
+		"identity_id", identity.ID(),
+		"invitation_token", plaintextToken)
 
 	// Grant the initial role if specified.
 	if req.GetRole() != pb.Role_ROLE_UNSPECIFIED {
@@ -700,6 +714,15 @@ func (s *Service) AcceptInvitation(ctx context.Context, req *pb.AcceptInvitation
 
 // SuspendIdentity suspends an active identity.
 func (s *Service) SuspendIdentity(ctx context.Context, req *pb.SuspendIdentityRequest) (*pb.SuspendIdentityResponse, error) {
+	if _, ok := auth.GetUserIDFromContext(ctx); !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "missing authentication context")
+	}
+
+	callerRole := s.getCallerHighestRole(ctx)
+	if !domain.CanGrant(callerRole, string(domain.RoleViewer)) {
+		return nil, status.Errorf(codes.PermissionDenied, "insufficient permissions to suspend identities")
+	}
+
 	id, err := uuid.Parse(req.GetId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid identity ID: %v", err)
@@ -736,6 +759,15 @@ func (s *Service) SuspendIdentity(ctx context.Context, req *pb.SuspendIdentityRe
 
 // ReactivateIdentity reactivates a suspended identity.
 func (s *Service) ReactivateIdentity(ctx context.Context, req *pb.ReactivateIdentityRequest) (*pb.ReactivateIdentityResponse, error) {
+	if _, ok := auth.GetUserIDFromContext(ctx); !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "missing authentication context")
+	}
+
+	callerRole := s.getCallerHighestRole(ctx)
+	if !domain.CanGrant(callerRole, string(domain.RoleViewer)) {
+		return nil, status.Errorf(codes.PermissionDenied, "insufficient permissions to reactivate identities")
+	}
+
 	id, err := uuid.Parse(req.GetId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid identity ID: %v", err)

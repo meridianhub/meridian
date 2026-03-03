@@ -751,6 +751,32 @@ func TestRevokeRole_AssignmentNotFound(t *testing.T) {
 	assert.Equal(t, codes.NotFound, status.Code(err))
 }
 
+func TestRevokeRole_InsufficientPermissions(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	granterID := uuid.New()
+	targetIdentity, err := domain.NewIdentity("target@example.com")
+	require.NoError(t, err)
+	repo.addIdentity(targetIdentity)
+
+	// Assignment grants OPERATOR role
+	assignment, err := domain.NewRoleAssignment(targetIdentity.ID(), granterID, "ADMIN", "OPERATOR")
+	require.NoError(t, err)
+	repo.roles[targetIdentity.ID()] = []*domain.RoleAssignment{assignment}
+
+	// VIEWER (level 1) cannot revoke OPERATOR (level 2)
+	revokerID := uuid.New()
+	ctx := contextWithAuth(revokerID, []string{"VIEWER"})
+
+	_, err = svc.RevokeRole(ctx, &pb.RevokeRoleRequest{
+		IdentityId:       targetIdentity.ID().String(),
+		RoleAssignmentId: assignment.ID().String(),
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
 func TestRevokeRole_AlreadyRevoked(t *testing.T) {
 	svc, repo := newTestService(t)
 
@@ -980,7 +1006,7 @@ func TestAcceptInvitation_ExpiredInvitation(t *testing.T) {
 
 func TestSuspendIdentity_Success(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := context.Background()
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	identity := makeActiveIdentity(t, "test@example.com", "SecurePass123!")
 	repo.addIdentity(identity)
@@ -994,9 +1020,38 @@ func TestSuspendIdentity_Success(t *testing.T) {
 	assert.Equal(t, pb.IdentityStatus_IDENTITY_STATUS_SUSPENDED, resp.Identity.Status)
 }
 
+func TestSuspendIdentity_NoAuthContext(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.SuspendIdentity(ctx, &pb.SuspendIdentityRequest{
+		Id:     uuid.New().String(),
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
+func TestSuspendIdentity_InsufficientPermissions(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"VIEWER"})
+
+	identity := makeActiveIdentity(t, "test@example.com", "SecurePass123!")
+	repo.addIdentity(identity)
+
+	_, err := svc.SuspendIdentity(ctx, &pb.SuspendIdentityRequest{
+		Id:     identity.ID().String(),
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
 func TestSuspendIdentity_NotActive(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := context.Background()
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	identity, err := domain.NewIdentity("test@example.com")
 	require.NoError(t, err)
@@ -1014,7 +1069,7 @@ func TestSuspendIdentity_NotActive(t *testing.T) {
 
 func TestSuspendIdentity_NotFound(t *testing.T) {
 	svc, _ := newTestService(t)
-	ctx := context.Background()
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	_, err := svc.SuspendIdentity(ctx, &pb.SuspendIdentityRequest{
 		Id:     uuid.New().String(),
@@ -1029,7 +1084,7 @@ func TestSuspendIdentity_NotFound(t *testing.T) {
 
 func TestReactivateIdentity_Success(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := context.Background()
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	identity := makeActiveIdentity(t, "test@example.com", "SecurePass123!")
 	require.NoError(t, identity.Suspend())
@@ -1044,9 +1099,39 @@ func TestReactivateIdentity_Success(t *testing.T) {
 	assert.Equal(t, pb.IdentityStatus_IDENTITY_STATUS_ACTIVE, resp.Identity.Status)
 }
 
+func TestReactivateIdentity_NoAuthContext(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.ReactivateIdentity(ctx, &pb.ReactivateIdentityRequest{
+		Id:     uuid.New().String(),
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
+func TestReactivateIdentity_InsufficientPermissions(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"OPERATOR"})
+
+	identity := makeActiveIdentity(t, "test@example.com", "SecurePass123!")
+	require.NoError(t, identity.Suspend())
+	repo.addIdentity(identity)
+
+	_, err := svc.ReactivateIdentity(ctx, &pb.ReactivateIdentityRequest{
+		Id:     identity.ID().String(),
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
 func TestReactivateIdentity_NotSuspended(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := context.Background()
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	identity := makeActiveIdentity(t, "test@example.com", "SecurePass123!")
 	// Lock the identity
