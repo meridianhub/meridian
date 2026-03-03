@@ -53,12 +53,12 @@ func (r *Repository) Save(ctx context.Context, identity *domain.Identity) error 
 		}
 
 		// Existing identity — optimistic locking update.
-		// The domain increments Version on each mutation, so entity.Version is the
-		// target version and the expected DB version is entity.Version-1.
-		expectedDBVersion := entity.Version - 1
-
+		// The domain increments Version on each mutation. Multiple mutations may
+		// occur between the load and the save, so we use the DB version we just
+		// loaded (existing.Version) as the guard rather than entity.Version-1,
+		// which would only be correct for single-mutation round-trips.
 		updateResult := tx.Model(&IdentityEntity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, expectedDBVersion).
+			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, existing.Version).
 			Updates(map[string]interface{}{
 				"email":           entity.Email,
 				"status":          entity.Status,
@@ -240,9 +240,11 @@ func (r *Repository) SaveIdentityWithInvitation(ctx context.Context, identity *d
 			return identResult.Error
 		}
 
-		expectedDBVersion := identEntity.Version - 1
+		// Use the DB version we just loaded as the optimistic lock guard.
+		// Multiple domain mutations may occur between load and save, so using
+		// existingIdent.Version is more correct than identEntity.Version-1.
 		updateResult := tx.Model(&IdentityEntity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", identEntity.ID, expectedDBVersion).
+			Where("id = ? AND version = ? AND deleted_at IS NULL", identEntity.ID, existingIdent.Version).
 			Updates(map[string]interface{}{
 				"email":           identEntity.Email,
 				"status":          identEntity.Status,
