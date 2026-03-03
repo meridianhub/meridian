@@ -3,6 +3,7 @@
 package registry
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,6 +14,9 @@ import (
 )
 
 const eventTriggerPrefix = "event:"
+
+// ErrNilSagaDefinition is returned by Reload when a nil entry is found in the input slice.
+var ErrNilSagaDefinition = errors.New("nil saga definition")
 
 // CompiledSaga pairs a saga definition with its precompiled CEL filter program.
 // FilterProgram is nil when the saga definition carries no filter expression.
@@ -54,12 +58,16 @@ func NewSagaRegistry() (*SagaRegistry, error) {
 // Only definitions whose trigger begins with "event:" are registered; all others
 // are silently skipped.
 //
-// If any definition carries an invalid CEL filter expression, Reload returns an
-// error and leaves the registry unchanged (atomic replacement guarantee).
+// If any definition is nil or carries an invalid CEL filter expression, Reload
+// returns an error and leaves the registry unchanged (atomic replacement guarantee).
 func (r *SagaRegistry) Reload(sagas []*controlplanev1.SagaDefinition) error {
 	newByChannel := make(map[string][]*CompiledSaga)
 
-	for _, def := range sagas {
+	for i, def := range sagas {
+		if def == nil {
+			return fmt.Errorf("%w at index %d", ErrNilSagaDefinition, i)
+		}
+
 		if !strings.HasPrefix(def.GetTrigger(), eventTriggerPrefix) {
 			continue
 		}
@@ -86,9 +94,8 @@ func (r *SagaRegistry) Reload(sagas []*controlplanev1.SagaDefinition) error {
 	return nil
 }
 
-// GetApplicableSagas returns the compiled sagas registered for the given channel.
-// Returns nil if no sagas are registered for the channel.
-// The returned slice must not be modified by callers.
+// GetApplicableSagas returns a defensive copy of the compiled sagas registered
+// for the given channel. Returns nil if no sagas are registered for the channel.
 func (r *SagaRegistry) GetApplicableSagas(channel string) []*CompiledSaga {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -98,5 +105,7 @@ func (r *SagaRegistry) GetApplicableSagas(channel string) []*CompiledSaga {
 		return nil
 	}
 
-	return sagas
+	out := make([]*CompiledSaga, len(sagas))
+	copy(out, sagas)
+	return out
 }

@@ -281,6 +281,51 @@ func TestSagaRegistry_Reload_EmptySlice_ClearsAll(t *testing.T) {
 	assert.Nil(t, results)
 }
 
+func TestSagaRegistry_Reload_FailedReload_LeavesRegistryUnchanged(t *testing.T) {
+	reg, err := registry.NewSagaRegistry()
+	require.NoError(t, err)
+
+	// Step 1: Load valid sagas
+	err = reg.Reload([]*controlplanev1.SagaDefinition{
+		{
+			Name:    "valid_saga",
+			Trigger: "event:my-channel",
+			Script:  "def run(ctx, input): pass",
+		},
+	})
+	require.NoError(t, err)
+
+	// Verify step 1 loaded correctly
+	results := reg.GetApplicableSagas("my-channel")
+	require.Len(t, results, 1)
+
+	// Step 2: Reload with invalid CEL filter — expect error
+	badFilter := `not valid CEL !!!`
+	err = reg.Reload([]*controlplanev1.SagaDefinition{
+		{
+			Name:    "bad_saga",
+			Trigger: "event:my-channel",
+			Script:  "def run(ctx, input): pass",
+			Filter:  &badFilter,
+		},
+	})
+	require.Error(t, err)
+
+	// Step 3: Previous registrations must survive the failed reload
+	surviving := reg.GetApplicableSagas("my-channel")
+	require.Len(t, surviving, 1, "registry must be unchanged after failed reload")
+	assert.Equal(t, "valid_saga", surviving[0].Definition.GetName())
+}
+
+func TestSagaRegistry_Reload_NilEntryReturnsError(t *testing.T) {
+	reg, err := registry.NewSagaRegistry()
+	require.NoError(t, err)
+
+	err = reg.Reload([]*controlplanev1.SagaDefinition{nil})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, registry.ErrNilSagaDefinition)
+}
+
 func TestSagaRegistry_Reload_MultipleDifferentChannels(t *testing.T) {
 	reg, err := registry.NewSagaRegistry()
 	require.NoError(t, err)

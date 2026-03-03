@@ -7,6 +7,7 @@ import (
 	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -88,13 +89,16 @@ func (c *ManifestClient) GetCurrentSagaDefinitions(ctx context.Context) ([]*cont
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
+	ctx = sharedclients.PropagateCorrelationID(ctx)
+	ctx = sharedclients.PropagateOrganization(ctx)
+
 	resp, err := c.client.GetCurrentManifest(ctx, &controlplanev1.GetCurrentManifestRequest{})
 	if err != nil {
 		st, ok := status.FromError(err)
 		if ok && st.Code() == codes.NotFound {
 			// No manifest applied yet — return empty slice, not an error.
 			c.logger.Info("no manifest found for tenant, saga registry will start empty")
-			return nil, nil
+			return []*controlplanev1.SagaDefinition{}, nil
 		}
 		return nil, fmt.Errorf("fetch current manifest: %w", err)
 	}
@@ -102,7 +106,7 @@ func (c *ManifestClient) GetCurrentSagaDefinitions(ctx context.Context) ([]*cont
 	mf := resp.GetVersion().GetManifest()
 	if mf == nil {
 		c.logger.Info("current manifest has no content, saga registry will start empty")
-		return nil, nil
+		return []*controlplanev1.SagaDefinition{}, nil
 	}
 
 	c.logger.Info("loaded saga definitions from current manifest",
