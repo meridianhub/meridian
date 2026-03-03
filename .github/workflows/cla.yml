@@ -1,0 +1,21 @@
+name: CLA Bot Bypass
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  cla-bot-bypass:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.user.login, '[bot]')
+    steps:
+      - name: Mark CLA passed for bot contributors
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+            --method POST \
+            -f state=success \
+            -f description="CLA not required for bot contributors" \
+            -f context="license/cla" \
+            -f target_url="https://cla-assistant.io/meridianhub/meridian"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
