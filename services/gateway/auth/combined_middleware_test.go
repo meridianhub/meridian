@@ -353,7 +353,39 @@ func TestTenantAuthorizationMiddleware(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "not authorized for this tenant")
 	})
 
-	t.Run("403 when no JWT tenant claim", func(t *testing.T) {
+	t.Run("OIDC token without tenant claim uses resolved tenant from subdomain", func(t *testing.T) {
+		middleware := NewTenantAuthorizationMiddleware(logger)
+
+		var capturedCtx context.Context
+		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			capturedCtx = r.Context()
+		})
+
+		handler := middleware.Handler(nextHandler)
+
+		// Simulate OIDC token (e.g. Dex) with no tenant claim but resolved tenant from subdomain
+		claims := &platformauth.Claims{
+			UserID: "oidc-user",
+			RegisteredClaims: jwt.RegisteredClaims{
+				Subject: "dex-subject-id",
+			},
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
+		ctx = tenant.WithTenant(ctx, tenant.MustNewTenantID("volterra"))
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		resolvedTenant, hasTenant := tenant.FromContext(capturedCtx)
+		assert.True(t, hasTenant)
+		assert.Equal(t, "volterra", resolvedTenant.String())
+	})
+
+	t.Run("403 when no JWT tenant claim and no resolved tenant", func(t *testing.T) {
 		middleware := NewTenantAuthorizationMiddleware(logger)
 
 		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -362,8 +394,11 @@ func TestTenantAuthorizationMiddleware(t *testing.T) {
 
 		handler := middleware.Handler(nextHandler)
 
-		// Create context with resolved tenant but no JWT tenant
-		ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("some_corp"))
+		// JWT has no tenant claim and no tenant resolved from subdomain
+		claims := &platformauth.Claims{
+			UserID: "oidc-user",
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
 		req = req.WithContext(ctx)

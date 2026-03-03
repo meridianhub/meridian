@@ -245,10 +245,10 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 			return
 		}
 
-		// Platform-admin/super-admin bypass: when JWT has no tenant claim but has
-		// elevated platform role, allow access without tenant context (platform-level
-		// endpoints like ListTenants) or cross-tenant access (tenant-scoped endpoints
-		// resolved via subdomain).
+		// When JWT has no tenant claim (e.g. standard OIDC tokens from Dex):
+		// 1. Platform-admin/super-admin: allow access to any tenant
+		// 2. Regular user with resolved tenant (subdomain/slug): scope to that tenant
+		// 3. Otherwise: deny
 		if jwtTenantID == "" {
 			claims, hasClaims := GetClaimsFromContext(ctx)
 			if hasClaims && hasPlatformAdminRole(claims) {
@@ -259,7 +259,20 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 				next.ServeHTTP(w, r)
 				return
 			}
-			// No tenant claim and not a platform admin
+
+			// Allow if tenant was resolved from subdomain/slug — user inherits
+			// tenant scope from the request routing rather than from JWT claims.
+			// This supports OIDC providers (like Dex) that issue identity-only
+			// tokens without custom tenant claims.
+			if resolvedTenant, ok := tenant.FromContext(ctx); ok && !resolvedTenant.IsEmpty() {
+				m.logger.Debug("tenant resolved from request context (no JWT tenant claim)",
+					slog.String("tenant", resolvedTenant.String()),
+					slog.String("path", r.URL.Path),
+				)
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			writeForbidden(w, "missing tenant claim in token")
 			return
 		}
