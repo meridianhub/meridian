@@ -621,6 +621,131 @@ func TestCompileEligibility_TooLong(t *testing.T) {
 	assert.ErrorIs(t, err, ErrExpressionTooLong)
 }
 
+func TestCompileEventFilter(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		expression string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:       "simple boolean true",
+			expression: `true`,
+			wantErr:    false,
+		},
+		{
+			name:       "event field comparison",
+			expression: `event.amount > 1000`,
+			wantErr:    false,
+		},
+		{
+			name:       "metadata field check",
+			expression: `metadata["correlation_id"] != ""`,
+			wantErr:    false,
+		},
+		{
+			name:       "combined event and metadata",
+			expression: `event.type == "PAYMENT" && metadata["source"] == "bank"`,
+			wantErr:    false,
+		},
+		{
+			name:       "non-boolean return type rejected",
+			expression: `event.amount`,
+			wantErr:    true,
+			errContain: "event filter expression must return boolean",
+		},
+		{
+			name:       "unknown variable rejected",
+			expression: `payload.foo == "bar"`,
+			wantErr:    true,
+			errContain: "undeclared reference",
+		},
+		{
+			name:       "attributes variable not available",
+			expression: `attributes["key"] == "value"`,
+			wantErr:    true,
+			errContain: "undeclared reference",
+		},
+		{
+			name:       "syntax error",
+			expression: `event.type ==`,
+			wantErr:    true,
+			errContain: "CEL compilation failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prg, err := c.CompileEventFilter(tt.expression)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
+				}
+				assert.Nil(t, prg)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, prg)
+			}
+		})
+	}
+}
+
+func TestCompileEventFilter_Evaluation(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	prg, err := c.CompileEventFilter(`event.type == "PAYMENT" && metadata["source"] == "bank"`)
+	require.NoError(t, err)
+
+	result, _, err := prg.Eval(map[string]any{
+		"event":    map[string]any{"type": "PAYMENT", "amount": 500},
+		"metadata": map[string]string{"source": "bank"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, true, result.Value())
+}
+
+func TestCompileEventFilter_CrossEnvRejection(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	// event_filter env should reject validation-env-only variables
+	_, err = c.CompileEventFilter(`amount > 0`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "undeclared reference")
+
+	// event_filter env should reject eligibility-env-only variables
+	_, err = c.CompileEventFilter(`party.type == "ORGANIZATION"`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "undeclared reference")
+
+	// validation env should reject event_filter-env-only variables
+	_, err = c.CompileValidation(`event.type == "PAYMENT"`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "undeclared reference")
+}
+
+func TestCompileEventFilter_SecurityLimits(t *testing.T) {
+	c, err := NewCompiler()
+	require.NoError(t, err)
+
+	longExpr := strings.Repeat("true || ", MaxExpressionLength/8+1) + "true"
+	require.Greater(t, len(longExpr), MaxExpressionLength)
+
+	_, err = c.CompileEventFilter(longExpr)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrExpressionTooLong)
+
+	deepExpr := strings.Repeat("(", MaxExpressionDepth+2) + "true" + strings.Repeat(")", MaxExpressionDepth+2)
+	_, err = c.CompileEventFilter(deepExpr)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrExpressionTooDeep)
+}
+
 func BenchmarkCompileValidation(b *testing.B) {
 	c, err := NewCompiler()
 	require.NoError(b, err)
