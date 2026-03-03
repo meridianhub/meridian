@@ -307,6 +307,120 @@ func TestValidate_EventTriggerWithFilter_NoWarning(t *testing.T) {
 	}
 }
 
+func TestValidate_EventTrigger_InvalidChannel_Error(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_unknown_event",
+		Trigger: "event:nonexistent.topic.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+	})
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid, "expected invalid manifest for unknown event channel")
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_EVENT_CHANNEL" {
+			found = true
+			assert.Contains(t, e.Message, "nonexistent.topic.v1")
+			assert.NotEmpty(t, e.AvailableFields, "expected available channels listed")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_EVENT_CHANNEL error, got errors: %v", result.Errors)
+}
+
+func TestValidate_EventTrigger_ValidChannel_Passes(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	filter := "event.amount > 0"
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_posted",
+		Trigger: "event:position-keeping.transaction-posted.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	result := v.Validate(m, nil)
+	assert.True(t, result.Valid, "expected valid manifest, got errors: %v", result.Errors)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "INVALID_EVENT_CHANNEL", e.Code)
+	}
+}
+
+func TestValidate_NonEventTrigger_NoChannelCheck(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	// api: trigger should not trigger channel validation even with a weird path
+	m.Sagas[0].Trigger = "api:/v1/some-handler"
+
+	result := v.Validate(m, nil)
+	assert.True(t, result.Valid, "expected valid manifest, got errors: %v", result.Errors)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "INVALID_EVENT_CHANNEL", e.Code)
+	}
+}
+
+func TestValidate_EventTrigger_InvalidCELFilter_Error(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	badFilter := "event.amount >>> 0"
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_captured_filtered",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &badFilter,
+	})
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid, "expected invalid manifest for bad CEL filter")
+
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e.Code, "CEL") && strings.Contains(e.Path, "filter") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected CEL error on filter path, got errors: %v", result.Errors)
+}
+
+func TestValidate_EventTrigger_InvalidChannel_SuggestsClose(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	// Typo close to "position-keeping.transaction-captured.v1"
+	// Use a channel name with one character deleted to trigger the suggestion logic.
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_transaction_captured_typo",
+		Trigger: "event:position-keeping.transacton-captured.v1", //nolint:misspell
+		Script:  "def execute(ctx):\n    return {}\n",
+	})
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid, "expected invalid manifest for typo'd event channel")
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_EVENT_CHANNEL" {
+			found = true
+			assert.NotEmpty(t, e.Suggestion, "expected a suggestion for close typo")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_EVENT_CHANNEL error, got errors: %v", result.Errors)
+}
+
 func TestValidateCEL_ValidExpression(t *testing.T) {
 	v, err := New()
 	if err != nil {

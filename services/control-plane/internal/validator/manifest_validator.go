@@ -17,6 +17,7 @@ import (
 	"github.com/google/cel-go/cel"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/shopspring/decimal"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
@@ -149,6 +150,8 @@ type ManifestValidator struct {
 	bucketCelEnv    *cel.Env
 	partyTypeCelEnv *cel.Env
 	mappingCelEnv   *cel.Env
+	eventFilterEnv  *cel.Env
+	channelRegistry map[string]bool
 }
 
 // New creates a new ManifestValidator.
@@ -202,12 +205,30 @@ func New() (*ManifestValidator, error) {
 		return nil, fmt.Errorf("failed to create mapping CEL environment: %w", err)
 	}
 
+	// CEL environment for event trigger filter expressions.
+	// Filters operate on a dynamic event map representing the domain event payload.
+	eventFilterEnv, err := cel.NewEnv(
+		cel.Variable("event", cel.MapType(cel.StringType, cel.DynType)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create event filter CEL environment: %w", err)
+	}
+
+	// Build channel registry from the canonical topic list.
+	allTopics := topics.All()
+	channelRegistry := make(map[string]bool, len(allTopics))
+	for _, topic := range allTopics {
+		channelRegistry[topic] = true
+	}
+
 	return &ManifestValidator{
 		protoValidator:  pv,
 		celEnv:          celEnv,
 		bucketCelEnv:    bucketCelEnv,
 		partyTypeCelEnv: partyTypeCelEnv,
 		mappingCelEnv:   mappingCelEnv,
+		eventFilterEnv:  eventFilterEnv,
+		channelRegistry: channelRegistry,
 	}, nil
 }
 
@@ -243,7 +264,10 @@ func (v *ManifestValidator) Validate(
 	// 8. Mappings validation
 	v.validateMappings(manifest, result)
 
-	// 9. Immutability checks
+	// 9. Event trigger channel and filter validation
+	v.validateEventTriggers(manifest, result)
+
+	// 10. Immutability checks
 	if previousManifest != nil {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
@@ -965,6 +989,112 @@ func (v *ManifestValidator) validateMappingIdempotency(
 			Message:  "content_hash_fields must have at least one entry when use_content_hash is true",
 		})
 	}
+}
+
+// eventFilterAvailableFields lists the variables available in event trigger filter CEL expressions.
+var eventFilterAvailableFields = []string{"event"}
+
+// validateEventTriggers validates all event-triggered sagas in the manifest.
+// It checks that the channel referenced after "event:" exists in the topic registry,
+// and that any filter expression is valid CEL.
+func (v *ManifestValidator) validateEventTriggers(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	for i, saga := range manifest.GetSagas() {
+		if !strings.HasPrefix(saga.GetTrigger(), "event:") {
+			continue
+		}
+		path := fmt.Sprintf("sagas[%d]", i)
+		v.validateEventTrigger(saga, path, result)
+	}
+}
+
+// validateEventTrigger validates a single event-triggered saga definition.
+// It checks channel existence and, if a filter is provided, validates it as CEL.
+func (v *ManifestValidator) validateEventTrigger(
+	saga *controlplanev1.SagaDefinition,
+	path string,
+	result *ValidationResult,
+) {
+	channel := strings.TrimPrefix(saga.GetTrigger(), "event:")
+
+	if !v.channelRegistry[channel] {
+		availableChans := v.availableChannels()
+		ve := ValidationError{
+			Severity:        SeverityError,
+			Path:            path + ".trigger",
+			Code:            "INVALID_EVENT_CHANNEL",
+			Message:         fmt.Sprintf("unknown event channel %q; must be a registered topic", channel),
+			AvailableFields: availableChans,
+		}
+		if suggestion := findClosestMatch(channel, availableChans); suggestion != "" {
+			ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+		}
+		addError(result, ve)
+	}
+
+	if saga.Filter == nil || saga.GetFilter() == "" {
+		// Missing filter warning is already emitted in validateDuplicates; skip here.
+		return
+	}
+
+	v.validateEventFilterCEL(saga.GetFilter(), path+".filter", result)
+}
+
+// validateEventFilterCEL compiles a CEL expression in the event filter environment.
+func (v *ManifestValidator) validateEventFilterCEL(
+	expression string,
+	path string,
+	result *ValidationResult,
+) {
+	if len(expression) > 4096 {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     path,
+			Code:     "CEL_EXPRESSION_TOO_LONG",
+			Message:  fmt.Sprintf("CEL expression exceeds maximum length of 4096 bytes (got %d)", len(expression)),
+		})
+		return
+	}
+
+	_, issues := v.eventFilterEnv.Compile(expression)
+	if issues == nil || issues.Err() == nil {
+		return
+	}
+
+	errMsg := issues.Err().Error()
+
+	if strings.Contains(errMsg, "undeclared reference") {
+		undeclaredField := extractUndeclaredReference(errMsg)
+		suggestion := ""
+		if undeclaredField != "" {
+			if match := findClosestMatch(undeclaredField, eventFilterAvailableFields); match != "" {
+				suggestion = fmt.Sprintf("Did you mean %q?", match)
+			}
+		}
+		addError(result, ValidationError{
+			Severity:        SeverityError,
+			Path:            path,
+			Code:            "CEL_UNDECLARED_REFERENCE",
+			Message:         errMsg,
+			Suggestion:      suggestion,
+			AvailableFields: eventFilterAvailableFields,
+		})
+		return
+	}
+
+	addError(result, ValidationError{
+		Severity: SeverityError,
+		Path:     path,
+		Code:     "CEL_COMPILATION_ERROR",
+		Message:  errMsg,
+	})
+}
+
+// availableChannels returns a sorted list of all registered event channel names.
+func (v *ManifestValidator) availableChannels() []string {
+	return mapKeys(v.channelRegistry)
 }
 
 // accountIDPattern matches valid Stripe Connect account IDs (acct_ followed by 16+ alphanumeric chars).
