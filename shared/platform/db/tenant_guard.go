@@ -64,7 +64,7 @@ func (g *TenantGuard) Name() string {
 	return "meridian:tenant_guard"
 }
 
-// Initialize registers Before callbacks on all CRUD operations.
+// Initialize registers Before callbacks on all CRUD and raw operations.
 func (g *TenantGuard) Initialize(db *gorm.DB) error {
 	check := func(tx *gorm.DB) {
 		ctx := tx.Statement.Context
@@ -93,5 +93,8 @@ func (g *TenantGuard) Initialize(db *gorm.DB) error {
 	if err := db.Callback().Delete().Before("gorm:delete").Register("meridian:tenant_guard:delete", check); err != nil {
 		return err
 	}
-	return db.Callback().Row().Before("gorm:row").Register("meridian:tenant_guard:row", check)
+	if err := db.Callback().Row().Before("gorm:row").Register("meridian:tenant_guard:row", check); err != nil {
+		return err
+	}
+	return db.Callback().Raw().Before("gorm:raw").Register("meridian:tenant_guard:raw", check)
 }

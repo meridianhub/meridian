@@ -67,6 +67,7 @@ func TestTenantAudit_LogsSchemaAccess(t *testing.T) {
 	assert.Equal(t, "tenant.schema.access", entry.Msg)
 	assert.Equal(t, "acme_bank", entry.Tenant)
 	assert.Equal(t, "org_acme_bank", entry.Schema)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestTenantAudit_LogsSchemaAccessWithService(t *testing.T) {
@@ -94,6 +95,7 @@ func TestTenantAudit_LogsSchemaAccessWithService(t *testing.T) {
 	assert.Equal(t, "beta_corp", entry.Tenant)
 	assert.Equal(t, "org_beta_corp", entry.Schema)
 	assert.Equal(t, "current-account", entry.Service)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestTenantAudit_NoLogOnMissingContext(t *testing.T) {
@@ -129,4 +131,5 @@ func TestTenantAudit_NoLogOnDatabaseError(t *testing.T) {
 	// Error log is expected, but the audit log ("tenant.schema.access") should NOT be emitted
 	assert.NotContains(t, buf.String(), "tenant.schema.access",
 		"should not log audit entry when SET LOCAL fails")
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

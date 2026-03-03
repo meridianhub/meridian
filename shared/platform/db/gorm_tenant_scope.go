@@ -55,6 +55,10 @@ func WithGormTenantScope(ctx context.Context, tx *gorm.DB) (*gorm.DB, error) {
 //
 // On success, emits an INFO-level "tenant.schema.access" audit log with tenant and schema fields.
 func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog.Logger) (*gorm.DB, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
 		logger.DebugContext(ctx, "tenant scope: missing tenant context, returning error")
@@ -70,8 +74,11 @@ func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog
 	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback.
 	// fmt.Sprintf is safe here because quotedSchema is already quoted by pq.QuoteIdentifier above,
 	// which properly escapes any special characters including quotes and null bytes.
+	// Bypass the TenantGuard for this SET LOCAL exec — this IS the operation that
+	// establishes tenant scope, so it must execute before the guard flag is set.
+	bypassCtx := WithTenantGuardBypass(ctx)
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", quotedSchema)
-	if err := tx.Exec(query).Error; err != nil {
+	if err := tx.WithContext(bypassCtx).Exec(query).Error; err != nil {
 		logger.ErrorContext(ctx, "tenant scope: failed to set search_path",
 			"tenant_hash", hashTenantID(tenantID),
 			"error", err)

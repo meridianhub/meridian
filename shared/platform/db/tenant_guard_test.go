@@ -195,6 +195,21 @@ func TestTenantGuard_AllowsBypassForMigrations(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestTenantGuard_BlocksRawWithoutTenantScope(t *testing.T) {
+	t.Parallel()
+	gormDB, _ := newMockGormDB(t)
+
+	err := gormDB.Use(db.NewTenantGuard())
+	require.NoError(t, err)
+
+	// Raw exec without tenant scope — should be blocked
+	err = gormDB.WithContext(context.Background()).
+		Exec("INSERT INTO test_entities (name) VALUES (?)", "test").Error
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, db.ErrTenantScopeRequired)
+}
+
 func TestTenantGuard_PluginName(t *testing.T) {
 	t.Parallel()
 	guard := db.NewTenantGuard()
