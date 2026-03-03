@@ -254,18 +254,12 @@ func (s *Service) SetPassword(ctx context.Context, req *pb.SetPasswordRequest) (
 		return nil, status.Errorf(codes.FailedPrecondition, "cannot activate identity: %v", err)
 	}
 
-	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save invitation after acceptance",
+	if err := s.repo.SaveIdentityWithInvitation(ctx, identity, invitation); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save identity and invitation after password set",
+			"identity_id", identity.ID(),
 			"invitation_id", invitation.ID(),
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to save invitation")
-	}
-
-	if err := s.repo.Save(ctx, identity); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save identity after password set",
-			"identity_id", identity.ID(),
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to save identity")
+		return nil, status.Errorf(codes.Internal, "failed to set password")
 	}
 
 	return &pb.SetPasswordResponse{
@@ -324,7 +318,12 @@ func (s *Service) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequ
 // For security, always returns success even if the email is not found.
 func (s *Service) RequestPasswordReset(ctx context.Context, req *pb.RequestPasswordResetRequest) (*pb.RequestPasswordResetResponse, error) {
 	// Attempt to find identity. If not found, return success to prevent email enumeration.
+	// Non-not-found errors are logged but still return success to avoid information leakage.
 	identity, findErr := s.repo.FindByEmail(ctx, req.GetEmail())
+	if findErr != nil && !errors.Is(findErr, domain.ErrIdentityNotFound) {
+		s.logger.ErrorContext(ctx, "unexpected error during password reset lookup",
+			"error", findErr)
+	}
 	if findErr == nil {
 		// TODO: Send plaintext token to user via email service.
 		// The plaintext token is captured here but not yet delivered.
@@ -401,20 +400,12 @@ func (s *Service) CompletePasswordReset(ctx context.Context, req *pb.CompletePas
 		return nil, status.Errorf(codes.Internal, "failed to set password on identity")
 	}
 
-	// Save invitation first to mark the token as consumed, preventing reuse
-	// if the subsequent identity save fails.
-	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save invitation after reset completion",
+	if err := s.repo.SaveIdentityWithInvitation(ctx, identity, invitation); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save identity and invitation after password reset",
+			"identity_id", identity.ID(),
 			"invitation_id", invitation.ID(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to complete password reset")
-	}
-
-	if err := s.repo.Save(ctx, identity); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save identity after password reset",
-			"identity_id", identity.ID(),
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to save identity")
 	}
 
 	return &pb.CompletePasswordResetResponse{
@@ -689,20 +680,12 @@ func (s *Service) AcceptInvitation(ctx context.Context, req *pb.AcceptInvitation
 		return nil, status.Errorf(codes.FailedPrecondition, "cannot activate identity: %v", err)
 	}
 
-	// Save invitation first to mark the token as consumed, preventing reuse
-	// if the subsequent identity save fails.
-	if err := s.repo.SaveInvitation(ctx, invitation); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save accepted invitation",
+	if err := s.repo.SaveIdentityWithInvitation(ctx, identity, invitation); err != nil {
+		s.logger.ErrorContext(ctx, "failed to save identity and invitation after acceptance",
+			"identity_id", identity.ID(),
 			"invitation_id", invitation.ID(),
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to save invitation")
-	}
-
-	if err := s.repo.Save(ctx, identity); err != nil {
-		s.logger.ErrorContext(ctx, "failed to save identity after invitation acceptance",
-			"identity_id", identity.ID(),
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to save identity")
+		return nil, status.Errorf(codes.Internal, "failed to accept invitation")
 	}
 
 	return &pb.AcceptInvitationResponse{

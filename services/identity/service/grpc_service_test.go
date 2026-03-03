@@ -103,6 +103,19 @@ func (m *mockRepository) FindRoleAssignments(_ context.Context, identityID uuid.
 	return m.roles[identityID], nil
 }
 
+func (m *mockRepository) SaveIdentityWithInvitation(_ context.Context, identity *domain.Identity, invitation *domain.Invitation) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	if m.saveInvitationErr != nil {
+		return m.saveInvitationErr
+	}
+	m.identities[identity.ID()] = identity
+	m.identByEmail[identity.Email()] = identity
+	m.invitations[invitation.TokenHash()] = invitation
+	return nil
+}
+
 func (m *mockRepository) SaveInvitation(_ context.Context, invitation *domain.Invitation) error {
 	if m.saveInvitationErr != nil {
 		return m.saveInvitationErr
