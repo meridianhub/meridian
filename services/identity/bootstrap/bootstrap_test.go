@@ -18,18 +18,23 @@ import (
 
 // setupMasterTenantDB creates a CockroachDB testcontainer and provisions the
 // org_meridian_master schema with identity tables.
-func setupMasterTenantDB(t *testing.T) (*gorm.DB, context.Context, func()) {
+func setupMasterTenantDB(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
 	db, cleanup := testdb.SetupCockroachDB(t, nil)
 
 	masterTenantID := tenant.MustNewTenantID(bootstrap.MasterTenantID)
-	ctx := setupTenantSchema(t, db, masterTenantID)
+	setupTenantSchema(t, db, masterTenantID)
 
-	return db, ctx, cleanup
+	return db, cleanup
+}
+
+// masterCtx returns a context scoped to the meridian_master tenant.
+func masterCtx() context.Context {
+	return tenant.WithTenant(context.Background(), tenant.MustNewTenantID(bootstrap.MasterTenantID))
 }
 
 // setupTenantSchema creates identity tables in a tenant schema.
-func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.Context {
+func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) {
 	t.Helper()
 	schemaName := tid.SchemaName()
 
@@ -76,26 +81,22 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.C
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 	)`, schemaName)).Error
 	require.NoError(t, err)
-
-	return tenant.WithTenant(context.Background(), tid)
 }
 
 // TestBootstrapPlatformAdmin_CreatesAdmin verifies that the platform admin is created
 // when the environment variables are set and no admin exists yet.
 func TestBootstrapPlatformAdmin_CreatesAdmin(t *testing.T) {
-	db, _, cleanup := setupMasterTenantDB(t)
+	db, cleanup := setupMasterTenantDB(t)
 	defer cleanup()
 
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
 
-	repo := persistence.NewRepository(db)
-	err := bootstrap.Run(context.Background(), repo)
+	err := bootstrap.Run(context.Background(), db)
 	require.NoError(t, err)
 
-	// Verify the identity was created in meridian_master tenant.
-	masterCtx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID(bootstrap.MasterTenantID))
-	identity, err := repo.FindByEmail(masterCtx, "admin@example.com")
+	repo := persistence.NewRepository(db)
+	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
 	require.NoError(t, err)
 	assert.Equal(t, domain.IdentityStatusActive, identity.Status())
 }
@@ -103,24 +104,22 @@ func TestBootstrapPlatformAdmin_CreatesAdmin(t *testing.T) {
 // TestBootstrapPlatformAdmin_Idempotent verifies that calling bootstrap twice does not
 // create a duplicate admin or return an error.
 func TestBootstrapPlatformAdmin_Idempotent(t *testing.T) {
-	db, _, cleanup := setupMasterTenantDB(t)
+	db, cleanup := setupMasterTenantDB(t)
 	defer cleanup()
 
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
 
-	repo := persistence.NewRepository(db)
-
-	err := bootstrap.Run(context.Background(), repo)
+	err := bootstrap.Run(context.Background(), db)
 	require.NoError(t, err)
 
 	// Second call must not fail.
-	err = bootstrap.Run(context.Background(), repo)
+	err = bootstrap.Run(context.Background(), db)
 	require.NoError(t, err)
 
 	// Exactly one identity should exist.
-	masterCtx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID(bootstrap.MasterTenantID))
-	identities, err := repo.ListByTenant(masterCtx)
+	repo := persistence.NewRepository(db)
+	identities, err := repo.ListByTenant(masterCtx())
 	require.NoError(t, err)
 	assert.Len(t, identities, 1)
 }
@@ -128,18 +127,17 @@ func TestBootstrapPlatformAdmin_Idempotent(t *testing.T) {
 // TestBootstrapPlatformAdmin_SkipsWhenEnvVarsEmpty verifies that bootstrap is skipped
 // when the required environment variables are not set.
 func TestBootstrapPlatformAdmin_SkipsWhenEnvVarsEmpty(t *testing.T) {
-	db, _, cleanup := setupMasterTenantDB(t)
+	db, cleanup := setupMasterTenantDB(t)
 	defer cleanup()
 
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "")
 
-	repo := persistence.NewRepository(db)
-	err := bootstrap.Run(context.Background(), repo)
+	err := bootstrap.Run(context.Background(), db)
 	require.NoError(t, err)
 
-	masterCtx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID(bootstrap.MasterTenantID))
-	identities, err := repo.ListByTenant(masterCtx)
+	repo := persistence.NewRepository(db)
+	identities, err := repo.ListByTenant(masterCtx())
 	require.NoError(t, err)
 	assert.Empty(t, identities)
 }
@@ -147,18 +145,17 @@ func TestBootstrapPlatformAdmin_SkipsWhenEnvVarsEmpty(t *testing.T) {
 // TestBootstrapPlatformAdmin_SkipsWhenOnlyEmailSet verifies that bootstrap is skipped
 // when only one of the two required env vars is set.
 func TestBootstrapPlatformAdmin_SkipsWhenOnlyEmailSet(t *testing.T) {
-	db, _, cleanup := setupMasterTenantDB(t)
+	db, cleanup := setupMasterTenantDB(t)
 	defer cleanup()
 
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "")
 
-	repo := persistence.NewRepository(db)
-	err := bootstrap.Run(context.Background(), repo)
+	err := bootstrap.Run(context.Background(), db)
 	require.NoError(t, err)
 
-	masterCtx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID(bootstrap.MasterTenantID))
-	identities, err := repo.ListByTenant(masterCtx)
+	repo := persistence.NewRepository(db)
+	identities, err := repo.ListByTenant(masterCtx())
 	require.NoError(t, err)
 	assert.Empty(t, identities)
 }
@@ -166,19 +163,18 @@ func TestBootstrapPlatformAdmin_SkipsWhenOnlyEmailSet(t *testing.T) {
 // TestBootstrapPlatformAdmin_PasswordIsHashed verifies that the stored password is
 // a bcrypt hash and not the plaintext password.
 func TestBootstrapPlatformAdmin_PasswordIsHashed(t *testing.T) {
-	db, _, cleanup := setupMasterTenantDB(t)
+	db, cleanup := setupMasterTenantDB(t)
 	defer cleanup()
 
 	const plaintext = "SecurePassword1!"
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", plaintext)
 
-	repo := persistence.NewRepository(db)
-	err := bootstrap.Run(context.Background(), repo)
+	err := bootstrap.Run(context.Background(), db)
 	require.NoError(t, err)
 
-	masterCtx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID(bootstrap.MasterTenantID))
-	identity, err := repo.FindByEmail(masterCtx, "admin@example.com")
+	repo := persistence.NewRepository(db)
+	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
 	require.NoError(t, err)
 
 	// The stored hash must not equal the plaintext.
@@ -192,21 +188,20 @@ func TestBootstrapPlatformAdmin_PasswordIsHashed(t *testing.T) {
 // TestBootstrapPlatformAdmin_RolesAssigned verifies that the expected roles are assigned
 // to the bootstrapped platform admin.
 func TestBootstrapPlatformAdmin_RolesAssigned(t *testing.T) {
-	db, _, cleanup := setupMasterTenantDB(t)
+	db, cleanup := setupMasterTenantDB(t)
 	defer cleanup()
 
 	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
 	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
 
+	err := bootstrap.Run(context.Background(), db)
+	require.NoError(t, err)
+
 	repo := persistence.NewRepository(db)
-	err := bootstrap.Run(context.Background(), repo)
+	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
 	require.NoError(t, err)
 
-	masterCtx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID(bootstrap.MasterTenantID))
-	identity, err := repo.FindByEmail(masterCtx, "admin@example.com")
-	require.NoError(t, err)
-
-	assignments, err := repo.FindRoleAssignments(masterCtx, identity.ID())
+	assignments, err := repo.FindRoleAssignments(masterCtx(), identity.ID())
 	require.NoError(t, err)
 	require.Len(t, assignments, 3)
 
@@ -218,4 +213,50 @@ func TestBootstrapPlatformAdmin_RolesAssigned(t *testing.T) {
 	assert.Contains(t, roleStrings, "platform-admin")
 	assert.Contains(t, roleStrings, "super-admin")
 	assert.Contains(t, roleStrings, "tenant-owner")
+}
+
+// TestBootstrapPlatformAdmin_ReconcilesMissingRoles verifies that when an admin already
+// exists but is missing roles, subsequent bootstrap calls add the missing roles.
+func TestBootstrapPlatformAdmin_ReconcilesMissingRoles(t *testing.T) {
+	db, cleanup := setupMasterTenantDB(t)
+	defer cleanup()
+
+	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
+	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
+
+	// First call: creates admin with all roles.
+	err := bootstrap.Run(context.Background(), db)
+	require.NoError(t, err)
+
+	repo := persistence.NewRepository(db)
+	identity, err := repo.FindByEmail(masterCtx(), "admin@example.com")
+	require.NoError(t, err)
+
+	// Manually revoke one role to simulate a partial state.
+	assignments, err := repo.FindRoleAssignments(masterCtx(), identity.ID())
+	require.NoError(t, err)
+	require.NotEmpty(t, assignments)
+
+	// Revoke the first role.
+	require.NoError(t, assignments[0].Revoke(identity.ID()))
+	require.NoError(t, repo.SaveRoleAssignment(masterCtx(), assignments[0]))
+
+	// Second call: should reconcile and restore the missing role.
+	err = bootstrap.Run(context.Background(), db)
+	require.NoError(t, err)
+
+	// All 3 roles must be active after reconciliation.
+	all, err := repo.FindRoleAssignments(masterCtx(), identity.ID())
+	require.NoError(t, err)
+
+	activeRoles := make([]string, 0)
+	for _, ra := range all {
+		if ra.IsActive() {
+			activeRoles = append(activeRoles, string(ra.Role()))
+		}
+	}
+
+	assert.Contains(t, activeRoles, "platform-admin")
+	assert.Contains(t, activeRoles, "super-admin")
+	assert.Contains(t, activeRoles, "tenant-owner")
 }
