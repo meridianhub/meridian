@@ -106,18 +106,7 @@ func (s *Service) UpdateIdentity(ctx context.Context, req *pb.UpdateIdentityRequ
 	// No mutable fields to update beyond email at this point.
 	// The proto defines email as the only updatable field; since the domain
 	// model treats email as immutable (set at creation), we return the
-	// current identity unchanged when no email update is requested.
-	// Future fields can be added here.
-
-	if err := s.repo.Save(ctx, identity); err != nil {
-		if errors.Is(err, domain.ErrVersionConflict) {
-			return nil, status.Errorf(codes.Aborted, "version conflict: identity was modified by another transaction")
-		}
-		s.logger.ErrorContext(ctx, "failed to save identity",
-			"identity_id", id,
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to update identity")
-	}
+	// current identity unchanged. Future fields can be added here.
 
 	return &pb.UpdateIdentityResponse{
 		Identity: identityToProto(identity),
