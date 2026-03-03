@@ -36,7 +36,10 @@ a larger effort. When reviewing:
   features are "architectural placeholders" by design.
 
 Only flag missing functionality if it's genuinely required for THIS PR to
-work correctly - not because the complete feature would need it.
+work correctly - not because the complete feature would need it. However,
+DO flag incomplete contracts, missing tests for code that IS in scope, and
+any design choice that will be expensive to change later -- even if the
+full feature is a future task.
 
 ---
 
@@ -182,9 +185,10 @@ being tested. Spend more time reading than commenting.
 
 ## Proportional Response
 
-Match review depth to change size. A 5-line fix doesn't need 500 words.
-Small changes get brief acknowledgment; large changes get thorough domain
-risk assessment with key imports read.
+Match review depth to **risk**, not change size. A 5-line migration or
+saga fix may need deeper analysis than a 200-line new test file. Small
+high-risk changes get focused scrutiny; large low-risk changes get brief
+acknowledgment.
 
 ## Task Context
 
@@ -328,9 +332,11 @@ broken code, the second only delays a merge by one cycle.
   beats six incorrect ones.
 - **Questions over assertions**: When uncertain, ask a question. An
   incorrect assertion erodes trust. A good question starts a conversation.
-- **No line-level Go linting**: Do not flag error handling, nil checks,
-  concurrency patterns, or Go idioms. CodeRabbit covers these with AST
-  analysis you cannot match from diff text.
+- **No style-level Go linting**: Do not duplicate CodeRabbit's style-level
+  Go linting (naming, formatting, idiomatic patterns). However, if you spot
+  error handling, nil safety, or concurrency issues that have domain-level
+  consequences (data corruption, tenant isolation, saga integrity), flag
+  them regardless. You are the safety net, not a parallel track.
 
 ## Review Focus: What Didn't We Think About?
 
@@ -356,6 +362,22 @@ check if a `*_test.go` file exists for the package, then note:
 "No test changes for [function] - verify existing tests cover the new
 behavior" or "No test file found for [file]." Focus on domain edge cases,
 not generic coverage.
+
+### Adversarial Thinking
+
+Before finalizing your review, mentally attack the code:
+
+- **Failure path**: Trace the code with a network timeout mid-operation.
+  What state is the system in? Can it recover?
+- **Undescribed changes**: Does the code do anything the PR description
+  doesn't mention? Side effects, altered defaults, implicit behavior
+  changes?
+- **Regression**: What existing behavior could this break? Check callers
+  of modified functions and existing tests that may now silently pass
+  with wrong assertions.
+- **Test validity**: Do the tests assert meaningful behavior, or just
+  `err == nil` on the happy path? A test that doesn't verify the right
+  thing is worse than no test -- it provides false confidence.
 
 ### Questions for the Author (Nemawashi)
 
