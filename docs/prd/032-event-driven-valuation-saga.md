@@ -16,8 +16,11 @@ instructions: |
   Key design choices:
   - The event: trigger type is transport-agnostic (hexagonal architecture) — Kafka is one
     adapter, but the port accepts any proto message from any delivery mechanism
-  - No new service required — the existing saga runtime (control-plane) already has the
-    SagaTrigger port used by Stripe webhooks; event consumption is another input adapter
+  - The existing utilization-metering-consumer is generalized and renamed to event-router —
+    a single service that routes ALL platform events to saga handlers via CEL filters
+  - The event-router's current hard-coded metering logic becomes a platform Starlark saga,
+    making it another rule not an exception — tenant utilization data stays in the tenant's
+    own schema, not tenant-zero
   - CEL filters on saga definitions determine applicability — the tenant decides what
     conditions make a saga fire, not the entity type. This handles events from any domain.
   - Idempotency uses correlation_id from the source event to prevent duplicate processing
@@ -245,61 +248,61 @@ account type definitions are needed — the routing logic lives on the saga, not
 Each saga stands alone — `trigger` says what channel, `filter` says when, `script` says
 what. No indirect wiring through account type policies or party relationships.
 
-### 2.5 Transport-Agnostic Architecture (Hexagonal)
+### 2.5 The Event Router (Service Generalization)
 
-Meridian uses hexagonal architecture. The `event:` trigger defines a **port** — the
-transport that delivers events is an **adapter**. This follows the same pattern as the
-utilization-metering-consumer, where domain logic receives a
-`func(ctx, key, msg proto.Message) error` with no transport references in the signature.
+The existing `utilization-metering-consumer` is generalized and renamed to
+**`event-router`**. The current service already has the right infrastructure — Kafka
+consumer, proto deserialization, hexagonal ports, at-least-once semantics with manual
+offset commits. What changes is its scope: instead of hard-coded Go metering logic, it
+becomes the platform's general-purpose event routing layer.
+
+**Current state (`utilization-metering-consumer`):**
+
+- Consumes audit events from 6 Kafka topics
+- Hard-coded Go transformer converts events to utilization measurements
+- Records measurements to Position Keeping on a tenant-zero account
+- Optionally publishes aggregated metrics to Market Data Service
+
+**Target state (`event-router`):**
+
+- Consumes events from ALL platform Kafka topics (not just audit)
+- Evaluates CEL filters from saga trigger definitions to determine routing
+- Dispatches matching events to the saga runtime for execution
+- Platform metering becomes a Starlark saga alongside tenant sagas (see 2.9)
 
 ```text
-┌──────────────────────────────────────────────────────────┐
-│                     SAGA RUNTIME                         │
-│                                                          │
-│  SagaTrigger port:                                       │
-│    TriggerSaga(ctx, sagaName, inputData, idempotencyKey) │
-│                                                          │
-│  Already used by:                                        │
-│    • api:    → gRPC/HTTP handler adapter                 │
-│    • webhook: → Stripe PaymentEventConsumer adapter      │
-│    • scheduled: → Platform scheduler adapter             │
-│    • event:  → Event consumer adapter (this PRD)         │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      EVENT ROUTER                            │
+│                                                              │
+│  For each event:                                             │
+│    1. Deserialize proto message                              │
+│    2. Find saga definitions with matching event: trigger     │
+│    3. Evaluate CEL filter against event payload              │
+│    4. For each match → SagaTrigger.TriggerSaga()             │
+│                                                              │
+│  Routes to:                                                  │
+│    • Tenant sagas  (usage-to-value, race-distribution, ...)  │
+│    • Platform sagas (utilization-metering — see 2.9)         │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
                           ▲
-                          │ SagaTrigger interface
+                          │ Kafka consumer
                           │
          ┌────────────────┼────────────────┐
          │                │                │
    ┌─────┴──────┐  ┌─────┴──────┐  ┌─────┴──────┐
-   │   Kafka     │  │   Outbox    │  │  In-Process │
-   │   Adapter   │  │   Poller    │  │   (testing) │
-   │             │  │   Adapter   │  │   Adapter   │
+   │ position-   │  │ market-     │  │ audit      │
+   │ keeping     │  │ information │  │ events     │
+   │ events      │  │ events      │  │ (metering) │
    └─────────────┘  └─────────────┘  └─────────────┘
 ```
 
-The event consumer adapter:
-
-1. Receives a proto message from *any* delivery mechanism
-2. Finds saga definitions with matching `event:` trigger for this channel
-3. Evaluates each saga's CEL filter against the event payload
-4. For each match, calls `SagaTrigger.TriggerSaga()` — the same port Stripe webhooks
-   already use
-5. Saga runtime handles execution, compensation, idempotency
-
-**No new service is required.** The saga runtime in control-plane already has:
+The saga runtime provides:
 
 - Starlark execution environment
 - Handler registry and typed service clients
 - Compensation logic
 - The `SagaTrigger` interface (already wired for Stripe webhooks)
-
-Adding an event consumer adapter is incremental — same pattern as adding the Stripe
-webhook adapter. The adapter subscribes to events and calls `TriggerSaga()`. The saga
-runtime does the rest.
-
-This also means the event consumer inherits the saga runtime's existing:
-
 - Observability (structured logging, metrics)
 - Multi-tenancy (tenant-scoped execution)
 - Error handling (retry, compensation, dead-letter)
@@ -347,6 +350,85 @@ materializing. This is inherent to event-driven architectures. Tenants design th
 settlement periods and reconciliation cycles around this — the platform does not promise
 synchronous execution for event-triggered sagas.
 
+### 2.9 Platform Metering as a Starlark Saga
+
+The current `utilization-metering-consumer` has hard-coded Go logic that transforms
+audit events into utilization measurements and records them to a tenant-zero account.
+This is the exact pattern that event-triggered sagas solve — it should be a Starlark
+saga, not compiled Go. Another rule, not an exception.
+
+**Current architecture (hard-coded):**
+
+```text
+Audit event → Go transformer → Position Keeping (tenant-zero account)
+```
+
+**Target architecture (Starlark saga):**
+
+```text
+Audit event → event-router → CEL filter → platform_metering.star saga
+                                            → Position Keeping (tenant's own schema)
+```
+
+**Key changes:**
+
+1. **Metering logic in Starlark, not Go.** The transformation from audit event to
+   utilization measurement becomes a saga script. This makes the metering logic visible,
+   auditable, and configurable per tenant.
+
+2. **Tenant's own schema, not tenant-zero.** Utilization data belongs to the tenant it
+   describes. Each tenant's metering positions live in their own position-keeping schema,
+   not a shared platform account. This aligns with multi-tenancy principles — tenants
+   can query their own utilization data directly.
+
+3. **Configurable per tenant.** Different tenants may want different metering granularity
+   or instruments tracked. A wealth management tenant may not need API call counting.
+   An energy tenant may want sub-second metering resolution. The Starlark saga makes
+   this tenant-configurable via the manifest.
+
+4. **Platform provisions a default metering saga.** On tenant creation, the platform
+   includes a default `platform_metering` saga in the tenant's manifest. Tenants can
+   modify or disable it. The platform still has visibility via the tenant's own
+   position data.
+
+**Example platform metering saga:**
+
+```python
+# Trigger: event:audit.operation-recorded.v1
+# Filter:  event.tenant_id == tenant.id
+#
+# Records a utilization measurement in the tenant's own schema
+# for each auditable operation (API calls, transactions, storage).
+
+def execute_metering():
+    ctx = input_data
+    correlation_id = ctx["correlation_id"]
+
+    step(name="check_idempotency")
+    existing = position_keeping.query_logs(
+        correlation_id=correlation_id,
+        instrument_code=ctx["instrument_code"],
+    )
+    if existing.count > 0:
+        return {"status": "ALREADY_METERED"}
+
+    step(name="record_utilization")
+    position_keeping.initiate_log(
+        account_id=ctx["metering_account_id"],
+        instrument_code=ctx["instrument_code"],
+        direction="DEBIT",
+        amount=Decimal(ctx["quantity"]),
+        correlation_id=correlation_id,
+        description=ctx["service_name"] + ":" + ctx["operation_type"],
+    )
+
+    return {"status": "METERED", "instrument": ctx["instrument_code"]}
+```
+
+This saga follows the same patterns as every other tenant saga — idempotency check,
+step markers, position booking. The event-router treats it identically to tenant
+business sagas. The only difference is that the platform provisions it by default.
+
 ## 3. What Already Exists
 
 ### 3.1 Position-Keeping Event Emission
@@ -387,18 +469,19 @@ synchronous execution for event-triggered sagas.
 - `reference_data.get_instrument(...)` / `reference_data.get_account_type(...)` — lookups
 - Results cached in saga LookupCache for deterministic replay
 
-### 3.6 Existing Event Consumer Patterns
+### 3.6 Existing Event Consumer: `utilization-metering-consumer`
 
-Two patterns already exist in the codebase:
+The service to be generalized into the event-router (see 2.5):
 
-**Hexagonal consumer (utilization-metering-consumer):**
-
-- Domain ports: `PositionKeepingClient`, `UtilizationPublisher` (interfaces)
+- Kafka consumer subscribing to 6 audit event topics
+- Hexagonal ports: `PositionKeepingClient`, `UtilizationPublisher` (interfaces)
 - Transport adapter: `AuditConsumer` wraps `MessageHandler` — domain never sees Kafka
-- Fan-out: primary output (gRPC to PK) + optional secondary (MDS publisher)
 - Handler signature: `func(ctx context.Context, key []byte, msg proto.Message) error`
+- Fan-out: primary output (gRPC to PK) + optional secondary (MDS publisher)
+- Hard-coded metering logic to be replaced by platform Starlark saga (see 2.9)
+- Currently records to tenant-zero account — to be migrated to tenant's own schema
 
-**Direct saga trigger (Stripe webhook consumer):**
+### 3.7 Direct Saga Trigger (Stripe Webhook Consumer)
 
 - `PaymentEventConsumer` receives HTTP webhook, calls `SagaTrigger.TriggerSaga()`
 - No message broker involved — event arrives via HTTP, saga executes immediately
@@ -411,6 +494,12 @@ Two patterns already exist in the codebase:
 - `event:` trigger type in manifest schema (proto + validator + planner + applier)
 - `filter` field on saga definitions — CEL expression for applicability
 - New CEL environment (`event_filter`) with event payload variables
+- **Rename `utilization-metering-consumer` to `event-router`** — generalize from
+  hard-coded metering to CEL-filtered saga dispatch for all platform events
+- **Convert platform metering to a Starlark saga** — the hard-coded Go transformation
+  logic becomes a `platform_metering.star` saga provisioned by default on tenant creation
+- **Tenant-scoped utilization data** — metering positions recorded in the tenant's own
+  schema, not tenant-zero
 - Event consumer adapter wired to the existing `SagaTrigger` port in the saga runtime
 - Idempotency contract (correlation_id as natural key)
 - Event chain termination via CEL filters + max chain depth safety net
@@ -431,7 +520,8 @@ Two patterns already exist in the codebase:
 - Batch-aware optimizations (individual event processing is sufficient at pilot scale)
 - Custom consumer code for tenants (the whole point is to avoid this)
 - Event contract formalization (covered by PRD-030)
-- New service deployment — the event consumer adapter runs inside the existing saga runtime
+- MDS aggregation publisher migration (the event-router's optional MDS fan-out can remain
+  as a separate concern, migrated in a follow-up)
 
 ## 5. Reference: Tenant Manifest Examples
 
@@ -753,7 +843,10 @@ and the saga runtime.
 - Idempotent: reprocessing the same event produces no duplicate side effects
 - Event chains terminate via CEL filters + max chain depth safety net
 - Saga compensation works: if a step fails, prior steps roll back
-- No new service required — event consumer adapter runs inside existing saga runtime
+- `utilization-metering-consumer` renamed to `event-router` and generalized to route
+  all platform events via CEL-filtered saga dispatch
+- Hard-coded metering logic replaced by a platform-provisioned Starlark saga
+- Tenant utilization data recorded in the tenant's own schema, not tenant-zero
 - Sagas can navigate the full entity graph (accounts, parties, hierarchies) via existing
   service modules
 
