@@ -13,3 +13,5 @@ CREATE DATABASE meridian_market_information;
 CREATE DATABASE meridian_reconciliation;
 CREATE DATABASE meridian_forecasting;
 CREATE DATABASE meridian_reference_data;
+CREATE DATABASE meridian_identity;
+CREATE DATABASE meridian_operational_gateway;
