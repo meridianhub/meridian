@@ -72,11 +72,19 @@ func TestTenantAudit_LogsSchemaAccess(t *testing.T) {
 	tenantID := tenant.TenantID("acme_bank")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
+	// WithGormTenantScopeAndLogger requires an active transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
 
-	_, err := db.WithGormTenantScopeAndLogger(ctx, gormDB, logger)
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+
+	_, err := db.WithGormTenantScopeAndLogger(ctx, tx, logger)
 	require.NoError(t, err)
+
+	_ = tx.Rollback()
 
 	entry := findLogEntry(t, &buf, "tenant.schema.access")
 	require.NotNil(t, entry, "expected tenant.schema.access audit log, got: %s", buf.String())
@@ -98,11 +106,19 @@ func TestTenantAudit_LogsSchemaAccessWithService(t *testing.T) {
 	tenantID := tenant.TenantID("beta_corp")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
+	// WithGormTenantScopeAndLogger requires an active transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_beta_corp", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
 
-	_, err := db.WithGormTenantScopeAndLogger(ctx, gormDB, logger)
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+
+	_, err := db.WithGormTenantScopeAndLogger(ctx, tx, logger)
 	require.NoError(t, err)
+
+	_ = tx.Rollback()
 
 	entry := findLogEntry(t, &buf, "tenant.schema.access")
 	require.NotNil(t, entry, "expected tenant.schema.access audit log, got: %s", buf.String())
@@ -137,11 +153,19 @@ func TestTenantAudit_NoLogOnDatabaseError(t *testing.T) {
 	tenantID := tenant.TenantID("acme_bank")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
+	// WithGormTenantScopeAndLogger requires an active transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnError(errAuditTestDBFailed)
+	mock.ExpectRollback()
 
-	_, err := db.WithGormTenantScopeAndLogger(ctx, gormDB, logger)
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+
+	_, err := db.WithGormTenantScopeAndLogger(ctx, tx, logger)
 	require.Error(t, err)
+
+	_ = tx.Rollback()
 
 	// Error/warn logs are expected, but the audit log ("tenant.schema.access") should NOT be emitted
 	assert.NotContains(t, buf.String(), "tenant.schema.access",

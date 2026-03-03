@@ -105,20 +105,25 @@ func TestTenantGuard_AllowsQueryWithTenantScope(t *testing.T) {
 	tenantID := tenant.TenantID("acme_bank")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
-	// Expect SET LOCAL + SELECT
+	// WithGormTenantScope requires an active transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT \* FROM "test_entities"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
+	mock.ExpectCommit()
 
-	// Set tenant scope, then query
-	scopedDB, err := db.WithGormTenantScope(ctx, gormDB.WithContext(ctx))
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+
+	scopedDB, err := db.WithGormTenantScope(ctx, tx)
 	require.NoError(t, err)
 
 	var entities []testEntity
 	err = scopedDB.Find(&entities).Error
 	require.NoError(t, err)
 
+	require.NoError(t, tx.Commit().Error)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -132,20 +137,25 @@ func TestTenantGuard_AllowsCreateWithTenantScope(t *testing.T) {
 	tenantID := tenant.TenantID("acme_bank")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
+	// WithGormTenantScope requires an active transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectBegin()
 	mock.ExpectQuery(`INSERT INTO "test_entities"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 	mock.ExpectCommit()
 
-	scopedDB, err := db.WithGormTenantScope(ctx, gormDB.WithContext(ctx))
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+
+	scopedDB, err := db.WithGormTenantScope(ctx, tx)
 	require.NoError(t, err)
 
 	entity := testEntity{Name: "test"}
 	err = scopedDB.Create(&entity).Error
 	require.NoError(t, err)
 
+	require.NoError(t, tx.Commit().Error)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -208,6 +218,19 @@ func TestTenantGuard_BlocksRawWithoutTenantScope(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, db.ErrTenantScopeRequired)
+}
+
+func TestTenantScope_RejectsNonTransaction(t *testing.T) {
+	t.Parallel()
+	gormDB, _ := newMockGormDB(t)
+
+	tenantID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Calling WithGormTenantScope outside a transaction should fail
+	_, err := db.WithGormTenantScope(ctx, gormDB.WithContext(ctx))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, db.ErrTenantScopeRequiresTransaction)
 }
 
 func TestTenantGuard_PluginName(t *testing.T) {

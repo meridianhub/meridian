@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -11,6 +12,11 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
+
+// ErrTenantScopeRequiresTransaction is returned when WithGormTenantScope is called
+// outside an active database transaction. SET LOCAL has no effect without a transaction,
+// so allowing this would silently skip tenant isolation.
+var ErrTenantScopeRequiresTransaction = errors.New("tenant scope requires an active transaction: SET LOCAL has no effect outside a transaction")
 
 // hashTenantID creates a short, privacy-preserving hash of the tenant ID for logging.
 // This allows correlation in logs without exposing the actual tenant ID.
@@ -67,13 +73,14 @@ func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog
 
 	schema := tenantID.SchemaName()
 
-	// Warn if called outside a transaction — SET LOCAL has no effect without one.
-	// PostgreSQL itself emits a WARNING in this case. We mirror that behavior in application logs.
-	if tx.Statement != nil && tx.Statement.ConnPool != nil {
-		if _, isTx := tx.Statement.ConnPool.(gorm.TxCommitter); !isTx {
-			logger.WarnContext(ctx, "tenant scope: SET LOCAL called outside transaction, scope may not be enforced",
-				"tenant_hash", hashTenantID(tenantID))
-		}
+	// Reject if called outside a transaction — SET LOCAL has no effect without one.
+	// Without this check, the guard flag would be set but the database scope would not
+	// actually be enforced, creating a false sense of tenant isolation.
+	if tx.Statement == nil || tx.Statement.ConnPool == nil {
+		return nil, ErrTenantScopeRequiresTransaction
+	}
+	if _, isTx := tx.Statement.ConnPool.(gorm.TxCommitter); !isTx {
+		return nil, ErrTenantScopeRequiresTransaction
 	}
 
 	// Quote the schema name to prevent SQL injection
