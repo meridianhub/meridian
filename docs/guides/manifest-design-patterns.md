@@ -176,6 +176,93 @@ Holding
 - **"Two truths" pattern:** Market value and cost basis are independent views
   of the same holding. They diverge by design.
 
+### Pattern 5: Time-Dependent Valuation (Forecast-Derived Pricing)
+
+**When to use:** The rate used for valuation varies over time, driven by a
+forecast curve published to Market Data by the Forecasting Service.
+
+**Reference:** [`tou_energy_valuation.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/tou_energy_valuation.star)
+
+**Account model:**
+
+```text
+Customer Metered Account (kWh)  ← source transaction (consumption)
+└── Billing Account (GBP)       ← saga creates time-of-use charge
+```
+
+**Flow:**
+
+1. kWh position captured (platform event)
+2. CEL filter matches: `event.instrument_code == 'KWH' && event.direction == 'DEBIT'`
+3. Saga looks up account type for valuation method
+4. Saga calls `valuation_engine.compute()` with `value_date` set to the
+   settlement period start
+5. Valuation engine looks up the rate from the forecast-derived price curve in
+   Market Data at the given `value_date`
+6. Saga books GBP position
+
+**Key decisions:**
+
+- **`value_date` is the temporal key.** Different settlement periods (e.g.,
+  half-hours) map to different rates from the price curve. The valuation engine
+  resolves the rate, not the saga.
+- **Forecast curves are the rate source.** The Forecasting Service generates
+  forward price curves from historical patterns and publishes them to Market
+  Data as ESTIMATE quality observations.
+- **Same event trigger as flat-rate valuation.** The only difference from
+  Pattern 1 is the `value_date` parameter. A tenant can migrate from flat-rate
+  to time-of-use by changing the valuation method, not the saga.
+
+### Pattern 6: Self-Referential Feedback Loop (Dynamic Capacity Pricing)
+
+**When to use:** The platform's own position data (e.g., utilisation) drives
+the forecast that generates dynamic prices, which in turn drive billing that
+creates more positions — forming a closed feedback loop.
+
+**Reference:** [`dynamic_capacity_billing.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/dynamic_capacity_billing.star)
+
+**Account model:**
+
+```text
+Usage Account (TOKEN)            ← source transaction (token consumption)
+└── Billing Account (USD)        ← saga creates dynamic charge
+```
+
+**The feedback loop:**
+
+```text
+TOKEN positions ──→ Forecasting Service ──→ Market Data (price curves)
+        ↑                                           │
+        │                                           ↓
+        └──────── Billing (USD charges) ←──── This saga
+```
+
+**Flow:**
+
+1. TOKEN position captured per region (platform event)
+2. CEL filter matches: `event.instrument_code == 'TOKEN' && event.direction == 'DEBIT'`
+3. Saga constructs regional dataset code: `TOKEN_PRICE_{REGION}`
+4. Saga queries Market Data directly for the price observation at the
+   consumption timestamp
+5. Saga computes charge: tokens × dynamic regional rate
+6. Saga books USD charge
+
+**Key decisions:**
+
+- **Direct market data query, not valuation engine.** The saga queries
+  `market_data.get_observation()` directly because the rate is
+  region-and-time-specific, driven by a dataset code constructed at runtime.
+- **Region encoded in dataset code.** Each data centre region has its own price
+  curve dataset (e.g., `TOKEN_PRICE_US_EAST_1`). The Forecasting Service
+  publishes each independently.
+- **Self-referential loop by design.** The platform's own utilisation drives its
+  own pricing. This enables demand shaping — high-utilisation regions become
+  expensive, shifting load to cheaper regions. Meridian acts as a financial load
+  balancer.
+- **Forecasting Service is the bridge.** It reads historical TOKEN positions,
+  analyses demand patterns, and publishes forward price curves. The
+  `capacity_pricing.star` built-in template is designed for this use case.
+
 ---
 
 ## Trigger and Filter Design
@@ -426,7 +513,7 @@ func TestAllStarFilesHaveTests(t *testing.T) {
 ## Reference Examples
 
 The [tenant saga examples](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/)
-directory contains four industry-spanning examples demonstrating these patterns:
+directory contains six industry-spanning examples demonstrating these patterns:
 
 | Example | Industry | Pattern | Trigger |
 |---------|----------|---------|---------|
@@ -434,6 +521,8 @@ directory contains four industry-spanning examples demonstrating these patterns:
 | `compute_billing.star` | Cloud | Single-leg billing | `event:position-keeping.transaction-captured.v1` |
 | `race_result_distribution.star` | Betting | Entity graph distribution | `event:market-information.observation-recorded.v1` |
 | `corporate_action_cost_adjustment.star` | Wealth | Phantom events / cost basis | `event:market-information.corporate-action.v1` |
+| `tou_energy_valuation.star` | Energy | Time-dependent valuation (forecast curves) | `event:position-keeping.transaction-captured.v1` |
+| `dynamic_capacity_billing.star` | Cloud | Self-referential feedback loop | `event:position-keeping.transaction-captured.v1` |
 
 Each example includes a file header documenting its trigger, filter, input
 data, and account model. See the

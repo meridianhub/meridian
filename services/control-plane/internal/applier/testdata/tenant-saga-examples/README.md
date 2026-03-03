@@ -75,6 +75,43 @@ Account model per client per instrument:
 The position log on the cost basis account IS the audit trail. Not reconstructed
 from trade confirmations — retrieved directly.
 
+### tou\_energy\_valuation.star — Energy: Time-of-Use Valuation
+
+An energy retailer values kWh consumption at dynamic half-hourly rates from a
+forecast-derived price curve.
+
+| Aspect | Detail |
+|--------|--------|
+| Trigger | `event:position-keeping.transaction-captured.v1` |
+| Filter | `event.instrument_code == 'KWH' && event.direction == 'DEBIT'` |
+| Pattern | Time-dependent valuation via forecast-derived price curves |
+| Key innovation | `value_date` parameter to valuation engine for temporal rate lookup |
+
+Extends the cross-instrument valuation pattern with temporal awareness: different
+settlement periods have different prices (peak, off-peak, overnight). The
+Forecasting Service generates forward price curves from historical consumption
+patterns and publishes them to Market Data as ESTIMATE quality observations. The
+valuation engine uses `value_date` to look up the correct rate.
+
+### dynamic\_capacity\_billing.star — Compute: Dynamic Regional Pricing
+
+A compute platform bills token consumption at rates derived from its own
+utilisation forecasts per data centre region.
+
+| Aspect | Detail |
+|--------|--------|
+| Trigger | `event:position-keeping.transaction-captured.v1` |
+| Filter | `event.instrument_code == 'TOKEN' && event.direction == 'DEBIT'` |
+| Pattern | Self-referential feedback loop (positions → forecasts → prices → billing) |
+| Key innovation | Direct market data query for region-specific dynamic pricing |
+
+The feedback loop: TOKEN positions accumulate per region → Forecasting Service
+analyses utilisation to generate demand curves → demand curves published as
+dynamic prices in Market Data → this saga reads the regional price at the
+consumption timestamp → books USD charge → which is itself a position. The
+platform's own usage patterns drive its own pricing, enabling demand shaping
+across data centre regions.
+
 ## Common Patterns
 
 All examples share these patterns:
