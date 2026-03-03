@@ -1093,6 +1093,30 @@ func TestSuspendIdentity_NotFound(t *testing.T) {
 	assert.Equal(t, codes.NotFound, status.Code(err))
 }
 
+func TestSuspendIdentity_CallerOutrankedByTarget(t *testing.T) {
+	svc, repo := newTestService(t)
+	callerID := uuid.New()
+	ctx := contextWithAuth(callerID, []string{"ADMIN"})
+
+	identity := makeActiveIdentity(t, "owner@example.com", "SecurePass123!")
+	repo.addIdentity(identity)
+
+	// Target holds TENANT_OWNER — outranks the caller's ADMIN role.
+	ownerAssignment := domain.ReconstructRoleAssignment(
+		uuid.New(), identity.ID(), uuid.New(), domain.RoleTenantOwner,
+		nil, nil, nil, time.Now(), time.Now(),
+	)
+	repo.roles[identity.ID()] = []*domain.RoleAssignment{ownerAssignment}
+
+	_, err := svc.SuspendIdentity(ctx, &pb.SuspendIdentityRequest{
+		Id:     identity.ID().String(),
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
 // --- ReactivateIdentity Tests ---
 
 func TestReactivateIdentity_Success(t *testing.T) {
@@ -1158,6 +1182,31 @@ func TestReactivateIdentity_NotSuspended(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+func TestReactivateIdentity_CallerOutrankedByTarget(t *testing.T) {
+	svc, repo := newTestService(t)
+	callerID := uuid.New()
+	ctx := contextWithAuth(callerID, []string{"ADMIN"})
+
+	identity := makeActiveIdentity(t, "owner@example.com", "SecurePass123!")
+	require.NoError(t, identity.Suspend())
+	repo.addIdentity(identity)
+
+	// Target holds TENANT_OWNER — outranks the caller's ADMIN role.
+	ownerAssignment := domain.ReconstructRoleAssignment(
+		uuid.New(), identity.ID(), uuid.New(), domain.RoleTenantOwner,
+		nil, nil, nil, time.Now(), time.Now(),
+	)
+	repo.roles[identity.ID()] = []*domain.RoleAssignment{ownerAssignment}
+
+	_, err := svc.ReactivateIdentity(ctx, &pb.ReactivateIdentityRequest{
+		Id:     identity.ID().String(),
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
 }
 
 // --- Health Check Tests ---

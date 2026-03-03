@@ -259,7 +259,7 @@ func (s *Service) SetPassword(ctx context.Context, req *pb.SetPasswordRequest) (
 			"identity_id", identity.ID(),
 			"invitation_id", invitation.ID(),
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to set password")
+		return nil, mapDomainError(err, "identity")
 	}
 
 	return &pb.SetPasswordResponse{
@@ -405,7 +405,7 @@ func (s *Service) CompletePasswordReset(ctx context.Context, req *pb.CompletePas
 			"identity_id", identity.ID(),
 			"invitation_id", invitation.ID(),
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to complete password reset")
+		return nil, mapDomainError(err, "identity")
 	}
 
 	return &pb.CompletePasswordResetResponse{
@@ -685,7 +685,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, req *pb.AcceptInvitation
 			"identity_id", identity.ID(),
 			"invitation_id", invitation.ID(),
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to accept invitation")
+		return nil, mapDomainError(err, "identity")
 	}
 
 	return &pb.AcceptInvitationResponse{
@@ -714,6 +714,11 @@ func (s *Service) SuspendIdentity(ctx context.Context, req *pb.SuspendIdentityRe
 	identity, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, mapDomainError(err, "identity")
+	}
+
+	// Verify caller outranks the target identity's highest role.
+	if err := s.verifyCallerOutranksTarget(ctx, id, callerRole); err != nil {
+		return nil, err
 	}
 
 	if err := identity.Suspend(); err != nil {
@@ -759,6 +764,11 @@ func (s *Service) ReactivateIdentity(ctx context.Context, req *pb.ReactivateIden
 	identity, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, mapDomainError(err, "identity")
+	}
+
+	// Verify caller outranks the target identity's highest role.
+	if err := s.verifyCallerOutranksTarget(ctx, id, callerRole); err != nil {
+		return nil, err
 	}
 
 	if err := identity.Activate(); err != nil {
@@ -817,6 +827,40 @@ func (s *Service) getCallerHighestRole(ctx context.Context) string {
 		}
 	}
 	return highest
+}
+
+// verifyCallerOutranksTarget checks that the caller's role strictly outranks
+// the target identity's highest active role. This prevents, for example, an
+// Admin from suspending a Tenant Owner.
+func (s *Service) verifyCallerOutranksTarget(ctx context.Context, targetID uuid.UUID, callerRole string) error {
+	assignments, err := s.repo.FindRoleAssignments(ctx, targetID)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to fetch target role assignments",
+			"target_id", targetID,
+			"error", err)
+		return status.Errorf(codes.Internal, "failed to verify target permissions")
+	}
+
+	// Find highest active role of the target identity.
+	targetHighest := ""
+	for _, a := range assignments {
+		if a.IsActive() {
+			role := string(a.Role())
+			if targetHighest == "" || domain.CanGrant(role, targetHighest) {
+				targetHighest = role
+			}
+		}
+	}
+
+	// If the target has no active roles, caller with Admin+ can proceed.
+	if targetHighest == "" {
+		return nil
+	}
+
+	if !domain.CanGrant(callerRole, targetHighest) {
+		return status.Errorf(codes.PermissionDenied, "insufficient privilege to act on identity with role %s", targetHighest)
+	}
+	return nil
 }
 
 // mapDomainError maps domain-layer errors to gRPC status errors.
