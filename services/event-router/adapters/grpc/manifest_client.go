@@ -20,6 +20,9 @@ var ErrManifestClientConfigRequired = fmt.Errorf("ManifestClientConfig is requir
 // ErrManifestClientServiceNameRequired is returned when ServiceName is not provided.
 var ErrManifestClientServiceNameRequired = fmt.Errorf("ServiceName is required for manifest client")
 
+// ErrManifestClientNegativeTimeout is returned when a negative Timeout is provided.
+var ErrManifestClientNegativeTimeout = fmt.Errorf("timeout must be non-negative")
+
 // ManifestClient fetches the current manifest saga definitions from the control-plane.
 // Used by the event-router to initialize and reload the SagaRegistry on startup.
 type ManifestClient struct {
@@ -58,6 +61,9 @@ func NewManifestClient(cfg *ManifestClientConfig) (*ManifestClient, error) {
 	}
 	if cfg.ServiceName == "" {
 		return nil, ErrManifestClientServiceNameRequired
+	}
+	if cfg.Timeout < 0 {
+		return nil, ErrManifestClientNegativeTimeout
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 10 * time.Second
