@@ -88,11 +88,11 @@ All examples share these patterns:
 
 ## Validation
 
-These scripts are validated by `docs/prd/032-examples/validate_examples_test.go`
-which checks Starlark syntax using the saga validator with mock handler bindings.
+These scripts are validated by `services/control-plane/internal/applier/validate_examples_test.go`
+which checks Starlark syntax using the same parser options as the saga runtime.
 
 Run:
 
 ```bash
-go test ./docs/prd/032-examples/ -v
+go test ./services/control-plane/internal/applier/ -run TestTenantExample -v
 ```

@@ -12,8 +12,8 @@ onboarding, and platform engineers extending the reference examples.
   saga scripts
 - [Saga Validation Guide](saga-validation.md) — Validation layers and
   troubleshooting
-- [PRD-032 Examples](../prd/032-examples/) — Industry-spanning reference
-  implementations
+- [Tenant Saga Examples](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/) —
+  Industry-spanning reference implementations
 
 ---
 
@@ -41,7 +41,7 @@ hold them, what events trigger valuations, and what sagas execute the logic?**
 **When to use:** A transaction in one instrument (e.g. kWh, GPU_HOUR) needs to
 produce a monetary value in another instrument (e.g. GBP, USD).
 
-**Reference:** [`usage_to_value.star`](../prd/032-examples/usage_to_value.star)
+**Reference:** [`usage_to_value.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/usage_to_value.star)
 
 **Account model:**
 
@@ -95,7 +95,7 @@ if existing_retail.count > 0 and existing_wholesale.count > 0:
 **When to use:** Simpler variant of cross-instrument valuation with a single
 target instrument.
 
-**Reference:** [`compute_billing.star`](../prd/032-examples/compute_billing.star)
+**Reference:** [`compute_billing.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/compute_billing.star)
 
 **Account model:**
 
@@ -113,7 +113,7 @@ idempotency check suffices.
 **When to use:** An event triggers traversal of a party hierarchy, with
 position booking per participant based on structuring data (allocation shares).
 
-**Reference:** [`race_result_distribution.star`](../prd/032-examples/race_result_distribution.star)
+**Reference:** [`race_result_distribution.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/race_result_distribution.star)
 
 **Account model:**
 
@@ -146,7 +146,7 @@ Syndicate Organization
 **When to use:** An economic event changes the value of a holding without moving
 cash or units. Cost basis adjustment, mark-to-market, tax events.
 
-**Reference:** [`corporate_action_cost_adjustment.star`](../prd/032-examples/corporate_action_cost_adjustment.star)
+**Reference:** [`corporate_action_cost_adjustment.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/corporate_action_cost_adjustment.star)
 
 **Account model (per client per instrument):**
 
@@ -425,8 +425,8 @@ func TestAllStarFilesHaveTests(t *testing.T) {
 
 ## Reference Examples
 
-The [`docs/prd/032-examples/`](../prd/032-examples/) directory contains four
-industry-spanning examples demonstrating these patterns:
+The [tenant saga examples](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/)
+directory contains four industry-spanning examples demonstrating these patterns:
 
 | Example | Industry | Pattern | Trigger |
 |---------|----------|---------|---------|
@@ -437,7 +437,7 @@ industry-spanning examples demonstrating these patterns:
 
 Each example includes a file header documenting its trigger, filter, input
 data, and account model. See the
-[examples README](../prd/032-examples/README.md) for details.
+[examples README](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/README.md) for details.
 
 ---
 

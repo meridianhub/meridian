@@ -1,4 +1,4 @@
-package examples
+package applier_test
 
 import (
 	"os"
@@ -11,12 +11,12 @@ import (
 	"go.starlark.net/syntax"
 )
 
-// examplesDir returns the directory containing the example .star files.
-func examplesDir(t *testing.T) string {
+// tenantExamplesDir returns the directory containing the tenant saga example .star files.
+func tenantExamplesDir(t *testing.T) string {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
 	require.True(t, ok, "failed to get caller info")
-	return filepath.Dir(filename)
+	return filepath.Join(filepath.Dir(filename), "testdata", "tenant-saga-examples")
 }
 
 // starlarkFileOptions matches the saga runtime's parser configuration:
@@ -28,8 +28,8 @@ var starlarkFileOptions = &syntax.FileOptions{
 	Recursion:      false,
 }
 
-func TestExampleSagas_SyntaxValid(t *testing.T) {
-	dir := examplesDir(t)
+func TestTenantExampleSagas_SyntaxValid(t *testing.T) {
+	dir := tenantExamplesDir(t)
 
 	examples := []struct {
 		name     string
@@ -54,8 +54,8 @@ func TestExampleSagas_SyntaxValid(t *testing.T) {
 	}
 }
 
-func TestExampleSagas_AllStarFilesHaveTests(t *testing.T) {
-	dir := examplesDir(t)
+func TestTenantExampleSagas_AllStarFilesHaveTests(t *testing.T) {
+	dir := tenantExamplesDir(t)
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 
@@ -69,7 +69,7 @@ func TestExampleSagas_AllStarFilesHaveTests(t *testing.T) {
 	for _, entry := range entries {
 		if filepath.Ext(entry.Name()) == ".star" {
 			assert.True(t, testedFiles[entry.Name()],
-				"star file %s exists but is not covered by TestExampleSagas_SyntaxValid — add it to the test list",
+				"star file %s exists but is not covered by TestTenantExampleSagas_SyntaxValid — add it to the test list",
 				entry.Name())
 		}
 	}
