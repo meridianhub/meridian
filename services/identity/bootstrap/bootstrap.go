@@ -23,6 +23,9 @@ import (
 // MasterTenantID is the well-known tenant ID for the master/platform tenant.
 const MasterTenantID = "meridian_master"
 
+// ErrNilRepository is returned when a nil repository is passed to Run.
+var ErrNilRepository = errors.New("bootstrap: repository must not be nil")
+
 // platformAdminRoles are the roles assigned to the bootstrapped platform admin.
 var platformAdminRoles = []auth.Role{
 	auth.RolePlatformAdmin,
@@ -42,6 +45,10 @@ var platformAdminRoles = []auth.Role{
 //   - If an admin already exists, any missing roles are reconciled atomically.
 //   - Identity creation and all role assignments are committed in a single transaction.
 func Run(ctx context.Context, repo domain.Repository) error {
+	if repo == nil {
+		return ErrNilRepository
+	}
+
 	email := os.Getenv("PLATFORM_ADMIN_EMAIL")
 	password := os.Getenv("PLATFORM_ADMIN_PASSWORD")
 
