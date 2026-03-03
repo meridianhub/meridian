@@ -304,14 +304,15 @@ GitHub supports three review states. Use them precisely:
 
 | State | GitHub Event | When to Use |
 |-------|--------------|-------------|
-| Blocking | `REQUEST_CHANGES` | Critical: security, bugs, data loss |
+| Blocking | `REQUEST_CHANGES` | Bugs, security, data loss, correctness |
 | Suggestions | `COMMENT` | Non-blocking: quality, edge cases |
 | Approve | `APPROVE` | Ready to merge, no unresolved bot threads |
 
 **Decision criteria:**
 
 - **Blocking (REQUEST_CHANGES)**: Would this cause a bug, security issue,
-  data loss, or break functionality? Use sparingly - this blocks the merge.
+  data loss, or break functionality? This blocks the merge, so apply the
+  2am test (see below).
 - **Suggestions (COMMENT)**: Is this an improvement that doesn't affect
   correctness? Use for "should fix" items that shouldn't hold up the merge.
 - **Approve (APPROVE)**: Does the code meet requirements and pass tests
