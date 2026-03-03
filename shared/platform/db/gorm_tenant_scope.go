@@ -67,6 +67,15 @@ func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog
 
 	schema := tenantID.SchemaName()
 
+	// Warn if called outside a transaction — SET LOCAL has no effect without one.
+	// PostgreSQL itself emits a WARNING in this case. We mirror that behavior in application logs.
+	if tx.Statement != nil && tx.Statement.ConnPool != nil {
+		if _, isTx := tx.Statement.ConnPool.(gorm.TxCommitter); !isTx {
+			logger.WarnContext(ctx, "tenant scope: SET LOCAL called outside transaction, scope may not be enforced",
+				"tenant_hash", hashTenantID(tenantID))
+		}
+	}
+
 	// Quote the schema name to prevent SQL injection
 	// pq.QuoteIdentifier handles special characters safely
 	quotedSchema := pq.QuoteIdentifier(schema)
@@ -86,9 +95,10 @@ func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog
 	}
 
 	// Audit log: emitted on every successful schema access for forensic traceability.
+	// Uses hashed tenant ID for privacy-preserving correlation (consistent with error-path logging).
 	// Service-level attributes (e.g., "service") should be pre-set on the logger at startup.
 	logger.InfoContext(ctx, "tenant.schema.access",
-		"tenant", tenantID.String(),
+		"tenant_hash", hashTenantID(tenantID),
 		"schema", schema,
 	)
 

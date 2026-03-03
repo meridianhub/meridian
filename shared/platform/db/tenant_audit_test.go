@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -21,11 +22,11 @@ var errAuditTestDBFailed = errors.New("database connection lost")
 
 // logEntry represents a parsed JSON log line for assertion
 type logEntry struct {
-	Level   string `json:"level"`
-	Msg     string `json:"msg"`
-	Tenant  string `json:"tenant"`
-	Schema  string `json:"schema"`
-	Service string `json:"service"`
+	Level      string `json:"level"`
+	Msg        string `json:"msg"`
+	TenantHash string `json:"tenant_hash"`
+	Schema     string `json:"schema"`
+	Service    string `json:"service"`
 }
 
 func newAuditMockGormDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
@@ -40,6 +41,25 @@ func newAuditMockGormDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	require.NoError(t, err)
 
 	return gormDB, mock
+}
+
+// findLogEntry finds a log entry with the given message in a multi-line JSON log buffer.
+func findLogEntry(t *testing.T, buf *bytes.Buffer, msg string) *logEntry {
+	t.Helper()
+	for _, line := range strings.Split(buf.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry logEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.Msg == msg {
+			return &entry
+		}
+	}
+	return nil
 }
 
 func TestTenantAudit_LogsSchemaAccess(t *testing.T) {
@@ -58,14 +78,11 @@ func TestTenantAudit_LogsSchemaAccess(t *testing.T) {
 	_, err := db.WithGormTenantScopeAndLogger(ctx, gormDB, logger)
 	require.NoError(t, err)
 
-	// Parse log output
-	var entry logEntry
-	err = json.Unmarshal(buf.Bytes(), &entry)
-	require.NoError(t, err, "log output: %s", buf.String())
+	entry := findLogEntry(t, &buf, "tenant.schema.access")
+	require.NotNil(t, entry, "expected tenant.schema.access audit log, got: %s", buf.String())
 
 	assert.Equal(t, "INFO", entry.Level)
-	assert.Equal(t, "tenant.schema.access", entry.Msg)
-	assert.Equal(t, "acme_bank", entry.Tenant)
+	assert.NotEmpty(t, entry.TenantHash, "tenant_hash should be set")
 	assert.Equal(t, "org_acme_bank", entry.Schema)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
@@ -87,12 +104,10 @@ func TestTenantAudit_LogsSchemaAccessWithService(t *testing.T) {
 	_, err := db.WithGormTenantScopeAndLogger(ctx, gormDB, logger)
 	require.NoError(t, err)
 
-	var entry logEntry
-	err = json.Unmarshal(buf.Bytes(), &entry)
-	require.NoError(t, err, "log output: %s", buf.String())
+	entry := findLogEntry(t, &buf, "tenant.schema.access")
+	require.NotNil(t, entry, "expected tenant.schema.access audit log, got: %s", buf.String())
 
-	assert.Equal(t, "tenant.schema.access", entry.Msg)
-	assert.Equal(t, "beta_corp", entry.Tenant)
+	assert.NotEmpty(t, entry.TenantHash, "tenant_hash should be set")
 	assert.Equal(t, "org_beta_corp", entry.Schema)
 	assert.Equal(t, "current-account", entry.Service)
 	assert.NoError(t, mock.ExpectationsWereMet())
@@ -128,7 +143,7 @@ func TestTenantAudit_NoLogOnDatabaseError(t *testing.T) {
 	_, err := db.WithGormTenantScopeAndLogger(ctx, gormDB, logger)
 	require.Error(t, err)
 
-	// Error log is expected, but the audit log ("tenant.schema.access") should NOT be emitted
+	// Error/warn logs are expected, but the audit log ("tenant.schema.access") should NOT be emitted
 	assert.NotContains(t, buf.String(), "tenant.schema.access",
 		"should not log audit entry when SET LOCAL fails")
 	assert.NoError(t, mock.ExpectationsWereMet())
