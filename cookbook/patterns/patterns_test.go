@@ -127,13 +127,18 @@ func TestBaseFiatGBP_ProvidesMatchesManifestInstruments(t *testing.T) {
 		"provides.instruments count should match instruments in manifest-fragment.yaml")
 
 	fragmentCodes := make(map[string]bool)
-	for _, inst := range instruments {
-		m := inst.(map[string]any)
-		fragmentCodes[m["code"].(string)] = true
+	for i, inst := range instruments {
+		m, ok := inst.(map[string]any)
+		require.True(t, ok, "instrument[%d] should be an object", i)
+		c, ok := m["code"].(string)
+		require.True(t, ok, "instrument[%d].code should be a string", i)
+		fragmentCodes[c] = true
 	}
-	for _, code := range providedInstruments {
-		assert.True(t, fragmentCodes[code.(string)],
-			"instrument %q in provides should be present in manifest-fragment.yaml", code)
+	for i, code := range providedInstruments {
+		c, ok := code.(string)
+		require.True(t, ok, "provided instrument[%d] should be a string", i)
+		assert.True(t, fragmentCodes[c],
+			"instrument %q in provides should be present in manifest-fragment.yaml", c)
 	}
 }
 
@@ -200,13 +205,18 @@ func TestBaseFiatUSD_ProvidesMatchesManifestInstruments(t *testing.T) {
 		"provides.instruments count should match instruments in manifest-fragment.yaml")
 
 	fragmentCodes := make(map[string]bool)
-	for _, inst := range instruments {
-		m := inst.(map[string]any)
-		fragmentCodes[m["code"].(string)] = true
+	for i, inst := range instruments {
+		m, ok := inst.(map[string]any)
+		require.True(t, ok, "instrument[%d] should be an object", i)
+		c, ok := m["code"].(string)
+		require.True(t, ok, "instrument[%d].code should be a string", i)
+		fragmentCodes[c] = true
 	}
-	for _, code := range providedInstruments {
-		assert.True(t, fragmentCodes[code.(string)],
-			"instrument %q in provides should be present in manifest-fragment.yaml", code)
+	for i, code := range providedInstruments {
+		c, ok := code.(string)
+		require.True(t, ok, "provided instrument[%d] should be a string", i)
+		assert.True(t, fragmentCodes[c],
+			"instrument %q in provides should be present in manifest-fragment.yaml", c)
 	}
 }
 
