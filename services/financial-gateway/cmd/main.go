@@ -1,8 +1,7 @@
 // Package main is the entry point for the financial-gateway standalone binary.
 //
-// It wires all financial-gateway components: gRPC service stub, platform bootstrap,
-// and health checks. The Stripe adapter is wired in task 5; this binary serves as
-// the structural scaffold for the service.
+// It wires all financial-gateway components: gRPC service, Stripe adapter,
+// platform bootstrap, and health checks.
 package main
 
 import (
@@ -102,8 +101,12 @@ func run(logger *slog.Logger) error {
 		WithAuthInterceptor(authInterceptor).
 		Build()
 
-	// Initialize and register FinancialGatewayService stub.
-	gatewaySvc, err := service.NewFinancialGatewayService(logger)
+	// Initialize and register FinancialGatewayService.
+	svcCfg := service.Config{
+		Logger: logger,
+	}
+
+	gatewaySvc, err := service.NewFinancialGatewayService(svcCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create financial gateway service: %w", err)
 	}
