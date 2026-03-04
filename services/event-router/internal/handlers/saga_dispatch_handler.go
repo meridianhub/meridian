@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -13,6 +14,9 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/protobuf/proto"
 )
+
+// ErrHandlerNotInitialized is returned when Handle is called on a handler with nil dependencies.
+var ErrHandlerNotInitialized = errors.New("saga dispatch handler is not properly initialized")
 
 const (
 	// defaultMaxChainDepth is the maximum saga chain depth before events are dropped.
@@ -83,6 +87,10 @@ func NewSagaDispatchHandler(reg *registry.SagaRegistry, trigger domain.SagaTrigg
 // warning log) while other sagas continue processing. Trigger errors are
 // returned immediately as they indicate infrastructure failures.
 func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event proto.Message, metadata map[string]string) error {
+	if h.registry == nil || h.sagaTrigger == nil {
+		return ErrHandlerNotInitialized
+	}
+
 	// Convert event to input_data (also validates event is non-nil).
 	inputData, err := saga.EventToInputData(event, metadata)
 	if err != nil {
