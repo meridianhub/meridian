@@ -73,6 +73,11 @@ def execute_usage_to_value():
 
     if retail_logs.count > 0 and wholesale_logs.count > 0:
         return {"status": "ALREADY_PROCESSED", "correlation_id": correlation_id}
+    if retail_logs.count > 0 or wholesale_logs.count > 0:
+        return {
+            "status": "PARTIAL_ALREADY_PROCESSED",
+            "correlation_id": correlation_id,
+        }
 
     # Look up account type for valuation method references.
     # The account type's DefaultConversionMethodID and ValuationMethods
@@ -102,7 +107,13 @@ def execute_usage_to_value():
     )
 
     # Value at wholesale rate (second entry in ValuationMethods array)
-    wholesale_method = account_type.valuation_methods[1]
+    valuation_methods = account_type.valuation_methods
+    if len(valuation_methods) < 2:
+        return {
+            "status": "CONFIG_ERROR",
+            "correlation_id": correlation_id,
+        }
+    wholesale_method = valuation_methods[1]
     step(name="compute_wholesale_valuation")
     wholesale = valuation_engine.compute(
         method_id=wholesale_method.method_id,

@@ -326,6 +326,21 @@ func TestEnergySettlement_ProvidesMatchesManifestInstruments(t *testing.T) {
 
 	require.Equal(t, len(instruments), len(providedInstruments),
 		"provides.instruments count should match instruments in manifest-fragment.yaml")
+
+	manifestCodes := make(map[string]bool)
+	for i, inst := range instruments {
+		m, ok := inst.(map[string]any)
+		require.True(t, ok, "instrument[%d] should be an object", i)
+		code, ok := m["code"].(string)
+		require.True(t, ok, "instrument[%d].code should be a string", i)
+		manifestCodes[code] = true
+	}
+	for i, code := range providedInstruments {
+		c, ok := code.(string)
+		require.True(t, ok, "provided instrument[%d] should be a string", i)
+		assert.True(t, manifestCodes[c],
+			"instrument %q in provides should be present in manifest-fragment.yaml", c)
+	}
 }
 
 func TestEnergySettlement_RequiresGBP(t *testing.T) {
