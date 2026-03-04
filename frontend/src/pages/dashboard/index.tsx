@@ -4,6 +4,7 @@ import { CreditCard, FileText, BarChart3, ArrowRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
+import { useTenantLayout } from '@/hooks/use-tenant-layout'
 import { tenantKeys } from '@/lib/query-keys'
 import { StatCard } from './stat-card'
 import { ActivityFeed, type ActivityItem } from './activity-feed'
@@ -82,6 +83,7 @@ function getCountFromPagination(
 export function DashboardPage() {
   const navigate = useNavigate()
   const { tenantSlug } = useTenantContext()
+  useTenantLayout()
   const { paymentsQuery, bookingLogsQuery, ledgerPostingsQuery, activityQuery } =
     useDashboardStats(tenantSlug)
 
