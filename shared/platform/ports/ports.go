@@ -130,6 +130,12 @@ const (
 	// Protocol: gRPC (internal)
 	// Visibility: Cluster-internal only
 	OperationalGateway = 50063
+
+	// FinancialGateway is the gRPC port for the Financial Gateway service.
+	// Manages outbound financial payment dispatch to external payment rails (Stripe, SWIFT, ACH, FedNow).
+	// Protocol: gRPC (internal)
+	// Visibility: Cluster-internal only
+	FinancialGateway = 50064
 )
 
 // HTTP service ports (various protocols).
