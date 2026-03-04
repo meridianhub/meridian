@@ -1,0 +1,32 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "time-display",
+    "type": "registry:ui",
+    "title": "Time Display",
+    "description": "Renders protobuf Timestamp values with three display modes: relative (e.g. '2 hours ago'), absolute (UTC ISO string), or both combined with a tooltip. Handles BigInt seconds conversion and null timestamps gracefully.",
+    "categories": ["display", "time", "date"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/time-display.tsx",
+            "type": "registry:file",
+            "target": "src/shared/time-display.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": ["format"],
+        "used_by": [
+            "accounts",
+            "audit",
+            "ledger",
+            "manifests",
+            "market-data",
+            "payments",
+            "positions",
+            "reconciliation",
+            "sagas"
+        ]
+    }
+}

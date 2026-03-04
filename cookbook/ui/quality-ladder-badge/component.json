@@ -1,0 +1,24 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "quality-ladder-badge",
+    "type": "registry:ui",
+    "title": "Quality Ladder Badge",
+    "description": "Badge that displays the temporal data quality level of a position measurement: ESTIMATE (yellow, forecast), COEFFICIENT (blue, modeled), ACTUAL (green, metered), or REVISED (purple, corrected). Each level renders with a distinct icon from the quality provenance ladder.",
+    "categories": ["display", "badge", "positions", "quality"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/features/positions/components/quality-ladder-badge.tsx",
+            "type": "registry:file",
+            "target": "src/features/positions/components/quality-ladder-badge.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "positions",
+        "tenant_configurable": false,
+        "configurable_props": ["showLabel"],
+        "used_by": [
+            "positions"
+        ]
+    }
+}

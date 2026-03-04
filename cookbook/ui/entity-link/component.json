@@ -1,0 +1,30 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "entity-link",
+    "type": "registry:ui",
+    "title": "Entity Link",
+    "description": "Typed navigation link that maps entity types (account, party, internal-account, payment, booking-log, position) to their canonical routes. Encodes IDs for URL safety and renders a styled anchor with an optional display label.",
+    "categories": ["navigation", "link", "entity"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/entity-link.tsx",
+            "type": "registry:file",
+            "target": "src/shared/entity-link.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "accounts",
+            "audit",
+            "internal-accounts",
+            "ledger",
+            "parties",
+            "payments",
+            "positions"
+        ]
+    }
+}

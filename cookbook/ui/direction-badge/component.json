@@ -1,0 +1,26 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "direction-badge",
+    "type": "registry:ui",
+    "title": "Direction Badge",
+    "description": "Badge that visually distinguishes CREDIT from DEBIT ledger directions using color-coded pill styles and directional arrow icons. Renders green for credits and red for debits.",
+    "categories": ["display", "badge", "ledger", "finance"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/direction-badge.tsx",
+            "type": "registry:file",
+            "target": "src/shared/direction-badge.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "ledger",
+            "payments",
+            "positions"
+        ]
+    }
+}

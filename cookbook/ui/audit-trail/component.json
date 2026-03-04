@@ -1,0 +1,31 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "audit-trail",
+    "type": "registry:ui",
+    "title": "Audit Trail",
+    "description": "Timeline view of audit log entries for any entity. Displays INSERT, UPDATE, and DELETE operations with before/after JSON diffs, actor identity, and timestamps. Handles stub responses (501/503) from the as-yet-unimplemented audit service with a 'coming soon' banner.",
+    "categories": ["audit", "timeline", "display"],
+    "registryDependencies": ["time-display"],
+    "files": [
+        {
+            "path": "frontend/src/shared/audit-trail.tsx",
+            "type": "registry:file",
+            "target": "src/shared/audit-trail.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "audit",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "accounts",
+            "internal-accounts",
+            "manifests",
+            "parties",
+            "payments",
+            "positions",
+            "reference-data",
+            "sagas"
+        ]
+    }
+}

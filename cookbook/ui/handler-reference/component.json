@@ -1,0 +1,24 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "handler-reference",
+    "type": "registry:ui",
+    "title": "Handler Reference",
+    "description": "Interactive accordion reference panel listing all Starlark handler services and their parameters. Fetches schemas from the DescribeHandlers API, supports text filtering, and provides an insert-template button that emits a Starlark call stub for each handler.",
+    "categories": ["editor", "reference", "starlark", "sagas"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/handler-reference.tsx",
+            "type": "registry:file",
+            "target": "src/shared/handler-reference.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "sagas",
+        "tenant_configurable": false,
+        "configurable_props": ["filter"],
+        "used_by": [
+            "sagas"
+        ]
+    }
+}

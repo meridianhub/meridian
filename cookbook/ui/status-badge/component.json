@@ -1,0 +1,31 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "status-badge",
+    "type": "registry:ui",
+    "title": "Status Badge",
+    "description": "Pill-shaped badge that maps domain status strings (account, payment, saga, reconciliation, tenant, manifest) to semantic color variants. Includes a skeleton loading state. Unknown statuses fall back to a neutral style.",
+    "categories": ["display", "status", "badge"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/status-badge.tsx",
+            "type": "registry:file",
+            "target": "src/shared/status-badge.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "accounts",
+            "internal-accounts",
+            "ledger",
+            "manifests",
+            "payments",
+            "reconciliation",
+            "sagas",
+            "tenants"
+        ]
+    }
+}

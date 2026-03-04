@@ -1,0 +1,24 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "cel-editor",
+    "type": "registry:ui",
+    "title": "CEL Editor",
+    "description": "CodeMirror-based editor for Common Expression Language (CEL) expressions with inline error diagnostics, a security constraints banner (max bytes, nesting depth, cost limit), and a context-specific variable reference panel. Supports validation, bucketKey, eligibility, and value expression contexts.",
+    "categories": ["editor", "cel", "reference-data", "validation"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/features/sagas/components/cel-editor.tsx",
+            "type": "registry:file",
+            "target": "src/features/sagas/components/cel-editor.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "reference-data",
+        "tenant_configurable": false,
+        "configurable_props": ["readOnly", "showVariables"],
+        "used_by": [
+            "reference-data"
+        ]
+    }
+}

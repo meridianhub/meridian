@@ -4,6 +4,21 @@
     "homepage": "https://github.com/meridianhub/meridian",
     "items": [
         {"name": "base-fiat-gbp", "type": "registry:pattern", "title": "Base Fiat Currency (GBP)"},
-        {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"}
+        {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"},
+        {"name": "audit-trail", "type": "registry:ui", "title": "Audit Trail", "categories": ["audit", "timeline", "display"]},
+        {"name": "breadcrumbs", "type": "registry:ui", "title": "Breadcrumbs", "categories": ["navigation", "layout"]},
+        {"name": "cel-editor", "type": "registry:ui", "title": "CEL Editor", "categories": ["editor", "cel", "reference-data", "validation"]},
+        {"name": "create-valuation-feature-dialog", "type": "registry:ui", "title": "Create Valuation Feature Dialog", "categories": ["form", "dialog", "reference-data", "valuation"]},
+        {"name": "data-table", "type": "registry:ui", "title": "Data Table", "categories": ["display", "data", "table", "pagination"]},
+        {"name": "detail-skeleton", "type": "registry:ui", "title": "Detail Skeleton", "categories": ["loading", "skeleton", "layout"]},
+        {"name": "direction-badge", "type": "registry:ui", "title": "Direction Badge", "categories": ["display", "badge", "ledger", "finance"]},
+        {"name": "entity-link", "type": "registry:ui", "title": "Entity Link", "categories": ["navigation", "link", "entity"]},
+        {"name": "handler-reference", "type": "registry:ui", "title": "Handler Reference", "categories": ["editor", "reference", "starlark", "sagas"]},
+        {"name": "money-display", "type": "registry:ui", "title": "Money Display", "categories": ["display", "finance", "currency", "instruments"]},
+        {"name": "quality-ladder-badge", "type": "registry:ui", "title": "Quality Ladder Badge", "categories": ["display", "badge", "positions", "quality"]},
+        {"name": "saga-timeline", "type": "registry:ui", "title": "Saga Timeline", "categories": ["display", "timeline", "sagas"]},
+        {"name": "starlark-editor", "type": "registry:ui", "title": "Starlark Editor", "categories": ["editor", "starlark", "sagas"]},
+        {"name": "status-badge", "type": "registry:ui", "title": "Status Badge", "categories": ["display", "status", "badge"]},
+        {"name": "time-display", "type": "registry:ui", "title": "Time Display", "categories": ["display", "time", "date"]}
     ]
 }

@@ -1,0 +1,25 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "saga-timeline",
+    "type": "registry:ui",
+    "title": "Saga Timeline",
+    "description": "Horizontal step timeline showing saga execution progress through INITIATED, RESERVED, EXECUTING, and COMPLETED stages. Completed steps show a checkmark with relative timestamps; the current step pulses. A separate compensation section renders if the saga triggered rollback steps.",
+    "categories": ["display", "timeline", "sagas"],
+    "registryDependencies": ["time-display"],
+    "files": [
+        {
+            "path": "frontend/src/features/sagas/components/saga-timeline.tsx",
+            "type": "registry:file",
+            "target": "src/features/sagas/components/saga-timeline.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "sagas",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "payments",
+            "sagas"
+        ]
+    }
+}
