@@ -51,6 +51,24 @@ func TestValidate_StripeMissingWebhookSecret(t *testing.T) {
 	assert.ErrorIs(t, err, ErrMissingStripeWebhookSecret)
 }
 
+func TestValidate_FinancialGatewayProviderValid(t *testing.T) {
+	cfg := ServiceConfig{
+		PaymentGatewayProvider: gateway.ProviderFinancialGateway,
+		FinancialGatewayAddr:   "financial-gateway:50064",
+	}
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_FinancialGatewayMissingAddr(t *testing.T) {
+	cfg := ServiceConfig{
+		PaymentGatewayProvider: gateway.ProviderFinancialGateway,
+		FinancialGatewayAddr:   "",
+	}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingFinancialGatewayAddr)
+}
+
 func TestValidate_UnsupportedProvider(t *testing.T) {
 	cfg := ServiceConfig{
 		PaymentGatewayProvider: "paypal",

@@ -16,7 +16,7 @@ import (
 // verify constraints.
 type ServiceConfig struct {
 	// PaymentGatewayProvider selects the payment gateway implementation.
-	// Valid values: "stripe", "mock". Default: "mock".
+	// Valid values: "stripe", "mock", "financial-gateway". Default: "mock".
 	PaymentGatewayProvider string
 
 	// StripeAPIKey is the platform Stripe API key. Required when
@@ -26,6 +26,11 @@ type ServiceConfig struct {
 	// StripeWebhookSecret is the Stripe webhook endpoint secret. Required when
 	// PaymentGatewayProvider is "stripe".
 	StripeWebhookSecret string
+
+	// FinancialGatewayAddr is the gRPC address of the financial-gateway service.
+	// Required when PaymentGatewayProvider is "financial-gateway".
+	// Example: "financial-gateway:50064" or "localhost:50064".
+	FinancialGatewayAddr string
 
 	// BillingEnabled controls whether billing background workers are started.
 	// Default: false.
@@ -51,9 +56,10 @@ type ServiceConfig struct {
 
 // Configuration validation errors.
 var (
-	ErrMissingStripeAPIKey        = errors.New("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
-	ErrMissingStripeWebhookSecret = errors.New("STRIPE_WEBHOOK_SECRET is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
-	ErrInvalidGatewayProvider     = errors.New("unsupported PAYMENT_GATEWAY_PROVIDER value")
+	ErrMissingStripeAPIKey         = errors.New("STRIPE_API_KEY is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
+	ErrMissingStripeWebhookSecret  = errors.New("STRIPE_WEBHOOK_SECRET is required when PAYMENT_GATEWAY_PROVIDER is \"stripe\"")
+	ErrMissingFinancialGatewayAddr = errors.New("FINANCIAL_GATEWAY_ADDR is required when PAYMENT_GATEWAY_PROVIDER is \"financial-gateway\"")
+	ErrInvalidGatewayProvider      = errors.New("unsupported PAYMENT_GATEWAY_PROVIDER value")
 )
 
 // LoadServiceConfig reads all payment-order environment variables and returns
@@ -63,6 +69,7 @@ func LoadServiceConfig() ServiceConfig {
 		PaymentGatewayProvider:   env.GetEnvOrDefault("PAYMENT_GATEWAY_PROVIDER", gateway.ProviderMock),
 		StripeAPIKey:             env.GetEnvOrDefault("STRIPE_API_KEY", ""),
 		StripeWebhookSecret:      env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", ""),
+		FinancialGatewayAddr:     env.GetEnvOrDefault("FINANCIAL_GATEWAY_ADDR", ""),
 		BillingEnabled:           env.GetEnvAsBool("BILLING_ENABLED", false),
 		BillingCronSchedule:      env.GetEnvOrDefault("BILLING_CRON_SCHEDULE", "0 0 * * *"),
 		BillingShadowMode:        env.GetEnvAsBool("BILLING_SHADOW_MODE", false),
@@ -82,10 +89,14 @@ func (c ServiceConfig) Validate() error {
 		if c.StripeWebhookSecret == "" {
 			return ErrMissingStripeWebhookSecret
 		}
+	case gateway.ProviderFinancialGateway:
+		if c.FinancialGatewayAddr == "" {
+			return ErrMissingFinancialGatewayAddr
+		}
 	case gateway.ProviderMock:
 		// No additional requirements.
 	default:
-		return fmt.Errorf("%w: %q (valid: %q, %q)", ErrInvalidGatewayProvider, c.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderMock)
+		return fmt.Errorf("%w: %q (valid: %q, %q, %q)", ErrInvalidGatewayProvider, c.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderFinancialGateway, gateway.ProviderMock)
 	}
 	return nil
 }
@@ -97,6 +108,7 @@ func (c ServiceConfig) LogValues(logger *slog.Logger) {
 		"payment_gateway_provider", c.PaymentGatewayProvider,
 		"stripe_api_key", redact(c.StripeAPIKey),
 		"stripe_webhook_secret", redact(c.StripeWebhookSecret),
+		"financial_gateway_addr", c.FinancialGatewayAddr,
 		"billing_enabled", c.BillingEnabled,
 		"billing_cron_schedule", c.BillingCronSchedule,
 		"billing_shadow_mode", c.BillingShadowMode,

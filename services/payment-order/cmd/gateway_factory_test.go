@@ -17,7 +17,8 @@ func TestCreatePaymentGateway_DefaultMock(t *testing.T) {
 		PaymentGatewayProvider: gateway.ProviderMock,
 	}
 
-	gw, err := createPaymentGateway(cfg, logger)
+	gw, cleanup, err := createPaymentGateway(cfg, logger)
+	t.Cleanup(cleanup)
 
 	require.NoError(t, err)
 	assert.NotNil(t, gw)
@@ -29,7 +30,8 @@ func TestCreatePaymentGateway_ExplicitMock(t *testing.T) {
 		PaymentGatewayProvider: gateway.ProviderMock,
 	}
 
-	gw, err := createPaymentGateway(cfg, logger)
+	gw, cleanup, err := createPaymentGateway(cfg, logger)
+	t.Cleanup(cleanup)
 
 	require.NoError(t, err)
 	assert.NotNil(t, gw)
@@ -42,7 +44,22 @@ func TestCreatePaymentGateway_StripeProvider(t *testing.T) {
 		StripeAPIKey:           "sk_test_fake_key_for_unit_test",
 	}
 
-	gw, err := createPaymentGateway(cfg, logger)
+	gw, cleanup, err := createPaymentGateway(cfg, logger)
+	t.Cleanup(cleanup)
+
+	require.NoError(t, err)
+	assert.NotNil(t, gw)
+}
+
+func TestCreatePaymentGateway_FinancialGatewayProvider(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	cfg := config.ServiceConfig{
+		PaymentGatewayProvider: gateway.ProviderFinancialGateway,
+		FinancialGatewayAddr:   "localhost:50064",
+	}
+
+	gw, cleanup, err := createPaymentGateway(cfg, logger)
+	t.Cleanup(cleanup)
 
 	require.NoError(t, err)
 	assert.NotNil(t, gw)
@@ -54,7 +71,10 @@ func TestCreatePaymentGateway_UnsupportedProvider(t *testing.T) {
 		PaymentGatewayProvider: "paypal",
 	}
 
-	gw, err := createPaymentGateway(cfg, logger)
+	gw, cleanup, err := createPaymentGateway(cfg, logger)
+	if cleanup != nil {
+		t.Cleanup(cleanup)
+	}
 
 	assert.ErrorIs(t, err, config.ErrInvalidGatewayProvider)
 	assert.Nil(t, gw)
