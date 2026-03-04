@@ -29,7 +29,7 @@ type FinancialGatewayService struct {
 // Config holds configuration for the FinancialGatewayService.
 type Config struct {
 	// StripeAdapter is the Stripe payment intent adapter for dispatching payments.
-	// If nil, Stripe-related RPCs return Unimplemented.
+	// If nil, Stripe-related RPCs return Unavailable.
 	StripeAdapter *stripeadapter.PaymentIntentAdapter
 
 	// ClientFactory creates tenant-scoped Stripe clients.
