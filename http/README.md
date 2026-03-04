@@ -120,4 +120,4 @@ automatically.
 
 - [Developer Guide: Calling Meridian APIs](../docs/guides/calling-meridian-apis.md)
 - [API Explorer (Swagger UI)](../api/openapi/swagger-ui.html) — run `make swagger-ui`
-- [Gateway Service README](../services/gateway/README.md)
+- [Gateway Service README](../services/api-gateway/README.md)

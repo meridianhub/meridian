@@ -257,7 +257,7 @@ the cryptographic chain breaks. The Device is the Source of Truth.
 
 **Actions:**
 
-- Implement `services/gateway-mqtt` package
+- Implement `services/api-gateway-mqtt` package
 - **Subscribe:** `/config/tariff` -> Updates local Reference Data
 - **Publish:** `/ledger/sync` -> Pushes Outbox events
 - Use MQTT for IoT (low overhead, pub/sub, works on 2G networks, QoS levels)

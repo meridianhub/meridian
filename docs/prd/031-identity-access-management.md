@@ -39,7 +39,7 @@ instructions: |
   - shared/platform/auth/rbac.go (existing RBAC framework)
   - shared/platform/auth/grpc_interceptor.go (JWT validation + tenant context)
   - shared/platform/auth/jwt.go (Claims structure)
-  - services/gateway/auth/ (HTTP auth middleware)
+  - services/api-gateway/auth/ (HTTP auth middleware)
   - deploy/demo/dex.yaml (static users to be replaced)
 
   Identity data lives in per-tenant schemas (org_{tenant_id}), same

@@ -278,7 +278,7 @@ service FinancialGatewayService {
 
 ### Phase 3: Rename gateway → api-gateway
 
-**Rename:** `services/gateway/` → `services/api-gateway/`
+**Rename:** `services/api-gateway/` → `services/api-gateway/`
 
 This is a separate phase because it touches:
 

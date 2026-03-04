@@ -33,7 +33,7 @@ External Partner
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
 | Mapping Engine | `shared/pkg/mapping/` | JSON transform via gjson/sjson + CEL |
-| Gateway Middleware | `services/gateway/internal/middleware/` | HTTP integration |
+| Gateway Middleware | `services/api-gateway/internal/middleware/` | HTTP integration |
 | Reference Data Service | `services/reference-data/` | Stores MappingDefinition records |
 | Proto Definition | `api/proto/meridian/mapping/v1/mapping.proto` | Wire contract |
 | Example Definitions | `services/reference-data/examples/` | Reference JSON files |

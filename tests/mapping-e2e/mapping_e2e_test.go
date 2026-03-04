@@ -7,7 +7,7 @@
 // These tests use the shared/pkg/mapping engine directly (the same engine used
 // by the gateway middleware) with in-process HTTP test infrastructure to verify
 // the complete inbound→transform→forward→outbound pipeline, complementing the
-// unit and middleware tests in services/gateway/integration_test/.
+// unit and middleware tests in services/api-gateway/integration_test/.
 package mapping_e2e_test
 
 import (

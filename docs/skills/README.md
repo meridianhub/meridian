@@ -84,7 +84,7 @@ Service documentation includes YAML frontmatter for Claude Code discovery:
 
 **Infrastructure Services:**
 
-- **[gateway](../../services/gateway/README.md)** - Multi-tenant API gateway
+- **[gateway](../../services/api-gateway/README.md)** - Multi-tenant API gateway
 - **[tenant](../../services/tenant/README.md)** - Multi-tenant platform infrastructure
 - **[audit-worker](../../services/audit-worker/README.md)** - Fallback audit logging worker
 
