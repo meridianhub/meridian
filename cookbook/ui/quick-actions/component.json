@@ -1,0 +1,20 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "quick-actions",
+    "type": "registry:ui",
+    "title": "Quick Actions",
+    "description": "Renders a vertical grid of labelled action buttons with optional icons and descriptions. Used on dashboard surfaces to surface common tenant operations such as initiating payments or creating accounts.",
+    "categories": ["dashboard", "actions", "navigation"],
+    "files": [
+        {
+            "path": "frontend/src/pages/dashboard/quick-actions.tsx",
+            "type": "registry:ui"
+        }
+    ],
+    "meta": {
+        "feature_module": "dashboard",
+        "tenant_configurable": true,
+        "configurable_props": ["actions"],
+        "used_by": ["dashboard"]
+    }
+}

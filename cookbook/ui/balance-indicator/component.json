@@ -1,0 +1,19 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "balance-indicator",
+    "type": "registry:ui",
+    "title": "Balance Indicator",
+    "description": "Shows whether a set of ledger postings is double-entry balanced by comparing total debits against total credits. Renders green when balanced and red with the monetary difference when unbalanced.",
+    "categories": ["ledger", "accounting", "display", "reconciliation"],
+    "files": [
+        {
+            "path": "frontend/src/pages/ledger/balance-indicator.tsx",
+            "type": "registry:ui"
+        }
+    ],
+    "meta": {
+        "feature_module": "ledger",
+        "tenant_configurable": false,
+        "used_by": ["ledger", "reconciliation"]
+    }
+}

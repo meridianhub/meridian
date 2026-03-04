@@ -1,0 +1,19 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "quality-ladder-badge",
+    "type": "registry:ui",
+    "title": "Quality Ladder Badge",
+    "description": "Displays the data quality level of a measurement or position as a coloured badge with an icon. Supports ESTIMATE, COEFFICIENT, ACTUAL, and REVISED quality levels from Meridian's temporal data quality ladder.",
+    "categories": ["data-quality", "display", "badge"],
+    "files": [
+        {
+            "path": "frontend/src/components/shared/quality-ladder-badge.tsx",
+            "type": "registry:ui"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "used_by": ["market-data", "positions", "reconciliation", "forecasting"]
+    }
+}

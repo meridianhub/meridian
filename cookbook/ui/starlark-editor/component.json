@@ -1,0 +1,19 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "starlark-editor",
+    "type": "registry:ui",
+    "title": "Starlark Editor",
+    "description": "A CodeMirror-based editor for authoring Starlark saga scripts with Python syntax highlighting, inline validation error diagnostics, and a complexity metrics panel showing handler call count, operation count, and estimated duration.",
+    "categories": ["editor", "starlark", "saga", "manifest"],
+    "files": [
+        {
+            "path": "frontend/src/components/shared/starlark-editor.tsx",
+            "type": "registry:ui"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "used_by": ["starlark", "manifests"]
+    }
+}

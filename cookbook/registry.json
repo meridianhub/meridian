@@ -2,5 +2,16 @@
     "$schema": "https://cookbook.meridianhub.org/schema/registry.json",
     "name": "meridian-cookbook",
     "homepage": "https://github.com/meridianhub/meridian",
-    "items": []
+    "items": [
+        {"name": "quality-ladder-badge", "type": "registry:ui", "title": "Quality Ladder Badge"},
+        {"name": "cel-editor", "type": "registry:ui", "title": "CEL Editor"},
+        {"name": "starlark-editor", "type": "registry:ui", "title": "Starlark Editor"},
+        {"name": "saga-timeline", "type": "registry:ui", "title": "Saga Timeline"},
+        {"name": "create-valuation-feature-dialog", "type": "registry:ui", "title": "Create Valuation Feature Dialog"},
+        {"name": "direction-badge", "type": "registry:ui", "title": "Direction Badge"},
+        {"name": "balance-indicator", "type": "registry:ui", "title": "Balance Indicator"},
+        {"name": "stat-card", "type": "registry:ui", "title": "Stat Card"},
+        {"name": "quick-actions", "type": "registry:ui", "title": "Quick Actions"},
+        {"name": "activity-feed", "type": "registry:ui", "title": "Activity Feed"}
+    ]
 }
