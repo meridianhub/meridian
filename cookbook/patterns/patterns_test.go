@@ -107,6 +107,9 @@ func TestBaseFiatGBP_ManifestFragmentContainsGBPInstrument(t *testing.T) {
 	instrument, ok := instruments[0].(map[string]any)
 	require.True(t, ok, "instrument entry should be a map")
 	assert.Equal(t, "GBP", instrument["code"], "instrument code should be GBP")
+	dimensions, ok := instrument["dimensions"].(map[string]any)
+	require.True(t, ok, "instrument should have a dimensions map")
+	assert.EqualValues(t, 2, dimensions["precision"], "instrument precision should be 2")
 }
 
 func TestBaseFiatGBP_ProvidesMatchesManifestInstruments(t *testing.T) {
@@ -185,6 +188,9 @@ func TestBaseFiatUSD_ManifestFragmentContainsUSDInstrument(t *testing.T) {
 	instrument, ok := instruments[0].(map[string]any)
 	require.True(t, ok, "instrument entry should be a map")
 	assert.Equal(t, "USD", instrument["code"], "instrument code should be USD")
+	dimensions, ok := instrument["dimensions"].(map[string]any)
+	require.True(t, ok, "instrument should have a dimensions map")
+	assert.EqualValues(t, 2, dimensions["precision"], "instrument precision should be 2")
 }
 
 func TestBaseFiatUSD_ProvidesMatchesManifestInstruments(t *testing.T) {
