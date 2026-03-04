@@ -23,7 +23,7 @@ type stubPaymentOrderUpdater struct {
 	resp  *pb.UpdatePaymentOrderResponse
 }
 
-func (s *stubPaymentOrderUpdater) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
+func (s *stubPaymentOrderUpdater) UpdatePaymentOrder(_ context.Context, req *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
 	s.calls = append(s.calls, req)
 	if s.err != nil {
 		return nil, s.err
