@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/meridianhub/meridian/services/event-router/domain"
 	"github.com/meridianhub/meridian/services/event-router/internal/correlation"
 	sagaidempotency "github.com/meridianhub/meridian/services/event-router/internal/idempotency"
+	"github.com/meridianhub/meridian/services/event-router/internal/observability"
 	"github.com/meridianhub/meridian/services/event-router/internal/registry"
 	sharedidempotency "github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
@@ -112,6 +114,9 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		return ErrHandlerNotInitialized
 	}
 
+	// Record event received at handler entry.
+	observability.RecordEventReceived(channel)
+
 	// Convert event to input_data (also validates event is non-nil).
 	inputData, err := saga.EventToInputData(event, metadata)
 	if err != nil {
@@ -120,7 +125,9 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 
 	// Check chain depth.
 	depth := extractChainDepth(metadata)
+
 	if depth >= h.maxChainDepth {
+		observability.RecordChainDepthExceeded()
 		h.logger.WarnContext(ctx, "chain depth exceeded, dropping event",
 			"channel", channel,
 			"chain_depth", depth,
@@ -155,18 +162,23 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 
 		// If no filter, the saga always matches.
 		if cs.FilterProgram == nil {
-			if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey); err != nil {
+			if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey, depth, false); err != nil {
 				return err
 			}
 			continue
 		}
 
-		// Evaluate CEL filter.
+		// Evaluate CEL filter, recording duration.
+		filterStart := time.Now()
 		out, _, evalErr := cs.FilterProgram.Eval(activation)
+		observability.RecordFilterEvaluationDuration(sagaName, time.Since(filterStart).Seconds())
+
 		if evalErr != nil {
-			h.logger.WarnContext(ctx, "CEL filter evaluation error, skipping saga",
+			observability.RecordFilterEvaluationError(sagaName)
+			h.logger.ErrorContext(ctx, "CEL filter evaluation error, skipping saga",
 				"saga_name", sagaName,
 				"channel", channel,
+				"correlation_id", idempotencyKey,
 				"error", evalErr,
 			)
 			continue
@@ -177,6 +189,7 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			h.logger.WarnContext(ctx, "CEL filter returned non-boolean, skipping saga",
 				"saga_name", sagaName,
 				"channel", channel,
+				"correlation_id", idempotencyKey,
 				"result_type", fmt.Sprintf("%T", out.Value()),
 			)
 			continue
@@ -186,11 +199,12 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			h.logger.DebugContext(ctx, "CEL filter did not match, skipping saga",
 				"saga_name", sagaName,
 				"channel", channel,
+				"correlation_id", idempotencyKey,
 			)
 			continue
 		}
 
-		if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey); err != nil {
+		if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey, depth, true); err != nil {
 			return err
 		}
 	}
@@ -204,16 +218,22 @@ func (h *SagaDispatchHandler) dispatchSaga(
 	sagaName, channel string,
 	inputData map[string]any,
 	correlationID string,
+	depth int,
+	filterMatched bool,
 ) error {
 	if h.idempotencyStore == nil {
 		// No idempotency store — trigger directly.
 		if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, correlationID); err != nil {
+			observability.RecordSagaTriggerFailure(sagaName, channel)
 			return fmt.Errorf("trigger saga %q: %w", sagaName, err)
 		}
-		h.logger.DebugContext(ctx, "saga triggered",
+		observability.RecordSagaTriggered(sagaName, channel)
+		h.logger.InfoContext(ctx, "saga triggered",
 			"saga_name", sagaName,
 			"channel", channel,
 			"correlation_id", correlationID,
+			"chain_depth", depth,
+			"filter_matched", filterMatched,
 		)
 		return nil
 	}
@@ -221,6 +241,7 @@ func (h *SagaDispatchHandler) dispatchSaga(
 	// Idempotency-protected dispatch.
 	result, err := h.idempotencyStore.Execute(ctx, sagaName, correlationID, func(ctx context.Context) error {
 		if _, triggerErr := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, correlationID); triggerErr != nil {
+			observability.RecordSagaTriggerFailure(sagaName, channel)
 			return fmt.Errorf("trigger saga %q: %w", sagaName, triggerErr)
 		}
 		return nil
@@ -246,10 +267,13 @@ func (h *SagaDispatchHandler) dispatchSaga(
 		return nil
 	}
 
-	h.logger.DebugContext(ctx, "saga triggered",
+	observability.RecordSagaTriggered(sagaName, channel)
+	h.logger.InfoContext(ctx, "saga triggered",
 		"saga_name", sagaName,
 		"channel", channel,
 		"correlation_id", correlationID,
+		"chain_depth", depth,
+		"filter_matched", filterMatched,
 	)
 	return nil
 }
