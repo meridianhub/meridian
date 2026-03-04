@@ -8,6 +8,7 @@ import (
 	"github.com/meridianhub/meridian/services/gateway/eventstream"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -103,9 +104,23 @@ func TestRouter_ChainDepth_AtMax_EventDropped(t *testing.T) {
 	}
 	src.EmitEvent(ctx, event)
 
-	// Allow time to confirm the event was NOT delivered
-	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, 0, conn.ReceivedCount(), "event at chain_depth == max should be dropped")
+	// Confirm non-delivery: emit a second sentinel event with depth 0 (below limit)
+	// and wait for it. The deep event must have been processed before the sentinel.
+	sentinel := eventstream.DomainEvent{
+		EventID:    "evt-sentinel",
+		EventType:  "sentinel.v1",
+		Channel:    "payment-order.created",
+		TenantID:   "tenant-A",
+		ChainDepth: 0, // always delivered
+	}
+	src.EmitEvent(ctx, sentinel)
+
+	err = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return conn.ReceivedCount() > 0
+	})
+	require.NoError(t, err, "sentinel event should arrive to confirm deep event was processed")
+	// Only the sentinel arrived, not the deep event.
+	assert.Equal(t, 1, conn.ReceivedCount(), "event at chain_depth == max should be dropped; only sentinel delivered")
 }
 
 func TestRouter_ChainDepth_AboveMax_EventDropped(t *testing.T) {
@@ -133,8 +148,21 @@ func TestRouter_ChainDepth_AboveMax_EventDropped(t *testing.T) {
 	}
 	src.EmitEvent(ctx, event)
 
-	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, 0, conn.ReceivedCount(), "event with chain_depth > max should be dropped")
+	// Use sentinel pattern: emit a below-limit event, wait for it, then verify only 1 arrived.
+	sentinel := eventstream.DomainEvent{
+		EventID:    "evt-sentinel",
+		EventType:  "sentinel.v1",
+		Channel:    "payment-order.created",
+		TenantID:   "tenant-A",
+		ChainDepth: 0,
+	}
+	src.EmitEvent(ctx, sentinel)
+
+	err = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return conn.ReceivedCount() > 0
+	})
+	require.NoError(t, err, "sentinel event should arrive")
+	assert.Equal(t, 1, conn.ReceivedCount(), "event with chain_depth > max should be dropped; only sentinel delivered")
 }
 
 func TestRouter_ChainDepth_ZeroMaxDepth_NoLimit(t *testing.T) {
@@ -231,12 +259,31 @@ func TestRouter_ChainDepth_MetricsIncremented_WhenDropped(t *testing.T) {
 		EventType:  "payment_order.created.v1",
 		Channel:    "payment-order.created",
 		TenantID:   "tenant-A",
-		ChainDepth: 5,
+		ChainDepth: 5, // exceeds max of 3
 	}
 	src.EmitEvent(ctx, deepEvent)
 
-	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, 0, conn.ReceivedCount(), "deep event should be dropped")
+	// Use sentinel pattern to confirm the deep event was processed before asserting.
+	sentinel := eventstream.DomainEvent{
+		EventID:    "evt-sentinel",
+		EventType:  "sentinel.v1",
+		Channel:    "payment-order.created",
+		TenantID:   "tenant-A",
+		ChainDepth: 0,
+	}
+	src.EmitEvent(ctx, sentinel)
+
+	err = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return conn.ReceivedCount() > 0
+	})
+	require.NoError(t, err, "sentinel should arrive to confirm processing order")
+
+	// Deep event was dropped — only sentinel arrived.
+	assert.Equal(t, 1, conn.ReceivedCount(), "deep event should be dropped")
+
+	// Verify the chain_depth_exceeded metric was incremented.
+	dropped := testutil.CollectAndCount(metrics.EventsDropped())
+	assert.Equal(t, 1, dropped, "events_dropped counter should have one label set (chain_depth_exceeded)")
 }
 
 func TestRouter_ChainDepth_Depth0_AlwaysDelivered(t *testing.T) {

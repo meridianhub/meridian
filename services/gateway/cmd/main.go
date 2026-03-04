@@ -285,7 +285,7 @@ func buildEventStreamComponents(
 		logger.Info("using local (in-process) fan-out", "buffer_size", esCfg.BufferSize)
 	}
 
-	router := eventstream.NewRouter(source, fanOut)
+	router := eventstream.NewRouter(source, fanOut, eventstream.WithMaxChainDepth(esCfg.MaxChainDepth))
 	handler := eventstream.NewHandler(router, logger)
 
 	return router, handler, cleanup, nil

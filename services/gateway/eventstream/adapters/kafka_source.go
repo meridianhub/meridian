@@ -263,8 +263,6 @@ func extractChainDepth(record *kgo.Record) int {
 }
 
 // incrementChainDepth returns depth+1 for use when publishing saga-triggered events.
-// It is exported so that saga dispatch components can propagate the chain depth
-// without importing kafka internals.
 func incrementChainDepth(depth int) int {
 	return depth + 1
 }
