@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { AuditTrail } from '@/components/shared/audit-trail'
+import { AuditTrail } from '@/shared/audit-trail'
 
 interface AuditTrailTabProps {
   partyId: string

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { StatusBadge } from '@/components/shared/status-badge'
+import { StatusBadge } from '@/shared/status-badge'
 
 describe('StatusBadge', () => {
   describe('status text formatting', () => {

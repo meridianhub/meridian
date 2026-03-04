@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
 
 // Mock the AuditTrail component to isolate tab behaviour
-vi.mock('@/components/shared/audit-trail', () => ({
+vi.mock('@/shared/audit-trail', () => ({
   AuditTrail: vi.fn(({ entityType, entityId }: { entityType: string; entityId: string }) => (
     <div data-testid="mock-audit-trail" data-entity-type={entityType} data-entity-id={entityId} />
   )),

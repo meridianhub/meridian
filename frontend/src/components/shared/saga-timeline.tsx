@@ -1,6 +1,6 @@
 import { CheckIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { TimeDisplay } from './time-display'
+import { TimeDisplay } from '@/shared/time-display'
 
 const SAGA_STEPS = ['INITIATED', 'RESERVED', 'EXECUTING', 'COMPLETED'] as const
 
