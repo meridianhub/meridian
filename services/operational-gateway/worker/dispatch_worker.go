@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"sync"
 	"time"
 
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
+	"github.com/meridianhub/meridian/shared/pkg/dispatch"
 )
 
 // Default configuration values.
@@ -284,8 +284,8 @@ func (w *DispatchWorker) handleRetry(ctx context.Context, instr *domain.Instruct
 		return fmt.Errorf("marking retrying: %w", err)
 	}
 
-	// Calculate next retry time using exponential backoff.
-	nextRetry := calculateNextRetry(instr.AttemptCount, conn.RetryPolicy)
+	// Calculate next retry time using exponential backoff from the shared dispatch package.
+	nextRetry := dispatch.CalculateNextRetry(instr.AttemptCount, conn.RetryPolicy)
 	instr.NextRetryAt = &nextRetry
 
 	if err := w.instructionRepo.Save(ctx, instr, ""); err != nil {
@@ -318,33 +318,4 @@ func (w *DispatchWorker) handleFailure(ctx context.Context, instr *domain.Instru
 		"error_code", errorCode,
 	)
 	return nil
-}
-
-// calculateNextRetry computes the next retry time using exponential backoff with a cap.
-// attempt is the 1-based attempt number that just failed.
-func calculateNextRetry(attempt int, policy domain.RetryPolicy) time.Time {
-	backoff := policy.InitialBackoff
-	if backoff <= 0 {
-		backoff = 1 * time.Second
-	}
-
-	multiplier := policy.BackoffMultiplier
-	if multiplier < 1.0 {
-		multiplier = 2.0
-	}
-
-	maxBackoff := policy.MaxBackoff
-	if maxBackoff <= 0 {
-		maxBackoff = 5 * time.Minute
-	}
-
-	// Exponential backoff: initialBackoff * multiplier^(attempt-1)
-	// attempt is 1-based; first retry (attempt=1) uses initialBackoff directly.
-	factor := math.Pow(multiplier, float64(attempt-1))
-	wait := time.Duration(float64(backoff) * factor)
-	if wait > maxBackoff {
-		wait = maxBackoff
-	}
-
-	return time.Now().Add(wait)
 }

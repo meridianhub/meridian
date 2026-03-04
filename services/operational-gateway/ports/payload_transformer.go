@@ -42,26 +42,6 @@ type InstructionRoute struct {
 	Headers map[string]string
 }
 
-// InstructionOutcome captures the result of processing an inbound provider response.
-// It represents the extracted state from a provider acknowledgement or status callback.
-type InstructionOutcome struct {
-	// ExternalID is the provider's identifier for the instruction, if returned.
-	// May be empty if the provider does not return an external reference.
-	ExternalID string
-
-	// ProviderStatus is the provider's status string for the instruction
-	// (e.g., "ACCEPTED", "PENDING", "REJECTED").
-	ProviderStatus string
-
-	// ShouldRetry indicates whether the dispatch should be retried.
-	// Set to true when the provider returns a transient error (e.g., rate limit, timeout).
-	ShouldRetry bool
-
-	// FailureReason contains a human-readable description of why the instruction failed.
-	// Non-empty only when the provider indicates a permanent failure.
-	FailureReason string
-}
-
 // PayloadTransformer transforms instruction payloads between Meridian's internal format
 // and the format expected by external providers.
 //

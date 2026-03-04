@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/pkg/dispatch"
 )
 
 // Protocol represents the communication protocol used to connect to a provider.
@@ -34,29 +35,31 @@ var validProtocols = map[Protocol]struct{}{
 }
 
 // CircuitState represents the current state of the circuit breaker.
-type CircuitState string
+// It is an alias for dispatch.CircuitState from the shared dispatch package.
+type CircuitState = dispatch.CircuitState
 
 const (
 	// CircuitStateClosed means the circuit is closed and requests flow normally.
-	CircuitStateClosed CircuitState = "CLOSED"
+	CircuitStateClosed = dispatch.CircuitStateClosed
 	// CircuitStateOpen means the circuit is open and requests are blocked.
-	CircuitStateOpen CircuitState = "OPEN"
+	CircuitStateOpen = dispatch.CircuitStateOpen
 	// CircuitStateHalfOpen means the circuit is allowing a probe request to test recovery.
-	CircuitStateHalfOpen CircuitState = "HALF_OPEN"
+	CircuitStateHalfOpen = dispatch.CircuitStateHalfOpen
 )
 
 // HealthStatus represents the observed health of a provider connection.
-type HealthStatus string
+// It is an alias for dispatch.HealthStatus from the shared dispatch package.
+type HealthStatus = dispatch.HealthStatus
 
 const (
 	// HealthStatusUnknown means no health check has been performed yet.
-	HealthStatusUnknown HealthStatus = "UNKNOWN"
+	HealthStatusUnknown = dispatch.HealthStatusUnknown
 	// HealthStatusHealthy means the provider is responding normally.
-	HealthStatusHealthy HealthStatus = "HEALTHY"
+	HealthStatusHealthy = dispatch.HealthStatusHealthy
 	// HealthStatusDegraded means the provider is responding but with elevated latency or errors.
-	HealthStatusDegraded HealthStatus = "DEGRADED"
+	HealthStatusDegraded = dispatch.HealthStatusDegraded
 	// HealthStatusUnhealthy means the provider is not responding or returning errors.
-	HealthStatusUnhealthy HealthStatus = "UNHEALTHY"
+	HealthStatusUnhealthy = dispatch.HealthStatusUnhealthy
 )
 
 // Sentinel errors for domain validation.
@@ -153,17 +156,8 @@ type MTLSAuth struct {
 func (a *MTLSAuth) AuthType() string { return "mtls" }
 
 // RetryPolicy defines how failed requests to a provider should be retried.
-type RetryPolicy struct {
-	// MaxAttempts is the maximum number of request attempts (including the initial attempt).
-	MaxAttempts int
-	// InitialBackoff is the wait duration before the first retry.
-	InitialBackoff time.Duration
-	// MaxBackoff is the maximum wait duration between retries.
-	MaxBackoff time.Duration
-	// BackoffMultiplier is the dimensionless scaling factor applied to the backoff duration on each retry
-	// (e.g., 2.0 doubles the backoff). This is a pure numeric multiplier, not a duration.
-	BackoffMultiplier float64
-}
+// It is an alias for dispatch.RetryPolicy from the shared dispatch package.
+type RetryPolicy = dispatch.RetryPolicy
 
 // RateLimitConfig defines the rate limiting policy for outbound requests to a provider.
 type RateLimitConfig struct {

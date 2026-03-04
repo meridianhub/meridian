@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
+	"github.com/meridianhub/meridian/shared/pkg/dispatch"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -781,15 +782,15 @@ func TestCalculateNextRetry_ExponentialBackoff(t *testing.T) {
 	before := time.Now()
 
 	// First retry (attempt 1): 1s * 2^0 = 1s
-	retry1 := calculateNextRetry(1, policy)
+	retry1 := dispatch.CalculateNextRetry(1, policy)
 	assert.InDelta(t, 1*time.Second, retry1.Sub(before), float64(200*time.Millisecond))
 
 	// Second retry (attempt 2): 1s * 2^1 = 2s
-	retry2 := calculateNextRetry(2, policy)
+	retry2 := dispatch.CalculateNextRetry(2, policy)
 	assert.InDelta(t, 2*time.Second, retry2.Sub(before), float64(200*time.Millisecond))
 
 	// Third retry (attempt 3): 1s * 2^2 = 4s
-	retry3 := calculateNextRetry(3, policy)
+	retry3 := dispatch.CalculateNextRetry(3, policy)
 	assert.InDelta(t, 4*time.Second, retry3.Sub(before), float64(200*time.Millisecond))
 }
 
@@ -803,7 +804,7 @@ func TestCalculateNextRetry_CapsAtMaxBackoff(t *testing.T) {
 	before := time.Now()
 
 	// attempt 3: 10s * 10^2 = 1000s, but capped at 30s
-	retry := calculateNextRetry(3, policy)
+	retry := dispatch.CalculateNextRetry(3, policy)
 	assert.InDelta(t, 30*time.Second, retry.Sub(before), float64(200*time.Millisecond))
 }
 
@@ -813,7 +814,7 @@ func TestCalculateNextRetry_FallbackDefaults(t *testing.T) {
 	before := time.Now()
 
 	// Should use defaults: 1s initial, 2.0 multiplier, 5m max
-	retry := calculateNextRetry(1, policy)
+	retry := dispatch.CalculateNextRetry(1, policy)
 	assert.InDelta(t, 1*time.Second, retry.Sub(before), float64(200*time.Millisecond))
 }
 
