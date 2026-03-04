@@ -107,10 +107,8 @@ func TestIdempotencyCleanupWorker_StartsAndStops(t *testing.T) {
 		errCh <- w.Start(ctx)
 	}()
 
-	// Wait until the worker is running (evidenced by ErrAlreadyRunning on a second Start attempt).
-	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
-		return w.Start(ctx) != nil
-	}))
+	// Wait until the worker has set running=true before stopping.
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(w.Running))
 
 	w.Stop()
 
@@ -137,10 +135,8 @@ func TestIdempotencyCleanupWorker_ContextCancellation_Stops(t *testing.T) {
 		errCh <- w.Start(ctx)
 	}()
 
-	// Wait until the worker is running before cancelling.
-	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
-		return w.Start(ctx) != nil
-	}))
+	// Wait until the worker has set running=true before cancelling.
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(w.Running))
 	cancel()
 
 	select {
@@ -174,26 +170,13 @@ func TestIdempotencyCleanupWorker_AlreadyRunning_ReturnsError(t *testing.T) {
 	defer cancel()
 	defer w.Stop()
 
-	startedCh := make(chan struct{})
 	go func() {
-		close(startedCh)
 		_ = w.Start(ctx)
 	}()
 
-	// Wait until Start() is definitely running before attempting second start.
-	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
-		select {
-		case <-startedCh:
-			return true
-		default:
-			return false
-		}
-	}))
-	// Poll until ErrAlreadyRunning is returned to ensure Start goroutine has set running=true.
-	var secondErr error
-	_ = await.New().AtMost(5 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
-		secondErr = w.Start(ctx)
-		return secondErr != nil
-	})
-	require.ErrorIs(t, secondErr, worker.ErrAlreadyRunning)
+	// Wait until the worker has set running=true, then verify a second Start returns ErrAlreadyRunning.
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(w.Running))
+
+	err = w.Start(ctx)
+	require.ErrorIs(t, err, worker.ErrAlreadyRunning)
 }

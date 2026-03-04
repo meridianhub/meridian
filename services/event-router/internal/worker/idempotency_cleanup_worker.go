@@ -135,6 +135,14 @@ func (w *IdempotencyCleanupWorker) Start(ctx context.Context) error {
 	return nil
 }
 
+// Running reports whether the worker is currently running.
+// Safe to call from any goroutine.
+func (w *IdempotencyCleanupWorker) Running() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.running
+}
+
 // Stop signals the worker to shut down.
 // It is safe to call Stop multiple times.
 func (w *IdempotencyCleanupWorker) Stop() {
