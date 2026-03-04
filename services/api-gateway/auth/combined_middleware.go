@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/gateway"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -245,35 +246,13 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 			return
 		}
 
-		// When JWT has no tenant claim (e.g. standard OIDC tokens from Dex):
-		// 1. Platform-admin/super-admin: allow access to any tenant
-		// 2. Regular user with resolved tenant (subdomain/slug): scope to that tenant
-		// 3. Otherwise: deny
+		// When JWT has no tenant claim (e.g. standard OIDC tokens from Dex),
+		// delegate to authorizeWithoutTenantClaim which checks platform-admin
+		// role, resolved tenant from subdomain, and platform paths.
 		if jwtTenantID == "" {
-			claims, hasClaims := GetClaimsFromContext(ctx)
-			if hasClaims && hasPlatformAdminRole(claims) {
-				m.logger.Debug("platform admin access",
-					slog.String("user_id", claims.UserID),
-					slog.String("path", r.URL.Path),
-				)
+			if m.authorizeWithoutTenantClaim(w, r) {
 				next.ServeHTTP(w, r)
-				return
 			}
-
-			// Allow if tenant was resolved from subdomain/slug — user inherits
-			// tenant scope from the request routing rather than from JWT claims.
-			// This supports OIDC providers (like Dex) that issue identity-only
-			// tokens without custom tenant claims.
-			if resolvedTenant, ok := tenant.FromContext(ctx); ok && !resolvedTenant.IsEmpty() {
-				m.logger.Debug("tenant resolved from request context (no JWT tenant claim)",
-					slog.String("tenant", resolvedTenant.String()),
-					slog.String("path", r.URL.Path),
-				)
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			writeForbidden(w, "missing tenant claim in token")
 			return
 		}
 
@@ -305,6 +284,51 @@ func (m *TenantAuthorizationMiddleware) Handler(next http.Handler) http.Handler 
 		)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// authorizeWithoutTenantClaim handles authorization for JWTs that lack a tenant
+// claim (e.g. standard OIDC tokens from Dex). Returns true if the request is
+// allowed, false if a 403 was written.
+//
+// Authorization paths (checked in order):
+//  1. Platform-admin/super-admin: allow access to any tenant
+//  2. Resolved tenant from subdomain/slug: scope user to that tenant
+//  3. Platform path (e.g., ListTenants): allow — bootstrap endpoint
+//  4. Otherwise: deny with 403
+func (m *TenantAuthorizationMiddleware) authorizeWithoutTenantClaim(w http.ResponseWriter, r *http.Request) bool {
+	ctx := r.Context()
+
+	claims, hasClaims := GetClaimsFromContext(ctx)
+	if hasClaims && hasPlatformAdminRole(claims) {
+		m.logger.Debug("platform admin access",
+			slog.String("user_id", claims.UserID),
+			slog.String("path", r.URL.Path),
+		)
+		return true
+	}
+
+	// Allow if tenant was resolved from subdomain/slug — user inherits
+	// tenant scope from the request routing rather than from JWT claims.
+	if resolvedTenant, ok := tenant.FromContext(ctx); ok && !resolvedTenant.IsEmpty() {
+		m.logger.Debug("tenant resolved from request context (no JWT tenant claim)",
+			slog.String("tenant", resolvedTenant.String()),
+			slog.String("path", r.URL.Path),
+		)
+		return true
+	}
+
+	// Allow platform paths (e.g., ListTenants) for any authenticated user.
+	// These are bootstrap endpoints where the caller discovers available
+	// tenants — requiring a tenant claim would be circular.
+	if gateway.IsPlatformPath(r.URL.Path) {
+		m.logger.Debug("platform path access (no tenant claim required)",
+			slog.String("path", r.URL.Path),
+		)
+		return true
+	}
+
+	writeForbidden(w, "missing tenant claim in token")
+	return false
 }
 
 // hasPlatformAdminRole returns true if claims contain platform-admin or super-admin role.
