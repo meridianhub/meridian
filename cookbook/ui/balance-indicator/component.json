@@ -7,7 +7,7 @@
     "categories": ["ledger", "accounting", "display", "reconciliation"],
     "files": [
         {
-            "path": "frontend/src/pages/ledger/balance-indicator.tsx",
+            "path": "frontend/src/features/ledger/pages/balance-indicator.tsx",
             "type": "registry:ui"
         }
     ],

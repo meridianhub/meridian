@@ -1,4 +1,4 @@
-import type { SagaStep } from '@/components/shared/saga-timeline'
+import type { SagaStep } from '@/features/sagas/components/saga-timeline'
 
 export interface PaymentOrderDetail {
   paymentOrderId: string

@@ -7,12 +7,12 @@
     "categories": ["saga", "timeline", "display", "status"],
     "files": [
         {
-            "path": "frontend/src/components/shared/saga-timeline.tsx",
+            "path": "frontend/src/features/sagas/components/saga-timeline.tsx",
             "type": "registry:ui"
         }
     ],
     "meta": {
-        "feature_module": "shared",
+        "feature_module": "sagas",
         "tenant_configurable": false,
         "used_by": ["payments", "transactions", "reconciliation"]
     }

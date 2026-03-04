@@ -1,0 +1,6 @@
+instruments:
+  - code: KWH
+    type: energy
+account_types:
+  - code: ENERGY_ACCOUNT
+    label: Energy Account

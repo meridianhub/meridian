@@ -7,7 +7,7 @@
     "categories": ["ledger", "badge", "display", "accounting"],
     "files": [
         {
-            "path": "frontend/src/pages/ledger/direction-badge.tsx",
+            "path": "frontend/src/features/ledger/pages/direction-badge.tsx",
             "type": "registry:ui"
         }
     ],

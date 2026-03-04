@@ -7,12 +7,12 @@
     "categories": ["data-quality", "display", "badge"],
     "files": [
         {
-            "path": "frontend/src/components/shared/quality-ladder-badge.tsx",
+            "path": "frontend/src/features/positions/components/quality-ladder-badge.tsx",
             "type": "registry:ui"
         }
     ],
     "meta": {
-        "feature_module": "shared",
+        "feature_module": "positions",
         "tenant_configurable": false,
         "used_by": ["market-data", "positions", "reconciliation", "forecasting"]
     }

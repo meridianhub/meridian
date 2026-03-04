@@ -7,12 +7,12 @@
     "categories": ["valuation", "account", "dialog", "form"],
     "files": [
         {
-            "path": "frontend/src/components/shared/create-valuation-feature-dialog.tsx",
+            "path": "frontend/src/features/reference-data/components/create-valuation-feature-dialog.tsx",
             "type": "registry:ui"
         }
     ],
     "meta": {
-        "feature_module": "valuation",
+        "feature_module": "reference-data",
         "tenant_configurable": false,
         "used_by": ["ledger", "internal-accounts"]
     }

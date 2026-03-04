@@ -1,0 +1,18 @@
+{
+    "name": "account-balance",
+    "type": "registry:ui",
+    "title": "Account Balance Widget",
+    "description": "Displays the current balance of an account with currency formatting.",
+    "categories": ["accounts", "dashboard"],
+    "meta": {
+        "feature_module": "position-keeping",
+        "tenant_configurable": true,
+        "configurable_props": ["currency", "show_available"]
+    },
+    "files": [
+        {
+            "path": "balance.tsx",
+            "type": "registry:file"
+        }
+    ]
+}

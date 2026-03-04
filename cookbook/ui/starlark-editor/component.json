@@ -7,12 +7,12 @@
     "categories": ["editor", "starlark", "saga", "manifest"],
     "files": [
         {
-            "path": "frontend/src/components/shared/starlark-editor.tsx",
+            "path": "frontend/src/features/sagas/components/starlark-editor.tsx",
             "type": "registry:ui"
         }
     ],
     "meta": {
-        "feature_module": "shared",
+        "feature_module": "sagas",
         "tenant_configurable": false,
         "used_by": ["starlark", "manifests"]
     }

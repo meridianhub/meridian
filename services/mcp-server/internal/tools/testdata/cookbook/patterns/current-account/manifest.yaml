@@ -1,0 +1,6 @@
+instruments:
+  - code: GBP
+    type: currency
+account_types:
+  - code: CURRENT_ACCOUNT
+    label: Current Account

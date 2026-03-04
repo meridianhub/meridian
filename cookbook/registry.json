@@ -3,6 +3,8 @@
     "name": "meridian-cookbook",
     "homepage": "https://github.com/meridianhub/meridian",
     "items": [
+        {"name": "base-fiat-gbp", "type": "registry:pattern", "title": "Base Fiat Currency (GBP)"},
+        {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"},
         {"name": "quality-ladder-badge", "type": "registry:ui", "title": "Quality Ladder Badge"},
         {"name": "cel-editor", "type": "registry:ui", "title": "CEL Editor"},
         {"name": "starlark-editor", "type": "registry:ui", "title": "Starlark Editor"},
