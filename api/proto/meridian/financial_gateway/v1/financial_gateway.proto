@@ -1,0 +1,286 @@
+syntax = "proto3";
+
+package meridian.financial_gateway.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway/v1;financialgatewayv1";
+
+// PaymentRail identifies the payment network or provider used for financial dispatch.
+enum PaymentRail {
+  // PAYMENT_RAIL_UNSPECIFIED means the payment rail is unknown.
+  PAYMENT_RAIL_UNSPECIFIED = 0;
+  // PAYMENT_RAIL_STRIPE dispatches via the Stripe payment network.
+  PAYMENT_RAIL_STRIPE = 1;
+  // PAYMENT_RAIL_SWIFT dispatches via the SWIFT interbank messaging network.
+  PAYMENT_RAIL_SWIFT = 2;
+  // PAYMENT_RAIL_ACH dispatches via the Automated Clearing House network.
+  PAYMENT_RAIL_ACH = 3;
+  // PAYMENT_RAIL_FEDNOW dispatches via the FedNow instant payment service.
+  PAYMENT_RAIL_FEDNOW = 4;
+}
+
+// DispatchStatus defines the lifecycle state of a dispatched financial operation.
+//
+// State Machine:
+//   PENDING → DISPATCHING → DELIVERED → ACKNOWLEDGED (happy path)
+//
+// Retry transitions:
+//   DISPATCHING → RETRYING → DISPATCHING (transient failure, within retry policy)
+//   DISPATCHING → FAILED (all retry attempts exhausted)
+//
+// Terminal states: DELIVERED, ACKNOWLEDGED, FAILED
+enum DispatchStatus {
+  // DISPATCH_STATUS_UNSPECIFIED means the status is unknown.
+  DISPATCH_STATUS_UNSPECIFIED = 0;
+  // DISPATCH_STATUS_PENDING means the operation has been accepted and is waiting to be dispatched.
+  // Next: DISPATCHING (on dispatch attempt)
+  DISPATCH_STATUS_PENDING = 1;
+  // DISPATCH_STATUS_DISPATCHING means the operation is actively being sent to the payment rail.
+  // Next: DELIVERED (on success), RETRYING (on transient failure), FAILED (on exhaustion)
+  DISPATCH_STATUS_DISPATCHING = 2;
+  // DISPATCH_STATUS_DELIVERED means the operation was successfully sent to the payment rail.
+  // The provider has received it but may not have confirmed processing.
+  // Terminal state unless provider sends an acknowledgement.
+  DISPATCH_STATUS_DELIVERED = 3;
+  // DISPATCH_STATUS_ACKNOWLEDGED means the payment rail has confirmed it has processed the operation.
+  // Terminal state. Requires a callback from the provider.
+  DISPATCH_STATUS_ACKNOWLEDGED = 4;
+  // DISPATCH_STATUS_RETRYING means a previous dispatch attempt failed transiently.
+  // The operation will be retried according to the retry policy.
+  // Next: DISPATCHING (on next retry), FAILED (on exhaustion)
+  DISPATCH_STATUS_RETRYING = 5;
+  // DISPATCH_STATUS_FAILED means all dispatch attempts have been exhausted.
+  // Terminal state. Requires manual intervention.
+  DISPATCH_STATUS_FAILED = 6;
+}
+
+// ProviderHealth represents the health status of a payment rail provider.
+enum ProviderHealth {
+  // PROVIDER_HEALTH_UNSPECIFIED means the health is unknown (not yet checked).
+  PROVIDER_HEALTH_UNSPECIFIED = 0;
+  // PROVIDER_HEALTH_HEALTHY means the provider is reachable and responding correctly.
+  PROVIDER_HEALTH_HEALTHY = 1;
+  // PROVIDER_HEALTH_DEGRADED means the provider is reachable but responding slowly or with errors.
+  PROVIDER_HEALTH_DEGRADED = 2;
+  // PROVIDER_HEALTH_UNHEALTHY means the provider is unreachable or consistently failing.
+  PROVIDER_HEALTH_UNHEALTHY = 3;
+}
+
+// ========================================
+// Service Request/Response Messages
+// ========================================
+
+// DispatchPaymentRequest submits a financial payment for dispatch via a payment rail.
+message DispatchPaymentRequest {
+  // payment_order_id is the unique identifier of the payment order being dispatched (UUID).
+  string payment_order_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // rail is the payment network to use for dispatch.
+  PaymentRail rail = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // amount_units is the payment amount in the smallest currency unit (e.g., cents for USD).
+  int64 amount_units = 3 [(buf.validate.field).int64.gt = 0];
+
+  // instrument_code is the instrument being transferred (e.g., "USD", "GBP", "EUR").
+  string instrument_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+
+  // debtor_account_id is the account being debited (UUID).
+  string debtor_account_id = 5 [(buf.validate.field).string.uuid = true];
+
+  // creditor_account_id is the account being credited (UUID).
+  string creditor_account_id = 6 [(buf.validate.field).string.uuid = true];
+
+  // reference is a human-readable payment reference for the beneficiary.
+  string reference = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 140
+  }];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 8 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that triggered this dispatch.
+  string causation_id = 9 [(buf.validate.field).string.max_len = 255];
+
+  // metadata contains additional key-value pairs for routing, filtering, or audit purposes.
+  map<string, string> metadata = 10 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {string: {max_len: 128}}
+    values: {string: {max_len: 1024}}
+  }];
+
+  // idempotency_key ensures exactly-once dispatch of this payment.
+  meridian.common.v1.IdempotencyKey idempotency_key = 11 [(buf.validate.field).required = true];
+}
+
+// DispatchPaymentResponse returns the accepted payment dispatch record.
+message DispatchPaymentResponse {
+  // dispatch_id is the unique identifier of this dispatch record (UUID).
+  string dispatch_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // payment_order_id is the payment order that was dispatched (UUID).
+  string payment_order_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // rail is the payment network used for dispatch.
+  PaymentRail rail = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // status is the current lifecycle state of this dispatch.
+  DispatchStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // provider_reference is the payment rail's own identifier for this transaction (if available).
+  string provider_reference = 5 [(buf.validate.field).string.max_len = 255];
+
+  // created_at is when this dispatch record was created.
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// DispatchRefundRequest submits a financial refund for dispatch via a payment rail.
+message DispatchRefundRequest {
+  // original_dispatch_id is the UUID of the payment dispatch being refunded.
+  string original_dispatch_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // refund_amount_units is the refund amount in the smallest currency unit.
+  // Must be less than or equal to the original payment amount.
+  int64 refund_amount_units = 2 [(buf.validate.field).int64.gt = 0];
+
+  // reason is the human-readable reason for the refund.
+  string reason = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 4 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that triggered this refund.
+  string causation_id = 5 [(buf.validate.field).string.max_len = 255];
+
+  // metadata contains additional key-value pairs for routing, filtering, or audit purposes.
+  map<string, string> metadata = 6 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {string: {max_len: 128}}
+    values: {string: {max_len: 1024}}
+  }];
+
+  // idempotency_key ensures exactly-once dispatch of this refund.
+  meridian.common.v1.IdempotencyKey idempotency_key = 7 [(buf.validate.field).required = true];
+}
+
+// DispatchRefundResponse returns the accepted refund dispatch record.
+message DispatchRefundResponse {
+  // dispatch_id is the unique identifier of this refund dispatch record (UUID).
+  string dispatch_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // original_dispatch_id is the original payment dispatch that was refunded (UUID).
+  string original_dispatch_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // rail is the payment network used for the refund dispatch.
+  PaymentRail rail = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // status is the current lifecycle state of this refund dispatch.
+  DispatchStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // provider_reference is the payment rail's own identifier for this refund (if available).
+  string provider_reference = 5 [(buf.validate.field).string.max_len = 255];
+
+  // created_at is when this refund dispatch record was created.
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// GetProviderHealthRequest checks the health of a payment rail provider.
+message GetProviderHealthRequest {
+  // rail is the payment network to check.
+  PaymentRail rail = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// GetProviderHealthResponse returns the current health status of a payment rail provider.
+message GetProviderHealthResponse {
+  // rail is the payment network that was checked.
+  PaymentRail rail = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // health is the current health status of the provider.
+  ProviderHealth health = 2 [(buf.validate.field).enum.defined_only = true];
+
+  // message provides additional details about the health status.
+  string message = 3 [(buf.validate.field).string.max_len = 1024];
+
+  // last_checked_at is when the health check was last performed.
+  google.protobuf.Timestamp last_checked_at = 4;
+
+  // latency_ms is the round-trip latency to the provider in milliseconds (0 if unavailable).
+  int64 latency_ms = 5 [(buf.validate.field).int64.gte = 0];
+}
+
+// ========================================
+// Service Definitions
+// ========================================
+
+// FinancialGatewayService manages financial payment dispatch to external payment rails.
+// It handles payment submission, refund dispatch, and provider health monitoring.
+//
+// Dispatch Flow:
+//   1. DispatchPayment: Accepts payment → PENDING
+//   2. Internal worker routes to payment rail → DISPATCHING → DELIVERED
+//   3. Payment rail sends confirmation (optional) → ACKNOWLEDGED
+//
+// Idempotency:
+//   All mutating operations require an idempotency_key.
+//   Duplicate requests within TTL return the cached response.
+service FinancialGatewayService {
+  // DispatchPayment submits a financial payment for outbound dispatch via a payment rail.
+  // The payment is accepted immediately and queued for async dispatch.
+  // Returns ALREADY_EXISTS if a dispatch with the same idempotency_key exists.
+  rpc DispatchPayment(DispatchPaymentRequest) returns (DispatchPaymentResponse) {
+    option (google.api.http) = {
+      post: "/v1/financial-gateway/payments"
+      body: "*"
+    };
+  }
+
+  // DispatchRefund submits a financial refund for outbound dispatch via the original payment rail.
+  // The refund is accepted immediately and queued for async dispatch.
+  // Returns NOT_FOUND if the original dispatch does not exist.
+  // Returns ALREADY_EXISTS if a refund with the same idempotency_key exists.
+  rpc DispatchRefund(DispatchRefundRequest) returns (DispatchRefundResponse) {
+    option (google.api.http) = {
+      post: "/v1/financial-gateway/refunds"
+      body: "*"
+    };
+  }
+
+  // GetProviderHealth returns the current health status of a payment rail provider.
+  // Used to check provider availability before dispatching payments.
+  rpc GetProviderHealth(GetProviderHealthRequest) returns (GetProviderHealthResponse) {
+    option (google.api.http) = {
+      get: "/v1/financial-gateway/providers/{rail}/health"
+    };
+  }
+}
