@@ -1,5 +1,5 @@
-import { StatusBadge } from '@/components/shared/status-badge'
-import { TimeDisplay } from '@/components/shared'
+import { StatusBadge } from '@/shared/status-badge'
+import { TimeDisplay } from '@/shared'
 import type { FinancialBookingLog } from './types'
 
 interface BookingLogHeaderProps {
