@@ -20,7 +20,6 @@ import (
 	fghttp "github.com/meridianhub/meridian/services/financial-gateway/adapters/http"
 	stripeadapter "github.com/meridianhub/meridian/services/financial-gateway/adapters/stripe"
 	"github.com/meridianhub/meridian/shared/platform/events"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 const testWebhookSecret = "whsec_test_webhook_secret_for_financial_gateway"
@@ -132,7 +131,8 @@ func TestWebhookHandler_MissingTenantContext(t *testing.T) {
 	payload := buildStripePayload(t, "evt_1", "payment_intent.succeeded", map[string]any{})
 	sig := signPayload(t, payload, testWebhookSecret)
 
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	// No {tenantID} path value set — simulates request without tenant in URL.
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/", bytes.NewReader(payload))
 	req.Header.Set("Stripe-Signature", sig)
 
 	rr := httptest.NewRecorder()
@@ -145,9 +145,8 @@ func TestWebhookHandler_MissingSignature(t *testing.T) {
 	h := setupHandler(t, nil)
 
 	payload := buildStripePayload(t, "evt_2", "payment_intent.succeeded", map[string]any{})
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
 
 	rr := httptest.NewRecorder()
 	h.HandleStripeWebhook(rr, req)
@@ -161,9 +160,8 @@ func TestWebhookHandler_InvalidSignature(t *testing.T) {
 	payload := buildStripePayload(t, "evt_3", "payment_intent.succeeded", map[string]any{})
 	sig := signPayload(t, payload, "whsec_wrong_secret")
 
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
 	req.Header.Set("Stripe-Signature", sig)
 
 	rr := httptest.NewRecorder()
@@ -180,9 +178,8 @@ func TestWebhookHandler_UnsupportedEvent_Returns200(t *testing.T) {
 	})
 	sig := signPayload(t, payload, testWebhookSecret)
 
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
 	req.Header.Set("Stripe-Signature", sig)
 
 	rr := httptest.NewRecorder()
@@ -208,9 +205,8 @@ func TestWebhookHandler_PaymentCaptured_PublishesToOutbox(t *testing.T) {
 	})
 	sig := signPayload(t, payload, testWebhookSecret)
 
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
 	req.Header.Set("Stripe-Signature", sig)
 
 	rr := httptest.NewRecorder()
@@ -247,9 +243,8 @@ func TestWebhookHandler_PaymentFailed_PublishesToOutbox(t *testing.T) {
 	})
 	sig := signPayload(t, payload, testWebhookSecret)
 
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
 	req.Header.Set("Stripe-Signature", sig)
 
 	rr := httptest.NewRecorder()
@@ -281,9 +276,8 @@ func TestWebhookHandler_OutboxPublishFails_Returns500(t *testing.T) {
 	})
 	sig := signPayload(t, payload, testWebhookSecret)
 
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
 	req.Header.Set("Stripe-Signature", sig)
 
 	rr := httptest.NewRecorder()
@@ -313,9 +307,8 @@ func TestWebhookHandler_TenantNotFound_Returns500(t *testing.T) {
 	payload := buildStripePayload(t, "evt_notfound_1", "payment_intent.succeeded", map[string]any{})
 	sig := signPayload(t, payload, testWebhookSecret)
 
-	ctx := tenant.WithTenant(context.Background(), "unknown-tenant")
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/unknown-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "unknown-tenant")
 	req.Header.Set("Stripe-Signature", sig)
 
 	rr := httptest.NewRecorder()

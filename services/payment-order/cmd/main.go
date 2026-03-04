@@ -536,8 +536,8 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
 
-	// Channel to collect server errors
-	serverErrors := make(chan error, 2)
+	// Channel to collect server errors (gRPC + HTTP + payment event consumer).
+	serverErrors := make(chan error, 3)
 
 	// Start gRPC server in background
 	go func() {
@@ -582,12 +582,10 @@ func run(logger *slog.Logger) error {
 		}()
 
 		go func() {
-			topics := []string{
+			if err := paymentEventConsumer.Start(
 				"financial-gateway.payment-captured.v1",
 				"financial-gateway.payment-failed.v1",
-			}
-			logger.Info("starting financial-gateway payment event consumer", "topics", topics)
-			if err := paymentEventConsumer.Start(topics); err != nil {
+			); err != nil {
 				logger.Error("payment event consumer error", "error", err)
 				serverErrors <- fmt.Errorf("payment event consumer error: %w", err)
 			}

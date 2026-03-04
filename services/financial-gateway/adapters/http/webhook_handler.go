@@ -69,10 +69,13 @@ type WebhookHandlerConfig struct {
 }
 
 // NewWebhookHandler creates a new WebhookHandler.
-// Panics if ClientFactory is nil to fail fast during initialization.
+// Panics if ClientFactory or OutboxPublisher is nil to fail fast during initialization.
 func NewWebhookHandler(cfg WebhookHandlerConfig) *WebhookHandler {
 	if cfg.ClientFactory == nil {
 		panic(ErrNilClientFactory.Error())
+	}
+	if cfg.OutboxPublisher == nil {
+		panic(ErrNilOutboxPublisher.Error())
 	}
 	logger := cfg.Logger
 	if logger == nil {
@@ -95,9 +98,13 @@ type webhookResponse struct {
 
 // HandleStripeWebhook processes an incoming Stripe webhook.
 //
+// The route must be registered as POST /webhooks/stripe/{tenantID} so that
+// r.PathValue("tenantID") returns the tenant identifier. Stripe is configured
+// to call the tenant-specific URL (e.g. /webhooks/stripe/acme-corp).
+//
 // Flow:
 //  1. Validate HTTP method and read body
-//  2. Extract tenant context
+//  2. Extract tenant ID from URL path and inject into context
 //  3. Resolve per-tenant Stripe client (contains webhook secret)
 //  4. Validate Stripe-Signature using the tenant-specific secret
 //  5. Map the Stripe event to a domain event (PaymentCapturedEvent or PaymentFailedEvent)
@@ -124,12 +131,16 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	tenantID, ok := tenant.FromContext(ctx)
-	if !ok {
-		h.logger.Warn("missing tenant context for stripe webhook")
+	// Extract tenant ID from the URL path segment {tenantID}.
+	// The route must be registered as: POST /webhooks/stripe/{tenantID}
+	rawTenantID := r.PathValue("tenantID")
+	if rawTenantID == "" {
+		h.logger.Warn("missing tenant ID in stripe webhook URL path")
 		h.writeError(w, http.StatusBadRequest, ErrMissingTenantContext.Error())
 		return
 	}
+	tenantID := tenant.TenantID(rawTenantID)
+	ctx = tenant.WithTenant(ctx, tenantID)
 
 	client, err := h.clientFactory.NewClient(ctx)
 	if err != nil {

@@ -18,6 +18,12 @@ import (
 // created without Kafka (use NewPaymentEventConsumerWithKafka for production).
 var ErrConsumerNotConfigured = errors.New("consumer not configured with Kafka — use NewPaymentEventConsumerWithKafka")
 
+// ErrUnexpectedCapturedMessageType is returned when the payment-captured consumer receives a message that is not *PaymentCapturedEvent.
+var ErrUnexpectedCapturedMessageType = errors.New("unexpected message type for payment-captured topic")
+
+// ErrUnexpectedFailedMessageType is returned when the payment-failed consumer receives a message that is not *PaymentFailedEvent.
+var ErrUnexpectedFailedMessageType = errors.New("unexpected message type for payment-failed topic")
+
 // PaymentOrderUpdater is the interface for updating payment order status.
 // Implemented by the payment-order gRPC service.
 type PaymentOrderUpdater interface {
@@ -30,10 +36,16 @@ type PaymentOrderUpdater interface {
 // This consumer subscribes to:
 //   - financial-gateway.payment-captured.v1 → marks payment order as SETTLED
 //   - financial-gateway.payment-failed.v1   → marks payment order as REJECTED
+//
+// Two separate ProtoConsumers are used so that each topic uses the correct
+// proto message factory for deserialization. A single consumer with a shared
+// msgFactory would cause PaymentFailedEvent bytes to be deserialized as
+// PaymentCapturedEvent, silently corrupting the event.
 type PaymentEventConsumer struct {
-	updater *kafka.ProtoConsumer
-	svc     PaymentOrderUpdater
-	logger  *slog.Logger
+	capturedConsumer *kafka.ProtoConsumer
+	failedConsumer   *kafka.ProtoConsumer
+	svc              PaymentOrderUpdater
+	logger           *slog.Logger
 }
 
 // NewPaymentEventConsumer creates a consumer that handles domain events from financial-gateway.
@@ -45,8 +57,8 @@ func NewPaymentEventConsumer(svc PaymentOrderUpdater) *PaymentEventConsumer {
 }
 
 // NewPaymentEventConsumerWithKafka creates a PaymentEventConsumer wired to real Kafka topics.
-// The returned consumer handles both payment-captured and payment-failed events by routing
-// on the event type within a single consumer group.
+// Two separate consumers are created — one per topic — so each uses the correct proto
+// message factory for deserialization.
 //
 // Call Start() to begin consuming and Stop()/Close() for graceful shutdown.
 func NewPaymentEventConsumerWithKafka(
@@ -63,66 +75,113 @@ func NewPaymentEventConsumerWithKafka(
 		logger: logger,
 	}
 
-	// The message factory returns PaymentCapturedEvent by default;
-	// we dispatch based on the proto type in the handler.
-	// Since the two event types share the same consumer group and topics,
-	// we use a wrapper that attempts to unmarshal as each type.
-	msgFactory := func() proto.Message {
-		// Return a placeholder; actual type detection happens in the handler
-		// by attempting unmarshal of each event type.
-		return &financialgatewayeventsv1.PaymentCapturedEvent{}
-	}
-
-	handler := func(ctx context.Context, key []byte, msg proto.Message) error {
-		return c.dispatch(ctx, key, msg)
-	}
-
-	consumer, err := kafka.NewProtoConsumer(kafkaConfig, msgFactory, handler)
+	// Consumer for payment-captured events uses PaymentCapturedEvent as the proto type.
+	capturedConfig := kafkaConfig
+	capturedConfig.GroupID = kafkaConfig.GroupID + "-captured"
+	capturedConfig.ClientID = kafkaConfig.ClientID + "-captured"
+	capturedConsumer, err := kafka.NewProtoConsumer(
+		capturedConfig,
+		func() proto.Message { return &financialgatewayeventsv1.PaymentCapturedEvent{} },
+		func(ctx context.Context, key []byte, msg proto.Message) error {
+			evt, ok := msg.(*financialgatewayeventsv1.PaymentCapturedEvent)
+			if !ok {
+				return fmt.Errorf("%w: %T", ErrUnexpectedCapturedMessageType, msg)
+			}
+			return c.HandlePaymentCapturedEvent(ctx, key, evt)
+		},
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create payment event kafka consumer: %w", err)
+		return nil, fmt.Errorf("failed to create payment-captured kafka consumer: %w", err)
 	}
 
-	c.updater = consumer
+	// Consumer for payment-failed events uses PaymentFailedEvent as the proto type.
+	failedConfig := kafkaConfig
+	failedConfig.GroupID = kafkaConfig.GroupID + "-failed"
+	failedConfig.ClientID = kafkaConfig.ClientID + "-failed"
+	failedConsumer, err := kafka.NewProtoConsumer(
+		failedConfig,
+		func() proto.Message { return &financialgatewayeventsv1.PaymentFailedEvent{} },
+		func(ctx context.Context, key []byte, msg proto.Message) error {
+			evt, ok := msg.(*financialgatewayeventsv1.PaymentFailedEvent)
+			if !ok {
+				return fmt.Errorf("%w: %T", ErrUnexpectedFailedMessageType, msg)
+			}
+			return c.HandlePaymentFailedEvent(ctx, key, evt)
+		},
+	)
+	if err != nil {
+		_ = capturedConsumer.Close()
+		return nil, fmt.Errorf("failed to create payment-failed kafka consumer: %w", err)
+	}
+
+	c.capturedConsumer = capturedConsumer
+	c.failedConsumer = failedConsumer
 	return c, nil
 }
 
 // Start subscribes to the financial-gateway payment topics and begins consuming.
-// Blocks until Stop() is called or an unrecoverable error occurs.
-func (c *PaymentEventConsumer) Start(topicList []string) error {
-	if c.updater == nil {
+// Starts both consumers in goroutines and blocks until both have stopped.
+// Returns the first error encountered, or nil if both stop cleanly.
+func (c *PaymentEventConsumer) Start(capturedTopic, failedTopic string) error {
+	if c.capturedConsumer == nil || c.failedConsumer == nil {
 		return ErrConsumerNotConfigured
 	}
-	c.logger.Info("starting payment event consumer", "topics", topicList)
-	return c.updater.Subscribe(topicList)
+	c.logger.Info("starting payment event consumers",
+		"captured_topic", capturedTopic,
+		"failed_topic", failedTopic,
+	)
+
+	errs := make(chan error, 2)
+
+	go func() {
+		if err := c.capturedConsumer.Subscribe([]string{capturedTopic}); err != nil {
+			errs <- fmt.Errorf("payment-captured consumer: %w", err)
+		} else {
+			errs <- nil
+		}
+	}()
+
+	go func() {
+		if err := c.failedConsumer.Subscribe([]string{failedTopic}); err != nil {
+			errs <- fmt.Errorf("payment-failed consumer: %w", err)
+		} else {
+			errs <- nil
+		}
+	}()
+
+	// Wait for both consumers to stop.
+	var firstErr error
+	for range 2 {
+		if err := <-errs; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
-// Stop gracefully stops the Kafka consumer.
+// Stop gracefully stops both Kafka consumers.
 func (c *PaymentEventConsumer) Stop() {
-	if c.updater != nil {
-		c.updater.Stop()
+	if c.capturedConsumer != nil {
+		c.capturedConsumer.Stop()
+	}
+	if c.failedConsumer != nil {
+		c.failedConsumer.Stop()
 	}
 }
 
-// Close closes the consumer and releases resources.
+// Close closes both consumers and releases resources.
 func (c *PaymentEventConsumer) Close() error {
-	if c.updater != nil {
-		return c.updater.Close()
+	var capturedErr, failedErr error
+	if c.capturedConsumer != nil {
+		capturedErr = c.capturedConsumer.Close()
 	}
-	return nil
-}
-
-// dispatch routes an incoming Kafka message to the correct handler based on its proto type.
-// Since both captured and failed events flow through the same consumer, we attempt
-// to identify which event type was received.
-func (c *PaymentEventConsumer) dispatch(ctx context.Context, key []byte, msg proto.Message) error {
-	switch evt := msg.(type) {
-	case *financialgatewayeventsv1.PaymentCapturedEvent:
-		return c.HandlePaymentCapturedEvent(ctx, key, evt)
-	default:
-		c.logger.Warn("received unexpected message type in payment event consumer",
-			"type", fmt.Sprintf("%T", msg))
-		return nil
+	if c.failedConsumer != nil {
+		failedErr = c.failedConsumer.Close()
 	}
+	if capturedErr != nil {
+		return capturedErr
+	}
+	return failedErr
 }
 
 // HandlePaymentCapturedEvent processes a PaymentCapturedEvent by marking the

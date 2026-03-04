@@ -144,6 +144,13 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
+	// Close the listener if any subsequent setup fails (before grpcServer.Serve takes ownership).
+	listenerClosed := false
+	defer func() {
+		if !listenerClosed {
+			_ = listener.Close()
+		}
+	}()
 
 	// --- Stripe webhook receiver setup ---
 
@@ -220,7 +227,10 @@ func run(logger *slog.Logger) error {
 
 	// Create HTTP mux and register the Stripe webhook endpoint.
 	mux := http.NewServeMux()
-	mux.HandleFunc("/webhooks/stripe", webhookHandler.HandleStripeWebhook)
+	// Tenant ID is embedded in the URL path so Stripe can be configured to call
+	// per-tenant endpoints (e.g. /webhooks/stripe/acme-corp). The handler
+	// extracts the tenant from r.PathValue("tenantID") and injects it into ctx.
+	mux.HandleFunc("POST /webhooks/stripe/{tenantID}", webhookHandler.HandleStripeWebhook)
 
 	httpAddress := fmt.Sprintf(":%s", cfg.HTTPPort)
 	httpServer := &http.Server{
@@ -232,6 +242,9 @@ func run(logger *slog.Logger) error {
 	serverErrors := make(chan error, 2)
 
 	// Start gRPC server in background.
+	// grpcServer.Serve takes ownership of the listener; mark it so the deferred
+	// close does not double-close on normal shutdown.
+	listenerClosed = true
 	go func() {
 		logger.Info("starting gRPC server", "address", grpcAddress)
 		if err := grpcServer.Serve(listener); err != nil {
