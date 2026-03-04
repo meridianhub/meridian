@@ -160,7 +160,7 @@ shadcn/ui registry schema:
   },
   "files": [
     {
-      "path": "shared/data-table.tsx",
+      "path": "ui/data-table/data-table.tsx",
       "type": "registry:ui"
     }
   ]
@@ -232,6 +232,14 @@ Both types use the same `$schema`, the same
 `registryDependencies` mechanism, and the same `meta`
 object (with type-specific fields). The `type` field
 determines which metadata fields are relevant.
+
+**File path resolution**: All `files[].path` values are
+relative to the cookbook root (`cookbook/`). For
+`registry:ui` entries, paths reference frontend source
+files (e.g., `ui/data-table/data-table.tsx`). For
+`registry:pattern` entries, paths reference pattern
+artefacts (e.g.,
+`patterns/energy-settlement/manifest-fragment.yaml`).
 
 ### Metadata Schema by Type
 
@@ -527,9 +535,11 @@ fragments are merged using these deterministic rules:
 The merge order is deterministic: resolve
 `registryDependencies` depth-first, then append the
 requested patterns in the order specified by the user.
-The resulting manifest is passed to
-`meridian_manifest_validate` which is the authoritative
-arbiter of correctness.
+Shared transitive dependencies are included once (first
+encounter wins). Dependency cycles are rejected with an
+error listing the cycle path. The resulting manifest is
+passed to `meridian_manifest_validate` which is the
+authoritative arbiter of correctness.
 
 **Full conversation flow:**
 
