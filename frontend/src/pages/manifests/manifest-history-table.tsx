@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
-import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/components/shared/data-table'
+import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/shared/data-table'
 import { useApiClients } from '@/api/context'
-import { StatusBadge } from '@/components/shared/status-badge'
-import { TimeDisplay } from '@/components/shared/time-display'
+import { StatusBadge } from '@/shared/status-badge'
+import { TimeDisplay } from '@/shared/time-display'
 import {
   Dialog,
   DialogContent,

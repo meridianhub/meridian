@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
 import { axe } from '@/test/test-utils'
-import { MoneyDisplay } from '@/components/shared/money-display'
+import { MoneyDisplay } from '@/shared/money-display'
 
 describe('MoneyDisplay accessibility', () => {
   it('has no accessibility violations', async () => {
