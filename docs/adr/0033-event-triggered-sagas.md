@@ -266,11 +266,14 @@ The manifest applier validates event-triggered sagas at apply time:
 
 ### Idempotency Key Derivation
 
-The correlation ID for idempotency is extracted from Kafka message headers in priority order:
+The correlation ID for idempotency is extracted in priority order:
 
-1. `x-meridian-correlation-id` header
-2. `correlation-id` header
-3. Generated UUID (with a warning log — Kafka redelivery may cause duplicate executions)
+1. Event proto `CorrelationID` field (populated during AsyncAPI deserialization)
+2. Kafka header `correlation_id`
+3. Kafka header `x-correlation-id`
+4. Kafka header `X-Correlation-ID`
+5. Kafka header `correlationId`
+6. Generated UUID (with a warning log — Kafka redelivery may cause duplicate executions)
 
 ### Prometheus Metrics
 
