@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -8,43 +7,14 @@ import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { MoneyDisplay } from '@/shared/money-display'
 import { AuditTrail, EntityLink, Breadcrumbs } from '@/shared'
-import { ConnectError, Code } from '@connectrpc/connect'
-import { useApiClients } from '@/api/context'
-import { useTenantContext } from '@/contexts/tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
-import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_account_pb'
 import { DepositDialog } from './deposit-dialog'
 import { WithdrawDialog } from './withdraw-dialog'
 import { ControlDialog } from './control-dialog'
 import type { ControlAction } from './control-dialog'
 import { CreateLienDialog } from './create-lien-dialog'
 import { CreateValuationFeatureDialog } from '@/components/shared/create-valuation-feature-dialog'
-import type { AccountStatus as AccountStatusType, CurrentAccount } from './types'
-import type { AmountBlock } from '@/api/gen/meridian/current_account/v1/current_account_pb'
-
-const ACCOUNT_STATUS_NAMES: Record<number, string> = {
-  [AccountStatus.ACTIVE]: 'ACTIVE',
-  [AccountStatus.FROZEN]: 'FROZEN',
-  [AccountStatus.CLOSED]: 'CLOSED',
-}
-
-/** Extract a display string from google.type.Money (units + nanos/1e9). */
-function formatBalance(money: { units?: bigint | number; nanos?: number; currencyCode?: string } | undefined | null): string | undefined {
-  if (!money) return undefined
-  const rawUnits = typeof money.units === 'bigint' ? money.units : BigInt(Math.trunc(money.units ?? 0))
-  if (rawUnits > BigInt(Number.MAX_SAFE_INTEGER) || rawUnits < BigInt(Number.MIN_SAFE_INTEGER)) {
-    return money.currencyCode ? `${money.currencyCode} ${rawUnits.toString()}` : rawUnits.toString()
-  }
-  const units = Number(rawUnits)
-  const nanos = money.nanos ?? 0
-  const value = units + nanos / 1e9
-  if (money.currencyCode) {
-    try {
-      return new Intl.NumberFormat(undefined, { style: 'currency', currency: money.currencyCode }).format(value)
-    } catch { /* fall through for non-ISO codes */ }
-  }
-  return value.toFixed(2)
-}
+import type { AccountStatus as AccountStatusType } from './types'
+import { useAccountDetail, useAccountPostings, useAccountLiens } from '../hooks'
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -224,18 +194,7 @@ function getTransactionStatusName(status: unknown): string {
 // ---------------------------------------------------------------------------
 
 function AccountTransactions({ accountId, instrumentCode }: { accountId: string; instrumentCode: string }) {
-  const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: [...tenantKeys.account(tenantSlug ?? '', accountId), 'postings'],
-    queryFn: () =>
-      clients.financialAccounting.listLedgerPostings({
-        pagination: { pageSize: 50, pageToken: '' },
-        accountId,
-      }),
-    enabled: !!accountId,
-  })
+  const { data, isLoading, isError } = useAccountPostings(accountId)
 
   const postings = data?.ledgerPostings ?? []
 
@@ -313,15 +272,7 @@ function getLienTypeName(blockType: number): string {
 }
 
 function AccountLiens({ accountId, instrumentCode }: { accountId: string; instrumentCode: string }) {
-  const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: tenantKeys.liens(tenantSlug ?? '', accountId),
-    queryFn: (): Promise<{ blocks: AmountBlock[] }> =>
-      clients.currentAccount.getActiveAmountBlocks({ accountId }),
-    enabled: !!accountId,
-  })
+  const { data, isLoading, isError } = useAccountLiens(accountId)
 
   const blocks = data?.blocks ?? []
 
@@ -394,33 +345,8 @@ function AccountLiens({ accountId, instrumentCode }: { accountId: string; instru
 
 export function AccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>()
-  const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
 
-  const { data: account, isLoading, isError } = useQuery({
-    queryKey: tenantKeys.account(tenantSlug ?? '', accountId ?? ''),
-    queryFn: async (): Promise<CurrentAccount | null> => {
-      try {
-        const response = await clients.currentAccount.retrieveCurrentAccount({ accountId: accountId ?? '' })
-        const f = response.facility
-        if (!f) return null
-        return {
-          accountId: f.accountId,
-          externalReference: f.externalIdentifier ?? '',
-          status: (ACCOUNT_STATUS_NAMES[f.accountStatus] ?? String(f.accountStatus)) as AccountStatusType,
-          instrumentCode: f.instrumentCode || '',
-          availableBalance: formatBalance(f.currentBalance?.availableBalance?.amount),
-          createdAt: f.createdAt ?? undefined,
-          updatedAt: f.updatedAt ?? undefined,
-          partyId: f.orgPartyId || undefined,
-        }
-      } catch (err: unknown) {
-        if (ConnectError.from(err).code === Code.NotFound) return null
-        throw err
-      }
-    },
-    enabled: !!accountId,
-  })
+  const { data: account, isLoading, isError } = useAccountDetail(accountId)
 
   if (isLoading) {
     return <AccountDetailSkeleton />
