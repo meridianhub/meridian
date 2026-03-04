@@ -183,8 +183,8 @@ func TestSagaDispatchHandler_ChainDepthExceeded(t *testing.T) {
 
 	event := newTestEvent(t, map[string]any{"order_id": "ord-1"})
 	metadata := map[string]string{
-		"x-correlation-id": "corr-5",
-		"x-chain-depth":    "5",
+		"x-correlation-id":       "corr-5",
+		"x-meridian-chain-depth": "5",
 	}
 	err = h.Handle(context.Background(), "orders", event, metadata)
 
@@ -205,8 +205,8 @@ func TestSagaDispatchHandler_ChainDepthAtLimit(t *testing.T) {
 
 	event := newTestEvent(t, map[string]any{"order_id": "ord-1"})
 	metadata := map[string]string{
-		"x-correlation-id": "corr-6",
-		"x-chain-depth":    "3",
+		"x-correlation-id":       "corr-6",
+		"x-meridian-chain-depth": "3",
 	}
 	err = h.Handle(context.Background(), "orders", event, metadata)
 
@@ -227,8 +227,8 @@ func TestSagaDispatchHandler_ChainDepthBelowLimit(t *testing.T) {
 
 	event := newTestEvent(t, map[string]any{"order_id": "ord-1"})
 	metadata := map[string]string{
-		"x-correlation-id": "corr-7",
-		"x-chain-depth":    "2",
+		"x-correlation-id":       "corr-7",
+		"x-meridian-chain-depth": "2",
 	}
 	err = h.Handle(context.Background(), "orders", event, metadata)
 
@@ -267,8 +267,8 @@ func TestSagaDispatchHandler_ChainDepthInvalid_DefaultsToZero(t *testing.T) {
 
 	event := newTestEvent(t, map[string]any{"order_id": "ord-1"})
 	metadata := map[string]string{
-		"x-correlation-id": "corr-9",
-		"x-chain-depth":    "not-a-number",
+		"x-correlation-id":       "corr-9",
+		"x-meridian-chain-depth": "not-a-number",
 	}
 	err = h.Handle(context.Background(), "orders", event, metadata)
 

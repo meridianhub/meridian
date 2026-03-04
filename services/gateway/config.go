@@ -73,6 +73,11 @@ type EventStreamConfig struct {
 
 	// BufferSize is the per-connection event buffer size. Defaults to 256.
 	BufferSize int
+
+	// MaxChainDepth is the maximum allowed saga event chain depth. Events with a
+	// ChainDepth greater than or equal to this value are dropped to prevent infinite
+	// saga-triggered event loops. Defaults to 8. Valid range: 1–100.
+	MaxChainDepth int
 }
 
 // AuthConfig holds the authentication configuration for the gateway.
@@ -156,6 +161,10 @@ var (
 
 	// ErrKafkaTopicsRequired is returned when KAFKA_ENABLED is true but KAFKA_TOPICS is not set.
 	ErrKafkaTopicsRequired = errors.New("KAFKA_TOPICS is required when KAFKA_ENABLED is true")
+
+	// ErrInvalidMaxChainDepth is returned when EVENT_STREAM_MAX_CHAIN_DEPTH is outside the allowed range [1, 100].
+	// A value of 0 is permitted and means "no limit".
+	ErrInvalidMaxChainDepth = errors.New("EVENT_STREAM_MAX_CHAIN_DEPTH must be 0 (no limit) or between 1 and 100")
 )
 
 // LoadConfig loads configuration from environment variables.
@@ -278,6 +287,7 @@ func loadEventStreamConfig() EventStreamConfig {
 		RedisEnabled:       env.GetEnvAsBool("EVENT_STREAM_REDIS_ENABLED", false),
 		MaxConnections:     env.GetEnvAsInt("EVENT_STREAM_MAX_CONNECTIONS", 0),
 		BufferSize:         env.GetEnvAsInt("EVENT_STREAM_BUFFER_SIZE", 256),
+		MaxChainDepth:      env.GetEnvAsInt("EVENT_STREAM_MAX_CHAIN_DEPTH", 8),
 	}
 	return cfg
 }
@@ -329,14 +339,24 @@ func (c *Config) Validate() error {
 		return ErrJWKSURLRequired
 	}
 
+	return c.EventStream.validate()
+}
+
+// validate checks event stream configuration constraints.
+func (cfg *EventStreamConfig) validate() error {
 	// Validate Kafka configuration when Kafka is enabled
-	if c.EventStream.Enabled && c.EventStream.KafkaEnabled {
-		if c.EventStream.KafkaBrokers == "" {
+	if cfg.Enabled && cfg.KafkaEnabled {
+		if cfg.KafkaBrokers == "" {
 			return ErrKafkaBrokersRequired
 		}
-		if len(c.EventStream.KafkaTopics) == 0 {
+		if len(cfg.KafkaTopics) == 0 {
 			return ErrKafkaTopicsRequired
 		}
+	}
+
+	// Validate chain depth bounds. Zero means "no limit" (disabled); non-zero values must be in [1, 100].
+	if cfg.MaxChainDepth != 0 && (cfg.MaxChainDepth < 1 || cfg.MaxChainDepth > 100) {
+		return ErrInvalidMaxChainDepth
 	}
 
 	return nil

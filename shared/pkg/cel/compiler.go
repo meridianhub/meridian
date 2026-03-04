@@ -149,12 +149,14 @@ func createEligibilityEnv() (*cel.Env, error) {
 // Variables available:
 //   - event: dyn - the full event payload as a dynamic map (any event proto or JSON object)
 //   - metadata: map[string]string - Kafka message headers and other event metadata
+//   - chain_depth: int - the causal chain depth of the event (0 = originated from external source)
 //
 // The expression must return a boolean indicating whether the saga should trigger.
 func createEventFilterEnv() (*cel.Env, error) {
 	return cel.NewEnv(
 		cel.Variable("event", cel.DynType),
 		cel.Variable("metadata", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("chain_depth", cel.IntType),
 	)
 }
 

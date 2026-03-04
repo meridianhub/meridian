@@ -28,7 +28,8 @@ const (
 	defaultMaxChainDepth = 10
 
 	// chainDepthHeader is the metadata key carrying the current chain depth.
-	chainDepthHeader = "x-chain-depth"
+	// Must match the header produced by the Kafka publisher and consumed by the gateway.
+	chainDepthHeader = "x-meridian-chain-depth"
 )
 
 // idempotencyStore is the interface for idempotency-protected saga dispatch.
@@ -143,10 +144,12 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 	}
 
 	// Build the CEL activation map for filter evaluation.
-	// CEL event filter environment expects "event" (dyn) and "metadata" (map[string]string).
+	// CEL event filter environment expects "event" (dyn), "metadata" (map[string]string),
+	// and "chain_depth" (int) as declared in shared/pkg/cel.
 	activation := map[string]any{
-		"event":    inputData["event"],
-		"metadata": metadata,
+		"event":       inputData["event"],
+		"metadata":    metadata,
+		"chain_depth": int64(depth),
 	}
 
 	idempotencyKey, src := correlation.ExtractFromMetadata(metadata)

@@ -212,8 +212,9 @@ type Router struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	logger  *slog.Logger
-	metrics *Metrics
+	logger        *slog.Logger
+	metrics       *Metrics
+	maxChainDepth int // 0 means no limit
 }
 
 // RouterOption is a functional option for configuring a Router.
@@ -224,6 +225,15 @@ type RouterOption func(*Router)
 func WithRouterMetrics(m *Metrics) RouterOption {
 	return func(r *Router) {
 		r.metrics = m
+	}
+}
+
+// WithMaxChainDepth sets the maximum allowed saga event chain depth. Events with a
+// ChainDepth greater than or equal to maxDepth are dropped with a warning log entry
+// rather than published to the FanOut. A value of 0 disables the limit.
+func WithMaxChainDepth(maxDepth int) RouterOption {
+	return func(r *Router) {
+		r.maxChainDepth = maxDepth
 	}
 }
 
@@ -364,6 +374,19 @@ func (r *Router) Start(ctx context.Context) error {
 	}()
 
 	return r.source.Start(r.ctx, func(handlerCtx context.Context, event DomainEvent) error { //nolint:contextcheck // r.ctx merges the external ctx via the goroutine above
+		if r.maxChainDepth > 0 && event.ChainDepth >= r.maxChainDepth {
+			r.logger.Warn("event chain depth limit exceeded, dropping event",
+				slog.Int("chain_depth", event.ChainDepth),
+				slog.Int("max_allowed", r.maxChainDepth),
+				slog.String("event_type", event.EventType),
+				slog.String("correlation_id", event.CorrelationID),
+				slog.String("event_id", event.EventID),
+			)
+			if r.metrics != nil {
+				r.metrics.IncEventDropped("chain_depth_exceeded")
+			}
+			return nil
+		}
 		return r.fanOut.Publish(handlerCtx, event)
 	})
 }
