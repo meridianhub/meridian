@@ -178,12 +178,7 @@ func TestRegistryDependencies_ReferenceValidEntries(t *testing.T) {
 			require.NoError(t, json.Unmarshal(componentData, &item))
 
 			for _, dep := range item.RegistryDependencies {
-				// A dependency is valid if it exists in the registry.
-				// Pattern entries (e.g. "valuation-engine") may not be UI components but should
-				// still be listed in registry.json once their tasks are complete.
-				// We use a soft assertion here so new pattern entries added later don't break
-				// existing tests — the test documents the intent.
-				assert.True(t, known[dep] || dep != "",
+				assert.True(t, known[dep],
 					"registryDependency %q in %s not found in registry.json", dep, name)
 			}
 		})
