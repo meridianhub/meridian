@@ -13,6 +13,7 @@ the event — such as `billing_account_id`, `account_type_code`, or `region_code
 are resolved by the saga via service module calls against the entity graph.
 
 This pattern:
+
 - Keeps event schemas stable (adding a new saga doesn't change the publisher)
 - Makes the entity graph load-bearing (account type metadata drives valuation logic)
 - Enables upfront validation (section 2.11) of `input_data` field accesses at manifest apply
