@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
-import type { TenantThemeConfig } from '@/lib/tenant-ui-config'
+import { DEFAULT_UI_CONFIG, type TenantThemeConfig, type TenantUIConfig } from '@/lib/tenant-ui-config'
 import { applyTenantTheme, resetTheme } from '@/lib/theme-utils'
 
 export interface Tenant {
@@ -17,6 +17,7 @@ export interface TenantContextValue {
   switchTenant: (tenant: Tenant) => void
   clearTenant: () => void
   applyTheme: (theme: TenantThemeConfig) => void
+  tenantConfig?: TenantUIConfig
 }
 
 const TenantContext = createContext<TenantContextValue | null>(null)
@@ -82,6 +83,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     switchTenant,
     clearTenant,
     applyTheme,
+    tenantConfig: DEFAULT_UI_CONFIG,
   }
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>

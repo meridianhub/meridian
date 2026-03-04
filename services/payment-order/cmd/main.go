@@ -16,7 +16,6 @@ import (
 	stripego "github.com/stripe/stripe-go/v82"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	stripegateway "github.com/meridianhub/meridian/services/payment-order/adapters/gateway/stripe"
@@ -40,8 +39,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/redislock"
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
@@ -322,6 +319,24 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
+	// Create Financial Gateway client for Starlark handlers (financial_gateway.dispatch_payment).
+	fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
+		ServiceName: financialgatewayclient.ServiceName,
+		Namespace:   namespace,
+		Port:        financialgatewayclient.DefaultPort,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+	})
+	if err != nil {
+		logger.Warn("financial-gateway client unavailable, Starlark financial_gateway handlers not registered",
+			"error", err)
+	} else {
+		defer fgCleanup()
+		if err := financialgatewayclient.RegisterStarlarkHandlers(handlerRegistry, fgClient); err != nil {
+			logger.Warn("failed to register financial-gateway handlers", "error", err)
+		}
+	}
+
 	// Create Reference Data client for saga definitions and instrument lookups.
 	// Uses the shared gRPC connection via ReferenceDataClientWrapper which implements
 	// service.ReferenceDataClient (GetSaga + RetrieveInstrument).
@@ -516,36 +531,14 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create webhook handler: %w", err)
 	}
 
-	// Create Stripe event processor for webhook idempotency and dunning.
-	// Requires Redis; if Redis is unavailable in non-production, skip Stripe webhook processing.
-	var eventProcessor *webhookhttp.StripeEventProcessor
-	if redisClient != nil {
-		eventProcessor, err = webhookhttp.NewStripeEventProcessor(webhookhttp.StripeEventProcessorConfig{
-			RedisClient: redisClient,
-			Logger:      logger,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create stripe event processor: %w", err)
-		}
-	} else {
-		logger.Warn("Stripe event processor disabled — Redis unavailable (DEVELOPMENT ONLY)")
-	}
-
-	// Create Stripe webhook handler (optional - only if STRIPE_API_KEY is configured)
-	stripeWebhookHandler, err := createStripeWebhookHandler(svcConfig, webhookHandler, eventProcessor, logger)
-	if err != nil {
-		return fmt.Errorf("failed to create stripe webhook handler: %w", err)
-	}
-
 	// Create HTTP server
 	httpPort := env.GetEnvAsInt("HTTP_PORT", ports.Gateway)
 	httpServer, err := webhookhttp.NewServer(webhookhttp.ServerConfig{
-		Port:                 httpPort,
-		WebhookHandler:       webhookHandler,
-		StripeWebhookHandler: stripeWebhookHandler,
-		Logger:               logger,
-		RateLimitPerSecond:   env.GetEnvAsFloat("HTTP_RATE_LIMIT_PER_SECOND", 100),
-		RateLimitBurst:       env.GetEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
+		Port:               httpPort,
+		WebhookHandler:     webhookHandler,
+		Logger:             logger,
+		RateLimitPerSecond: env.GetEnvAsFloat("HTTP_RATE_LIMIT_PER_SECOND", 100),
+		RateLimitBurst:     env.GetEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP server: %w", err)
@@ -561,8 +554,40 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
 
-	// Channel to collect server errors
-	serverErrors := make(chan error, 2)
+	// Construct the financial-gateway payment event consumer before starting servers
+	// so that any initialization error causes an early return without leaving
+	// running goroutines/listeners behind.
+	//
+	// Subscribes to financial-gateway.payment-captured.v1 and
+	// financial-gateway.payment-failed.v1 topics and calls UpdatePaymentOrder
+	// to transition payment orders to SETTLED or REJECTED.
+	var paymentEventConsumer *pomessaging.PaymentEventConsumer
+	if bootstrapServers != "" {
+		paymentEventConsumer, err = pomessaging.NewPaymentEventConsumerWithKafka(
+			kafka.ConsumerConfig{
+				BootstrapServers: bootstrapServers,
+				GroupID:          "payment-order-gateway-events",
+				ClientID:         "payment-order-gateway-events",
+				AutoOffsetReset:  "earliest",
+				EnableAutoCommit: false,
+			},
+			localServiceClient,
+			logger,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create payment event consumer: %w", err)
+		}
+		defer func() {
+			if err := paymentEventConsumer.Close(); err != nil {
+				logger.Error("failed to close payment event consumer", "error", err)
+			}
+		}()
+	} else {
+		logger.Warn("payment event consumer disabled - KAFKA_BOOTSTRAP_SERVERS not set")
+	}
+
+	// Channel to collect server errors (gRPC + HTTP + payment event consumer).
+	serverErrors := make(chan error, 3)
 
 	// Start gRPC server in background
 	go func() {
@@ -579,6 +604,19 @@ func run(logger *slog.Logger) error {
 			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
+
+	// Start payment event consumer after servers are up.
+	if paymentEventConsumer != nil {
+		go func() {
+			if err := paymentEventConsumer.Start(
+				"financial-gateway.payment-captured.v1",
+				"financial-gateway.payment-failed.v1",
+			); err != nil {
+				logger.Error("payment event consumer error", "error", err)
+				serverErrors <- fmt.Errorf("payment event consumer error: %w", err)
+			}
+		}()
+	}
 
 	// Start billing workers in background (if enabled)
 	workerCtx, workerCancel := context.WithCancel(ctx)
@@ -641,6 +679,12 @@ func run(logger *slog.Logger) error {
 		dunningWorker.Stop()
 		billingWg.Wait()
 		logger.Info("billing workers stopped")
+	}
+
+	// Stop payment event consumer before closing connections
+	if paymentEventConsumer != nil {
+		paymentEventConsumer.Stop()
+		logger.Info("payment event consumer stopped")
 	}
 
 	// Shutdown HTTP server (stop accepting new webhooks)
@@ -990,103 +1034,6 @@ func createGatewayAccountConfig(logger *slog.Logger) (*config.GatewayAccountConf
 		"gateway_count", len(cfg.Mappings))
 
 	return cfg, nil
-}
-
-// createStripeWebhookHandler creates the StripeWebhookHandler if Stripe provider is configured.
-// Returns nil (no error) when Stripe is not the active provider, making the handler optional.
-func createStripeWebhookHandler(svcConfig config.ServiceConfig, webhookHandler *webhookhttp.WebhookHandler, eventProcessor *webhookhttp.StripeEventProcessor, logger *slog.Logger) (*webhookhttp.StripeWebhookHandler, error) {
-	if svcConfig.StripeAPIKey == "" {
-		logger.Info("Stripe API key not set, Stripe webhook handler disabled")
-		return nil, nil //nolint:nilnil // nil handler is intentional: ServerConfig treats nil as "feature disabled"
-	}
-
-	provider, err := createTenantConfigProvider(logger)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tenant config provider: %w", err)
-	}
-
-	cfg := stripegateway.DefaultConfig()
-	cfg.APIKey = svcConfig.StripeAPIKey
-
-	clientFactory, err := stripegateway.NewClientFactory(cfg, provider, logger)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stripe client factory: %w", err)
-	}
-
-	handler, err := webhookhttp.NewStripeWebhookHandler(webhookhttp.StripeWebhookHandlerConfig{
-		ClientFactory:  clientFactory,
-		WebhookHandler: webhookHandler,
-		EventProcessor: eventProcessor,
-		Logger:         logger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stripe webhook handler: %w", err)
-	}
-
-	logger.Info("stripe webhook handler enabled", "route", "/webhook/stripe")
-	return handler, nil
-}
-
-// createTenantConfigProvider creates the appropriate TenantConfigProvider.
-// If CONTROL_PLANE_ADDR is set, creates a ManifestTenantConfigProvider that
-// queries the control-plane ManifestHistoryService for per-tenant Stripe config.
-// Otherwise, falls back to the env-based stub provider.
-func createTenantConfigProvider(logger *slog.Logger) (stripegateway.TenantConfigProvider, error) {
-	controlPlaneAddr := env.GetEnvOrDefault("CONTROL_PLANE_ADDR", "")
-	if controlPlaneAddr != "" {
-		return createManifestTenantConfigProvider(controlPlaneAddr, logger)
-	}
-
-	logger.Warn("CONTROL_PLANE_ADDR not set, using env-based tenant config provider (single-tenant fallback)")
-	stripeWebhookSecret := env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
-	return &envTenantConfigProvider{
-		webhookSecret: stripeWebhookSecret,
-	}, nil
-}
-
-// createManifestTenantConfigProvider creates a ManifestTenantConfigProvider
-// backed by the control-plane ManifestHistoryService gRPC endpoint.
-func createManifestTenantConfigProvider(addr string, logger *slog.Logger) (*stripegateway.ManifestTenantConfigProvider, error) {
-	conn, err := grpc.NewClient(addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to control-plane at %s: %w", addr, err)
-	}
-
-	client := controlplanev1.NewManifestHistoryServiceClient(conn)
-	cacheTTL := env.GetEnvAsDuration("TENANT_CONFIG_CACHE_TTL", 5*time.Minute)
-
-	provider, err := stripegateway.NewManifestTenantConfigProvider(stripegateway.ManifestTenantConfigProviderConfig{
-		Client:   client,
-		Logger:   logger,
-		CacheTTL: cacheTTL,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create manifest tenant config provider: %w", err)
-	}
-
-	logger.Info("tenant config provider backed by control-plane manifest",
-		"control_plane_addr", addr,
-		"cache_ttl", cacheTTL)
-
-	return provider, nil
-}
-
-// envTenantConfigProvider is a fallback TenantConfigProvider that returns a global
-// webhook secret from environment variables. Used when CONTROL_PLANE_ADDR is not set.
-type envTenantConfigProvider struct {
-	webhookSecret string
-}
-
-func (p *envTenantConfigProvider) GetTenantConfig(_ string) (stripegateway.TenantConfig, error) {
-	if p.webhookSecret == "" {
-		return stripegateway.TenantConfig{}, stripegateway.ErrTenantConfigNotFound
-	}
-	return stripegateway.TenantConfig{
-		ConnectedAccountID:    "platform", // Placeholder for single-tenant fallback
-		WebhookEndpointSecret: p.webhookSecret,
-	}, nil
 }
 
 // parseLogLevel converts a string log level to slog.Level.

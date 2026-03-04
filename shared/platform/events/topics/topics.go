@@ -122,6 +122,25 @@ const (
 	OperationalGatewayInstructionCancelledV1 = "operational-gateway.instruction-cancelled.v1"
 )
 
+// Financial Gateway topics
+const (
+	// FinancialGatewayPaymentCapturedV1 is the Kafka topic for payment captured events.
+	// Published when a Stripe payment_intent.succeeded webhook is received and validated.
+	FinancialGatewayPaymentCapturedV1 = "financial-gateway.payment-captured.v1"
+
+	// FinancialGatewayPaymentFailedV1 is the Kafka topic for payment failed events.
+	// Published when a Stripe payment_intent.payment_failed webhook is received and validated.
+	FinancialGatewayPaymentFailedV1 = "financial-gateway.payment-failed.v1"
+
+	// FinancialGatewayPaymentRefundedV1 is the Kafka topic for payment refunded events.
+	// Published when a Stripe charge.refunded webhook is received and validated.
+	FinancialGatewayPaymentRefundedV1 = "financial-gateway.payment-refunded.v1"
+
+	// FinancialGatewayPaymentDisputedV1 is the Kafka topic for payment disputed events.
+	// Published when a Stripe charge.dispute.created webhook is received and validated.
+	FinancialGatewayPaymentDisputedV1 = "financial-gateway.payment-disputed.v1"
+)
+
 // Reconciliation topics
 const (
 	// ReconciliationRunStartedV1 is the Kafka topic for reconciliation run started events.
@@ -184,5 +203,9 @@ func All() []string {
 		OperationalGatewayInstructionFailedV1,
 		OperationalGatewayInstructionExpiredV1,
 		OperationalGatewayInstructionCancelledV1,
+		FinancialGatewayPaymentCapturedV1,
+		FinancialGatewayPaymentFailedV1,
+		FinancialGatewayPaymentRefundedV1,
+		FinancialGatewayPaymentDisputedV1,
 	}
 }

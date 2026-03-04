@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package meridian.financial_gateway_events.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway_events/v1;financialgatewayeventsv1";
+
+// PaymentCapturedEvent is published when a Stripe payment_intent.succeeded webhook
+// is received and validated. It signals that a payment has been successfully captured
+// by the payment provider.
+message PaymentCapturedEvent {
+  // event_id uniquely identifies this event instance (UUID).
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the provider event that caused this domain event.
+  string causation_id = 3 [(buf.validate.field).string.max_len = 255];
+
+  // version is the event schema version for forward compatibility.
+  int32 version = 4 [(buf.validate.field).int32.gte = 1];
+
+  // payment_order_id is the Meridian payment order associated with this capture.
+  // May be empty if the Stripe payment was not created via Meridian (no payment_order_id in metadata).
+  string payment_order_id = 5 [(buf.validate.field).string.max_len = 255];
+
+  // provider_reference_id is the payment provider's identifier (e.g., Stripe PaymentIntent ID).
+  string provider_reference_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // amount_minor_units is the captured amount in the smallest currency unit (e.g., cents for USD).
+  int64 amount_minor_units = 7 [(buf.validate.field).int64.gte = 0];
+
+  // currency is the ISO 4217 currency code (e.g., "USD", "GBP").
+  // May be empty if the provider did not include currency in the webhook payload.
+  string currency = 8 [(buf.validate.field).string.max_len = 3];
+
+  // captured_at is when the payment was captured by the provider.
+  google.protobuf.Timestamp captured_at = 9;
+
+  // provider_event_id is the payment provider's webhook event ID (e.g., Stripe evt_ ID).
+  // Used for idempotency and deduplication.
+  string provider_event_id = 10 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // metadata contains additional key-value pairs from the provider event.
+  map<string, string> metadata = 11 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {string: {max_len: 128}}
+    values: {string: {max_len: 1024}}
+  }];
+}
+
+// PaymentFailedEvent is published when a Stripe payment_intent.payment_failed webhook
+// is received and validated. It signals that a payment attempt was rejected by the provider.
+message PaymentFailedEvent {
+  // event_id uniquely identifies this event instance (UUID).
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the provider event that caused this domain event.
+  string causation_id = 3 [(buf.validate.field).string.max_len = 255];
+
+  // version is the event schema version for forward compatibility.
+  int32 version = 4 [(buf.validate.field).int32.gte = 1];
+
+  // payment_order_id is the Meridian payment order associated with this failure.
+  // May be empty if the Stripe payment was not created via Meridian (no payment_order_id in metadata).
+  string payment_order_id = 5 [(buf.validate.field).string.max_len = 255];
+
+  // provider_reference_id is the payment provider's identifier (e.g., Stripe PaymentIntent ID).
+  string provider_reference_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // failure_reason is a human-readable description of why the payment failed.
+  string failure_reason = 7 [(buf.validate.field).string.max_len = 1024];
+
+  // failure_code is the provider's machine-readable failure code (e.g., Stripe decline code).
+  string failure_code = 8 [(buf.validate.field).string.max_len = 255];
+
+  // provider_event_id is the payment provider's webhook event ID (e.g., Stripe evt_ ID).
+  // Used for idempotency and deduplication.
+  string provider_event_id = 9 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // failed_at is when the payment failure occurred.
+  google.protobuf.Timestamp failed_at = 10;
+}

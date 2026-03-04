@@ -211,6 +211,10 @@ func TestAll_ContainsAllConstants(t *testing.T) {
 		topics.OperationalGatewayInstructionFailedV1,
 		topics.OperationalGatewayInstructionExpiredV1,
 		topics.OperationalGatewayInstructionCancelledV1,
+		topics.FinancialGatewayPaymentCapturedV1,
+		topics.FinancialGatewayPaymentFailedV1,
+		topics.FinancialGatewayPaymentRefundedV1,
+		topics.FinancialGatewayPaymentDisputedV1,
 	}
 
 	allSet := make(map[string]bool, len(topics.All()))

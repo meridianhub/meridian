@@ -119,6 +119,15 @@ func (s *FinancialGatewayService) DispatchRefund(
 	return nil, status.Error(codes.Unimplemented, "DispatchRefund not yet implemented")
 }
 
+// CancelPayment cancels a pending payment dispatch before it is delivered to the payment rail.
+// Returns Unimplemented until cancellation support is added.
+func (s *FinancialGatewayService) CancelPayment(
+	_ context.Context,
+	_ *financialgatewayv1.CancelPaymentRequest,
+) (*financialgatewayv1.CancelPaymentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "CancelPayment not yet implemented")
+}
+
 // GetProviderHealth returns the current health status of a payment rail provider.
 func (s *FinancialGatewayService) GetProviderHealth(
 	_ context.Context,
