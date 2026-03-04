@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -79,6 +80,24 @@ func loadManifestFragment(t *testing.T, name string) map[string]any {
 	var v map[string]any
 	require.NoError(t, yaml.Unmarshal(data, &v))
 	return v
+}
+
+// resolveCookbookPath resolves a relative path declared inside a pattern.json files[]
+// entry to an absolute path, rejecting any path that escapes the cookbook root.
+func resolveCookbookPath(t *testing.T, root, relPath string) string {
+	t.Helper()
+	cleanRel := filepath.Clean(relPath)
+	require.False(t, filepath.IsAbs(cleanRel),
+		"files[].path must be relative, got: %s", relPath)
+
+	abs := filepath.Join(root, cleanRel)
+	rel, err := filepath.Rel(root, abs)
+	require.NoError(t, err, "failed to compute relative path for %s", relPath)
+	require.False(t,
+		rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)),
+		"files[].path escapes cookbook root: %s", relPath,
+	)
+	return abs
 }
 
 // allPatternNames returns the names of all pattern directories.
@@ -216,6 +235,20 @@ func TestComposition_ManifestFragmentsMergeWithoutKeyConflict(t *testing.T) {
 				t.Run("with_"+refName, func(t *testing.T) {
 					otherFragment := loadManifestFragment(t, refName)
 
+					// Check for top-level keys whose types differ between the two fragments.
+					// Incompatible types (e.g., one fragment has a list and the other a scalar
+					// for the same key) would prevent a valid merged manifest.
+					conflictingKeys := make([]string, 0)
+					for k, baseVal := range baseFragment {
+						if otherVal, exists := otherFragment[k]; exists &&
+							reflect.TypeOf(baseVal) != reflect.TypeOf(otherVal) {
+							conflictingKeys = append(conflictingKeys, k)
+						}
+					}
+					assert.Empty(t, conflictingKeys,
+						"manifest fragments for %s + %s contain incompatible top-level keys (type mismatch): %v",
+						patternName, refName, conflictingKeys)
+
 					// Merge: collect all top-level keys from both fragments.
 					merged := make(map[string][]any)
 					collectFragmentKeys(merged, patternName, baseFragment)
@@ -270,8 +303,9 @@ func TestOrphanDetection_NoUnreferencedFilesInCookbook(t *testing.T) {
 				continue
 			}
 			if relPath, ok := entry["path"].(string); ok {
-				// Normalise to the absolute path within the cookbook directory.
-				abs := filepath.Join(root, relPath)
+				// Normalise to the absolute path within the cookbook directory,
+				// rejecting any path that would escape the root.
+				abs := resolveCookbookPath(t, root, relPath)
 				referenced[filepath.Clean(abs)] = true
 			}
 		}
@@ -352,7 +386,7 @@ func TestFileExistence_AllFilesInPatternJSONExist(t *testing.T) {
 				relPath, ok := entry["path"].(string)
 				require.True(t, ok, "files[%d].path should be a string in %s", i, patternName)
 
-				absPath := filepath.Join(root, relPath)
+				absPath := resolveCookbookPath(t, root, relPath)
 				_, err := os.Stat(absPath)
 				assert.NoError(t, err,
 					"file %s listed in %s/pattern.json files[] does not exist", relPath, patternName)
