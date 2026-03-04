@@ -1,13 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { axe } from '@/test/test-utils'
+import { axe, renderWithProviders } from '@/test/test-utils'
 import { Sidebar } from '@/components/layout/sidebar'
 
 function renderSidebar(props: React.ComponentProps<typeof Sidebar>) {
-  return render(
+  return renderWithProviders(
     <MemoryRouter>
       <Sidebar {...props} />
     </MemoryRouter>,
