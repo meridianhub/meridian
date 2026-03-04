@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useClients } from '@/api/context'
-import { StatusBadge } from '@/components/shared/status-badge'
+import { StatusBadge } from '@/shared/status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 
 function partyStatusLabel(status: unknown): string {

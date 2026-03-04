@@ -9,9 +9,9 @@ import {
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
-import { StatusBadge } from '@/components/shared/status-badge'
-import { TimeDisplay, EntityLink, Breadcrumbs } from '@/components/shared'
-import { MoneyDisplay } from '@/components/shared/money-display'
+import { StatusBadge } from '@/shared/status-badge'
+import { TimeDisplay, EntityLink, Breadcrumbs } from '@/shared'
+import { MoneyDisplay } from '@/shared/money-display'
 import {
   Table,
   TableBody,

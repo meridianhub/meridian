@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { axe } from '@/test/test-utils'
-import { StatusBadge } from '@/components/shared/status-badge'
+import { StatusBadge } from '@/shared/status-badge'
 
 describe('StatusBadge accessibility', () => {
   it('has no accessibility violations - success variant', async () => {

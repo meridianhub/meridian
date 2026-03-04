@@ -5,10 +5,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { StatusBadge } from '@/components/shared/status-badge'
+import { StatusBadge } from '@/shared/status-badge'
 import { CELEditor } from '@/components/shared/cel-editor'
-import { Breadcrumbs } from '@/components/shared'
-import { DetailSkeleton } from '@/components/shared/detail-skeleton'
+import { Breadcrumbs } from '@/shared'
+import { DetailSkeleton } from '@/shared/detail-skeleton'
 import {
   VarianceDetail,
   type Variance,

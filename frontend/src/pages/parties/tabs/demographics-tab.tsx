@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { TimeDisplay } from '@/components/shared/time-display'
+import { TimeDisplay } from '@/shared/time-display'
 import { useForm } from 'react-hook-form'
 
 interface DemographicsTabProps {

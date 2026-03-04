@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useClients } from '@/api/context'
-import { TimeDisplay } from '@/components/shared/time-display'
+import { TimeDisplay } from '@/shared/time-display'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
 

@@ -1,4 +1,4 @@
-import type { DataTableQueryParams, DataTableResult } from '@/components/shared/data-table'
+import type { DataTableQueryParams, DataTableResult } from '@/shared/data-table'
 
 export interface PaymentOrder {
   paymentOrderId: string

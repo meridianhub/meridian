@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { axe } from '@/test/test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { DataTable } from '@/components/shared/data-table'
+import { DataTable } from '@/shared/data-table'
 
 type TestRow = { id: string; name: string; status: string }
 

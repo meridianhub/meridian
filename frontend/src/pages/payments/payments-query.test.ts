@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fetchPayments } from './payments-query'
-import type { DataTableQueryParams } from '@/components/shared/data-table'
+import type { DataTableQueryParams } from '@/shared/data-table'
 
 const mockPaymentOrders = [
   {
