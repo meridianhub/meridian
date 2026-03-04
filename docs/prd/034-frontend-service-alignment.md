@@ -285,9 +285,6 @@ src/
 │   ├── time-display.tsx
 │   └── handler-reference.tsx
 │
-├── registry/                   # Component registry
-│   └── registry.json           # shadcn-style component index
-│
 └── App.tsx                     # Route definitions
 ```
 
@@ -371,11 +368,11 @@ pattern, adapted for Meridian's needs.
 
 ```json
 {
-  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
   "name": "data-table",
   "type": "registry:ui",
   "title": "Data Table",
-  "description": "Sortable, filterable table with pagination. Used across all list pages.",
+  "description": "Sortable, filterable table with pagination.",
   "registryDependencies": ["status-badge", "entity-link"],
   "categories": ["shared", "layout"],
   "meta": {
@@ -393,17 +390,18 @@ pattern, adapted for Meridian's needs.
 }
 ```
 
-**Registry index** (`src/registry/registry.json`):
+**Registry index** (`cookbook/registry.json` - the unified
+Meridian Cookbook, see PRD-035):
 
 ```json
 {
-  "$schema": "https://ui.shadcn.com/schema/registry.json",
-  "name": "meridian-console",
+  "$schema": "https://cookbook.meridianhub.org/schema/registry.json",
+  "name": "meridian-cookbook",
   "homepage": "https://github.com/meridianhub/meridian",
   "items": [
     { "name": "data-table", "type": "registry:ui", "title": "Data Table" },
     { "name": "money-display", "type": "registry:ui", "title": "Money Display" },
-    { "name": "account-summary-card", "type": "registry:component", "title": "Account Summary Card" }
+    { "name": "account-summary-card", "type": "registry:ui", "title": "Account Summary Card" }
   ]
 }
 ```
@@ -634,14 +632,14 @@ changes naturally prompt UI parity discussion.
 
 ### Phase 4: Component Registry
 
-- Create `src/registry/registry.json` with shadcn-style
-  schema
+- Create UI component entries in `cookbook/ui/` using the
+  unified Meridian Cookbook schema (see PRD-035)
 - Add entries for all shared components (DataTable,
   MoneyDisplay, etc.) with metadata: feature module,
   tenant-configurable props, dependencies
 - Add entries for feature-specific components with metadata
 - Validate widget component names in tenant config against
-  registry at config write time
+  `cookbook/registry.json` at config write time
 
 ### Phase 5: Tenant Theme Foundation
 

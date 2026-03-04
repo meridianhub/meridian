@@ -394,7 +394,8 @@ static catalogue: the response is state-aware.
 **MCP tool: `meridian_cookbook_discover`**
 
 Input: current manifest (or tenant_id to fetch it),
-optional `type` filter (`ui`, `pattern`, or both)
+optional `type` filter (`registry:ui`, `registry:pattern`,
+or omit for both)
 
 Output:
 
@@ -516,10 +517,12 @@ fragments are merged using these deterministic rules:
 - **Nested objects** (valuation_rules, seed_data):
   recursive merge, with later pattern values overriding
   on key collision
-- **Conflict detection**: if two fragments define the
-  same key with different content,
-  `meridian_manifest_validate` rejects with a
-  descriptive error listing both sources
+- **Post-merge validation**:
+  `meridian_manifest_validate` runs on the merged result
+  and rejects structurally invalid manifests (e.g.,
+  duplicate instrument codes with conflicting
+  definitions, missing required references). The merge
+  itself is permissive; validation is authoritative
 
 The merge order is deterministic: resolve
 `registryDependencies` depth-first, then append the
@@ -533,7 +536,7 @@ arbiter of correctness.
 ```text
 User: "We're an energy retailer billing residential customers"
 
-AI: meridian_cookbook_list(type: "pattern", category: "energy")
+AI: meridian_cookbook_list(type: "registry:pattern", category: "energy")
     → energy-settlement, time-of-use-pricing, carbon-offset
 
 AI: meridian_cookbook_describe("energy-settlement")
@@ -565,7 +568,7 @@ AI: meridian_manifest_apply(merged_manifest, plan_hash)
 
 User: "What UI components are available for energy?"
 
-AI: meridian_cookbook_list(type: "ui", category: "positions")
+AI: meridian_cookbook_list(type: "registry:ui", category: "positions")
     → quality-ladder-badge, data-table, money-display
 ```
 
