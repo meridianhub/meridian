@@ -130,6 +130,44 @@ dynamic prices in Market Data → this saga reads the regional price at the
 consumption timestamp → books USD charge → which is itself a position. The
 `region_code` is resolved from account metadata (each usage account is per-region).
 
+### valuation\_on\_capture.star — Precious Metals: Spot Rate Settlement
+
+A precious metals trading platform books GBP settlement value when a GOLD,
+SILVER, or PLATINUM position is captured.
+
+| Aspect | Detail |
+|--------|--------|
+| Trigger | `event:position-keeping.transaction-captured.v1` |
+| Filter | `event.instrument_code in ['GOLD', 'SILVER', 'PLATINUM']` |
+| Pattern | Single-leg spot valuation |
+| Idempotency | Checks GBP settlement exists for correlation\_id |
+| Chain termination | GBP positions rejected by filter (`instrument_code in [...]` does not include `'GBP'`) |
+| Key modules | `reference_data.get_account`, `reference_data.get_account_type`, `valuation_engine.compute` |
+
+Demonstrates the CEL `in` operator for multi-instrument filtering. Simpler than
+the two-leg energy valuation: one settlement account, one GBP leg, direction
+mirrors the source position (DEBIT stays DEBIT, CREDIT stays CREDIT).
+
+### kyc\_on\_party.star — Financial Services: Compliance Marker on Party Creation
+
+A financial services platform initiates KYC verification when an individual party
+is registered. Demonstrates entity graph resolution for party-triggered events.
+
+| Aspect | Detail |
+|--------|--------|
+| Trigger | `event:party.created.v1` |
+| Filter | `event.party_type == 'INDIVIDUAL'` |
+| Pattern | Compliance marker (zero-amount position as durable obligation record) |
+| Key modules | `party.get`, `reference_data.query`, `position_keeping.initiate_log` |
+| Event status | Aspirational — `party.created.v1` channel not yet in event inventory |
+
+The saga resolves party details from the event's `party_id`, locates the
+jurisdiction-specific compliance account via `reference_data.query`, and books a
+zero-amount GBP position as a durable KYC obligation record. The `reference` field
+carries `party_id` for downstream reconciliation processes to locate the marker.
+Zero-amount positions are valid position logs — they record an obligation, not a
+financial movement.
+
 ## Common Patterns
 
 All examples share these patterns:

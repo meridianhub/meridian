@@ -41,6 +41,8 @@ func TestTenantExampleSagas_SyntaxValid(t *testing.T) {
 		{"corporate_action_cost_adjustment", "corporate_action_cost_adjustment.star"},
 		{"tou_energy_valuation", "tou_energy_valuation.star"},
 		{"dynamic_capacity_billing", "dynamic_capacity_billing.star"},
+		{"valuation_on_capture", "valuation_on_capture.star"},
+		{"kyc_on_party", "kyc_on_party.star"},
 	}
 
 	for _, ex := range examples {
@@ -68,6 +70,8 @@ func TestTenantExampleSagas_AllStarFilesHaveTests(t *testing.T) {
 		"corporate_action_cost_adjustment.star": true,
 		"tou_energy_valuation.star":             true,
 		"dynamic_capacity_billing.star":         true,
+		"valuation_on_capture.star":             true,
+		"kyc_on_party.star":                     true,
 	}
 
 	for _, entry := range entries {
