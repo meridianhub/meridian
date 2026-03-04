@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "saas-billing",
+    "type": "registry:pattern",
+    "title": "SaaS Compute Billing",
+    "description": "Usage-based billing for cloud compute resources. Meters GPU hours, API calls, and storage consumption, then converts to USD charges via valuation rules. Includes platform credits as a voucher instrument.",
+    "registryDependencies": ["base-fiat-usd"],
+    "categories": ["economy", "billing", "compute", "usage-metering"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "compute-metering",
+        "industries": ["saas", "cloud", "ai"],
+        "provides": {
+            "instruments": ["GPU_HOUR", "API_CALL", "STORAGE_GB", "CREDIT"],
+            "account_types": ["BILLING", "USAGE", "CREDIT_BALANCE", "REVENUE"],
+            "sagas": ["record_gpu_usage", "compute_billing", "generate_monthly_invoice"],
+            "valuation_rules": ["GPU_HOUR->USD", "API_CALL->USD", "STORAGE_GB->USD", "CREDIT->USD"],
+            "triggers": ["webhook:gpu_meter_event", "event:position-keeping.transaction-captured.v1", "scheduled:monthly_billing"]
+        },
+        "requires": {
+            "instruments": ["USD"],
+            "market_data": []
+        },
+        "composes_with": ["dynamic-capacity-pricing", "payment-gateway-stripe"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-usd"]
+    },
+    "files": [
+        {
+            "path": "patterns/saas-billing/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/saas-billing/compute_billing.star",
+            "type": "registry:file",
+            "target": "~/sagas/compute_billing.star"
+        }
+    ]
+}

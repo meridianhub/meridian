@@ -1,0 +1,104 @@
+accountTypes:
+  - code: CUSTOMER_CURRENT
+    name: Customer Current Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP, USD, EUR]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+  - code: PAYMENT_CLEARING
+    name: Payment Clearing Account
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP, USD, EUR]
+    policies:
+      validation: ""
+      bucketing: ""
+
+sagas:
+  - name: stripe_payment_via_gateway
+    trigger: "api:/v1/payments/stripe"
+  - name: stripe_payment_received
+    trigger: "webhook:stripe.payment_intent.succeeded"
+
+operationalGateway:
+  providerConnections:
+    - connectionId: stripe-payments
+      providerName: Stripe
+      providerType: payment_gateway
+      protocol: PROVIDER_PROTOCOL_HTTPS
+      baseUrl: https://api.stripe.com/v1
+      auth:
+        apiKey:
+          headerName: Authorization
+          apiKeySecretRef: "sm://stripe/api_key"
+      retryPolicy:
+        maxAttempts: 3
+        initialBackoffSeconds: 1
+        maxBackoffSeconds: 30
+        backoffMultiplier: 2.0
+      rateLimit:
+        requestsPerSecond: 25.0
+        burstSize: 50
+  instructionRoutes:
+    - instructionType: payment.collect
+      connectionId: stripe-payments
+      outboundMappingId: payment-collect-to-stripe
+      inboundMappingId: stripe-response-to-ack
+      httpMethod: POST
+      pathTemplate: /payment_intents
+
+mappings:
+  - name: payment-collect-to-stripe
+    targetService: external.stripe
+    targetRpc: CreatePaymentIntent
+    fields:
+      - externalPath: amount
+        internalPath: amount_cents
+        transform:
+          cel:
+            inboundCel: "int(value)"
+            outboundCel: "int(value)"
+      - externalPath: currency
+        internalPath: currency
+        transform:
+          cel:
+            inboundCel: "value.upperAscii()"
+            outboundCel: "value.lowerAscii()"
+      - externalPath: customer
+        internalPath: customer_id
+      - externalPath: payment_method
+        internalPath: payment_method_id
+    outboundComputedFields:
+      - targetPath: confirm
+        celExpression: "true"
+  - name: stripe-response-to-ack
+    targetService: internal.operational_gateway
+    targetRpc: AcknowledgeInstruction
+    fields:
+      - externalPath: id
+        internalPath: provider_reference_id
+      - externalPath: status
+        internalPath: provider_status
+        transform:
+          enumMapping:
+            values:
+              requires_payment_method: PENDING
+              requires_confirmation: PENDING
+              requires_action: PENDING
+              processing: PROCESSING
+              requires_capture: DELIVERED
+              succeeded: ACKNOWLEDGED
+              canceled: FAILED
+            fallback: UNKNOWN
+      - externalPath: amount
+        internalPath: amount_cents
+        transform:
+          cel:
+            inboundCel: "int(value)"
+            outboundCel: "int(value)"
+      - externalPath: currency
+        internalPath: currency
+        transform:
+          cel:
+            inboundCel: "value.upperAscii()"
+            outboundCel: "value.lowerAscii()"
