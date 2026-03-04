@@ -1,0 +1,4 @@
+sagas:
+  - name: race_result_distribution
+    trigger: "event:market-information.observation-recorded.v1"
+    filter: "event.dataset_code == 'HORSE_RACING' && event.quality == 'ACTUAL'"

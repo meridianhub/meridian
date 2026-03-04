@@ -372,9 +372,165 @@ func TestEnergySettlement_StarFileExists(t *testing.T) {
 	require.NoError(t, err, "usage_to_value.star should exist in energy-settlement pattern")
 }
 
+// --- economy pattern tests (all 9 patterns) ---
+
+// allEconomyPatterns lists all economy pattern names that should exist.
+var allEconomyPatterns = []string{
+	"saas-billing",
+	"carbon-offset",
+	"precious-metals",
+	"time-of-use-pricing",
+	"dynamic-capacity-pricing",
+	"kyc-compliance",
+	"payment-gateway-stripe",
+	"entity-distribution",
+	"phantom-cost-basis",
+}
+
+func TestEconomyPatterns_PatternJSONValidatesAgainstSchema(t *testing.T) {
+	s := compileSchema(t, "registry-item.json")
+	for _, name := range allEconomyPatterns {
+		t.Run(name, func(t *testing.T) {
+			validatePatternJSON(t, s, name)
+		})
+	}
+}
+
+func TestEconomyPatterns_ManifestFragmentIsValidYAML(t *testing.T) {
+	for _, name := range allEconomyPatterns {
+		t.Run(name, func(t *testing.T) {
+			fragment := loadManifestFragment(t, name)
+			require.NotNil(t, fragment, "manifest-fragment.yaml should not be empty")
+		})
+	}
+}
+
+func TestEconomyPatterns_TypeIsRegistryPattern(t *testing.T) {
+	for _, name := range allEconomyPatterns {
+		t.Run(name, func(t *testing.T) {
+			pattern := loadPatternJSON(t, name)
+			assert.Equal(t, "registry:pattern", pattern["type"])
+		})
+	}
+}
+
+func TestEconomyPatterns_HasRequiredMetaFields(t *testing.T) {
+	for _, name := range allEconomyPatterns {
+		t.Run(name, func(t *testing.T) {
+			pattern := loadPatternJSON(t, name)
+			meta, ok := pattern["meta"].(map[string]any)
+			require.True(t, ok, "meta should be present")
+
+			_, ok = meta["complexity"]
+			assert.True(t, ok, "meta.complexity should be present")
+
+			_, ok = meta["industries"]
+			assert.True(t, ok, "meta.industries should be present")
+
+			provides, ok := meta["provides"].(map[string]any)
+			require.True(t, ok, "meta.provides should be present")
+			_, ok = provides["instruments"]
+			assert.True(t, ok, "meta.provides.instruments should be present")
+			_, ok = provides["sagas"]
+			assert.True(t, ok, "meta.provides.sagas should be present")
+		})
+	}
+}
+
+func TestEconomyPatterns_ProvidesInstrumentsMatchManifest(t *testing.T) {
+	for _, name := range allEconomyPatterns {
+		t.Run(name, func(t *testing.T) {
+			pattern := loadPatternJSON(t, name)
+			fragment := loadManifestFragment(t, name)
+
+			meta := pattern["meta"].(map[string]any)
+			provides := meta["provides"].(map[string]any)
+			providedInstruments, ok := provides["instruments"].([]any)
+			require.True(t, ok)
+
+			// Collect instrument codes from manifest fragment
+			fragmentCodes := make(map[string]bool)
+			if instruments, ok := fragment["instruments"].([]any); ok {
+				for _, inst := range instruments {
+					m, ok := inst.(map[string]any)
+					if !ok {
+						continue
+					}
+					if c, ok := m["code"].(string); ok {
+						fragmentCodes[c] = true
+					}
+				}
+			}
+
+			// All provided instruments should be in the manifest fragment
+			for _, code := range providedInstruments {
+				c, ok := code.(string)
+				require.True(t, ok)
+				assert.True(t, fragmentCodes[c],
+					"instrument %q listed in provides should be in manifest-fragment.yaml", c)
+			}
+		})
+	}
+}
+
+func TestEconomyPatterns_StarFilesExistForSagaPatterns(t *testing.T) {
+	patternsWithStarFiles := map[string][]string{
+		"saas-billing":             {"record_gpu_usage.star", "compute_billing.star", "generate_monthly_invoice.star"},
+		"precious-metals":          {"valuation_on_capture.star"},
+		"time-of-use-pricing":      {"tou_energy_valuation.star"},
+		"dynamic-capacity-pricing": {"dynamic_capacity_billing.star"},
+		"kyc-compliance":           {"kyc_on_party.star"},
+		"payment-gateway-stripe":   {"stripe_payment_received.star"},
+		"entity-distribution":      {"race_result_distribution.star"},
+		"phantom-cost-basis":       {"corporate_action_cost_adjustment.star"},
+	}
+
+	for name, starFiles := range patternsWithStarFiles {
+		t.Run(name, func(t *testing.T) {
+			for _, starFile := range starFiles {
+				path := filepath.Join(patternsDir(t), name, starFile)
+				_, err := os.ReadFile(path)
+				assert.NoError(t, err, "star file %s should exist for pattern %s", starFile, name)
+			}
+		})
+	}
+}
+
+func TestEconomyPatterns_FilesListedInPatternJSONExist(t *testing.T) {
+	for _, name := range allEconomyPatterns {
+		t.Run(name, func(t *testing.T) {
+			pattern := loadPatternJSON(t, name)
+			files, ok := pattern["files"].([]any)
+			require.True(t, ok, "pattern should have files array")
+
+			for i, f := range files {
+				fileEntry, ok := f.(map[string]any)
+				require.True(t, ok, "file entry %d should be an object", i)
+				relPath, ok := fileEntry["path"].(string)
+				require.True(t, ok, "file entry %d should have a path", i)
+
+				absPath := filepath.Join(patternsDir(t), "..", relPath)
+				_, err := os.Stat(absPath)
+				assert.NoError(t, err, "file %s listed in pattern.json should exist", relPath)
+			}
+		})
+	}
+}
+
+func TestEconomyPatterns_HasRegistryDependencies(t *testing.T) {
+	for _, name := range allEconomyPatterns {
+		t.Run(name, func(t *testing.T) {
+			pattern := loadPatternJSON(t, name)
+			deps, ok := pattern["registryDependencies"].([]any)
+			require.True(t, ok, "registryDependencies should be present")
+			assert.NotEmpty(t, deps, "economy pattern should have at least one registry dependency")
+		})
+	}
+}
+
 // --- registry.json integration tests ---
 
-func TestRegistry_ContainsBaseFiatGBP(t *testing.T) {
+func TestRegistry_ContainsAllPatterns(t *testing.T) {
 	registryPath := filepath.Join(patternsDir(t), "..", "registry.json")
 	data, err := os.ReadFile(registryPath)
 	require.NoError(t, err)
@@ -385,21 +541,25 @@ func TestRegistry_ContainsBaseFiatGBP(t *testing.T) {
 	items, ok := registry["items"].([]any)
 	require.True(t, ok)
 
-	found := false
+	registryNames := make(map[string]bool)
 	for _, item := range items {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		if m["name"] == "base-fiat-gbp" {
-			found = true
-			assert.Equal(t, "registry:pattern", m["type"])
+		if name, ok := m["name"].(string); ok {
+			registryNames[name] = true
+			assert.Equal(t, "registry:pattern", m["type"], "registry item %s should have type registry:pattern", name)
 		}
 	}
-	assert.True(t, found, "registry.json should contain base-fiat-gbp entry")
+
+	allPatterns := append([]string{"base-fiat-gbp", "base-fiat-usd"}, allEconomyPatterns...)
+	for _, name := range allPatterns {
+		assert.True(t, registryNames[name], "registry.json should contain %s entry", name)
+	}
 }
 
-func TestRegistry_ContainsEnergySettlement(t *testing.T) {
+func TestRegistry_NoDuplicateNames(t *testing.T) {
 	registryPath := filepath.Join(patternsDir(t), "..", "registry.json")
 	data, err := os.ReadFile(registryPath)
 	require.NoError(t, err)
@@ -410,41 +570,17 @@ func TestRegistry_ContainsEnergySettlement(t *testing.T) {
 	items, ok := registry["items"].([]any)
 	require.True(t, ok)
 
-	found := false
+	seen := make(map[string]bool)
 	for _, item := range items {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		if m["name"] == "energy-settlement" {
-			found = true
-			assert.Equal(t, "registry:pattern", m["type"])
-		}
-	}
-	assert.True(t, found, "registry.json should contain energy-settlement entry")
-}
-
-func TestRegistry_ContainsBaseFiatUSD(t *testing.T) {
-	registryPath := filepath.Join(patternsDir(t), "..", "registry.json")
-	data, err := os.ReadFile(registryPath)
-	require.NoError(t, err)
-
-	var registry map[string]any
-	require.NoError(t, json.Unmarshal(data, &registry))
-
-	items, ok := registry["items"].([]any)
-	require.True(t, ok)
-
-	found := false
-	for _, item := range items {
-		m, ok := item.(map[string]any)
+		name, ok := m["name"].(string)
 		if !ok {
 			continue
 		}
-		if m["name"] == "base-fiat-usd" {
-			found = true
-			assert.Equal(t, "registry:pattern", m["type"])
-		}
+		assert.False(t, seen[name], "registry.json should not have duplicate entry for %s", name)
+		seen[name] = true
 	}
-	assert.True(t, found, "registry.json should contain base-fiat-usd entry")
 }
