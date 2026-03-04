@@ -131,7 +131,7 @@ The `event_filter` CEL environment exposes three variables:
 | Variable | Type | Description |
 |----------|------|-------------|
 | `event` | `dyn` | Event payload fields (deserialized from proto via AsyncAPI mapping) |
-| `metadata` | `map(string, string)` | Kafka message headers (correlation-id, tenant-id, chain-depth, etc.) |
+| `metadata` | `map(string, string)` | Kafka message headers (`x-tenant-id`, `x-meridian-chain-depth`, etc.) |
 | `chain_depth` | `int` | Current saga chain depth (number of event-triggered hops in this chain) |
 
 ### Chain Depth Enforcement
