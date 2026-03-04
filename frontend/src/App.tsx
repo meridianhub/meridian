@@ -28,7 +28,7 @@ import { ForecastingPage } from '@/features/forecasting'
 import { DashboardPage } from '@/features/dashboard'
 import { ManifestsPage } from '@/features/manifests'
 import { McpConfigPage } from '@/features/mcp-config'
-import { TransactionsPage } from '@/pages/transactions'
+import { TransactionsPage } from '@/features/transactions'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
