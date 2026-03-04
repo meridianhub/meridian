@@ -204,12 +204,6 @@ func withSagaTimeout(d time.Duration) e2eOption {
 	}
 }
 
-func withSagaOrchestration() e2eOption {
-	return func(c *e2eConfig) {
-		c.sagaOrchestrationEnabled = true
-	}
-}
-
 // ============================================================================
 // Schema Setup
 // ============================================================================

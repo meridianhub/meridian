@@ -36,6 +36,14 @@ type ParsedWebhookEvent struct {
 	Status             string
 	Message            string
 	Timestamp          time.Time
+
+	// AmountMinorUnits is the amount in the smallest currency unit (e.g., cents for USD).
+	// Zero if the event does not carry an amount (e.g., dispute events).
+	AmountMinorUnits int64
+
+	// Currency is the ISO 4217 currency code (e.g., "USD", "GBP").
+	// Empty string if the event does not carry a currency.
+	Currency string
 }
 
 // WebhookAdapter validates Stripe webhook signatures and translates
@@ -97,6 +105,8 @@ func (a *WebhookAdapter) parsePaymentIntentSucceeded(event *stripego.Event) (Par
 		PaymentOrderID:     pi.Metadata["payment_order_id"],
 		Status:             "SETTLED",
 		Timestamp:          time.Unix(event.Created, 0),
+		AmountMinorUnits:   pi.Amount,
+		Currency:           string(pi.Currency),
 	}, nil
 }
 
@@ -118,6 +128,8 @@ func (a *WebhookAdapter) parsePaymentIntentFailed(event *stripego.Event) (Parsed
 		Status:             "REJECTED",
 		Message:            message,
 		Timestamp:          time.Unix(event.Created, 0),
+		AmountMinorUnits:   pi.Amount,
+		Currency:           string(pi.Currency),
 	}, nil
 }
 
