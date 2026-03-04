@@ -187,8 +187,13 @@ func extractStringMetadata(params map[string]any) map[string]string {
 	return meta
 }
 
-// cancelPaymentHandler cancels a pending payment dispatch via the FinancialGateway service
-// (compensation handler for dispatch_payment).
+// cancelPaymentHandler is the compensation handler for dispatch_payment.
+//
+// The FinancialGateway proto does not expose a CancelPayment RPC — once a payment
+// is dispatched to an external rail (e.g., Stripe), it cannot be recalled at this
+// API level. Reversal is handled via dispatch_refund in a separate compensation path.
+// This handler records the cancellation intent and signals the saga to stop further
+// forward steps; it does not make a gRPC call.
 //
 // Parameters:
 //   - payment_order_id (string, required): UUID of the payment order to cancel
@@ -296,16 +301,16 @@ func parseDispatchRefundParams(params map[string]any) (dispatchRefundParams, err
 // dispatchRefundHandler dispatches a financial refund via the FinancialGateway service.
 //
 // Parameters:
-//   - original_dispatch_id (string, required): UUID of the payment dispatch being refunded
-//   - refund_amount_units (int64, required): Refund amount in smallest currency unit
-//   - reason (string, required): Human-readable reason for the refund
+//   - payment_order_id (string, required): UUID of the original payment order being refunded
+//   - refund_amount_minor_units (int64, required): Refund amount in smallest currency unit (e.g., cents)
+//   - idempotency_key (string, required): Idempotency key to prevent duplicate refunds
+//   - reason (string, optional): Human-readable reason for the refund
 //   - correlation_id (string, optional): Links to originating saga/event
 //   - causation_id (string, optional): Identifies the event that caused this refund
 //   - metadata (map, optional): Additional key-value pairs for routing or audit
 //
 // Returns a map containing:
-//   - dispatch_id: UUID of the created refund dispatch record
-//   - original_dispatch_id: Echo of the input original_dispatch_id
+//   - refund_reference_id: UUID of the created refund dispatch record
 //   - status: Lifecycle status string (e.g., "PENDING")
 //   - provider_reference: Payment rail's own identifier (if immediately available)
 func dispatchRefundHandler(c *Client) saga.Handler {
@@ -321,6 +326,7 @@ func dispatchRefundHandler(c *Client) saga.Handler {
 			OriginalDispatchId: p.paymentOrderID,
 			RefundAmountUnits:  p.refundAmountMinorUnits,
 			Reason:             p.reason,
+			IdempotencyKey:     &commonv1.IdempotencyKey{Key: p.idempotencyKey},
 		}
 		applyRefundOptionalFields(req, ctx, params)
 
