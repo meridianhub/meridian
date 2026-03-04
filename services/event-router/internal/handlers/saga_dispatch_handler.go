@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/event-router/domain"
+	"github.com/meridianhub/meridian/services/event-router/internal/observability"
 	"github.com/meridianhub/meridian/services/event-router/internal/registry"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/protobuf/proto"
@@ -91,6 +93,9 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		return ErrHandlerNotInitialized
 	}
 
+	// Record event received at handler entry.
+	observability.RecordEventReceived(channel)
+
 	// Convert event to input_data (also validates event is non-nil).
 	inputData, err := saga.EventToInputData(event, metadata)
 	if err != nil {
@@ -99,11 +104,15 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 
 	// Check chain depth.
 	depth := extractChainDepth(metadata)
+	correlationID := extractCorrelationID(metadata)
+
 	if depth >= h.maxChainDepth {
+		observability.RecordChainDepthExceeded()
 		h.logger.WarnContext(ctx, "chain depth exceeded, dropping event",
 			"channel", channel,
 			"chain_depth", depth,
 			"max_chain_depth", h.maxChainDepth,
+			"correlation_id", correlationID,
 		)
 		return nil
 	}
@@ -121,7 +130,7 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		"metadata": metadata,
 	}
 
-	idempotencyKey := extractCorrelationID(metadata)
+	idempotencyKey := correlationID
 	if idempotencyKey == "" {
 		idempotencyKey = uuid.New().String()
 		h.logger.WarnContext(ctx, "no correlation ID in metadata, generated UUID as idempotency key — Kafka redelivery may cause duplicate saga executions",
@@ -138,19 +147,27 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
 				return fmt.Errorf("trigger saga %q: %w", sagaName, err)
 			}
-			h.logger.DebugContext(ctx, "saga triggered (no filter)",
+			observability.RecordSagaTriggered(sagaName, channel)
+			h.logger.InfoContext(ctx, "saga triggered",
 				"saga_name", sagaName,
 				"channel", channel,
+				"correlation_id", idempotencyKey,
+				"chain_depth", depth,
+				"filter_matched", false,
 			)
 			continue
 		}
 
-		// Evaluate CEL filter.
+		// Evaluate CEL filter, recording duration.
+		filterStart := time.Now()
 		out, _, evalErr := cs.FilterProgram.Eval(activation)
+		observability.RecordFilterEvaluationDuration(sagaName, time.Since(filterStart).Seconds())
+
 		if evalErr != nil {
-			h.logger.WarnContext(ctx, "CEL filter evaluation error, skipping saga",
+			h.logger.ErrorContext(ctx, "CEL filter evaluation error, skipping saga",
 				"saga_name", sagaName,
 				"channel", channel,
+				"correlation_id", idempotencyKey,
 				"error", evalErr,
 			)
 			continue
@@ -161,6 +178,7 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			h.logger.WarnContext(ctx, "CEL filter returned non-boolean, skipping saga",
 				"saga_name", sagaName,
 				"channel", channel,
+				"correlation_id", idempotencyKey,
 				"result_type", fmt.Sprintf("%T", out.Value()),
 			)
 			continue
@@ -170,6 +188,7 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			h.logger.DebugContext(ctx, "CEL filter did not match, skipping saga",
 				"saga_name", sagaName,
 				"channel", channel,
+				"correlation_id", idempotencyKey,
 			)
 			continue
 		}
@@ -177,9 +196,13 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
 			return fmt.Errorf("trigger saga %q: %w", sagaName, err)
 		}
-		h.logger.DebugContext(ctx, "saga triggered",
+		observability.RecordSagaTriggered(sagaName, channel)
+		h.logger.InfoContext(ctx, "saga triggered",
 			"saga_name", sagaName,
 			"channel", channel,
+			"correlation_id", idempotencyKey,
+			"chain_depth", depth,
+			"filter_matched", true,
 		)
 	}
 
