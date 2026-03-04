@@ -166,7 +166,7 @@ func mapStripeError(err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
 	default:
-		return status.Error(codes.Internal, "stripe dispatch failed")
+		return status.Error(codes.Unavailable, "stripe dispatch failed")
 	}
 }
 
