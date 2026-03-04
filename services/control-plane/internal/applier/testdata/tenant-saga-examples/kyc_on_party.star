@@ -1,5 +1,7 @@
 # Saga: kyc_on_party
-# Version: 1.0.0
+# Version: 1.1.0
+# Previous: 1.0.0
+# Changed: Use party entity graph as source of truth for jurisdiction_code
 # Author: Tenant Configuration (Financial Services)
 # Date: 2026-03-04
 #
@@ -13,12 +15,11 @@
 #
 # NOTE: The party.created.v1 channel is aspirational — it does not exist in
 # the current event inventory. When implemented, the proto would define fields
-# such as party_id, party_type, jurisdiction_code, and created_at. This
-# example validates the platform's ability to support compliance use cases
-# once the event is defined.
+# such as party_id, party_type, and created_at. This example validates the
+# platform's ability to support compliance use cases once the event is defined.
 #
 # Pattern:
-#   1. Resolve party details from entity graph
+#   1. Resolve party details from entity graph (source of truth for jurisdiction)
 #   2. Idempotency check via position log correlation_id
 #   3. Look up the compliance account for this jurisdiction
 #   4. Book a nominal compliance reserve position (tracks outstanding KYC)
@@ -31,11 +32,10 @@
 #   - correlation_id: string - Idempotency key from standard headers
 #   - party_id: string (UUID) - The newly created party identifier
 #   - party_type: string - Party classification (filtered by CEL to 'INDIVIDUAL')
-#   - jurisdiction_code: string - Regulatory jurisdiction (e.g., 'GB', 'US')
 #   - created_at: string - ISO 8601 timestamp of party creation
 #
 # Entity graph resolution (via service module calls):
-#   - party details: from party.get(party_id=...)
+#   - party details: from party.get(party_id=...)  <-- jurisdiction source of truth
 #   - compliance account: from reference_data.query(entity_type="account", ...)
 
 # Define the saga
@@ -46,14 +46,14 @@ def execute_kyc_on_party():
 
     correlation_id = ctx["correlation_id"]
     party_id = ctx["party_id"]
-    jurisdiction_code = ctx["jurisdiction_code"]
 
     # Resolve the newly created party from the entity graph.
-    # Confirms the party exists and loads its jurisdiction metadata.
-    # In a real implementation, party.jurisdiction_code would be used here
-    # instead of relying on the event field directly.
+    # party_details.jurisdiction_code is the source of truth — the event payload
+    # is not trusted for routing decisions because it could diverge from the
+    # party record if the event was replayed or the party was updated.
     step(name="lookup_party")
-    party.get(party_id=party_id)
+    party_details = party.get(party_id=party_id)
+    jurisdiction_code = party_details.jurisdiction_code
 
     # Idempotency check: has KYC already been triggered for this party?
     step(name="check_idempotency")
@@ -70,8 +70,7 @@ def execute_kyc_on_party():
     #
     # jurisdiction_code is validated to strictly 2 uppercase ASCII letters (ISO 3166-1
     # alpha-2, e.g. 'GB', 'US') before embedding in the filter string to prevent
-    # predicate injection. Range comparison enforces A-Z only — isalpha() would
-    # admit non-ASCII and lowercase characters.
+    # predicate injection. Range comparison enforces A-Z only.
     step(name="find_compliance_account")
     valid_jc = (
         len(jurisdiction_code) == 2
