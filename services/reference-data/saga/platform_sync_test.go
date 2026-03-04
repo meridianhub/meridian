@@ -278,27 +278,27 @@ func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
 		err := sync.SyncPlatformDefaults(ctx)
 		require.NoError(t, err)
 
-		// Verify sagas were inserted
+		// Verify all unique sagas were inserted (some may have multiple versions)
 		var count int
-		err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM public.platform_saga_definition`).Scan(&count)
+		err = pool.QueryRow(ctx, `SELECT COUNT(DISTINCT name) FROM public.platform_saga_definition`).Scan(&count)
 		require.NoError(t, err)
 		defaults, defaultsErr := PlatformDefaults()
 		require.NoError(t, defaultsErr)
 		assert.Equal(t, len(defaults), count, "expected all platform defaults to be inserted")
 
-		// Verify each saga has correct fields and ACTIVE status
+		// Verify each saga has an ACTIVE version with correct fields
 		for _, meta := range defaults {
 			var name, displayName, description, version, status string
 			err := pool.QueryRow(ctx, `
 				SELECT name, version, display_name, description, status
 				FROM public.platform_saga_definition
-				WHERE name = $1
+				WHERE name = $1 AND status = 'ACTIVE'
 			`, meta.Name).Scan(&name, &version, &displayName, &description, &status)
-			require.NoError(t, err, "saga %s should exist", meta.Name)
+			require.NoError(t, err, "saga %s should have an ACTIVE version", meta.Name)
 			assert.Equal(t, meta.Name, name)
 			assert.Equal(t, meta.DisplayName, displayName)
 			assert.Regexp(t, `^\d+\.\d+\.\d+$`, version)
-			assert.Equal(t, "ACTIVE", status, "saga %s should be ACTIVE after sync", meta.Name)
+			assert.Equal(t, "ACTIVE", status)
 		}
 	})
 

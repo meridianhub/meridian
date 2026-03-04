@@ -46,6 +46,7 @@ type ProvisioningWorker struct {
 	done                  chan struct{}
 	wg                    sync.WaitGroup // Tracks in-flight provisioning goroutines
 	stopping              atomic.Bool    // Prevents new work during shutdown
+	stoppingMu            sync.Mutex     // Guards stopping check + wg.Add to prevent race with wg.Wait
 }
 
 // namedHook wraps a hook with its name for logging.
@@ -219,6 +220,13 @@ func (w *ProvisioningWorker) Stop() {
 		close(w.done)
 	}
 
+	// Barrier: acquire and release stoppingMu so that any in-flight
+	// processPendingTenants holding the lock for stopping check + wg.Add
+	// must complete before we proceed to wg.Wait.
+	w.stoppingMu.Lock()
+	//nolint:staticcheck,gocritic // SA2001: intentional empty critical section used as barrier
+	w.stoppingMu.Unlock()
+
 	// Wait for all in-flight provisioning goroutines to complete
 	w.logger.Info("waiting for in-flight provisioning to complete")
 	w.wg.Wait()
@@ -343,22 +351,22 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 			"tenant_id", tenant.ID,
 			"schema", tenant.SchemaName())
 
-		// Check if worker is stopping before adding new work.
-		// This prevents a race condition where wg.Add(1) is called
-		// after Stop() has already called wg.Wait().
+		// Atomically check stopping + wg.Add under stoppingMu to prevent
+		// a race where Stop() calls wg.Wait() between our check and Add.
 		//
-		// Note: When this branch is taken, the tenant remains in PROVISIONING status
-		// but won't be provisioned in this session. On restart, the RecoverStuckTenants
-		// method (called during Start()) will reset any stale PROVISIONING tenants back
-		// to PROVISIONING_PENDING so they can be picked up by the next polling cycle.
+		// Note: When the stopping branch is taken, the tenant remains in PROVISIONING
+		// status but won't be provisioned in this session. On restart, RecoverStuckTenants
+		// (called during Start()) resets stale PROVISIONING tenants back to
+		// PROVISIONING_PENDING so they can be picked up by the next polling cycle.
+		w.stoppingMu.Lock()
 		if w.stopping.Load() {
+			w.stoppingMu.Unlock()
 			w.logger.Warn("not spawning provisioning goroutine - worker is stopping",
 				"tenant_id", tenant.ID)
 			continue
 		}
-
-		// Track the goroutine in the WaitGroup
 		w.wg.Add(1)
+		w.stoppingMu.Unlock()
 
 		// Spawn provisioning in background with detached context
 		// We use context.WithoutCancel to prevent parent cancellation from stopping provisioning

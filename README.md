@@ -1,5 +1,12 @@
 # Meridian
 
+[![Build & Test](https://github.com/meridianhub/meridian/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/build.yml?query=branch%3Adevelop)
+[![Nightly](https://github.com/meridianhub/meridian/actions/workflows/nightly.yml/badge.svg)](https://github.com/meridianhub/meridian/actions/workflows/nightly.yml)
+[![Code Quality](https://github.com/meridianhub/meridian/actions/workflows/quality.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/quality.yml?query=branch%3Adevelop)
+[![Security Scanning](https://github.com/meridianhub/meridian/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/security.yml?query=branch%3Adevelop)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/meridianhub/meridian)](https://go.dev/)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
+
 Open-source billing engine with a double-entry ledger.
 Define your pricing and settlement logic in code —
 Meridian handles the bookkeeping, audit trails, and payment collection.
