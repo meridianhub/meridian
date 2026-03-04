@@ -137,8 +137,10 @@ services:
       DATABASE_URL: "postgres://root@cockroachdb:26257/defaultdb?sslmode=disable"
       LOG_LEVEL: info
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      RATE_LIMIT_RPS: "100"
-      CIRCUIT_BREAKER_TIMEOUT: "30s"
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-100}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-10}
+      CIRCUIT_BREAKER_TIMEOUT: ${CIRCUIT_BREAKER_TIMEOUT:-30s}
+      CIRCUIT_BREAKER_FAILURES: ${CIRCUIT_BREAKER_FAILURES:-5}
 
 volumes:
   cockroachdb_data:
