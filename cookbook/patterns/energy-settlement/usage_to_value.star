@@ -87,6 +87,16 @@ def execute_usage_to_value():
         code=account.account_type_code,
     )
 
+    # Validate config before any side-effecting booking steps.
+    # Fail fast here so retries leave no orphaned legs.
+    valuation_methods = account_type.valuation_methods
+    if len(valuation_methods) < 2:
+        return {
+            "status": "CONFIG_ERROR",
+            "correlation_id": correlation_id,
+        }
+    wholesale_method = valuation_methods[1]
+
     # Value at retail rate using the account type's default conversion method
     step(name="compute_retail_valuation")
     retail = valuation_engine.compute(
@@ -107,13 +117,6 @@ def execute_usage_to_value():
     )
 
     # Value at wholesale rate (second entry in ValuationMethods array)
-    valuation_methods = account_type.valuation_methods
-    if len(valuation_methods) < 2:
-        return {
-            "status": "CONFIG_ERROR",
-            "correlation_id": correlation_id,
-        }
-    wholesale_method = valuation_methods[1]
     step(name="compute_wholesale_valuation")
     wholesale = valuation_engine.compute(
         method_id=wholesale_method.method_id,
