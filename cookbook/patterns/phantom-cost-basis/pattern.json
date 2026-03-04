@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "phantom-cost-basis",
+    "type": "registry:pattern",
+    "title": "Phantom Cost Basis Adjustment",
+    "description": "Adjusts cost basis for all holdings of an instrument when a corporate action occurs. Handles phantom events where no cash or units move but the tax position changes, such as accumulating ETF dividends. The cost basis account position log serves as the HMRC audit trail.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["economy", "corporate-actions", "cost-basis", "event-driven"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "phantom-transaction-event",
+        "industries": ["trading", "corporate-actions"],
+        "provides": {
+            "instruments": [],
+            "account_types": [],
+            "sagas": ["corporate_action_cost_adjustment"],
+            "valuation_rules": [],
+            "triggers": ["event:market-information.corporate-action.v1"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["precious-metals"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/phantom-cost-basis/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/phantom-cost-basis/corporate_action_cost_adjustment.star",
+            "type": "registry:file",
+            "target": "~/sagas/corporate_action_cost_adjustment.star"
+        }
+    ]
+}

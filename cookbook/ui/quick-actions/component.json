@@ -7,7 +7,7 @@
     "categories": ["dashboard", "actions", "navigation"],
     "files": [
         {
-            "path": "frontend/src/pages/dashboard/quick-actions.tsx",
+            "path": "frontend/src/features/dashboard/pages/quick-actions.tsx",
             "type": "registry:ui"
         }
     ],

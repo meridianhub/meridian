@@ -7,7 +7,7 @@
     "categories": ["dashboard", "display", "metrics", "card"],
     "files": [
         {
-            "path": "frontend/src/pages/dashboard/stat-card.tsx",
+            "path": "frontend/src/features/dashboard/pages/stat-card.tsx",
             "type": "registry:ui"
         }
     ],

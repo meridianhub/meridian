@@ -7,7 +7,7 @@
     "categories": ["dashboard", "display", "events", "feed"],
     "files": [
         {
-            "path": "frontend/src/pages/dashboard/activity-feed.tsx",
+            "path": "frontend/src/features/dashboard/pages/activity-feed.tsx",
             "type": "registry:ui"
         }
     ],
