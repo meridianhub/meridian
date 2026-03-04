@@ -1,7 +1,6 @@
 import { PageErrorBoundary } from '@/components/error-boundary'
 import { DashboardPage } from '@/pages/dashboard'
-import { LedgerPage } from '@/pages/ledger'
-import { BookingLogDetailPage } from '@/pages/ledger/booking-log-detail'
+import { LedgerPage, BookingLogDetailPage } from '@/features/ledger'
 
 export interface Route {
   path: string
