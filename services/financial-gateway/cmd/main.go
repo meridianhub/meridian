@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	financialgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway/v1"
@@ -234,8 +235,12 @@ func run(logger *slog.Logger) error {
 
 	httpAddress := fmt.Sprintf(":%s", cfg.HTTPPort)
 	httpServer := &http.Server{
-		Addr:    httpAddress,
-		Handler: mux,
+		Addr:              httpAddress,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Channel to collect server errors.

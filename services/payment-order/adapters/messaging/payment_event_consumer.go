@@ -18,6 +18,9 @@ import (
 // created without Kafka (use NewPaymentEventConsumerWithKafka for production).
 var ErrConsumerNotConfigured = errors.New("consumer not configured with Kafka — use NewPaymentEventConsumerWithKafka")
 
+// ErrNilPaymentOrderUpdater is returned when a nil PaymentOrderUpdater is passed to a constructor.
+var ErrNilPaymentOrderUpdater = errors.New("payment order updater is required")
+
 // ErrUnexpectedCapturedMessageType is returned when the payment-captured consumer receives a message that is not *PaymentCapturedEvent.
 var ErrUnexpectedCapturedMessageType = errors.New("unexpected message type for payment-captured topic")
 
@@ -50,6 +53,9 @@ type PaymentEventConsumer struct {
 
 // NewPaymentEventConsumer creates a consumer that handles domain events from financial-gateway.
 func NewPaymentEventConsumer(svc PaymentOrderUpdater) *PaymentEventConsumer {
+	if svc == nil {
+		panic(ErrNilPaymentOrderUpdater.Error())
+	}
 	return &PaymentEventConsumer{
 		svc:    svc,
 		logger: slog.Default(),
@@ -66,6 +72,9 @@ func NewPaymentEventConsumerWithKafka(
 	svc PaymentOrderUpdater,
 	logger *slog.Logger,
 ) (*PaymentEventConsumer, error) {
+	if svc == nil {
+		return nil, ErrNilPaymentOrderUpdater
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}

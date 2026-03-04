@@ -536,26 +536,10 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
 
-	// Channel to collect server errors (gRPC + HTTP + payment event consumer).
-	serverErrors := make(chan error, 3)
-
-	// Start gRPC server in background
-	go func() {
-		logger.Info("starting gRPC server", "address", grpcAddress)
-		if err := grpcServer.Serve(grpcListener); err != nil {
-			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
-		}
-	}()
-
-	// Start HTTP server in background
-	go func() {
-		logger.Info("starting HTTP server", "port", httpPort)
-		if err := httpServer.Start(); err != nil {
-			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
-		}
-	}()
-
-	// Start financial-gateway payment event consumer (if Kafka is configured).
+	// Construct the financial-gateway payment event consumer before starting servers
+	// so that any initialization error causes an early return without leaving
+	// running goroutines/listeners behind.
+	//
 	// Subscribes to financial-gateway.payment-captured.v1 and
 	// financial-gateway.payment-failed.v1 topics and calls UpdatePaymentOrder
 	// to transition payment orders to SETTLED or REJECTED.
@@ -580,7 +564,31 @@ func run(logger *slog.Logger) error {
 				logger.Error("failed to close payment event consumer", "error", err)
 			}
 		}()
+	} else {
+		logger.Warn("payment event consumer disabled - KAFKA_BOOTSTRAP_SERVERS not set")
+	}
 
+	// Channel to collect server errors (gRPC + HTTP + payment event consumer).
+	serverErrors := make(chan error, 3)
+
+	// Start gRPC server in background
+	go func() {
+		logger.Info("starting gRPC server", "address", grpcAddress)
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
+		}
+	}()
+
+	// Start HTTP server in background
+	go func() {
+		logger.Info("starting HTTP server", "port", httpPort)
+		if err := httpServer.Start(); err != nil {
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
+		}
+	}()
+
+	// Start payment event consumer after servers are up.
+	if paymentEventConsumer != nil {
 		go func() {
 			if err := paymentEventConsumer.Start(
 				"financial-gateway.payment-captured.v1",
@@ -590,8 +598,6 @@ func run(logger *slog.Logger) error {
 				serverErrors <- fmt.Errorf("payment event consumer error: %w", err)
 			}
 		}()
-	} else {
-		logger.Warn("payment event consumer disabled - KAFKA_BOOTSTRAP_SERVERS not set")
 	}
 
 	// Start billing workers in background (if enabled)

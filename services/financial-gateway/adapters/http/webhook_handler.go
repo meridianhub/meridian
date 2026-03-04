@@ -201,6 +201,19 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Require payment_order_id to be present in Stripe metadata.
+	// Events without it cannot be routed to a payment order — publishing
+	// would fail with ErrEmptyAggregateID and trigger infinite Stripe retries.
+	if parsed.PaymentOrderID == "" {
+		h.logger.Warn("stripe webhook missing payment_order_id in metadata — event acknowledged without processing",
+			"event_id", parsed.EventID,
+			"gateway_reference_id", parsed.GatewayReferenceID,
+			"tenant_id", tenantID.String(),
+		)
+		h.writeSuccess(w, "event acknowledged — no payment_order_id in metadata")
+		return
+	}
+
 	h.logger.Info("publishing stripe webhook domain event",
 		"event_id", parsed.EventID,
 		"gateway_reference_id", parsed.GatewayReferenceID,
