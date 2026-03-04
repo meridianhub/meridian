@@ -1,0 +1,325 @@
+package http_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/stripe/stripe-go/v82/webhook"
+	"google.golang.org/protobuf/proto"
+	"gorm.io/gorm"
+
+	financialgatewayeventsv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway_events/v1"
+	fghttp "github.com/meridianhub/meridian/services/financial-gateway/adapters/http"
+	stripeadapter "github.com/meridianhub/meridian/services/financial-gateway/adapters/stripe"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
+)
+
+const testWebhookSecret = "whsec_test_webhook_secret_for_financial_gateway"
+
+// --- Test helpers ---
+
+func buildStripePayload(t *testing.T, eventID, eventType string, data map[string]any) []byte {
+	t.Helper()
+	payload := map[string]any{
+		"id":      eventID,
+		"type":    eventType,
+		"created": time.Now().Unix(),
+		"data":    map[string]any{"object": data},
+	}
+	out, err := json.Marshal(payload)
+	require.NoError(t, err)
+	return out
+}
+
+func signPayload(t *testing.T, payload []byte, secret string) string {
+	t.Helper()
+	signed := webhook.GenerateTestSignedPayload(&webhook.UnsignedPayload{
+		Payload: payload,
+		Secret:  secret,
+	})
+	return signed.Header
+}
+
+// testTenantConfigProvider implements stripeadapter.TenantConfigProvider.
+type testTenantConfigProvider struct {
+	configs map[string]stripeadapter.TenantConfig
+}
+
+func (p *testTenantConfigProvider) GetTenantConfig(tenantID string) (stripeadapter.TenantConfig, error) {
+	cfg, ok := p.configs[tenantID]
+	if !ok {
+		return stripeadapter.TenantConfig{}, stripeadapter.ErrTenantConfigNotFound
+	}
+	return cfg, nil
+}
+
+// stubOutboxPublisher records published events.
+type stubOutboxPublisher struct {
+	published []capturedPublish
+	err       error
+}
+
+type capturedPublish struct {
+	topic string
+	aggID string
+	event interface{}
+}
+
+func (s *stubOutboxPublisher) Publish(_ context.Context, _ *gorm.DB, event proto.Message, cfg events.PublishConfig) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.published = append(s.published, capturedPublish{
+		topic: cfg.Topic,
+		aggID: cfg.AggregateID,
+		event: event,
+	})
+	return nil
+}
+
+func setupHandler(t *testing.T, stub *stubOutboxPublisher) *fghttp.WebhookHandler {
+	t.Helper()
+	if stub == nil {
+		stub = &stubOutboxPublisher{}
+	}
+	provider := &testTenantConfigProvider{
+		configs: map[string]stripeadapter.TenantConfig{
+			"test-tenant": {
+				ConnectedAccountID:    "acct_test",
+				WebhookEndpointSecret: testWebhookSecret,
+			},
+		},
+	}
+	factory, err := stripeadapter.NewClientFactory(stripeadapter.Config{
+		APIKey:             "sk_test_key",
+		TenantCacheSize:    10,
+		TenantCacheTTL:     time.Minute,
+		CircuitBreakerName: "test-cb",
+	}, provider, nil)
+	require.NoError(t, err)
+
+	return fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+		ClientFactory:   factory,
+		OutboxPublisher: stub,
+		DB:              nil,
+	})
+}
+
+// --- Tests ---
+
+func TestWebhookHandler_MethodNotAllowed(t *testing.T) {
+	h := setupHandler(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/webhooks/stripe", nil)
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+}
+
+func TestWebhookHandler_MissingTenantContext(t *testing.T) {
+	h := setupHandler(t, nil)
+
+	payload := buildStripePayload(t, "evt_1", "payment_intent.succeeded", map[string]any{})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestWebhookHandler_MissingSignature(t *testing.T) {
+	h := setupHandler(t, nil)
+
+	payload := buildStripePayload(t, "evt_2", "payment_intent.succeeded", map[string]any{})
+	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestWebhookHandler_InvalidSignature(t *testing.T) {
+	h := setupHandler(t, nil)
+
+	payload := buildStripePayload(t, "evt_3", "payment_intent.succeeded", map[string]any{})
+	sig := signPayload(t, payload, "whsec_wrong_secret")
+
+	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestWebhookHandler_UnsupportedEvent_Returns200(t *testing.T) {
+	h := setupHandler(t, nil)
+
+	payload := buildStripePayload(t, "evt_4", "customer.created", map[string]any{
+		"id": "cus_123",
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, true, resp["acknowledged"])
+}
+
+func TestWebhookHandler_PaymentCaptured_PublishesToOutbox(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	h := setupHandler(t, stub)
+
+	payload := buildStripePayload(t, "evt_cap_1", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_test_cap_123",
+		"object":   "payment_intent",
+		"amount":   5000,
+		"currency": "gbp",
+		"metadata": map[string]string{"payment_order_id": "po-cap-123"},
+		"status":   "succeeded",
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	require.Len(t, stub.published, 1)
+	assert.Equal(t, "financial-gateway.payment-captured.v1", stub.published[0].topic)
+
+	evt, ok := stub.published[0].event.(*financialgatewayeventsv1.PaymentCapturedEvent)
+	require.True(t, ok, "expected *PaymentCapturedEvent, got %T", stub.published[0].event)
+	assert.Equal(t, "pi_test_cap_123", evt.GetProviderReferenceId())
+	assert.Equal(t, "po-cap-123", evt.GetPaymentOrderId())
+	assert.NotEmpty(t, evt.GetEventId())
+	assert.Equal(t, int32(1), evt.GetVersion())
+	assert.Equal(t, "evt_cap_1", evt.GetProviderEventId())
+}
+
+func TestWebhookHandler_PaymentFailed_PublishesToOutbox(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	h := setupHandler(t, stub)
+
+	payload := buildStripePayload(t, "evt_fail_1", "payment_intent.payment_failed", map[string]any{
+		"id":     "pi_test_fail_456",
+		"object": "payment_intent",
+		"metadata": map[string]string{
+			"payment_order_id": "po-fail-456",
+		},
+		"last_payment_error": map[string]any{
+			"message": "Your card was declined.",
+			"code":    "card_declined",
+		},
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	require.Len(t, stub.published, 1)
+	assert.Equal(t, "financial-gateway.payment-failed.v1", stub.published[0].topic)
+
+	evt, ok := stub.published[0].event.(*financialgatewayeventsv1.PaymentFailedEvent)
+	require.True(t, ok, "expected *PaymentFailedEvent, got %T", stub.published[0].event)
+	assert.Equal(t, "pi_test_fail_456", evt.GetProviderReferenceId())
+	assert.Equal(t, "po-fail-456", evt.GetPaymentOrderId())
+	assert.Equal(t, "Your card was declined.", evt.GetFailureReason())
+	assert.Equal(t, "evt_fail_1", evt.GetProviderEventId())
+}
+
+func TestWebhookHandler_OutboxPublishFails_Returns500(t *testing.T) {
+	stub := &stubOutboxPublisher{err: errors.New("outbox write failed")}
+	h := setupHandler(t, stub)
+
+	payload := buildStripePayload(t, "evt_err_1", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_test_err",
+		"object":   "payment_intent",
+		"metadata": map[string]string{"payment_order_id": "po-err"},
+		"amount":   1000,
+		"currency": "usd",
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestWebhookHandler_TenantNotFound_Returns500(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	provider := &testTenantConfigProvider{
+		configs: map[string]stripeadapter.TenantConfig{}, // no tenants configured
+	}
+	factory, err := stripeadapter.NewClientFactory(stripeadapter.Config{
+		APIKey:             "sk_test_key",
+		TenantCacheSize:    10,
+		TenantCacheTTL:     time.Minute,
+		CircuitBreakerName: "test-cb",
+	}, provider, nil)
+	require.NoError(t, err)
+
+	h := fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+		ClientFactory:   factory,
+		OutboxPublisher: stub,
+	})
+
+	payload := buildStripePayload(t, "evt_notfound_1", "payment_intent.succeeded", map[string]any{})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	ctx := tenant.WithTenant(context.Background(), "unknown-tenant")
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(payload))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}

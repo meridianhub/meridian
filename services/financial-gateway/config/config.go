@@ -14,6 +14,9 @@ type Config struct {
 	// GRPCPort is the gRPC listen port.
 	GRPCPort string
 
+	// HTTPPort is the HTTP listen port for the webhook receiver.
+	HTTPPort string
+
 	// DatabaseURL is the CockroachDB/PostgreSQL connection string.
 	DatabaseURL string
 
@@ -22,6 +25,10 @@ type Config struct {
 
 	// StripeSecretKey is the Stripe API secret key for payment dispatch.
 	StripeSecretKey string
+
+	// ControlPlaneAddr is the gRPC address of the control-plane service.
+	// Used for fetching per-tenant Stripe configuration from manifests.
+	ControlPlaneAddr string
 
 	// CircuitBreaker configures per-connection circuit breaker behavior.
 	CircuitBreaker CircuitBreakerConfig
@@ -51,10 +58,12 @@ type RateLimitConfig struct {
 // LoadConfig loads configuration from environment variables with sensible defaults.
 func LoadConfig() Config {
 	return Config{
-		GRPCPort:        env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.FinancialGateway)),
-		DatabaseURL:     env.GetEnvOrDefault("DATABASE_URL", ""),
-		LogLevel:        env.GetEnvOrDefault("LOG_LEVEL", "info"),
-		StripeSecretKey: env.GetEnvOrDefault("STRIPE_SECRET_KEY", ""),
+		GRPCPort:         env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.FinancialGateway)),
+		HTTPPort:         env.GetEnvOrDefault("HTTP_PORT", strconv.Itoa(ports.FinancialGatewayHTTP)),
+		DatabaseURL:      env.GetEnvOrDefault("DATABASE_URL", ""),
+		LogLevel:         env.GetEnvOrDefault("LOG_LEVEL", "info"),
+		StripeSecretKey:  env.GetEnvOrDefault("STRIPE_SECRET_KEY", ""),
+		ControlPlaneAddr: env.GetEnvOrDefault("CONTROL_PLANE_ADDR", ""),
 		CircuitBreaker: CircuitBreakerConfig{
 			Timeout:          env.GetEnvAsDuration("CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
 			FailureThreshold: env.GetEnvAsInt("CIRCUIT_BREAKER_FAILURES", 5),

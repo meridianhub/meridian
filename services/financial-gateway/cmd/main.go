@@ -1,7 +1,7 @@
 // Package main is the entry point for the financial-gateway standalone binary.
 //
 // It wires all financial-gateway components: gRPC service, Stripe adapter,
-// platform bootstrap, and health checks.
+// HTTP webhook receiver, outbox worker, platform bootstrap, and health checks.
 package main
 
 import (
@@ -10,13 +10,23 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	financialgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway/v1"
+	webhookhttp "github.com/meridianhub/meridian/services/financial-gateway/adapters/http"
+	stripeadapter "github.com/meridianhub/meridian/services/financial-gateway/adapters/stripe"
 	"github.com/meridianhub/meridian/services/financial-gateway/config"
 	"github.com/meridianhub/meridian/services/financial-gateway/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
+	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -25,12 +35,18 @@ import (
 // ErrMissingDatabaseURL is returned when the DATABASE_URL environment variable is not set.
 var ErrMissingDatabaseURL = errors.New("DATABASE_URL is required")
 
+// ErrMissingStripeAPIKey is returned when the STRIPE_SECRET_KEY environment variable is not set.
+var ErrMissingStripeAPIKey = errors.New("STRIPE_SECRET_KEY is required")
+
 // Build information set via ldflags during compilation.
 var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
+
+// Verify at compile time that *events.OutboxPublisher satisfies the webhook handler interface.
+var _ webhookhttp.OutboxEventPublisher = (*events.OutboxPublisher)(nil)
 
 func main() {
 	logLevel := parseLogLevel(os.Getenv("LOG_LEVEL"))
@@ -122,19 +138,112 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("gRPC services registered")
 
-	// Create listener before serving to fail fast if the port is unavailable.
-	address := fmt.Sprintf(":%s", cfg.GRPCPort)
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", address)
+	// Create gRPC listener before serving to fail fast if port is unavailable.
+	grpcAddress := fmt.Sprintf(":%s", cfg.GRPCPort)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", grpcAddress)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", address, err)
+		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
 
+	// --- Stripe webhook receiver setup ---
+
+	// Require Stripe API key for the client factory.
+	if cfg.StripeSecretKey == "" {
+		return bootstrap.Permanent(ErrMissingStripeAPIKey)
+	}
+
+	// Build the per-tenant Stripe config provider.
+	// When CONTROL_PLANE_ADDR is set, use ManifestTenantConfigProvider to fetch
+	// per-tenant webhook secrets from control-plane manifests.
+	// Otherwise fall back to a single-tenant env-var provider for local dev.
+	tenantConfigProvider, controlPlaneConn, err := createTenantConfigProvider(cfg, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create tenant config provider: %w", err)
+	}
+	if controlPlaneConn != nil {
+		defer func() {
+			if closeErr := controlPlaneConn.Close(); closeErr != nil {
+				logger.Error("failed to close control-plane connection", "error", closeErr)
+			}
+		}()
+	}
+
+	stripeCfg := stripeadapter.DefaultConfig()
+	stripeCfg.APIKey = cfg.StripeSecretKey
+
+	clientFactory, err := stripeadapter.NewClientFactory(stripeCfg, tenantConfigProvider, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create stripe client factory: %w", err)
+	}
+
+	// Initialize the outbox publisher and worker for webhook domain events.
+	// Events written to the outbox within the same DB transaction are published
+	// to Kafka asynchronously by the background worker.
+	outboxPublisher := events.NewOutboxPublisher("financial-gateway")
+
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers == "" {
+		bootstrapServers = env.GetEnvOrDefault("KAFKA_BROKERS", "")
+	}
+	if bootstrapServers != "" {
+		outboxRepo := events.NewPostgresOutboxRepository(db)
+		producer, kafkaErr := kafka.NewProtoProducer(kafka.ProducerConfig{
+			BootstrapServers: bootstrapServers,
+			ClientID:         "financial-gateway-outbox-worker",
+			Acks:             "all",
+			Retries:          3,
+			Compression:      "snappy",
+		})
+		if kafkaErr != nil {
+			logger.Warn("failed to create Kafka producer for outbox worker", "error", kafkaErr)
+		} else {
+			defer producer.Close()
+			workerConfig := events.DefaultWorkerConfig("financial-gateway")
+			outboxWorker := events.NewWorker(outboxRepo, producer, workerConfig, logger)
+			outboxWorker.Start(ctx)
+			defer outboxWorker.Stop()
+			logger.Info("outbox worker started", "bootstrap_servers", bootstrapServers)
+		}
+	} else {
+		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set (events will accumulate in outbox)")
+	}
+
+	// Create the webhook handler.
+	// The handler validates Stripe-Signature, maps events to domain protos,
+	// and publishes them to the transactional outbox.
+	webhookHandler := webhookhttp.NewWebhookHandler(webhookhttp.WebhookHandlerConfig{
+		ClientFactory:   clientFactory,
+		OutboxPublisher: outboxPublisher,
+		DB:              db,
+		Logger:          logger,
+	})
+
+	// Create HTTP mux and register the Stripe webhook endpoint.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/webhooks/stripe", webhookHandler.HandleStripeWebhook)
+
+	httpAddress := fmt.Sprintf(":%s", cfg.HTTPPort)
+	httpServer := &http.Server{
+		Addr:    httpAddress,
+		Handler: mux,
+	}
+
+	// Channel to collect server errors.
+	serverErrors := make(chan error, 2)
+
 	// Start gRPC server in background.
-	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Info("starting gRPC server", "address", address)
+		logger.Info("starting gRPC server", "address", grpcAddress)
 		if err := grpcServer.Serve(listener); err != nil {
-			serverErrors <- err
+			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
+		}
+	}()
+
+	// Start HTTP webhook server in background.
+	go func() {
+		logger.Info("starting HTTP webhook server", "address", httpAddress)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
@@ -142,10 +251,67 @@ func run(logger *slog.Logger) error {
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 	orchestrator.AddCleanup(func() error {
 		runCancel()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("failed to shutdown HTTP server", "error", err)
+		}
 		return nil
 	})
 
 	return orchestrator.Wait(serverErrors)
+}
+
+// createTenantConfigProvider builds the TenantConfigProvider.
+// When CONTROL_PLANE_ADDR is set, connects to the control-plane gRPC service to read
+// per-tenant Stripe manifest config. Otherwise falls back to an env-var provider.
+func createTenantConfigProvider(cfg config.Config, logger *slog.Logger) (stripeadapter.TenantConfigProvider, *grpc.ClientConn, error) {
+	if cfg.ControlPlaneAddr == "" {
+		logger.Warn("CONTROL_PLANE_ADDR not set - using env-based single-tenant Stripe config")
+		provider := &envTenantConfigProvider{
+			webhookSecret: env.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", ""),
+			accountID:     env.GetEnvOrDefault("STRIPE_CONNECTED_ACCOUNT_ID", ""),
+		}
+		return provider, nil, nil
+	}
+
+	conn, err := grpc.NewClient(
+		cfg.ControlPlaneAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to dial control-plane at %s: %w", cfg.ControlPlaneAddr, err)
+	}
+
+	manifestClient := controlplanev1.NewManifestHistoryServiceClient(conn)
+	provider, err := stripeadapter.NewManifestTenantConfigProvider(stripeadapter.ManifestTenantConfigProviderConfig{
+		Client: manifestClient,
+		Logger: logger,
+	})
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("failed to create manifest tenant config provider: %w", err)
+	}
+
+	logger.Info("using control-plane manifest for per-tenant Stripe config", "addr", cfg.ControlPlaneAddr)
+	return provider, conn, nil
+}
+
+// envTenantConfigProvider is a single-tenant fallback that reads Stripe config from
+// environment variables. Used in local development when no control-plane is available.
+type envTenantConfigProvider struct {
+	webhookSecret string
+	accountID     string
+}
+
+func (p *envTenantConfigProvider) GetTenantConfig(_ string) (stripeadapter.TenantConfig, error) {
+	if p.accountID == "" {
+		return stripeadapter.TenantConfig{}, stripeadapter.ErrTenantConfigNotFound
+	}
+	return stripeadapter.TenantConfig{
+		ConnectedAccountID:    p.accountID,
+		WebhookEndpointSecret: p.webhookSecret,
+	}, nil
 }
 
 // parseLogLevel converts a string log level to slog.Level.
