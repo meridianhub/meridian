@@ -91,9 +91,9 @@ import (
 	tenantservice "github.com/meridianhub/meridian/services/tenant/service"
 
 	// Gateway
-	"github.com/meridianhub/meridian/services/gateway"
-	"github.com/meridianhub/meridian/services/gateway/eventstream"
-	"github.com/meridianhub/meridian/services/gateway/eventstream/adapters"
+	gateway "github.com/meridianhub/meridian/services/api-gateway"
+	"github.com/meridianhub/meridian/services/api-gateway/eventstream"
+	"github.com/meridianhub/meridian/services/api-gateway/eventstream/adapters"
 
 	// Shared platform
 	masterbootstrap "github.com/meridianhub/meridian/internal/bootstrap"

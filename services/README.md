@@ -350,7 +350,7 @@ The Gateway provides a multi-tenant API gateway for authenticated access to back
 | `JWKS_URL` | When AUTH_ENABLED | JWKS endpoint URL for JWT validation |
 | `BACKENDS` | No | JSON array of backend route mappings |
 
-See [services/gateway/README.md](gateway/README.md) for full configuration options.
+See [services/api-gateway/README.md](api-gateway/README.md) for full configuration options.
 
 ### Reference Data Service
 

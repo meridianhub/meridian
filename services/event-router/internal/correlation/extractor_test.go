@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/meridianhub/meridian/services/api-gateway/eventstream"
 	"github.com/meridianhub/meridian/services/event-router/internal/correlation"
-	"github.com/meridianhub/meridian/services/gateway/eventstream"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -55,7 +55,7 @@ way to generate it.
 | **Tenant Service** | `services/tenant/` | Full CRUD, async provisioning, status tracking |
 | **Usage Metering** | `services/utilization-metering-consumer/` | Transforms audit events into measurements |
 | **RBAC** | `shared/platform/auth/rbac.go` | Roles (admin, operator, auditor, service), permissions |
-| **API Gateway** | `services/gateway/` | Subdomain routing, JWT auth, rate limiting |
+| **API Gateway** | `services/api-gateway/` | Subdomain routing, JWT auth, rate limiting |
 | **Party Service** | `services/party/` | Organization/party registration (customers) |
 | **Causation Tree** | `api/proto/meridian/saga/v1/saga_admin.proto` | GetCausationTree RPC for audit trails |
 | **Dry-Run Validation** | Reference Data, Position Keeping | Validate before commit |
@@ -111,7 +111,7 @@ graph TD
 
 ### What Stays in Existing Services
 
-- **`services/gateway/`**: Continues to handle routing, JWT auth.
+- **`services/api-gateway/`**: Continues to handle routing, JWT auth.
   Calls control-plane's `ValidateAPIKey` RPC for database-backed
   key validation (replacing env-var keys).
 - **`services/tenant/`**: Continues to own schema provisioning
@@ -384,7 +384,7 @@ If a tenant genuinely needs a new code, the migration path is:
 
 ### WS-2: Staff Identity Registry (Complexity: 8) P0
 
-**Service**: `services/control-plane/` + `services/gateway/`
+**Service**: `services/control-plane/` + `services/api-gateway/`
 (key validation RPC)
 
 **Objective**: Separate identity layer for tenant employees who manage

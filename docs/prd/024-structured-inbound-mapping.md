@@ -20,7 +20,7 @@ instructions: |
   date, attribute flatten), explicit CelTransform (inbound_cel +
   outbound_cel), IdempotencyConfig for dedup, DryRunMapping RPC,
   gateway middleware at /mapping/{name}, manifest integration. CRUD
-  in services/reference-data/, engine middleware in services/gateway/.
+  in services/reference-data/, engine middleware in services/api-gateway/.
   Key deps: tidwall/gjson (add to go.mod), hashicorp/golang-lru/v2
   (already present). All CEL expressions bounded: max 4096 bytes,
   cost limit 10,000, guaranteed termination.
@@ -270,7 +270,7 @@ Mapping CRUD lives in **`services/reference-data/`**. Mappings are
 metadata about how to interpret data, analogous to Instrument
 Definitions and Attribute Schemas.
 
-The **Mapping Engine middleware** lives in `services/gateway/` — it
+The **Mapping Engine middleware** lives in `services/api-gateway/` — it
 intercepts `/mapping/` requests, resolves the mapping definition,
 applies transforms in both directions, and forwards to Vanguard.
 

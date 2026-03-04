@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/meridianhub/meridian/services/gateway"
+	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"

@@ -563,7 +563,7 @@ Following the hexagonal pattern used by existing services
 (e.g., `current-account/adapters/`, `payment-order/adapters/`):
 
 ```text
-services/gateway/
+services/api-gateway/
 ├── eventstream/
 │   ├── ports.go              # EventSource, FanOut interfaces
 │   ├── domain.go             # DomainEvent, Subscription, Channel

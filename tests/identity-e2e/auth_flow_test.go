@@ -19,7 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
-	"github.com/meridianhub/meridian/services/gateway/auth"
+	"github.com/meridianhub/meridian/services/api-gateway/auth"
 	"github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	identitysvc "github.com/meridianhub/meridian/services/identity/service"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"

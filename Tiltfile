@@ -586,16 +586,16 @@ gateway_build_args = {
 docker_build(
     'gateway',
     context='.',
-    dockerfile='services/gateway/cmd/Dockerfile',
+    dockerfile='services/api-gateway/cmd/Dockerfile',
     build_args=gateway_build_args,
 )
 
 # Deploy gateway K8s manifests
-k8s_yaml('services/gateway/k8s/secret.yaml')
-k8s_yaml('services/gateway/k8s/configmap.yaml')
-k8s_yaml('services/gateway/k8s/deployment.yaml')
-k8s_yaml('services/gateway/k8s/service.yaml')
-k8s_yaml('services/gateway/k8s/ingress.yaml')
+k8s_yaml('services/api-gateway/k8s/secret.yaml')
+k8s_yaml('services/api-gateway/k8s/configmap.yaml')
+k8s_yaml('services/api-gateway/k8s/deployment.yaml')
+k8s_yaml('services/api-gateway/k8s/service.yaml')
+k8s_yaml('services/api-gateway/k8s/ingress.yaml')
 
 # Configure gateway resource
 k8s_resource(

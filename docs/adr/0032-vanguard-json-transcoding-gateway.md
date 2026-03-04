@@ -205,7 +205,7 @@ var descriptorBytes []byte
 * [google.api.http annotation reference](https://cloud.google.com/endpoints/docs/grpc/transcoding)
 * [ADR-0002: Microservices per BIAN Domain](0002-microservices-per-bian-domain.md)
 * [ADR-0010: gRPC Client-Side Load Balancing](0010-grpc-client-side-load-balancing.md)
-* Related code: `services/gateway/transcoder.go`, `cmd/meridian/main.go`
+* Related code: `services/api-gateway/transcoder.go`, `cmd/meridian/main.go`
 
 ## Notes
 

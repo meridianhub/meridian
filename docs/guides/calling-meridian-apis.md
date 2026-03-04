@@ -250,6 +250,6 @@ In production:
 ## See Also
 
 - [ADR-0032: Vanguard HTTP/JSON Transcoding Gateway](../adr/0032-vanguard-json-transcoding-gateway.md)
-- [Gateway Service README](../../services/gateway/README.md)
+- [Gateway Service README](../../services/api-gateway/README.md)
 - [HTTP Client Files](../../http/README.md)
 - [API Proto Documentation](../../api/proto/README.md)

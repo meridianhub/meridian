@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/meridianhub/meridian/services/gateway/eventstream"
+	"github.com/meridianhub/meridian/services/api-gateway/eventstream"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
