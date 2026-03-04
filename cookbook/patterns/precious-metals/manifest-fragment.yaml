@@ -1,0 +1,54 @@
+instruments:
+  - code: GOLD
+    name: Gold (troy ounce)
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: troy_oz
+      precision: 4
+  - code: SILVER
+    name: Silver (troy ounce)
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: troy_oz
+      precision: 4
+  - code: PLATINUM
+    name: Platinum (troy ounce)
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: troy_oz
+      precision: 4
+
+accountTypes:
+  - code: TRADING
+    name: Precious Metals Trading Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GOLD, SILVER, PLATINUM]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+  - code: SETTLEMENT
+    name: GBP Settlement Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount >= 0"
+      bucketing: ""
+
+valuationRules:
+  - fromInstrument: GOLD
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: lbma_gold_fix
+  - fromInstrument: SILVER
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: lbma_silver_fix
+  - fromInstrument: PLATINUM
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: lppm_platinum_fix
+
+sagas:
+  - name: valuation_on_capture
+    trigger: "event:position-keeping.transaction-captured.v1"
+    filter: "event.instrument_code in ['GOLD', 'SILVER', 'PLATINUM']"
