@@ -19,6 +19,7 @@ import (
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	"github.com/meridianhub/meridian/cookbook"
 	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/clients"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/prompts"
@@ -46,6 +47,10 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
 	if err := tools.RegisterValidationTools(toolReg); err != nil {
 		return nil, fmt.Errorf("register validation tools: %w", err)
 	}
+
+	// Cookbook discover tool uses the embedded cookbook FS — no gRPC needed.
+	cookbookLoader := tools.NewFSCookbookLoader(cookbook.FS)
+	tools.RegisterCookbookDiscoverTool(toolReg, cookbookLoader)
 
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()
