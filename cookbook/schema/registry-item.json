@@ -78,9 +78,11 @@
         }
     },
     "then": {
+        "required": ["meta"],
         "properties": {
             "meta": {
                 "type": "object",
+                "required": ["feature_module"],
                 "properties": {
                     "feature_module": {
                         "type": "string",
@@ -106,6 +108,7 @@
         }
     },
     "else": {
+        "required": ["meta"],
         "properties": {
             "meta": {
                 "type": "object",
@@ -113,8 +116,7 @@
                 "properties": {
                     "complexity": {
                         "type": "integer",
-                        "minimum": 1,
-                        "maximum": 8,
+                        "enum": [1, 2, 3, 5, 8],
                         "description": "Story point complexity estimate (Fibonacci: 1, 2, 3, 5, 8)."
                     },
                     "design_pattern": {

@@ -87,6 +87,9 @@ func TestRegistryItemSchema_ValidUIComponent_MinimalFields(t *testing.T) {
 		"type":        "registry:ui",
 		"title":       "Balance Card",
 		"description": "Shows account balance.",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 	}
 
 	err := validateJSON(t, s, item)
@@ -260,6 +263,68 @@ func TestRegistryItemSchema_PatternMissingComplexity(t *testing.T) {
 	assert.Error(t, err, "pattern without complexity in meta should fail")
 }
 
+func TestRegistryItemSchema_PatternMissingMeta(t *testing.T) {
+	s := compileSchema(t, "registry-item.json")
+
+	item := map[string]any{
+		"name":        "no-meta-pattern",
+		"type":        "registry:pattern",
+		"title":       "No Meta",
+		"description": "Pattern without any meta field.",
+	}
+
+	err := validateJSON(t, s, item)
+	assert.Error(t, err, "pattern without meta should fail validation")
+}
+
+func TestRegistryItemSchema_UIWithoutMeta(t *testing.T) {
+	s := compileSchema(t, "registry-item.json")
+
+	item := map[string]any{
+		"name":        "no-meta-ui",
+		"type":        "registry:ui",
+		"title":       "No Meta UI",
+		"description": "UI component without meta.",
+	}
+
+	err := validateJSON(t, s, item)
+	assert.Error(t, err, "registry:ui without meta should fail validation")
+}
+
+func TestRegistryItemSchema_UIWithoutFeatureModule(t *testing.T) {
+	s := compileSchema(t, "registry-item.json")
+
+	item := map[string]any{
+		"name":        "no-feature-module",
+		"type":        "registry:ui",
+		"title":       "No Feature Module",
+		"description": "UI component with meta but missing feature_module.",
+		"meta": map[string]any{
+			"tenant_configurable": true,
+		},
+	}
+
+	err := validateJSON(t, s, item)
+	assert.Error(t, err, "registry:ui without meta.feature_module should fail validation")
+}
+
+func TestRegistryItemSchema_PatternNonFibonacciComplexity(t *testing.T) {
+	s := compileSchema(t, "registry-item.json")
+
+	item := map[string]any{
+		"name":        "bad-complexity",
+		"type":        "registry:pattern",
+		"title":       "Bad Complexity",
+		"description": "Pattern with non-Fibonacci complexity.",
+		"meta": map[string]any{
+			"complexity": 4,
+		},
+	}
+
+	err := validateJSON(t, s, item)
+	assert.Error(t, err, "non-Fibonacci complexity (4) should fail validation")
+}
+
 func TestRegistryItemSchema_UIWithFilesArray(t *testing.T) {
 	s := compileSchema(t, "registry-item.json")
 
@@ -268,6 +333,9 @@ func TestRegistryItemSchema_UIWithFilesArray(t *testing.T) {
 		"type":        "registry:ui",
 		"title":       "Account Form",
 		"description": "Form for creating accounts.",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 		"files": []map[string]any{
 			{"path": "components/AccountForm.tsx", "type": "registry:file"},
 			{"path": "components/AccountForm.test.tsx", "type": "registry:file", "target": "src/components/AccountForm.test.tsx"},
