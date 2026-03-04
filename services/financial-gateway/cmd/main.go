@@ -293,6 +293,10 @@ func createTenantConfigProvider(cfg config.Config, logger *slog.Logger) (stripea
 		return provider, nil, nil
 	}
 
+	// insecure.NewCredentials() is intentional: all inter-service gRPC traffic
+	// runs inside the cluster and is secured at the network layer (mTLS via
+	// the service mesh / Kubernetes CNI). Application-layer TLS is not used
+	// for internal service-to-service calls across the Meridian platform.
 	conn, err := grpc.NewClient(
 		cfg.ControlPlaneAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
