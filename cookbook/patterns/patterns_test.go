@@ -247,6 +247,131 @@ func TestBaseFiatUSD_HasEmptyDependencies(t *testing.T) {
 	assert.Empty(t, marketRequires, "foundation pattern should require no market_data")
 }
 
+// --- energy-settlement tests ---
+
+func TestEnergySettlement_PatternJSONValidatesAgainstSchema(t *testing.T) {
+	s := compileSchema(t, "registry-item.json")
+	validatePatternJSON(t, s, "energy-settlement")
+}
+
+func TestEnergySettlement_ManifestFragmentIsValidYAML(t *testing.T) {
+	fragment := loadManifestFragment(t, "energy-settlement")
+	require.NotNil(t, fragment, "manifest-fragment.yaml should not be empty")
+}
+
+func TestEnergySettlement_ManifestFragmentContainsKWHInstrument(t *testing.T) {
+	fragment := loadManifestFragment(t, "energy-settlement")
+
+	instruments, ok := fragment["instruments"].([]any)
+	require.True(t, ok, "manifest-fragment.yaml should have an instruments list")
+	require.Len(t, instruments, 1, "energy-settlement should define exactly one instrument")
+
+	instrument, ok := instruments[0].(map[string]any)
+	require.True(t, ok, "instrument entry should be a map")
+	assert.Equal(t, "KWH", instrument["code"], "instrument code should be KWH")
+	dimensions, ok := instrument["dimensions"].(map[string]any)
+	require.True(t, ok, "instrument should have a dimensions map")
+	assert.EqualValues(t, 3, dimensions["precision"], "KWH instrument precision should be 3")
+}
+
+func TestEnergySettlement_ManifestFragmentContainsAccountTypes(t *testing.T) {
+	fragment := loadManifestFragment(t, "energy-settlement")
+
+	accountTypes, ok := fragment["accountTypes"].([]any)
+	require.True(t, ok, "manifest-fragment.yaml should have an accountTypes list")
+	require.Len(t, accountTypes, 3, "energy-settlement should define 3 account types")
+
+	codes := make([]string, 0, 3)
+	for _, at := range accountTypes {
+		m, ok := at.(map[string]any)
+		require.True(t, ok, "account type entry should be a map")
+		code, ok := m["code"].(string)
+		require.True(t, ok, "account type should have a code string")
+		codes = append(codes, code)
+	}
+	assert.ElementsMatch(t, []string{"ENERGY_INVENTORY", "SETTLEMENT", "REVENUE"}, codes)
+}
+
+func TestEnergySettlement_ManifestFragmentContainsValuationRules(t *testing.T) {
+	fragment := loadManifestFragment(t, "energy-settlement")
+
+	rules, ok := fragment["valuationRules"].([]any)
+	require.True(t, ok, "manifest-fragment.yaml should have a valuationRules list")
+	require.Len(t, rules, 2, "energy-settlement should define 2 valuation rules")
+
+	names := make([]string, 0, 2)
+	for _, r := range rules {
+		m, ok := r.(map[string]any)
+		require.True(t, ok, "valuation rule entry should be a map")
+		name, ok := m["name"].(string)
+		require.True(t, ok, "valuation rule should have a name string")
+		names = append(names, name)
+	}
+	assert.ElementsMatch(t, []string{"kwh_to_gbp_retail", "kwh_to_gbp_wholesale"}, names)
+}
+
+func TestEnergySettlement_ProvidesMatchesManifestInstruments(t *testing.T) {
+	pattern := loadPatternJSON(t, "energy-settlement")
+	fragment := loadManifestFragment(t, "energy-settlement")
+
+	meta, ok := pattern["meta"].(map[string]any)
+	require.True(t, ok)
+	provides, ok := meta["provides"].(map[string]any)
+	require.True(t, ok)
+	providedInstruments, ok := provides["instruments"].([]any)
+	require.True(t, ok)
+
+	instruments, ok := fragment["instruments"].([]any)
+	require.True(t, ok)
+
+	require.Equal(t, len(instruments), len(providedInstruments),
+		"provides.instruments count should match instruments in manifest-fragment.yaml")
+
+	manifestCodes := make(map[string]bool)
+	for i, inst := range instruments {
+		m, ok := inst.(map[string]any)
+		require.True(t, ok, "instrument[%d] should be an object", i)
+		code, ok := m["code"].(string)
+		require.True(t, ok, "instrument[%d].code should be a string", i)
+		manifestCodes[code] = true
+	}
+	for i, code := range providedInstruments {
+		c, ok := code.(string)
+		require.True(t, ok, "provided instrument[%d] should be a string", i)
+		assert.True(t, manifestCodes[c],
+			"instrument %q in provides should be present in manifest-fragment.yaml", c)
+	}
+}
+
+func TestEnergySettlement_RequiresGBP(t *testing.T) {
+	pattern := loadPatternJSON(t, "energy-settlement")
+
+	meta, ok := pattern["meta"].(map[string]any)
+	require.True(t, ok)
+	requires, ok := meta["requires"].(map[string]any)
+	require.True(t, ok)
+
+	instrRequires, ok := requires["instruments"].([]any)
+	require.True(t, ok)
+	require.Len(t, instrRequires, 1, "energy-settlement should require exactly one instrument")
+	assert.Equal(t, "GBP", instrRequires[0])
+}
+
+func TestEnergySettlement_HasRegistryDependencyOnBaseFiatGBP(t *testing.T) {
+	pattern := loadPatternJSON(t, "energy-settlement")
+
+	deps, ok := pattern["registryDependencies"].([]any)
+	require.True(t, ok, "registryDependencies should be present and an array")
+	require.Len(t, deps, 1)
+	assert.Equal(t, "base-fiat-gbp", deps[0])
+}
+
+func TestEnergySettlement_StarFileExists(t *testing.T) {
+	path := filepath.Join(patternsDir(t), "energy-settlement", "usage_to_value.star")
+	_, err := os.Stat(path)
+	require.NoError(t, err, "usage_to_value.star should exist in energy-settlement pattern")
+}
+
 // --- economy pattern tests (all 9 patterns) ---
 
 // allEconomyPatterns lists all economy pattern names that should exist.

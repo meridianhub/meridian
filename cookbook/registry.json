@@ -5,6 +5,7 @@
     "items": [
         {"name": "base-fiat-gbp", "type": "registry:pattern", "title": "Base Fiat Currency (GBP)"},
         {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"},
+        {"name": "energy-settlement", "type": "registry:pattern", "title": "Energy Usage-to-Value Settlement"},
         {"name": "saas-billing", "type": "registry:pattern", "title": "SaaS Compute Billing"},
         {"name": "carbon-offset", "type": "registry:pattern", "title": "Carbon Credit Registry"},
         {"name": "precious-metals", "type": "registry:pattern", "title": "Precious Metals Trading"},
