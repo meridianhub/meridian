@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
+import { DEFAULT_UI_CONFIG, type TenantUIConfig } from '@/lib/tenant-ui-config'
 
 export interface Tenant {
   id: string
@@ -14,6 +15,7 @@ export interface TenantContextValue {
   isPlatformAdmin: boolean
   switchTenant: (tenant: Tenant) => void
   clearTenant: () => void
+  tenantConfig?: TenantUIConfig
 }
 
 const TenantContext = createContext<TenantContextValue | null>(null)
@@ -59,6 +61,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     isPlatformAdmin,
     switchTenant,
     clearTenant,
+    tenantConfig: DEFAULT_UI_CONFIG,
   }
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>
