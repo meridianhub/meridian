@@ -216,11 +216,11 @@ func TestDispatchInstruction_Success(t *testing.T) {
 	svc, _, _ := newTestOGService(t)
 	ctx := tenantContext("test-tenant")
 
-	payload, err := structpb.NewStruct(map[string]any{"amount": 100.0})
+	payload, err := structpb.NewStruct(map[string]any{"device_id": "dev-001"})
 	require.NoError(t, err)
 
 	resp, err := svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
-		InstructionType: "payment.initiate",
+		InstructionType: "kyc.verify",
 		Payload:         payload,
 		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "idem-1"},
 	})
@@ -229,17 +229,17 @@ func TestDispatchInstruction_Success(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.NotEmpty(t, resp.Instruction.Id)
 	assert.Equal(t, opgatewayv1.InstructionStatus_INSTRUCTION_STATUS_PENDING, resp.Instruction.Status)
-	assert.Equal(t, "payment.initiate", resp.Instruction.InstructionType)
+	assert.Equal(t, "kyc.verify", resp.Instruction.InstructionType)
 }
 
 func TestDispatchInstruction_MissingTenant(t *testing.T) {
 	svc, _, _ := newTestOGService(t)
 
-	payload, err := structpb.NewStruct(map[string]any{"amount": 100.0})
+	payload, err := structpb.NewStruct(map[string]any{"device_id": "dev-001"})
 	require.NoError(t, err)
 
 	_, err = svc.DispatchInstruction(context.Background(), &opgatewayv1.DispatchInstructionRequest{
-		InstructionType: "payment.initiate",
+		InstructionType: "kyc.verify",
 		Payload:         payload,
 		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "idem-1"},
 	})
@@ -254,7 +254,7 @@ func TestDispatchInstruction_MissingInstructionType(t *testing.T) {
 	svc, _, _ := newTestOGService(t)
 	ctx := tenantContext("test-tenant")
 
-	payload, err := structpb.NewStruct(map[string]any{"amount": 100.0})
+	payload, err := structpb.NewStruct(map[string]any{"device_id": "dev-001"})
 	require.NoError(t, err)
 
 	_, err = svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
@@ -274,7 +274,7 @@ func TestDispatchInstruction_MissingPayload(t *testing.T) {
 	ctx := tenantContext("test-tenant")
 
 	_, err := svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
-		InstructionType: "payment.initiate",
+		InstructionType: "device.command",
 		Payload:         nil,
 		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "idem-1"},
 	})
@@ -291,7 +291,7 @@ func TestDispatchInstruction_MissingIdempotencyKey(t *testing.T) {
 
 	payload, _ := structpb.NewStruct(map[string]any{"x": 1.0})
 	_, err := svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
-		InstructionType: "payment.initiate",
+		InstructionType: "device.command",
 		Payload:         payload,
 	})
 
@@ -308,7 +308,7 @@ func TestDispatchInstruction_RepoError(t *testing.T) {
 
 	payload, _ := structpb.NewStruct(map[string]any{"x": 1.0})
 	_, err := svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
-		InstructionType: "payment.initiate",
+		InstructionType: "device.command",
 		Payload:         payload,
 		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "idem-2"},
 	})
@@ -327,7 +327,7 @@ func TestCancelInstruction_Success(t *testing.T) {
 
 	// Pre-populate a PENDING instruction.
 	tid := uuid.MustParse(testTenantID())
-	inst, err := domain.NewInstruction(tid, "payment.initiate", "pending", map[string]any{"x": 1})
+	inst, err := domain.NewInstruction(tid, "device.command", "pending", map[string]any{"x": 1})
 	require.NoError(t, err)
 	inst.ID = uuid.New()
 	instRepo.instructions[inst.ID] = inst
@@ -359,7 +359,7 @@ func TestCancelInstruction_WrongTenant(t *testing.T) {
 
 	// Store instruction under a different tenant.
 	otherTenantID := uuid.New()
-	inst, err := domain.NewInstruction(otherTenantID, "payment.initiate", "pending", map[string]any{"x": 1})
+	inst, err := domain.NewInstruction(otherTenantID, "device.command", "pending", map[string]any{"x": 1})
 	require.NoError(t, err)
 	inst.ID = uuid.New()
 	instRepo.instructions[inst.ID] = inst
@@ -381,7 +381,7 @@ func TestCancelInstruction_NotCancellable(t *testing.T) {
 	ctx := tenantContext("test-tenant")
 
 	tid := uuid.MustParse(testTenantID())
-	inst, err := domain.NewInstruction(tid, "payment.initiate", "pending", map[string]any{"x": 1})
+	inst, err := domain.NewInstruction(tid, "device.command", "pending", map[string]any{"x": 1})
 	require.NoError(t, err)
 	inst.ID = uuid.New()
 	// Transition to DISPATCHING.
@@ -405,7 +405,7 @@ func TestGetInstruction_Success(t *testing.T) {
 	ctx := tenantContext("test-tenant")
 
 	tid := uuid.MustParse(testTenantID())
-	inst, err := domain.NewInstruction(tid, "payment.initiate", "pending", map[string]any{"x": 1})
+	inst, err := domain.NewInstruction(tid, "device.command", "pending", map[string]any{"x": 1})
 	require.NoError(t, err)
 	inst.ID = uuid.New()
 	instRepo.instructions[inst.ID] = inst
@@ -468,7 +468,7 @@ func TestListInstructions_Success(t *testing.T) {
 
 	tid := uuid.MustParse(testTenantID())
 	for i := 0; i < 3; i++ {
-		inst, err := domain.NewInstruction(tid, "payment.initiate", "pending", map[string]any{"i": float64(i)})
+		inst, err := domain.NewInstruction(tid, "device.command", "pending", map[string]any{"i": float64(i)})
 		require.NoError(t, err)
 		inst.ID = uuid.New()
 		instRepo.instructions[inst.ID] = inst
@@ -486,7 +486,7 @@ func TestListInstructions_Pagination(t *testing.T) {
 
 	tid := uuid.MustParse(testTenantID())
 	for i := 0; i < 5; i++ {
-		inst, err := domain.NewInstruction(tid, "payment.initiate", "pending", map[string]any{"i": float64(i)})
+		inst, err := domain.NewInstruction(tid, "device.command", "pending", map[string]any{"i": float64(i)})
 		require.NoError(t, err)
 		inst.ID = uuid.New()
 		instRepo.instructions[inst.ID] = inst
@@ -564,21 +564,21 @@ func TestUpsertConnection_Success(t *testing.T) {
 	ctx := tenantContext("test-tenant")
 
 	resp, err := svc.UpsertConnection(ctx, &opgatewayv1.UpsertConnectionRequest{
-		ProviderName: "Stripe",
-		ProviderType: "payment_gateway",
+		ProviderName: "Onfido",
+		ProviderType: "kyc_provider",
 		Protocol:     opgatewayv1.Protocol_PROTOCOL_HTTPS,
-		BaseUrl:      "https://api.stripe.com",
+		BaseUrl:      "https://api.onfido.com",
 		AuthConfig: &opgatewayv1.UpsertConnectionRequest_ApiKey{
 			ApiKey: &opgatewayv1.ApiKeyAuth{
 				HeaderName: "X-API-Key",
-				SecretRef:  "stripe-api-key",
+				SecretRef:  "onfido-api-key",
 			},
 		},
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, resp.Connection)
-	assert.Equal(t, "Stripe", resp.Connection.ProviderName)
+	assert.Equal(t, "Onfido", resp.Connection.ProviderName)
 	assert.Equal(t, opgatewayv1.Protocol_PROTOCOL_HTTPS, resp.Connection.Protocol)
 }
 
@@ -586,10 +586,10 @@ func TestUpsertConnection_MissingTenant(t *testing.T) {
 	svc, _ := newTestConnService(t)
 
 	_, err := svc.UpsertConnection(context.Background(), &opgatewayv1.UpsertConnectionRequest{
-		ProviderName: "Stripe",
-		ProviderType: "payment_gateway",
+		ProviderName: "Onfido",
+		ProviderType: "kyc_provider",
 		Protocol:     opgatewayv1.Protocol_PROTOCOL_HTTPS,
-		BaseUrl:      "https://api.stripe.com",
+		BaseUrl:      "https://api.onfido.com",
 		AuthConfig: &opgatewayv1.UpsertConnectionRequest_ApiKey{
 			ApiKey: &opgatewayv1.ApiKeyAuth{HeaderName: "X-API-Key", SecretRef: "key"},
 		},
@@ -628,7 +628,7 @@ func TestGetConnection_Success(t *testing.T) {
 	ctx := tenantContext("test-tenant")
 	tid := tenantIDToUUID(tenant.TenantID("test-tenant"))
 
-	conn, err := domain.NewProviderConnection(tid, "Stripe", "payment_gateway", domain.ProtocolHTTPS, "https://api.stripe.com",
+	conn, err := domain.NewProviderConnection(tid, "Onfido", "kyc_provider", domain.ProtocolHTTPS, "https://api.onfido.com",
 		&domain.APIKeyAuth{HeaderName: "X-API-Key", SecretRef: "key"}, domain.RetryPolicy{MaxAttempts: 3}, domain.RateLimitConfig{})
 	require.NoError(t, err)
 	connRepo.connections[tid+":"+conn.ConnectionID] = conn
@@ -707,7 +707,7 @@ func makeDeliveredInstruction(t *testing.T, instRepo *mockInstructionRepo) *doma
 	tenantUUID, err := uuid.Parse(tid)
 	require.NoError(t, err)
 
-	inst, err := domain.NewInstruction(tenantUUID, "payment.initiate", uuid.Nil.String(), map[string]any{"amount": 100.0})
+	inst, err := domain.NewInstruction(tenantUUID, "device.command", uuid.Nil.String(), map[string]any{"device_id": "dev-001"})
 	require.NoError(t, err)
 	inst.ID = uuid.New()
 	require.NoError(t, inst.MarkDispatching())
