@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { CELEditor } from '@/components/shared/cel-editor'
+import { CELEditor } from '@/features/sagas/components/cel-editor'
 import { useApiClients } from '@/api/context'
 import { handleConnectError } from '@/lib/error-handling'
 import { referenceKeys } from '@/lib/query-keys'
