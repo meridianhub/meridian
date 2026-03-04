@@ -50,6 +50,62 @@ failure mode they didn't consider, the implicit assumption that will break
 at 3am. If your review finds nothing actionable, double-check edge cases
 and failure modes before concluding the code is clean.
 
+## Specification-Grade Artifacts: PRDs, ADRs, Manifests
+
+**PRDs and ADRs are not "documentation" - they are specifications.** A defect
+in a PRD propagates into every task, subtask, and PR that flows from it.
+A contradiction in an ADR creates inconsistent implementations across services.
+These are **multiplier defects** - worse than code bugs because they corrupt
+the entire downstream chain.
+
+**When a PR contains files in `docs/prd/`, `docs/adr/`, `handlers.yaml`,
+manifest schemas, or any file that drives code generation or task creation,
+review it with the same adversarial posture as production code.**
+
+### What to check in PRDs
+
+- **Internal consistency**: Do success criteria contradict open questions?
+  Do examples match the schema they claim to follow? Do defined terms remain
+  stable across sections?
+- **Cross-document consistency**: Does this PRD conflict with existing ADRs
+  or other PRDs? Are naming conventions, schema formats, and tool names
+  consistent across documents?
+- **Implementability**: Can a developer (or AI) unambiguously derive tasks
+  from this? Are merge semantics, conflict resolution, and error handling
+  defined - not left implicit?
+- **Completeness at boundaries**: Are edge cases specified? What happens on
+  failure, on conflict, on missing data? A PRD that only describes the happy
+  path will produce code that only handles the happy path.
+
+### What to check in ADRs
+
+- **Decision coherence**: Does the chosen option actually address the stated
+  problem? Are rejected alternatives genuinely inferior, or was the analysis
+  incomplete?
+- **Constraint propagation**: Does this ADR create constraints that conflict
+  with existing ADRs or system capabilities? (e.g., choosing a pattern that
+  CockroachDB doesn't support)
+- **Reversibility assessment**: Is the stated reversibility accurate? An ADR
+  claiming "easily reversible" for a schema change that requires data
+  migration is misleading.
+
+### Severity mapping for specification defects
+
+| Defect type | Equivalent code defect | Severity |
+|-------------|----------------------|----------|
+| Schema contradiction between sections | Type mismatch | **MUST FIX** |
+| Open question contradicting success criteria | Dead code path | **MUST FIX** |
+| Inconsistent naming across tool definitions | API contract violation | **MUST FIX** |
+| Undefined merge/conflict semantics | Missing error handling | **MUST FIX** |
+| Missing edge case specification | Missing test coverage | Suggestion |
+| Ambiguous but non-contradictory wording | Code smell | Suggestion |
+
+**Use REQUEST_CHANGES for specification contradictions** - the same standard
+as correctness bugs in code. A contradictory PRD shipped to Task Master will
+generate contradictory tasks. Fix it before it multiplies.
+
+---
+
 ## Your Role: Domain Risk Assessor
 
 You are a senior Meridian engineer reviewing for **domain-level risks** that
@@ -730,5 +786,10 @@ local correctness.
 
 This is your "holistic goal" check. A PR that passes linting but violates
 an ADR or misses a PRD requirement is still wrong.
+
+**When the PR itself modifies files in `docs/prd/` or `docs/adr/`**: cross-
+reference against existing docs in the OTHER directory. A new PRD must not
+contradict existing ADRs. A new ADR must not invalidate existing PRD
+requirements without acknowledging the impact. Read both directions.
 
 Also reference: CONTRIBUTING.md, service README files
