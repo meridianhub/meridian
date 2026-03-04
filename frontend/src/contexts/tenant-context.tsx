@@ -1,7 +1,8 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
-import { DEFAULT_UI_CONFIG, type TenantUIConfig } from '@/lib/tenant-ui-config'
+import { DEFAULT_UI_CONFIG, type TenantThemeConfig, type TenantUIConfig } from '@/lib/tenant-ui-config'
+import { applyTenantTheme, resetTheme } from '@/lib/theme-utils'
 
 export interface Tenant {
   id: string
@@ -15,6 +16,7 @@ export interface TenantContextValue {
   isPlatformAdmin: boolean
   switchTenant: (tenant: Tenant) => void
   clearTenant: () => void
+  applyTheme: (theme: TenantThemeConfig) => void
   tenantConfig?: TenantUIConfig
 }
 
@@ -24,8 +26,22 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const { claims, lens } = useAuth()
   const queryClient = useQueryClient()
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null)
+  const [tenantTheme, setTenantTheme] = useState<TenantThemeConfig | null>(null)
 
   const isPlatformAdmin = lens === 'platform'
+
+  useEffect(() => {
+    if (tenantTheme) {
+      applyTenantTheme(tenantTheme)
+    } else {
+      resetTheme()
+    }
+  }, [tenantTheme])
+
+  // Reset theme only on unmount to avoid a visual flash during theme switches.
+  useEffect(() => {
+    return () => resetTheme()
+  }, [])
 
   const switchTenant = useCallback(
     (tenant: Tenant) => {
@@ -50,7 +66,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const clearTenant = useCallback(() => {
     if (!isPlatformAdmin) return
     setSelectedTenant(null)
+    setTenantTheme(null)
   }, [isPlatformAdmin])
+
+  const applyTheme = useCallback((theme: TenantThemeConfig) => {
+    setTenantTheme(theme)
+  }, [])
 
   // For tenant admins, tenant slug is fixed from JWT claims
   const tenantSlug = isPlatformAdmin ? selectedTenant?.slug ?? null : claims?.tenantId ?? null
@@ -61,6 +82,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     isPlatformAdmin,
     switchTenant,
     clearTenant,
+    applyTheme,
     tenantConfig: DEFAULT_UI_CONFIG,
   }
 
