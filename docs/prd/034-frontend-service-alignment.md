@@ -167,10 +167,10 @@ rendered visual browser.
 - **Composability metadata**: Components declare their
   feature module, dependencies, and tenant-configurable
   props as structured data.
-- **Consistent with Meridian's philosophy**: The Economy
-  Cookbook (PRD-035) uses the same registry pattern for
-  manifest patterns. One discovery model for both UI
-  components and business configuration.
+- **Consistent with Meridian's philosophy**: The Meridian
+  Cookbook (PRD-035) uses the same registry format for
+  both UI components and economy patterns. One discovery
+  model across the entire platform.
 
 **What Storybook provides that the registry does not:**
 
@@ -422,10 +422,9 @@ pattern, adapted for Meridian's needs.
   RPC-to-UI coverage script.
 - **Component dependency tracking**: `registryDependencies`
   makes component relationships explicit.
-- **Consistent pattern**: The Economy Cookbook (PRD-035)
-  uses the same registry format for manifest patterns.
-  One discovery model across both UI and business
-  configuration.
+- **Consistent pattern**: The Meridian Cookbook (PRD-035)
+  uses the same registry format for both UI components
+  and economy patterns. One unified discovery model.
 
 ### Tenant UI Customisation Architecture
 
