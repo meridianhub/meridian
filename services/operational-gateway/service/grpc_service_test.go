@@ -269,6 +269,26 @@ func TestDispatchInstruction_MissingInstructionType(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 }
 
+func TestDispatchInstruction_RejectsPaymentType(t *testing.T) {
+	svc, _, _ := newTestOGService(t)
+	ctx := tenantContext("test-tenant")
+
+	payload, err := structpb.NewStruct(map[string]any{"amount": 100})
+	require.NoError(t, err)
+
+	_, err = svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
+		InstructionType: "payment.collect",
+		Payload:         payload,
+		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "idem-pay"},
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "financial-gateway")
+}
+
 func TestDispatchInstruction_MissingPayload(t *testing.T) {
 	svc, _, _ := newTestOGService(t)
 	ctx := tenantContext("test-tenant")
