@@ -8,7 +8,9 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/event-router/internal/handlers"
+	sagaidempotency "github.com/meridianhub/meridian/services/event-router/internal/idempotency"
 	"github.com/meridianhub/meridian/services/event-router/internal/registry"
+	sharedidempotency "github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -418,4 +420,145 @@ func TestSagaDispatchHandler_InputDataContainsEventAndMetadata(t *testing.T) {
 	inputData := trigger.calls[0].InputData
 	assert.Contains(t, inputData, "event")
 	assert.Contains(t, inputData, "metadata")
+}
+
+// fakeIdempotencyStore is a test double for the idempotency store.
+type fakeIdempotencyStore struct {
+	// calls tracks (sagaName, correlationID) pairs
+	calls []idempotencyCall
+	// fromCache determines whether Execute returns FromCache=true
+	fromCache bool
+	// err is returned by Execute when non-nil
+	err error
+}
+
+type idempotencyCall struct {
+	SagaName      string
+	CorrelationID string
+}
+
+func (f *fakeIdempotencyStore) Execute(
+	ctx context.Context,
+	sagaName, correlationID string,
+	fn sagaidempotency.DispatchFunc,
+) (*sharedidempotency.ExecuteResult, error) {
+	f.calls = append(f.calls, idempotencyCall{
+		SagaName:      sagaName,
+		CorrelationID: correlationID,
+	})
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.fromCache {
+		return &sharedidempotency.ExecuteResult{FromCache: true}, nil
+	}
+	// Execute the function
+	if err := fn(ctx); err != nil {
+		return nil, err
+	}
+	return &sharedidempotency.ExecuteResult{FromCache: false}, nil
+}
+
+func TestSagaDispatchHandler_WithIdempotencyStore_FirstCall_Triggers(t *testing.T) {
+	reg, err := registry.NewSagaRegistry()
+	require.NoError(t, err)
+	require.NoError(t, reg.Reload([]*controlplanev1.SagaDefinition{
+		{Name: "test_saga", Trigger: "event:orders", Script: "def run(ctx): pass"},
+	}))
+
+	trigger := &fakeSagaTrigger{}
+	iStore := &fakeIdempotencyStore{}
+	h := handlers.NewSagaDispatchHandler(reg, trigger,
+		handlers.WithIdempotencyStore(iStore),
+		handlers.WithLogger(slog.Default()),
+	)
+
+	event := newTestEvent(t, map[string]any{"id": "1"})
+	err = h.Handle(context.Background(), "orders", event, map[string]string{"x-correlation-id": "corr-idem-1"})
+
+	require.NoError(t, err)
+	require.Len(t, trigger.calls, 1, "saga should be triggered on first call")
+	require.Len(t, iStore.calls, 1)
+	assert.Equal(t, "test_saga", iStore.calls[0].SagaName)
+	assert.Equal(t, "corr-idem-1", iStore.calls[0].CorrelationID)
+}
+
+func TestSagaDispatchHandler_WithIdempotencyStore_CacheHit_SkipsTrigger(t *testing.T) {
+	reg, err := registry.NewSagaRegistry()
+	require.NoError(t, err)
+	require.NoError(t, reg.Reload([]*controlplanev1.SagaDefinition{
+		{Name: "dup_saga", Trigger: "event:orders", Script: "def run(ctx): pass"},
+	}))
+
+	trigger := &fakeSagaTrigger{}
+	iStore := &fakeIdempotencyStore{fromCache: true}
+	h := handlers.NewSagaDispatchHandler(reg, trigger, handlers.WithIdempotencyStore(iStore))
+
+	event := newTestEvent(t, map[string]any{"id": "2"})
+	err = h.Handle(context.Background(), "orders", event, map[string]string{"x-correlation-id": "corr-dup"})
+
+	require.NoError(t, err)
+	assert.Empty(t, trigger.calls, "saga should NOT be triggered when idempotency cache hits")
+	require.Len(t, iStore.calls, 1)
+}
+
+func TestSagaDispatchHandler_WithIdempotencyStore_InProgress_SkipsWithoutError(t *testing.T) {
+	reg, err := registry.NewSagaRegistry()
+	require.NoError(t, err)
+	require.NoError(t, reg.Reload([]*controlplanev1.SagaDefinition{
+		{Name: "prog_saga", Trigger: "event:orders", Script: "def run(ctx): pass"},
+	}))
+
+	trigger := &fakeSagaTrigger{}
+	iStore := &fakeIdempotencyStore{err: sharedidempotency.ErrOperationInProgress}
+	h := handlers.NewSagaDispatchHandler(reg, trigger, handlers.WithIdempotencyStore(iStore))
+
+	event := newTestEvent(t, map[string]any{"id": "3"})
+	err = h.Handle(context.Background(), "orders", event, map[string]string{"x-correlation-id": "corr-prog"})
+
+	require.NoError(t, err, "ErrOperationInProgress should be swallowed")
+	assert.Empty(t, trigger.calls)
+}
+
+func TestSagaDispatchHandler_WithIdempotencyStore_OtherError_ReturnsError(t *testing.T) {
+	reg, err := registry.NewSagaRegistry()
+	require.NoError(t, err)
+	require.NoError(t, reg.Reload([]*controlplanev1.SagaDefinition{
+		{Name: "err_saga", Trigger: "event:orders", Script: "def run(ctx): pass"},
+	}))
+
+	trigger := &fakeSagaTrigger{}
+	iStore := &fakeIdempotencyStore{err: errors.New("db connection lost")}
+	h := handlers.NewSagaDispatchHandler(reg, trigger, handlers.WithIdempotencyStore(iStore))
+
+	event := newTestEvent(t, map[string]any{"id": "4"})
+	err = h.Handle(context.Background(), "orders", event, map[string]string{"x-correlation-id": "corr-err"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db connection lost")
+}
+
+func TestSagaDispatchHandler_WithIdempotencyStore_MultipleSagas_EachCheckedIndependently(t *testing.T) {
+	reg, err := registry.NewSagaRegistry()
+	require.NoError(t, err)
+	require.NoError(t, reg.Reload([]*controlplanev1.SagaDefinition{
+		{Name: "saga_a", Trigger: "event:orders", Script: "def run(ctx): pass"},
+		{Name: "saga_b", Trigger: "event:orders", Script: "def run(ctx): pass"},
+	}))
+
+	trigger := &fakeSagaTrigger{}
+	iStore := &fakeIdempotencyStore{}
+	h := handlers.NewSagaDispatchHandler(reg, trigger, handlers.WithIdempotencyStore(iStore))
+
+	event := newTestEvent(t, map[string]any{"id": "5"})
+	err = h.Handle(context.Background(), "orders", event, map[string]string{"x-correlation-id": "corr-multi"})
+
+	require.NoError(t, err)
+	require.Len(t, trigger.calls, 2)
+	require.Len(t, iStore.calls, 2)
+	assert.Equal(t, "saga_a", iStore.calls[0].SagaName)
+	assert.Equal(t, "saga_b", iStore.calls[1].SagaName)
+	// Both use the same correlation ID
+	assert.Equal(t, "corr-multi", iStore.calls[0].CorrelationID)
+	assert.Equal(t, "corr-multi", iStore.calls[1].CorrelationID)
 }

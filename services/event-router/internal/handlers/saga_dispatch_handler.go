@@ -10,7 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/event-router/domain"
+	sagaidempotency "github.com/meridianhub/meridian/services/event-router/internal/idempotency"
 	"github.com/meridianhub/meridian/services/event-router/internal/registry"
+	sharedidempotency "github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/protobuf/proto"
 )
@@ -29,13 +31,19 @@ const (
 	correlationIDHeader = "x-correlation-id"
 )
 
+// idempotencyStore is the interface for idempotency-protected saga dispatch.
+type idempotencyStore interface {
+	Execute(ctx context.Context, sagaName, correlationID string, fn sagaidempotency.DispatchFunc) (*sharedidempotency.ExecuteResult, error)
+}
+
 // SagaDispatchHandler evaluates CEL filters against incoming events and triggers
 // matching sagas via the SagaTrigger port. It implements domain.EventHandler.
 type SagaDispatchHandler struct {
-	registry      *registry.SagaRegistry
-	sagaTrigger   domain.SagaTrigger
-	maxChainDepth int
-	logger        *slog.Logger
+	registry         *registry.SagaRegistry
+	sagaTrigger      domain.SagaTrigger
+	maxChainDepth    int
+	logger           *slog.Logger
+	idempotencyStore idempotencyStore
 }
 
 // Option configures a SagaDispatchHandler.
@@ -57,6 +65,17 @@ func WithLogger(logger *slog.Logger) Option {
 	return func(h *SagaDispatchHandler) {
 		if logger != nil {
 			h.logger = logger
+		}
+	}
+}
+
+// WithIdempotencyStore sets the idempotency store used to deduplicate saga dispatches.
+// When set, each saga trigger is wrapped with idempotency protection keyed on
+// (sagaName, correlationID). A nil store is ignored.
+func WithIdempotencyStore(store idempotencyStore) Option {
+	return func(h *SagaDispatchHandler) {
+		if store != nil {
+			h.idempotencyStore = store
 		}
 	}
 }
@@ -86,6 +105,10 @@ func NewSagaDispatchHandler(reg *registry.SagaRegistry, trigger domain.SagaTrigg
 // Filter evaluation errors cause the individual saga to be skipped (with a
 // warning log) while other sagas continue processing. Trigger errors are
 // returned immediately as they indicate infrastructure failures.
+//
+// When an idempotency store is configured, each saga trigger is deduplicated
+// by (sagaName, correlationID). Duplicate dispatches are logged and skipped.
+// ErrOperationInProgress is logged and skipped (another worker is processing).
 func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event proto.Message, metadata map[string]string) error {
 	if h.registry == nil || h.sagaTrigger == nil {
 		return ErrHandlerNotInitialized
@@ -135,13 +158,9 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 
 		// If no filter, the saga always matches.
 		if cs.FilterProgram == nil {
-			if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
-				return fmt.Errorf("trigger saga %q: %w", sagaName, err)
+			if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey); err != nil {
+				return err
 			}
-			h.logger.DebugContext(ctx, "saga triggered (no filter)",
-				"saga_name", sagaName,
-				"channel", channel,
-			)
 			continue
 		}
 
@@ -174,15 +193,67 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			continue
 		}
 
-		if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
+		if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// dispatchSaga triggers a single saga, optionally wrapping with idempotency protection.
+func (h *SagaDispatchHandler) dispatchSaga(
+	ctx context.Context,
+	sagaName, channel string,
+	inputData map[string]any,
+	correlationID string,
+) error {
+	if h.idempotencyStore == nil {
+		// No idempotency store — trigger directly.
+		if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, correlationID); err != nil {
 			return fmt.Errorf("trigger saga %q: %w", sagaName, err)
 		}
 		h.logger.DebugContext(ctx, "saga triggered",
 			"saga_name", sagaName,
 			"channel", channel,
+			"correlation_id", correlationID,
 		)
+		return nil
 	}
 
+	// Idempotency-protected dispatch.
+	result, err := h.idempotencyStore.Execute(ctx, sagaName, correlationID, func(ctx context.Context) error {
+		if _, triggerErr := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, correlationID); triggerErr != nil {
+			return fmt.Errorf("trigger saga %q: %w", sagaName, triggerErr)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, sharedidempotency.ErrOperationInProgress) {
+			h.logger.InfoContext(ctx, "saga dispatch in progress by another worker, skipping",
+				"saga_name", sagaName,
+				"channel", channel,
+				"correlation_id", correlationID,
+			)
+			return nil
+		}
+		return fmt.Errorf("idempotent dispatch of saga %q: %w", sagaName, err)
+	}
+
+	if result.FromCache {
+		h.logger.InfoContext(ctx, "saga already dispatched (idempotent skip)",
+			"saga_name", sagaName,
+			"channel", channel,
+			"correlation_id", correlationID,
+		)
+		return nil
+	}
+
+	h.logger.DebugContext(ctx, "saga triggered",
+		"saga_name", sagaName,
+		"channel", channel,
+		"correlation_id", correlationID,
+	)
 	return nil
 }
 
