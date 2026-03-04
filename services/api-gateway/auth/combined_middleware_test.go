@@ -410,6 +410,57 @@ func TestTenantAuthorizationMiddleware(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "missing tenant claim")
 	})
 
+	t.Run("platform path allowed without tenant claim for authenticated user", func(t *testing.T) {
+		middleware := NewTenantAuthorizationMiddleware(logger)
+
+		var nextCalled bool
+		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(nextHandler)
+
+		// OIDC token with no tenant claim, no resolved tenant, but platform path
+		claims := &platformauth.Claims{
+			UserID: "oidc-user",
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
+
+		req := httptest.NewRequest(http.MethodGet, "/v1/tenants", nil)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.True(t, nextCalled, "platform path should be accessible without tenant claim")
+	})
+
+	t.Run("platform path allowed for Connect/gRPC path", func(t *testing.T) {
+		middleware := NewTenantAuthorizationMiddleware(logger)
+
+		var nextCalled bool
+		nextHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(nextHandler)
+
+		claims := &platformauth.Claims{
+			UserID: "oidc-user",
+		}
+		ctx := injectClaimsToContext(context.Background(), claims)
+
+		req := httptest.NewRequest(http.MethodPost, "/meridian.tenant.v1.TenantService/ListTenants", nil)
+		req = req.WithContext(ctx)
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.True(t, nextCalled)
+	})
+
 	t.Run("403 when no resolved tenant in context", func(t *testing.T) {
 		middleware := NewTenantAuthorizationMiddleware(logger)
 
