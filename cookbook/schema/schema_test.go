@@ -173,6 +173,9 @@ func TestRegistryItemSchema_InvalidName_UpperCase(t *testing.T) {
 		"type":        "registry:ui",
 		"title":       "My Component",
 		"description": "A component.",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 	}
 
 	err := validateJSON(t, s, item)
@@ -187,6 +190,9 @@ func TestRegistryItemSchema_InvalidName_StartsWithDigit(t *testing.T) {
 		"type":        "registry:ui",
 		"title":       "Invalid",
 		"description": "A component.",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 	}
 
 	err := validateJSON(t, s, item)
@@ -201,6 +207,9 @@ func TestRegistryItemSchema_InvalidType(t *testing.T) {
 		"type":        "registry:unknown",
 		"title":       "My Thing",
 		"description": "A thing.",
+		"meta": map[string]any{
+			"complexity": 1,
+		},
 	}
 
 	err := validateJSON(t, s, item)
@@ -214,6 +223,9 @@ func TestRegistryItemSchema_MissingRequiredName(t *testing.T) {
 		"type":        "registry:ui",
 		"title":       "No Name",
 		"description": "Missing name field.",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 	}
 
 	err := validateJSON(t, s, item)
@@ -227,6 +239,9 @@ func TestRegistryItemSchema_MissingRequiredTitle(t *testing.T) {
 		"name":        "no-title",
 		"type":        "registry:ui",
 		"description": "Missing title field.",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 	}
 
 	err := validateJSON(t, s, item)
@@ -240,6 +255,9 @@ func TestRegistryItemSchema_MissingRequiredDescription(t *testing.T) {
 		"name":  "no-desc",
 		"type":  "registry:ui",
 		"title": "No Description",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 	}
 
 	err := validateJSON(t, s, item)
@@ -354,6 +372,9 @@ func TestRegistryItemSchema_FileMissingPath(t *testing.T) {
 		"type":        "registry:ui",
 		"title":       "Bad Files",
 		"description": "Component with invalid files entry.",
+		"meta": map[string]any{
+			"feature_module": "current-account",
+		},
 		"files": []map[string]any{
 			{"type": "registry:file"},
 		},
