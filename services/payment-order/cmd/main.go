@@ -322,6 +322,24 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
+	// Create Financial Gateway client for Starlark handlers (financial_gateway.dispatch_payment).
+	fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
+		ServiceName: financialgatewayclient.ServiceName,
+		Namespace:   namespace,
+		Port:        financialgatewayclient.DefaultPort,
+		Timeout:     defaults.DefaultRPCTimeout,
+		Tracer:      tracer,
+	})
+	if err != nil {
+		logger.Warn("financial-gateway client unavailable, Starlark financial_gateway handlers not registered",
+			"error", err)
+	} else {
+		defer fgCleanup()
+		if err := financialgatewayclient.RegisterStarlarkHandlers(handlerRegistry, fgClient); err != nil {
+			logger.Warn("failed to register financial-gateway handlers", "error", err)
+		}
+	}
+
 	// Create Reference Data client for saga definitions and instrument lookups.
 	// Uses the shared gRPC connection via ReferenceDataClientWrapper which implements
 	// service.ReferenceDataClient (GetSaga + RetrieveInstrument).
