@@ -34,8 +34,6 @@ type ServerConfig struct {
 	Port int
 	// WebhookHandler handles incoming webhooks.
 	WebhookHandler *WebhookHandler
-	// StripeWebhookHandler handles incoming Stripe-specific webhooks (optional).
-	StripeWebhookHandler *StripeWebhookHandler
 	// Logger for request logging.
 	Logger *slog.Logger
 	// RateLimitPerSecond is the max requests per second per IP.
@@ -110,9 +108,6 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	// Create mux and register handlers
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /webhook/payment-gateway", cfg.WebhookHandler.HandleWebhook)
-	if cfg.StripeWebhookHandler != nil {
-		mux.HandleFunc("POST /webhook/stripe", cfg.StripeWebhookHandler.HandleStripeWebhook)
-	}
 	mux.HandleFunc("GET /health", healthHandler)
 
 	// Apply middleware chain

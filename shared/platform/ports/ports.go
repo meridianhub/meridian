@@ -159,4 +159,10 @@ const (
 	// Protocol: HTTP (internal)
 	// Visibility: Cluster-internal only (scraped by Prometheus)
 	HTTPMetrics = 9090
+
+	// FinancialGatewayHTTP is the HTTP port for the Financial Gateway webhook receiver.
+	// Receives inbound Stripe webhooks, validates signatures, and emits domain events via outbox.
+	// Protocol: HTTP (external)
+	// Visibility: Exposed via Ingress for Stripe webhook delivery
+	FinancialGatewayHTTP = 8095
 )

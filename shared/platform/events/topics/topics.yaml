@@ -305,3 +305,28 @@ services:
         description: Published when a pending instruction is explicitly cancelled
         event_type: operational_gateway.instruction_cancelled.v1
         proto_message: InstructionCancelledEvent
+
+  financial-gateway:
+    description: Payment provider webhook events received and validated by the financial gateway
+    topics:
+      - name: financial-gateway.payment-captured.v1
+        constant: FinancialGatewayPaymentCapturedV1
+        description: Published when a payment_intent.succeeded webhook is received and validated from a payment provider
+        event_type: financial_gateway.payment_captured.v1
+        proto_message: PaymentCapturedEvent
+
+      - name: financial-gateway.payment-failed.v1
+        constant: FinancialGatewayPaymentFailedV1
+        description: Published when a payment_intent.payment_failed webhook is received and validated from a payment provider
+        event_type: financial_gateway.payment_failed.v1
+        proto_message: PaymentFailedEvent
+
+      - name: financial-gateway.payment-refunded.v1
+        constant: FinancialGatewayPaymentRefundedV1
+        description: Published when a charge.refunded webhook is received and validated from a payment provider
+        event_type: financial_gateway.payment_refunded.v1
+
+      - name: financial-gateway.payment-disputed.v1
+        constant: FinancialGatewayPaymentDisputedV1
+        description: Published when a charge.dispute.created webhook is received and validated from a payment provider
+        event_type: financial_gateway.payment_disputed.v1

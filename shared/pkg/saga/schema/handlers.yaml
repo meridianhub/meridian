@@ -853,3 +853,97 @@ handlers:
       status:
         type: string
         description: "Current lifecycle status of the instruction"
+
+  # Financial Gateway Service
+  financial_gateway.dispatch_payment:
+    description: "Dispatch a payment to an external provider via the Financial Gateway"
+    params:
+      payment_order_id:
+        type: string
+        required: true
+        description: "Identifier of the payment order"
+      amount_minor_units:
+        type: int64
+        required: true
+        description: "Amount in minor currency units (e.g., cents)"
+      currency:
+        type: string
+        required: true
+        description: "Currency code (e.g., GBP, USD)"
+      customer_reference:
+        type: string
+        required: true
+        description: "Provider-assigned customer identifier"
+      payment_method_reference:
+        type: string
+        required: true
+        description: "Provider-assigned payment method identifier"
+      idempotency_key:
+        type: string
+        required: true
+        description: "Idempotency key for gateway deduplication"
+      rail:
+        type: string
+        required: true
+        description: "Payment rail to use (e.g., STRIPE, ADYEN)"
+      metadata:
+        type: map
+        required: false
+        description: "Additional metadata to pass to the provider (e.g., debtor_account_id, creditor_reference)"
+    returns:
+      provider_reference_id:
+        type: string
+        description: "Provider-assigned reference identifier (e.g., Stripe PaymentIntent ID)"
+      status:
+        type: string
+        description: "Status of the payment dispatch (e.g., ACCEPTED, PENDING)"
+      platform_fee_minor_units:
+        type: int64
+        description: "Platform fee charged for this payment in minor currency units"
+    compensate: financial_gateway.cancel_payment
+
+  financial_gateway.cancel_payment:
+    description: "Cancel a pending payment dispatch (compensation handler)"
+    params:
+      payment_order_id:
+        type: string
+        required: true
+        description: "Identifier of the payment order to cancel"
+      reason:
+        type: string
+        required: false
+        description: "Reason for cancellation (for audit trail)"
+    returns:
+      payment_order_id:
+        type: string
+        description: "Echo of the input payment order ID"
+      status:
+        type: string
+        description: "Status of the payment (CANCELLED)"
+
+  financial_gateway.dispatch_refund:
+    description: "Dispatch a refund for a previously processed payment via the Financial Gateway"
+    params:
+      payment_order_id:
+        type: string
+        required: true
+        description: "Identifier of the original payment order to refund"
+      refund_amount_minor_units:
+        type: int64
+        required: true
+        description: "Refund amount in minor currency units (e.g., cents)"
+      reason:
+        type: string
+        required: false
+        description: "Reason for the refund"
+      idempotency_key:
+        type: string
+        required: true
+        description: "Idempotency key for refund deduplication"
+    returns:
+      refund_reference_id:
+        type: string
+        description: "Provider-assigned refund reference identifier"
+      status:
+        type: string
+        description: "Status of the refund dispatch (e.g., ACCEPTED, PENDING)"
