@@ -139,7 +139,7 @@ describe('useTenantFeatures', () => {
     expect(result.current.defaultFeature).toBe('accounts')
   })
 
-  it('returns empty string for defaultFeature when no features are enabled', () => {
+  it('falls back to all features when enabled list is empty', () => {
     vi.mocked(useTenantContext).mockReturnValue(
       makeContext({
         tenantConfig: {
@@ -152,8 +152,9 @@ describe('useTenantFeatures', () => {
 
     const { result } = renderHook(() => useTenantFeatures())
 
-    // No enabled features — defaultFeature must not point to a disabled feature
-    expect(result.current.defaultFeature).toBe('')
-    expect(result.current.isFeatureEnabled('dashboard')).toBe(false)
+    // Empty enabled list is treated as "use defaults" — all features enabled
+    expect(result.current.enabledFeatures).toEqual([...ALL_FEATURES])
+    expect(result.current.isFeatureEnabled('dashboard')).toBe(true)
+    expect(result.current.defaultFeature).toBe('dashboard')
   })
 })

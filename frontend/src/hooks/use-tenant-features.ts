@@ -19,15 +19,18 @@ export function useTenantFeatures(): TenantFeaturesResult {
 
   return useMemo(() => {
     const config = tenantConfig ?? DEFAULT_UI_CONFIG
-    const enabledFeatures = config.features?.enabled ?? [...ALL_FEATURES]
+
+    // Treat an empty enabled list the same as an absent one — fall back to all features
+    const configuredEnabled = config.features?.enabled ?? [...ALL_FEATURES]
+    const enabledFeatures = configuredEnabled.length > 0 ? configuredEnabled : [...ALL_FEATURES]
     const enabledSet = new Set<string>(enabledFeatures)
 
-    // Fall back to the first enabled feature if the configured default is not in the enabled list.
-    // When no features are enabled at all, defaultFeature is an empty string (no valid default).
-    const configuredDefault = config.features?.defaultFeature ?? 'dashboard'
+    // Fall back to the first enabled feature if the configured default is not in the enabled list
+    const configuredDefault =
+      config.features?.defaultFeature ?? DEFAULT_UI_CONFIG.features!.defaultFeature!
     const defaultFeature = enabledSet.has(configuredDefault)
       ? configuredDefault
-      : (enabledFeatures[0] ?? '')
+      : enabledFeatures[0]
 
     return {
       isFeatureEnabled: (feature: string) => enabledSet.has(feature),
