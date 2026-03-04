@@ -16,6 +16,8 @@ Each skill document includes:
 - **[docker.md](docker.md)** - Docker configuration and multi-stage builds
 - **[schema-evolution.md](schema-evolution.md)** - Protobuf schema evolution with buf breaking change detection
 - **[starlark-saga.md](starlark-saga.md)** - Generate Starlark saga scripts following Meridian conventions
+<!-- markdownlint-disable-next-line MD013 -->
+- **[event-triggered-sagas.md](event-triggered-sagas.md)** - Configure sagas that fire reactively on Kafka events with CEL filters
 
 ### Deployment
 
