@@ -1,0 +1,7 @@
+instruments:
+  - code: GBP
+    name: British Pound Sterling
+    type: INSTRUMENT_TYPE_FIAT
+    dimensions:
+      unit: GBP
+      precision: 2
