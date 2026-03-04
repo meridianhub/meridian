@@ -4,6 +4,7 @@
     "homepage": "https://github.com/meridianhub/meridian",
     "items": [
         {"name": "base-fiat-gbp", "type": "registry:pattern", "title": "Base Fiat Currency (GBP)"},
-        {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"}
+        {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"},
+        {"name": "energy-settlement", "type": "registry:pattern", "title": "Energy Usage-to-Value Settlement"}
     ]
 }
