@@ -1,0 +1,19 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "activity-feed",
+    "type": "registry:ui",
+    "title": "Activity Feed",
+    "description": "Displays a chronological list of recent platform events (payments, accounts, reconciliation runs, sagas, system events) with type-coloured indicator dots, status badges, and relative timestamps. Supports loading skeletons and empty state.",
+    "categories": ["dashboard", "display", "events", "feed"],
+    "files": [
+        {
+            "path": "frontend/src/features/dashboard/pages/activity-feed.tsx",
+            "type": "registry:ui"
+        }
+    ],
+    "meta": {
+        "feature_module": "dashboard",
+        "tenant_configurable": false,
+        "used_by": ["dashboard"]
+    }
+}
