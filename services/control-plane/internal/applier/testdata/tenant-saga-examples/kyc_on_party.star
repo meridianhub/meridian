@@ -70,10 +70,13 @@ def execute_kyc_on_party():
     #
     # jurisdiction_code is validated to strictly 2 uppercase ASCII letters (ISO 3166-1
     # alpha-2, e.g. 'GB', 'US') before embedding in the filter string to prevent
-    # predicate injection. Range comparison enforces A-Z only.
+    # predicate injection. The None/type guard runs first so the length/range checks
+    # only execute on a valid string.
     step(name="find_compliance_account")
     valid_jc = (
-        len(jurisdiction_code) == 2
+        jurisdiction_code != None
+        and type(jurisdiction_code) == type("")
+        and len(jurisdiction_code) == 2
         and "A" <= jurisdiction_code[0] and jurisdiction_code[0] <= "Z"
         and "A" <= jurisdiction_code[1] and jurisdiction_code[1] <= "Z"
     )
