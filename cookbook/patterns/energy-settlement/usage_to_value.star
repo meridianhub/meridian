@@ -53,8 +53,14 @@ def execute_usage_to_value():
     step(name="lookup_account")
     account = reference_data.get_account(id=source_account_id)
 
-    billing_account_id = account.metadata["billing_account_id"]
-    counterparty_account_id = account.metadata["counterparty_account_id"]
+    metadata = account.metadata or {}
+    billing_account_id = metadata.get("billing_account_id")
+    counterparty_account_id = metadata.get("counterparty_account_id")
+    if not billing_account_id or not counterparty_account_id:
+        return {
+            "status": "CONFIG_ERROR",
+            "correlation_id": correlation_id,
+        }
 
     # Idempotency: check both legs are complete (not just one)
     step(name="check_retail_idempotency")
@@ -97,7 +103,9 @@ def execute_usage_to_value():
         }
     wholesale_method = valuation_methods[1]
 
-    # Value at retail rate using the account type's default conversion method
+    # Compute both valuations before booking either leg.
+    # This ensures that if wholesale valuation fails, no retail booking
+    # has been created — retries remain safe with no partial state.
     step(name="compute_retail_valuation")
     retail = valuation_engine.compute(
         method_id=account_type.default_conversion_method_id,
@@ -106,7 +114,15 @@ def execute_usage_to_value():
         to_instrument="GBP",
     )
 
-    # Book customer billing position
+    step(name="compute_wholesale_valuation")
+    wholesale = valuation_engine.compute(
+        method_id=wholesale_method.method_id,
+        amount=amount,
+        from_instrument=instrument_code,
+        to_instrument="GBP",
+    )
+
+    # Book both legs only after both valuations succeed.
     step(name="book_retail_position")
     position_keeping.initiate_log(
         account_id=billing_account_id,
@@ -114,15 +130,6 @@ def execute_usage_to_value():
         direction="DEBIT",
         amount=retail.amount,
         correlation_id=correlation_id,
-    )
-
-    # Value at wholesale rate (second entry in ValuationMethods array)
-    step(name="compute_wholesale_valuation")
-    wholesale = valuation_engine.compute(
-        method_id=wholesale_method.method_id,
-        amount=amount,
-        from_instrument=instrument_code,
-        to_instrument="GBP",
     )
 
     step(name="book_wholesale_position")
