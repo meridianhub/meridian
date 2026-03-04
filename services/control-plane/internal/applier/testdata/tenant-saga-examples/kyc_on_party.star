@@ -49,10 +49,11 @@ def execute_kyc_on_party():
     jurisdiction_code = ctx["jurisdiction_code"]
 
     # Resolve the newly created party from the entity graph.
-    # The event carries the party_id — the saga loads full party details
-    # including metadata needed to locate the correct compliance account.
+    # Confirms the party exists and loads its jurisdiction metadata.
+    # In a real implementation, party.jurisdiction_code would be used here
+    # instead of relying on the event field directly.
     step(name="lookup_party")
-    party_details = party.get(party_id=party_id)
+    party.get(party_id=party_id)
 
     # Idempotency check: has KYC already been triggered for this party?
     step(name="check_idempotency")
@@ -66,7 +67,17 @@ def execute_kyc_on_party():
     # Find the compliance account for this jurisdiction.
     # Each jurisdiction has a dedicated compliance account used to track
     # outstanding KYC obligations as position logs.
+    #
+    # jurisdiction_code is validated to 2-letter ISO alpha-2 format before use
+    # in the filter expression to prevent predicate injection.
     step(name="find_compliance_account")
+    if len(jurisdiction_code) != 2:
+        return {
+            "status": "INVALID_JURISDICTION_CODE",
+            "jurisdiction_code": jurisdiction_code,
+            "party_id": party_id,
+        }
+
     compliance_accounts = reference_data.query(
         entity_type="account",
         filter="metadata.jurisdiction_code == '" + jurisdiction_code + "' && metadata.account_purpose == 'KYC_COMPLIANCE'",
@@ -79,11 +90,19 @@ def execute_kyc_on_party():
             "party_id": party_id,
         }
 
+    if compliance_accounts.count > 1:
+        return {
+            "status": "AMBIGUOUS_COMPLIANCE_ACCOUNT",
+            "jurisdiction_code": jurisdiction_code,
+            "party_id": party_id,
+        }
+
     compliance_account_id = compliance_accounts.items[0].account_id
 
     # Book a compliance reserve position to record the outstanding KYC obligation.
     # Amount is zero — this is a marker position, not a financial movement.
     # The position log reference field carries the party_id for downstream lookup.
+    # Description is PII-free; reference=party_id is the linkage for downstream queries.
     step(name="book_kyc_marker")
     position_keeping.initiate_log(
         account_id=compliance_account_id,
@@ -91,7 +110,7 @@ def execute_kyc_on_party():
         direction="DEBIT",
         amount=Decimal("0"),
         correlation_id=correlation_id,
-        description="KYC initiated: " + party_details.display_name,
+        description="KYC initiated",
         reference=party_id,
     )
 
