@@ -8,8 +8,9 @@ import (
 
 // Provider constants for gateway selection.
 const (
-	ProviderStripe = "stripe"
-	ProviderMock   = "mock"
+	ProviderStripe           = "stripe"
+	ProviderMock             = "mock"
+	ProviderFinancialGateway = "financial-gateway"
 )
 
 // Config holds configuration for payment gateway connections.
