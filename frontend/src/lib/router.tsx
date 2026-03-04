@@ -1,5 +1,5 @@
 import { PageErrorBoundary } from '@/components/error-boundary'
-import { DashboardPage } from '@/pages/dashboard'
+import { DashboardPage } from '@/features/dashboard'
 import { LedgerPage } from '@/pages/ledger'
 import { BookingLogDetailPage } from '@/pages/ledger/booking-log-detail'
 
