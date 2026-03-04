@@ -42,14 +42,35 @@ func TestRecordFilterEvaluationDuration(_ *testing.T) {
 	RecordFilterEvaluationDuration("payment_saga", 0.005)
 }
 
+func TestRecordFilterEvaluationError(t *testing.T) {
+	filterEvaluationErrorsTotal.Reset()
+
+	RecordFilterEvaluationError("broken_saga")
+	RecordFilterEvaluationError("broken_saga")
+
+	if got := testutil.ToFloat64(filterEvaluationErrorsTotal.WithLabelValues("broken_saga")); got != 2.0 {
+		t.Errorf("broken_saga filter error count = %v, want 2.0", got)
+	}
+}
+
 func TestRecordChainDepthExceeded(t *testing.T) {
-	// Reset via re-registration is not possible with promauto; use a fresh counter
-	// name to isolate. Instead we read the current value and verify increment.
+	// Cannot reset a promauto.NewCounter — read delta instead.
 	before := testutil.ToFloat64(chainDepthExceededTotal)
 	RecordChainDepthExceeded()
 	after := testutil.ToFloat64(chainDepthExceededTotal)
 	if after-before != 1.0 {
 		t.Errorf("chainDepthExceededTotal delta = %v, want 1.0", after-before)
+	}
+}
+
+func TestRecordSagaTriggerFailure(t *testing.T) {
+	sagaTriggerFailuresTotal.Reset()
+
+	RecordSagaTriggerFailure("failing_saga", "payments")
+	RecordSagaTriggerFailure("failing_saga", "payments")
+
+	if got := testutil.ToFloat64(sagaTriggerFailuresTotal.WithLabelValues("failing_saga", "payments")); got != 2.0 {
+		t.Errorf("failing_saga trigger failure count = %v, want 2.0", got)
 	}
 }
 

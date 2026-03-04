@@ -53,7 +53,8 @@ groups:
           summary: "High CEL filter evaluation latency (p99 > 10ms) for saga {{ $labels.saga_name }}"
           description: |
             CEL filter evaluation p99 latency is {{ $value | humanizeDuration }} for saga {{ $labels.saga_name }}.
-            CEL filters should complete in < 1ms. Complex expressions may need simplification.
+            CEL filters should complete in < 10ms. Sustained p99 above this threshold may indicate overly complex expressions.
+            Consider simplifying the filter or pre-computing expensive lookups.
           runbook_url: "https://docs.meridian.io/runbooks/event-router-filter-latency"
 
       # =============================================================================

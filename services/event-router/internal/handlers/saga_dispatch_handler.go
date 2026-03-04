@@ -145,6 +145,7 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		// If no filter, the saga always matches.
 		if cs.FilterProgram == nil {
 			if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
+				observability.RecordSagaTriggerFailure(sagaName, channel)
 				return fmt.Errorf("trigger saga %q: %w", sagaName, err)
 			}
 			observability.RecordSagaTriggered(sagaName, channel)
@@ -164,6 +165,7 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		observability.RecordFilterEvaluationDuration(sagaName, time.Since(filterStart).Seconds())
 
 		if evalErr != nil {
+			observability.RecordFilterEvaluationError(sagaName)
 			h.logger.ErrorContext(ctx, "CEL filter evaluation error, skipping saga",
 				"saga_name", sagaName,
 				"channel", channel,
@@ -194,6 +196,7 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		}
 
 		if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
+			observability.RecordSagaTriggerFailure(sagaName, channel)
 			return fmt.Errorf("trigger saga %q: %w", sagaName, err)
 		}
 		observability.RecordSagaTriggered(sagaName, channel)

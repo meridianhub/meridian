@@ -8,6 +8,7 @@ import (
 	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/services/event-router/internal/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"google.golang.org/grpc"
@@ -160,6 +161,7 @@ func (c *SagaTriggerClient) TriggerSaga(ctx context.Context, sagaName string, in
 		sagaID = resp.GetSagaId()
 
 		if resp.GetWasDuplicate() {
+			observability.RecordDuplicateEvent(sagaName)
 			c.logger.Debug("saga trigger was duplicate, returning existing instance",
 				"saga_name", sagaName,
 				"saga_id", sagaID,
