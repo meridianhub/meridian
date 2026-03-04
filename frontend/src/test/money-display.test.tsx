@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { MoneyDisplay, formatMoney } from '@/components/shared/money-display'
+import { MoneyDisplay, formatMoney } from '@/shared/money-display'
 
 describe('formatMoney', () => {
   describe('null/undefined handling', () => {

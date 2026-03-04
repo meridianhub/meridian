@@ -2,11 +2,11 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
-import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/components/shared/data-table'
-import { TimeDisplay } from '@/components/shared/time-display'
-import { DirectionBadge } from '@/components/shared/direction-badge'
-import { EntityLink } from '@/components/shared/entity-link'
-import { MoneyDisplay } from '@/components/shared/money-display'
+import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/shared/data-table'
+import { TimeDisplay } from '@/shared/time-display'
+import { DirectionBadge } from '@/shared/direction-badge'
+import { EntityLink } from '@/shared/entity-link'
+import { MoneyDisplay } from '@/shared/money-display'
 
 interface LedgerPosting {
   id: string

@@ -3,9 +3,9 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
-import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/components/shared/data-table'
-import { StatusBadge } from '@/components/shared/status-badge'
-import { TimeDisplay } from '@/components/shared'
+import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/shared/data-table'
+import { StatusBadge } from '@/shared/status-badge'
+import { TimeDisplay } from '@/shared'
 import type { FinancialBookingLog } from './types'
 
 function getStatusName(status: unknown): string {

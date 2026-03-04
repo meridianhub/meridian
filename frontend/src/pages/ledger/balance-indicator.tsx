@@ -1,4 +1,4 @@
-import { MoneyDisplay } from '@/components/shared/money-display'
+import { MoneyDisplay } from '@/shared/money-display'
 import { cn } from '@/lib/utils'
 
 interface BalanceIndicatorProps {

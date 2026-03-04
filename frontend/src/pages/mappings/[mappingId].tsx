@@ -1,13 +1,13 @@
 import * as React from 'react'
 import { useParams } from 'react-router-dom'
-import { Breadcrumbs } from '@/components/shared'
+import { Breadcrumbs } from '@/shared'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { StatusBadge } from '@/components/shared/status-badge'
-import { DetailSkeleton } from '@/components/shared/detail-skeleton'
+import { StatusBadge } from '@/shared/status-badge'
+import { DetailSkeleton } from '@/shared/detail-skeleton'
 import { useApiClients } from '@/api/context'
 
 // ─── Types ───────────────────────────────────────────────────────────────────

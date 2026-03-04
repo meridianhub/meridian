@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import { StatusBadge } from '@/components/shared/status-badge'
-import { TimeDisplay } from '@/components/shared/time-display'
+import { StatusBadge } from '@/shared/status-badge'
+import { TimeDisplay } from '@/shared/time-display'
 import { cn } from '@/lib/utils'
 
 export interface ActivityItem {
