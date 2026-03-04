@@ -12,6 +12,10 @@ var ErrInvalidThreshold = errors.New("threshold must be greater than zero")
 // It tracks consecutive failures and transitions between closed, open, and half-open
 // states to protect downstream systems from cascading failures.
 //
+// CircuitBreaker is NOT safe for concurrent use. Callers must ensure that all
+// method calls for a given instance are serialized (e.g., by the owning worker
+// goroutine that processes instructions for a single connection).
+//
 // State transitions:
 //
 //	CLOSED → OPEN: when failure count reaches threshold

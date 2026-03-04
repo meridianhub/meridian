@@ -58,6 +58,22 @@ func TestCalculateNextRetry_CapsAtMaxBackoff(t *testing.T) {
 	assert.InDelta(t, 10*time.Second, wait, float64(500*time.Millisecond))
 }
 
+func TestCalculateNextRetry_OverflowSafeForExtremeAttempts(t *testing.T) {
+	policy := RetryPolicy{
+		MaxAttempts:       100,
+		InitialBackoff:    1 * time.Second,
+		MaxBackoff:        5 * time.Minute,
+		BackoffMultiplier: 2.0,
+	}
+
+	now := time.Now()
+	// attempt=100: 2^99 would overflow int64, should be capped to MaxBackoff
+	result := CalculateNextRetry(100, policy)
+	wait := result.Sub(now)
+	assert.InDelta(t, 5*time.Minute, wait, float64(500*time.Millisecond))
+	assert.True(t, wait > 0, "backoff should never be negative even for extreme attempts")
+}
+
 func TestCalculateNextRetry_DefaultsForZeroValues(t *testing.T) {
 	// Zero-value policy should use sensible defaults
 	policy := RetryPolicy{}

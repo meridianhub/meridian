@@ -43,10 +43,11 @@ func calculateBackoff(attempt int, policy RetryPolicy) time.Duration {
 	// Exponential backoff: initialBackoff * multiplier^(attempt-1)
 	// attempt is 1-based; first retry (attempt=1) uses initialBackoff directly.
 	factor := math.Pow(multiplier, float64(attempt-1))
-	wait := time.Duration(float64(backoff) * factor)
-	if wait > maxBackoff {
-		wait = maxBackoff
+	waitFloat := float64(backoff) * factor
+	// Cap in float64 space before converting to time.Duration to avoid
+	// int64 overflow for extreme attempt counts.
+	if waitFloat > float64(maxBackoff) {
+		return maxBackoff
 	}
-
-	return wait
+	return time.Duration(waitFloat)
 }

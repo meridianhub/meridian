@@ -28,6 +28,18 @@ func (f *stubFetcher) FetchDispatchable(_ context.Context, _ int) ([]*mockInstru
 	return f.instructions, nil
 }
 
+func TestNewWorker_PanicsOnNilFetcher(t *testing.T) {
+	assert.PanicsWithValue(t, "dispatch: NewWorker requires non-nil fetcher", func() {
+		NewWorker[*mockInstruction](nil, func(_ context.Context, _ []*mockInstruction) {}, WorkerConfig{}, nil)
+	})
+}
+
+func TestNewWorker_PanicsOnNilProcessor(t *testing.T) {
+	assert.PanicsWithValue(t, "dispatch: NewWorker requires non-nil processor", func() {
+		NewWorker[*mockInstruction](&stubFetcher{}, nil, WorkerConfig{}, nil)
+	})
+}
+
 func TestWorkerConfig_ApplyDefaults(t *testing.T) {
 	cfg := WorkerConfig{}
 	cfg.applyDefaults()

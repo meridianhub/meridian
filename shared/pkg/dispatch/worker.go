@@ -55,12 +55,19 @@ type Worker[I DispatchableInstruction] struct {
 }
 
 // NewWorker creates a new Worker with the given fetcher, processor callback, and config.
+// Panics if fetcher or processor is nil.
 func NewWorker[I DispatchableInstruction](
 	fetcher InstructionFetcher[I],
 	processor BatchProcessor[I],
 	config WorkerConfig,
 	logger *slog.Logger,
 ) *Worker[I] {
+	if fetcher == nil {
+		panic("dispatch: NewWorker requires non-nil fetcher")
+	}
+	if processor == nil {
+		panic("dispatch: NewWorker requires non-nil processor")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
