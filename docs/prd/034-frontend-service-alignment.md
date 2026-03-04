@@ -516,10 +516,10 @@ ui:
     dashboard:
       widgets:
         - feature: accounts
-          component: AccountSummaryCard
+          component: account-summary-card
           position: 1
         - feature: payments
-          component: RecentPayments
+          component: recent-payments
           position: 2
     table_defaults:
       accounts:
@@ -532,23 +532,33 @@ Dashboard reads widget list, `DataTable` reads column/sort
 defaults. Tenants change layout, refresh, done.
 
 **Component validation**: Widget component names are
-validated against the component registry. The registry is
-the source of truth for valid component names:
+validated against the component registry. The registry
+`name` field (kebab-case) is the **canonical identifier**
+used across tenant config, write-time validation, and
+render-time lookup:
 
 ```typescript
 // Generated from registry.json at build time
+// Keys are registry `name` values (kebab-case)
 const STAFF_DASHBOARD_WIDGETS: Record<string, () => Promise<ComponentType>> = {
-  AccountSummaryCard: () => import('@/features/accounts/...'),
-  RecentPayments: () => import('@/features/payments/...'),
+  'account-summary-card': () => import('@/features/accounts/...'),
+  'recent-payments': () => import('@/features/payments/...'),
 }
 ```
+
+**Canonical ID rule**: tenant config, validation, and
+runtime lookup all use the registry `name` field
+(kebab-case) as the single stable identifier. Display
+labels use the `title` field (human-readable). No
+case-conversion mapping is needed because all layers
+use the same format.
 
 Validation occurs at two points:
 
 - **Config write time** (manifest apply or tenant entity
-  update): reject configurations referencing unknown
-  component names with a descriptive error. The component
-  registry is the source of truth for valid names.
+  update): reject configurations referencing component
+  names not present in registry `items[].name`. The
+  component registry is the single source of truth.
 - **Render time**: skip unresolvable components with a
   warning log, render remaining widgets normally
 
@@ -633,15 +643,15 @@ changes naturally prompt UI parity discussion.
 - Add entries for feature-specific components with metadata
 - Validate widget component names in tenant config against
   registry at config write time
-- Add a dev-mode theme preview panel: a collapsible sidebar
-  that lets developers switch CSS variable overrides
-  without restarting the app
 
 ### Phase 5: Tenant Theme Foundation
 
 - CSS variable override system from tenant config
 - Tenant logo/branding in AppShell
-- Dev-mode theme preview panel wired to tenant config
+- Dev-mode theme preview panel: a collapsible sidebar that
+  lets developers switch CSS variable overrides (primary
+  colour, background, font) without restarting the app,
+  wired to tenant config schema
 
 ### Phase 6: Feature Visibility
 
@@ -690,12 +700,13 @@ changes naturally prompt UI parity discussion.
    storage: local filesystem (dev/demo), object storage
    (S3/GCS) for production? Is a CDN layer needed?
 
-6. **Registry scope**: Should the component registry
-   describe only tenant-configurable components (dashboard
-   widgets, table columns), or all components including
-   internal-only ones? Broader scope is more useful for AI
-   development assistance; narrower scope is easier to
-   maintain.
+6. **Registry maintenance**: The registry covers all shared
+   and feature components (see Success Criterion 3). The
+   open question is maintenance strategy: manually curated
+   entries vs auto-generated from TypeScript source (e.g.,
+   a build step that scans exports and generates
+   `registry.json`). Auto-generation reduces drift but
+   requires tooling investment.
 
 ## Success Criteria
 

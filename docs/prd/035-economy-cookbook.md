@@ -35,17 +35,33 @@ HATEOAS principles for state-aware navigation.
 The cookbook is to Meridian manifests what shadcn/ui is to
 React components: a catalogue of building blocks that AI
 assistants and developers can browse, compose, and apply -
-without needing a running server, without parsing
-unstructured documentation, and without guessing what works
-together.
+without parsing unstructured documentation and without
+guessing what works together.
+
+### Two Modes of Operation
+
+**Offline (static registry browsing)**: The registry layer
+is static JSON files. AI assistants can read `registry.json`
+and individual `pattern.json` files directly from the
+filesystem or a CDN. No running server needed. This covers
+browsing, reading pattern metadata, and manually composing
+manifest fragments.
+
+**Online (state-aware HATEOAS discovery)**: The
+`meridian_cookbook_discover` MCP tool inspects a tenant's
+current manifest and returns compatible patterns with
+reasons. This requires the MCP server to be running (same
+as existing `meridian_manifest_validate`). Discovery adds
+intelligence on top of the static registry - it is not
+required for basic pattern browsing.
 
 ### Three Layers
 
-| Layer | Model | Purpose |
-|-------|-------|---------|
-| **Registry** | shadcn/ui | Static JSON patterns with metadata, deps, files |
-| **Discovery** | HATEOAS | Given current state, what patterns are compatible? |
-| **Execution** | Existing MCP | validate, plan, apply (already built) |
+| Layer | Model | Requires server? |
+|-------|-------|------------------|
+| **Registry** | shadcn/ui | No - static JSON files |
+| **Discovery** | HATEOAS | Yes - MCP server computes compatibility |
+| **Execution** | Existing MCP | Yes - validate, plan, apply |
 
 ## Goals
 
@@ -333,6 +349,28 @@ manifest fragments and merges them into a complete manifest.
 The existing `meridian_manifest_validate` tool catches any
 conflicts or missing dependencies. This keeps the cookbook
 stateless and the validation authoritative.
+
+**Merge semantics**: Manifest fragments are merged using
+these deterministic rules:
+
+- **Lists** (instruments, account_types, sagas): append in
+  pattern dependency order, deduplicate by `code`/`name`
+  field (first occurrence wins)
+- **Scalars** (metadata.name, metadata.description): later
+  pattern overrides earlier
+- **Nested objects** (valuation_rules, seed_data): recursive
+  merge, with later pattern values overriding on key
+  collision
+- **Conflict detection**: if two fragments define the same
+  `code`/`name` with different content,
+  `meridian_manifest_validate` rejects with a descriptive
+  error listing both sources
+
+The merge order is deterministic: resolve
+`registryDependencies` depth-first, then append the
+requested patterns in the order specified by the user. The
+resulting manifest is passed to `meridian_manifest_validate`
+which is the authoritative arbiter of correctness.
 
 **Full conversation flow:**
 
