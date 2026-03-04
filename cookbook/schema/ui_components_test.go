@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,6 +80,12 @@ func TestUIComponentEntry_FilesExist(t *testing.T) {
 			require.NotEmpty(t, item.Files, "component.json for %s has no files", name)
 
 			for _, f := range item.Files {
+				// Reject absolute or escaping paths before joining with root.
+				assert.False(t, filepath.IsAbs(f.Path),
+					"file path %q in %s/component.json must be relative", f.Path, name)
+				assert.False(t, strings.HasPrefix(filepath.Clean(f.Path), ".."),
+					"file path %q in %s/component.json must not escape the repo root", f.Path, name)
+
 				fullPath := filepath.Join(root, f.Path)
 				_, statErr := os.Stat(fullPath)
 				assert.NoError(t, statErr, "file %s listed in %s/component.json does not exist", f.Path, name)
