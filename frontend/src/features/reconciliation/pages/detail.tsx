@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StatusBadge } from '@/shared/status-badge'
-import { CELEditor } from '@/components/shared/cel-editor'
+import { CELEditor } from '@/features/sagas/components/cel-editor'
 import { Breadcrumbs } from '@/shared'
 import { DetailSkeleton } from '@/shared/detail-skeleton'
 import {

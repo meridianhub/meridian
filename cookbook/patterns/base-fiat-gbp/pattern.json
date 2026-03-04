@@ -1,0 +1,35 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "base-fiat-gbp",
+    "type": "registry:pattern",
+    "title": "Base Fiat Currency (GBP)",
+    "description": "Foundation instrument for British Pound Sterling. Provides GBP instrument with standard 2-decimal precision.",
+    "registryDependencies": [],
+    "categories": ["foundation", "fiat", "currency"],
+    "meta": {
+        "complexity": 1,
+        "design_pattern": null,
+        "industries": ["all"],
+        "provides": {
+            "instruments": ["GBP"],
+            "account_types": [],
+            "sagas": [],
+            "valuation_rules": [],
+            "triggers": []
+        },
+        "requires": {
+            "instruments": [],
+            "market_data": []
+        },
+        "composes_with": ["energy-settlement", "saas-billing", "carbon-offset", "precious-metals"],
+        "conflicts_with": [],
+        "extends": []
+    },
+    "files": [
+        {
+            "path": "patterns/base-fiat-gbp/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        }
+    ]
+}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 
 	"google.golang.org/grpc/status"
@@ -19,7 +20,6 @@ import (
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
-	"github.com/meridianhub/meridian/cookbook"
 	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/clients"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/prompts"
@@ -34,9 +34,11 @@ import (
 // it creates gRPC clients and wires all remote tools. If not, only local tools
 // (validation, prompts, embedded docs) are registered.
 //
+// cookbookFS provides the cookbook registry filesystem (may be nil to skip cookbook tools).
+//
 // Returns a cleanup function to close the gRPC connection (nil when no
 // connection was established).
-func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
+func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (func(), error) {
 	// Prompts are always available (no external deps).
 	srv.SetPromptRegistry(prompts.NewRegistry())
 
@@ -48,9 +50,16 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
 		return nil, fmt.Errorf("register validation tools: %w", err)
 	}
 
-	// Cookbook discover tool uses the embedded cookbook FS — no gRPC needed.
-	cookbookLoader := tools.NewFSCookbookLoader(cookbook.FS)
-	tools.RegisterCookbookDiscoverTool(toolReg, cookbookLoader)
+	// Cookbook tools are local (filesystem-based). cookbookFS may be nil if the
+	// cookbook is not embedded in this build; in that case tools are silently skipped.
+	tools.RegisterCookbookTools(toolReg, cookbookFS)
+
+	// Cookbook discover tool inspects the manifest against the cookbook registry.
+	// Skip when cookbookFS is nil (build without embedded cookbook).
+	if cookbookFS != nil {
+		cookbookLoader := tools.NewFSCookbookLoader(cookbookFS)
+		tools.RegisterCookbookDiscoverTool(toolReg, cookbookLoader)
+	}
 
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()

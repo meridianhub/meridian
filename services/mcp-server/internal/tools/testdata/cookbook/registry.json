@@ -1,36 +1,24 @@
 {
     "$schema": "https://cookbook.meridianhub.org/schema/registry.json",
-    "name": "test-cookbook",
+    "name": "meridian-cookbook-test",
     "items": [
         {
-            "name": "fiat-foundation",
+            "name": "account-balance",
+            "type": "registry:ui",
+            "title": "Account Balance Widget",
+            "categories": ["accounts", "dashboard"]
+        },
+        {
+            "name": "current-account",
             "type": "registry:pattern",
-            "title": "Fiat Foundation",
-            "categories": ["banking", "foundation"]
+            "title": "Current Account",
+            "categories": ["accounts", "banking"]
         },
         {
             "name": "energy-settlement",
             "type": "registry:pattern",
             "title": "Energy Settlement",
-            "categories": ["energy"]
-        },
-        {
-            "name": "precious-metals",
-            "type": "registry:pattern",
-            "title": "Precious Metals",
-            "categories": ["commodities"]
-        },
-        {
-            "name": "transaction-table",
-            "type": "registry:ui",
-            "title": "Transaction Table",
-            "categories": ["ledger", "display"]
-        },
-        {
-            "name": "conflicting-pattern",
-            "type": "registry:pattern",
-            "title": "Conflicting Pattern",
-            "categories": ["test"]
+            "categories": ["energy", "settlement"]
         }
     ]
 }

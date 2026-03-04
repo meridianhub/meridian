@@ -78,7 +78,8 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 	srv := server.New(tr, cfg, logger)
 
 	// Wire tools, resources, and prompts onto the server.
-	cleanup, err := wireServer(srv, logger)
+	// cookbookFS is nil until the cookbook directory is embedded at build time.
+	cleanup, err := wireServer(srv, logger, nil)
 	if err != nil {
 		return fmt.Errorf("wire server: %w", err)
 	}
@@ -189,7 +190,8 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 	srv := server.New(sseTr, cfg, logger)
 
 	// Wire tools, resources, and prompts onto the server.
-	cleanup, wireErr := wireServer(srv, logger)
+	// cookbookFS is nil until the cookbook directory is embedded at build time.
+	cleanup, wireErr := wireServer(srv, logger, nil)
 	if wireErr != nil {
 		return fmt.Errorf("wire server: %w", wireErr)
 	}

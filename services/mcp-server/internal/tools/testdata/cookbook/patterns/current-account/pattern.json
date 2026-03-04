@@ -1,0 +1,23 @@
+{
+    "name": "current-account",
+    "type": "registry:pattern",
+    "title": "Current Account",
+    "description": "Standard current account with debit/credit posting and overdraft.",
+    "categories": ["accounts", "banking"],
+    "meta": {
+        "complexity": 3,
+        "industries": ["banking", "fintech"],
+        "design_pattern": "double-entry",
+        "provides": {
+            "instruments": ["GBP"],
+            "account_types": ["CURRENT_ACCOUNT"],
+            "sagas": ["current_account_deposit", "current_account_withdrawal"]
+        }
+    },
+    "files": [
+        {
+            "path": "manifest.yaml",
+            "type": "registry:file"
+        }
+    ]
+}

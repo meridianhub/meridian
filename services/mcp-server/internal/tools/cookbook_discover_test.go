@@ -18,7 +18,7 @@ func testdataCookbookLoader(t *testing.T) tools.CookbookLoader {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	dir := filepath.Join(filepath.Dir(file), "testdata", "cookbook")
+	dir := filepath.Join(filepath.Dir(file), "testdata", "cookbook_discover")
 	return tools.NewFSCookbookLoader(os.DirFS(dir))
 }
 

@@ -14,9 +14,9 @@ import (
 type CookbookLoader interface {
 	// LoadRegistry returns the parsed registry index (cookbook/registry.json).
 	LoadRegistry() (*cookbookRegistry, error)
-	// LoadPattern returns the parsed registry item for the given pattern name.
+	// LoadPattern returns the parsed full pattern detail for the given pattern name.
 	// Returns nil, nil when the pattern file does not exist.
-	LoadPattern(name string) (*cookbookRegistryItem, error)
+	LoadPattern(name string) (*cookbookPatternDetail, error)
 }
 
 // fsCookbookLoader loads cookbook data from an fs.FS rooted at the cookbook directory.
@@ -25,25 +25,17 @@ type fsCookbookLoader struct {
 }
 
 // NewFSCookbookLoader returns a CookbookLoader that reads from the given fs.FS.
-// The fs.FS must have registry.json at its root and pattern files under patterns/.
+// The fs.FS must have registry.json at its root and pattern files under patterns/<name>/pattern.json.
 func NewFSCookbookLoader(cookbookFS fs.FS) CookbookLoader {
 	return &fsCookbookLoader{cookbookFS: cookbookFS}
 }
 
 func (l *fsCookbookLoader) LoadRegistry() (*cookbookRegistry, error) {
-	data, err := fs.ReadFile(l.cookbookFS, "registry.json")
-	if err != nil {
-		return nil, fmt.Errorf("read cookbook registry: %w", err)
-	}
-	var reg cookbookRegistry
-	if err := json.Unmarshal(data, &reg); err != nil {
-		return nil, fmt.Errorf("parse cookbook registry: %w", err)
-	}
-	return &reg, nil
+	return loadCookbookRegistry(l.cookbookFS)
 }
 
-func (l *fsCookbookLoader) LoadPattern(name string) (*cookbookRegistryItem, error) {
-	path := "patterns/" + name + ".json"
+func (l *fsCookbookLoader) LoadPattern(name string) (*cookbookPatternDetail, error) {
+	path := fmt.Sprintf("patterns/%s/pattern.json", name)
 	data, err := fs.ReadFile(l.cookbookFS, path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -52,29 +44,16 @@ func (l *fsCookbookLoader) LoadPattern(name string) (*cookbookRegistryItem, erro
 		}
 		return nil, fmt.Errorf("read pattern %q: %w", name, err)
 	}
-	var item cookbookRegistryItem
-	if err := json.Unmarshal(data, &item); err != nil {
+	var detail cookbookPatternDetail
+	if err := json.Unmarshal(data, &detail); err != nil {
 		return nil, fmt.Errorf("parse pattern %q: %w", name, err)
 	}
-	return &item, nil
+	return &detail, nil
 }
 
-// cookbookRegistry mirrors the structure of cookbook/registry.json.
-type cookbookRegistry struct {
-	Name  string               `json:"name"`
-	Items []cookbookIndexEntry `json:"items"`
-}
-
-// cookbookIndexEntry is a summary row in the registry index.
-type cookbookIndexEntry struct {
-	Name       string   `json:"name"`
-	Type       string   `json:"type"`
-	Title      string   `json:"title"`
-	Categories []string `json:"categories,omitempty"`
-}
-
-// cookbookRegistryItem is a full registry item (from patterns/<name>.json).
-type cookbookRegistryItem struct {
+// cookbookPatternDetail is the full content of a patterns/<name>/pattern.json file.
+// cookbookRegistryItem (the index summary) is defined in cookbook.go.
+type cookbookPatternDetail struct {
 	Name        string               `json:"name"`
 	Type        string               `json:"type"`
 	Title       string               `json:"title"`
@@ -115,19 +94,13 @@ type cookbookPatternRequires struct {
 type manifestState struct {
 	// instrumentCodes is the set of instrument codes present in the manifest.
 	instrumentCodes map[string]bool
-	// installedPatterns is the set of pattern names already installed (derived from
-	// manifest metadata or known patterns that "provide" items matching the manifest).
-	// For now this is left empty — conflicts are detected by name matching in the
-	// registry items themselves.
-	installedPatterns map[string]bool
 }
 
 // parseManifestState extracts compatibility-relevant state from a raw manifest JSON object.
 // Accepts nil to represent an empty/unconfigured manifest.
 func parseManifestState(manifestJSON json.RawMessage) *manifestState {
 	state := &manifestState{
-		instrumentCodes:   make(map[string]bool),
-		installedPatterns: make(map[string]bool),
+		instrumentCodes: make(map[string]bool),
 	}
 	if len(manifestJSON) == 0 {
 		return state
@@ -209,15 +182,14 @@ func buildHATEOASLinks(name string) map[string]interface{} {
 // checkCompatibility evaluates a registry item against the current manifest state.
 // Returns (compatible, incompatible, conflict). Exactly one bucket will receive the item.
 func checkCompatibility(
-	item *cookbookRegistryItem,
-	entry cookbookIndexEntry,
+	entry cookbookRegistryItem,
+	detail *cookbookPatternDetail,
 	state *manifestState,
 	installedNames map[string]bool,
 ) (comp *compatibleEntry, incompat *incompatibleEntry, conflict *conflictEntry) {
 	// For UI components, meta is feature-module-based; no instrument requirements.
 	// They are always considered compatible unless explicitly conflicting.
-	if item == nil || item.Type == "registry:ui" {
-		// Minimal info from index entry.
+	if detail == nil || entry.Type == "registry:ui" {
 		return &compatibleEntry{
 			Name:       entry.Name,
 			Title:      entry.Title,
@@ -228,16 +200,16 @@ func checkCompatibility(
 		}, nil, nil
 	}
 
-	meta := item.Meta
+	meta := detail.Meta
 
 	// Check conflicts first: if this pattern conflicts with an installed one, skip.
 	if meta != nil {
 		for _, conflictName := range meta.ConflictsWith {
 			if installedNames[conflictName] {
 				return nil, nil, &conflictEntry{
-					Name:            item.Name,
-					Title:           item.Title,
-					Type:            item.Type,
+					Name:            detail.Name,
+					Title:           detail.Title,
+					Type:            detail.Type,
 					Reason:          fmt.Sprintf("conflicts with installed pattern %q", conflictName),
 					ConflictingWith: conflictName,
 				}
@@ -256,9 +228,9 @@ func checkCompatibility(
 		if len(missing) > 0 {
 			reason := fmt.Sprintf("missing required instruments: %v", missing)
 			return nil, &incompatibleEntry{
-				Name:    item.Name,
-				Title:   item.Title,
-				Type:    item.Type,
+				Name:    detail.Name,
+				Title:   detail.Title,
+				Type:    detail.Type,
 				Reason:  reason,
 				Missing: missing,
 			}, nil
@@ -277,13 +249,13 @@ func checkCompatibility(
 	}
 
 	return &compatibleEntry{
-		Name:       item.Name,
-		Title:      item.Title,
-		Type:       item.Type,
+		Name:       detail.Name,
+		Title:      detail.Title,
+		Type:       detail.Type,
 		Reason:     reason,
 		Complexity: complexity,
-		Categories: item.Categories,
-		Links:      buildHATEOASLinks(item.Name),
+		Categories: detail.Categories,
+		Links:      buildHATEOASLinks(detail.Name),
 	}, nil, nil
 }
 
@@ -309,26 +281,19 @@ func handleCookbookDiscover(_ context.Context, loader CookbookLoader, params jso
 
 	// Load all pattern details upfront so we can do cross-pattern conflict detection.
 	// Patterns that fail to load are skipped gracefully.
-	allItems := make(map[string]*cookbookRegistryItem, len(reg.Items))
+	allDetails := make(map[string]*cookbookPatternDetail, len(reg.Items))
 	for _, entry := range reg.Items {
-		item, loadErr := loader.LoadPattern(entry.Name)
+		detail, loadErr := loader.LoadPattern(entry.Name)
 		if loadErr != nil {
 			continue
 		}
-		if item == nil {
-			item = &cookbookRegistryItem{
-				Name:  entry.Name,
-				Type:  entry.Type,
-				Title: entry.Title,
-			}
-		}
-		allItems[entry.Name] = item
+		allDetails[entry.Name] = detail // may be nil for UI items with no pattern.json
 	}
 
 	// Determine installed patterns from the manifest state.
 	// A pattern is considered "installed" if all instruments it provides are present in the manifest.
-	// This is a heuristic for v1 — a pattern explicitly tracks its own installation state in future.
-	installedNames := buildInstalledPatternSet(allItems, state)
+	// This is a heuristic for v1 — future versions may track installation state explicitly.
+	installedNames := buildInstalledPatternSet(reg.Items, allDetails, state)
 
 	result := discoverResult{
 		Compatible:   []compatibleEntry{},
@@ -342,13 +307,9 @@ func handleCookbookDiscover(_ context.Context, loader CookbookLoader, params jso
 			continue
 		}
 
-		item, ok := allItems[entry.Name]
-		if !ok {
-			// Item failed to load — skip.
-			continue
-		}
+		detail := allDetails[entry.Name] // nil for UI items or failed loads
 
-		comp, incompat, conflict := checkCompatibility(item, entry, state, installedNames)
+		comp, incompat, conflict := checkCompatibility(entry, detail, state, installedNames)
 		switch {
 		case comp != nil:
 			result.Compatible = append(result.Compatible, *comp)
@@ -365,13 +326,17 @@ func handleCookbookDiscover(_ context.Context, loader CookbookLoader, params jso
 // buildInstalledPatternSet determines which patterns are likely already installed in the manifest.
 // A pattern is considered installed if all instruments it provides are present in the manifest.
 // This is a heuristic: it assumes that if a pattern's instruments are present, the pattern was applied.
-func buildInstalledPatternSet(allItems map[string]*cookbookRegistryItem, state *manifestState) map[string]bool {
+func buildInstalledPatternSet(items []cookbookRegistryItem, allDetails map[string]*cookbookPatternDetail, state *manifestState) map[string]bool {
 	installed := make(map[string]bool)
-	for name, item := range allItems {
-		if item.Type != "registry:pattern" || item.Meta == nil || item.Meta.Provides == nil {
+	for _, item := range items {
+		if item.Type != itemTypePattern {
 			continue
 		}
-		provided := item.Meta.Provides.Instruments
+		detail := allDetails[item.Name]
+		if detail == nil || detail.Meta == nil || detail.Meta.Provides == nil {
+			continue
+		}
+		provided := detail.Meta.Provides.Instruments
 		if len(provided) == 0 {
 			continue
 		}
@@ -383,7 +348,7 @@ func buildInstalledPatternSet(allItems map[string]*cookbookRegistryItem, state *
 			}
 		}
 		if allPresent {
-			installed[name] = true
+			installed[item.Name] = true
 		}
 	}
 	return installed
