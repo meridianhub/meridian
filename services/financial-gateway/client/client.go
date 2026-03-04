@@ -232,6 +232,29 @@ func (c *Client) DispatchRefund(ctx context.Context, req *financialgatewayv1.Dis
 	return resp, nil
 }
 
+// CancelPayment cancels a pending payment dispatch before it is delivered to the payment rail.
+// Only payments in PENDING status can be cancelled.
+func (c *Client) CancelPayment(ctx context.Context, req *financialgatewayv1.CancelPaymentRequest) (*financialgatewayv1.CancelPaymentResponse, error) {
+	ctx, cancel := clients.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	ctx = clients.PropagateCorrelationID(ctx)
+	ctx = clients.PropagateOrganization(ctx)
+
+	if c.resilient != nil {
+		return clients.ExecuteWithResilienceNoRetry(ctx, c.resilient, "CancelPayment", func() (*financialgatewayv1.CancelPaymentResponse, error) {
+			return c.financialGateway.CancelPayment(ctx, req)
+		})
+	}
+
+	resp, err := c.financialGateway.CancelPayment(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to cancel payment: %w", err)
+	}
+
+	return resp, nil
+}
+
 // GetProviderHealth returns the current health status of a payment rail provider.
 // This is an idempotent read operation, so retry is enabled.
 func (c *Client) GetProviderHealth(ctx context.Context, req *financialgatewayv1.GetProviderHealthRequest) (*financialgatewayv1.GetProviderHealthResponse, error) {

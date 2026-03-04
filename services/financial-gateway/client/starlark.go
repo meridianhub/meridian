@@ -41,7 +41,7 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 			},
 		},
 		"financial_gateway.cancel_payment": {
-			handler: cancelPaymentHandler(),
+			handler: cancelPaymentHandler(c),
 			metadata: saga.HandlerMetadata{
 				Category:            saga.HandlerCategorySettlement,
 				ProducesInstruments: []string{},
@@ -187,13 +187,10 @@ func extractStringMetadata(params map[string]any) map[string]string {
 	return meta
 }
 
-// cancelPaymentHandler is the compensation handler for dispatch_payment.
-//
-// The FinancialGateway proto does not expose a CancelPayment RPC — once a payment
-// is dispatched to an external rail (e.g., Stripe), it cannot be recalled at this
-// API level. Reversal is handled via dispatch_refund in a separate compensation path.
-// This handler records the cancellation intent and signals the saga to stop further
-// forward steps; it does not make a gRPC call.
+// cancelPaymentHandler cancels a pending payment dispatch via the FinancialGateway service.
+// This is the compensation handler for dispatch_payment; it can only cancel payments that
+// are still in PENDING status. Payments already dispatching or delivered must be reversed
+// via dispatch_refund instead.
 //
 // Parameters:
 //   - payment_order_id (string, required): UUID of the payment order to cancel
@@ -203,8 +200,8 @@ func extractStringMetadata(params map[string]any) map[string]string {
 //   - payment_order_id: Echo of the input payment_order_id
 //   - status: Lifecycle status string (CANCELLED)
 //   - reason: Echo of the input reason (if provided)
-func cancelPaymentHandler() saga.Handler {
-	return func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
+func cancelPaymentHandler(c *Client) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "financial_gateway.cancel_payment"
 
 		paymentOrderID, err := saga.RequireStringParam(params, "payment_order_id")
@@ -214,10 +211,25 @@ func cancelPaymentHandler() saga.Handler {
 
 		reason, _ := params["reason"].(string)
 
+		req := &financialgatewayv1.CancelPaymentRequest{
+			PaymentOrderId: paymentOrderID,
+			Reason:         reason,
+			CorrelationId:  ctx.CorrelationID.String(),
+		}
+		if causationID, ok := params["causation_id"].(string); ok && causationID != "" {
+			req.CausationId = causationID
+		}
+
+		clientCtx := prepareClientContext(ctx)
+		resp, err := c.CancelPayment(clientCtx, req)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", handlerName, err)
+		}
+
 		return map[string]any{
-			"payment_order_id": paymentOrderID,
-			"status":           "CANCELLED",
-			"reason":           reason,
+			"payment_order_id": resp.GetPaymentOrderId(),
+			"status":           resp.GetStatus(),
+			"reason":           resp.GetReason(),
 		}, nil
 	}
 }

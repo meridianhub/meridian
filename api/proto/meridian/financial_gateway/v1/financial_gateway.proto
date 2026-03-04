@@ -209,6 +209,35 @@ message DispatchRefundResponse {
   google.protobuf.Timestamp created_at = 6;
 }
 
+// CancelPaymentRequest cancels a pending payment dispatch before it is delivered to the payment rail.
+// Only payments in PENDING status can be cancelled; dispatching or delivered payments must be
+// reversed via DispatchRefund.
+message CancelPaymentRequest {
+  // payment_order_id is the UUID of the payment order to cancel.
+  string payment_order_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // reason is the human-readable reason for the cancellation (for audit trail).
+  string reason = 2 [(buf.validate.field).string.max_len = 500];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 3 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the event or command that triggered this cancellation.
+  string causation_id = 4 [(buf.validate.field).string.max_len = 255];
+}
+
+// CancelPaymentResponse confirms the cancellation of a payment dispatch.
+message CancelPaymentResponse {
+  // payment_order_id is the UUID of the payment order that was cancelled.
+  string payment_order_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // status is always "CANCELLED" for a successful cancellation.
+  string status = 2;
+
+  // reason is the cancellation reason that was provided.
+  string reason = 3;
+}
+
 // GetProviderHealthRequest checks the health of a payment rail provider.
 message GetProviderHealthRequest {
   // rail is the payment network to check.
@@ -272,6 +301,17 @@ service FinancialGatewayService {
   rpc DispatchRefund(DispatchRefundRequest) returns (DispatchRefundResponse) {
     option (google.api.http) = {
       post: "/v1/financial-gateway/refunds"
+      body: "*"
+    };
+  }
+
+  // CancelPayment cancels a pending payment dispatch before it is delivered to the payment rail.
+  // Only payments in PENDING status can be cancelled.
+  // Returns NOT_FOUND if the payment order does not exist.
+  // Returns FAILED_PRECONDITION if the payment is already dispatching or delivered.
+  rpc CancelPayment(CancelPaymentRequest) returns (CancelPaymentResponse) {
+    option (google.api.http) = {
+      post: "/v1/financial-gateway/payments/{payment_order_id}/cancel"
       body: "*"
     };
   }
