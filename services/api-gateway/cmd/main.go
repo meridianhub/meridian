@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridianhub/meridian/services/api-gateway"
+	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream"
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream/adapters"
 	gwhealth "github.com/meridianhub/meridian/services/api-gateway/health"
