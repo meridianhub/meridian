@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 
 	"google.golang.org/grpc/status"
@@ -33,9 +34,11 @@ import (
 // it creates gRPC clients and wires all remote tools. If not, only local tools
 // (validation, prompts, embedded docs) are registered.
 //
+// cookbookFS provides the cookbook registry filesystem (may be nil to skip cookbook tools).
+//
 // Returns a cleanup function to close the gRPC connection (nil when no
 // connection was established).
-func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
+func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (func(), error) {
 	// Prompts are always available (no external deps).
 	srv.SetPromptRegistry(prompts.NewRegistry())
 
@@ -46,6 +49,10 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger) (func(), error) {
 	if err := tools.RegisterValidationTools(toolReg); err != nil {
 		return nil, fmt.Errorf("register validation tools: %w", err)
 	}
+
+	// Cookbook tools are local (filesystem-based). cookbookFS may be nil if the
+	// cookbook is not embedded in this build; in that case tools are silently skipped.
+	tools.RegisterCookbookTools(toolReg, cookbookFS)
 
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()

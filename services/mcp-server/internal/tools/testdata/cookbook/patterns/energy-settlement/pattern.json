@@ -1,0 +1,23 @@
+{
+    "name": "energy-settlement",
+    "type": "registry:pattern",
+    "title": "Energy Settlement",
+    "description": "Bilateral energy settlement with estimate-to-actual reconciliation.",
+    "categories": ["energy", "settlement"],
+    "meta": {
+        "complexity": 5,
+        "industries": ["energy", "utilities"],
+        "design_pattern": "temporal-quality-ladder",
+        "provides": {
+            "instruments": ["KWH"],
+            "account_types": ["ENERGY_ACCOUNT"],
+            "sagas": ["energy_settlement"]
+        }
+    },
+    "files": [
+        {
+            "path": "manifest.yaml",
+            "type": "registry:file"
+        }
+    ]
+}
