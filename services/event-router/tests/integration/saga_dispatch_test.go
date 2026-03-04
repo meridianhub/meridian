@@ -538,14 +538,18 @@ func TestIntegration_E2E_KafkaIdempotency(t *testing.T) {
 		})
 	require.NoError(t, err, "at least one saga trigger expected")
 
-	// Give extra time for the second message to be processed (if it would trigger)
+	// Verify deduplication: poll for a second trigger that should never arrive.
+	// We intentionally wait 3 seconds and assert that the poll times out. This is
+	// NOT a flaky timing hack -- the idempotency store enforces deduplication at the
+	// database level (CockroachDB unique constraint on saga_name + correlation_id),
+	// so a second trigger is structurally impossible once the first is recorded.
+	// The short timeout simply proves no duplicate leaked through.
 	err = await.New().
 		AtMost(3 * secondDuration).
 		PollInterval(200 * millisecondDuration).
 		Until(func() bool {
 			return trigger.callCount() >= 2
 		})
-	// We EXPECT this to time out (only 1 trigger)
 	assert.ErrorIs(t, err, await.ErrTimeout, "second event should be deduplicated")
 	assert.Equal(t, 1, trigger.callCount(), "only one saga execution expected with idempotency")
 }

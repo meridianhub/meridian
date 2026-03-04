@@ -302,8 +302,14 @@ const (
 // consumeAndDispatch starts a background goroutine that consumes Kafka messages
 // from the given topic and dispatches them through the SagaDispatchHandler.
 // The consumer is stopped when the test finishes.
+//
+// Errors from proto unmarshalling and handler dispatch are logged via the
+// provided logger rather than silently discarded, so test failures are
+// diagnosable from the test output.
 func consumeAndDispatch(t *testing.T, broker, topic string, h *handlers.SagaDispatchHandler) {
 	t.Helper()
+
+	logger := testLogger()
 
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(broker),
@@ -332,6 +338,11 @@ func consumeAndDispatch(t *testing.T, broker, topic string, h *handlers.SagaDisp
 				// Reconstruct proto message from record value
 				s := &structpb.Struct{}
 				if unmarshalErr := proto.Unmarshal(record.Value, s); unmarshalErr != nil {
+					logger.Error("failed to unmarshal Kafka record",
+						"topic", record.Topic,
+						"offset", record.Offset,
+						"error", unmarshalErr,
+					)
 					return
 				}
 
@@ -341,7 +352,13 @@ func consumeAndDispatch(t *testing.T, broker, topic string, h *handlers.SagaDisp
 					metadata[header.Key] = string(header.Value)
 				}
 
-				_ = h.Handle(ctx, record.Topic, s, metadata)
+				if handleErr := h.Handle(ctx, record.Topic, s, metadata); handleErr != nil {
+					logger.Error("handler dispatch failed",
+						"topic", record.Topic,
+						"offset", record.Offset,
+						"error", handleErr,
+					)
+				}
 			})
 
 			client.AllowRebalance()
