@@ -197,11 +197,14 @@ jobs:
           .
 
     - name: Generate SBOM with Syft
-      uses: anchore/sbom-action@v0.23.0
+      uses: nick-fields/retry@v3
       with:
-        image: meridian:sbom
-        format: spdx-json
-        output-file: sbom.spdx.json
+        timeout_minutes: 5
+        max_attempts: 3
+        retry_wait_seconds: 10
+        command: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft meridian:sbom -o spdx-json=sbom.spdx.json
 
     - name: Verify SBOM was created
       run: |
