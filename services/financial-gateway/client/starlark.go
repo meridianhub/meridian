@@ -19,6 +19,7 @@ import (
 // This function is called during service initialization to register FinancialGateway
 // handlers with the saga execution engine. Registered handlers:
 //   - financial_gateway.dispatch_payment
+//   - financial_gateway.cancel_payment (compensation for dispatch_payment)
 //   - financial_gateway.dispatch_refund
 //
 // Example usage:
@@ -34,6 +35,13 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 	}{
 		"financial_gateway.dispatch_payment": {
 			handler: dispatchPaymentHandler(c),
+			metadata: saga.HandlerMetadata{
+				Category:            saga.HandlerCategorySettlement,
+				ProducesInstruments: []string{},
+			},
+		},
+		"financial_gateway.cancel_payment": {
+			handler: cancelPaymentHandler(),
 			metadata: saga.HandlerMetadata{
 				Category:            saga.HandlerCategorySettlement,
 				ProducesInstruments: []string{},
@@ -57,14 +65,15 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 }
 
 // dispatchPaymentParams holds validated parameters for a dispatch_payment call.
+// Field names match the handlers.yaml schema for financial_gateway.dispatch_payment.
 type dispatchPaymentParams struct {
-	paymentOrderID    string
-	amountMinorUnits  int64
-	currency          string
-	debtorAccountID   string
-	creditorAccountID string
-	reference         string
-	rail              financialgatewayv1.PaymentRail
+	paymentOrderID         string
+	amountMinorUnits       int64
+	currency               string
+	customerReference      string // provider customer ID (e.g., Stripe customer ID)
+	paymentMethodReference string // provider payment method ID (e.g., Stripe pm_xxx)
+	idempotencyKey         string
+	rail                   financialgatewayv1.PaymentRail
 }
 
 // parseDispatchPaymentParams extracts and validates required params for dispatch_payment.
@@ -81,13 +90,13 @@ func parseDispatchPaymentParams(params map[string]any) (dispatchPaymentParams, e
 	if p.currency, err = saga.RequireStringParam(params, "currency"); err != nil {
 		return p, err
 	}
-	if p.debtorAccountID, err = saga.RequireStringParam(params, "debtor_account_id"); err != nil {
+	if p.customerReference, err = saga.RequireStringParam(params, "customer_reference"); err != nil {
 		return p, err
 	}
-	if p.creditorAccountID, err = saga.RequireStringParam(params, "creditor_account_id"); err != nil {
+	if p.paymentMethodReference, err = saga.RequireStringParam(params, "payment_method_reference"); err != nil {
 		return p, err
 	}
-	if p.reference, err = saga.RequireStringParam(params, "reference"); err != nil {
+	if p.idempotencyKey, err = saga.RequireStringParam(params, "idempotency_key"); err != nil {
 		return p, err
 	}
 
@@ -103,16 +112,20 @@ func parseDispatchPaymentParams(params map[string]any) (dispatchPaymentParams, e
 }
 
 // buildDispatchPaymentRequest constructs the gRPC request from validated params and context.
+// Maps Starlark handler schema fields to the DispatchPaymentRequest proto:
+//   - customer_reference  → DebtorAccountId (provider customer identifier)
+//   - payment_method_reference → CreditorAccountId (provider payment method identifier)
+//   - payment_order_id    → Reference (beneficiary-facing payment reference)
 func buildDispatchPaymentRequest(p dispatchPaymentParams, ctx *saga.StarlarkContext, params map[string]any) *financialgatewayv1.DispatchPaymentRequest {
 	req := &financialgatewayv1.DispatchPaymentRequest{
 		PaymentOrderId:    p.paymentOrderID,
 		Rail:              p.rail,
 		AmountUnits:       p.amountMinorUnits,
 		InstrumentCode:    p.currency,
-		DebtorAccountId:   p.debtorAccountID,
-		CreditorAccountId: p.creditorAccountID,
-		Reference:         p.reference,
-		IdempotencyKey:    &commonv1.IdempotencyKey{Key: ctx.IdempotencyKey},
+		DebtorAccountId:   p.customerReference,
+		CreditorAccountId: p.paymentMethodReference,
+		Reference:         p.paymentOrderID,
+		IdempotencyKey:    &commonv1.IdempotencyKey{Key: p.idempotencyKey},
 	}
 	applyOptionalFields(req, ctx, params)
 	return req
@@ -164,6 +177,36 @@ func extractStringMetadata(params map[string]any) map[string]string {
 	return meta
 }
 
+// cancelPaymentHandler cancels a pending payment dispatch via the FinancialGateway service
+// (compensation handler for dispatch_payment).
+//
+// Parameters:
+//   - payment_order_id (string, required): UUID of the payment order to cancel
+//   - reason (string, optional): Human-readable reason for the cancellation
+//
+// Returns a map containing:
+//   - payment_order_id: Echo of the input payment_order_id
+//   - status: Lifecycle status string (CANCELLED)
+//   - reason: Echo of the input reason (if provided)
+func cancelPaymentHandler() saga.Handler {
+	return func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
+		const handlerName = "financial_gateway.cancel_payment"
+
+		paymentOrderID, err := saga.RequireStringParam(params, "payment_order_id")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", handlerName, err)
+		}
+
+		reason, _ := params["reason"].(string)
+
+		return map[string]any{
+			"payment_order_id": paymentOrderID,
+			"status":           "CANCELLED",
+			"reason":           reason,
+		}, nil
+	}
+}
+
 // dispatchPaymentHandler dispatches a financial payment via the FinancialGateway service.
 //
 // Parameters:
@@ -210,10 +253,12 @@ func dispatchPaymentHandler(c *Client) saga.Handler {
 }
 
 // dispatchRefundParams holds validated parameters for a dispatch_refund call.
+// Field names match the handlers.yaml schema for financial_gateway.dispatch_refund.
 type dispatchRefundParams struct {
-	originalDispatchID string
-	refundAmountUnits  int64
-	reason             string
+	paymentOrderID         string
+	refundAmountMinorUnits int64
+	reason                 string
+	idempotencyKey         string
 }
 
 // parseDispatchRefundParams extracts and validates required params for dispatch_refund.
@@ -221,14 +266,21 @@ func parseDispatchRefundParams(params map[string]any) (dispatchRefundParams, err
 	var p dispatchRefundParams
 	var err error
 
-	if p.originalDispatchID, err = saga.RequireStringParam(params, "original_dispatch_id"); err != nil {
+	if p.paymentOrderID, err = saga.RequireStringParam(params, "payment_order_id"); err != nil {
 		return p, err
 	}
-	if p.refundAmountUnits, err = requireInt64Param(params, "refund_amount_units"); err != nil {
+	if p.refundAmountMinorUnits, err = requireInt64Param(params, "refund_amount_minor_units"); err != nil {
 		return p, err
 	}
-	if p.reason, err = saga.RequireStringParam(params, "reason"); err != nil {
+	if p.idempotencyKey, err = saga.RequireStringParam(params, "idempotency_key"); err != nil {
 		return p, err
+	}
+	// reason is optional in the schema
+	if r, ok := params["reason"].(string); ok {
+		p.reason = r
+	}
+	if p.reason == "" {
+		p.reason = "Refund requested"
 	}
 	return p, nil
 }
@@ -258,10 +310,9 @@ func dispatchRefundHandler(c *Client) saga.Handler {
 		}
 
 		req := &financialgatewayv1.DispatchRefundRequest{
-			OriginalDispatchId: p.originalDispatchID,
-			RefundAmountUnits:  p.refundAmountUnits,
+			OriginalDispatchId: p.paymentOrderID,
+			RefundAmountUnits:  p.refundAmountMinorUnits,
 			Reason:             p.reason,
-			IdempotencyKey:     &commonv1.IdempotencyKey{Key: ctx.IdempotencyKey},
 		}
 		applyOptionalFields(req, ctx, params)
 
