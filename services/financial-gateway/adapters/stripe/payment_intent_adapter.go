@@ -26,23 +26,23 @@ var (
 var (
 	stripePaymentTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "stripe_gateway_payment_total",
-			Help: "Total number of Stripe PaymentIntent creation attempts",
+			Name: "financial_gateway_stripe_payment_total",
+			Help: "Total number of Stripe PaymentIntent creation attempts via financial-gateway",
 		},
 		[]string{"status", "currency"},
 	)
 	stripePaymentDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "stripe_gateway_payment_duration_seconds",
-			Help:    "Duration of Stripe PaymentIntent creation in seconds",
+			Name:    "financial_gateway_stripe_payment_duration_seconds",
+			Help:    "Duration of Stripe PaymentIntent creation via financial-gateway in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"status"},
 	)
 	stripePaymentErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "stripe_gateway_payment_errors_total",
-			Help: "Total number of Stripe PaymentIntent errors by type",
+			Name: "financial_gateway_stripe_payment_errors_total",
+			Help: "Total number of Stripe PaymentIntent errors via financial-gateway by type",
 		},
 		[]string{"error_type"},
 	)
