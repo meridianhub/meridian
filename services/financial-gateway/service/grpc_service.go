@@ -3,7 +3,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"os"
 
@@ -11,9 +10,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-// ErrLoggerNil is returned when a nil logger is provided to a constructor.
-var ErrLoggerNil = errors.New("logger cannot be nil")
 
 // FinancialGatewayService implements FinancialGatewayServiceServer.
 // All RPCs return codes.Unimplemented until the Stripe adapter is wired in task 5.

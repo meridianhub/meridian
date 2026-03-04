@@ -147,7 +147,7 @@ func run(logger *slog.Logger) error {
 
 // parseLogLevel converts a string log level to slog.Level.
 func parseLogLevel(levelStr string) slog.Level {
-	switch strings.ToLower(levelStr) {
+	switch strings.ToLower(strings.TrimSpace(levelStr)) {
 	case "debug":
 		return slog.LevelDebug
 	case "warn", "warning":

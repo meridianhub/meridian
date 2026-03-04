@@ -80,23 +80,53 @@ func RecordDispatchDuration(tenant, rail string, duration time.Duration) {
 	dispatchDuration.WithLabelValues(tenant, rail).Observe(duration.Seconds())
 }
 
+// knownDispatchOutcomes is the set of valid outcome label values.
+// Any value outside this set is mapped to "unknown" to prevent cardinality blowup.
+var knownDispatchOutcomes = map[string]struct{}{
+	DispatchOutcomeSuccess:     {},
+	DispatchOutcomeRetry:       {},
+	DispatchOutcomeFailure:     {},
+	DispatchOutcomeCircuitOpen: {},
+}
+
+// knownCircuitStates is the set of valid circuit breaker state label values.
+var knownCircuitStates = []string{"closed", "half_open", "open"}
+
 // RecordDispatchAttempt increments the dispatch attempts counter.
-// outcome should be one of the DispatchOutcome* constants.
+// outcome must be one of the DispatchOutcome* constants; unknown values are recorded as "unknown".
 func RecordDispatchAttempt(tenant, rail, outcome string) {
+	if _, ok := knownDispatchOutcomes[outcome]; !ok {
+		outcome = "unknown"
+	}
 	dispatchAttemptsTotal.WithLabelValues(tenant, rail, outcome).Inc()
 }
 
 // RecordCircuitBreakerState updates the gauge for a specific provider's circuit breaker state.
-// Resets all states before setting the active one to avoid stale time series.
+// Resets all known states before setting the active one to guarantee the one-hot invariant.
+// Unknown state values are silently ignored to prevent unbounded label cardinality.
 func RecordCircuitBreakerState(tenant, rail, state string) {
-	circuitBreakerState.WithLabelValues(tenant, rail, "closed").Set(0)
-	circuitBreakerState.WithLabelValues(tenant, rail, "half_open").Set(0)
-	circuitBreakerState.WithLabelValues(tenant, rail, "open").Set(0)
+	valid := false
+	for _, s := range knownCircuitStates {
+		if s == state {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return
+	}
+	for _, s := range knownCircuitStates {
+		circuitBreakerState.WithLabelValues(tenant, rail, s).Set(0)
+	}
 	circuitBreakerState.WithLabelValues(tenant, rail, state).Set(1)
 }
 
 // SetActiveDispatches sets the gauge for dispatches currently in a given status.
+// count is clamped to 0 if negative to prevent invalid operational signals.
 // Call this after each polling cycle with the current count per status.
 func SetActiveDispatches(tenant, status string, count float64) {
+	if count < 0 {
+		count = 0
+	}
 	activeDispatches.WithLabelValues(tenant, status).Set(count)
 }
