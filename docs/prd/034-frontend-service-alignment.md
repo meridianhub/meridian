@@ -16,7 +16,8 @@ This makes it difficult to:
 1. **Find what to update** when a service API changes
 2. **Reuse data-fetching logic** across pages calling the
    same service
-3. **Develop and test components in isolation**
+3. **Discover available components** programmatically
+   (for AI-assisted development or tenant configuration)
 4. **Offer tenant-specific UI experiences** (branding,
    feature visibility, layout)
 5. **Distinguish staff operations views from customer-facing
@@ -46,10 +47,14 @@ The frontend should:
   statements) using the same component library but with a
   different shell and reduced scope
 
-The component library (via Storybook) becomes the catalogue
-of building blocks. Storybook serves two audiences:
-developers building features, and tenant administrators
-previewing what's available to configure.
+Components are described by a **component registry** - a
+structured JSON index following the shadcn/ui registry
+pattern. Each component has machine-readable metadata
+(name, props, dependencies, feature module). This serves
+two purposes: developers discover what's available without
+running a separate tool, and AI assistants can query the
+registry to generate or modify UI configurations
+programmatically.
 
 ### Runtime, Not Deployable
 
@@ -84,8 +89,9 @@ feature visibility + layout preferences.
    backend services
 2. Extract **service-aligned data hooks** to replace inline
    query construction
-3. Set up **Storybook** as a component catalogue and
-   development environment
+3. Create a **component registry** (shadcn-style JSON index)
+   describing all shared and feature components with
+   machine-readable metadata
 4. Design the **tenant UI customisation** architecture
    (theme, feature toggles, layout)
 5. Establish a **service coverage map** linking RPCs to UI
@@ -101,6 +107,9 @@ feature visibility + layout preferences.
 - Adding new backend RPCs
 - Micro-frontend architecture (see Architectural Decision
   below)
+- Storybook or similar visual component browser (the
+  component registry replaces this need - see Architectural
+  Decision below)
 
 ## Architectural Decision: Centralised Frontend
 
@@ -126,6 +135,50 @@ If Meridian ever needs independent deployment of UI modules
 migration from feature modules to micro-frontends. The
 feature module structure makes that migration easier, not
 harder.
+
+## Architectural Decision: Component Registry Over Storybook
+
+**Decision**: Use a structured JSON component registry
+(shadcn/ui registry pattern) instead of Storybook for
+component cataloguing and discovery.
+
+**Context**: The original PRD proposed Storybook as a
+component catalogue serving developers and tenant
+administrators. On review, Meridian's primary component
+consumers are AI assistants configuring tenant economies
+and developers navigating feature modules - both better
+served by structured, queryable metadata than by a
+rendered visual browser.
+
+**Rationale**:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Storybook | Visual preview, theme testing, established ecosystem | Requires running dev server, JS runtime for introspection, not AI-navigable without experimental MCP plugins |
+| Component Registry (shadcn model) | Static JSON, trivially machine-readable, AI-native, no runtime, composable | No visual preview (mitigated by dev-mode theme panel + running the app) |
+
+**What the registry provides that Storybook does not:**
+
+- **Static indexing**: `jq`, `grep`, or any JSON parser can
+  query the registry. No Node.js runtime needed.
+- **AI-native**: LLMs consume JSON trivially. Storybook
+  requires AST parsing of executable JavaScript or
+  experimental MCP plugins that need a running dev server.
+- **Composability metadata**: Components declare their
+  feature module, dependencies, and tenant-configurable
+  props as structured data.
+- **Consistent with Meridian's philosophy**: The Economy
+  Cookbook (PRD-035) uses the same registry pattern for
+  manifest patterns. One discovery model for both UI
+  components and business configuration.
+
+**What Storybook provides that the registry does not:**
+
+- **Visual preview**: Mitigated by feature module structure
+  (easy to navigate to any component in the running app)
+  and a dev-mode theme preview panel.
+- **Interaction testing**: Mitigated by existing E2E tests
+  and unit tests per feature module.
 
 ## Current State
 
@@ -179,8 +232,9 @@ src/
    `CELEditor`, `SagaTimeline`, and
    `CreateValuationFeatureDialog` live together despite
    serving different services.
-4. **No visual testing**: Component changes require running
-   the full app.
+4. **No component metadata**: No structured way to discover
+   what components exist, what props they take, or which
+   feature module they belong to.
 5. **No tenant customisation**: Every tenant sees the same
    UI.
 
@@ -230,6 +284,9 @@ src/
 │   ├── breadcrumbs.tsx
 │   ├── time-display.tsx
 │   └── handler-reference.tsx
+│
+├── registry/                   # Component registry
+│   └── registry.json           # shadcn-style component index
 │
 └── App.tsx                     # Route definitions
 ```
@@ -304,35 +361,71 @@ it a cross-cutting concern. The `features/audit/` module owns
 the dedicated `/audit-log` page but the reusable component
 stays in shared.
 
-### Storybook
+### Component Registry
 
-**Why Storybook matters for this project specifically:**
+A structured JSON index describing every shared and feature
+component. Follows the shadcn/ui `registry-item.json` schema
+pattern, adapted for Meridian's needs.
 
-1. **Component catalogue**: When building tenant-customisable
-   UI, you need a visual inventory of what's available.
-   Storybook is that inventory.
-2. **Theme testing**: Storybook's theme decorator lets you
-   preview components under different tenant themes without
-   running the full app.
-3. **Feature flag testing**: Stories can render components
-   with different feature toggle states to verify
-   conditional rendering.
-4. **Staff vs customer views**: Stories can show the same
-   data component in "operations" vs "customer portal"
-   contexts.
-5. **Design review**: PRs that change components include
-   Storybook previews (Chromatic or similar), so reviewers
-   see visual impact without pulling the branch.
+**Registry entry format:**
 
-**Setup:**
+```json
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "data-table",
+  "type": "registry:ui",
+  "title": "Data Table",
+  "description": "Sortable, filterable table with pagination. Used across all list pages.",
+  "registryDependencies": ["status-badge", "entity-link"],
+  "categories": ["shared", "layout"],
+  "meta": {
+    "feature_module": "shared",
+    "tenant_configurable": true,
+    "configurable_props": ["visible_columns", "default_sort"],
+    "used_by": ["accounts", "payments", "ledger", "positions", "reconciliation"]
+  },
+  "files": [
+    {
+      "path": "shared/data-table.tsx",
+      "type": "registry:ui"
+    }
+  ]
+}
+```
 
-- Storybook 8.x with `@storybook/react-vite` (matches
-  build tool)
-- MSW addon (already using MSW in tests) for realistic
-  API data
-- a11y addon for accessibility auditing
-- Stories colocated with components:
-  `data-table.stories.tsx` next to `data-table.tsx`
+**Registry index** (`src/registry/registry.json`):
+
+```json
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "meridian-console",
+  "homepage": "https://github.com/meridianhub/meridian",
+  "items": [
+    { "name": "data-table", "type": "registry:ui", "title": "Data Table" },
+    { "name": "money-display", "type": "registry:ui", "title": "Money Display" },
+    { "name": "account-summary-card", "type": "registry:component", "title": "Account Summary Card" }
+  ]
+}
+```
+
+**What this enables:**
+
+- **AI-assisted development**: An AI assistant can query the
+  registry to understand what components exist, what props
+  they accept, and which feature modules use them - without
+  parsing TypeScript source.
+- **Tenant layout validation**: When a tenant configures
+  dashboard widgets, the registry validates component names
+  at config write time.
+- **Service coverage**: The registry's `meta.used_by` field
+  maps components to feature modules, supplementing the
+  RPC-to-UI coverage script.
+- **Component dependency tracking**: `registryDependencies`
+  makes component relationships explicit.
+- **Consistent pattern**: The Economy Cookbook (PRD-035)
+  uses the same registry format for manifest patterns.
+  One discovery model across both UI and business
+  configuration.
 
 ### Tenant UI Customisation Architecture
 
@@ -439,11 +532,11 @@ Dashboard reads widget list, `DataTable` reads column/sort
 defaults. Tenants change layout, refresh, done.
 
 **Component validation**: Widget component names are
-validated against a registry of allowed components per
-context (staff/customer). The registry maps string names to
-lazy-loaded component imports:
+validated against the component registry. The registry is
+the source of truth for valid component names:
 
 ```typescript
+// Generated from registry.json at build time
 const STAFF_DASHBOARD_WIDGETS: Record<string, () => Promise<ComponentType>> = {
   AccountSummaryCard: () => import('@/features/accounts/...'),
   RecentPayments: () => import('@/features/payments/...'),
@@ -454,7 +547,8 @@ Validation occurs at two points:
 
 - **Config write time** (manifest apply or tenant entity
   update): reject configurations referencing unknown
-  component names with a descriptive error
+  component names with a descriptive error. The component
+  registry is the source of truth for valid names.
 - **Render time**: skip unresolvable components with a
   warning log, render remaining widgets normally
 
@@ -529,19 +623,25 @@ changes naturally prompt UI parity discussion.
 - Update all imports
 - Verify no broken references
 
-### Phase 4: Storybook
+### Phase 4: Component Registry
 
-- Install Storybook 8 with Vite builder
-- Write stories for shared components
-- Write stories for feature-specific components
-- Add MSW integration for page-level stories
-- CI job to build Storybook
+- Create `src/registry/registry.json` with shadcn-style
+  schema
+- Add entries for all shared components (DataTable,
+  MoneyDisplay, etc.) with metadata: feature module,
+  tenant-configurable props, dependencies
+- Add entries for feature-specific components with metadata
+- Validate widget component names in tenant config against
+  registry at config write time
+- Add a dev-mode theme preview panel: a collapsible sidebar
+  that lets developers switch CSS variable overrides
+  without restarting the app
 
 ### Phase 5: Tenant Theme Foundation
 
 - CSS variable override system from tenant config
 - Tenant logo/branding in AppShell
-- Theme preview in Storybook
+- Dev-mode theme preview panel wired to tenant config
 
 ### Phase 6: Feature Visibility
 
@@ -569,12 +669,7 @@ changes naturally prompt UI parity discussion.
    tree-shaking. Recommendation: barrels for page exports
    (needed by App.tsx), direct imports for everything else.
 
-3. **Storybook hosting**: Chromatic (paid, best
-   integration), GitHub Pages (free, manual), or dev-only
-   (`npm run storybook`)? Start with dev-only, evaluate
-   Chromatic when tenant admins need a preview.
-
-4. **Tenant UI config location**: The `ui:` block shown in
+3. **Tenant UI config location**: The `ui:` block shown in
    the customisation section needs a home. Options:
    - **Manifest YAML** (alongside instruments, sagas) -
      consistent with config-as-code, versioned, auditable
@@ -584,24 +679,33 @@ changes naturally prompt UI parity discussion.
      manifest, cosmetic config (theme, logo) on tenant
      entity
 
-5. **Customer portal timeline**: Is this near-term or
+4. **Customer portal timeline**: Is this near-term or
    future? The architecture supports it regardless (same
    SPA, different shell based on JWT lens), but it affects
    investment in Layer 4 now vs later.
 
-6. **Tenant asset backend storage**: The gateway serves
+5. **Tenant asset backend storage**: The gateway serves
    assets via `/tenant-assets/:slug/` (per security
    requirements above). The open question is backend
    storage: local filesystem (dev/demo), object storage
    (S3/GCS) for production? Is a CDN layer needed?
 
+6. **Registry scope**: Should the component registry
+   describe only tenant-configurable components (dashboard
+   widgets, table columns), or all components including
+   internal-only ones? Broader scope is more useful for AI
+   development assistance; narrower scope is easier to
+   maintain.
+
 ## Success Criteria
 
 1. Every page lives inside `features/<service>/pages/`
 2. Data fetching uses feature hooks, not inline `useQuery()`
-3. Storybook builds and renders all shared + feature
-   components
+3. Component registry describes all shared and feature
+   components with machine-readable metadata
 4. A tenant can apply custom branding (logo, primary colour)
    via configuration at runtime
-5. All existing E2E tests pass
-6. No visual regressions
+5. Widget component names in tenant config are validated
+   against the component registry
+6. All existing E2E tests pass
+7. No visual regressions
