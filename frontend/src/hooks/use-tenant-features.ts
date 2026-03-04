@@ -22,11 +22,12 @@ export function useTenantFeatures(): TenantFeaturesResult {
     const enabledFeatures = config.features?.enabled ?? [...ALL_FEATURES]
     const enabledSet = new Set<string>(enabledFeatures)
 
-    // Fall back to the first enabled feature if the configured default is not in the enabled list
+    // Fall back to the first enabled feature if the configured default is not in the enabled list.
+    // When no features are enabled at all, defaultFeature is an empty string (no valid default).
     const configuredDefault = config.features?.defaultFeature ?? 'dashboard'
     const defaultFeature = enabledSet.has(configuredDefault)
       ? configuredDefault
-      : (enabledFeatures[0] ?? 'dashboard')
+      : (enabledFeatures[0] ?? '')
 
     return {
       isFeatureEnabled: (feature: string) => enabledSet.has(feature),
