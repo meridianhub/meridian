@@ -101,6 +101,13 @@ type DomainEvent struct {
 	// Payload is the JSON-encoded event body. Gateway adapters decode this
 	// from the wire format (e.g., protobuf→JSON) before populating this field.
 	Payload []byte
+
+	// ChainDepth tracks how many saga-triggered events deep this event is in a
+	// causal chain. A depth of 0 means the event originated from an external
+	// source (e.g., a direct API call or sensor reading). Each time an event
+	// triggers a saga that publishes a new event, ChainDepth is incremented.
+	// This field is propagated via the "x-meridian-chain-depth" Kafka header.
+	ChainDepth int
 }
 
 // NewDomainEvent constructs a DomainEvent with a generated EventID and the Channel

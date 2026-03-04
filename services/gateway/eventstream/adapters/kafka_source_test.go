@@ -273,6 +273,128 @@ func TestRecordToDomainEvent(t *testing.T) {
 	})
 }
 
+func TestExtractChainDepth(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers []kgo.RecordHeader
+		want    int
+	}{
+		{
+			name:    "no chain depth header defaults to 0",
+			headers: nil,
+			want:    0,
+		},
+		{
+			name: "chain depth 0",
+			headers: []kgo.RecordHeader{
+				{Key: headerChainDepth, Value: []byte("0")},
+			},
+			want: 0,
+		},
+		{
+			name: "chain depth 3",
+			headers: []kgo.RecordHeader{
+				{Key: headerChainDepth, Value: []byte("3")},
+			},
+			want: 3,
+		},
+		{
+			name: "chain depth 8",
+			headers: []kgo.RecordHeader{
+				{Key: headerChainDepth, Value: []byte("8")},
+			},
+			want: 8,
+		},
+		{
+			name: "invalid non-numeric value defaults to 0",
+			headers: []kgo.RecordHeader{
+				{Key: headerChainDepth, Value: []byte("not-a-number")},
+			},
+			want: 0,
+		},
+		{
+			name: "negative value defaults to 0",
+			headers: []kgo.RecordHeader{
+				{Key: headerChainDepth, Value: []byte("-1")},
+			},
+			want: 0,
+		},
+		{
+			name: "empty value defaults to 0",
+			headers: []kgo.RecordHeader{
+				{Key: headerChainDepth, Value: []byte("")},
+			},
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			record := &kgo.Record{Headers: tt.headers}
+			got := extractChainDepth(record)
+			if got != tt.want {
+				t.Errorf("extractChainDepth() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIncrementChainDepth(t *testing.T) {
+	tests := []struct {
+		depth int
+		want  int
+	}{
+		{0, 1},
+		{1, 2},
+		{7, 8},
+		{99, 100},
+	}
+	for _, tt := range tests {
+		if got := incrementChainDepth(tt.depth); got != tt.want {
+			t.Errorf("incrementChainDepth(%d) = %d, want %d", tt.depth, got, tt.want)
+		}
+	}
+}
+
+func TestRecordToDomainEvent_ChainDepth(t *testing.T) {
+	src := &KafkaEventSource{logger: newDiscardLogger()}
+
+	t.Run("chain depth header extracted", func(t *testing.T) {
+		record := &kgo.Record{
+			Topic: "events.v1",
+			Headers: []kgo.RecordHeader{
+				{Key: tenant.TenantIDKey, Value: []byte("acme_bank")},
+				{Key: "event_type", Value: []byte("some.event")},
+				{Key: headerChainDepth, Value: []byte("5")},
+			},
+		}
+		event, err := src.recordToDomainEvent(record)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if event.ChainDepth != 5 {
+			t.Errorf("ChainDepth = %d, want 5", event.ChainDepth)
+		}
+	})
+
+	t.Run("missing chain depth header defaults to 0", func(t *testing.T) {
+		record := &kgo.Record{
+			Topic: "events.v1",
+			Headers: []kgo.RecordHeader{
+				{Key: tenant.TenantIDKey, Value: []byte("acme_bank")},
+				{Key: "event_type", Value: []byte("some.event")},
+			},
+		}
+		event, err := src.recordToDomainEvent(record)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if event.ChainDepth != 0 {
+			t.Errorf("ChainDepth = %d, want 0", event.ChainDepth)
+		}
+	})
+}
+
 // ─── integration tests (require Kafka testcontainer) ───────────────────────────
 
 func TestKafkaEventSource_Integration(t *testing.T) {

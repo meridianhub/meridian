@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ const (
 	headerAggregateID   = "aggregate_id"
 	headerCorrelationID = "correlation_id"
 	headerCausationID   = "causation_id"
+	headerChainDepth    = "x-meridian-chain-depth"
 
 	// ConsumerGroupID is the Kafka consumer group used by KafkaEventSource.
 	ConsumerGroupID = "ops-console-events"
@@ -184,6 +186,7 @@ func (s *KafkaEventSource) recordToDomainEvent(record *kgo.Record) (eventstream.
 	aggregateID := extractHeaderValue(record, headerAggregateID)
 	correlationID := extractHeaderValue(record, headerCorrelationID)
 	causationID := extractHeaderValue(record, headerCausationID)
+	chainDepth := extractChainDepth(record)
 
 	payload := encodePayload(record.Value)
 
@@ -221,6 +224,7 @@ func (s *KafkaEventSource) recordToDomainEvent(record *kgo.Record) (eventstream.
 	}
 	event.Channel = channel
 	event.Timestamp = ts.UTC()
+	event.ChainDepth = chainDepth
 
 	return event, nil
 }
@@ -242,6 +246,27 @@ func extractHeaderValue(record *kgo.Record, key string) string {
 		}
 	}
 	return ""
+}
+
+// extractChainDepth reads the x-meridian-chain-depth header from the Kafka record.
+// Returns 0 if the header is absent or cannot be parsed as an integer.
+func extractChainDepth(record *kgo.Record) int {
+	v := extractHeaderValue(record, headerChainDepth)
+	if v == "" {
+		return 0
+	}
+	depth, err := strconv.Atoi(v)
+	if err != nil || depth < 0 {
+		return 0
+	}
+	return depth
+}
+
+// incrementChainDepth returns depth+1 for use when publishing saga-triggered events.
+// It is exported so that saga dispatch components can propagate the chain depth
+// without importing kafka internals.
+func incrementChainDepth(depth int) int {
+	return depth + 1
 }
 
 // encodePayload converts raw bytes to a JSON-safe representation.
