@@ -907,4 +907,92 @@ For detailed validation documentation, see the [Saga Validation Guide](saga-vali
 - **[Saga Validation Guide](saga-validation.md)** - Validation workflow, error interpretation, and monitoring
 - **[Saga Handlers Schema](../saga-handlers.schema.json)** - Available service modules and handlers
 - **[Saga Service Catalog](../saga-service-catalog.md)** - Service module documentation
+
+---
+
+## Event-Triggered Saga Patterns
+
+Sagas triggered by the `event:` prefix receive their input from a Kafka event. The `input_data`
+dictionary has a nested structure compared to API-triggered sagas.
+
+### Input Data Access
+
+```python
+def execute():
+    ctx = input_data
+
+    # Standard headers (same as all trigger types)
+    correlation_id = ctx["correlation_id"]
+
+    # Event payload fields are nested under "event"
+    account_id       = ctx["event"]["account_id"]
+    instrument_code  = ctx["event"]["instrument_code"]
+    direction        = ctx["event"]["direction"]
+
+    # Multi-asset amount
+    amount = Decimal(ctx["event"]["instrument_amount"]["amount"])
+
+    # Kafka metadata headers (for advanced use)
+    chain_depth = int(ctx["metadata"].get("x-meridian-chain-depth", "0"))
+```
+
+### Chain Termination Pattern
+
+Event-triggered sagas create positions that emit new events. Prevent infinite loops by writing
+CEL filters that exclude the saga's own output:
+
+```python
+# If this saga creates GBP positions, the filter must exclude GBP events:
+# trigger: "event:position-keeping.transaction-captured.v1"
+# filter:  "event.instrument_code != 'GBP' && event.direction == 'DEBIT'"
+#
+# The saga then handles kWh/GPU_HOUR/GOLD events but NOT GBP events it creates.
+```
+
+### Idempotency Check Pattern
+
+Kafka guarantees at-least-once delivery. Event-triggered sagas must check whether work has
+already been done:
+
+```python
+def execute():
+    ctx = input_data
+    correlation_id = ctx["correlation_id"]
+
+    # Always check before doing work
+    step(name="check_idempotency")
+    existing = position_keeping.query_logs(
+        correlation_id=correlation_id,
+        instrument_code="GBP",
+        account_id=settlement_account_id,
+    )
+
+    if existing.count > 0:
+        return {"status": "ALREADY_PROCESSED", "correlation_id": correlation_id}
+
+    # Proceed with actual work only if not already done
+```
+
+### Entity Graph Resolution Pattern
+
+The event carries only the fields published by the producer. Resolve business data via service
+module calls — do not embed computed values in the event payload:
+
+```python
+def execute():
+    ctx = input_data
+    account_id = ctx["event"]["account_id"]  # From event
+
+    # Resolve business data from entity graph (not from event)
+    step(name="lookup_account")
+    account = reference_data.get_account(id=account_id)
+    billing_account_id = account.metadata["billing_account_id"]  # From entity graph
+
+    step(name="lookup_account_type")
+    account_type = reference_data.get_account_type(code=account.account_type_code)
+    conversion_method = account_type.default_conversion_method_id
+```
+
+For complete event-triggered saga documentation, see **[Event-Triggered Sagas](../skills/event-triggered-sagas.md)**.
+
 - **[ADR-0028: Starlark Saga & CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)** - Architecture decision

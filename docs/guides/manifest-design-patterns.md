@@ -557,3 +557,84 @@ When guiding a tenant through economy design, follow this sequence:
 
 This sequence maps directly to the manifest structure and can be driven by
 conversational AI that asks the right questions at each step.
+
+---
+
+## Event-Triggered Saga Pattern
+
+**When to use:** Any saga that should fire reactively when a Kafka event arrives, without requiring a
+user-initiated API call or a scheduled job.
+
+**Reference examples:**
+
+<!-- markdownlint-disable MD013 -->
+- [`valuation_on_capture.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/valuation_on_capture.star) — Spot rate valuation on precious metals
+- [`kyc_on_party.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/kyc_on_party.star) — Compliance marker on party creation
+<!-- markdownlint-enable MD013 -->
+
+**Manifest definition:**
+
+```yaml
+saga_definitions:
+  - name: kwh_valuation
+    trigger: "event:position-keeping.transaction-captured.v1"
+    filter: "event.instrument_code == 'KWH' && event.direction == 'DEBIT'"
+    script: |
+      kwh_valuation_saga = saga(name="kwh_valuation")
+
+      def execute():
+          ctx = input_data
+          correlation_id = ctx["correlation_id"]
+          account_id     = ctx["event"]["account_id"]
+          amount         = Decimal(ctx["event"]["instrument_amount"]["amount"])
+
+          # Resolve billing account from entity graph (thin event pattern)
+          step(name="lookup_account")
+          account = reference_data.get_account(id=account_id)
+          billing_account_id = account.metadata["billing_account_id"]
+
+          # Idempotency check
+          step(name="check_idempotency")
+          existing = position_keeping.query_logs(
+              correlation_id=correlation_id,
+              instrument_code="GBP",
+              account_id=billing_account_id,
+          )
+          if existing.count > 0:
+              return {"status": "ALREADY_VALUED"}
+
+          # Compute and book GBP charge
+          step(name="compute_valuation")
+          account_type = reference_data.get_account_type(code=account.account_type_code)
+          valuation = valuation_engine.compute(
+              method_id=account_type.default_conversion_method_id,
+              amount=amount,
+              from_instrument="KWH",
+              to_instrument="GBP",
+          )
+
+          step(name="book_charge")
+          position_keeping.initiate_log(
+              account_id=billing_account_id,
+              instrument_code="GBP",
+              direction="DEBIT",
+              amount=valuation.amount,
+              correlation_id=correlation_id,
+          )
+
+          return {"status": "VALUED", "gbp_amount": str(valuation.amount)}
+
+      output = execute()
+```
+
+**Key design decisions:**
+
+- **Chain termination:** The CEL filter `instrument_code == 'KWH'` excludes GBP positions created by
+  this saga from re-triggering it. The saga will never fire on its own output.
+- **Thin event:** Only `account_id` and `amount` are taken from the event. Billing account and
+  conversion method are resolved from the entity graph at runtime — not hardcoded in the manifest.
+- **Idempotency:** Checks for an existing GBP position before proceeding. Safe against Kafka
+  at-least-once redelivery.
+
+**See also:** [ADR-0033: Event-Triggered Sagas](../adr/0033-event-triggered-sagas.md) and
+[Event-Triggered Sagas Skill](../skills/event-triggered-sagas.md).

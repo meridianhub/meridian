@@ -32,6 +32,8 @@ scenarios.
   pricing updates, and rate management
 - **[troubleshooting-saga-handlers.md](troubleshooting-saga-handlers.md)** - Debugging Starlark saga
   scripts, handler errors, and execution failures
+- **[event-router.md](event-router.md)** - Event-router service operations: dispatching Kafka events
+  to tenant sagas, CEL filter troubleshooting, chain depth incidents
 
 ## Runbook Structure
 

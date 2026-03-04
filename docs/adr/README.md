@@ -80,6 +80,8 @@ Architectural Decision Records) format.
 | [ADR-0031](0031-getbalance-nil-guard-retention.md) | Retain Nil Guard on PositionKeepingClient in GetBalance | Accepted | 2026-02-13 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0032](0032-vanguard-json-transcoding-gateway.md) | Vanguard HTTP/JSON Transcoding Gateway | Accepted | 2026-02-20 |
+<!-- markdownlint-disable-next-line MD013 -->
+| [ADR-0033](0033-event-triggered-sagas.md) | Event-Triggered Sagas | Accepted | 2026-03-04 |
 
 ## Architecture Decision Relationships
 
@@ -147,6 +149,10 @@ graph LR
 ### API Gateway & Protocols
 
 - [ADR-0032](0032-vanguard-json-transcoding-gateway.md) - Vanguard HTTP/JSON Transcoding Gateway
+
+### Event-Driven Architecture
+
+- [ADR-0033](0033-event-triggered-sagas.md) - Event-Triggered Sagas
 
 ### Multi-Tenancy
 
