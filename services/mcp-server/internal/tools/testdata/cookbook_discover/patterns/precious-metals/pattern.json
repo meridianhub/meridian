@@ -1,0 +1,17 @@
+{
+    "name": "precious-metals",
+    "type": "registry:pattern",
+    "title": "Precious Metals",
+    "description": "Tracks gold, silver, and platinum as financial instruments.",
+    "categories": ["commodities"],
+    "meta": {
+        "complexity": 3,
+        "industries": ["commodities", "banking"],
+        "provides": {
+            "instruments": ["XAU", "XAG"]
+        },
+        "requires": {
+            "instruments": ["XAU"]
+        }
+    }
+}
