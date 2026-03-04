@@ -323,7 +323,7 @@ keyed on `(sagaName, correlationID)`.
 
 ## Examples
 
-### Energy Billing: Single-Leg Valuation
+### Precious Metals: Spot Rate Settlement
 
 **File:** [`valuation_on_capture.star`](../../services/control-plane/internal/applier/testdata/tenant-saga-examples/valuation_on_capture.star)
 

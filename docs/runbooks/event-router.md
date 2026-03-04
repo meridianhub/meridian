@@ -56,7 +56,7 @@ evaluates registered CEL filters and triggers matching sagas.
 | `CONSUMER_GROUP_ID` | No | `event-router` | Consumer group ID for offset management |
 | `POSITION_KEEPING_ENDPOINT` | Yes | — | gRPC endpoint for Position Keeping (legacy, billing path) |
 | `TENANT_ZERO_ID` | Yes | — | UUID of the platform billing tenant |
-| `TENANT_ACCOUNT_MAPPING` | No | `{}` | JSON mapping of tenant UUIDs to billing account UUIDs |
+| `TENANT_ACCOUNT_MAPPING` | No | `""` | JSON mapping of tenant UUIDs to billing account UUIDs |
 | `HTTP_PORT` | No | `8080` | HTTP port for health checks and metrics |
 | `ENABLE_MDS_OUTPUT` | No | `true` | Feature flag for Market Data Service output |
 | `MDS_SERVICE_ADDR` | No | — | gRPC address for Market Data Service |
@@ -199,8 +199,10 @@ kubectl logs deployment/event-router | grep "trigger saga"
 
 ```bash
 # Via Meridian MCP: confirm saga exists and has event: trigger
-mcp__meridian__meridian_handlers_describe(trigger_prefix: "webhook")
-# Note: use the control-plane describe API to inspect active sagas
+mcp__meridian__meridian_handlers_describe(trigger_prefix: "api")
+# Review the output for sagas with trigger beginning "event:"
+# Note: the handlers_describe tool lists api/webhook/scheduled triggers;
+# use the control-plane describe API to inspect active saga definitions
 ```
 
 ---
@@ -245,12 +247,9 @@ mcp__meridian__meridian_manifest_plan(manifest: {...})
 mcp__meridian__meridian_manifest_apply(manifest: {...}, plan_hash: "...", applied_by: "operator@example.com")
 ```
 
-**Step 4:** If immediate relief is needed, temporarily increase `MAX_CHAIN_DEPTH` (not recommended for
-permanent use — fix the filter instead):
-
-```bash
-kubectl set env deployment/event-router MAX_CHAIN_DEPTH=20
-```
+**Step 4:** If immediate relief is needed, the maximum chain depth can be overridden via the
+`WithMaxChainDepth` option when constructing the `SagaDispatchHandler` (requires a code change and
+redeployment). This is not recommended as a permanent fix — correct the filter instead.
 
 ---
 
