@@ -9,7 +9,7 @@ vi.mock('@/api/context', () => ({
 }))
 
 // Mock CodeMirror editors to avoid JSDOM incompatibility
-vi.mock('@/components/shared/cel-editor', () => ({
+vi.mock('@/features/sagas/components/cel-editor', () => ({
   CELEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <textarea
       data-testid="cel-editor"

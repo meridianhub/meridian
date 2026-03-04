@@ -18,7 +18,7 @@ import { WithdrawDialog } from './withdraw-dialog'
 import { ControlDialog } from './control-dialog'
 import type { ControlAction } from './control-dialog'
 import { CreateLienDialog } from './create-lien-dialog'
-import { CreateValuationFeatureDialog } from '@/components/shared/create-valuation-feature-dialog'
+import { CreateValuationFeatureDialog } from '@/features/reference-data/components/create-valuation-feature-dialog'
 import type { AccountStatus as AccountStatusType, CurrentAccount } from './types'
 import type { AmountBlock } from '@/api/gen/meridian/current_account/v1/current_account_pb'
 
