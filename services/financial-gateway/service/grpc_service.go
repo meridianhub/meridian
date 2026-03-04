@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"time"
@@ -94,7 +95,7 @@ func (s *FinancialGatewayService) dispatchStripePayment(
 			"payment_order_id", req.GetPaymentOrderId(),
 			"error", err,
 		)
-		return nil, status.Errorf(codes.Internal, "stripe dispatch failed: %v", err)
+		return nil, mapStripeError(err)
 	}
 
 	dispatchID := uuid.New().String()
@@ -151,6 +152,22 @@ func (s *FinancialGatewayService) getStripeHealth() (*financialgatewayv1.GetProv
 		Message:       "circuit breaker state: " + cbState.String(),
 		LastCheckedAt: timestamppb.New(time.Now()),
 	}, nil
+}
+
+// mapStripeError maps adapter errors to appropriate gRPC status codes.
+func mapStripeError(err error) error {
+	switch {
+	case errors.Is(err, stripeadapter.ErrMissingStripeAccount):
+		return status.Error(codes.FailedPrecondition, "stripe connected account not configured")
+	case errors.Is(err, stripeadapter.ErrInvalidRequest):
+		return status.Error(codes.InvalidArgument, "invalid payment parameters")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "request canceled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
+	default:
+		return status.Error(codes.Internal, "stripe dispatch failed")
+	}
 }
 
 // mapCircuitBreakerHealth maps a gobreaker circuit breaker state to a proto ProviderHealth.

@@ -64,7 +64,8 @@ func TestPaymentIntentAdapter_DispatchPayment_Success(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
@@ -90,12 +91,13 @@ func TestPaymentIntentAdapter_DispatchPayment_WithPlatformFee(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{
 		PlatformFee: &PlatformFeeConfig{
 			Type:  PlatformFeeTypePercentage,
 			Value: decimal.NewFromFloat(2.5),
 		},
 	}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
@@ -132,7 +134,8 @@ func TestPaymentIntentAdapter_DispatchPayment_StatusMapping(t *testing.T) {
 				},
 			}
 
-			adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+			adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+			require.NoError(t, err)
 
 			ctx := tenantContext("tenant_a")
 			ctx = WithStripeAccount(ctx, "acct_tenant_a")
@@ -154,7 +157,8 @@ func TestPaymentIntentAdapter_DispatchPayment_CardError(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
@@ -179,7 +183,8 @@ func TestPaymentIntentAdapter_DispatchPayment_CardErrorWithPaymentIntent(t *test
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
@@ -199,11 +204,12 @@ func TestPaymentIntentAdapter_DispatchPayment_InvalidRequestError(t *testing.T) 
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
-	_, err := adapter.DispatchPayment(ctx, testDispatchRequest())
+	_, err = adapter.DispatchPayment(ctx, testDispatchRequest())
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidRequest))
 }
@@ -218,11 +224,12 @@ func TestPaymentIntentAdapter_DispatchPayment_APIError(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
-	_, err := adapter.DispatchPayment(ctx, testDispatchRequest())
+	_, err = adapter.DispatchPayment(ctx, testDispatchRequest())
 	require.Error(t, err, "API errors are transient and should be returned for retry")
 }
 
@@ -233,11 +240,12 @@ func TestPaymentIntentAdapter_DispatchPayment_NonStripeError(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
-	_, err := adapter.DispatchPayment(ctx, testDispatchRequest())
+	_, err = adapter.DispatchPayment(ctx, testDispatchRequest())
 	require.Error(t, err)
 }
 
@@ -251,11 +259,12 @@ func TestPaymentIntentAdapter_DispatchPayment_MissingStripeAccount(t *testing.T)
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	// No stripe account set in context
-	_, err := adapter.DispatchPayment(ctx, testDispatchRequest())
+	_, err = adapter.DispatchPayment(ctx, testDispatchRequest())
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrMissingStripeAccount))
 }
@@ -272,11 +281,12 @@ func TestPaymentIntentAdapter_DispatchPayment_CurrencyLowercase(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
-	_, err := adapter.DispatchPayment(ctx, testDispatchRequest())
+	_, err = adapter.DispatchPayment(ctx, testDispatchRequest())
 	require.NoError(t, err)
 }
 
@@ -293,11 +303,12 @@ func TestPaymentIntentAdapter_DispatchPayment_IdempotencyKey(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
-	_, err := adapter.DispatchPayment(ctx, testDispatchRequest())
+	_, err = adapter.DispatchPayment(ctx, testDispatchRequest())
 	require.NoError(t, err)
 }
 
@@ -308,11 +319,12 @@ func TestPaymentIntentAdapter_DispatchPayment_ContextCancelled(t *testing.T) {
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
-	_, err := adapter.DispatchPayment(ctx, testDispatchRequest())
+	_, err = adapter.DispatchPayment(ctx, testDispatchRequest())
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, context.Canceled))
 }
@@ -330,13 +342,20 @@ func TestPaymentIntentAdapter_DispatchPayment_MetadataPassthrough(t *testing.T) 
 		},
 	}
 
-	adapter := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	adapter, err := NewPaymentIntentAdapter(mock, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
 
 	req := testDispatchRequest()
 	req.Metadata = map[string]string{"foo": "bar"}
 
 	ctx := tenantContext("tenant_a")
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
-	_, err := adapter.DispatchPayment(ctx, req)
+	_, err = adapter.DispatchPayment(ctx, req)
 	require.NoError(t, err)
+}
+
+func TestNewPaymentIntentAdapter_NilCreator(t *testing.T) {
+	_, err := NewPaymentIntentAdapter(nil, PaymentIntentAdapterConfig{}, slog.Default())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNilCreator))
 }

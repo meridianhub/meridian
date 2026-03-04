@@ -19,6 +19,7 @@ import (
 var (
 	ErrMissingStripeAccount = errors.New("stripe connected account ID not found in context")
 	ErrInvalidRequest       = errors.New("invalid stripe request")
+	ErrNilCreator           = errors.New("payment intent creator must not be nil")
 )
 
 // Prometheus metrics for Stripe gateway operations.
@@ -99,7 +100,11 @@ type PaymentIntentAdapter struct {
 }
 
 // NewPaymentIntentAdapter creates a new Stripe payment intent adapter.
-func NewPaymentIntentAdapter(creator PaymentIntentCreator, config PaymentIntentAdapterConfig, logger *slog.Logger) *PaymentIntentAdapter {
+// Returns an error if creator is nil.
+func NewPaymentIntentAdapter(creator PaymentIntentCreator, config PaymentIntentAdapterConfig, logger *slog.Logger) (*PaymentIntentAdapter, error) {
+	if creator == nil {
+		return nil, ErrNilCreator
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -107,7 +112,7 @@ func NewPaymentIntentAdapter(creator PaymentIntentCreator, config PaymentIntentA
 		creator: creator,
 		config:  config,
 		logger:  logger,
-	}
+	}, nil
 }
 
 // DispatchPayment creates a Stripe PaymentIntent on the tenant's Connected Account.
@@ -139,8 +144,11 @@ func (a *PaymentIntentAdapter) DispatchPayment(ctx context.Context, req *financi
 		},
 	}
 
-	// Merge request metadata into Stripe metadata
+	// Merge request metadata into Stripe metadata, protecting reserved keys
 	for k, v := range req.GetMetadata() {
+		if k == "payment_order_id" || k == "tenant_id" {
+			continue
+		}
 		params.Metadata[k] = v
 	}
 

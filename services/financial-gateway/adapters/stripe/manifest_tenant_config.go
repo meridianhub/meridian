@@ -101,12 +101,17 @@ func (p *ManifestTenantConfigProvider) GetTenantConfig(tenantID string) (TenantC
 	return cfg, nil
 }
 
+// manifestFetchTimeout is the maximum time to wait for a control-plane manifest fetch.
+const manifestFetchTimeout = 10 * time.Second
+
 // fetchFromManifest calls GetCurrentManifest on the control-plane with the tenant's context
 // and extracts the Stripe Connect configuration from the payment_rails section.
 func (p *ManifestTenantConfigProvider) fetchFromManifest(tenantID string) (TenantConfig, error) {
-	// Set tenant ID in outgoing gRPC metadata
-	ctx := metadata.AppendToOutgoingContext(
-		context.Background(),
+	// Set tenant ID in outgoing gRPC metadata with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), manifestFetchTimeout)
+	defer cancel()
+	ctx = metadata.AppendToOutgoingContext(
+		ctx,
 		tenant.TenantIDKey, tenantID,
 	)
 
