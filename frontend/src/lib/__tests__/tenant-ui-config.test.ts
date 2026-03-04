@@ -103,6 +103,25 @@ describe("tenant-ui-config", () => {
       expect(() => validateTenantUIConfig(null)).toThrow()
       expect(() => validateTenantUIConfig(42)).toThrow()
     })
+
+    it("rejects unknown feature identifiers in enabled list", () => {
+      const config = {
+        features: {
+          enabled: ["dashboard", "acount"],  // typo: 'acount'
+        },
+      }
+      expect(() => validateTenantUIConfig(config)).toThrow()
+    })
+
+    it("rejects unknown feature identifier as defaultFeature", () => {
+      const config = {
+        features: {
+          enabled: ["dashboard"],
+          defaultFeature: "not-a-feature",
+        },
+      }
+      expect(() => validateTenantUIConfig(config)).toThrow()
+    })
   })
 
   describe("DEFAULT_UI_CONFIG", () => {

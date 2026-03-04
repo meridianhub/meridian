@@ -1,44 +1,6 @@
 import { z } from "zod"
 
-// TypeScript interfaces
-
-export interface TenantThemeConfig {
-  primaryColor: string
-  logoUrl?: string
-  faviconUrl?: string
-  fontFamily?: string
-}
-
-export interface TenantFeaturesConfig {
-  enabled: string[]
-  defaultFeature?: string
-}
-
-export interface DashboardWidget {
-  feature: string
-  component: string
-  position: number
-}
-
-export interface TableDefaults {
-  visibleColumns: string[]
-  defaultSort?: string
-}
-
-export interface TenantLayoutConfig {
-  dashboard: {
-    widgets: DashboardWidget[]
-  }
-  tableDefaults: Record<string, TableDefaults>
-}
-
-export interface TenantUIConfig {
-  theme?: TenantThemeConfig
-  features?: TenantFeaturesConfig
-  layout?: TenantLayoutConfig
-}
-
-// Default configuration with all features enabled
+// Feature list — single source of truth for valid feature identifiers
 
 export const ALL_FEATURES = [
   "dashboard",
@@ -60,12 +22,7 @@ export const ALL_FEATURES = [
   "mcp-config",
 ] as const
 
-export const DEFAULT_UI_CONFIG: TenantUIConfig = {
-  features: {
-    enabled: [...ALL_FEATURES],
-    defaultFeature: "dashboard",
-  },
-}
+export type FeatureId = (typeof ALL_FEATURES)[number]
 
 // Zod validation schemas
 
@@ -77,8 +34,8 @@ export const TenantThemeConfigSchema = z.object({
 })
 
 export const TenantFeaturesConfigSchema = z.object({
-  enabled: z.array(z.string()),
-  defaultFeature: z.string().optional(),
+  enabled: z.array(z.enum(ALL_FEATURES)),
+  defaultFeature: z.enum(ALL_FEATURES).optional(),
 })
 
 export const DashboardWidgetSchema = z.object({
@@ -104,6 +61,24 @@ export const TenantUIConfigSchema = z.object({
   features: TenantFeaturesConfigSchema.optional(),
   layout: TenantLayoutConfigSchema.optional(),
 })
+
+// TypeScript types derived from Zod schemas
+
+export type TenantThemeConfig = z.infer<typeof TenantThemeConfigSchema>
+export type TenantFeaturesConfig = z.infer<typeof TenantFeaturesConfigSchema>
+export type DashboardWidget = z.infer<typeof DashboardWidgetSchema>
+export type TableDefaults = z.infer<typeof TableDefaultsSchema>
+export type TenantLayoutConfig = z.infer<typeof TenantLayoutConfigSchema>
+export type TenantUIConfig = z.infer<typeof TenantUIConfigSchema>
+
+// Default configuration with all features enabled
+
+export const DEFAULT_UI_CONFIG: TenantUIConfig = {
+  features: {
+    enabled: [...ALL_FEATURES],
+    defaultFeature: "dashboard",
+  },
+}
 
 export function validateTenantUIConfig(data: unknown): TenantUIConfig {
   return TenantUIConfigSchema.parse(data)
