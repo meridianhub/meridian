@@ -48,6 +48,7 @@ import (
 	// Service-owned clients (standardized client packages from each service)
 	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
 	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+	financialgatewayclient "github.com/meridianhub/meridian/services/financial-gateway/client"
 	internalaccountclient "github.com/meridianhub/meridian/services/internal-account/client"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
 	positionkeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
@@ -166,10 +167,11 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create payment gateway
-	paymentGateway, err := createPaymentGateway(svcConfig, logger)
+	paymentGateway, gatewayCleanup, err := createPaymentGateway(svcConfig, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create payment gateway: %w", err)
 	}
+	defer gatewayCleanup()
 	logger.Info("payment gateway initialized")
 
 	// Load gateway account configuration
@@ -851,8 +853,9 @@ func createInternalAccountClient(namespace string, logger *slog.Logger, tracer *
 // The gateway is wrapped with circuit breaker, rate limiting, and retry logic.
 // Provider selection and API key validation are handled by ServiceConfig.Validate,
 // so this function assumes the config is already validated.
-func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, error) {
+func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, func(), error) {
 	var baseGateway gateway.PaymentGateway
+	cleanup := func() {}
 
 	switch svcConfig.PaymentGatewayProvider {
 	case gateway.ProviderStripe:
@@ -864,6 +867,17 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 		)
 		logger.Info("using stripe payment gateway")
 
+	case gateway.ProviderFinancialGateway:
+		fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
+			Target: svcConfig.FinancialGatewayAddr,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create financial-gateway gRPC client: %w", err)
+		}
+		cleanup = fgCleanup
+		baseGateway = gateway.NewFinancialGatewayClient(fgClient, logger)
+		logger.Info("using financial-gateway payment gateway", "addr", svcConfig.FinancialGatewayAddr)
+
 	case gateway.ProviderMock:
 		logger.Warn("using mock payment gateway")
 		baseGateway = gateway.New(gateway.Config{
@@ -874,7 +888,7 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 		})
 
 	default:
-		return nil, fmt.Errorf("%w: %q (valid: %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderMock)
+		return nil, nil, fmt.Errorf("%w: %q (valid: %q, %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderFinancialGateway, gateway.ProviderMock)
 	}
 
 	// Configure resilience settings from environment
@@ -908,7 +922,7 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 		"max_retries", resilientConfig.MaxRetries,
 	)
 
-	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig), nil
+	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig), cleanup, nil
 }
 
 // createRedisClient creates and validates a Redis client connection.
