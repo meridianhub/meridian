@@ -1,0 +1,135 @@
+# Event Router Saga Dispatch Alert Rules
+#
+# These alerts monitor the event-router's saga dispatch pipeline:
+# - Filter evaluation latency
+# - Chain depth limit violations
+# - Saga execution failures
+#
+# Metrics namespace: meridian_event_router_*
+
+groups:
+  - name: event_router_saga_dispatch
+    interval: 30s
+    rules:
+      # =============================================================================
+      # FILTER EVALUATION ALERTS
+      # =============================================================================
+
+      # High CEL filter error rate — sagas are being skipped due to evaluation errors.
+      # Filter errors indicate invalid saga filter expressions in the manifest.
+      - alert: EventRouterFilterErrorRateHigh
+        expr: |
+          (
+            sum(rate(meridian_event_router_filter_evaluation_errors_total[5m]))
+            / clamp_min(sum(rate(meridian_event_router_events_received_total[5m])), 0.0001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: event-router
+          category: saga_dispatch
+        annotations:
+          summary: "High CEL filter error rate in event-router"
+          description: |
+            CEL filter evaluation is failing at {{ $value | humanizePercentage }} of events.
+            Sagas with broken filters are being skipped silently.
+            Check saga definitions in the manifest for invalid CEL expressions.
+          runbook_url: "https://docs.meridian.io/runbooks/event-router-filter-errors"
+
+      # Elevated filter evaluation latency p99 — CEL expressions may be too complex.
+      - alert: EventRouterFilterLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, saga_name) (
+              rate(meridian_event_router_filter_evaluation_duration_seconds_bucket[5m])
+            )
+          ) > 0.010
+        for: 5m
+        labels:
+          severity: warning
+          service: event-router
+          category: performance
+        annotations:
+          summary: "High CEL filter evaluation latency (p99 > 10ms) for saga {{ $labels.saga_name }}"
+          description: |
+            CEL filter evaluation p99 latency is {{ $value | humanizeDuration }} for saga {{ $labels.saga_name }}.
+            CEL filters should complete in < 10ms. Sustained p99 above this threshold may indicate overly complex expressions.
+            Consider simplifying the filter or pre-computing expensive lookups.
+          runbook_url: "https://docs.meridian.io/runbooks/event-router-filter-latency"
+
+      # =============================================================================
+      # CHAIN DEPTH ALERTS
+      # =============================================================================
+
+      # Sustained chain depth violations — potential infinite saga loop.
+      # A small number of chain depth exceeded events is expected in normal operation.
+      # A sustained spike indicates a saga is triggering itself or forming a cycle.
+      - alert: EventRouterChainDepthSpikeDetected
+        expr: |
+          rate(meridian_event_router_chain_depth_exceeded_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          service: event-router
+          category: saga_dispatch
+        annotations:
+          summary: "Sustained saga chain depth limit violations in event-router"
+          description: |
+            Events are being dropped at {{ $value }} chain-depth-exceeded/second.
+            This may indicate an infinite saga chain loop where a saga is triggering itself.
+            Immediate investigation required to identify the cyclic saga dependency.
+          runbook_url: "https://docs.meridian.io/runbooks/event-router-chain-depth"
+
+      # =============================================================================
+      # SAGA EXECUTION FAILURE ALERTS
+      # =============================================================================
+
+      # Saga trigger failures — infrastructure-level failures prevent saga execution.
+      - alert: EventRouterSagaTriggerFailureRateHigh
+        expr: |
+          (
+            sum(rate(meridian_event_router_saga_trigger_failures_total[5m]))
+            / clamp_min(sum(rate(meridian_event_router_sagas_triggered_total[5m])), 0.0001)
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          service: event-router
+          category: saga_dispatch
+        annotations:
+          summary: "High saga trigger failure rate in event-router"
+          description: |
+            Saga trigger failures are at {{ $value | humanizePercentage }} of trigger attempts.
+            Events matching saga filters are failing to start saga execution.
+            Check saga-runner connectivity and gRPC health.
+          runbook_url: "https://docs.meridian.io/runbooks/event-router-saga-failures"
+
+  - name: event_router_saga_dispatch_slo
+    interval: 60s
+    rules:
+      # Record event routing rate for SLO dashboards.
+      - record: event_router:events_received:rate5m
+        expr: sum(rate(meridian_event_router_events_received_total[5m]))
+
+      # Record saga trigger success rate.
+      - record: event_router:sagas_triggered:rate5m
+        expr: sum(rate(meridian_event_router_sagas_triggered_total[5m]))
+
+      # Record filter evaluation p50/p95/p99 latency.
+      - record: event_router:filter_latency_p50:5m
+        expr: |
+          histogram_quantile(0.50,
+            sum by (le) (rate(meridian_event_router_filter_evaluation_duration_seconds_bucket[5m]))
+          )
+
+      - record: event_router:filter_latency_p95:5m
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(meridian_event_router_filter_evaluation_duration_seconds_bucket[5m]))
+          )
+
+      - record: event_router:filter_latency_p99:5m
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(meridian_event_router_filter_evaluation_duration_seconds_bucket[5m]))
+          )
