@@ -129,13 +129,21 @@ func buildDispatchPaymentRequest(p dispatchPaymentParams, ctx *saga.StarlarkCont
 	debtorAccountID := meta["debtor_account_id"]
 	creditorReference := meta["creditor_reference"]
 
+	// For Stripe charges the debtor account is charged (creditor == debtor).
+	// For bank-transfer rails (SWIFT, ACH, FEDNOW) the saga must supply a
+	// distinct creditor_account_id in metadata; fall back to debtor if absent.
+	creditorAccountID := meta["creditor_account_id"]
+	if creditorAccountID == "" {
+		creditorAccountID = debtorAccountID
+	}
+
 	req := &financialgatewayv1.DispatchPaymentRequest{
 		PaymentOrderId:    p.paymentOrderID,
 		Rail:              p.rail,
 		AmountUnits:       p.amountMinorUnits,
 		InstrumentCode:    p.currency,
 		DebtorAccountId:   debtorAccountID,
-		CreditorAccountId: debtorAccountID, // creditor is the same account for Stripe charges
+		CreditorAccountId: creditorAccountID,
 		Reference:         creditorReference,
 		IdempotencyKey:    &commonv1.IdempotencyKey{Key: p.idempotencyKey},
 		Metadata:          meta,
@@ -335,6 +343,9 @@ func dispatchRefundHandler(c *Client) saga.Handler {
 		}
 
 		req := &financialgatewayv1.DispatchRefundRequest{
+			// OriginalDispatchId is supplied as the payment_order_id from the saga context.
+			// The FinancialGateway service resolves the payment_order_id to the underlying
+			// dispatch UUID internally; callers do not need the internal dispatch ID.
 			OriginalDispatchId: p.paymentOrderID,
 			RefundAmountUnits:  p.refundAmountMinorUnits,
 			Reason:             p.reason,
