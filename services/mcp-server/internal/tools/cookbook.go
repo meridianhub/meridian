@@ -64,7 +64,7 @@ func buildCookbookListTool(cookbookFS fs.FS) Tool {
 				},
 				"category": map[string]interface{}{
 					"type":        "string",
-					"description": "Filter by category tag (e.g. \"payments\", \"energy\"). Case-insensitive substring match.",
+					"description": "Filter by category tag (e.g. \"payments\", \"energy\"). Case-insensitive exact match.",
 				},
 				"industry": map[string]interface{}{
 					"type":        "string",
