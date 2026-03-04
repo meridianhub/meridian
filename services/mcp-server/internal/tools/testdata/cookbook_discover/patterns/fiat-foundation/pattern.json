@@ -1,0 +1,14 @@
+{
+    "name": "fiat-foundation",
+    "type": "registry:pattern",
+    "title": "Fiat Foundation",
+    "description": "Establishes base GBP and USD instrument definitions for fiat currency operations.",
+    "categories": ["banking", "foundation"],
+    "meta": {
+        "complexity": 2,
+        "industries": ["banking", "fintech"],
+        "provides": {
+            "instruments": ["GBP", "USD"]
+        }
+    }
+}

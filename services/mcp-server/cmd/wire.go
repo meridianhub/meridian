@@ -54,6 +54,13 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 	// cookbook is not embedded in this build; in that case tools are silently skipped.
 	tools.RegisterCookbookTools(toolReg, cookbookFS)
 
+	// Cookbook discover tool inspects the manifest against the cookbook registry.
+	// Skip when cookbookFS is nil (build without embedded cookbook).
+	if cookbookFS != nil {
+		cookbookLoader := tools.NewFSCookbookLoader(cookbookFS)
+		tools.RegisterCookbookDiscoverTool(toolReg, cookbookLoader)
+	}
+
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()
 
