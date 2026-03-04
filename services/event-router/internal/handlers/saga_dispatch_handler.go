@@ -9,12 +9,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/meridianhub/meridian/services/event-router/domain"
+	"github.com/meridianhub/meridian/services/event-router/internal/correlation"
+	sagaidempotency "github.com/meridianhub/meridian/services/event-router/internal/idempotency"
 	"github.com/meridianhub/meridian/services/event-router/internal/observability"
 	"github.com/meridianhub/meridian/services/event-router/internal/registry"
+	sharedidempotency "github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
-	"google.golang.org/protobuf/proto"
 )
 
 // ErrHandlerNotInitialized is returned when Handle is called on a handler with nil dependencies.
@@ -27,18 +30,21 @@ const (
 	// chainDepthHeader is the metadata key carrying the current chain depth.
 	// Must match the header produced by the Kafka publisher and consumed by the gateway.
 	chainDepthHeader = "x-meridian-chain-depth"
-
-	// correlationIDHeader is the metadata key carrying the correlation ID.
-	correlationIDHeader = "x-correlation-id"
 )
+
+// idempotencyStore is the interface for idempotency-protected saga dispatch.
+type idempotencyStore interface {
+	Execute(ctx context.Context, sagaName, correlationID string, fn sagaidempotency.DispatchFunc) (*sharedidempotency.ExecuteResult, error)
+}
 
 // SagaDispatchHandler evaluates CEL filters against incoming events and triggers
 // matching sagas via the SagaTrigger port. It implements domain.EventHandler.
 type SagaDispatchHandler struct {
-	registry      *registry.SagaRegistry
-	sagaTrigger   domain.SagaTrigger
-	maxChainDepth int
-	logger        *slog.Logger
+	registry         *registry.SagaRegistry
+	sagaTrigger      domain.SagaTrigger
+	maxChainDepth    int
+	logger           *slog.Logger
+	idempotencyStore idempotencyStore
 }
 
 // Option configures a SagaDispatchHandler.
@@ -60,6 +66,17 @@ func WithLogger(logger *slog.Logger) Option {
 	return func(h *SagaDispatchHandler) {
 		if logger != nil {
 			h.logger = logger
+		}
+	}
+}
+
+// WithIdempotencyStore sets the idempotency store used to deduplicate saga dispatches.
+// When set, each saga trigger is wrapped with idempotency protection keyed on
+// (sagaName, correlationID). A nil store is ignored.
+func WithIdempotencyStore(store idempotencyStore) Option {
+	return func(h *SagaDispatchHandler) {
+		if store != nil {
+			h.idempotencyStore = store
 		}
 	}
 }
@@ -89,6 +106,10 @@ func NewSagaDispatchHandler(reg *registry.SagaRegistry, trigger domain.SagaTrigg
 // Filter evaluation errors cause the individual saga to be skipped (with a
 // warning log) while other sagas continue processing. Trigger errors are
 // returned immediately as they indicate infrastructure failures.
+//
+// When an idempotency store is configured, each saga trigger is deduplicated
+// by (sagaName, correlationID). Duplicate dispatches are logged and skipped.
+// ErrOperationInProgress is logged and skipped (another worker is processing).
 func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event proto.Message, metadata map[string]string) error {
 	if h.registry == nil || h.sagaTrigger == nil {
 		return ErrHandlerNotInitialized
@@ -105,7 +126,6 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 
 	// Check chain depth.
 	depth := extractChainDepth(metadata)
-	correlationID := extractCorrelationID(metadata)
 
 	if depth >= h.maxChainDepth {
 		observability.RecordChainDepthExceeded()
@@ -113,7 +133,6 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			"channel", channel,
 			"chain_depth", depth,
 			"max_chain_depth", h.maxChainDepth,
-			"correlation_id", correlationID,
 		)
 		return nil
 	}
@@ -133,9 +152,8 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		"chain_depth": int64(depth),
 	}
 
-	idempotencyKey := correlationID
-	if idempotencyKey == "" {
-		idempotencyKey = uuid.New().String()
+	idempotencyKey, src := correlation.ExtractFromMetadata(metadata)
+	if src == correlation.SourceGenerated {
 		h.logger.WarnContext(ctx, "no correlation ID in metadata, generated UUID as idempotency key — Kafka redelivery may cause duplicate saga executions",
 			"channel", channel,
 			"generated_key", idempotencyKey,
@@ -147,18 +165,9 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 
 		// If no filter, the saga always matches.
 		if cs.FilterProgram == nil {
-			if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
-				observability.RecordSagaTriggerFailure(sagaName, channel)
-				return fmt.Errorf("trigger saga %q: %w", sagaName, err)
+			if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey, depth, false); err != nil {
+				return err
 			}
-			observability.RecordSagaTriggered(sagaName, channel)
-			h.logger.InfoContext(ctx, "saga triggered",
-				"saga_name", sagaName,
-				"channel", channel,
-				"correlation_id", idempotencyKey,
-				"chain_depth", depth,
-				"filter_matched", false,
-			)
 			continue
 		}
 
@@ -198,7 +207,26 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			continue
 		}
 
-		if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, idempotencyKey); err != nil {
+		if err := h.dispatchSaga(ctx, sagaName, channel, inputData, idempotencyKey, depth, true); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// dispatchSaga triggers a single saga, optionally wrapping with idempotency protection.
+func (h *SagaDispatchHandler) dispatchSaga(
+	ctx context.Context,
+	sagaName, channel string,
+	inputData map[string]any,
+	correlationID string,
+	depth int,
+	filterMatched bool,
+) error {
+	if h.idempotencyStore == nil {
+		// No idempotency store — trigger directly.
+		if _, err := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, correlationID); err != nil {
 			observability.RecordSagaTriggerFailure(sagaName, channel)
 			return fmt.Errorf("trigger saga %q: %w", sagaName, err)
 		}
@@ -206,12 +234,50 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		h.logger.InfoContext(ctx, "saga triggered",
 			"saga_name", sagaName,
 			"channel", channel,
-			"correlation_id", idempotencyKey,
+			"correlation_id", correlationID,
 			"chain_depth", depth,
-			"filter_matched", true,
+			"filter_matched", filterMatched,
 		)
+		return nil
 	}
 
+	// Idempotency-protected dispatch.
+	result, err := h.idempotencyStore.Execute(ctx, sagaName, correlationID, func(ctx context.Context) error {
+		if _, triggerErr := h.sagaTrigger.TriggerSaga(ctx, sagaName, inputData, correlationID); triggerErr != nil {
+			observability.RecordSagaTriggerFailure(sagaName, channel)
+			return fmt.Errorf("trigger saga %q: %w", sagaName, triggerErr)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, sharedidempotency.ErrOperationInProgress) {
+			h.logger.InfoContext(ctx, "saga dispatch in progress by another worker, skipping",
+				"saga_name", sagaName,
+				"channel", channel,
+				"correlation_id", correlationID,
+			)
+			return nil
+		}
+		return fmt.Errorf("idempotent dispatch of saga %q: %w", sagaName, err)
+	}
+
+	if result != nil && result.FromCache {
+		h.logger.InfoContext(ctx, "saga already dispatched (idempotent skip)",
+			"saga_name", sagaName,
+			"channel", channel,
+			"correlation_id", correlationID,
+		)
+		return nil
+	}
+
+	observability.RecordSagaTriggered(sagaName, channel)
+	h.logger.InfoContext(ctx, "saga triggered",
+		"saga_name", sagaName,
+		"channel", channel,
+		"correlation_id", correlationID,
+		"chain_depth", depth,
+		"filter_matched", filterMatched,
+	)
 	return nil
 }
 
@@ -227,13 +293,4 @@ func extractChainDepth(metadata map[string]string) int {
 		return 0
 	}
 	return depth
-}
-
-// extractCorrelationID reads the correlation ID from metadata.
-// Returns empty string if absent — caller is responsible for fallback and logging.
-func extractCorrelationID(metadata map[string]string) string {
-	if id, ok := metadata[correlationIDHeader]; ok && id != "" {
-		return id
-	}
-	return ""
 }
