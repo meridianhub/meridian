@@ -1,0 +1,55 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://cookbook.meridianhub.org/schema/registry.json",
+    "title": "Registry Index",
+    "description": "Schema for the Meridian Cookbook registry index listing all available items.",
+    "type": "object",
+    "required": ["name", "items"],
+    "properties": {
+        "$schema": {
+            "type": "string",
+            "format": "uri",
+            "description": "URI reference to the schema this document conforms to."
+        },
+        "name": {
+            "type": "string",
+            "description": "Name of this registry."
+        },
+        "homepage": {
+            "type": "string",
+            "format": "uri",
+            "description": "Homepage URL for this registry."
+        },
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "type", "title"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]*$",
+                        "description": "Unique kebab-case identifier for the registry item."
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["registry:ui", "registry:pattern"],
+                        "description": "The kind of registry item."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Human-readable display name."
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Taxonomy tags for discovery and filtering."
+                    }
+                },
+                "additionalProperties": false
+            },
+            "description": "List of registry items available in this registry."
+        }
+    },
+    "additionalProperties": false
+}

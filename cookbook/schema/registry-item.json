@@ -1,0 +1,193 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "title": "Registry Item",
+    "description": "Schema for a Meridian Cookbook registry item (UI component or business pattern).",
+    "type": "object",
+    "required": ["name", "type", "title", "description"],
+    "properties": {
+        "$schema": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "URI reference to the schema this document conforms to."
+        },
+        "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "Unique kebab-case identifier for the registry item."
+        },
+        "type": {
+            "type": "string",
+            "enum": ["registry:ui", "registry:pattern"],
+            "description": "The kind of registry item: a UI component or a business pattern."
+        },
+        "title": {
+            "type": "string",
+            "description": "Human-readable display name for the registry item."
+        },
+        "description": {
+            "type": "string",
+            "description": "Explanation of what this registry item provides."
+        },
+        "categories": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Taxonomy tags for discovery and filtering."
+        },
+        "registryDependencies": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Names of other registry items this item depends on."
+        },
+        "files": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["path", "type"],
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Source path of the file within the registry item."
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "File type (e.g., registry:file, registry:page)."
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Optional destination path when installing this item."
+                    }
+                },
+                "additionalProperties": false
+            },
+            "description": "Files included in this registry item."
+        },
+        "meta": {
+            "type": "object",
+            "description": "Type-specific metadata for the registry item."
+        }
+    },
+    "additionalProperties": false,
+    "if": {
+        "properties": {
+            "type": { "const": "registry:ui" }
+        }
+    },
+    "then": {
+        "required": ["meta"],
+        "properties": {
+            "meta": {
+                "type": "object",
+                "required": ["feature_module"],
+                "properties": {
+                    "feature_module": {
+                        "type": "string",
+                        "description": "The Meridian feature module this UI component belongs to."
+                    },
+                    "tenant_configurable": {
+                        "type": "boolean",
+                        "description": "Whether tenants can configure this component."
+                    },
+                    "configurable_props": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "List of props that can be configured by tenants."
+                    },
+                    "used_by": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Feature modules that use this component."
+                    }
+                },
+                "additionalProperties": false
+            }
+        }
+    },
+    "else": {
+        "required": ["meta"],
+        "properties": {
+            "meta": {
+                "type": "object",
+                "required": ["complexity"],
+                "properties": {
+                    "complexity": {
+                        "type": "integer",
+                        "enum": [1, 2, 3, 5, 8],
+                        "description": "Story point complexity estimate (Fibonacci: 1, 2, 3, 5, 8)."
+                    },
+                    "design_pattern": {
+                        "type": ["string", "null"],
+                        "description": "Reference to a Meridian design patterns guide entry."
+                    },
+                    "industries": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Industry sectors this pattern applies to."
+                    },
+                    "provides": {
+                        "type": "object",
+                        "properties": {
+                            "instruments": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "account_types": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "sagas": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "valuation_rules": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "triggers": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Meridian manifest components this pattern contributes."
+                    },
+                    "requires": {
+                        "type": "object",
+                        "properties": {
+                            "instruments": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "market_data": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "External instruments or market data this pattern depends on."
+                    },
+                    "composes_with": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Pattern names that can be composed with this pattern."
+                    },
+                    "conflicts_with": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Pattern names that conflict with this pattern."
+                    },
+                    "extends": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Pattern names that this pattern extends."
+                    }
+                },
+                "additionalProperties": false
+            }
+        }
+    }
+}
