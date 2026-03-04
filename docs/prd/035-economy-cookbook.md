@@ -245,9 +245,14 @@ cookbook/
 │       ├── pattern.json
 │       ├── manifest-fragment.yaml
 │       └── kyc_on_party.star
+├── ...                              # Additional patterns added over time
 └── docs/
     └── authoring-patterns.md        # Guide for adding new patterns
 ```
+
+Note: the directory listing above is illustrative, not
+exhaustive. See the Initial Pattern Inventory section for
+the full list of patterns to migrate.
 
 ### HATEOAS Discovery
 
@@ -328,10 +333,12 @@ cognitive load.
 
 HATEOAS discovery: AI asks "what's possible from here?" and
 the system tells it. The AI follows links, not logic.
-Composition rules are enforced by the server, not
-interpreted by the client. New patterns become available to
-AI the moment they're added to the registry, with zero
-prompt engineering.
+Compatibility rules are computed by the server (via
+`meridian_cookbook_discover`), while the actual manifest
+merge is done client-side by the AI. Validation remains
+server-side (`meridian_manifest_validate`). New patterns
+become available to AI the moment they're added to the
+registry, with zero prompt engineering.
 
 ### MCP Tools
 
@@ -485,11 +492,12 @@ Migrated from existing content:
    (consistent with registry format, easier to merge
    programmatically)?
 
-4. **Discovery implementation**: Should `cookbook_discover`
-   live in the MCP server (Go, alongside existing manifest
-   tools) or as a separate lightweight service? The logic
-   is simple set intersection - probably belongs in the
-   existing MCP server.
+4. **Discovery implementation**: Should
+   `meridian_cookbook_discover` live in the MCP server (Go,
+   alongside existing manifest tools) or as a separate
+   lightweight service? The logic is simple set
+   intersection - probably belongs in the existing MCP
+   server.
 
 5. **Community patterns**: Should the registry support
    third-party pattern sources (like shadcn's namespace
