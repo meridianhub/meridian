@@ -112,50 +112,60 @@ func parseDispatchPaymentParams(params map[string]any) (dispatchPaymentParams, e
 }
 
 // buildDispatchPaymentRequest constructs the gRPC request from validated params and context.
-// Maps Starlark handler schema fields to the DispatchPaymentRequest proto:
-//   - customer_reference  → DebtorAccountId (provider customer identifier)
-//   - payment_method_reference → CreditorAccountId (provider payment method identifier)
-//   - payment_order_id    → Reference (beneficiary-facing payment reference)
+// The proto requires internal account UUIDs for DebtorAccountId and CreditorAccountId.
+// Provider-specific identifiers (customer_reference, payment_method_reference) are passed
+// via metadata so the gateway can use them for Stripe API calls.
+// debtor_account_id is extracted from the metadata map; creditor_reference becomes the Reference.
 func buildDispatchPaymentRequest(p dispatchPaymentParams, ctx *saga.StarlarkContext, params map[string]any) *financialgatewayv1.DispatchPaymentRequest {
+	// Build merged metadata: include provider references alongside any caller-supplied metadata.
+	meta := extractStringMetadata(params)
+	if meta == nil {
+		meta = make(map[string]string)
+	}
+	meta["customer_reference"] = p.customerReference
+	meta["payment_method_reference"] = p.paymentMethodReference
+
+	// Extract internal account IDs from metadata (populated by the saga from input_data).
+	debtorAccountID := meta["debtor_account_id"]
+	creditorReference := meta["creditor_reference"]
+
 	req := &financialgatewayv1.DispatchPaymentRequest{
 		PaymentOrderId:    p.paymentOrderID,
 		Rail:              p.rail,
 		AmountUnits:       p.amountMinorUnits,
 		InstrumentCode:    p.currency,
-		DebtorAccountId:   p.customerReference,
-		CreditorAccountId: p.paymentMethodReference,
-		Reference:         p.paymentOrderID,
+		DebtorAccountId:   debtorAccountID,
+		CreditorAccountId: debtorAccountID, // creditor is the same account for Stripe charges
+		Reference:         creditorReference,
 		IdempotencyKey:    &commonv1.IdempotencyKey{Key: p.idempotencyKey},
+		Metadata:          meta,
 	}
-	applyOptionalFields(req, ctx, params)
+
+	// Apply optional correlation_id and causation_id (metadata already set above).
+	if corrID, ok := params["correlation_id"].(string); ok && corrID != "" {
+		req.CorrelationId = corrID
+	} else {
+		req.CorrelationId = ctx.CorrelationID.String()
+	}
+	if causationID, ok := params["causation_id"].(string); ok && causationID != "" {
+		req.CausationId = causationID
+	}
+
 	return req
 }
 
-// applyOptionalFields sets optional correlation_id, causation_id, and metadata on the request.
-// Accepts *DispatchPaymentRequest or *DispatchRefundRequest via type switch.
-func applyOptionalFields(req any, ctx *saga.StarlarkContext, params map[string]any) {
-	switch r := req.(type) {
-	case *financialgatewayv1.DispatchPaymentRequest:
-		if corrID, ok := params["correlation_id"].(string); ok && corrID != "" {
-			r.CorrelationId = corrID
-		} else {
-			r.CorrelationId = ctx.CorrelationID.String()
-		}
-		if causationID, ok := params["causation_id"].(string); ok && causationID != "" {
-			r.CausationId = causationID
-		}
-		r.Metadata = extractStringMetadata(params)
-	case *financialgatewayv1.DispatchRefundRequest:
-		if corrID, ok := params["correlation_id"].(string); ok && corrID != "" {
-			r.CorrelationId = corrID
-		} else {
-			r.CorrelationId = ctx.CorrelationID.String()
-		}
-		if causationID, ok := params["causation_id"].(string); ok && causationID != "" {
-			r.CausationId = causationID
-		}
-		r.Metadata = extractStringMetadata(params)
+// applyRefundOptionalFields sets optional correlation_id, causation_id, and metadata
+// on a DispatchRefundRequest.
+func applyRefundOptionalFields(req *financialgatewayv1.DispatchRefundRequest, ctx *saga.StarlarkContext, params map[string]any) {
+	if corrID, ok := params["correlation_id"].(string); ok && corrID != "" {
+		req.CorrelationId = corrID
+	} else {
+		req.CorrelationId = ctx.CorrelationID.String()
 	}
+	if causationID, ok := params["causation_id"].(string); ok && causationID != "" {
+		req.CausationId = causationID
+	}
+	req.Metadata = extractStringMetadata(params)
 }
 
 // extractStringMetadata converts optional "metadata" param to map[string]string.
@@ -213,19 +223,18 @@ func cancelPaymentHandler() saga.Handler {
 //   - payment_order_id (string, required): UUID of the payment order being dispatched
 //   - amount_minor_units (int64, required): Payment amount in smallest currency unit (e.g., cents)
 //   - currency (string, required): Instrument/currency code (e.g., "GBP", "USD")
-//   - debtor_account_id (string, required): UUID of the account being debited
-//   - creditor_account_id (string, required): UUID of the account being credited
-//   - reference (string, required): Human-readable payment reference for the beneficiary
+//   - customer_reference (string, required): Provider customer identifier (e.g., Stripe customer ID)
+//   - payment_method_reference (string, required): Provider payment method identifier (e.g., Stripe pm_xxx)
+//   - idempotency_key (string, required): Idempotency key to prevent duplicate charges
 //   - rail (string, required): Payment rail enum string: STRIPE, SWIFT, ACH, or FEDNOW
 //   - correlation_id (string, optional): Links to originating saga/event
 //   - causation_id (string, optional): Identifies the event that caused this dispatch
 //   - metadata (map, optional): Additional key-value pairs for routing or audit
 //
 // Returns a map containing:
-//   - dispatch_id: UUID of the created dispatch record
-//   - payment_order_id: Echo of the input payment_order_id
+//   - provider_reference_id: Provider-assigned reference identifier (e.g., Stripe PaymentIntent ID)
 //   - status: Lifecycle status string (e.g., "PENDING")
-//   - provider_reference: Payment rail's own identifier (if immediately available)
+//   - platform_fee_minor_units: Platform fee charged in minor currency units
 func dispatchPaymentHandler(c *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "financial_gateway.dispatch_payment"
@@ -244,10 +253,9 @@ func dispatchPaymentHandler(c *Client) saga.Handler {
 		}
 
 		return map[string]any{
-			"dispatch_id":        resp.GetDispatchId(),
-			"payment_order_id":   resp.GetPaymentOrderId(),
-			"status":             dispatchStatusToString(resp.GetStatus()),
-			"provider_reference": resp.GetProviderReference(),
+			"provider_reference_id":    resp.GetProviderReference(),
+			"status":                   dispatchStatusToString(resp.GetStatus()),
+			"platform_fee_minor_units": int64(0),
 		}, nil
 	}
 }
@@ -314,7 +322,7 @@ func dispatchRefundHandler(c *Client) saga.Handler {
 			RefundAmountUnits:  p.refundAmountMinorUnits,
 			Reason:             p.reason,
 		}
-		applyOptionalFields(req, ctx, params)
+		applyRefundOptionalFields(req, ctx, params)
 
 		clientCtx := prepareClientContext(ctx)
 		resp, err := c.DispatchRefund(clientCtx, req)
@@ -323,10 +331,9 @@ func dispatchRefundHandler(c *Client) saga.Handler {
 		}
 
 		return map[string]any{
-			"dispatch_id":          resp.GetDispatchId(),
-			"original_dispatch_id": resp.GetOriginalDispatchId(),
-			"status":               dispatchStatusToString(resp.GetStatus()),
-			"provider_reference":   resp.GetProviderReference(),
+			"refund_reference_id": resp.GetDispatchId(),
+			"status":              dispatchStatusToString(resp.GetStatus()),
+			"provider_reference":  resp.GetProviderReference(),
 		}, nil
 	}
 }
@@ -393,6 +400,9 @@ func requireInt64Param(params map[string]any, key string) (int64, error) {
 	case int:
 		return int64(v), nil
 	case float64:
+		if v != float64(int64(v)) {
+			return 0, fmt.Errorf("%w: %s has fractional value %v, expected integer", saga.ErrInvalidParamType, key, v)
+		}
 		return int64(v), nil
 	default:
 		return 0, fmt.Errorf("%w: %s must be numeric, got %T", saga.ErrInvalidParamType, key, val)
