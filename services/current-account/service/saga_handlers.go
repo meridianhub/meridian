@@ -135,6 +135,11 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 		{"operational_gateway.dispatch_instruction", stubNotImplemented("operational_gateway.dispatch_instruction")},
 		{"operational_gateway.cancel_instruction", stubNotImplemented("operational_gateway.cancel_instruction")},
 		{"operational_gateway.get_instruction", stubNotImplemented("operational_gateway.get_instruction")},
+
+		// Financial Gateway handlers (stubs - defined in schema for financial gateway service)
+		{"financial_gateway.dispatch_payment", stubNotImplemented("financial_gateway.dispatch_payment")},
+		{"financial_gateway.cancel_payment", stubNotImplemented("financial_gateway.cancel_payment")},
+		{"financial_gateway.dispatch_refund", stubNotImplemented("financial_gateway.dispatch_refund")},
 	}
 
 	for _, h := range handlers {
