@@ -86,12 +86,16 @@ func NewIdempotencyCleanupWorker(
 // The cleanup runs immediately on first tick and then at each CleanupInterval.
 //
 // Returns ErrAlreadyRunning if Start is called while already running.
+// Start can be called again after Stop() returns; the done channel is
+// re-initialized so the worker is restartable.
 func (w *IdempotencyCleanupWorker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.running {
 		w.mu.Unlock()
 		return ErrAlreadyRunning
 	}
+	// Re-initialize the done channel so the worker is restartable after Stop().
+	w.done = make(chan struct{})
 	w.running = true
 	w.mu.Unlock()
 

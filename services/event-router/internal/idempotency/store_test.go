@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	sagaidempotency "github.com/meridianhub/meridian/services/event-router/internal/idempotency"
 	sharedidempotency "github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
@@ -172,16 +173,27 @@ func TestExecute_InProgress_ReturnsErrOperationInProgress(t *testing.T) {
 	blockCh := make(chan struct{})
 	doneCh := make(chan error, 1)
 
+	// pendingCh is closed once the first execution has started (PENDING written to DB).
+	pendingCh := make(chan struct{})
+
 	go func() {
 		_, err := store.Execute(context.Background(), sagaName, correlationID, func(_ context.Context) error {
-			<-blockCh // hold the PENDING state
+			close(pendingCh) // signal that PENDING state is now in the DB
+			<-blockCh        // hold the PENDING state
 			return nil
 		})
 		doneCh <- err
 	}()
 
-	// Give the goroutine time to mark PENDING
-	time.Sleep(100 * time.Millisecond)
+	// Wait until the first goroutine has written PENDING to the DB.
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		select {
+		case <-pendingCh:
+			return true
+		default:
+			return false
+		}
+	}), "timed out waiting for PENDING state to be written")
 
 	// Second call should see PENDING and return ErrOperationInProgress
 	_, err := store.Execute(context.Background(), sagaName, correlationID, func(_ context.Context) error {
@@ -202,8 +214,7 @@ func TestExecute_InProgress_ReturnsErrOperationInProgress(t *testing.T) {
 func TestExecute_CustomConfig(t *testing.T) {
 	pool := getPool(t)
 	cfg := &sagaidempotency.Config{
-		DefaultTTL:     5 * time.Minute,
-		StaleThreshold: 30 * time.Second,
+		DefaultTTL: 5 * time.Minute,
 	}
 	store, err := sagaidempotency.NewSagaIdempotencyStore(context.Background(), pool, cfg)
 	require.NoError(t, err)

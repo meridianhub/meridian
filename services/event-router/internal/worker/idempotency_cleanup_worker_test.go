@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/services/event-router/internal/worker"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
@@ -106,8 +107,10 @@ func TestIdempotencyCleanupWorker_StartsAndStops(t *testing.T) {
 		errCh <- w.Start(ctx)
 	}()
 
-	// Let it run briefly
-	time.Sleep(200 * time.Millisecond)
+	// Wait until the worker is running (evidenced by ErrAlreadyRunning on a second Start attempt).
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		return w.Start(ctx) != nil
+	}))
 
 	w.Stop()
 
@@ -134,7 +137,10 @@ func TestIdempotencyCleanupWorker_ContextCancellation_Stops(t *testing.T) {
 		errCh <- w.Start(ctx)
 	}()
 
-	time.Sleep(150 * time.Millisecond)
+	// Wait until the worker is running before cancelling.
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		return w.Start(ctx) != nil
+	}))
 	cancel()
 
 	select {
@@ -174,9 +180,20 @@ func TestIdempotencyCleanupWorker_AlreadyRunning_ReturnsError(t *testing.T) {
 		_ = w.Start(ctx)
 	}()
 
-	<-startedCh
-	time.Sleep(50 * time.Millisecond) // ensure Start() is running
-
-	err = w.Start(ctx)
-	require.ErrorIs(t, err, worker.ErrAlreadyRunning)
+	// Wait until Start() is definitely running before attempting second start.
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		select {
+		case <-startedCh:
+			return true
+		default:
+			return false
+		}
+	}))
+	// Poll until ErrAlreadyRunning is returned to ensure Start goroutine has set running=true.
+	var secondErr error
+	_ = await.New().AtMost(5 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		secondErr = w.Start(ctx)
+		return secondErr != nil
+	})
+	require.ErrorIs(t, secondErr, worker.ErrAlreadyRunning)
 }

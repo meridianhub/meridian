@@ -11,8 +11,14 @@ import (
 	sharedidempotency "github.com/meridianhub/meridian/shared/pkg/idempotency"
 )
 
-// ErrNilPool is returned when a nil pool is provided.
-var ErrNilPool = errors.New("pool cannot be nil")
+// Sentinel errors returned by NewSagaIdempotencyStore.
+var (
+	// ErrNilPool is returned when a nil pool is provided.
+	ErrNilPool = errors.New("pool cannot be nil")
+
+	// ErrInvalidConfig is returned when the configuration is invalid.
+	ErrInvalidConfig = errors.New("invalid idempotency store config")
+)
 
 const (
 	// sagaNamespace is the idempotency namespace for saga dispatch operations.
@@ -20,27 +26,19 @@ const (
 
 	// DefaultTTL is how long idempotency records are retained.
 	DefaultTTL = 24 * time.Hour
-
-	// DefaultStaleThreshold is how long a PENDING record can exist before being considered stale.
-	DefaultStaleThreshold = 1 * time.Hour
 )
 
 // Config holds configuration for the SagaIdempotencyStore.
 type Config struct {
 	// DefaultTTL is how long idempotency records are retained.
-	// Default: 24h
+	// Default: 24h. Must be > 0.
 	DefaultTTL time.Duration
-
-	// StaleThreshold is how long a PENDING record can exist before being considered stale.
-	// Default: 1h
-	StaleThreshold time.Duration
 }
 
 // DefaultConfig returns the default store configuration.
 func DefaultConfig() Config {
 	return Config{
-		DefaultTTL:     DefaultTTL,
-		StaleThreshold: DefaultStaleThreshold,
+		DefaultTTL: DefaultTTL,
 	}
 }
 
@@ -56,14 +54,21 @@ type SagaIdempotencyStore struct {
 
 // NewSagaIdempotencyStore creates a new store backed by a PostgreSQL/CockroachDB connection pool.
 // It calls EnsureTable to create the _idempotency_keys table if it does not exist.
+//
+// When cfg is nil, DefaultConfig is used. When cfg is non-nil, its fields are merged
+// over the defaults so that zero values fall back to the defaults.
 func NewSagaIdempotencyStore(ctx context.Context, pool *pgxpool.Pool, cfg *Config) (*SagaIdempotencyStore, error) {
 	if pool == nil {
 		return nil, ErrNilPool
 	}
 
-	if cfg == nil {
-		defaultCfg := DefaultConfig()
-		cfg = &defaultCfg
+	// Merge caller-supplied config over defaults so zero-valued fields fall back.
+	effectiveCfg := DefaultConfig()
+	if cfg != nil && cfg.DefaultTTL > 0 {
+		effectiveCfg.DefaultTTL = cfg.DefaultTTL
+	}
+	if effectiveCfg.DefaultTTL <= 0 {
+		return nil, fmt.Errorf("%w: DefaultTTL must be > 0", ErrInvalidConfig)
 	}
 
 	svc := sharedidempotency.NewPostgresService(pool)
@@ -72,7 +77,7 @@ func NewSagaIdempotencyStore(ctx context.Context, pool *pgxpool.Pool, cfg *Confi
 	}
 
 	execCfg := sharedidempotency.ExecutorConfig{
-		DefaultTTL:         cfg.DefaultTTL,
+		DefaultTTL:         effectiveCfg.DefaultTTL,
 		MaxDeadlockRetries: 3,
 		DeadlockRetryDelay: 50 * time.Millisecond,
 	}
@@ -80,7 +85,7 @@ func NewSagaIdempotencyStore(ctx context.Context, pool *pgxpool.Pool, cfg *Confi
 
 	return &SagaIdempotencyStore{
 		executor: executor,
-		config:   *cfg,
+		config:   effectiveCfg,
 	}, nil
 }
 

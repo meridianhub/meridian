@@ -8,13 +8,14 @@ import (
 	"log/slog"
 	"strconv"
 
-	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/meridianhub/meridian/services/event-router/domain"
+	"github.com/meridianhub/meridian/services/event-router/internal/correlation"
 	sagaidempotency "github.com/meridianhub/meridian/services/event-router/internal/idempotency"
 	"github.com/meridianhub/meridian/services/event-router/internal/registry"
 	sharedidempotency "github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
-	"google.golang.org/protobuf/proto"
 )
 
 // ErrHandlerNotInitialized is returned when Handle is called on a handler with nil dependencies.
@@ -26,9 +27,6 @@ const (
 
 	// chainDepthHeader is the metadata key carrying the current chain depth.
 	chainDepthHeader = "x-chain-depth"
-
-	// correlationIDHeader is the metadata key carrying the correlation ID.
-	correlationIDHeader = "x-correlation-id"
 )
 
 // idempotencyStore is the interface for idempotency-protected saga dispatch.
@@ -144,9 +142,8 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 		"metadata": metadata,
 	}
 
-	idempotencyKey := extractCorrelationID(metadata)
-	if idempotencyKey == "" {
-		idempotencyKey = uuid.New().String()
+	idempotencyKey, src := correlation.ExtractFromMetadata(metadata)
+	if src == correlation.SourceGenerated {
 		h.logger.WarnContext(ctx, "no correlation ID in metadata, generated UUID as idempotency key — Kafka redelivery may cause duplicate saga executions",
 			"channel", channel,
 			"generated_key", idempotencyKey,
@@ -240,7 +237,7 @@ func (h *SagaDispatchHandler) dispatchSaga(
 		return fmt.Errorf("idempotent dispatch of saga %q: %w", sagaName, err)
 	}
 
-	if result.FromCache {
+	if result != nil && result.FromCache {
 		h.logger.InfoContext(ctx, "saga already dispatched (idempotent skip)",
 			"saga_name", sagaName,
 			"channel", channel,
@@ -269,13 +266,4 @@ func extractChainDepth(metadata map[string]string) int {
 		return 0
 	}
 	return depth
-}
-
-// extractCorrelationID reads the correlation ID from metadata.
-// Returns empty string if absent — caller is responsible for fallback and logging.
-func extractCorrelationID(metadata map[string]string) string {
-	if id, ok := metadata[correlationIDHeader]; ok && id != "" {
-		return id
-	}
-	return ""
 }
