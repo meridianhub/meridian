@@ -1,12 +1,13 @@
 # Meridian local development stack
 #
 # Services:
-#   cockroachdb  - CockroachDB single-node (insecure) on port 26257, UI on 8080
-#   migrate      - One-shot migration runner; exits 0 when all migrations applied
-#   meridian     - Unified binary; starts after migrations complete
-#   seed         - One-shot seed runner; creates dev tenant and applies manifest (idempotent)
-#   frontend     - Vite dev server with HMR on port 5173
-#   mcp-server   - MCP (Model Context Protocol) server for AI integration on port 8091
+#   cockroachdb        - CockroachDB single-node (insecure) on port 26257, UI on 8080
+#   migrate            - One-shot migration runner; exits 0 when all migrations applied
+#   meridian           - Unified binary; starts after migrations complete
+#   seed               - One-shot seed runner; creates dev tenant and applies manifest (idempotent)
+#   frontend           - Vite dev server with HMR on port 5173
+#   mcp-server         - MCP (Model Context Protocol) server for AI integration on port 8091
+#   financial-gateway  - Financial gateway service for payment processing on port 50064
 #
 # Usage:
 #   docker compose -f deploy/dev/docker-compose.yml up
@@ -18,6 +19,7 @@
 #   8090  - meridian HTTP gateway
 #   5173  - frontend (Vite dev server)
 #   8091  - mcp-server SSE endpoint
+#   50064 - financial-gateway gRPC
 
 services:
   cockroachdb:
@@ -119,6 +121,24 @@ services:
       MERIDIAN_API_URL: meridian:50051
       MERIDIAN_API_KEY: dev-key
       MCP_OAUTH_ENABLED: "false"
+
+  financial-gateway:
+    build:
+      context: ../..
+      dockerfile: services/financial-gateway/cmd/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:50064:50064"
+    environment:
+      DATABASE_URL: "postgres://root@cockroachdb:26257/defaultdb?sslmode=disable"
+      LOG_LEVEL: info
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      RATE_LIMIT_RPS: "100"
+      CIRCUIT_BREAKER_TIMEOUT: "30s"
 
 volumes:
   cockroachdb_data:
