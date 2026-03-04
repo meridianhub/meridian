@@ -3,31 +3,18 @@ package ports
 
 import (
 	"context"
-	"time"
 
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
+	"github.com/meridianhub/meridian/shared/pkg/dispatch"
 )
 
 // DispatchResult captures the outcome of a single outbound HTTP dispatch attempt.
-type DispatchResult struct {
-	// StatusCode is the HTTP response status code from the provider.
-	StatusCode int
+// It is an alias for dispatch.Result from the shared dispatch package.
+type DispatchResult = dispatch.Result
 
-	// ResponseBody is the raw response body received from the provider.
-	ResponseBody []byte
-
-	// Outcome is the extracted InstructionOutcome after applying the inbound transform.
-	// May be nil if the dispatch did not reach the response parsing stage.
-	Outcome *InstructionOutcome
-
-	// Duration is the total time elapsed for the dispatch attempt, including
-	// connect, send, and receive time.
-	Duration time.Duration
-
-	// Error is non-nil when the dispatch failed before a response could be parsed
-	// (e.g., network error, auth failure, transform failure).
-	Error error
-}
+// InstructionOutcome captures the result of processing an inbound provider response.
+// It is an alias for dispatch.Outcome from the shared dispatch package.
+type InstructionOutcome = dispatch.Outcome
 
 // Dispatcher sends an instruction to an external provider via a configured connection.
 // Implementations handle the transport-level concerns (HTTP, gRPC, etc.) and authentication.
