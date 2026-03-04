@@ -83,7 +83,7 @@ func (s *FinancialGatewayService) dispatchStripePayment(
 			"payment_order_id", req.GetPaymentOrderId(),
 			"error", err,
 		)
-		return nil, status.Errorf(codes.Internal, "failed to resolve stripe configuration: %v", err)
+		return nil, mapClientFactoryError(err)
 	}
 
 	// Inject the Stripe Connected Account ID into context
@@ -134,7 +134,7 @@ func (s *FinancialGatewayService) GetProviderHealth(
 
 // getStripeHealth reports Stripe provider health based on circuit breaker state.
 func (s *FinancialGatewayService) getStripeHealth() (*financialgatewayv1.GetProviderHealthResponse, error) {
-	if s.clientFactory == nil {
+	if s.stripeAdapter == nil || s.clientFactory == nil {
 		return &financialgatewayv1.GetProviderHealthResponse{
 			Rail:          financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE,
 			Health:        financialgatewayv1.ProviderHealth_PROVIDER_HEALTH_UNSPECIFIED,
@@ -152,6 +152,25 @@ func (s *FinancialGatewayService) getStripeHealth() (*financialgatewayv1.GetProv
 		Message:       "circuit breaker state: " + cbState.String(),
 		LastCheckedAt: timestamppb.New(time.Now()),
 	}, nil
+}
+
+// mapClientFactoryError maps client factory errors to appropriate gRPC status codes
+// without leaking internal error details.
+func mapClientFactoryError(err error) error {
+	switch {
+	case errors.Is(err, stripeadapter.ErrMissingTenant):
+		return status.Error(codes.FailedPrecondition, "tenant context required")
+	case errors.Is(err, stripeadapter.ErrTenantConfigNotFound):
+		return status.Error(codes.FailedPrecondition, "stripe not configured for tenant")
+	case errors.Is(err, stripeadapter.ErrCircuitOpen):
+		return status.Error(codes.Unavailable, "stripe service temporarily unavailable")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "request canceled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
+	default:
+		return status.Error(codes.Internal, "failed to resolve stripe configuration")
+	}
 }
 
 // mapStripeError maps adapter errors to appropriate gRPC status codes.
