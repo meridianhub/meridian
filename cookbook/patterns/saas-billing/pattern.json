@@ -32,9 +32,19 @@
             "target": "~/manifest-fragment.yaml"
         },
         {
+            "path": "patterns/saas-billing/record_gpu_usage.star",
+            "type": "registry:file",
+            "target": "~/sagas/record_gpu_usage.star"
+        },
+        {
             "path": "patterns/saas-billing/compute_billing.star",
             "type": "registry:file",
             "target": "~/sagas/compute_billing.star"
+        },
+        {
+            "path": "patterns/saas-billing/generate_monthly_invoice.star",
+            "type": "registry:file",
+            "target": "~/sagas/generate_monthly_invoice.star"
         }
     ]
 }

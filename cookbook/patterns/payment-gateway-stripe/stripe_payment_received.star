@@ -92,4 +92,4 @@ def execute_stripe_payment_received():
     return result
 
 # Execute the saga
-execute_stripe_payment_received()
+output = execute_stripe_payment_received()

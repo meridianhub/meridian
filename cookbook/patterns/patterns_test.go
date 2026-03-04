@@ -350,7 +350,7 @@ func TestEconomyPatterns_ProvidesInstrumentsMatchManifest(t *testing.T) {
 
 func TestEconomyPatterns_StarFilesExistForSagaPatterns(t *testing.T) {
 	patternsWithStarFiles := map[string][]string{
-		"saas-billing":             {"compute_billing.star"},
+		"saas-billing":             {"record_gpu_usage.star", "compute_billing.star", "generate_monthly_invoice.star"},
 		"precious-metals":          {"valuation_on_capture.star"},
 		"time-of-use-pricing":      {"tou_energy_valuation.star"},
 		"dynamic-capacity-pricing": {"dynamic_capacity_billing.star"},

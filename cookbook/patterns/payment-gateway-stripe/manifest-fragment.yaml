@@ -30,6 +30,8 @@ operationalGateway:
       auth:
         apiKey:
           headerName: Authorization
+          # Secret must include 'Bearer ' prefix, e.g. 'Bearer sk_live_xxx'.
+          # APIKeyAuth sets the header value verbatim.
           apiKeySecretRef: "sm://stripe/api_key"
       retryPolicy:
         maxAttempts: 3
