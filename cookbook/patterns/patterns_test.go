@@ -547,9 +547,13 @@ func TestRegistry_ContainsAllPatterns(t *testing.T) {
 		if !ok {
 			continue
 		}
+		itemType, _ := m["type"].(string)
+		if itemType != "registry:pattern" {
+			// Skip non-pattern items (e.g. registry:ui) — this test only validates patterns.
+			continue
+		}
 		if name, ok := m["name"].(string); ok {
 			registryNames[name] = true
-			assert.Equal(t, "registry:pattern", m["type"], "registry item %s should have type registry:pattern", name)
 		}
 	}
 
