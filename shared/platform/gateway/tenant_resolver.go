@@ -76,9 +76,12 @@ var platformPaths = []string{
 	"/meridian.tenant.v1.TenantService/", // Connect/gRPC path
 }
 
-// isPlatformPath returns true if the request path is a platform-level endpoint
-// that should bypass tenant resolution.
-func isPlatformPath(path string) bool {
+// IsPlatformPath returns true if the request path is a platform-level endpoint
+// that should bypass tenant resolution and tenant authorization.
+// Platform paths (e.g., ListTenants) are bootstrap endpoints that only require
+// authentication — the endpoint itself handles access control based on the
+// caller's identity.
+func IsPlatformPath(path string) bool {
 	for _, prefix := range platformPaths {
 		if strings.HasPrefix(path, prefix) {
 			return true
@@ -188,7 +191,7 @@ func (m *TenantResolverMiddleware) extractSlugFromRequest(w http.ResponseWriter,
 func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip tenant resolution for platform-level endpoints
-		if isPlatformPath(r.URL.Path) {
+		if IsPlatformPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
