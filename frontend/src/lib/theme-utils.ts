@@ -15,6 +15,17 @@ const COLOR_PROPERTY_MAP: Record<string, string> = {
 export function applyTenantTheme(theme: TenantThemeConfig): void {
   const root = document.documentElement
 
+  // Clear any previously applied variables so stale properties don't linger
+  // when switching between themes that have different sets of properties.
+  const previouslyApplied = root.getAttribute(TENANT_THEME_ATTR)
+  if (previouslyApplied) {
+    for (const prop of previouslyApplied.split(",")) {
+      if (prop) {
+        root.style.removeProperty(prop)
+      }
+    }
+  }
+
   const applied: string[] = []
 
   if (theme.primaryColor) {

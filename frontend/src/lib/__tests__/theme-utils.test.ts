@@ -54,6 +54,16 @@ describe("theme-utils", () => {
       applyTenantTheme({ primaryColor: "#00ff00" })
       expect(document.documentElement.style.getPropertyValue("--primary")).toBe("#00ff00")
     })
+
+    it("clears stale properties when switching to a theme with fewer properties", () => {
+      applyTenantTheme({ primaryColor: "#ff0000", fontFamily: "Inter" })
+      expect(document.documentElement.style.getPropertyValue("--font-family")).toBe("Inter")
+
+      // Switch to a theme without fontFamily — stale --font-family should be removed
+      applyTenantTheme({ primaryColor: "#00ff00" })
+      expect(document.documentElement.style.getPropertyValue("--primary")).toBe("#00ff00")
+      expect(document.documentElement.style.getPropertyValue("--font-family")).toBe("")
+    })
   })
 
   describe("resetTheme", () => {

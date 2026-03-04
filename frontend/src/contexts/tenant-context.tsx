@@ -35,10 +35,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     } else {
       resetTheme()
     }
-    return () => {
-      resetTheme()
-    }
   }, [tenantTheme])
+
+  // Reset theme only on unmount to avoid a visual flash during theme switches.
+  useEffect(() => {
+    return () => resetTheme()
+  }, [])
 
   const switchTenant = useCallback(
     (tenant: Tenant) => {
