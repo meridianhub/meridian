@@ -68,10 +68,11 @@ def execute_kyc_on_party():
     # Each jurisdiction has a dedicated compliance account used to track
     # outstanding KYC obligations as position logs.
     #
-    # jurisdiction_code is validated to 2-letter ISO alpha-2 format before use
-    # in the filter expression to prevent predicate injection.
+    # jurisdiction_code is validated to strictly 2 ASCII alpha characters (ISO 3166-1
+    # alpha-2) before embedding in the filter string to prevent predicate injection.
     step(name="find_compliance_account")
-    if len(jurisdiction_code) != 2:
+    valid_jc = len(jurisdiction_code) == 2 and jurisdiction_code[0].isalpha() and jurisdiction_code[1].isalpha()
+    if not valid_jc:
         return {
             "status": "INVALID_JURISDICTION_CODE",
             "jurisdiction_code": jurisdiction_code,
