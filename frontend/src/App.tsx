@@ -29,6 +29,7 @@ import { DashboardPage } from '@/features/dashboard'
 import { ManifestsPage } from '@/features/manifests'
 import { McpConfigPage } from '@/features/mcp-config'
 import { TransactionsPage } from '@/features/transactions'
+import { ThemePreviewPanel } from '@/components/dev/theme-preview-panel'
 
 // Placeholder page components - replaced as each page task is implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -381,6 +382,7 @@ export function App() {
           <AuthenticatedApp />
         </AuthProvider>
         {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+        {import.meta.env.DEV && <ThemePreviewPanel />}
       </QueryClientProvider>
     </PageErrorBoundary>
   )
