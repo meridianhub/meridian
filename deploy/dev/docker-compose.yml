@@ -18,7 +18,7 @@
 #   50051 - meridian gRPC
 #   8090  - meridian HTTP gateway
 #   5173  - frontend (Vite dev server)
-#   8091  - mcp-server SSE endpoint
+#   8091  - mcp-server HTTP endpoint
 #   50064 - financial-gateway gRPC
 
 services:
@@ -114,8 +114,8 @@ services:
       - "127.0.0.1:8091:8090"
     environment:
       LOG_LEVEL: info
-      MCP_TRANSPORT: sse
-      MCP_SSE_PORT: "8090"
+      MCP_TRANSPORT: http
+      MCP_PORT: "8090"
       MCP_SERVER_NAME: meridian-mcp
       MCP_BASE_URL: http://localhost:8091
       MERIDIAN_API_URL: meridian:50051

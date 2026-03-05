@@ -617,7 +617,7 @@ k8s_resource(
 # MCP Server
 # =============================================================================
 # Model Context Protocol server for AI agent integration.
-# Exposes Meridian's transaction engine capabilities via MCP SSE transport.
+# Exposes Meridian's transaction engine capabilities via streamable HTTP transport.
 # Connects to the gateway for all backend gRPC service calls.
 
 # Standard build args for mcp-server
@@ -644,7 +644,7 @@ k8s_yaml('services/mcp-server/k8s/service.yaml')
 # Configure mcp-server resource
 k8s_resource(
     'mcp-server',
-    port_forwards=['18090:8090'],  # MCP SSE endpoint (18090 to avoid conflict with gateway)
+    port_forwards=['18090:8090'],  # MCP HTTP endpoint (18090 to avoid conflict with gateway)
     resource_deps=[
         'generate-proto',   # Ensures proto files are generated before building
         'gateway',          # MCP server routes all gRPC calls through the gateway
@@ -991,7 +991,7 @@ Gateway:
   • HTTP Gateway           → localhost:8090 (subdomain routing)
     - Tenant resolution via TenantResolverMiddleware
     - Proxies to gRPC backends via Connect protocol
-  • MCP Server             → localhost:18090 (SSE transport)
+  • MCP Server             → localhost:18090 (streamable HTTP)
     - Model Context Protocol for AI agent integration
     - Routes all gRPC calls through the HTTP gateway
 

@@ -4,7 +4,7 @@ import "context"
 
 // Transport defines the interface for MCP server communication.
 // Implementations handle reading and writing JSON-RPC 2.0 messages
-// over different transport mechanisms (stdio, SSE).
+// over different transport mechanisms (stdio, streamable HTTP).
 type Transport interface {
 	// ReadMessage reads the next JSON-RPC message from the transport.
 	// It blocks until a message is available or the context is cancelled.

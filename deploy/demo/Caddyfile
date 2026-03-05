@@ -22,9 +22,9 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		respond "Not Found" 404
 	}
 
-	# MCP Server: streamable HTTP + legacy SSE transport
+	# MCP Server: streamable HTTP transport
 	@mcp_transport {
-		path /mcp /mcp/* /sse /sse/* /message /message/*
+		path /mcp /mcp/*
 	}
 	handle @mcp_transport {
 		reverse_proxy mcp-server:8090
