@@ -1,11 +1,10 @@
-import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
-import { useApiClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
 import { TransactionStatus } from '@/api/gen/meridian/common/v1/types_pb'
+import { usePositionLogsTable } from '../hooks'
 
 const TRANSACTION_STATUS_NAMES: Record<number, string> = {
   [TransactionStatus.PENDING]: 'PENDING',
@@ -56,20 +55,9 @@ export interface TransactionLogEntry {
   reference?: string
 }
 
-interface ListPositionLogsParams {
-  pageToken?: string
-  pageSize: number
-  filters?: Record<string, string>
-}
-
-interface ListPositionLogsResult {
-  items: FinancialPositionLog[]
-  nextPageToken?: string
-}
-
 export function PositionsPage() {
   const navigate = useNavigate()
-  const clients = useApiClients()
+  const { queryKey, queryFn } = usePositionLogsTable()
 
   const columns: ColumnDef<FinancialPositionLog>[] = [
     {
@@ -129,24 +117,6 @@ export function PositionsPage() {
     },
   ]
 
-  const queryFn = async (params: ListPositionLogsParams): Promise<ListPositionLogsResult> => {
-    const statusValue = params.filters?.status
-    const response = await clients.positionKeeping.listFinancialPositionLogs({
-      pageToken: params.pageToken ?? '',
-      accountId: params.filters?.accountId ?? '',
-      status: statusValue ? (Number(statusValue) as TransactionStatus) : TransactionStatus.UNSPECIFIED,
-      pagination: {
-        pageSize: params.pageSize,
-        pageToken: params.pageToken ?? '',
-      },
-    })
-
-    return {
-      items: (response.logs ?? []) as FinancialPositionLog[],
-      nextPageToken: response.pagination?.nextPageToken,
-    }
-  }
-
   const handleRowClick = (log: FinancialPositionLog) => {
     navigate(`/positions/${log.logId}`)
   }
@@ -162,7 +132,7 @@ export function PositionsPage() {
 
       <Card className="p-6">
         <DataTable
-          queryKey={['positions']}
+          queryKey={queryKey}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}

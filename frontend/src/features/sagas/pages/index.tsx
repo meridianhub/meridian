@@ -3,12 +3,12 @@ import { Link } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/shared/data-table'
+import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { StatusBadge } from '@/shared/status-badge'
-import { useApiClients } from '@/api/context'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { SagaStatus } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
+import { useSagasTable } from '../hooks'
 import { CreateSagaDraftDialog } from './create-saga-draft-dialog'
 
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ export interface StarlarkConfigPageProps {
 // ---------------------------------------------------------------------------
 
 export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPageProps) {
-  const { sagaRegistry } = useApiClients()
+  const { queryKey, queryFn } = useSagasTable()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const columns = useMemo((): ColumnDef<SagaDefinition>[] => {
@@ -118,17 +118,6 @@ export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPa
     return base
   }, [isPlatformAdmin])
 
-  async function fetchSagas(params: DataTableQueryParams): Promise<DataTableResult<SagaDefinition>> {
-    const response = await sagaRegistry.listSagas({
-      pageSize: params.pageSize,
-      pageToken: params.pageToken,
-    })
-    return {
-      items: response.sagas ?? [],
-      nextPageToken: response.nextPageToken || undefined,
-    }
-  }
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between">
@@ -145,8 +134,8 @@ export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPa
 
       <Card className="p-6">
         <DataTable<SagaDefinition>
-          queryKey={['starlark-config']}
-          queryFn={fetchSagas}
+          queryKey={queryKey}
+          queryFn={queryFn}
           columns={columns}
           pageSize={25}
           className="w-full"

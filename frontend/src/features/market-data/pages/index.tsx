@@ -4,10 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared'
-import { useApiClients } from '@/api/context'
-import { useTenantContext } from '@/contexts/tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
+import { useDatasetsTable } from '../hooks'
 import { CATEGORY_OPTIONS, STATUS_OPTIONS } from './constants'
 import { RegisterDataSetDialog } from './register-dataset-dialog'
 
@@ -107,8 +105,7 @@ const columns: ColumnDef<DataSetRow>[] = [
 ]
 
 export function MarketDataPage() {
-  const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
+  const { queryKey, queryFn, tenantSlug } = useDatasetsTable()
   const navigate = useNavigate()
   const [registerOpen, setRegisterOpen] = React.useState(false)
 
@@ -133,29 +130,8 @@ export function MarketDataPage() {
       </div>
 
       <DataTable<DataSetRow>
-        queryKey={[...tenantKeys.all(tenantSlug), 'market-data', 'datasets']}
-        queryFn={async ({ pageToken, pageSize, filters }) => {
-          const statusFilter = filters?.status ? parseInt(filters.status, 10) : 0
-          const categoryFilter = filters?.category ? parseInt(filters.category, 10) : 0
-          const res = await clients.marketInformation.listDataSets({
-            statusFilter,
-            categoryFilter,
-            pageSize,
-            pageToken: pageToken ?? '',
-          })
-          return {
-            items: res.datasets.map((d) => ({
-              id: d.id,
-              code: d.code,
-              displayName: d.displayName,
-              category: d.category,
-              unit: d.unit,
-              status: d.status,
-              createdAt: d.createdAt ?? null,
-            })),
-            nextPageToken: res.nextPageToken || undefined,
-          }
-        }}
+        queryKey={queryKey}
+        queryFn={queryFn}
         columns={columns}
         pageSize={25}
         filters={[

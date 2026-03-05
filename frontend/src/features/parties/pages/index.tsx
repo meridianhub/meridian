@@ -4,35 +4,11 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { StatusBadge } from '@/shared/status-badge'
-import { useClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { tenantKeys } from '@/lib/query-keys'
-import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { usePartiesTable } from '../hooks'
 import { RegisterPartyDialog } from './dialogs/register-party-dialog'
 import { RegisterPartyTypeDialog } from './dialogs/register-party-type-dialog'
-
-function partyStatusLabel(status: unknown): string {
-  if (typeof status === 'string') return status
-  const map: Record<number, string> = {
-    0: 'UNSPECIFIED',
-    1: 'PARTY_STATUS_ACTIVE',
-    2: 'PARTY_STATUS_RESTRICTED',
-    3: 'PARTY_STATUS_SUSPENDED',
-    4: 'PARTY_STATUS_TERMINATED',
-  }
-  return map[status as number] ?? 'UNKNOWN'
-}
-
-function partyTypeLabel(partyType: unknown): string {
-  if (typeof partyType === 'string') return partyType
-  const map: Record<number, string> = {
-    0: 'UNSPECIFIED',
-    1: 'PARTY_TYPE_PERSON',
-    2: 'PARTY_TYPE_ORGANIZATION',
-  }
-  return map[partyType as number] ?? 'UNKNOWN'
-}
 
 export interface Party {
   partyId: string
@@ -43,21 +19,9 @@ export interface Party {
   createdAt?: { seconds: bigint | number; nanos?: number }
 }
 
-interface ListPartiesParams {
-  pageToken?: string
-  pageSize: number
-  filters?: Record<string, string>
-}
-
-interface ListPartiesResult {
-  items: Party[]
-  nextPageToken?: string
-}
-
 export function PartiesPage() {
   const navigate = useNavigate()
-  const clients = useClients()
-  const tenantSlug = useTenantSlug()
+  const { queryKey, queryFn, tenantSlug } = usePartiesTable()
   const [registerOpen, setRegisterOpen] = React.useState(false)
   const [addPartyTypeOpen, setAddPartyTypeOpen] = React.useState(false)
 
@@ -120,30 +84,6 @@ export function PartiesPage() {
     },
   ]
 
-  const queryFn = React.useCallback(async (params: ListPartiesParams): Promise<ListPartiesResult> => {
-    const response = await clients.party.listParties({
-      pageToken: params.pageToken,
-      pageSize: params.pageSize,
-      searchQuery: params.filters?.searchQuery,
-      partyType: params.filters?.partyType,
-      status: params.filters?.status,
-    })
-
-    const parties: Party[] = response.parties.map((p: Party) => ({
-      partyId: p.partyId,
-      legalName: p.legalName,
-      partyType: partyTypeLabel(p.partyType),
-      status: partyStatusLabel(p.status),
-      externalReference: p.externalReference,
-      createdAt: p.createdAt,
-    }))
-
-    return {
-      items: parties,
-      nextPageToken: response.nextPageToken,
-    }
-  }, [clients.party])
-
   const handleRowClick = (party: Party) => {
     navigate(`/parties/${party.partyId}`)
   }
@@ -175,7 +115,7 @@ export function PartiesPage() {
 
       <Card className="p-6">
         <DataTable
-          queryKey={tenantKeys.parties(tenantSlug)}
+          queryKey={queryKey}
           queryFn={queryFn}
           columns={columns}
           pageSize={25}

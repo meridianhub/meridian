@@ -4,10 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared'
-import { useApiClients } from '@/api/context'
-import { useTenantContext } from '@/contexts/tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
+import { useInternalAccountsTable } from '../hooks'
 import { CreateInternalAccountDialog } from './create-internal-account-dialog'
 
 interface InternalAccountRow {
@@ -90,8 +88,7 @@ const columns: ColumnDef<InternalAccountRow>[] = [
 ]
 
 export function InternalAccountsPage() {
-  const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
+  const { queryKey, queryFn, tenantSlug } = useInternalAccountsTable()
   const navigate = useNavigate()
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
 
@@ -121,27 +118,8 @@ export function InternalAccountsPage() {
       />
 
       <DataTable<InternalAccountRow>
-        queryKey={tenantKeys.internalAccounts(tenantSlug)}
-        queryFn={async ({ pageToken, pageSize, filters }) => {
-          const statusFilter = filters?.status ? parseInt(filters.status, 10) : 0
-          const res = await clients.internalAccount.listInternalAccounts({
-            behaviorClassFilter: filters?.behaviorClass ?? '',
-            statusFilter,
-            pagination: { pageToken: pageToken ?? '', pageSize },
-          })
-          return {
-            items: res.facilities.map((f) => ({
-              accountId: f.accountId,
-              accountCode: f.accountCode,
-              name: f.name,
-              behaviorClass: f.behaviorClass,
-              accountStatus: f.accountStatus,
-              instrumentCode: f.instrumentCode,
-              createdAt: f.createdAt ?? null,
-            })),
-            nextPageToken: res.pagination?.nextPageToken || undefined,
-          }
-        }}
+        queryKey={queryKey}
+        queryFn={queryFn}
         columns={columns}
         pageSize={25}
         filters={[

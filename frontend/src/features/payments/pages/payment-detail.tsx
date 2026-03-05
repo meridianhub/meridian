@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,10 +11,9 @@ import { TimeDisplay } from '@/shared/time-display'
 import { SagaTimeline } from '@/features/sagas/components/saga-timeline'
 import { AuditTrail } from '@/shared/audit-trail'
 import { EntityLink, Breadcrumbs } from '@/shared'
-import { useTenantSlug } from '@/hooks/use-tenant-context'
-import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { tenantKeys } from '@/lib/query-keys'
-import { fetchPaymentDetail } from './payment-detail-query'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { usePaymentDetail } from '../hooks'
 import {
   InitiatePaymentDialog,
   CancelPaymentDialog,
@@ -105,7 +104,6 @@ function PaymentActions({
 export function PaymentDetailPage() {
   const { paymentOrderId } = useParams<{ paymentOrderId: string }>()
   const tenantSlug = useTenantSlug()
-  const authFetch = useAuthenticatedFetch()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [initiateOpen, setInitiateOpen] = React.useState(false)
@@ -114,11 +112,7 @@ export function PaymentDetailPage() {
     ? tenantKeys.payment(tenantSlug, paymentOrderId)
     : ['payments', paymentOrderId]
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey,
-    queryFn: () => fetchPaymentDetail(paymentOrderId!, authFetch),
-    enabled: !!paymentOrderId,
-  })
+  const { data, isLoading, isError } = usePaymentDetail(paymentOrderId)
 
   function handleActionSuccess() {
     void queryClient.invalidateQueries({ queryKey })

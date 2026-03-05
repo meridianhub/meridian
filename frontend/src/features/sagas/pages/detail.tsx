@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/shared/status-badge'
@@ -10,6 +10,7 @@ import { Breadcrumbs } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { SagaStatus, ErrorCategory } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
+import { useSagaDetail, useActiveSaga } from '../hooks'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,31 +131,12 @@ export function StarlarkDetailPage() {
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [complexityMetrics, setComplexityMetrics] = useState<ComplexityMetrics | undefined>(undefined)
 
-  // Fetch the specific saga definition
-  const { data: sagaData, isLoading } = useQuery({
-    queryKey: ['starlark-config', definitionId],
-    queryFn: async () => {
-      const response = await sagaRegistry.getSaga({ id: definitionId ?? '' })
-      return response.saga
-    },
-    enabled: !!definitionId,
-  })
+  const { data: sagaData, isLoading } = useSagaDetail(definitionId)
 
-  // For non-system sagas: also fetch the platform default (system saga with same name)
-  // to show the split pane comparison
-  const { data: activeSagaData } = useQuery({
-    queryKey: ['starlark-config', 'active', sagaData?.name],
-    queryFn: async () => {
-      if (!sagaData?.name) return null
-      try {
-        const response = await sagaRegistry.getActiveSaga({ name: sagaData.name })
-        return response
-      } catch {
-        return null
-      }
-    },
-    enabled: !!sagaData?.name && !sagaData.isSystem,
-  })
+  const { data: activeSagaData } = useActiveSaga(
+    sagaData?.name,
+    !!sagaData?.name && !sagaData.isSystem,
+  )
 
   const effectiveScript = script ?? sagaData?.script ?? ''
 

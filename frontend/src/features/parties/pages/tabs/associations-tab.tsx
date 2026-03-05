@@ -1,11 +1,8 @@
 import * as React from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useClients } from '@/api/context'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
-import { tenantKeys } from '@/lib/query-keys'
-import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { usePartyAssociations } from '../../hooks'
 import { RegisterAssociationsDialog } from '../dialogs/register-associations-dialog'
 
 interface AssociationsTabProps {
@@ -13,16 +10,9 @@ interface AssociationsTabProps {
 }
 
 export function AssociationsTab({ partyId }: AssociationsTabProps) {
-  const clients = useClients()
-  const tenantSlug = useTenantSlug()
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
-  const { isLoading } = useQuery({
-    queryKey: tenantKeys.partyAssociations(tenantSlug ?? '', partyId),
-    queryFn: async () => {
-      return await clients.party.retrieveAssociations({ partyId })
-    },
-  })
+  const { isLoading } = usePartyAssociations(partyId)
 
   if (isLoading) {
     return (
