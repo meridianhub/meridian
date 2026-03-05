@@ -83,6 +83,12 @@ export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
         columns={columns}
         filters={FILTER_CONFIGS}
         onRowClick={handleRowClick}
+        emptyState={
+          <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+            <span className="text-sm font-medium">No payments yet</span>
+            <span className="text-xs">Payments will appear here once initiated.</span>
+          </div>
+        }
       />
     </div>
   )

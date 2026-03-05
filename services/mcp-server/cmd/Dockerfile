@@ -47,7 +47,7 @@ COPY --from=builder /build/mcp-server /mcp-server
 # Use non-root user (distroless provides nonroot user at uid 65532)
 USER nonroot:nonroot
 
-# Expose SSE port (only used when MCP_TRANSPORT=sse)
+# Expose HTTP port (used when MCP_TRANSPORT=http)
 EXPOSE 8090
 
 # Run the binary

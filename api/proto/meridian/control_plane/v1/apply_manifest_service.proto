@@ -3,6 +3,7 @@ syntax = "proto3";
 package meridian.control_plane.v1;
 
 import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
 import "meridian/control_plane/v1/manifest.proto";
 import "meridian/control_plane/v1/manifest_history_service.proto";
 
@@ -13,7 +14,12 @@ option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_
 service ApplyManifestService {
   // ApplyManifest validates and applies a manifest, returning the execution result.
   // In dry_run mode, validation and planning are performed but no changes are committed.
-  rpc ApplyManifest(ApplyManifestRequest) returns (ApplyManifestResponse);
+  rpc ApplyManifest(ApplyManifestRequest) returns (ApplyManifestResponse) {
+    option (google.api.http) = {
+      post: "/v1/manifests/apply"
+      body: "*"
+    };
+  }
 }
 
 // ApplyManifestRequest contains the manifest to apply and apply options.

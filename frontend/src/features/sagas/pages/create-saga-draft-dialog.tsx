@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { useApiClients } from '@/api/context'
 import { handleConnectError } from '@/lib/error-handling'
 import { referenceKeys } from '@/lib/query-keys'
+import { StarlarkEditor } from '../components/starlark-editor'
 
 const NAME_PATTERN = /^[a-z][a-z0-9_.]*$/
 
@@ -144,6 +145,13 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
     }
   }
 
+  function handleScriptChange(value: string) {
+    setFormData((prev) => ({ ...prev, script: value }))
+    if (errors.script) {
+      setErrors((prev) => ({ ...prev, script: undefined }))
+    }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (mutation.isPending) return
@@ -249,19 +257,13 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="saga-script" className="text-sm font-medium">
+              <label className="text-sm font-medium">
                 Script <span className="text-destructive">*</span>
               </label>
-              <textarea
-                id="saga-script"
+              <StarlarkEditor
                 value={formData.script}
-                onChange={handleChange('script')}
-                placeholder="def execute(ctx):&#10;    pass"
-                aria-label="Script"
-                aria-describedby={errors.script ? 'saga-script-error' : undefined}
-                rows={12}
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground"
-                spellCheck={false}
+                onChange={handleScriptChange}
+                className="min-h-[200px]"
               />
               {errors.script && (
                 <p id="saga-script-error" className="text-sm text-destructive">
@@ -290,7 +292,7 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
           </div>
         </form>
 
-        <DialogFooter>
+        <DialogFooter className="sticky bottom-0 bg-background pt-4 border-t">
           <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

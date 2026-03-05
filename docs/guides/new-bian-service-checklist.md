@@ -757,7 +757,7 @@ func TestIntegration(t *testing.T) {
         t.Skip("skipping integration test")
     }
 
-    db, cleanup := testdb.SetupPostgres(t, []interface{}{&persistence.{Entity}Entity{}})
+    db, cleanup := testdb.SetupCockroachDB(t, []interface{}{&persistence.{Entity}Entity{}})
     defer cleanup()
 
     repo := persistence.NewRepository(db)

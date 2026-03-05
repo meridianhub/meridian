@@ -1,11 +1,12 @@
 // Package main is the entry point for the MCP server.
-// It supports stdio and SSE transports for Model Context Protocol communication.
+// It supports stdio and streamable HTTP transports for Model Context Protocol communication.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -62,10 +63,10 @@ func run(logger *slog.Logger) error {
 	switch transportMode {
 	case "stdio":
 		return runStdio(logger, cfg)
-	case "sse":
-		return runSSE(logger, cfg)
+	case "http":
+		return runHTTP(logger, cfg)
 	default:
-		return bootstrap.Permanent(fmt.Errorf("%w: %s (expected stdio or sse)", errUnknownTransport, transportMode))
+		return bootstrap.Permanent(fmt.Errorf("%w: %s (expected stdio or http)", errUnknownTransport, transportMode))
 	}
 }
 
@@ -109,7 +110,7 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 const (
 	httpReadHeaderTimeout = 10 * time.Second
 	httpReadTimeout       = 30 * time.Second
-	httpWriteTimeout      = 0 // SSE requires no write timeout (long-lived streams)
+	httpWriteTimeout      = 0 // Streamable HTTP may use long-lived responses
 	httpIdleTimeout       = 120 * time.Second
 	shutdownTimeout       = 30 * time.Second
 )
@@ -178,16 +179,20 @@ func (p *passthroughIssuer) Issue(claims map[string]any) (string, error) {
 	return fmt.Sprintf("mcp-issued-%v", claims["client_id"]), nil
 }
 
-func runSSE(logger *slog.Logger, cfg server.Config) error {
-	port := env.GetEnvOrDefault("MCP_SSE_PORT", "8090")
+func runHTTP(logger *slog.Logger, cfg server.Config) error {
+	port := env.GetEnvOrDefault("MCP_PORT", "8090")
 	addr := fmt.Sprintf(":%s", port)
 
-	logger.Info("using SSE transport", "address", addr)
+	logger.Info("using streamable HTTP transport", "address", addr)
 
-	sseTr := transport.NewSSETransport(logger)
-	defer sseTr.Close()
+	// The streamable HTTP handler calls Dispatch() directly — no transport
+	// read/write loop is needed. We provide a no-op transport to satisfy
+	// server.New(); Run() is never called in HTTP mode.
+	pr, pw := io.Pipe()
+	noopTr := transport.NewStdioTransport(pr, io.Discard)
+	defer func() { _ = pw.Close(); _ = noopTr.Close() }()
 
-	srv := server.New(sseTr, cfg, logger)
+	srv := server.New(noopTr, cfg, logger)
 
 	// Wire tools, resources, and prompts onto the server.
 	// cookbookFS is nil until the cookbook directory is embedded at build time.
@@ -199,8 +204,6 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 		defer cleanup()
 	}
 
-	// Streamable HTTP transport (MCP spec 2025-03-26).
-	// Shares the same MCPServer instance so tools/resources/prompts are identical.
 	streamableHandler := transport.NewStreamableHTTPHandler(srv, logger)
 	defer streamableHandler.Close()
 
@@ -228,9 +231,8 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 			TokenURL:         oauthCfg.TokenURL,
 		}
 
-		// Use a background context for JWKS initialisation: srvCtx doesn't exist
-		// yet at this point (it is created below). The JWKS provider uses its own
-		// Close() to stop the background refresh goroutine on shutdown.
+		// The JWKS provider uses its own Close() to stop the background refresh
+		// goroutine on shutdown.
 		validator, validatorCleanup, err := buildBearerValidator(context.Background(), logger)
 		if err != nil {
 			return fmt.Errorf("bearer validator: %w", err)
@@ -241,12 +243,8 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 		bearerMW := mcpauth.NewBearerMiddleware(validator, meta)
 
 		mux.Handle("/mcp", bearerMW.Handler(streamableHandler))
-		mux.Handle("/sse", bearerMW.Handler(http.HandlerFunc(sseTr.HandleSSE)))
-		mux.Handle("/message", bearerMW.Handler(http.HandlerFunc(sseTr.HandleMessage)))
 	} else {
 		mux.Handle("/mcp", streamableHandler)
-		mux.HandleFunc("/sse", sseTr.HandleSSE)
-		mux.HandleFunc("/message", sseTr.HandleMessage)
 	}
 
 	httpServer := &http.Server{
@@ -258,16 +256,8 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 		IdleTimeout:       httpIdleTimeout,
 	}
 
-	// Start MCP server loop in background
-	serverErrors := bootstrap.ServerErrorChannel(2)
-	srvCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go func() {
-		if err := srv.Run(srvCtx); err != nil {
-			serverErrors <- fmt.Errorf("mcp server: %w", err)
-		}
-	}()
+	// Start HTTP server
+	serverErrors := bootstrap.ServerErrorChannel(1)
 
 	go func() {
 		logger.Info("HTTP server starting", "address", addr)
@@ -284,7 +274,6 @@ func runSSE(logger *slog.Logger, cfg server.Config) error {
 
 	// Create the shutdown context AFTER the signal/error arrives so the full
 	// timeout window is available for graceful drain.
-	cancel()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 

@@ -121,8 +121,8 @@ services:
         condition: service_started
     environment:
       # --- MCP Transport ---
-      MCP_TRANSPORT: sse
-      MCP_SSE_PORT: "8090"
+      MCP_TRANSPORT: http
+      MCP_PORT: "8090"
       MCP_SERVER_NAME: ${MCP_SERVER_NAME:-meridian-mcp}
       MCP_BASE_URL: ${MCP_BASE_URL:?MCP_BASE_URL must be set in the env file (e.g. https://your-domain)}
 
@@ -138,7 +138,7 @@ services:
       MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}      # required when MCP_OAUTH_ENABLED=true
       MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-} # required when MCP_OAUTH_ENABLED=true
     # Not exposed to host — accessed only by caddy on the internal network
-    # Caddy proxies /sse and /message to this container
+    # Caddy proxies /mcp to this container
 
   caddy:
     image: caddy:2-alpine
