@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "time-of-use-pricing",
+    "type": "registry:pattern",
+    "title": "Time-of-Use Energy Pricing",
+    "description": "Extends energy settlement with temporal pricing awareness. Values kWh consumption at dynamic rates that vary by settlement period (half-hour), using forecast-derived price curves from Market Data. Peak, off-peak, and overnight rates are resolved from the event timestamp.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["economy", "energy", "pricing", "temporal"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "time-based-pricing",
+        "industries": ["energy", "utilities"],
+        "provides": {
+            "instruments": ["KWH"],
+            "account_types": [],
+            "sagas": ["tou_energy_valuation"],
+            "valuation_rules": ["KWH->GBP"],
+            "triggers": ["event:position-keeping.transaction-captured.v1"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": ["nordpool_spot"]
+        },
+        "composes_with": ["carbon-offset", "saas-billing"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/time-of-use-pricing/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/time-of-use-pricing/tou_energy_valuation.star",
+            "type": "registry:file",
+            "target": "~/sagas/tou_energy_valuation.star"
+        }
+    ]
+}

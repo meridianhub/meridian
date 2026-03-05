@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "energy-settlement",
+    "type": "registry:pattern",
+    "title": "Energy Usage-to-Value Settlement",
+    "description": "Converts metered kWh into monetary value using market rates. Creates retail and wholesale GBP positions from energy consumption.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["energy", "utilities", "cross-instrument"],
+    "meta": {
+        "complexity": 3,
+        "design_pattern": "cross-instrument-valuation",
+        "industries": ["energy", "utilities"],
+        "provides": {
+            "instruments": ["KWH"],
+            "account_types": ["ENERGY_INVENTORY", "SETTLEMENT", "REVENUE"],
+            "sagas": ["usage_to_value"],
+            "valuation_rules": ["kwh_to_gbp_retail", "kwh_to_gbp_wholesale"],
+            "triggers": ["event:position-keeping.transaction-captured.v1"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": ["KWH_GBP_RETAIL", "KWH_GBP_WHOLESALE"]
+        },
+        "composes_with": ["carbon-offset", "time-of-use-pricing"],
+        "conflicts_with": ["flat-rate-billing"],
+        "extends": []
+    },
+    "files": [
+        {
+            "path": "patterns/energy-settlement/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/energy-settlement/usage_to_value.star",
+            "type": "registry:file",
+            "target": "~/sagas/usage_to_value.star"
+        }
+    ]
+}

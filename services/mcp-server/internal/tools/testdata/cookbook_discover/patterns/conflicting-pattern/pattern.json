@@ -1,0 +1,11 @@
+{
+    "name": "conflicting-pattern",
+    "type": "registry:pattern",
+    "title": "Conflicting Pattern",
+    "description": "A test pattern that conflicts with fiat-foundation.",
+    "categories": ["test"],
+    "meta": {
+        "complexity": 1,
+        "conflicts_with": ["fiat-foundation"]
+    }
+}

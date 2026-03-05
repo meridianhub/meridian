@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "payment-gateway-stripe",
+    "type": "registry:pattern",
+    "title": "Stripe Payment Gateway",
+    "description": "Stripe payment integration via the Operational Gateway abstraction layer. Includes provider connection configuration, outbound/inbound mapping definitions for payload transformation, instruction routing, and a multi-step saga with lien reservation, gateway dispatch, and conditional ledger posting.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["economy", "payments", "gateway", "integration"],
+    "meta": {
+        "complexity": 8,
+        "design_pattern": "operational-gateway",
+        "industries": ["payments", "fintech"],
+        "provides": {
+            "instruments": [],
+            "account_types": ["CUSTOMER_CURRENT", "PAYMENT_CLEARING"],
+            "sagas": ["stripe_payment_via_gateway", "stripe_payment_received"],
+            "valuation_rules": [],
+            "triggers": ["api:/v1/payments/stripe", "webhook:stripe.payment_intent.succeeded"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["kyc-compliance", "saas-billing"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/payment-gateway-stripe/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/payment-gateway-stripe/stripe_payment_received.star",
+            "type": "registry:file",
+            "target": "~/sagas/stripe_payment_received.star"
+        }
+    ]
+}

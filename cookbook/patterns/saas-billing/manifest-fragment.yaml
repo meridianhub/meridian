@@ -1,0 +1,82 @@
+instruments:
+  - code: GPU_HOUR
+    name: GPU Compute Hour
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: GPU-hr
+      precision: 6
+  - code: API_CALL
+    name: API Call Unit
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: calls
+      precision: 0
+  - code: STORAGE_GB
+    name: Storage Gigabyte-Month
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: GB-mo
+      precision: 3
+  - code: CREDIT
+    name: Platform Credit
+    type: INSTRUMENT_TYPE_VOUCHER
+    dimensions:
+      unit: credits
+      precision: 2
+
+accountTypes:
+  - code: BILLING
+    name: Billing Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [USD]
+    policies:
+      validation: ""
+      bucketing: ""
+  - code: USAGE
+    name: Usage Metering Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GPU_HOUR, API_CALL, STORAGE_GB]
+    policies:
+      validation: "amount > 0"
+      bucketing: "instrument_code + ':' + attributes.billing_period"
+  - code: CREDIT_BALANCE
+    name: Credit Balance Account
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [CREDIT]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+  - code: REVENUE
+    name: Revenue Account
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [USD]
+    policies:
+      validation: ""
+      bucketing: ""
+
+valuationRules:
+  - fromInstrument: GPU_HOUR
+    toInstrument: USD
+    method: VALUATION_METHOD_FIXED
+    source: pricing_table_v2
+  - fromInstrument: API_CALL
+    toInstrument: USD
+    method: VALUATION_METHOD_FIXED
+    source: pricing_table_v2
+  - fromInstrument: STORAGE_GB
+    toInstrument: USD
+    method: VALUATION_METHOD_FIXED
+    source: pricing_table_v2
+  - fromInstrument: CREDIT
+    toInstrument: USD
+    method: VALUATION_METHOD_FIXED
+    source: credit_exchange_rate
+
+sagas:
+  - name: record_gpu_usage
+    trigger: "webhook:gpu_meter_event"
+  - name: compute_billing
+    trigger: "event:position-keeping.transaction-captured.v1"
+    filter: "event.instrument_code == 'GPU_HOUR' && event.direction == 'DEBIT'"
+  - name: generate_monthly_invoice
+    trigger: "scheduled:monthly_billing"

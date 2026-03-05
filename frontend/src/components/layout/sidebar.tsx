@@ -21,31 +21,34 @@ import {
   Bot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTenantFeatures } from '@/hooks/use-tenant-features'
+import { useTenantContext } from '@/contexts/tenant-context'
 
 interface NavItem {
   label: string
   href: string
   icon: React.ComponentType<{ className?: string }>
+  feature?: string
 }
 
 const TENANT_NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { label: 'Accounts', href: '/accounts', icon: Wallet },
-  { label: 'Internal Accounts', href: '/internal-accounts', icon: Building },
-  { label: 'Payments', href: '/payments', icon: ArrowLeftRight },
+  { label: 'Dashboard', href: '/', icon: LayoutDashboard, feature: 'dashboard' },
+  { label: 'Accounts', href: '/accounts', icon: Wallet, feature: 'accounts' },
+  { label: 'Internal Accounts', href: '/internal-accounts', icon: Building, feature: 'internal-accounts' },
+  { label: 'Payments', href: '/payments', icon: ArrowLeftRight, feature: 'payments' },
   { label: 'Transactions', href: '/transactions', icon: Activity },
-  { label: 'Positions', href: '/positions', icon: TrendingUp },
-  { label: 'Ledger', href: '/ledger', icon: BookOpen },
-  { label: 'Parties', href: '/parties', icon: Users },
-  { label: 'Reconciliation', href: '/reconciliation', icon: CheckSquare },
-  { label: 'Starlark Config', href: '/starlark-config', icon: Code },
-  { label: 'Market Data', href: '/market-data', icon: LineChart },
-  { label: 'Forecasting', href: '/forecasting', icon: BarChart3 },
-  { label: 'Reference Data', href: '/reference-data', icon: Database },
-  { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map },
-  { label: 'Manifests', href: '/manifests', icon: FileJson },
-  { label: 'MCP Config', href: '/mcp-config', icon: Bot },
-  { label: 'Audit Log', href: '/audit-log', icon: ClipboardList },
+  { label: 'Positions', href: '/positions', icon: TrendingUp, feature: 'positions' },
+  { label: 'Ledger', href: '/ledger', icon: BookOpen, feature: 'ledger' },
+  { label: 'Parties', href: '/parties', icon: Users, feature: 'parties' },
+  { label: 'Reconciliation', href: '/reconciliation', icon: CheckSquare, feature: 'reconciliation' },
+  { label: 'Starlark Config', href: '/starlark-config', icon: Code, feature: 'sagas' },
+  { label: 'Market Data', href: '/market-data', icon: LineChart, feature: 'market-data' },
+  { label: 'Forecasting', href: '/forecasting', icon: BarChart3, feature: 'forecasting' },
+  { label: 'Reference Data', href: '/reference-data', icon: Database, feature: 'reference-data' },
+  { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map, feature: 'mappings' },
+  { label: 'Manifests', href: '/manifests', icon: FileJson, feature: 'manifests' },
+  { label: 'MCP Config', href: '/mcp-config', icon: Bot, feature: 'mcp-config' },
+  { label: 'Audit Log', href: '/audit-log', icon: ClipboardList, feature: 'audit' },
 ]
 
 const PLATFORM_NAV_ITEMS: NavItem[] = [
@@ -63,6 +66,14 @@ interface SidebarProps {
 
 export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }: SidebarProps) {
   const showPlatformItems = lens === 'platform'
+  const { isFeatureEnabled } = useTenantFeatures()
+  const { isPlatformAdmin } = useTenantContext()
+
+  const visibleTenantItems = TENANT_NAV_ITEMS.filter((item) => {
+    if (!item.feature) return true
+    if (isPlatformAdmin) return true
+    return isFeatureEnabled(item.feature)
+  })
 
   return (
     <>
@@ -84,7 +95,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
     >
       <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto py-4">
         <ul role="list" className="space-y-1 px-2">
-          {TENANT_NAV_ITEMS.map((item) => {
+          {visibleTenantItems.map((item) => {
             const Icon = item.icon
             const isActive = currentPath === item.href
             return (
