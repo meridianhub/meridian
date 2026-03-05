@@ -185,13 +185,17 @@ frontend/src/features/cookbook/
 │   ├── catalogue-grid.tsx     # Filterable card grid
 │   ├── pattern-detail.tsx     # Economy pattern detail
 │   ├── component-detail.tsx   # UI component detail
-│   ├── saga-flow.tsx          # Starlark → flow diagram
+│   ├── saga-flow.tsx          # Mermaid flow diagram
 │   ├── saga-flow-parser.ts   # .star text → flow model
+│   ├── saga-mermaid.ts        # Flow model → Mermaid markup
+│   ├── handler-reference.tsx  # Service module API docs
 │   ├── composition-graph.tsx  # Node graph (patterns)
 │   ├── manifest-viewer.tsx    # YAML syntax highlight
+│   ├── linked-detail.tsx      # Split: editor + diagram + API ref
 │   └── filter-bar.tsx         # Type/category/industry
 ├── hooks/
 │   ├── use-cookbook.ts         # Registry data (static)
+│   ├── use-handlers.ts        # Handler definitions (gRPC)
 │   └── use-discovery.ts       # Tenant compatibility (gRPC)
 ├── lib/
 │   └── star-parser.ts         # Starlark static analysis
@@ -240,6 +244,143 @@ as the entry point at the top.
 `.star` text. It does not import Starlark, Go, or any
 runtime. It is a text → visual transformation, like a
 Mermaid renderer.
+
+**Mermaid as the rendering engine**: The parsed flow
+model maps directly to Mermaid flowchart syntax:
+
+```mermaid
+flowchart TD
+    START([usage_to_value]) --> S1
+    S1[lookup_account\n reference_data.get_account] --> S2
+    S2[check_retail_idempotency\n position_keeping.query_logs] --> S3
+    S3[check_wholesale_idempotency\n position_keeping.query_logs] --> D1
+    D1{already processed?}
+    D1 -->|Yes| EXIT([ALREADY_PROCESSED])
+    D1 -->|No| S4
+    S4[lookup_account_type\n reference_data.get_account_type] --> S5
+    S5[compute_retail_valuation\n valuation_engine.compute] --> S6
+    S6[compute_wholesale_valuation\n valuation_engine.compute] --> S7
+    S7[book_retail_position\n position_keeping.initiate_log] --> S8
+    S8[book_wholesale_position\n position_keeping.initiate_log] --> END([VALUED])
+```
+
+Mermaid is the right tool here because:
+
+- The Starlark flow is inherently linear with branches
+  — exactly what Mermaid flowcharts express
+- mermaid.js is already a standard rendering library
+  (< 50KB gzipped for the flowchart module)
+- GitHub, GitLab, and Markdown tools render it natively,
+  making the generated diagrams portable
+- Starlark's bounded nature (no while loops, no
+  recursion) means every saga maps to a finite flowchart
+
+The parser generates Mermaid markup as a string; the
+component renders it with mermaid.js. This keeps the
+rendering stateless and cacheable.
+
+### Service Module Reference (Live from handlers.yaml)
+
+The `handlers.yaml` files are the **runtime source of
+truth** for every service module available to Starlark.
+The saga engine reads them at startup to build
+type-safe service modules. The browser renders the
+same data — not a copy, not documentation that can
+drift, but the actual interface definitions the
+platform enforces at execution time.
+
+**This is not documentation. It is the code rendered.**
+
+The handlers.yaml is to Starlark service modules what
+proto files are to gRPC services: the authoritative
+contract. The browser visualises this contract the
+same way a proto viewer renders `.proto` files — from
+the source, not from hand-written docs.
+
+**What each handler definition contains:**
+
+| Field | Runtime purpose | Visual rendering |
+|-------|----------------|-----------------|
+| `description` | Logged in saga audit trail | Handler summary text |
+| `params` (typed, required/optional) | Enforced at script load time | Parameter signature |
+| `returns` | Available to subsequent saga steps | Return type table |
+| `compensate` | Automatic rollback on saga failure | Compensation chain link |
+
+**Rendered as a browsable reference:**
+
+```text
+Service: position_keeping
+
+  initiate_log(account_id, instrument_code, direction, amount, ...)
+    Initiate a position log entry for a DEBIT or CREDIT.
+    Params: account_id (string, required), instrument_code (string, required), ...
+    Returns: log_id (string), position_id (string)
+    Compensates via: position_keeping.cancel_log
+
+  query_logs(correlation_id, instrument_code, account_id)
+    Query position logs by correlation ID and filters.
+    Params: correlation_id (string, required), ...
+    Returns: count (int), logs (array)
+```
+
+**Data path**: The handlers.yaml is already parsed by
+the schema registry at startup and served via an
+existing gRPC endpoint (`handlers_describe`). The
+browser reads from this same endpoint — no new data
+path, no separate docs to maintain. When a developer
+adds a parameter to handlers.yaml, it appears in the
+browser on the next deploy because it IS the same
+data.
+
+**Why this matters**: The Starlark sagas look simple
+because the service modules hide the complexity. The
+service module reference reveals what's behind each
+`service.method()` call — parameter types, return
+values, and crucially, the compensation chain that
+makes rollback automatic. Without this context, a
+reader sees `position_keeping.initiate_log(...)` and
+has to guess what it does. With the reference, they
+see the live contract the platform enforces.
+
+### Linked Experience
+
+The three views — editor, flow diagram, and API
+reference — are interconnected:
+
+```text
++---------------------------+---------------------------+
+|  Starlark Editor          |  Flow Diagram (Mermaid)   |
+|                           |                           |
+|  step("create_lien")  <---|--- [create_lien]          |
+|  lien = payment_order.    |       payment_order       |
+|    create_lien(...)       |           |               |
+|                           |    [dispatch_payment]     |
+|  step("dispatch")         |       financial_gateway   |
+|  ...                      |                           |
++---------------------------+---------------------------+
+|  API Reference (collapsible)                          |
+|  > payment_order.create_lien                          |
+|    Params: account_id (string, required), ...         |
+|    Returns: lien_id, bucket_id                        |
+|    Compensates via: payment_order.terminate_lien       |
++-------------------------------------------------------+
+```
+
+**Interactions:**
+
+- Click a node in the Mermaid diagram → scroll to and
+  highlight the corresponding `step()` block in the
+  editor
+- Click a `service.method()` call in the editor →
+  expand the API reference panel for that handler
+- Hover a service badge in the flow diagram → tooltip
+  showing handler signature and compensation chain
+
+This linked experience is what makes the cookbook
+browser more than a static catalogue: it's an
+interactive exploration tool where the visual flow,
+the source code, and the API documentation are all
+connected.
 
 ### Composition Graph
 
@@ -326,32 +467,61 @@ It appears in the sidebar under a "Platform" or
 - Lazy loading of `.star` and `.yaml` file contents
 - Route: `/cookbook/:name`
 
-### Phase 3: Saga Flow Renderer
+### Phase 3: Saga Flow Renderer (Mermaid)
 
-- Starlark static parser (`star-parser.ts`)
-- Flow diagram component (`saga-flow.tsx`)
-- Renders step nodes, service call badges, early-exit
-  branches, trigger/filter header
-- Integrated into pattern detail as the primary view
-  (above the raw code)
+- Starlark static parser (`star-parser.ts`) — regex
+  extraction of `step()`, `service.method()`, and
+  `if...return` blocks
+- Mermaid markup generator from parsed flow model
+- Render with mermaid.js in pattern detail view
+- Shows trigger/filter as entry node, steps as
+  rectangles with service badges, branches as diamonds,
+  compensation as dashed edges
+- Integrated as primary view above the raw code editor
 
-### Phase 4: Composition Graph
+### Phase 4: Service Module Reference
 
-- Node graph component using a graph layout library
+- Fetch handler definitions from existing gRPC
+  endpoint (handlers_describe)
+- Render as collapsible API reference panel: service
+  name, handler signature, typed params, returns,
+  compensation chain
+- Shown alongside saga detail — click a
+  `service.method()` in the code or flow diagram to
+  expand the relevant handler docs
+- No separate documentation — this IS the runtime
+  contract rendered
+
+### Phase 5: Linked Experience
+
+- Click a Mermaid node → scroll to the corresponding
+  `step()` in the CodeMirror editor
+- Click a service call in the editor → expand the
+  API reference for that handler
+- Hover a service name in the flow diagram → tooltip
+  with handler signature and compensation chain
+- Split-panel layout: editor left, diagram right,
+  API reference below (collapsible)
+
+### Phase 6: Composition Graph
+
+- Node graph component using @xyflow/react with elkjs
+  layout
 - Renders all patterns with four edge types
-- Interactive: click, hover, filter
+- Interactive: click to navigate, hover to highlight,
+  filter by category/industry
 - Route: `/cookbook/graph`
 - Also embedded as a mini-graph on each pattern detail
   (showing immediate neighbours only)
 
-### Phase 5: UI Component Preview
+### Phase 7: UI Component Preview
 
 - Live component rendering with mock data
 - Prop table from component.json metadata
 - Feature module usage context
 - Integrated into detail view for `registry:ui` entries
 
-### Phase 6: Tenant Discovery View (Optional)
+### Phase 8: Tenant Discovery View (Optional)
 
 - "What can I add?" panel that calls existing gRPC
   services to inspect the tenant's current manifest
@@ -366,29 +536,48 @@ It appears in the sidebar under a "Platform" or
 
 ### Saga Flow Rendering
 
-**Option A: Custom SVG/Canvas** — Full control over
-visual design, matches the app's design language.
-More implementation effort.
+**Decision: Mermaid** — Parse `.star` → generate Mermaid
+flowchart syntax → render with mermaid.js.
 
-**Option B: Mermaid generation** — Parse .star → generate
-Mermaid flowchart syntax → render with mermaid-js.
-Fast to implement, but constrained by Mermaid's layout
-and styling.
+Rationale:
 
-**Option C: @xyflow/react (React Flow)** — Interactive
-node-based diagrams. Good for both saga flows and the
-composition graph. Consistent library for both views.
+- Starlark's bounded structure (no while, no recursion)
+  maps perfectly to finite Mermaid flowcharts
+- mermaid.js is lightweight (< 50KB gzipped for
+  flowcharts), well-maintained, and renders natively
+  in GitHub/GitLab/Markdown tools
+- The generated Mermaid markup is portable — it can be
+  embedded in ADRs, PRDs, or issue descriptions
+- Mermaid handles layout automatically (no manual
+  positioning or force-directed physics)
+- The parser output is a string (Mermaid markup), not
+  a component tree — trivially cacheable and testable
 
-**Recommendation**: Option C for both saga flows and
-composition graph. One library, two views, interactive
-by default.
+Alternatives considered:
 
-### Graph Layout
+- **@xyflow/react**: More interactive (drag, zoom) but
+  adds ~150KB, requires layout logic, and the
+  interactivity isn't needed for a read-only flow view
+- **Custom SVG**: Full design control but high
+  implementation cost for layout algorithms
 
-**elkjs** for automatic layout (hierarchical for saga
-flows, force-directed for composition graph). Runs in
-a web worker to avoid blocking the main thread on large
-graphs.
+### Composition Graph
+
+**Decision: @xyflow/react (React Flow)** — For the
+pattern relationship graph only (not saga flows).
+
+The composition graph benefits from interactivity
+(click to navigate, hover to highlight neighbours,
+filter by category) in a way that saga flows do not.
+Force-directed layout with **elkjs** running in a web
+worker for automatic positioning.
+
+This means two rendering approaches:
+
+| View | Library | Why |
+|------|---------|-----|
+| Saga flow | mermaid.js | Linear flow, read-only, portable |
+| Composition graph | @xyflow/react | Interactive exploration, force layout |
 
 ## Open Questions
 
@@ -439,19 +628,25 @@ graphs.
 
 1. A staff user can browse all cookbook entries from a
    single page, filtered by type, category, or industry
-2. Economy pattern details show a rendered saga flow
-   diagram that communicates the service call chain
-   without reading code
-3. The composition graph reveals pattern relationships
+2. Economy pattern details show a Mermaid flow diagram
+   that communicates the service call chain without
+   reading code
+3. Service module handlers are browsable as a live API
+   reference rendered from the same handlers.yaml that
+   the runtime enforces — no separate docs to maintain
+4. Clicking a node in the flow diagram highlights the
+   corresponding step in the code editor; clicking a
+   service call opens its handler reference
+5. The composition graph reveals pattern relationships
    (depends, composes, extends, conflicts) as an
    interactive node graph
-4. UI component details show a live rendered preview
+6. UI component details show a live rendered preview
    with prop documentation
-5. All data comes from gRPC or static files — no MCP
+7. All data comes from gRPC or static files — no MCP
    dependency
-6. The saga flow parser handles all 11 existing cookbook
+8. The saga flow parser handles all 11 existing cookbook
    patterns without manual annotation
-7. Page loads in < 2s on a standard connection
+9. Page loads in < 2s on a standard connection
    (static bundling for catalogue, lazy fetch for detail)
 
 ## Relationship to Previous PRDs
