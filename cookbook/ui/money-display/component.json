@@ -1,0 +1,28 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "money-display",
+    "type": "registry:ui",
+    "title": "Money Display",
+    "description": "Renders financial amounts for both fiat currencies (ISO 4217) and non-fiat instruments (kWh, GPU_HOUR, TONNE_CO2E) using BigInt arithmetic to avoid float precision loss. Supports locale-aware currency symbol placement and optional sign display.",
+    "categories": ["display", "finance", "currency", "instruments"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/money-display.tsx",
+            "type": "registry:file",
+            "target": "src/shared/money-display.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "accounts",
+            "ledger",
+            "payments",
+            "positions",
+            "reconciliation"
+        ]
+    }
+}

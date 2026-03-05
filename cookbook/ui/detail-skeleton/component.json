@@ -1,0 +1,29 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "detail-skeleton",
+    "type": "registry:ui",
+    "title": "Detail Skeleton",
+    "description": "Full-page loading skeleton for entity detail pages. Renders animated placeholders for a back-navigation link, title with status badge, a configurable stats grid, optional tab bar, and tab content area.",
+    "categories": ["loading", "skeleton", "layout"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/detail-skeleton.tsx",
+            "type": "registry:file",
+            "target": "src/shared/detail-skeleton.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": ["fieldCount", "tabCount", "showBackNav"],
+        "used_by": [
+            "accounts",
+            "internal-accounts",
+            "parties",
+            "payments",
+            "positions",
+            "sagas"
+        ]
+    }
+}

@@ -1,0 +1,35 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "data-table",
+    "type": "registry:ui",
+    "title": "Data Table",
+    "description": "Paginated, filterable, and sortable data table with React Query integration. Renders server-side paginated lists with optional filter controls, column sorting, skeleton loading rows, and empty/error states.",
+    "categories": ["display", "data", "table", "pagination"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/data-table.tsx",
+            "type": "registry:file",
+            "target": "src/shared/data-table.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "accounts",
+            "audit",
+            "ledger",
+            "manifests",
+            "market-data",
+            "parties",
+            "payments",
+            "positions",
+            "reconciliation",
+            "reference-data",
+            "sagas",
+            "tenants"
+        ]
+    }
+}

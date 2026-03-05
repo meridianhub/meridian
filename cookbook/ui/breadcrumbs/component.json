@@ -1,0 +1,36 @@
+{
+    "$schema": "../../schema/registry-item.json",
+    "name": "breadcrumbs",
+    "type": "registry:ui",
+    "title": "Breadcrumbs",
+    "description": "Accessible breadcrumb navigation bar with a home icon root link and configurable intermediate items. The last item renders as plain text; earlier items render as links when an href is provided.",
+    "categories": ["navigation", "layout"],
+    "registryDependencies": [],
+    "files": [
+        {
+            "path": "frontend/src/shared/breadcrumbs.tsx",
+            "type": "registry:file",
+            "target": "src/shared/breadcrumbs.tsx"
+        }
+    ],
+    "meta": {
+        "feature_module": "shared",
+        "tenant_configurable": false,
+        "configurable_props": [],
+        "used_by": [
+            "accounts",
+            "audit",
+            "internal-accounts",
+            "ledger",
+            "manifests",
+            "market-data",
+            "parties",
+            "payments",
+            "positions",
+            "reconciliation",
+            "reference-data",
+            "sagas",
+            "tenants"
+        ]
+    }
+}
