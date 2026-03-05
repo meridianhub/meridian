@@ -463,7 +463,7 @@ via the Model Context Protocol (MCP).
 - Translate MCP JSON-RPC calls into gRPC requests to backend services
 - Expose read, simulate, and write tool categories
 - Plan-before-apply safety for manifest operations
-- Support stdio, streamable HTTP, and SSE transports
+- Support stdio and streamable HTTP transports
 
 See [services/mcp-server/README.md](mcp-server/README.md) for full documentation.
 
