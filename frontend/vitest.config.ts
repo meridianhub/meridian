@@ -31,6 +31,7 @@ function genStubPlugin(): Plugin {
     export const ForecastingService = { typeName: 'stub', methods: [] }
     export const ManifestHistoryService = { typeName: 'stub', methods: [] }
     export const ApplyManifestService = { typeName: 'stub', methods: [] }
+    export const AccountStatus = { UNSPECIFIED: 0, ACTIVE: 1, FROZEN: 2, CLOSED: 3 }
     export const TransactionStatus = { UNSPECIFIED: 0, PENDING: 1, POSTED: 2, FAILED: 3, CANCELLED: 4, REVERSED: 5 }
     export const PostingDirection = { UNSPECIFIED: 0, DEBIT: 1, CREDIT: 2 }
     export const Currency = { UNSPECIFIED: 0, GBP: 1, USD: 2, EUR: 3 }
