@@ -1,24 +1,19 @@
 {
-    "$schema": "../../schema/registry-item.json",
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
     "name": "cel-editor",
     "type": "registry:ui",
     "title": "CEL Editor",
-    "description": "CodeMirror-based editor for Common Expression Language (CEL) expressions with inline error diagnostics, a security constraints banner (max bytes, nesting depth, cost limit), and a context-specific variable reference panel. Supports validation, bucketKey, eligibility, and value expression contexts.",
-    "categories": ["editor", "cel", "reference-data", "validation"],
-    "registryDependencies": [],
+    "description": "A CodeMirror-based editor for authoring Common Expression Language (CEL) expressions used in Meridian validation rules, bucket keys, eligibility checks, and valuation formulas. Shows available context variables and inline error diagnostics.",
+    "categories": ["editor", "cel", "validation", "manifest"],
     "files": [
         {
             "path": "frontend/src/features/sagas/components/cel-editor.tsx",
-            "type": "registry:file",
-            "target": "src/features/sagas/components/cel-editor.tsx"
+            "type": "registry:ui"
         }
     ],
     "meta": {
-        "feature_module": "reference-data",
+        "feature_module": "sagas",
         "tenant_configurable": false,
-        "configurable_props": ["readOnly", "showVariables"],
-        "used_by": [
-            "reference-data"
-        ]
+        "used_by": ["manifests", "mappings", "market-data"]
     }
 }

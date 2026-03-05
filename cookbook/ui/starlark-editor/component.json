@@ -1,24 +1,19 @@
 {
-    "$schema": "../../schema/registry-item.json",
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
     "name": "starlark-editor",
     "type": "registry:ui",
     "title": "Starlark Editor",
-    "description": "CodeMirror-based editor for Starlark saga scripts with Python syntax highlighting, inline lint diagnostics (SYNTAX, ERROR, WARNING categories with line:column navigation), read-only mode, and a complexity metrics panel showing handler call count, operation count, estimated duration, and complexity score.",
-    "categories": ["editor", "starlark", "sagas"],
-    "registryDependencies": [],
+    "description": "A CodeMirror-based editor for authoring Starlark saga scripts with Python syntax highlighting, inline validation error diagnostics, and a complexity metrics panel showing handler call count, operation count, and estimated duration.",
+    "categories": ["editor", "starlark", "saga", "manifest"],
     "files": [
         {
             "path": "frontend/src/features/sagas/components/starlark-editor.tsx",
-            "type": "registry:file",
-            "target": "src/features/sagas/components/starlark-editor.tsx"
+            "type": "registry:ui"
         }
     ],
     "meta": {
         "feature_module": "sagas",
         "tenant_configurable": false,
-        "configurable_props": ["readOnly"],
-        "used_by": [
-            "sagas"
-        ]
+        "used_by": ["starlark", "manifests"]
     }
 }

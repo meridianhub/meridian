@@ -1,25 +1,19 @@
 {
-    "$schema": "../../schema/registry-item.json",
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
     "name": "saga-timeline",
     "type": "registry:ui",
     "title": "Saga Timeline",
-    "description": "Horizontal step timeline showing saga execution progress through INITIATED, RESERVED, EXECUTING, and COMPLETED stages. Completed steps show a checkmark with relative timestamps; the current step pulses. A separate compensation section renders if the saga triggered rollback steps.",
-    "categories": ["display", "timeline", "sagas"],
-    "registryDependencies": ["time-display"],
+    "description": "Visualises the lifecycle of a Meridian saga as a horizontal step timeline, showing INITIATED, RESERVED, EXECUTING, and COMPLETED states with timestamps. Renders a separate compensation branch when rollback steps are present.",
+    "categories": ["saga", "timeline", "display", "status"],
     "files": [
         {
             "path": "frontend/src/features/sagas/components/saga-timeline.tsx",
-            "type": "registry:file",
-            "target": "src/features/sagas/components/saga-timeline.tsx"
+            "type": "registry:ui"
         }
     ],
     "meta": {
         "feature_module": "sagas",
         "tenant_configurable": false,
-        "configurable_props": [],
-        "used_by": [
-            "payments",
-            "sagas"
-        ]
+        "used_by": ["payments", "transactions", "reconciliation"]
     }
 }

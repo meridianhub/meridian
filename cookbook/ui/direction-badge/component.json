@@ -1,26 +1,19 @@
 {
-    "$schema": "../../schema/registry-item.json",
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
     "name": "direction-badge",
     "type": "registry:ui",
     "title": "Direction Badge",
-    "description": "Badge that visually distinguishes CREDIT from DEBIT ledger directions using color-coded pill styles and directional arrow icons. Renders green for credits and red for debits.",
-    "categories": ["display", "badge", "ledger", "finance"],
-    "registryDependencies": [],
+    "description": "Displays a double-entry bookkeeping direction (DEBIT or CREDIT) as a colour-coded inline badge. DEBIT renders in orange and CREDIT in blue, following standard accounting colour conventions.",
+    "categories": ["ledger", "badge", "display", "accounting"],
     "files": [
         {
-            "path": "frontend/src/shared/direction-badge.tsx",
-            "type": "registry:file",
-            "target": "src/shared/direction-badge.tsx"
+            "path": "frontend/src/features/ledger/pages/direction-badge.tsx",
+            "type": "registry:ui"
         }
     ],
     "meta": {
-        "feature_module": "shared",
+        "feature_module": "ledger",
         "tenant_configurable": false,
-        "configurable_props": [],
-        "used_by": [
-            "ledger",
-            "payments",
-            "positions"
-        ]
+        "used_by": ["ledger", "transactions", "audit"]
     }
 }

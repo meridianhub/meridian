@@ -1,0 +1,13 @@
+accountTypes:
+  - code: KYC_COMPLIANCE
+    name: KYC Compliance Obligation Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount >= 0"
+      bucketing: ""
+
+sagas:
+  - name: kyc_on_party
+    trigger: "event:party.created.v1"
+    filter: "event.party_type == 'INDIVIDUAL'"

@@ -21,7 +21,7 @@
             "instruments": [],
             "market_data": []
         },
-        "composes_with": ["energy-settlement", "saas-billing", "carbon-offset", "precious-metals"],
+        "composes_with": ["saas-billing", "carbon-offset", "precious-metals"],
         "conflicts_with": [],
         "extends": []
     },

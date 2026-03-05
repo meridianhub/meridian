@@ -1,26 +1,19 @@
 {
-    "$schema": "../../schema/registry-item.json",
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
     "name": "create-valuation-feature-dialog",
     "type": "registry:ui",
     "title": "Create Valuation Feature Dialog",
-    "description": "Modal dialog for mapping an input instrument to an account's native currency via a valuation method. Collects instrument code, valuation method ID and version, output instrument (must match account currency), and optional JSON parameters. Supports both current and internal account types, with field-level and general error display.",
-    "categories": ["form", "dialog", "reference-data", "valuation"],
-    "registryDependencies": [],
+    "description": "A modal dialog for attaching a valuation feature to a current or internal bank account. Collects input instrument code, valuation method ID and version, output instrument, and optional JSON parameters, then calls the CreateValuationFeature RPC.",
+    "categories": ["valuation", "account", "dialog", "form"],
     "files": [
         {
             "path": "frontend/src/features/reference-data/components/create-valuation-feature-dialog.tsx",
-            "type": "registry:file",
-            "target": "src/features/reference-data/components/create-valuation-feature-dialog.tsx"
+            "type": "registry:ui"
         }
     ],
     "meta": {
         "feature_module": "reference-data",
         "tenant_configurable": false,
-        "configurable_props": [],
-        "used_by": [
-            "accounts",
-            "internal-accounts",
-            "reference-data"
-        ]
+        "used_by": ["ledger", "internal-accounts"]
     }
 }

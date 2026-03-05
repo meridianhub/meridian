@@ -1,0 +1,19 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "stat-card",
+    "type": "registry:ui",
+    "title": "Stat Card",
+    "description": "A summary card that displays a numeric metric with a title, optional description, and icon. Supports loading skeleton state, error fallback, a 'recent' qualifier suffix, and optional navigation via an href link.",
+    "categories": ["dashboard", "display", "metrics", "card"],
+    "files": [
+        {
+            "path": "frontend/src/features/dashboard/pages/stat-card.tsx",
+            "type": "registry:ui"
+        }
+    ],
+    "meta": {
+        "feature_module": "dashboard",
+        "tenant_configurable": false,
+        "used_by": ["dashboard"]
+    }
+}
