@@ -212,6 +212,14 @@ func TestDispatchPayment_StripeSuccess(t *testing.T) {
 	// Verify the Stripe API was called with correct params
 	require.Equal(t, 1, creator.callCount())
 	call := creator.lastCall()
+	require.NotNil(t, call)
+	require.NotNil(t, call.Amount)
+	require.NotNil(t, call.Currency)
+	require.NotNil(t, call.Customer)
+	require.NotNil(t, call.PaymentMethod)
+	require.NotNil(t, call.Confirm)
+	require.NotNil(t, call.OffSession)
+	require.NotNil(t, call.StripeAccount)
 	assert.Equal(t, int64(10000), *call.Amount)
 	assert.Equal(t, "gbp", *call.Currency)
 	assert.Equal(t, "cus_e2e_test", *call.Customer)
@@ -292,8 +300,8 @@ func TestDispatchPayment_InvalidRequest(t *testing.T) {
 func TestDispatchPayment_MissingTenantContext(t *testing.T) {
 	creator := &stubPaymentIntentCreator{
 		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
-			t.Fatal("stripe should not be called without tenant context")
-			return nil, nil
+			t.Error("stripe should not be called without tenant context")
+			return nil, errors.New("unexpected stripe call")
 		},
 	}
 
@@ -311,8 +319,8 @@ func TestDispatchPayment_MissingTenantContext(t *testing.T) {
 func TestDispatchPayment_TenantNotConfigured(t *testing.T) {
 	creator := &stubPaymentIntentCreator{
 		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
-			t.Fatal("stripe should not be called for unconfigured tenant")
-			return nil, nil
+			t.Error("stripe should not be called for unconfigured tenant")
+			return nil, errors.New("unexpected stripe call")
 		},
 	}
 
@@ -331,8 +339,8 @@ func TestDispatchPayment_TenantNotConfigured(t *testing.T) {
 func TestDispatchPayment_UnsupportedRail(t *testing.T) {
 	creator := &stubPaymentIntentCreator{
 		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
-			t.Fatal("stripe should not be called for non-Stripe rail")
-			return nil, nil
+			t.Error("stripe should not be called for non-Stripe rail")
+			return nil, errors.New("unexpected stripe call")
 		},
 	}
 
@@ -353,8 +361,8 @@ func TestDispatchPayment_UnsupportedRail(t *testing.T) {
 func TestCircuitBreakerTrips(t *testing.T) {
 	creator := &stubPaymentIntentCreator{
 		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
-			t.Fatal("stripe should not be called when circuit breaker is open")
-			return nil, nil
+			t.Error("stripe should not be called when circuit breaker is open")
+			return nil, errors.New("unexpected stripe call")
 		},
 	}
 
