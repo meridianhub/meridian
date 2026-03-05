@@ -81,7 +81,7 @@ export function useDatasetObservations(datasetCode: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: [...tenantKeys.marketDataSet(tenantSlug ?? '', datasetCode ?? ''), 'observations'],
+    queryKey: tenantKeys.marketDataObservations(tenantSlug ?? '', datasetCode ?? ''),
     queryFn: () =>
       clients.marketInformation.listObservations({
         datasetCode: datasetCode!,

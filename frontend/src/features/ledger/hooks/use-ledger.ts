@@ -46,7 +46,7 @@ export function useBookingLogsTable() {
   const clients = useApiClients()
   const tenantSlug = useTenantSlug()
 
-  const queryKey = [...(tenantSlug ? tenantKeys.all(tenantSlug) : ['no-tenant']), 'ledger', 'bookingLogs'] as const
+  const queryKey = tenantKeys.bookingLogs(tenantSlug ?? '')
 
   async function queryFn(
     params: DataTableQueryParams,
@@ -95,7 +95,7 @@ export function useBookingLogDetail(bookingLogId: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: [...tenantKeys.all(tenantSlug ?? ''), 'ledger', 'bookingLog', bookingLogId],
+    queryKey: tenantKeys.bookingLog(tenantSlug ?? '', bookingLogId ?? ''),
     queryFn: async (): Promise<FinancialBookingLog | null> => {
       const response = await clients.financialAccounting.retrieveFinancialBookingLog({
         id: bookingLogId ?? '',
@@ -150,7 +150,7 @@ export function useLedgerPostings(accountId: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: [...tenantKeys.all(tenantSlug ?? ''), 'ledger', 'postings', accountId],
+    queryKey: tenantKeys.ledgerPostings(tenantSlug ?? '', accountId ?? ''),
     queryFn: () =>
       clients.financialAccounting.listLedgerPostings({
         pagination: { pageSize: 50, pageToken: '' },

@@ -13,9 +13,7 @@ export function usePositionLogsTable() {
   const clients = useApiClients()
   const tenantSlug = useTenantSlug()
 
-  const queryKey = tenantSlug
-    ? [...tenantKeys.all(tenantSlug), 'positions']
-    : ['positions']
+  const queryKey = tenantKeys.positions(tenantSlug ?? '')
 
   async function queryFn(
     params: DataTableQueryParams,
@@ -48,9 +46,7 @@ export function usePositionLogDetail(logId: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: tenantSlug
-      ? [...tenantKeys.all(tenantSlug), 'positions', logId]
-      : ['positions', logId],
+    queryKey: tenantKeys.position(tenantSlug ?? '', logId ?? ''),
     queryFn: () =>
       clients.positionKeeping.retrieveFinancialPositionLog({ logId: logId! }),
     enabled: Boolean(tenantSlug && logId),

@@ -141,7 +141,7 @@ export function useAccountPostings(accountId: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: [...tenantKeys.account(tenantSlug ?? '', accountId ?? ''), 'postings'],
+    queryKey: tenantKeys.accountPostings(tenantSlug ?? '', accountId ?? ''),
     queryFn: () =>
       clients.financialAccounting.listLedgerPostings({
         pagination: { pageSize: 50, pageToken: '' },

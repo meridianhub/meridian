@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
+import { tenantKeys, referenceKeys } from '@/lib/query-keys'
 import type { DataTableQueryParams, DataTableResult } from '@/shared/data-table'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 
@@ -39,9 +39,7 @@ export function useSagaDetail(definitionId: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: tenantSlug
-      ? [...tenantKeys.sagas(tenantSlug), definitionId]
-      : ['starlark-config', definitionId],
+    queryKey: tenantKeys.saga(tenantSlug ?? '', definitionId ?? ''),
     queryFn: async () => {
       const response = await sagaRegistry.getSaga({ id: definitionId ?? '' })
       return response.saga
@@ -57,7 +55,7 @@ export function useActiveSaga(sagaName: string | undefined, enabled: boolean = t
   const { sagaRegistry } = useApiClients()
 
   return useQuery({
-    queryKey: ['starlark-config', 'active', sagaName],
+    queryKey: referenceKeys.activeSaga(sagaName ?? ''),
     queryFn: async () => {
       if (!sagaName) return null
       try {

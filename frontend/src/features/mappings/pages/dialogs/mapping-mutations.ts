@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
+import { referenceKeys } from '@/lib/query-keys'
 
 export interface CreateMappingRequest {
   name: string
@@ -25,7 +26,7 @@ export function useCreateMapping() {
       return response.mapping
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['mappings'] })
+      void queryClient.invalidateQueries({ queryKey: referenceKeys.mappings() })
     },
   })
 }

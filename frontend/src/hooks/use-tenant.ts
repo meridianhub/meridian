@@ -26,7 +26,7 @@ export function useTenantProvisioningStatus(tenantId: string, tenantStatus?: Ten
   const isProvisioning = tenantStatus !== undefined && PROVISIONING_STATUSES.has(tenantStatus)
 
   return useQuery({
-    queryKey: [...platformKeys.tenant(tenantId), 'provisioning-status'],
+    queryKey: platformKeys.tenantProvisioningStatus(tenantId),
     queryFn: async () => {
       const response = await tenant.getTenantProvisioningStatus({ tenantId })
       return response
@@ -48,7 +48,7 @@ export function useUpdateTenantStatus(tenantId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: platformKeys.tenant(tenantId) })
       void queryClient.invalidateQueries({
-        queryKey: [...platformKeys.tenant(tenantId), 'provisioning-status'],
+        queryKey: platformKeys.tenantProvisioningStatus(tenantId),
       })
       void queryClient.invalidateQueries({ queryKey: platformKeys.tenants() })
     },
