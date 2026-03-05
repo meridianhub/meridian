@@ -115,14 +115,15 @@ describe('OverviewTab', () => {
     it('renders party type', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('PARTY_TYPE_ORGANIZATION')).toBeInTheDocument()
+        expect(screen.getByText('ORGANIZATION')).toBeInTheDocument()
       })
     })
 
-    it('renders party status', async () => {
+    it('renders party status via StatusBadge', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('PARTY_STATUS_ACTIVE')).toBeInTheDocument()
+        // Prefix stripped, StatusBadge renders the label
+        expect(screen.getByText('ACTIVE')).toBeInTheDocument()
       })
     })
 

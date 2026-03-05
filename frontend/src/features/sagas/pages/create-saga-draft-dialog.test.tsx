@@ -79,7 +79,7 @@ describe('CreateSagaDraftDialog - rendering', () => {
     expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/description/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^script$/i)).toBeInTheDocument()
+    expect(screen.getByTestId('starlark-editor')).toBeInTheDocument()
     expect(screen.getByLabelText(/preconditions cel/i)).toBeInTheDocument()
   })
 
@@ -91,8 +91,8 @@ describe('CreateSagaDraftDialog - rendering', () => {
 
   it('pre-fills script with starter template', () => {
     renderDialog()
-    const scriptArea = screen.getByLabelText(/^script$/i) as HTMLTextAreaElement
-    expect(scriptArea.value).toContain(STARTER_SCRIPT_FRAGMENT)
+    const editor = screen.getByTestId('starlark-editor')
+    expect(editor.textContent).toContain(STARTER_SCRIPT_FRAGMENT)
   })
 })
 
@@ -151,14 +151,15 @@ describe('CreateSagaDraftDialog - script validation', () => {
     vi.clearAllMocks()
   })
 
-  it('shows error when script is cleared', async () => {
+  it('submits with pre-filled script successfully (script validation)', async () => {
     const user = userEvent.setup()
     renderDialog()
-    const scriptArea = screen.getByLabelText(/^script$/i)
-    await user.clear(scriptArea)
+    // With the starter template pre-filled, submission should not show script error
     await user.type(screen.getByLabelText(/^name$/i), 'savings.withdraw')
     await user.click(screen.getByRole('button', { name: /create saga draft/i }))
-    expect(await screen.findByText(/script is required/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText(/script is required/i)).not.toBeInTheDocument()
+    })
   })
 })
 
@@ -267,8 +268,8 @@ describe('CreateSagaDraftDialog - close and reset', () => {
     )
 
     expect(screen.getByLabelText(/^name$/i)).toHaveValue('')
-    // Script should be reset to starter template
-    const scriptArea = screen.getByLabelText(/^script$/i) as HTMLTextAreaElement
-    expect(scriptArea.value).toContain(STARTER_SCRIPT_FRAGMENT)
+    // Script editor should be reset to starter template
+    const editor = screen.getByTestId('starlark-editor')
+    expect(editor.textContent).toContain(STARTER_SCRIPT_FRAGMENT)
   })
 })

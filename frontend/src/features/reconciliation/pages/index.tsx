@@ -112,6 +112,12 @@ export function ReconciliationPage() {
         queryFn={queryFn}
         columns={columns}
         pageSize={25}
+        emptyState={
+          <div data-testid="empty-state" className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+            <span className="text-sm font-medium">No reconciliation runs yet</span>
+            <span className="text-xs">Start a reconciliation to see results here.</span>
+          </div>
+        }
         filters={[
           {
             field: 'status',

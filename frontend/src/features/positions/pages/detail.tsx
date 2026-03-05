@@ -36,7 +36,7 @@ function BalanceView({ log }: BalanceViewProps) {
   for (const entry of entries) {
     const rawAmount = entry.amount?.amount
     if (rawAmount === undefined || rawAmount === null) continue
-    const amt = typeof rawAmount === 'string' ? BigInt(rawAmount) : rawAmount
+    const amt = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount)
     const signed = entry.direction === 'CREDIT' ? amt : -amt
 
     provisionalTotal += signed

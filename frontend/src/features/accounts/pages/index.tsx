@@ -4,6 +4,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
+import { EntityLink } from '@/shared'
 import { Button } from '@/components/ui/button'
 import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_account_pb'
 import { CreateAccountDialog } from './create-account-dialog'
@@ -38,6 +39,13 @@ export function AccountsPage() {
     {
       accessorKey: 'instrumentCode',
       header: 'Instrument',
+    },
+    {
+      accessorKey: 'partyId',
+      header: 'Party',
+      cell: ({ row }) => row.original.partyId
+        ? <span onClick={(e) => e.stopPropagation()}><EntityLink type="party" id={row.original.partyId} /></span>
+        : <span className="text-muted-foreground">—</span>,
     },
     {
       accessorKey: 'createdAt',

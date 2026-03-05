@@ -3,6 +3,7 @@ syntax = "proto3";
 package meridian.control_plane.v1;
 
 import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "meridian/control_plane/v1/manifest.proto";
 
@@ -17,14 +18,26 @@ option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_
 // with a forward-only audit trail.
 service ManifestHistoryService {
   // GetCurrentManifest retrieves the most recently applied manifest for the tenant.
-  rpc GetCurrentManifest(GetCurrentManifestRequest) returns (GetCurrentManifestResponse);
+  rpc GetCurrentManifest(GetCurrentManifestRequest) returns (GetCurrentManifestResponse) {
+    option (google.api.http) = {
+      get: "/v1/manifests/current"
+    };
+  }
 
   // GetManifestVersion retrieves a specific manifest version by its version string.
-  rpc GetManifestVersion(GetManifestVersionRequest) returns (GetManifestVersionResponse);
+  rpc GetManifestVersion(GetManifestVersionRequest) returns (GetManifestVersionResponse) {
+    option (google.api.http) = {
+      get: "/v1/manifests/versions/{version}"
+    };
+  }
 
   // ListManifestVersions returns a paginated list of manifest versions, ordered
   // by applied_at descending (most recent first).
-  rpc ListManifestVersions(ListManifestVersionsRequest) returns (ListManifestVersionsResponse);
+  rpc ListManifestVersions(ListManifestVersionsRequest) returns (ListManifestVersionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/manifests/versions"
+    };
+  }
 }
 
 // ========================================

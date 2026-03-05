@@ -3,7 +3,9 @@ import { ClockIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TimeDisplay } from './time-display';
 import { EmptyState } from '@/components/ui/empty-state';
-import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch';
+import { Button } from '@/components/ui/button';
+import { useApiClients } from '@/api/context';
+import { AuditOperation as AuditOperationEnum } from '@/api/gen/meridian/audit/v1/audit_events_pb';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,53 +22,27 @@ export interface AuditEntry {
   newValues: object | null;
 }
 
-export interface AuditEntriesResponse {
-  entries: AuditEntry[];
-}
-
 export interface AuditTrailProps {
   entityType: string;
   entityId: string;
 }
 
 // ---------------------------------------------------------------------------
-// Stub audit client
-//
-// The audit query RPC (ListAuditEntries) does not exist yet (Open Item #1).
-// This stub calls the service and throws StubError on 501/503 responses so the
-// UI can show a "coming soon" banner while the backend is built.
+// Enum helpers
 // ---------------------------------------------------------------------------
 
-async function fetchAuditEntries(
-  entityType: string,
-  entityId: string,
-  fetchFn: typeof fetch = fetch,
-): Promise<AuditEntriesResponse> {
-  const response = await fetchFn(
-    '/meridian.audit.v1.AuditService/ListAuditEntries',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entityType, entityId }),
-    },
-  );
+const OPERATION_NAMES: Record<number, AuditOperation> = {
+  [AuditOperationEnum.INSERT]: 'INSERT',
+  [AuditOperationEnum.UPDATE]: 'UPDATE',
+  [AuditOperationEnum.DELETE]: 'DELETE',
+};
 
-  if (!response.ok) {
-    if (response.status === 501 || response.status === 503) {
-      throw new StubError('Audit service not yet implemented');
-    }
-    throw new Error(`Audit request failed: ${response.status}`);
-  }
+const VALID_OPERATIONS = new Set<string>(['INSERT', 'UPDATE', 'DELETE']);
 
-  return response.json() as Promise<AuditEntriesResponse>;
-}
-
-class StubError extends Error {
-  readonly isStub = true;
-}
-
-function isStubError(err: unknown): boolean {
-  return err instanceof StubError || (err instanceof Error && err.message.includes('Audit service not yet implemented'));
+function toOperationName(op: unknown): AuditOperation {
+  if (typeof op === 'string' && VALID_OPERATIONS.has(op)) return op as AuditOperation;
+  if (typeof op === 'number') return OPERATION_NAMES[op] ?? 'UPDATE';
+  return 'UPDATE';
 }
 
 // ---------------------------------------------------------------------------
@@ -234,11 +210,19 @@ function AuditEntryItem({ entry }: { entry: AuditEntry }) {
 // ---------------------------------------------------------------------------
 
 export function AuditTrail({ entityType, entityId }: AuditTrailProps) {
-  const authFetch = useAuthenticatedFetch();
-  const { data, isLoading, isError, error } = useQuery({
+  const clients = useApiClients();
+
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['audit', entityType, entityId],
-    queryFn: () => fetchAuditEntries(entityType, entityId, authFetch),
-    staleTime: 0, // Always refetch audit logs
+    queryFn: async () => {
+      const response = await clients.audit.listAuditEntries({
+        tableName: entityType,
+        recordId: entityId,
+        pageSize: 50,
+      });
+      return response;
+    },
+    staleTime: 0,
   });
 
   if (isLoading) {
@@ -246,33 +230,36 @@ export function AuditTrail({ entityType, entityId }: AuditTrailProps) {
   }
 
   if (isError) {
-    if (isStubError(error)) {
-      // Stub fallback: audit service not yet implemented (Open Item #1)
-      return (
-        <div
-          data-testid="audit-trail-stub"
-          className="rounded-lg border border-dashed p-6 text-center"
-        >
-          <p className="text-sm text-muted-foreground">
-            Audit log coming soon — the audit query service is not yet available.
-          </p>
-        </div>
-      );
-    }
-    // Generic error state for non-stub failures (500, network, parse errors)
     return (
       <div
         data-testid="audit-trail-error"
         className="rounded-lg border border-dashed p-6 text-center"
       >
         <p className="text-sm text-muted-foreground">
-          Unable to load audit history. Please try again.
+          Unable to load audit history.
         </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          onClick={() => void refetch()}
+        >
+          Retry
+        </Button>
       </div>
     );
   }
 
-  if (!data?.entries.length) {
+  const entries: AuditEntry[] = (data?.entries ?? []).map((e) => ({
+    entryId: e.entryId,
+    operation: toOperationName(e.operation),
+    changedBy: e.changedBy,
+    timestamp: e.timestamp ?? null,
+    oldValues: e.oldValues?.fields ? (e.oldValues as unknown as object) : null,
+    newValues: e.newValues?.fields ? (e.newValues as unknown as object) : null,
+  }));
+
+  if (entries.length === 0) {
     return (
       <div data-testid="audit-trail-empty">
         <EmptyState
@@ -285,7 +272,7 @@ export function AuditTrail({ entityType, entityId }: AuditTrailProps) {
   }
 
   // Sort most-recent first
-  const sorted = [...data.entries].sort((a, b) => {
+  const sorted = [...entries].sort((a, b) => {
     const aTime = typeof a.timestamp?.seconds === 'bigint'
       ? Number(a.timestamp.seconds)
       : (a.timestamp?.seconds ?? 0);
