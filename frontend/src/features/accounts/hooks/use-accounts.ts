@@ -85,6 +85,7 @@ export function useAccountsTable() {
       status: toAccountStatus(a.accountStatus),
       instrumentCode: a.instrumentCode || '',
       availableBalance: '',
+      partyId: a.orgPartyId || undefined,
       createdAt: a.createdAt ?? undefined,
       updatedAt: a.updatedAt ?? undefined,
     }))

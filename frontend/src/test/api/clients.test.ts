@@ -24,7 +24,7 @@ describe('createServiceClients', () => {
     const transport = makeTransport()
     const clients = createServiceClients(transport)
 
-    expect(Object.keys(clients)).toHaveLength(18)
+    expect(Object.keys(clients)).toHaveLength(19)
   })
 
   it('creates clients for all expected services', () => {
@@ -49,13 +49,14 @@ describe('createServiceClients', () => {
     expect(clients).toHaveProperty('forecasting')
     expect(clients).toHaveProperty('manifestHistory')
     expect(clients).toHaveProperty('manifestApplier')
+    expect(clients).toHaveProperty('audit')
   })
 
   it('calls createClient for each service with the provided transport', () => {
     const transport = makeTransport()
     createServiceClients(transport)
 
-    expect(createClient).toHaveBeenCalledTimes(18)
+    expect(createClient).toHaveBeenCalledTimes(19)
     vi.mocked(createClient).mock.calls.forEach(([, t]) => {
       expect(t).toBe(transport)
     })

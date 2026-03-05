@@ -31,24 +31,44 @@ interface NavItem {
   feature?: string
 }
 
-const TENANT_NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard, feature: 'dashboard' },
-  { label: 'Accounts', href: '/accounts', icon: Wallet, feature: 'accounts' },
-  { label: 'Internal Accounts', href: '/internal-accounts', icon: Building, feature: 'internal-accounts' },
-  { label: 'Payments', href: '/payments', icon: ArrowLeftRight, feature: 'payments' },
-  { label: 'Transactions', href: '/transactions', icon: Activity },
-  { label: 'Positions', href: '/positions', icon: TrendingUp, feature: 'positions' },
-  { label: 'Ledger', href: '/ledger', icon: BookOpen, feature: 'ledger' },
-  { label: 'Parties', href: '/parties', icon: Users, feature: 'parties' },
-  { label: 'Reconciliation', href: '/reconciliation', icon: CheckSquare, feature: 'reconciliation' },
-  { label: 'Starlark Config', href: '/starlark-config', icon: Code, feature: 'sagas' },
-  { label: 'Market Data', href: '/market-data', icon: LineChart, feature: 'market-data' },
-  { label: 'Forecasting', href: '/forecasting', icon: BarChart3, feature: 'forecasting' },
-  { label: 'Reference Data', href: '/reference-data', icon: Database, feature: 'reference-data' },
-  { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map, feature: 'mappings' },
-  { label: 'Manifests', href: '/manifests', icon: FileJson, feature: 'manifests' },
-  { label: 'MCP Config', href: '/mcp-config', icon: Bot, feature: 'mcp-config' },
-  { label: 'Audit Log', href: '/audit-log', icon: ClipboardList, feature: 'audit' },
+interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
+const TENANT_NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Operations',
+    items: [
+      { label: 'Dashboard', href: '/', icon: LayoutDashboard, feature: 'dashboard' },
+      { label: 'Accounts', href: '/accounts', icon: Wallet, feature: 'accounts' },
+      { label: 'Internal Accounts', href: '/internal-accounts', icon: Building, feature: 'internal-accounts' },
+      { label: 'Payments', href: '/payments', icon: ArrowLeftRight, feature: 'payments' },
+      { label: 'Transactions', href: '/transactions', icon: Activity },
+      { label: 'Positions', href: '/positions', icon: TrendingUp, feature: 'positions' },
+      { label: 'Ledger', href: '/ledger', icon: BookOpen, feature: 'ledger' },
+      { label: 'Parties', href: '/parties', icon: Users, feature: 'parties' },
+      { label: 'Reconciliation', href: '/reconciliation', icon: CheckSquare, feature: 'reconciliation' },
+    ],
+  },
+  {
+    label: 'Configuration',
+    items: [
+      { label: 'Starlark Config', href: '/starlark-config', icon: Code, feature: 'sagas' },
+      { label: 'Market Data', href: '/market-data', icon: LineChart, feature: 'market-data' },
+      { label: 'Forecasting', href: '/forecasting', icon: BarChart3, feature: 'forecasting' },
+      { label: 'Reference Data', href: '/reference-data', icon: Database, feature: 'reference-data' },
+      { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map, feature: 'mappings' },
+      { label: 'Manifests', href: '/manifests', icon: FileJson, feature: 'manifests' },
+      { label: 'MCP Config', href: '/mcp-config', icon: Bot, feature: 'mcp-config' },
+    ],
+  },
+  {
+    label: 'Admin',
+    items: [
+      { label: 'Audit Log', href: '/audit-log', icon: ClipboardList, feature: 'audit' },
+    ],
+  },
 ]
 
 const PLATFORM_NAV_ITEMS: NavItem[] = [
@@ -69,11 +89,11 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
   const { isFeatureEnabled } = useTenantFeatures()
   const { isPlatformAdmin } = useTenantContext()
 
-  const visibleTenantItems = TENANT_NAV_ITEMS.filter((item) => {
+  function isItemVisible(item: NavItem): boolean {
     if (!item.feature) return true
     if (isPlatformAdmin) return true
     return isFeatureEnabled(item.feature)
-  })
+  }
 
   return (
     <>
@@ -94,53 +114,74 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
       )}
     >
       <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto py-4">
-        <ul role="list" className="space-y-1 px-2">
-          {visibleTenantItems.map((item) => {
-            const Icon = item.icon
-            const isActive = currentPath === item.href
+        <ul role="list" className="px-2">
+          {TENANT_NAV_GROUPS.map((group) => {
+            const visibleItems = group.items.filter(isItemVisible)
+            if (visibleItems.length === 0) return null
+
             return (
-              <li key={item.href}>
-                <Link
-                  to={item.href}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                    isActive
-                      ? 'bg-gray-700 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white',
-                  )}
-                >
-                  <Icon className="size-4 shrink-0" />
-                  {item.label}
-                </Link>
+              <li key={group.label}>
+                <div className="mb-1 mt-4 first:mt-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  {group.label}
+                </div>
+                <ul role="list" className="space-y-0.5">
+                  {visibleItems.map((item) => {
+                    const Icon = item.icon
+                    const isActive = currentPath === item.href
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          to={item.href}
+                          aria-current={isActive ? 'page' : undefined}
+                          className={cn(
+                            'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                            isActive
+                              ? 'bg-gray-700 text-white'
+                              : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                          )}
+                        >
+                          <Icon className="size-4 shrink-0" />
+                          {item.label}
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
               </li>
             )
           })}
 
           {showPlatformItems && (
             <>
-              <li role="separator" className="my-2 border-t border-gray-700" />
-              {PLATFORM_NAV_ITEMS.map((item) => {
-                const Icon = item.icon
-                const isActive = currentPath === item.href
-                return (
-                  <li key={item.href}>
-                    <Link
-                      to={item.href}
-                      aria-current={isActive ? 'page' : undefined}
-                      className={cn(
-                        'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                        isActive
-                          ? 'bg-gray-700 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white',
-                      )}
-                    >
-                      <Icon className="size-4 shrink-0" />
-                      {item.label}
-                    </Link>
-                  </li>
-                )
-              })}
+              <li role="separator" className="my-3 border-t border-gray-700" />
+              <li>
+                <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  Platform
+                </div>
+                <ul role="list" className="space-y-0.5">
+                  {PLATFORM_NAV_ITEMS.map((item) => {
+                    const Icon = item.icon
+                    const isActive = currentPath === item.href
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          to={item.href}
+                          aria-current={isActive ? 'page' : undefined}
+                          className={cn(
+                            'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                            isActive
+                              ? 'bg-gray-700 text-white'
+                              : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                          )}
+                        >
+                          <Icon className="size-4 shrink-0" />
+                          {item.label}
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </li>
             </>
           )}
         </ul>

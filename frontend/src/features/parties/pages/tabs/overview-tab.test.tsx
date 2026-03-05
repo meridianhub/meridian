@@ -119,10 +119,11 @@ describe('OverviewTab', () => {
       })
     })
 
-    it('renders party status', async () => {
+    it('renders party status via StatusBadge', async () => {
       renderTab()
       await waitFor(() => {
-        expect(screen.getByText('PARTY_STATUS_ACTIVE')).toBeInTheDocument()
+        // StatusBadge replaces underscores with spaces
+        expect(screen.getByText('PARTY STATUS ACTIVE')).toBeInTheDocument()
       })
     })
 
