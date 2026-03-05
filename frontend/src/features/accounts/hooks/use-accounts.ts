@@ -7,10 +7,14 @@ import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_acc
 import type { DataTableQueryParams, DataTableResult } from '@/shared/data-table'
 import type { CurrentAccount, AccountStatus as AccountStatusType } from '../pages/types'
 
-const ACCOUNT_STATUS_NAMES: Record<number, string> = {
+const ACCOUNT_STATUS_NAMES: Record<number, AccountStatusType> = {
   [AccountStatus.ACTIVE]: 'ACTIVE',
   [AccountStatus.FROZEN]: 'FROZEN',
   [AccountStatus.CLOSED]: 'CLOSED',
+}
+
+function toAccountStatus(status: number | undefined): AccountStatusType {
+  return ACCOUNT_STATUS_NAMES[status ?? 0] ?? 'SUSPENDED'
 }
 
 /** Extract a display string from google.type.Money (units + nanos/1e9). */
@@ -78,8 +82,7 @@ export function useAccountsTable() {
     const accounts: CurrentAccount[] = (response.accounts ?? []).map((a) => ({
       accountId: a.accountId ?? '',
       externalReference: a.externalIdentifier ?? '',
-      status: (ACCOUNT_STATUS_NAMES[a.accountStatus] ??
-        String(a.accountStatus)) as CurrentAccount['status'],
+      status: toAccountStatus(a.accountStatus),
       instrumentCode: a.instrumentCode || '',
       availableBalance: '',
       createdAt: a.createdAt ?? undefined,
@@ -114,8 +117,7 @@ export function useAccountDetail(accountId: string | undefined) {
         return {
           accountId: f.accountId,
           externalReference: f.externalIdentifier ?? '',
-          status: (ACCOUNT_STATUS_NAMES[f.accountStatus] ??
-            String(f.accountStatus)) as AccountStatusType,
+          status: toAccountStatus(f.accountStatus),
           instrumentCode: f.instrumentCode || '',
           availableBalance: formatBalance(f.currentBalance?.availableBalance?.amount) ?? '',
           createdAt: f.createdAt ?? undefined,
