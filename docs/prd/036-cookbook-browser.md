@@ -615,7 +615,7 @@ This means two rendering approaches:
    needs this in the frontend. Options: call existing
    gRPC services and compute compatibility client-side,
    add a dedicated gRPC endpoint for discovery, or
-   skip Phase 6 and keep discovery MCP-only.
+   skip Phase 8 and keep discovery MCP-only.
 
 5. **Access control**: Should the cookbook browser be
    visible to all staff, or gated behind a role
