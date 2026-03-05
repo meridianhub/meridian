@@ -24,75 +24,30 @@ Now you're maintaining a financial system — and you're not a financial company
 
 ## How It Works
 
-You write business logic in [Starlark](https://github.com/google/starlark-go)
-(a deterministic Python subset — no imports, no filesystem, no network).
-Meridian runs it on a double-entry ledger with automatic compensation on failure.
+Define your economy in a declarative manifest — instruments, account types, and
+settlement rules. Meridian provisions the ledger, enforces double-entry
+bookkeeping, and handles compensation when something fails.
 
-```python
-deposit_saga = saga(name="current_account_deposit")
+```bash
+# Register a customer
+curl -X POST http://localhost:8090/v1/parties \
+  -H "X-Tenant-ID: default" \
+  -d '{"partyType": "PARTY_TYPE_PERSON", "legalName": "Alice Smith"}'
 
-def execute_deposit():
-    amount = Decimal(input_data["amount"])
-    account_id = input_data["account_id"]
+# Open an account
+curl -X POST http://localhost:8090/v1/current-accounts \
+  -H "X-Tenant-ID: default" \
+  -d '{"partyId": "...", "baseCurrency": "CURRENCY_GBP"}'
 
-    step(name="log_position")
-    position_keeping.initiate_log(
-        position_id=account_id,
-        amount=amount,
-        currency=input_data["currency"],
-        direction="CREDIT",
-        transaction_id=input_data["transaction_id"],
-    )
-
-    step(name="post_to_ledger")
-    financial_accounting.capture_posting(
-        account_id=account_id,
-        amount=amount,
-        currency=input_data["currency"],
-        direction="CREDIT",
-        transaction_id=input_data["transaction_id"],
-    )
-
-execute_deposit()
+# Deposit — ledger entries, position updates, and audit trail created atomically
+curl -X POST http://localhost:8090/v1/current-accounts/{id}/deposits \
+  -H "X-Tenant-ID: default" \
+  -d '{"amount": {"amount": {"currencyCode": "GBP", "units": "100"}}}'
 ```
 
-When you need revenue splits across participants, the same engine handles it:
-
-```python
-def execute_distribution():
-    total = Decimal(input_data["total_amount"])
-
-    step(name="list_participants")
-    participants = party.list_participants(org_id=input_data["org_id"])
-
-    for p in participants:
-        share = Decimal(str(p["metadata"]["allocation_share"]))
-        account_ref = build_org_account_ref(
-            party_id=p["party_id"],
-            org_id=input_data["org_id"],
-            currency="GBP",
-        )
-        account_id = resolve_account(reference=account_ref)
-
-        step(name="credit_" + p["party_id"])
-        position_keeping.initiate_log(
-            position_id=account_id,
-            amount=total * share,
-            currency="GBP",
-            direction="CREDIT",
-            transaction_id=input_data["transaction_id"],
-        )
-```
-
-Validation and pricing rules use [CEL](https://cel.dev/) expressions:
-
-```cel
-// Enforce daily spending limit
-transaction.amount <= account.daily_limit - account.daily_spent
-
-// Time-of-use pricing
-rate_schedule.lookup(timestamp.hour) * quantity
-```
+Behind the scenes, each operation runs as a **saga** — a multi-step workflow
+that either completes fully or compensates automatically. Sagas are written in
+sandboxed scripts that Meridian validates before execution.
 
 ## What's Built
 
@@ -302,13 +257,20 @@ Built on [BIAN](https://bian.org/) banking service domain patterns.
 | **CurrentAccount** | Customer accounts, transaction orchestration |
 | **PositionKeeping** | Pre-ledger transaction log, position tracking |
 | **FinancialAccounting** | Double-entry bookkeeping |
-| **PaymentOrder** | Saga orchestration, settlement, Stripe integration |
-| **MarketInformation** | Pricing data with quality ladder (estimate / actual / verified) |
+| **PaymentOrder** | Settlement, Stripe Connect integration |
 | **Party** | Customer data, identity verification |
+| **MarketInformation** | Pricing data with quality ladder (estimate / actual / verified) |
 | **Reconciliation** | Variance detection, dispute management |
-| **ControlPlane** | Tenant management, billing configuration |
+| **Forecasting** | Forward curves and forecast generation |
+| **ControlPlane** | Tenant management, manifest configuration, Stripe billing |
+| **EventRouter** | CEL-filtered event routing, saga triggering |
+| **FinancialGateway** | External payment provider dispatch and reconciliation |
+| **OperationalGateway** | Non-financial outbound dispatch (KYC, IoT, partner) |
+| **Identity** | OIDC authentication and identity provider integration |
+| **MCP Server** | AI assistant integration via Model Context Protocol |
 
-See [docs/adr/](docs/adr/) for architectural decisions.
+See [services/README.md](services/README.md) for the full architecture diagram
+and [docs/adr/](docs/adr/) for architectural decisions.
 
 ## Technology
 

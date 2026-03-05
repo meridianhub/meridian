@@ -40,8 +40,12 @@ flowchart LR
         subgraph Infrastructure["Infrastructure"]
             Tenant["Tenant<br/>:50056"]
             CP["ControlPlane"]
+            Identity["Identity"]
             AW["audit-worker<br/>:8080"]
-            UMC["event-router<br/>:8080"]
+            ER["event-router<br/>:8080"]
+            FGW["FinancialGateway"]
+            OGW["OperationalGateway"]
+            MCP["MCP Server"]
             DB[("CockroachDB<br/>:26257")]
             Kafka["Kafka<br/>:9092"]
             Redis["Redis<br/>:6379"]
@@ -80,9 +84,18 @@ flowchart LR
     PK -->|"Publish Events"| Kafka
     Kafka -->|"Consume Events"| FA
 
-    %% Utilization metering (billing)
-    Kafka -->|"Audit Events"| UMC
-    UMC -->|"RecordMeasurement (gRPC)"| PK
+    %% Event routing (saga triggering + billing)
+    Kafka -->|"Domain Events"| ER
+    ER -->|"TriggerSaga (gRPC)"| CP
+    ER -->|"RecordMeasurement (gRPC)"| PK
+
+    %% Financial & operational gateways
+    FGW -->|"SQL"| DB
+    OGW -->|"SQL"| DB
+    Identity -->|"SQL"| DB
+
+    %% MCP server (AI adapter)
+    MCP -->|"gRPC"| CP
 
     %% Database connections
     CA -->|"SQL"| DB
@@ -118,7 +131,7 @@ flowchart LR
 
     class CA,PK,FA,Party,PO,RD,MI,IBA,Recon,FC service
     class GW edge
-    class Tenant,CP,AW,UMC,DB,Kafka,Redis storage
+    class Tenant,CP,Identity,AW,ER,FGW,OGW,MCP,DB,Kafka,Redis storage
     class User,PayGW,AuthProvider external
     class TenantCtl admin
 ```
@@ -154,7 +167,8 @@ All inter-service communication uses gRPC with Protocol Buffers:
 | Reconciliation | FinancialAccounting | Query ledger | Compare ledger entries across services |
 | Reconciliation | CurrentAccount | Query accounts | Compare account state across services |
 | Forecasting | MarketInformation | `GetMarketData()` | Retrieve market data for forecast models |
-| UtilizationMeteringConsumer | PositionKeeping | `RecordMeasurement()` | Record billing measurements to tenant-zero |
+| EventRouter | ControlPlane | `ExecuteSaga()` | Trigger saga workflows from domain events |
+| EventRouter | PositionKeeping | `RecordMeasurement()` | Record billing measurements to tenant-zero |
 
 **Note:** CurrentAccount uses a `ValidateParty()` client wrapper that calls `RetrieveParty()` and
 validates the party status is ACTIVE.
@@ -172,7 +186,7 @@ Event-driven communication for eventual consistency:
 | Publisher | Topic Pattern | Consumer | Purpose |
 |-----------|---------------|----------|---------|
 | PositionKeeping | `position-keeping.transaction-*.v1` | FinancialAccounting | Trigger ledger postings |
-| All Services | `*.audit.events` | UtilizationMeteringConsumer | Platform billing via tenant-zero |
+| All Services | `*.audit.events` | EventRouter | Platform billing and saga triggering |
 
 **Event Types:**
 
@@ -263,6 +277,10 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Reconciliation | 50060 | - | 9090 |
 | Forecasting | 50061 | - | 9090 |
 | ControlPlane | - | - | - |
+| FinancialGateway | gRPC | HTTP | - |
+| OperationalGateway | gRPC | HTTP | - |
+| Identity | gRPC | HTTP | - |
+| MCP Server | - | HTTP/stdio | - |
 | audit-worker | - | 8080 | 8080 |
 | event-router | - | 8080 | 8080 |
 
@@ -376,24 +394,78 @@ DRAFT → ACTIVE → DEPRECATED
 
 See [services/reference-data/README.md](reference-data/README.md) for full documentation.
 
-### Utilization Metering Consumer
+### Event Router
 
-The Utilization Metering Consumer is a centralized Kafka consumer for platform billing.
+CEL-filtered saga dispatcher that routes domain events from Kafka to saga workflows
+and platform billing handlers.
 
 **Responsibilities:**
 
-- Consumes audit events from all 6 domain services
-- Transforms audit events into utilization measurements
-- Records measurements to Position Keeping's tenant-zero for billing
+- Consumes domain events from multiple Kafka topics
+- Routes events to handlers via pluggable `EventHandler` interface
+- Triggers saga workflows through the control-plane's `SagaExecutionService`
+- Transforms audit events into utilization measurements for platform billing (tenant-zero)
 
 **Architecture:**
 
 - **Single deployment** consuming from multiple topics (not per-service)
 - **HPA scaling** based on Kafka consumer lag (1-5 replicas)
-- **Tenant-zero isolation** for platform billing data
+- **Idempotent saga triggering** via idempotency keys from source events
 
-See [services/event-router/README.md](event-router/README.md) for full
-documentation and [k8s/README.md](event-router/k8s/README.md) for deployment details.
+See [services/event-router/README.md](event-router/README.md) for full documentation.
+
+### Financial Gateway
+
+External payment provider integration gateway for dispatching and reconciling
+financial instructions.
+
+**Responsibilities:**
+
+- Dispatch payment instructions to configured provider connections
+- Track instruction lifecycle (pending, dispatching, delivered, acknowledged)
+- Process inbound webhooks from external providers
+- Monitor provider connection health
+
+See [services/financial-gateway/README.md](financial-gateway/README.md) for full documentation.
+
+### Operational Gateway
+
+Non-financial outbound dispatch gateway for IoT telemetry, KYC verification,
+partner file transfers, and settlement notifications.
+
+**Responsibilities:**
+
+- Dispatch non-financial operational instructions (KYC, device, settlement, partner)
+- Route instructions to configured provider connections
+- Reject `payment.*` instructions (must use financial-gateway)
+
+See [services/operational-gateway/README.md](operational-gateway/README.md) for full documentation.
+
+### Identity Service
+
+OIDC-based identity and authentication service for Meridian platform access.
+
+**Responsibilities:**
+
+- Integrate with OIDC-compliant identity providers (Dex, Keycloak)
+- Validate tokens and manage JWKS endpoints
+- Configure identity connectors for external providers
+
+See [services/identity/README.md](identity/README.md) for full documentation.
+
+### MCP Server
+
+Thin JSON-RPC adapter that exposes Meridian's backend services to LLM clients
+via the Model Context Protocol (MCP).
+
+**Responsibilities:**
+
+- Translate MCP JSON-RPC calls into gRPC requests to backend services
+- Expose read, simulate, and write tool categories
+- Plan-before-apply safety for manifest operations
+- Support stdio, streamable HTTP, and SSE transports
+
+See [services/mcp-server/README.md](mcp-server/README.md) for full documentation.
 
 ### Internal Account Service
 
