@@ -137,29 +137,38 @@ function scanFeatureFiles(
     const content = fs.readFileSync(file, 'utf-8')
     const relPath = path.relative(ROOT, file)
 
-    // Pattern 1: clients.propertyName.methodName(
-    // Pattern 2: destructured variable.methodName( (from `const { prop } = useApiClients()`)
+    // Extract destructured aliases from useApiClients() calls in this file
+    const aliases = extractUseApiClientsAliases(content)
+
     for (const propName of clientPropertyNames) {
       const serviceName = clientMappings.get(propName)!
 
-      // Match both `clients.prop.method(` and standalone `prop.method(`
-      const pattern = new RegExp(
-        `(?:\\bclients\\.)?\\b${escapeRegex(propName)}\\b\\.(\\w+)\\s*\\(`,
-        'g',
-      )
-      let m: RegExpExecArray | null
-      while ((m = pattern.exec(content)) !== null) {
-        const methodName = m[1]
-        if (!calls.has(serviceName)) {
-          calls.set(serviceName, new Map())
-        }
-        const methods = calls.get(serviceName)!
-        if (!methods.has(methodName)) {
-          methods.set(methodName, [])
-        }
-        const files = methods.get(methodName)!
-        if (!files.includes(relPath)) {
-          files.push(relPath)
+      // Build match roots: always match `clients.propName`, and also
+      // standalone `alias` only when destructured from useApiClients()
+      const roots: string[] = [`clients.${propName}`]
+      for (const alias of aliases.get(propName) ?? []) {
+        roots.push(alias)
+      }
+
+      for (const root of roots) {
+        const pattern = new RegExp(
+          `\\b${escapeRegex(root)}\\b\\.(\\w+)\\s*\\(`,
+          'g',
+        )
+        let m: RegExpExecArray | null
+        while ((m = pattern.exec(content)) !== null) {
+          const methodName = m[1]
+          if (!calls.has(serviceName)) {
+            calls.set(serviceName, new Map())
+          }
+          const methods = calls.get(serviceName)!
+          if (!methods.has(methodName)) {
+            methods.set(methodName, [])
+          }
+          const files = methods.get(methodName)!
+          if (!files.includes(relPath)) {
+            files.push(relPath)
+          }
         }
       }
     }
@@ -170,6 +179,24 @@ function scanFeatureFiles(
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function extractUseApiClientsAliases(content: string): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  const destructureRe = /const\s*\{([^}]+)\}\s*=\s*useApiClients\(\s*\)/g
+  let m: RegExpExecArray | null
+  while ((m = destructureRe.exec(content)) !== null) {
+    for (const raw of m[1].split(',')) {
+      const part = raw.trim()
+      if (!part) continue
+      const segments = part.split(':').map((s) => s.trim())
+      const prop = segments[0]
+      const alias = segments[1] || prop
+      if (!out.has(prop)) out.set(prop, [])
+      out.get(prop)!.push(alias)
+    }
+  }
+  return out
 }
 
 // --- Build coverage report ---
@@ -194,7 +221,6 @@ function buildCoverageReport(
   const report: ServiceCoverage[] = []
 
   for (const [service, serviceRpcs] of serviceMap) {
-    const isRegistered = registeredServices.has(service)
     const serviceCalls = frontendCalls.get(service)
 
     const rpcCoverage = serviceRpcs.map((rpc) => {
