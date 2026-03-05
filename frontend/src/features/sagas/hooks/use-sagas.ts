@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -59,8 +60,15 @@ export function useActiveSaga(sagaName: string | undefined, enabled: boolean = t
     queryKey: ['starlark-config', 'active', sagaName],
     queryFn: async () => {
       if (!sagaName) return null
-      const response = await sagaRegistry.getActiveSaga({ name: sagaName })
-      return response
+      try {
+        const response = await sagaRegistry.getActiveSaga({ name: sagaName })
+        return response
+      } catch (error) {
+        if (error instanceof ConnectError && error.code === Code.NotFound) {
+          return null
+        }
+        throw error
+      }
     },
     enabled: !!sagaName && enabled,
   })

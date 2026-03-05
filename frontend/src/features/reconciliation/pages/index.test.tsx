@@ -5,7 +5,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
 
 // Mock the reconciliation hook
-const mockQueryFn = vi.fn()
+const { mockQueryFn } = vi.hoisted(() => ({
+  mockQueryFn: vi.fn(),
+}))
 
 vi.mock('../hooks', () => ({
   useReconciliationRunsTable: vi.fn(() => ({

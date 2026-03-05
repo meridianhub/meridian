@@ -73,7 +73,7 @@ export function usePartyDetail(partyId: string | undefined) {
   return useQuery({
     queryKey: tenantKeys.party(tenantSlug ?? '', partyId ?? ''),
     queryFn: async () => {
-      const response = await clients.party.retrieveParty({ partyId: partyId! })
+      const response = await clients.party.retrieveParty({ partyId: partyId ?? '' })
       return response.party
     },
     enabled: Boolean(tenantSlug && partyId),
@@ -89,7 +89,7 @@ export function usePartyAssociations(partyId: string | undefined) {
 
   return useQuery({
     queryKey: tenantKeys.partyAssociations(tenantSlug ?? '', partyId ?? ''),
-    queryFn: () => clients.party.retrieveAssociations({ partyId: partyId! }),
+    queryFn: () => clients.party.retrieveAssociations({ partyId: partyId ?? '' }),
     enabled: Boolean(tenantSlug && partyId),
   })
 }
