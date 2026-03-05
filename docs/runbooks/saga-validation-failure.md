@@ -17,6 +17,8 @@ instructions: |
 **When to use this runbook**: Saga validation failures are reported through
 metrics, tenant support requests, or CI pipeline failures.
 
+**See also**: [Saga Validation Guide](../guides/saga-validation.md) for validation levels, usage, and security constraints.
+
 ## Quick Reference
 
 | Error Category | Typical Cause | Recovery Time | Escalation |

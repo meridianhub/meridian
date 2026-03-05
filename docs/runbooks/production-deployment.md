@@ -209,7 +209,7 @@ SERVICES=(
   "gateway"
   "internal-account"
   "market-information"
-  "utilization-metering-consumer"
+  "event-router"
 )
 
 # Note: reference-data is a library embedded in other services, not a standalone deployment.
@@ -370,7 +370,7 @@ flowchart TD
     subgraph Tier4["Tier 4: Edge and Supporting Services"]
         GW["Gateway :8080"]
         AW["AuditWorker :8080"]
-        UMC["UtilizationMeteringConsumer :8080"]
+        ER["EventRouter :8080"]
         AC["AuditConsumers :8080"]
     end
 
@@ -386,7 +386,7 @@ flowchart TD
     GW --> PO
     GW --> Party
     GW --> MI
-    UMC --> PK
+    ER --> PK
 ```
 
 ### Tier 1: Platform Services
@@ -479,8 +479,8 @@ done
 3. **Audit Consumers** -- Per-service Kafka consumers that write audit events to `audit_log` tables.
    One deployment per domain service.
 
-4. **Utilization Metering Consumer** (:8080) -- Consumes audit events from all services for
-   platform billing. Records measurements to Position Keeping's tenant-zero.
+4. **Event Router** (:8080) -- CEL-filtered saga dispatcher. Consumes domain events from Kafka
+   and triggers saga workflows. Also handles platform billing via utilization metering.
 
 ```bash
 # Deploy Gateway
@@ -496,9 +496,9 @@ for svc in current-account financial-accounting position-keeping party payment-o
   kubectl apply -k deployments/k8s/audit-consumer/overlays/${svc}
 done
 
-# Deploy Utilization Metering Consumer
-kubectl apply -k services/utilization-metering-consumer/k8s/
-kubectl wait --for=condition=Available deployment/utilization-metering-consumer -n production --timeout=120s
+# Deploy Event Router
+kubectl apply -k services/event-router/k8s/
+kubectl wait --for=condition=Available deployment/event-router -n production --timeout=120s
 ```
 
 ## 4. Health Check Verification
@@ -658,7 +658,7 @@ kubectl rollout status deployment/<service-name> -n production
 
 **Rollback order** (reverse of deployment order):
 
-1. Tier 4: Gateway, Audit Consumers, Audit Worker, Utilization Metering Consumer
+1. Tier 4: Gateway, Audit Consumers, Audit Worker, Event Router
 2. Tier 3: Payment Order, Current Account
 3. Tier 2: Financial Accounting, Position Keeping, Internal Account, Market Information
 4. Tier 1: Reference Data, Party, Tenant
@@ -725,7 +725,7 @@ kubectl scale deployment <service>-audit-consumer -n production --replicas=<prev
 | Payment Order | 50054 | 8080 | 9090 | `payment-order` |
 | Gateway | - | 8080 | 8080 | `gateway` |
 | Audit Worker | - | 8080 | 8080 | `audit-worker` |
-| Utilization Metering Consumer | - | 8080 | 8080 | `utilization-metering-consumer` |
+| Event Router | - | 8080 | 8080 | `event-router` |
 
 All gRPC services use Kubernetes DNS for service discovery:
 `<service-name>.<namespace>.svc.cluster.local:<port>`
