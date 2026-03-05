@@ -68,7 +68,7 @@ export const tenantKeys = {
   bookingLogs: (tenantId: string) =>
     [...tenantKeys.ledger(tenantId), 'bookingLogs'] as const,
   bookingLog: (tenantId: string, bookingLogId: string) =>
-    [...tenantKeys.ledger(tenantId), 'bookingLog', bookingLogId] as const,
+    [...tenantKeys.bookingLogs(tenantId), bookingLogId] as const,
   ledgerPostings: (tenantId: string, accountId: string) =>
     [...tenantKeys.ledger(tenantId), 'postings', accountId] as const,
 
