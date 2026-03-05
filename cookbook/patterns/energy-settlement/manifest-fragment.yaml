@@ -1,0 +1,48 @@
+instruments:
+  - code: KWH
+    name: Kilowatt Hour
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: kWh
+      precision: 3
+
+accountTypes:
+  - code: ENERGY_INVENTORY
+    name: Energy Inventory Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments:
+      - KWH
+    policies:
+      validation: "amount > 0"
+      bucketing: "instrument_code + ':' + attributes.delivery_period"
+
+  - code: SETTLEMENT
+    name: Settlement Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments:
+      - GBP
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+
+  - code: REVENUE
+    name: Revenue Account
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments:
+      - GBP
+    policies:
+      validation: ""
+      bucketing: ""
+
+valuationRules:
+  - name: kwh_to_gbp_retail
+    fromInstrument: KWH
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: KWH_GBP_RETAIL
+
+  - name: kwh_to_gbp_wholesale
+    fromInstrument: KWH
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: KWH_GBP_WHOLESALE

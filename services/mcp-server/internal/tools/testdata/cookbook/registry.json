@@ -1,0 +1,24 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry.json",
+    "name": "meridian-cookbook-test",
+    "items": [
+        {
+            "name": "account-balance",
+            "type": "registry:ui",
+            "title": "Account Balance Widget",
+            "categories": ["accounts", "dashboard"]
+        },
+        {
+            "name": "current-account",
+            "type": "registry:pattern",
+            "title": "Current Account",
+            "categories": ["accounts", "banking"]
+        },
+        {
+            "name": "energy-settlement",
+            "type": "registry:pattern",
+            "title": "Energy Settlement",
+            "categories": ["energy", "settlement"]
+        }
+    ]
+}

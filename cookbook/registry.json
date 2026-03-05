@@ -4,6 +4,26 @@
     "homepage": "https://github.com/meridianhub/meridian",
     "items": [
         {"name": "base-fiat-gbp", "type": "registry:pattern", "title": "Base Fiat Currency (GBP)"},
-        {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"}
+        {"name": "base-fiat-usd", "type": "registry:pattern", "title": "Base Fiat Currency (USD)"},
+        {"name": "energy-settlement", "type": "registry:pattern", "title": "Energy Usage-to-Value Settlement"},
+        {"name": "saas-billing", "type": "registry:pattern", "title": "SaaS Compute Billing"},
+        {"name": "carbon-offset", "type": "registry:pattern", "title": "Carbon Credit Registry"},
+        {"name": "precious-metals", "type": "registry:pattern", "title": "Precious Metals Trading"},
+        {"name": "time-of-use-pricing", "type": "registry:pattern", "title": "Time-of-Use Energy Pricing"},
+        {"name": "dynamic-capacity-pricing", "type": "registry:pattern", "title": "Dynamic Capacity Pricing"},
+        {"name": "kyc-compliance", "type": "registry:pattern", "title": "KYC Compliance Workflow"},
+        {"name": "payment-gateway-stripe", "type": "registry:pattern", "title": "Stripe Payment Gateway"},
+        {"name": "entity-distribution", "type": "registry:pattern", "title": "Entity Hierarchy Distribution"},
+        {"name": "phantom-cost-basis", "type": "registry:pattern", "title": "Phantom Cost Basis Adjustment"},
+        {"name": "quality-ladder-badge", "type": "registry:ui", "title": "Quality Ladder Badge"},
+        {"name": "cel-editor", "type": "registry:ui", "title": "CEL Editor"},
+        {"name": "starlark-editor", "type": "registry:ui", "title": "Starlark Editor"},
+        {"name": "saga-timeline", "type": "registry:ui", "title": "Saga Timeline"},
+        {"name": "create-valuation-feature-dialog", "type": "registry:ui", "title": "Create Valuation Feature Dialog"},
+        {"name": "direction-badge", "type": "registry:ui", "title": "Direction Badge"},
+        {"name": "balance-indicator", "type": "registry:ui", "title": "Balance Indicator"},
+        {"name": "stat-card", "type": "registry:ui", "title": "Stat Card"},
+        {"name": "quick-actions", "type": "registry:ui", "title": "Quick Actions"},
+        {"name": "activity-feed", "type": "registry:ui", "title": "Activity Feed"}
     ]
 }
