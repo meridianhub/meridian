@@ -1,0 +1,7 @@
+instruments:
+  - code: USD
+    name: United States Dollar
+    type: INSTRUMENT_TYPE_FIAT
+    dimensions:
+      unit: USD
+      precision: 2

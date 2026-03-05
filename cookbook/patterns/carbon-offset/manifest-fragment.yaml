@@ -1,0 +1,55 @@
+instruments:
+  - code: TONNE_CO2E
+    name: Tonne of CO2 Equivalent
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: tCO2e
+      precision: 3
+  - code: VER
+    name: Verified Emission Reduction
+    type: INSTRUMENT_TYPE_VOUCHER
+    dimensions:
+      unit: VER
+      precision: 0
+  - code: CER
+    name: Certified Emission Reduction
+    type: INSTRUMENT_TYPE_VOUCHER
+    dimensions:
+      unit: CER
+      precision: 0
+
+accountTypes:
+  - code: CARBON_INVENTORY
+    name: Carbon Credit Inventory
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [TONNE_CO2E, VER, CER]
+    policies:
+      validation: "amount > 0"
+      bucketing: "instrument_code + ':' + attributes.vintage_year + ':' + attributes.project_id"
+  - code: RETIREMENT
+    name: Retirement Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [TONNE_CO2E, VER, CER]
+    policies:
+      validation: "amount > 0"
+      bucketing: "instrument_code + ':' + attributes.vintage_year + ':' + attributes.retirement_reason"
+
+valuationRules:
+  - fromInstrument: VER
+    toInstrument: USD
+    method: VALUATION_METHOD_SPOT_RATE
+    source: verra_registry
+  - fromInstrument: CER
+    toInstrument: USD
+    method: VALUATION_METHOD_SPOT_RATE
+    source: gold_standard_registry
+  - fromInstrument: TONNE_CO2E
+    toInstrument: USD
+    method: VALUATION_METHOD_SPOT_RATE
+    source: eu_ets_spot
+
+sagas:
+  - name: purchase_carbon_credits
+    trigger: "api:/v1/carbon/purchases"
+  - name: retire_carbon_credits
+    trigger: "api:/v1/carbon/retirements"

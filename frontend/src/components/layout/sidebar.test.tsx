@@ -1,7 +1,41 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Sidebar } from '@/components/layout/sidebar'
+import type { TenantContextValue } from '@/contexts/tenant-context'
+
+vi.mock('@/contexts/tenant-context', () => ({
+  useTenantContext: vi.fn(),
+}))
+
+vi.mock('@/hooks/use-tenant-features', () => ({
+  useTenantFeatures: vi.fn(),
+}))
+
+import { useTenantContext } from '@/contexts/tenant-context'
+import { useTenantFeatures } from '@/hooks/use-tenant-features'
+import { ALL_FEATURES } from '@/lib/tenant-ui-config'
+
+function makeContext(overrides: Partial<TenantContextValue> = {}): TenantContextValue {
+  return {
+    currentTenant: null,
+    tenantSlug: null,
+    isPlatformAdmin: false,
+    switchTenant: vi.fn(),
+    clearTenant: vi.fn(),
+    applyTheme: vi.fn(),
+    ...overrides,
+  }
+}
+
+function makeFeatures(enabledFeatures: readonly string[] = ALL_FEATURES) {
+  const enabledSet = new Set(enabledFeatures)
+  return {
+    isFeatureEnabled: (f: string) => enabledSet.has(f),
+    enabledFeatures,
+    defaultFeature: enabledFeatures[0] ?? 'dashboard',
+  }
+}
 
 function renderSidebar(props: React.ComponentProps<typeof Sidebar>) {
   return render(
@@ -12,8 +46,13 @@ function renderSidebar(props: React.ComponentProps<typeof Sidebar>) {
 }
 
 describe('Sidebar', () => {
+  beforeEach(() => {
+    vi.mocked(useTenantContext).mockReturnValue(makeContext())
+    vi.mocked(useTenantFeatures).mockReturnValue(makeFeatures())
+  })
+
   describe('tenant lens', () => {
-    it('renders all tenant nav items', () => {
+    it('renders all tenant nav items when all features enabled', () => {
       renderSidebar({ lens: 'tenant' })
 
       expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
@@ -108,6 +147,63 @@ describe('Sidebar', () => {
     it('has an accessible nav landmark', () => {
       renderSidebar({ lens: 'tenant' })
       expect(screen.getByRole('navigation')).toBeInTheDocument()
+    })
+  })
+
+  describe('feature filtering', () => {
+    it('hides nav items whose feature is disabled', () => {
+      vi.mocked(useTenantFeatures).mockReturnValue(
+        makeFeatures(['dashboard', 'payments']),
+      )
+      vi.mocked(useTenantContext).mockReturnValue(makeContext({ isPlatformAdmin: false }))
+
+      renderSidebar({ lens: 'tenant' })
+
+      expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Payments' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Accounts' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Ledger' })).not.toBeInTheDocument()
+    })
+
+    it('always shows items without a feature field regardless of enabled features', () => {
+      vi.mocked(useTenantFeatures).mockReturnValue(
+        makeFeatures(['dashboard']),
+      )
+      vi.mocked(useTenantContext).mockReturnValue(makeContext({ isPlatformAdmin: false }))
+
+      renderSidebar({ lens: 'tenant' })
+
+      // Transactions has no feature field — always visible
+      expect(screen.getByRole('link', { name: 'Transactions' })).toBeInTheDocument()
+    })
+
+    it('platform admin sees all nav items regardless of enabled features', () => {
+      vi.mocked(useTenantFeatures).mockReturnValue(
+        makeFeatures(['dashboard']),
+      )
+      vi.mocked(useTenantContext).mockReturnValue(makeContext({ isPlatformAdmin: true }))
+
+      renderSidebar({ lens: 'platform' })
+
+      expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Accounts' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Ledger' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Starlark Config' })).toBeInTheDocument()
+    })
+
+    it('tenant user only sees enabled feature nav items', () => {
+      vi.mocked(useTenantFeatures).mockReturnValue(
+        makeFeatures(['dashboard', 'accounts', 'ledger']),
+      )
+      vi.mocked(useTenantContext).mockReturnValue(makeContext({ isPlatformAdmin: false }))
+
+      renderSidebar({ lens: 'tenant' })
+
+      expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Accounts' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Ledger' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Payments' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Reconciliation' })).not.toBeInTheDocument()
     })
   })
 })

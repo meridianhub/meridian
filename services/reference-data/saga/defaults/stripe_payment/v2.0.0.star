@@ -1,3 +1,8 @@
+# DEPRECATED: This saga dispatches payment.* instructions to the operational-gateway,
+# which no longer accepts financial instruction types. Payment instructions must be
+# routed through the financial-gateway. Use the financial-gateway saga for new deployments.
+# This file is retained for reference only and must not be deployed to new tenants.
+#
 # Saga: stripe_payment
 # Version: 2.0.0
 # Previous: 1.0.0

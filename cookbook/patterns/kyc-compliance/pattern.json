@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "kyc-compliance",
+    "type": "registry:pattern",
+    "title": "KYC Compliance Workflow",
+    "description": "Initiates KYC verification when an individual party is created. Uses the compliance marker pattern: books a zero-amount position log to track outstanding KYC obligations per jurisdiction. Compliance accounts are resolved via entity graph traversal.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["economy", "compliance", "kyc", "event-driven"],
+    "meta": {
+        "complexity": 3,
+        "design_pattern": "compliance-marker",
+        "industries": ["banking", "compliance"],
+        "provides": {
+            "instruments": [],
+            "account_types": ["KYC_COMPLIANCE"],
+            "sagas": ["kyc_on_party"],
+            "valuation_rules": [],
+            "triggers": ["event:party.created.v1"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["precious-metals", "payment-gateway-stripe"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/kyc-compliance/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/kyc-compliance/kyc_on_party.star",
+            "type": "registry:file",
+            "target": "~/sagas/kyc_on_party.star"
+        }
+    ]
+}

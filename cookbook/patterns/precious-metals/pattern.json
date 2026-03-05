@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "precious-metals",
+    "type": "registry:pattern",
+    "title": "Precious Metals Trading",
+    "description": "Precious metals trading platform with event-triggered valuation. When gold, silver, or platinum positions are captured, an event-driven saga automatically books the GBP settlement value at the current spot rate from LBMA/LPPM price fixes.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["economy", "commodities", "trading", "event-driven"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "valuation-on-capture",
+        "industries": ["commodities", "trading"],
+        "provides": {
+            "instruments": ["GOLD", "SILVER", "PLATINUM"],
+            "account_types": ["TRADING", "SETTLEMENT"],
+            "sagas": ["valuation_on_capture"],
+            "valuation_rules": ["GOLD->GBP", "SILVER->GBP", "PLATINUM->GBP"],
+            "triggers": ["event:position-keeping.transaction-captured.v1"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": ["lbma_gold_fix", "lbma_silver_fix", "lppm_platinum_fix"]
+        },
+        "composes_with": ["kyc-compliance", "carbon-offset"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/precious-metals/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/precious-metals/valuation_on_capture.star",
+            "type": "registry:file",
+            "target": "~/sagas/valuation_on_capture.star"
+        }
+    ]
+}

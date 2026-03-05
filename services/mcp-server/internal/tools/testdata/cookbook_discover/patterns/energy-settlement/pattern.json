@@ -1,0 +1,19 @@
+{
+    "name": "energy-settlement",
+    "type": "registry:pattern",
+    "title": "Energy Settlement",
+    "description": "Handles energy commodity settlement using GBP as the base currency.",
+    "categories": ["energy", "settlement"],
+    "meta": {
+        "complexity": 5,
+        "industries": ["energy", "utilities"],
+        "provides": {
+            "instruments": ["KWH"],
+            "account_types": ["ENERGY_ACCOUNT"],
+            "sagas": ["energy-deposit", "energy-withdrawal"]
+        },
+        "requires": {
+            "instruments": ["GBP"]
+        }
+    }
+}

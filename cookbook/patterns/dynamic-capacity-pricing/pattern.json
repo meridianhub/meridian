@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "dynamic-capacity-pricing",
+    "type": "registry:pattern",
+    "title": "Dynamic Capacity Pricing",
+    "description": "Self-referential feedback loop pricing for compute tokens. Bills token consumption at rates derived from the platform's own utilisation forecasts per data centre region. Usage patterns drive pricing, and pricing shapes usage patterns.",
+    "registryDependencies": ["base-fiat-usd"],
+    "categories": ["economy", "compute", "pricing", "dynamic"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "feedback-loop-pricing",
+        "industries": ["cloud", "infrastructure"],
+        "provides": {
+            "instruments": ["TOKEN"],
+            "account_types": [],
+            "sagas": ["dynamic_capacity_billing"],
+            "valuation_rules": [],
+            "triggers": ["event:position-keeping.transaction-captured.v1"]
+        },
+        "requires": {
+            "instruments": ["USD"],
+            "market_data": ["TOKEN_PRICE_{REGION}"]
+        },
+        "composes_with": ["saas-billing"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-usd"]
+    },
+    "files": [
+        {
+            "path": "patterns/dynamic-capacity-pricing/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/dynamic-capacity-pricing/dynamic_capacity_billing.star",
+            "type": "registry:file",
+            "target": "~/sagas/dynamic_capacity_billing.star"
+        }
+    ]
+}

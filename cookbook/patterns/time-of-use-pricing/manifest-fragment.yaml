@@ -1,0 +1,18 @@
+instruments:
+  - code: KWH
+    name: Kilowatt Hour
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: kWh
+      precision: 3
+
+valuationRules:
+  - fromInstrument: KWH
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: nordpool_spot
+
+sagas:
+  - name: tou_energy_valuation
+    trigger: "event:position-keeping.transaction-captured.v1"
+    filter: "event.instrument_code == 'KWH' && event.direction == 'DEBIT'"

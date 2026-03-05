@@ -1,0 +1,4 @@
+sagas:
+  - name: corporate_action_cost_adjustment
+    trigger: "event:market-information.corporate-action.v1"
+    filter: "event.action_type == 'ACCUMULATING_DIVIDEND'"

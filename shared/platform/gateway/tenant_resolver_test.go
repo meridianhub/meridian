@@ -930,19 +930,19 @@ func TestServeHTTP(t *testing.T) {
 
 func TestIsPlatformPath(t *testing.T) {
 	// REST transcoding paths
-	assert.True(t, isPlatformPath("/v1/tenants"))
-	assert.True(t, isPlatformPath("/v1/tenants/acme_corp"))
+	assert.True(t, IsPlatformPath("/v1/tenants"))
+	assert.True(t, IsPlatformPath("/v1/tenants/acme_corp"))
 
 	// Connect/gRPC paths
-	assert.True(t, isPlatformPath("/meridian.tenant.v1.TenantService/ListTenants"))
-	assert.True(t, isPlatformPath("/meridian.tenant.v1.TenantService/CreateTenant"))
-	assert.True(t, isPlatformPath("/meridian.tenant.v1.TenantService/GetTenant"))
+	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/ListTenants"))
+	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/CreateTenant"))
+	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/GetTenant"))
 
 	// Non-platform paths
-	assert.False(t, isPlatformPath("/v1/accounts"))
-	assert.False(t, isPlatformPath("/v1/parties"))
-	assert.False(t, isPlatformPath("/health"))
-	assert.False(t, isPlatformPath("/meridian.party.v1.PartyService/ListParties"))
+	assert.False(t, IsPlatformPath("/v1/accounts"))
+	assert.False(t, IsPlatformPath("/v1/parties"))
+	assert.False(t, IsPlatformPath("/health"))
+	assert.False(t, IsPlatformPath("/meridian.party.v1.PartyService/ListParties"))
 }
 
 func TestPlatformPathBypassesTenantResolution(t *testing.T) {

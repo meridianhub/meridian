@@ -1,0 +1,19 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "create-valuation-feature-dialog",
+    "type": "registry:ui",
+    "title": "Create Valuation Feature Dialog",
+    "description": "A modal dialog for attaching a valuation feature to a current or internal bank account. Collects input instrument code, valuation method ID and version, output instrument, and optional JSON parameters, then calls the CreateValuationFeature RPC.",
+    "categories": ["valuation", "account", "dialog", "form"],
+    "files": [
+        {
+            "path": "frontend/src/features/reference-data/components/create-valuation-feature-dialog.tsx",
+            "type": "registry:ui"
+        }
+    ],
+    "meta": {
+        "feature_module": "reference-data",
+        "tenant_configurable": false,
+        "used_by": ["ledger", "internal-accounts"]
+    }
+}
