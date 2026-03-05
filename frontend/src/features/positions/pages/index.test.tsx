@@ -20,6 +20,14 @@ vi.mock('@/api/context', () => ({
   })),
 }))
 
+vi.mock('@/hooks/use-tenant-context', () => ({
+  useTenantSlug: () => 'test-tenant',
+  useCurrentTenant: () => null,
+  useIsPlatformAdmin: () => false,
+  useSwitchTenant: () => vi.fn(),
+  useClearTenant: () => vi.fn(),
+}))
+
 import { PositionsPage } from './index'
 
 function makeQueryClient() {

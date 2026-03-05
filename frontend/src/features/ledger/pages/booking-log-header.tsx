@@ -36,7 +36,7 @@ export function BookingLogHeader({ bookingLog }: BookingLogHeaderProps) {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <MetaField label="Account Type" value={bookingLog.financialAccountType} />
         <MetaField label="Business Unit" value={bookingLog.businessUnitReference} />
-        <MetaField label="Currency" value={bookingLog.baseCurrency} />
+        <MetaField label="Currency" value={bookingLog.instrumentCode} />
         <MetaField
           label="Postings"
           value={

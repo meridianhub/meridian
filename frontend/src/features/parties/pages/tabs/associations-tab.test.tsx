@@ -3,9 +3,21 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
+const mockRetrieveAssociations = vi.fn().mockResolvedValue({})
+
 vi.mock('@/api/context', () => ({
-  useClients: vi.fn(),
-  useApiClients: vi.fn(),
+  useClients: vi.fn(() => ({
+    party: {
+      retrieveAssociations: mockRetrieveAssociations,
+    },
+  })),
+  useApiClients: vi.fn(() => ({
+    party: {
+      retrieveAssociations: mockRetrieveAssociations,
+      listParties: vi.fn().mockResolvedValue({ parties: [] }),
+      registerAssociations: vi.fn(),
+    },
+  })),
 }))
 
 vi.mock('@/hooks/use-tenant-context', () => ({
@@ -16,7 +28,7 @@ vi.mock('@/hooks/use-tenant-context', () => ({
   useClearTenant: () => vi.fn(),
 }))
 
-import { useClients, useApiClients } from '@/api/context'
+import { useApiClients } from '@/api/context'
 import { AssociationsTab } from './associations-tab'
 
 function makeQueryClient() {
@@ -53,11 +65,11 @@ describe('AssociationsTab', () => {
 
   describe('loading state', () => {
     it('renders skeletons while loading', () => {
-      vi.mocked(useClients).mockReturnValue({
+      vi.mocked(useApiClients).mockReturnValue({
         party: {
           retrieveAssociations: vi.fn(() => new Promise(() => {})),
         },
-      } as ReturnType<typeof useClients>)
+      } as ReturnType<typeof useApiClients>)
 
       const { container } = renderTab()
 
@@ -66,11 +78,11 @@ describe('AssociationsTab', () => {
     })
 
     it('does not render empty state while loading', () => {
-      vi.mocked(useClients).mockReturnValue({
+      vi.mocked(useApiClients).mockReturnValue({
         party: {
           retrieveAssociations: vi.fn(() => new Promise(() => {})),
         },
-      } as ReturnType<typeof useClients>)
+      } as ReturnType<typeof useApiClients>)
 
       renderTab()
 
@@ -80,11 +92,11 @@ describe('AssociationsTab', () => {
 
   describe('empty state', () => {
     it('renders empty state heading after data loads', async () => {
-      vi.mocked(useClients).mockReturnValue({
+      vi.mocked(useApiClients).mockReturnValue({
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({}),
         },
-      } as ReturnType<typeof useClients>)
+      } as ReturnType<typeof useApiClients>)
 
       renderTab()
 
@@ -94,11 +106,11 @@ describe('AssociationsTab', () => {
     })
 
     it('renders descriptive message', async () => {
-      vi.mocked(useClients).mockReturnValue({
+      vi.mocked(useApiClients).mockReturnValue({
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({}),
         },
-      } as ReturnType<typeof useClients>)
+      } as ReturnType<typeof useApiClients>)
 
       renderTab()
 
@@ -108,11 +120,11 @@ describe('AssociationsTab', () => {
     })
 
     it('renders add association button', async () => {
-      vi.mocked(useClients).mockReturnValue({
+      vi.mocked(useApiClients).mockReturnValue({
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({}),
         },
-      } as ReturnType<typeof useClients>)
+      } as ReturnType<typeof useApiClients>)
 
       renderTab()
 
@@ -125,9 +137,9 @@ describe('AssociationsTab', () => {
   describe('query key', () => {
     it('calls retrieveAssociations with the provided partyId', async () => {
       const retrieveAssociations = vi.fn().mockResolvedValue({})
-      vi.mocked(useClients).mockReturnValue({
+      vi.mocked(useApiClients).mockReturnValue({
         party: { retrieveAssociations },
-      } as ReturnType<typeof useClients>)
+      } as ReturnType<typeof useApiClients>)
 
       renderTab('party-abc')
 

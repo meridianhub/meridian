@@ -23,6 +23,23 @@ vi.mock('@/api/context', () => ({
       retrieveDemographics: vi.fn().mockResolvedValue(null),
     },
   })),
+  useApiClients: vi.fn(() => ({
+    party: {
+      retrieveParty: vi.fn().mockResolvedValue({
+        party: {
+          partyId: 'test-party-1',
+          legalName: 'Test Party',
+          partyType: 'PARTY_TYPE_ORGANIZATION',
+          status: 'PARTY_STATUS_ACTIVE',
+        },
+      }),
+      listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
+      retrieveReference: vi.fn().mockResolvedValue({}),
+      retrieveAssociations: vi.fn().mockResolvedValue({}),
+      retrieveBankRelations: vi.fn().mockResolvedValue({}),
+      retrieveDemographics: vi.fn().mockResolvedValue(null),
+    },
+  })),
 }))
 
 // Mock useAuth to avoid requiring AuthProvider in tests
@@ -33,6 +50,14 @@ vi.mock('@/contexts/auth-context', () => ({
 // Mock useTenantContext to avoid requiring TenantProvider in tests
 vi.mock('@/contexts/tenant-context', () => ({
   useTenantContext: vi.fn(() => ({ tenantSlug: 'test-tenant', isPlatformAdmin: false, currentTenant: null, switchTenant: vi.fn() })),
+}))
+
+vi.mock('@/hooks/use-tenant-context', () => ({
+  useTenantSlug: () => 'test-tenant',
+  useCurrentTenant: () => null,
+  useIsPlatformAdmin: () => false,
+  useSwitchTenant: () => vi.fn(),
+  useClearTenant: () => vi.fn(),
 }))
 
 import { PartyDetailPage } from './[partyId]'

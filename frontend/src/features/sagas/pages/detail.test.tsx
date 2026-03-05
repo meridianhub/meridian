@@ -11,6 +11,14 @@ vi.mock('@/api/context', () => ({
   useApiClients: vi.fn(),
 }))
 
+vi.mock('@/hooks/use-tenant-context', () => ({
+  useTenantSlug: () => 'test-tenant',
+  useCurrentTenant: () => null,
+  useIsPlatformAdmin: () => false,
+  useSwitchTenant: () => vi.fn(),
+  useClearTenant: () => vi.fn(),
+}))
+
 // Mock CodeMirror (same as starlark-editor tests)
 vi.mock('codemirror', () => ({
   basicSetup: [],

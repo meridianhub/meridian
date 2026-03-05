@@ -1,14 +1,11 @@
-import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { MoneyDisplay } from '@/shared/money-display'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
-import { useTenantSlug } from '@/hooks/use-tenant-context'
-import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
-import { tenantKeys } from '@/lib/query-keys'
-import { fetchPayments, type PaymentOrder } from './payments-query'
+import { usePaymentsTable } from '../hooks'
+import type { PaymentOrder } from './payments-query'
 
 const STATUS_OPTIONS = [
   { label: 'Initiated', value: 'INITIATED' },
@@ -67,13 +64,7 @@ interface PaymentsPageProps {
 
 export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
   const navigate = useNavigate()
-  const tenantSlug = useTenantSlug()
-  const authFetch = useAuthenticatedFetch()
-  const queryKey = tenantSlug ? tenantKeys.payments(tenantSlug) : ['payments']
-  const queryFn = useCallback(
-    (params: Parameters<typeof fetchPayments>[0]) => fetchPayments(params, authFetch),
-    [authFetch],
-  )
+  const { queryKey, queryFn } = usePaymentsTable()
 
   function handleRowClick(row: PaymentOrder) {
     if (onRowNavigate) {

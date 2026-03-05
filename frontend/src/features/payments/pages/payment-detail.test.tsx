@@ -6,10 +6,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
-import { PaymentDetailPage } from './payment-detail'
-
-vi.mock('./payment-detail-query', () => ({
-  fetchPaymentDetail: vi.fn(),
+// Mock the payment detail hook
+vi.mock('../hooks', () => ({
+  usePaymentDetail: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    isError: false,
+  })),
 }))
 
 // Mock dialog mutations to avoid requiring a live API transport
@@ -19,8 +22,17 @@ vi.mock('./dialogs/payment-mutations', () => ({
   useReversePayment: () => ({ mutateAsync: vi.fn(), isPending: false, reset: vi.fn() }),
 }))
 
-import { fetchPaymentDetail } from './payment-detail-query'
-const mockFetch = vi.mocked(fetchPaymentDetail)
+vi.mock('@/hooks/use-tenant-context', () => ({
+  useTenantSlug: () => 'test-tenant',
+  useCurrentTenant: () => null,
+  useIsPlatformAdmin: () => false,
+  useSwitchTenant: () => vi.fn(),
+  useClearTenant: () => vi.fn(),
+}))
+
+import { usePaymentDetail } from '../hooks'
+import { PaymentDetailPage } from './payment-detail'
+const mockUsePaymentDetail = vi.mocked(usePaymentDetail)
 
 function makeQueryClient() {
   return new QueryClient({
@@ -73,7 +85,7 @@ const sampleDetail = {
 
 describe('PaymentDetailPage - structure', () => {
   beforeEach(() => {
-    mockFetch.mockResolvedValue(sampleDetail)
+    mockUsePaymentDetail.mockReturnValue({ data: sampleDetail, isLoading: false, isError: false } as ReturnType<typeof usePaymentDetail>)
   })
 
   it('renders payment order ID as heading', async () => {
@@ -117,7 +129,7 @@ describe('PaymentDetailPage - structure', () => {
 
 describe('PaymentDetailPage - Overview tab', () => {
   beforeEach(() => {
-    mockFetch.mockResolvedValue(sampleDetail)
+    mockUsePaymentDetail.mockReturnValue({ data: sampleDetail, isLoading: false, isError: false } as ReturnType<typeof usePaymentDetail>)
   })
 
   it('shows payment details in Overview tab', async () => {
@@ -174,7 +186,7 @@ describe('PaymentDetailPage - Overview tab', () => {
 
 describe('PaymentDetailPage - Saga Steps tab', () => {
   beforeEach(() => {
-    mockFetch.mockResolvedValue(sampleDetail)
+    mockUsePaymentDetail.mockReturnValue({ data: sampleDetail, isLoading: false, isError: false } as ReturnType<typeof usePaymentDetail>)
   })
 
   it('shows SagaTimeline when Saga Steps tab is clicked', async () => {
@@ -221,8 +233,7 @@ describe('PaymentDetailPage - Saga Steps tab', () => {
 
 describe('PaymentDetailPage - loading state', () => {
   it('shows skeleton while loading', () => {
-    // Never resolves
-    mockFetch.mockReturnValue(new Promise(() => {}))
+    mockUsePaymentDetail.mockReturnValue({ data: undefined, isLoading: true, isError: false } as ReturnType<typeof usePaymentDetail>)
 
     render(
       <Wrapper>
@@ -236,7 +247,7 @@ describe('PaymentDetailPage - loading state', () => {
 
 describe('PaymentDetailPage - error state', () => {
   it('shows error message on fetch failure', async () => {
-    mockFetch.mockRejectedValue(new Error('Not found'))
+    mockUsePaymentDetail.mockReturnValue({ data: undefined, isLoading: false, isError: true } as ReturnType<typeof usePaymentDetail>)
 
     render(
       <Wrapper>

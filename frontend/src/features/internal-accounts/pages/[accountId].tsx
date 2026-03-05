@@ -8,29 +8,17 @@ import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { MoneyDisplay } from '@/shared/money-display'
 import { AuditTrail, Breadcrumbs } from '@/shared'
-import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { ControlAction } from '@/api/gen/meridian/internal_account/v1/internal_account_pb'
+import { useInternalAccountDetail } from '../hooks'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type InternalAccountStatusLabel = 'ACTIVE' | 'SUSPENDED' | 'CLOSED' | 'UNKNOWN'
-
-interface InternalAccount {
-  accountId: string
-  accountCode: string
-  name: string
-  behaviorClass: string
-  instrumentCode: string
-  accountStatus: number
-  description: string
-  createdAt?: { seconds: bigint | number; nanos?: number } | null
-  updatedAt?: { seconds: bigint | number; nanos?: number } | null
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -276,35 +264,10 @@ function InternalAccountTransactions({ accountId, instrumentCode }: { accountId:
 export function InternalAccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>()
   const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
 
   const queryKey = tenantKeys.internalAccount(tenantSlug ?? '', accountId ?? '')
 
-  const { data: account, isLoading, isError } = useQuery({
-    queryKey,
-    queryFn: async (): Promise<InternalAccount | null> => {
-      try {
-        const response = await clients.internalAccount.retrieveInternalAccount({ accountId: accountId ?? '' })
-        const f = response.facility
-        if (!f) return null
-        return {
-          accountId: f.accountId,
-          accountCode: f.accountCode,
-          name: f.name,
-          behaviorClass: f.behaviorClass,
-          instrumentCode: f.instrumentCode,
-          accountStatus: f.accountStatus,
-          description: f.description,
-          createdAt: f.createdAt ?? null,
-          updatedAt: f.updatedAt ?? null,
-        }
-      } catch (err: unknown) {
-        if (ConnectError.from(err).code === Code.NotFound) return null
-        throw err
-      }
-    },
-    enabled: !!accountId,
-  })
+  const { data: account, isLoading, isError } = useInternalAccountDetail(accountId)
 
   if (isLoading) {
     return <InternalAccountDetailSkeleton />

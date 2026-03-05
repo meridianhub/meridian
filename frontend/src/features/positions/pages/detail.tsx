@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MoneyDisplay } from '@/shared/money-display'
@@ -9,7 +8,7 @@ import { QualityLadderBadge } from '@/features/positions/components/quality-ladd
 import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink, Breadcrumbs } from '@/shared'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useApiClients } from '@/api/context'
+import { usePositionLogDetail } from '../hooks'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
 
 function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -141,14 +140,8 @@ function MeasurementHistory({ entries }: MeasurementHistoryProps) {
 
 export function PositionDetailPage() {
   const { logId } = useParams<{ logId: string }>()
-  const clients = useApiClients()
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['positions', logId],
-    queryFn: () =>
-      clients.positionKeeping.retrieveFinancialPositionLog({ logId: logId! }),
-    enabled: !!logId,
-  })
+  const { data, isLoading, isError } = usePositionLogDetail(logId)
 
   const log = data?.log as FinancialPositionLog | undefined
 

@@ -5,7 +5,7 @@ import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
+import { useReconciliationRunsTable } from '../hooks'
 import { InitiateReconciliationDialog } from './initiate-reconciliation-dialog'
 
 export interface ReconciliationRun {
@@ -22,49 +22,6 @@ export interface ReconciliationRun {
 function formatDate(iso: string): string {
   if (!iso) return '—'
   return iso.slice(0, 10)
-}
-
-async function fetchReconciliationRuns(params: {
-  pageToken?: string
-  pageSize: number
-  filters?: Record<string, string>
-}, fetchFn: typeof fetch = fetch): Promise<{ items: ReconciliationRun[]; nextPageToken?: string }> {
-  const url = new URL('/v1/reconciliation/runs', window.location.origin)
-  url.searchParams.set('page_size', String(params.pageSize))
-  if (params.pageToken) url.searchParams.set('page_token', params.pageToken)
-  if (params.filters) {
-    for (const [k, v] of Object.entries(params.filters)) {
-      if (v) url.searchParams.set(k, v)
-    }
-  }
-  const res = await fetchFn(url.toString())
-  if (!res.ok) throw new Error(`Failed to fetch reconciliation runs: ${res.status}`)
-  const data = await res.json() as {
-    runs?: Array<{
-      runId?: string
-      accountId?: string
-      scope?: string
-      settlementType?: string
-      status?: string
-      varianceCount?: number
-      periodStart?: string
-      periodEnd?: string
-    }>
-    nextPageToken?: string
-  }
-  return {
-    items: (data.runs ?? []).map((run) => ({
-      runId: run.runId ?? '',
-      accountId: run.accountId ?? '',
-      scope: run.scope?.replace('RECONCILIATION_SCOPE_', '') ?? '',
-      settlementType: run.settlementType?.replace('SETTLEMENT_TYPE_', '') ?? '',
-      status: run.status?.replace('RUN_STATUS_', '') ?? '',
-      varianceCount: run.varianceCount ?? 0,
-      periodStart: run.periodStart ?? '',
-      periodEnd: run.periodEnd ?? '',
-    })),
-    nextPageToken: data.nextPageToken,
-  }
 }
 
 const columns: ColumnDef<ReconciliationRun>[] = [
@@ -123,7 +80,7 @@ const columns: ColumnDef<ReconciliationRun>[] = [
 
 export function ReconciliationPage() {
   const navigate = useNavigate()
-  const authFetch = useAuthenticatedFetch()
+  const { queryKey, queryFn } = useReconciliationRunsTable()
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
   function handleRowClick(run: ReconciliationRun) {
@@ -151,8 +108,8 @@ export function ReconciliationPage() {
         onSuccess={handleReconciliationSuccess}
       />
       <DataTable
-        queryKey={['reconciliation-runs']}
-        queryFn={(params) => fetchReconciliationRuns(params, authFetch)}
+        queryKey={queryKey}
+        queryFn={queryFn}
         columns={columns}
         pageSize={25}
         filters={[

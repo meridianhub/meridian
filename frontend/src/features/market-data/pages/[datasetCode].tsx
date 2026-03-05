@@ -1,13 +1,11 @@
 import { useParams } from 'react-router-dom'
 import { Breadcrumbs } from '@/shared'
-import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/shared/status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useApiClients } from '@/api/context'
-import { useTenantContext } from '@/contexts/tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
+import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { useDatasetDetail, useDatasetObservations } from '../hooks'
 
 interface ObservationPoint {
   x: number // unix seconds
@@ -159,40 +157,10 @@ function ObservationChart({ points, unit }: { points: ObservationPoint[]; unit: 
 
 export function DatasetDetailPage() {
   const { datasetCode } = useParams<{ datasetCode: string }>()
-  const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
+  const tenantSlug = useTenantSlug()
 
-  const datasetQuery = useQuery({
-    queryKey: [
-      ...tenantKeys.all(tenantSlug ?? ''),
-      'market-data',
-      'datasets',
-      datasetCode,
-    ],
-    queryFn: () =>
-      clients.marketInformation.retrieveDataSet({
-        code: datasetCode!,
-        version: 0,
-      }),
-    enabled: !!tenantSlug && !!datasetCode,
-  })
-
-  const observationsQuery = useQuery({
-    queryKey: [
-      ...tenantKeys.all(tenantSlug ?? ''),
-      'market-data',
-      'datasets',
-      datasetCode,
-      'observations',
-    ],
-    queryFn: () =>
-      clients.marketInformation.listObservations({
-        datasetCode: datasetCode!,
-        pageSize: 100,
-        pageToken: '',
-      }),
-    enabled: !!tenantSlug && !!datasetCode,
-  })
+  const datasetQuery = useDatasetDetail(datasetCode)
+  const observationsQuery = useDatasetObservations(datasetCode)
 
   if (!tenantSlug) {
     return (

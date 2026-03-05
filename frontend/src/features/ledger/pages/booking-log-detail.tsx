@@ -1,14 +1,10 @@
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
   flexRender,
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { useApiClients } from '@/api/context'
-import { useTenantContext } from '@/contexts/tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay, EntityLink, Breadcrumbs } from '@/shared'
 import { MoneyDisplay } from '@/shared/money-display'
@@ -21,26 +17,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useBookingLogDetail } from '../hooks'
 import { BalanceIndicator } from './balance-indicator'
 import { DirectionBadge } from './direction-badge'
 import { BookingLogHeader } from './booking-log-header'
-import type { LedgerPosting, FinancialBookingLog } from './types'
-
-function getStatusName(status: unknown): string {
-  if (typeof status === 'string') return status
-  if (typeof status === 'number') {
-    const statusMap: Record<number, string> = {
-      0: 'UNSPECIFIED',
-      1: 'PENDING',
-      2: 'POSTED',
-      3: 'FAILED',
-      4: 'CANCELLED',
-      5: 'REVERSED',
-    }
-    return statusMap[status] ?? String(status)
-  }
-  return String(status ?? '')
-}
+import type { LedgerPosting } from './types'
 
 function getDirectionName(direction: unknown): string {
   if (typeof direction === 'string') return direction
@@ -53,28 +34,6 @@ function getDirectionName(direction: unknown): string {
     return dirMap[direction] ?? String(direction)
   }
   return String(direction ?? '')
-}
-
-function getCurrencyName(currency: unknown): string {
-  if (typeof currency === 'string') return currency
-  if (typeof currency === 'number') {
-    const currencyMap: Record<number, string> = {
-      0: 'UNSPECIFIED',
-      1: 'GBP',
-      2: 'USD',
-      3: 'EUR',
-      4: 'JPY',
-      5: 'AUD',
-      6: 'CAD',
-      7: 'CHF',
-      8: 'CNY',
-      9: 'INR',
-      10: 'SGD',
-      11: 'HKD',
-    }
-    return currencyMap[currency] ?? String(currency)
-  }
-  return String(currency ?? '')
 }
 
 function computeTotals(postings: LedgerPosting[], _currency: string): { debitTotal: bigint; creditTotal: bigint } {
@@ -140,7 +99,7 @@ const postingColumns: ColumnDef<LedgerPosting>[] = [
     accessorKey: 'status',
     header: 'Status',
     cell: ({ row }) => (
-      <StatusBadge status={getStatusName(row.original.status)} />
+      <StatusBadge status={row.original.status} />
     ),
   },
 ]
@@ -192,60 +151,12 @@ function PostingsTable({ postings }: { postings: LedgerPosting[] }) {
 
 export function BookingLogDetailPage() {
   const { bookingLogId } = useParams<{ bookingLogId: string }>()
-  const { tenantSlug } = useTenantContext()
-  const clients = useApiClients()
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: [...tenantKeys.all(tenantSlug ?? ''), 'ledger', 'bookingLog', bookingLogId],
-    queryFn: async () => {
-      const response = await clients.financialAccounting.retrieveFinancialBookingLog({
-        id: bookingLogId ?? '',
-      })
-
-      const log = response.financialBookingLog
-      if (!log) return null
-
-      const postings: LedgerPosting[] = (log.postings ?? []).map((p) => ({
-        id: p.id,
-        financialBookingLogId: p.financialBookingLogId,
-        postingDirection: getDirectionName(p.postingDirection),
-        postingAmount: {
-          currencyCode: typeof p.postingAmount?.currencyCode === 'string'
-            ? p.postingAmount.currencyCode
-            : '',
-          units: (() => {
-            const u = p.postingAmount?.units
-            return typeof u === 'bigint' ? u : typeof u === 'number' && Number.isSafeInteger(u) ? BigInt(u) : 0n
-          })(),
-          nanos: p.postingAmount?.nanos ?? 0,
-        },
-        accountId: p.accountId,
-        valueDate: p.valueDate ?? null,
-        postingResult: p.postingResult ?? '',
-        createdAt: p.createdAt ?? null,
-        status: getStatusName(p.status),
-      }))
-
-      const bookingLog: FinancialBookingLog = {
-        id: log.id,
-        financialAccountType: String(log.financialAccountType ?? ''),
-        productServiceReference: String(log.productServiceReference ?? ''),
-        businessUnitReference: String(log.businessUnitReference ?? ''),
-        chartOfAccountsRules: String(log.chartOfAccountsRules ?? ''),
-        baseCurrency: getCurrencyName(log.baseCurrency),
-        status: getStatusName(log.status),
-        createdAt: log.createdAt ?? null,
-        updatedAt: log.updatedAt ?? null,
-        postings,
-      }
-
-      return bookingLog
-    },
-    enabled: !!tenantSlug && !!bookingLogId,
-  })
+  const { data, isLoading, isError } = useBookingLogDetail(bookingLogId)
 
   const postings = data?.postings ?? []
-  const currency = data?.baseCurrency ?? 'GBP'
+  const postingCurrency = postings.find((p) => p.postingAmount?.currencyCode)?.postingAmount?.currencyCode
+  const currency = data?.instrumentCode || postingCurrency || ''
   const { debitTotal, creditTotal } = computeTotals(postings, currency)
 
   if (isLoading) {
