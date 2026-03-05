@@ -74,7 +74,7 @@ export function useAccountsTable() {
     const response = await clients.currentAccount.listCurrentAccounts({
       pageSize: params.pageSize,
       pageToken: params.pageToken ?? '',
-      ...(parsedStatus !== undefined && Number.isFinite(parsedStatus)
+      ...(parsedStatus !== undefined && Number.isInteger(parsedStatus) && parsedStatus >= 0
         ? { status: parsedStatus as AccountStatus }
         : {}),
     })
@@ -129,7 +129,7 @@ export function useAccountDetail(accountId: string | undefined) {
         throw err
       }
     },
-    enabled: !!accountId,
+    enabled: Boolean(tenantSlug && accountId),
   })
 }
 
@@ -147,7 +147,7 @@ export function useAccountPostings(accountId: string | undefined) {
         pagination: { pageSize: 50, pageToken: '' },
         accountId: accountId ?? '',
       }),
-    enabled: !!accountId,
+    enabled: Boolean(tenantSlug && accountId),
   })
 }
 
@@ -162,6 +162,6 @@ export function useAccountLiens(accountId: string | undefined) {
     queryKey: tenantKeys.liens(tenantSlug ?? '', accountId ?? ''),
     queryFn: () =>
       clients.currentAccount.getActiveAmountBlocks({ accountId: accountId ?? '' }),
-    enabled: !!accountId,
+    enabled: Boolean(tenantSlug && accountId),
   })
 }
