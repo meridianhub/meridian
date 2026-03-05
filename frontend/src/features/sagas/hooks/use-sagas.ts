@@ -46,7 +46,7 @@ export function useSagaDetail(definitionId: string | undefined) {
       const response = await sagaRegistry.getSaga({ id: definitionId ?? '' })
       return response.saga
     },
-    enabled: Boolean(tenantSlug && definitionId),
+    enabled: Boolean(definitionId),
   })
 }
 
