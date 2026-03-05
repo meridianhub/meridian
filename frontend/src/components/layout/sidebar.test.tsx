@@ -3,6 +3,8 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Sidebar } from '@/components/layout/sidebar'
 import type { TenantContextValue } from '@/contexts/tenant-context'
+import type { TenantFeaturesResult } from '@/hooks/use-tenant-features'
+import type { FeatureId } from '@/lib/tenant-ui-config'
 
 vi.mock('@/contexts/tenant-context', () => ({
   useTenantContext: vi.fn(),
@@ -28,8 +30,8 @@ function makeContext(overrides: Partial<TenantContextValue> = {}): TenantContext
   }
 }
 
-function makeFeatures(enabledFeatures: readonly string[] = ALL_FEATURES) {
-  const enabledSet = new Set(enabledFeatures)
+function makeFeatures(enabledFeatures: readonly FeatureId[] = ALL_FEATURES): TenantFeaturesResult {
+  const enabledSet = new Set<string>(enabledFeatures)
   return {
     isFeatureEnabled: (f: string) => enabledSet.has(f),
     enabledFeatures,
