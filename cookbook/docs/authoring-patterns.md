@@ -33,7 +33,8 @@ in `pattern.json`'s `files[]` array.
 
 ## The `pattern.json` Schema
 
-All fields come from `cookbook/schema/registry-item.json`. For `registry:pattern` entries:
+All fields come from `cookbook/schema/registry-item.json`. For `registry:pattern` entries,
+`files[].path` values are relative to the **cookbook root** (`cookbook/`), for example `patterns/my-pattern/...`.
 
 ```json
 {
@@ -336,6 +337,7 @@ because its account types hold GBP, which must already exist.
 - `registryDependencies: ["base-fiat-gbp"]` — uses GBP instrument from that pattern
 - `requires.market_data: ["KWH_GBP_RETAIL", "KWH_GBP_WHOLESALE"]` — SPOT_RATE valuation needs live rates
 - `composes_with: ["carbon-offset", "time-of-use-pricing"]` — these patterns add value alongside this one
+- `conflicts_with: ["flat-rate-billing"]` — flat-rate billing contradicts usage-based settlement
 
 **`manifest-fragment.yaml` structure:** Declares KWH instrument, three account types (ENERGY_INVENTORY,
 SETTLEMENT, REVENUE), and two valuation rules for retail and wholesale conversion.
@@ -388,7 +390,7 @@ Every pattern needs to pass the suite in `cookbook/validation_test.go` and `cook
 3. **Dependency existence** — every name in `registryDependencies` and `meta.composes_with` must exist
    in `registry.json`. Add your pattern to the registry before adding cross-references to it.
 
-4. **File existence** — every path in `files[]` must exist on disk relative to the cookbook root.
+4. **File existence** — every path in `files[]` must exist on disk relative to the cookbook root (`cookbook/`).
 
 5. **Starlark syntax** — all `.star` files parse without errors using the saga runtime's file options
    (no `while` loops, no recursion).
