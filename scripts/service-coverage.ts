@@ -61,7 +61,7 @@ function parseProtoFiles(): RpcDefinition[] {
   const protoFiles = globFiles(PROTO_DIR, /\.proto$/)
   const rpcs: RpcDefinition[] = []
 
-  const serviceRegex = /^service\s+(\w+)\s*\{/
+  const serviceRegex = /^\s*service\s+(\w+)\s*\{/
   const rpcRegex = /^\s*rpc\s+(\w+)\s*\(/
 
   for (const file of protoFiles) {
@@ -144,7 +144,7 @@ function scanFeatureFiles(
 
       // Match both `clients.prop.method(` and standalone `prop.method(`
       const pattern = new RegExp(
-        `(?:clients\\.)?${escapeRegex(propName)}\\.(\\w+)\\s*\\(`,
+        `(?:\\bclients\\.)?\\b${escapeRegex(propName)}\\b\\.(\\w+)\\s*\\(`,
         'g',
       )
       let m: RegExpExecArray | null
