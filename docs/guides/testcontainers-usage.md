@@ -93,8 +93,8 @@ deleted.
 1. **Use defer for cleanup**:
 
    ```go
-   tc := testhelpers.SetupTestContainer(t)
-   defer tc.Cleanup(t)
+   db, cleanup := testdb.SetupCockroachDB(t, nil)
+   defer cleanup()
    ```
 
 2. **Run tests in parallel** (when safe):
@@ -102,8 +102,8 @@ deleted.
    ```go
    func TestConcurrentOperations(t *testing.T) {
        t.Parallel()
-       tc := testhelpers.SetupTestContainer(t)
-       defer tc.Cleanup(t)
+       db, cleanup := testdb.SetupCockroachDB(t, nil)
+       defer cleanup()
    }
    ```
 
@@ -126,15 +126,16 @@ deleted.
 
 ```go
 func TestCreate(t *testing.T) {
-    tc := testhelpers.SetupTestContainer(t)
-    defer tc.Cleanup(t)
+    db, cleanup := testdb.SetupCockroachDB(t, nil)
+    defer cleanup()
 
+    repo := repository.NewRepository(db)
     log := createTestLog(t, "ACC-001")
-    err := tc.Repo.Create(context.Background(), log)
+    err := repo.Create(context.Background(), log)
     require.NoError(t, err)
 
     // Verify
-    retrieved, err := tc.Repo.FindByID(context.Background(), log.LogID)
+    retrieved, err := repo.FindByID(context.Background(), log.LogID)
     require.NoError(t, err)
     assert.Equal(t, log.LogID, retrieved.LogID)
 }
@@ -144,15 +145,16 @@ func TestCreate(t *testing.T) {
 
 ```go
 func TestCreateBatch(t *testing.T) {
-    tc := testhelpers.SetupTestContainer(t)
-    defer tc.Cleanup(t)
+    db, cleanup := testdb.SetupCockroachDB(t, nil)
+    defer cleanup()
 
+    repo := repository.NewRepository(db)
     logs := make([]*domain.FinancialPositionLog, 100)
     for i := 0; i < 100; i++ {
         logs[i] = createTestLog(t, fmt.Sprintf("ACC-%03d", i))
     }
 
-    err := tc.Repo.CreateBatch(context.Background(), logs)
+    err := repo.CreateBatch(context.Background(), logs)
     require.NoError(t, err)
 }
 ```
@@ -161,22 +163,21 @@ func TestCreateBatch(t *testing.T) {
 
 ```go
 func TestCustomQuery(t *testing.T) {
-    tc := testhelpers.SetupTestContainer(t)
-    defer tc.Cleanup(t)
+    db, cleanup := testdb.SetupCockroachDB(t, nil)
+    defer cleanup()
+
+    repo := repository.NewRepository(db)
 
     // Insert test data
     log := createTestLog(t, "ACC-001")
-    err := tc.Repo.Create(context.Background(), log)
+    err := repo.Create(context.Background(), log)
     require.NoError(t, err)
 
-    // Run custom query
+    // Run custom query via GORM's underlying connection
     var status string
-    err = tc.Pool.QueryRow(context.Background(),
-        `SELECT current_status
-         FROM position_keeping.financial_position_logs
-         WHERE log_id = $1`,
-        log.LogID).Scan(&status)
-    require.NoError(t, err)
+    db.Raw(`SELECT current_status
+            FROM position_keeping.financial_position_logs
+            WHERE log_id = ?`, log.LogID).Scan(&status)
     assert.Equal(t, "PENDING", status)
 }
 ```
@@ -186,13 +187,15 @@ func TestCustomQuery(t *testing.T) {
 ```go
 func BenchmarkCreate(b *testing.B) {
     // Setup once for all iterations
-    tc := testhelpers.SetupTestContainer(&testing.T{})
-    defer tc.Cleanup(&testing.T{})
+    t := &testing.T{}
+    db, cleanup := testdb.SetupCockroachDB(t, nil)
+    defer cleanup()
 
+    repo := repository.NewRepository(db)
     b.ResetTimer()
     for i := 0; i < b.N; i++ {
-        log := createTestLog(&testing.T{}, fmt.Sprintf("ACC-%d", i))
-        _ = tc.Repo.Create(context.Background(), log)
+        log := createTestLog(t, fmt.Sprintf("ACC-%d", i))
+        _ = repo.Create(context.Background(), log)
     }
 }
 ```
@@ -225,11 +228,11 @@ docker system df
 
 **Problem**: Too many open connections
 
-**Solution**: Ensure `Cleanup()` is called with defer:
+**Solution**: Ensure `cleanup()` is called with defer:
 
 ```go
-tc := testhelpers.SetupTestContainer(t)
-defer tc.Cleanup(t)  // CRITICAL - must use defer
+db, cleanup := testdb.SetupCockroachDB(t, nil)
+defer cleanup()  // CRITICAL - must use defer
 ```
 
 ### Slow Tests
@@ -244,25 +247,24 @@ defer tc.Cleanup(t)  // CRITICAL - must use defer
 
 ## Migration from Inline Setup
 
-If you have tests with inline testcontainer setup, migrate to this package:
+If you have tests with inline testcontainer setup, migrate to `testdb.SetupCockroachDB`:
 
 ### Before
 
 ```go
 func TestOldWay(t *testing.T) {
     ctx := context.Background()
-    pgContainer, err := postgres.Run(ctx, "postgres:16-alpine", ...)
+    container, err := cockroach.Run(ctx, "cockroachdb/cockroach:latest-v24.3", ...)
     require.NoError(t, err)
-    defer pgContainer.Terminate(ctx)
+    defer container.Terminate(ctx)
 
-    connStr, _ := pgContainer.ConnectionString(ctx, "sslmode=disable")
-    pool, _ := pgxpool.New(ctx, connStr)
-    defer pool.Close()
+    connStr, _ := container.ConnectionString(ctx)
+    db, _ := gorm.Open(postgres.Open(connStr), &gorm.Config{})
 
     // Load schema manually...
-    _, err = pool.Exec(ctx, "CREATE TABLE...")
+    db.Exec("CREATE TABLE...")
 
-    repo := repository.NewPostgresRepository(pool)
+    repo := repository.NewRepository(db)
     // ... test code ...
 }
 ```
@@ -271,10 +273,11 @@ func TestOldWay(t *testing.T) {
 
 ```go
 func TestNewWay(t *testing.T) {
-    tc := testhelpers.SetupTestContainer(t)
-    defer tc.Cleanup(t)
+    db, cleanup := testdb.SetupCockroachDB(t, nil)
+    defer cleanup()
 
-    // ... test code using tc.Repo ...
+    repo := repository.NewRepository(db)
+    // ... test code ...
 }
 ```
 
@@ -287,9 +290,7 @@ func TestNewWay(t *testing.T) {
 
 ## See Also
 
-- [postgres_repository_test.go][repo-test] - Example integration tests
-- [postgres_repository_bench_test.go][repo-bench] - Example benchmarks
+- [repository_test.go][repo-test] - Example integration tests
 - [testcontainers-go docs](https://golang.testcontainers.org/) - Official documentation
 
-[repo-test]: ../../services/position-keeping/repository/postgres_repository_test.go
-[repo-bench]: ../../services/position-keeping/repository/postgres_repository_bench_test.go
+[repo-test]: ../../services/position-keeping/repository/repository_test.go
