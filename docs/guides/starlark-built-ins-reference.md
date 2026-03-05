@@ -7,7 +7,7 @@
 **Related:**
 
 - **[Style Guide](starlark-style-guide.md)** - Syntax and conventions
-- **[Patterns](../starlark-patterns.md)** - Common workflow patterns
+- **[Patterns](./manifest-design-patterns.md)** - Common workflow patterns
 - **[Service Catalog](../saga-service-catalog.md)** - Service module handlers
 
 ---
@@ -638,4 +638,4 @@ assert.Equal(t, "COMPLETED", result["status"])
 - **[CEL Specification](https://github.com/google/cel-spec)** - Expression language
 - **[handlers.yaml](../../shared/pkg/saga/schema/handlers.yaml)** - Service module API
 - **[Style Guide](starlark-style-guide.md)** - Conventions and best practices
-- **[Patterns](../starlark-patterns.md)** - Common workflow patterns
+- **[Patterns](./manifest-design-patterns.md)** - Common workflow patterns

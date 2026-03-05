@@ -1,8 +1,8 @@
 # Testcontainers Usage Guide
 
-This guide describes how to use testcontainers for PostgreSQL integration tests across Meridian services.
+This guide describes how to use testcontainers for CockroachDB integration tests across Meridian services.
 
-**Shared utility**: `shared/platform/testdb/` - Provides reusable testcontainer setup for all services.
+**Shared utility**: `shared/platform/testdb/` - Provides reusable testcontainer setup for all services via `testdb.SetupCockroachDB`.
 
 The examples below use position-keeping but the pattern applies to all services.
 
@@ -10,10 +10,10 @@ The examples below use position-keeping but the pattern applies to all services.
 
 The testhelpers package implements a complete testing environment with:
 
-- **Isolated PostgreSQL containers** - Each test gets its own database
-- **Automatic schema setup** - Position-keeping schema loaded automatically
-- **Connection pooling** - pgx connection pool configured and ready
-- **Repository instances** - Pre-configured PostgresRepository for immediate use
+- **Isolated CockroachDB containers** - Each test gets its own database
+- **Automatic schema setup** - Service schema loaded automatically
+- **GORM database handle** - Configured and ready for repository use
+- **Repository instances** - Pre-configured repository for immediate use
 - **Proper cleanup** - Automatic container termination and resource management
 
 ## Quick Start
@@ -90,10 +90,9 @@ deleted.
 
 ## Container Configuration
 
-- **Image**: postgres:16-alpine
-- **Database**: test_position_keeping
-- **User**: test / test
-- **Wait Strategy**: Wait for "database system is ready" (2 occurrences, 30s timeout)
+- **Image**: CockroachDB (via testcontainers)
+- **Database**: Service-specific test database
+- **Wait Strategy**: Container readiness check with timeout
 - **Connection**: SSL disabled for test performance
 
 ## Performance
