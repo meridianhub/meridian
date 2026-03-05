@@ -94,7 +94,7 @@ flowchart LR
     Consumer --> Router
     Router --> SH
     Router --> UH
-    SH -->|TriggerSaga| CP
+    SH -->|ExecuteSaga| CP
     UH -->|RecordMeasurement| PK
 
     classDef kafka fill:#50c878,stroke:#2d7a4a,color:#fff

@@ -8,12 +8,11 @@ The examples below use position-keeping but the pattern applies to all services.
 
 ## Overview
 
-The testhelpers package implements a complete testing environment with:
+The `testdb` package implements a complete testing environment with:
 
 - **Isolated CockroachDB containers** - Each test gets its own database
 - **Automatic schema setup** - Service schema loaded automatically
 - **GORM database handle** - Configured and ready for repository use
-- **Repository instances** - Pre-configured repository for immediate use
 - **Proper cleanup** - Automatic container termination and resource management
 
 ## Quick Start
@@ -293,4 +292,4 @@ func TestNewWay(t *testing.T) {
 - [repository_test.go][repo-test] - Example integration tests
 - [testcontainers-go docs](https://golang.testcontainers.org/) - Official documentation
 
-[repo-test]: ../../services/position-keeping/repository/repository_test.go
+[repo-test]: ../../services/position-keeping/adapters/persistence/postgres_repository_test.go
