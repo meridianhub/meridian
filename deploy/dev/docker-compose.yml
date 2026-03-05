@@ -18,7 +18,7 @@
 #   50051 - meridian gRPC
 #   8090  - meridian HTTP gateway
 #   5173  - frontend (Vite dev server)
-#   8091  - mcp-server SSE endpoint
+#   8091  - mcp-server HTTP endpoint
 #   50064 - financial-gateway gRPC
 
 services:
