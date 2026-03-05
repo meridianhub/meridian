@@ -8,11 +8,11 @@ import {
 
 const DEFAULT_WIDGETS: DashboardWidget[] = []
 
-const DEFAULT_TABLE_DEFAULTS: Record<string, TableDefaults> = {}
+const DEFAULT_TABLE_DEFAULTS: Readonly<Partial<Record<string, TableDefaults>>> = {}
 
 export interface TenantLayoutResult {
   widgets: readonly DashboardWidget[]
-  tableDefaults: Readonly<Record<string, TableDefaults>>
+  tableDefaults: Readonly<Partial<Record<string, TableDefaults>>>
   getTableDefaults: (tableKey: string) => TableDefaults | undefined
 }
 
@@ -26,13 +26,14 @@ export function useTenantLayout(): TenantLayoutResult {
     const widgets: readonly DashboardWidget[] =
       layout?.dashboard?.widgets ?? DEFAULT_WIDGETS
 
-    const tableDefaults: Readonly<Record<string, TableDefaults>> =
+    const tableDefaults: Readonly<Partial<Record<string, TableDefaults>>> =
       layout?.tableDefaults ?? DEFAULT_TABLE_DEFAULTS
 
     return {
       widgets,
       tableDefaults,
-      getTableDefaults: (tableKey: string) => tableDefaults[tableKey],
+      getTableDefaults: (tableKey: string) =>
+        Object.hasOwn(tableDefaults, tableKey) ? tableDefaults[tableKey] : undefined,
     }
   }, [tenantConfig])
 }

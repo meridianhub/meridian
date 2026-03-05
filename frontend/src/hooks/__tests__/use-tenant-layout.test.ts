@@ -17,6 +17,7 @@ function makeContext(overrides: Partial<TenantContextValue> = {}): TenantContext
     isPlatformAdmin: false,
     switchTenant: vi.fn(),
     clearTenant: vi.fn(),
+    applyTheme: vi.fn(),
     ...overrides,
   }
 }
