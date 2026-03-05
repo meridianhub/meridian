@@ -12,7 +12,7 @@ import { DetailSkeleton } from '@/shared/detail-skeleton'
 import {
   VarianceDetail,
   type Variance,
-} from '@/components/reconciliation/variance-detail'
+} from '../components/variance-detail'
 import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
 import { cn } from '@/lib/utils'
 import { CreateDisputeDialog } from './create-dispute-dialog'
