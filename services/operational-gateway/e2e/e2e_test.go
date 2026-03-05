@@ -435,10 +435,10 @@ func TestInstructionLifecycle_HappyPath(t *testing.T) {
 
 	// Seed connection and route
 	conn := h.seedConnection(t, mockServer.URL)
-	h.seedRoute(t, "payment.create", conn.ConnectionID, "POST", "/v1/payments")
+	h.seedRoute(t, "device.create", conn.ConnectionID, "POST", "/v1/payments")
 
 	// Create instruction
-	instr := h.createInstruction(t, "payment.create", conn.ConnectionID)
+	instr := h.createInstruction(t, "device.create", conn.ConnectionID)
 
 	// Start dispatch worker
 	ctx, cancel := context.WithCancel(context.Background())
@@ -475,10 +475,10 @@ func TestInstructionLifecycle_RetryOnTransientFailure(t *testing.T) {
 	}, worker.ExpiryWorkerConfig{})
 
 	conn := h.seedConnection(t, mockServer.URL)
-	h.seedRoute(t, "payment.retry-test", conn.ConnectionID, "POST", "/v1/payments")
+	h.seedRoute(t, "device.retry-test", conn.ConnectionID, "POST", "/v1/payments")
 
 	// MaxAttempts=5 allows retries after transient failures
-	instr := h.createInstruction(t, "payment.retry-test", conn.ConnectionID, domain.WithMaxAttempts(5))
+	instr := h.createInstruction(t, "device.retry-test", conn.ConnectionID, domain.WithMaxAttempts(5))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -506,10 +506,10 @@ func TestInstructionLifecycle_FailAfterMaxRetries(t *testing.T) {
 	}, worker.ExpiryWorkerConfig{})
 
 	conn := h.seedConnection(t, mockServer.URL)
-	h.seedRoute(t, "payment.fail-test", conn.ConnectionID, "POST", "/v1/payments")
+	h.seedRoute(t, "device.fail-test", conn.ConnectionID, "POST", "/v1/payments")
 
 	// MaxAttempts=2 means it will fail after 2 attempts
-	instr := h.createInstruction(t, "payment.fail-test", conn.ConnectionID, domain.WithMaxAttempts(2))
+	instr := h.createInstruction(t, "device.fail-test", conn.ConnectionID, domain.WithMaxAttempts(2))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -542,11 +542,11 @@ func TestInstructionLifecycle_Expiry(t *testing.T) {
 	})
 
 	conn := h.seedConnection(t, mockServer.URL)
-	h.seedRoute(t, "payment.expiry-test", conn.ConnectionID, "POST", "/v1/payments")
+	h.seedRoute(t, "device.expiry-test", conn.ConnectionID, "POST", "/v1/payments")
 
 	// Create instruction with expires_at in the past
 	expiresAt := time.Now().Add(-1 * time.Second)
-	instr := h.createInstruction(t, "payment.expiry-test", conn.ConnectionID, domain.WithExpiresAt(expiresAt))
+	instr := h.createInstruction(t, "device.expiry-test", conn.ConnectionID, domain.WithExpiresAt(expiresAt))
 
 	// Only start the expiry worker (not the dispatch worker)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -574,10 +574,10 @@ func TestInstructionLifecycle_Cancellation(t *testing.T) {
 	}, worker.ExpiryWorkerConfig{})
 
 	conn := h.seedConnection(t, mockServer.URL)
-	h.seedRoute(t, "payment.cancel-test", conn.ConnectionID, "POST", "/v1/payments")
+	h.seedRoute(t, "device.cancel-test", conn.ConnectionID, "POST", "/v1/payments")
 
 	// Create instruction in PENDING
-	instr := h.createInstruction(t, "payment.cancel-test", conn.ConnectionID)
+	instr := h.createInstruction(t, "device.cancel-test", conn.ConnectionID)
 
 	// Cancel the instruction before dispatch
 	err := instr.Cancel()
@@ -628,7 +628,7 @@ func TestConcurrentDispatch(t *testing.T) {
 	}, worker.ExpiryWorkerConfig{})
 
 	conn := h.seedConnection(t, mockServer.URL)
-	h.seedRoute(t, "payment.concurrent", conn.ConnectionID, "POST", "/v1/payments")
+	h.seedRoute(t, "device.concurrent", conn.ConnectionID, "POST", "/v1/payments")
 
 	// Create 50 instructions concurrently
 	const numInstructions = 50
@@ -643,7 +643,7 @@ func TestConcurrentDispatch(t *testing.T) {
 			defer wg.Done()
 			instr, err := domain.NewInstruction(
 				h.tenantID,
-				"payment.concurrent",
+				"device.concurrent",
 				conn.ConnectionID,
 				map[string]any{"index": idx, "amount": 100},
 			)

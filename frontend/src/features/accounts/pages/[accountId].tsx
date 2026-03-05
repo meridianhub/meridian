@@ -12,7 +12,7 @@ import { WithdrawDialog } from './withdraw-dialog'
 import { ControlDialog } from './control-dialog'
 import type { ControlAction } from './control-dialog'
 import { CreateLienDialog } from './create-lien-dialog'
-import { CreateValuationFeatureDialog } from '@/components/shared/create-valuation-feature-dialog'
+import { CreateValuationFeatureDialog } from '@/features/reference-data/components/create-valuation-feature-dialog'
 import type { AccountStatus as AccountStatusType } from './types'
 import { useAccountDetail, useAccountPostings, useAccountLiens } from '../hooks'
 
@@ -313,8 +313,8 @@ function AccountLiens({ accountId, instrumentCode }: { accountId: string; instru
                     <td className="py-2 pr-4 font-mono text-xs">{block.blockId}</td>
                     <td className="py-2 pr-4 tabular-nums">
                       <MoneyDisplay
-                        amount={block.amount?.units}
-                        currency={block.amount?.currencyCode ?? instrumentCode}
+                        amount={block.amount?.amount?.units}
+                        currency={block.amount?.amount?.currencyCode ?? instrumentCode}
                       />
                     </td>
                     <td className="py-2 pr-4">

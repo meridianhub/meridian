@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
@@ -179,6 +180,11 @@ func (s *OperationalGatewayService) DispatchInstruction(
 	// Validate required fields.
 	if req.InstructionType == "" {
 		return nil, status.Error(codes.InvalidArgument, "instruction_type is required")
+	}
+	if strings.HasPrefix(req.InstructionType, "payment.") {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"payment instructions must use financial-gateway, not operational-gateway (instruction_type: %q)",
+			req.InstructionType)
 	}
 	if req.Payload == nil {
 		return nil, status.Error(codes.InvalidArgument, "payload is required")

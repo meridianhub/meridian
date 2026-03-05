@@ -1,0 +1,35 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "carbon-offset",
+    "type": "registry:pattern",
+    "title": "Carbon Credit Registry",
+    "description": "Carbon credit trading and retirement with verified emission reductions (VERs) and certified emission reductions (CERs). Tracks credit provenance by vintage year and project, with a permanent retirement account for irrevocable credit retirement.",
+    "registryDependencies": ["base-fiat-usd"],
+    "categories": ["economy", "carbon", "sustainability", "trading"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "credit-retirement-lifecycle",
+        "industries": ["energy", "sustainability"],
+        "provides": {
+            "instruments": ["TONNE_CO2E", "VER", "CER"],
+            "account_types": ["CARBON_INVENTORY", "RETIREMENT"],
+            "sagas": ["purchase_carbon_credits", "retire_carbon_credits"],
+            "valuation_rules": ["VER->USD", "CER->USD", "TONNE_CO2E->USD"],
+            "triggers": ["api:/v1/carbon/purchases", "api:/v1/carbon/retirements"]
+        },
+        "requires": {
+            "instruments": ["USD"],
+            "market_data": ["verra_registry", "gold_standard_registry", "eu_ets_spot"]
+        },
+        "composes_with": ["saas-billing", "precious-metals"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-usd"]
+    },
+    "files": [
+        {
+            "path": "patterns/carbon-offset/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        }
+    ]
+}

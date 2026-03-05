@@ -117,7 +117,7 @@ export function useAccountDetail(accountId: string | undefined) {
           status: (ACCOUNT_STATUS_NAMES[f.accountStatus] ??
             String(f.accountStatus)) as AccountStatusType,
           instrumentCode: f.instrumentCode || '',
-          availableBalance: formatBalance(f.currentBalance?.availableBalance?.amount),
+          availableBalance: formatBalance(f.currentBalance?.availableBalance?.amount) ?? '',
           createdAt: f.createdAt ?? undefined,
           updatedAt: f.updatedAt ?? undefined,
           partyId: f.orgPartyId || undefined,
