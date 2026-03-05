@@ -114,8 +114,8 @@ services:
       - "127.0.0.1:8091:8090"
     environment:
       LOG_LEVEL: info
-      MCP_TRANSPORT: sse
-      MCP_SSE_PORT: "8090"
+      MCP_TRANSPORT: http
+      MCP_PORT: "8090"
       MCP_SERVER_NAME: meridian-mcp
       MCP_BASE_URL: http://localhost:8091
       MERIDIAN_API_URL: meridian:50051

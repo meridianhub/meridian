@@ -455,10 +455,10 @@ func TestAuthCodeStore_ConsumeOnlyOnce(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
-// SSE transport — auth middleware
+// Bearer middleware
 // -----------------------------------------------------------------------
 
-func TestSSEMiddleware_RejectsUnauthenticated(t *testing.T) {
+func TestBearerMiddleware_RejectsUnauthenticated(t *testing.T) {
 	meta := auth.Metadata{
 		AuthorizationURL: "https://auth.example.com/authorize",
 		TokenURL:         "https://auth.example.com/token",
@@ -470,7 +470,7 @@ func TestSSEMiddleware_RejectsUnauthenticated(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/sse", nil)
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 	w := httptest.NewRecorder()
 	mw.Handler(inner).ServeHTTP(w, req)
 
@@ -482,7 +482,7 @@ func TestSSEMiddleware_RejectsUnauthenticated(t *testing.T) {
 	assert.Equal(t, "https://auth.example.com/token", body["token_url"])
 }
 
-func TestSSEMiddleware_AcceptsValidToken(t *testing.T) {
+func TestBearerMiddleware_AcceptsValidToken(t *testing.T) {
 	meta := auth.Metadata{
 		AuthorizationURL: "https://auth.example.com/authorize",
 		TokenURL:         "https://auth.example.com/token",
@@ -496,7 +496,7 @@ func TestSSEMiddleware_AcceptsValidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/sse", nil)
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
 	w := httptest.NewRecorder()
 	mw.Handler(inner).ServeHTTP(w, req)

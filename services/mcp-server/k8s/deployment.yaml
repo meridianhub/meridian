@@ -1,5 +1,5 @@
 # Port Configuration: See shared/platform/ports/ports.go for canonical port assignments.
-# This service uses port 8090 for SSE transport (MCP_SSE_PORT).
+# This service uses port 8090 for HTTP transport (MCP_PORT).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -92,7 +92,7 @@ spec:
         image: mcp-server:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - name: sse
+        - name: http
           containerPort: 8090
           protocol: TCP
         envFrom:
@@ -125,7 +125,7 @@ spec:
             memory: 256Mi
         livenessProbe:
           tcpSocket:
-            port: sse
+            port: http
           initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 3
@@ -133,7 +133,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           tcpSocket:
-            port: sse
+            port: http
           initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
@@ -141,7 +141,7 @@ spec:
           failureThreshold: 3
         startupProbe:
           tcpSocket:
-            port: sse
+            port: http
           initialDelaySeconds: 0
           periodSeconds: 2
           timeoutSeconds: 3

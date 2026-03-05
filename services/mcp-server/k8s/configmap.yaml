@@ -10,8 +10,8 @@ data:
   LOG_LEVEL: "info"
 
   # MCP transport configuration
-  MCP_TRANSPORT: "sse"
-  MCP_SSE_PORT: "8090"
+  MCP_TRANSPORT: "http"
+  MCP_PORT: "8090"
   MCP_SERVER_NAME: "meridian-mcp"
 
   # Meridian gateway address (single gRPC endpoint for all backend services)

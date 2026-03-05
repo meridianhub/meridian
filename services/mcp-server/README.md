@@ -12,10 +12,10 @@ instructions: |
   using the Model Context Protocol (MCP 2025-03-26).
 
   Key patterns:
-  - Transport agnostic: stdio for CLI tools, streamable HTTP for network clients (recommended), SSE for legacy clients
+  - Transport modes: stdio for CLI tools, streamable HTTP for network clients
   - Tool categories: Read (no side effects), Simulate (dry-run), Write (state mutation)
   - Plan-before-apply safety: meridian_manifest_plan must precede meridian_manifest_apply
-  - OAuth 2.1 with PKCE: optional, enabled via MCP_OAUTH_ENABLED=true for network transports
+  - OAuth 2.1 with PKCE: optional, enabled via MCP_OAUTH_ENABLED=true for HTTP transport
   - All logs go to stderr; stdout is reserved for the JSON-RPC protocol (stdio mode)
 ---
 
@@ -31,8 +31,8 @@ Thin JSON-RPC adapter that exposes Meridian's backend services to LLM clients vi
 | **Type** | Infrastructure (API Gateway) |
 | **Language** | Go |
 | **Protocol** | MCP 2025-03-26 |
-| **Transports** | stdio, streamable HTTP, SSE (legacy) |
-| **Auth** | OAuth 2.1 with PKCE (optional, network transports) |
+| **Transports** | stdio, streamable HTTP |
+| **Auth** | OAuth 2.1 with PKCE (optional, HTTP transport) |
 | **Standalone** | No (requires Meridian backend services via `MERIDIAN_API_URL`) |
 
 ## Architecture
@@ -51,7 +51,6 @@ flowchart TB
     subgraph "MCP Server"
         ST[stdio Transport]
         SH[Streamable HTTP Transport]
-        SE[SSE Transport - Legacy]
         TH[Tool Handlers]
         RH[Resource Handlers]
         PH[Prompt Handlers]
@@ -72,11 +71,9 @@ flowchart TB
     CLI -->|JSON-RPC| ST
     CB -->|JSON-RPC + Bearer| SH
     SH <--> OA
-    SE <--> OA
 
     ST --> TH
     SH --> TH
-    SE --> TH
     TH --> RH
     TH --> PH
 
@@ -100,7 +97,7 @@ responses to stdout. Logs are written to stderr to avoid corrupting the protocol
 MCP_TRANSPORT=stdio ./mcp-server
 ```
 
-### Streamable HTTP (recommended for network deployments)
+### Streamable HTTP (for network deployments)
 
 The streamable HTTP transport (MCP spec 2025-03-26) uses a single `/mcp` endpoint for all
 communication. Clients POST JSON-RPC requests and receive synchronous JSON responses. Session
@@ -111,36 +108,19 @@ management is handled via the `Mcp-Session-Id` header.
 | `/mcp` | `POST` | Send JSON-RPC requests (initialize, tools/list, tools/call, etc.) |
 | `/mcp` | `DELETE` | Terminate a session |
 
-The streamable HTTP transport is automatically available alongside SSE when running in `sse`
-mode -- no separate transport flag is needed.
-
 ```bash
-MCP_TRANSPORT=sse MCP_SSE_PORT=8090 ./mcp-server
-# Both /mcp (streamable HTTP) and /sse + /message (legacy) are served
-```
-
-### SSE (legacy)
-
-The original SSE transport is still available for clients that do not yet support streamable HTTP.
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /sse` | Establishes the SSE stream for server-to-client messages |
-| `POST /message` | Receives client JSON-RPC requests |
-
-```bash
-MCP_TRANSPORT=sse MCP_SSE_PORT=8090 ./mcp-server
+MCP_TRANSPORT=http MCP_PORT=8090 ./mcp-server
 ```
 
 ## Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio` or `sse` |
-| `MCP_SSE_PORT` | `8090` | HTTP port when using SSE transport |
+| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio` or `http` |
+| `MCP_PORT` | `8090` | HTTP port when using streamable HTTP transport |
 | `MCP_SERVER_NAME` | `meridian-mcp` | Server name reported in MCP initialize response |
-| `MCP_BASE_URL` | `http://localhost:8090` | Base URL for OAuth redirect URIs (SSE mode) |
-| `MCP_OAUTH_ENABLED` | `false` | Enable OAuth 2.1 PKCE flow for SSE transport |
+| `MCP_BASE_URL` | `http://localhost:8090` | Base URL for OAuth redirect URIs (HTTP mode) |
+| `MCP_OAUTH_ENABLED` | `false` | Enable OAuth 2.1 PKCE flow for HTTP transport |
 | `MCP_OAUTH_CLIENT_ID` | `meridian-mcp` | OAuth client ID advertised to clients |
 | `MCP_OAUTH_REDIRECT_URI` | `{MCP_BASE_URL}/oauth/callback` | OAuth redirect URI |
 | `MERIDIAN_API_URL` | - | gRPC address of the Meridian gateway (e.g., `localhost:9090`) |
@@ -149,15 +129,15 @@ MCP_TRANSPORT=sse MCP_SSE_PORT=8090 ./mcp-server
 
 ## OAuth 2.1 Configuration
 
-OAuth 2.1 with PKCE is optional and applies to both the streamable HTTP and SSE transports. When
-enabled, the server exposes authorization and token endpoints and requires clients to present a
-bearer token on the `/mcp`, `/sse`, and `/message` endpoints.
+OAuth 2.1 with PKCE is optional and applies to the streamable HTTP transport. When enabled, the
+server exposes authorization and token endpoints and requires clients to present a bearer token
+on the `/mcp` endpoint.
 
-Example configuration for a production SSE deployment:
+Example configuration for a production deployment:
 
 ```bash
-MCP_TRANSPORT=sse
-MCP_SSE_PORT=8090
+MCP_TRANSPORT=http
+MCP_PORT=8090
 MCP_BASE_URL=https://mcp.example.com
 MCP_OAUTH_ENABLED=true
 MCP_OAUTH_CLIENT_ID=my-mcp-client
@@ -176,7 +156,7 @@ For production, configure a real JWT signer and validator.
 
 ## Client Configuration
 
-### Streamable HTTP (recommended for network deployments)
+### Streamable HTTP (for network deployments)
 
 For Claude Desktop, Claude Code, or any MCP client connecting to a remote Meridian instance:
 
@@ -191,7 +171,7 @@ For Claude Desktop, Claude Code, or any MCP client connecting to a remote Meridi
 }
 ```
 
-### stdio mode (recommended for local development)
+### stdio mode (for local development)
 
 Add the following to your Claude Desktop configuration file
 (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
@@ -207,18 +187,6 @@ Add the following to your Claude Desktop configuration file
         "MERIDIAN_API_KEY": "pk_your_tenant_api_key",
         "LOG_LEVEL": "info"
       }
-    }
-  }
-}
-```
-
-### Legacy SSE (for clients without streamable HTTP support)
-
-```json
-{
-  "mcpServers": {
-    "meridian": {
-      "url": "http://localhost:8090/sse"
     }
   }
 }
@@ -334,20 +302,18 @@ MERIDIAN_API_URL=localhost:9090 \
   /tmp/meridian-mcp
 ```
 
-### Running standalone (network mode)
+### Running standalone (HTTP mode)
 
 ```bash
-MCP_TRANSPORT=sse \
-  MCP_SSE_PORT=8090 \
+MCP_TRANSPORT=http \
+  MCP_PORT=8090 \
   MERIDIAN_API_URL=localhost:9090 \
   MERIDIAN_API_KEY=pk_your_tenant_api_key \
   LOG_LEVEL=debug \
   /tmp/meridian-mcp
 ```
 
-This starts both the streamable HTTP (`/mcp`) and legacy SSE (`/sse`, `/message`) endpoints.
-
-Test with curl using the streamable HTTP transport:
+Test with curl:
 
 ```bash
 # Initialize a session
@@ -360,18 +326,6 @@ curl -X POST http://localhost:8090/mcp \
   -H 'Content-Type: application/json' \
   -H 'Mcp-Session-Id: <session-id-from-above>' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-```
-
-Or test with the legacy SSE transport:
-
-```bash
-# Open SSE stream
-curl -N http://localhost:8090/sse
-
-# Send a tools/list request (in a separate terminal)
-curl -X POST http://localhost:8090/message \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
 ## References

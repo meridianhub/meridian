@@ -2,12 +2,12 @@
 // enabling browser-based SSO login for MCP clients.
 //
 // Flow:
-//  1. MCP client connects to SSE endpoint, receives 401 with auth metadata
+//  1. MCP client POSTs to /mcp, receives 401 with auth metadata
 //  2. MCP client opens browser → authorization endpoint
 //  3. User authenticates via Meridian SSO
 //  4. Authorization code returned via redirect with PKCE challenge
 //  5. Client exchanges code + PKCE verifier for JWT at token endpoint
-//  6. Client reconnects to SSE with Bearer token
+//  6. Client retries /mcp with Bearer token
 package auth
 
 import (
@@ -357,7 +357,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // -----------------------------------------------------------------------
-// BearerMiddleware — wraps SSE/message handlers
+// BearerMiddleware — wraps MCP HTTP handlers
 // -----------------------------------------------------------------------
 
 // BearerMiddleware enforces Bearer token authentication on HTTP handlers.
