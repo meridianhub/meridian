@@ -9,6 +9,7 @@ import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { useTenants } from '@/hooks/use-tenants'
 import { ApiClientProvider } from '@/api/context'
 import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
+import { FeatureGuard } from '@/components/feature-guard'
 import { AppShell } from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AccountsPage, AccountDetailPage } from '@/features/accounts'
@@ -224,38 +225,38 @@ function AppShellLayout() {
       <Routes>
         {/* Tenant-scoped routes */}
         <Route path="/" element={guarded(<DashboardPage />)} />
-        <Route path="/accounts" element={guarded(<AccountsPage />)} />
-        <Route path="/accounts/:accountId" element={guarded(<AccountDetailPage />)} />
-        <Route path="/internal-accounts" element={guarded(<InternalAccountsPage />)} />
-        <Route path="/internal-accounts/:accountId" element={guarded(<InternalAccountDetailPage />)} />
-        <Route path="/payments" element={guarded(<PaymentsPage />)} />
-        <Route path="/payments/:paymentOrderId" element={guarded(<PaymentDetailPage />)} />
+        <Route path="/accounts" element={<FeatureGuard feature="accounts">{guarded(<AccountsPage />)}</FeatureGuard>} />
+        <Route path="/accounts/:accountId" element={<FeatureGuard feature="accounts">{guarded(<AccountDetailPage />)}</FeatureGuard>} />
+        <Route path="/internal-accounts" element={<FeatureGuard feature="internal-accounts">{guarded(<InternalAccountsPage />)}</FeatureGuard>} />
+        <Route path="/internal-accounts/:accountId" element={<FeatureGuard feature="internal-accounts">{guarded(<InternalAccountDetailPage />)}</FeatureGuard>} />
+        <Route path="/payments" element={<FeatureGuard feature="payments">{guarded(<PaymentsPage />)}</FeatureGuard>} />
+        <Route path="/payments/:paymentOrderId" element={<FeatureGuard feature="payments">{guarded(<PaymentDetailPage />)}</FeatureGuard>} />
         <Route path="/transactions" element={guarded(<TransactionsPage />)} />
-        <Route path="/positions" element={guarded(<PositionsPage />)} />
-        <Route path="/positions/:logId" element={guarded(<PositionDetailPage />)} />
-        <Route path="/ledger" element={guarded(<LedgerPage />)} />
-        <Route path="/ledger/:bookingLogId" element={guarded(<BookingLogDetailPage />)} />
-        <Route path="/parties" element={guarded(<PartiesPage />)} />
-        <Route path="/parties/:partyId" element={guarded(<PartyDetailPage />)} />
-        <Route path="/reconciliation" element={guarded(<ReconciliationPage />)} />
-        <Route path="/reconciliation/:runId" element={guarded(<ReconciliationDetailPage />)} />
+        <Route path="/positions" element={<FeatureGuard feature="positions">{guarded(<PositionsPage />)}</FeatureGuard>} />
+        <Route path="/positions/:logId" element={<FeatureGuard feature="positions">{guarded(<PositionDetailPage />)}</FeatureGuard>} />
+        <Route path="/ledger" element={<FeatureGuard feature="ledger">{guarded(<LedgerPage />)}</FeatureGuard>} />
+        <Route path="/ledger/:bookingLogId" element={<FeatureGuard feature="ledger">{guarded(<BookingLogDetailPage />)}</FeatureGuard>} />
+        <Route path="/parties" element={<FeatureGuard feature="parties">{guarded(<PartiesPage />)}</FeatureGuard>} />
+        <Route path="/parties/:partyId" element={<FeatureGuard feature="parties">{guarded(<PartyDetailPage />)}</FeatureGuard>} />
+        <Route path="/reconciliation" element={<FeatureGuard feature="reconciliation">{guarded(<ReconciliationPage />)}</FeatureGuard>} />
+        <Route path="/reconciliation/:runId" element={<FeatureGuard feature="reconciliation">{guarded(<ReconciliationDetailPage />)}</FeatureGuard>} />
         <Route
           path="/starlark-config"
-          element={guarded(<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />)}
+          element={<FeatureGuard feature="sagas">{guarded(<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />)}</FeatureGuard>}
         />
-        <Route path="/starlark-config/:definitionId" element={guarded(<StarlarkDetailPage />)} />
-        <Route path="/market-data" element={guarded(<MarketDataPage />)} />
-        <Route path="/market-data/:datasetCode" element={guarded(<DatasetDetailPage />)} />
-        <Route path="/forecasting" element={guarded(<ForecastingPage />)} />
-        <Route path="/reference-data" element={guarded(<ReferenceDataHubPage />)} />
-        <Route path="/reference-data/instruments" element={guarded(<InstrumentsPage />)} />
-        <Route path="/reference-data/account-types" element={guarded(<AccountTypesPage />)} />
-        <Route path="/reference-data/nodes" element={guarded(<NodesPage />)} />
-        <Route path="/gateway-mappings" element={guarded(<MappingsPage />)} />
-        <Route path="/gateway-mappings/:mappingId" element={guarded(<MappingDetailPage />)} />
-        <Route path="/manifests" element={guarded(<ManifestsPage />)} />
-        <Route path="/mcp-config" element={guarded(<McpConfigPage />)} />
-        <Route path="/audit-log" element={guarded(<AuditLogPage />)} />
+        <Route path="/starlark-config/:definitionId" element={<FeatureGuard feature="sagas">{guarded(<StarlarkDetailPage />)}</FeatureGuard>} />
+        <Route path="/market-data" element={<FeatureGuard feature="market-data">{guarded(<MarketDataPage />)}</FeatureGuard>} />
+        <Route path="/market-data/:datasetCode" element={<FeatureGuard feature="market-data">{guarded(<DatasetDetailPage />)}</FeatureGuard>} />
+        <Route path="/forecasting" element={<FeatureGuard feature="forecasting">{guarded(<ForecastingPage />)}</FeatureGuard>} />
+        <Route path="/reference-data" element={<FeatureGuard feature="reference-data">{guarded(<ReferenceDataHubPage />)}</FeatureGuard>} />
+        <Route path="/reference-data/instruments" element={<FeatureGuard feature="reference-data">{guarded(<InstrumentsPage />)}</FeatureGuard>} />
+        <Route path="/reference-data/account-types" element={<FeatureGuard feature="reference-data">{guarded(<AccountTypesPage />)}</FeatureGuard>} />
+        <Route path="/reference-data/nodes" element={<FeatureGuard feature="reference-data">{guarded(<NodesPage />)}</FeatureGuard>} />
+        <Route path="/gateway-mappings" element={<FeatureGuard feature="mappings">{guarded(<MappingsPage />)}</FeatureGuard>} />
+        <Route path="/gateway-mappings/:mappingId" element={<FeatureGuard feature="mappings">{guarded(<MappingDetailPage />)}</FeatureGuard>} />
+        <Route path="/manifests" element={<FeatureGuard feature="manifests">{guarded(<ManifestsPage />)}</FeatureGuard>} />
+        <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config">{guarded(<McpConfigPage />)}</FeatureGuard>} />
+        <Route path="/audit-log" element={<FeatureGuard feature="audit">{guarded(<AuditLogPage />)}</FeatureGuard>} />
 
         {/* Platform-only routes */}
         <Route
