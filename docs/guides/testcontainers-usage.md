@@ -174,9 +174,10 @@ func TestCustomQuery(t *testing.T) {
 
     // Run custom query via GORM's underlying connection
     var status string
-    db.Raw(`SELECT current_status
-            FROM position_keeping.financial_position_logs
-            WHERE log_id = ?`, log.LogID).Scan(&status)
+    err = db.Raw(`SELECT current_status
+                  FROM position_keeping.financial_position_logs
+                  WHERE log_id = ?`, log.LogID).Scan(&status).Error
+    require.NoError(t, err)
     assert.Equal(t, "PENDING", status)
 }
 ```

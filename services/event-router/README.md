@@ -47,7 +47,7 @@ CEL-filtered saga dispatcher that routes domain events from Kafka to saga workfl
 
 The Event Router provides event-driven workflow orchestration by:
 
-- Consuming domain events from Kafka topics (audit events, transaction events)
+- Consuming domain events from Kafka audit topics
 - Routing events to registered handlers via the `EventHandler` interface
 - Triggering saga workflows through the control-plane's `SagaExecutionService`
 - Transforming audit events into utilization measurements for platform billing (tenant-zero)
