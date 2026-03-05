@@ -3,6 +3,18 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
+
+// Mock the reconciliation hook
+const mockQueryFn = vi.fn()
+
+vi.mock('../hooks', () => ({
+  useReconciliationRunsTable: vi.fn(() => ({
+    queryKey: ['test-tenant', 'reconciliation-runs'],
+    queryFn: mockQueryFn,
+    tenantSlug: 'test-tenant',
+  })),
+}))
+
 import { ReconciliationPage } from './index'
 
 function renderPage() {
@@ -16,14 +28,14 @@ function renderPage() {
   )
 }
 
-// sampleRuns uses the proto/gateway response format (runs array with full enum names).
+// sampleRuns uses the hook output format (prefixes already stripped by the hook).
 const sampleRuns = [
   {
     runId: 'run-001',
     accountId: 'acc-123',
-    scope: 'RECONCILIATION_SCOPE_FULL',
-    settlementType: 'SETTLEMENT_TYPE_ON_DEMAND',
-    status: 'RUN_STATUS_COMPLETED',
+    scope: 'FULL',
+    settlementType: 'ON_DEMAND',
+    status: 'COMPLETED',
     varianceCount: 2,
     periodStart: '2026-01-01T00:00:00Z',
     periodEnd: '2026-01-31T23:59:59Z',
@@ -31,9 +43,9 @@ const sampleRuns = [
   {
     runId: 'run-002',
     accountId: 'acc-456',
-    scope: 'RECONCILIATION_SCOPE_ACCOUNT',
-    settlementType: 'SETTLEMENT_TYPE_DAILY',
-    status: 'RUN_STATUS_RUNNING',
+    scope: 'ACCOUNT',
+    settlementType: 'DAILY',
+    status: 'RUNNING',
     varianceCount: 0,
     periodStart: '2026-02-01T00:00:00Z',
     periodEnd: '2026-02-28T23:59:59Z',
@@ -43,20 +55,16 @@ const sampleRuns = [
 describe('ReconciliationPage - list view', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    mockQueryFn.mockResolvedValue({ items: [] })
   })
 
   it('renders page heading', () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
-    )
     renderPage()
     expect(screen.getByText('Reconciliation')).toBeInTheDocument()
   })
 
   it('renders settlement runs in the table', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
-    )
+    mockQueryFn.mockResolvedValue({ items: sampleRuns })
     renderPage()
 
     await waitFor(() => {
@@ -66,9 +74,7 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('shows variance count with destructive badge when count > 0', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
-    )
+    mockQueryFn.mockResolvedValue({ items: sampleRuns })
     renderPage()
 
     await waitFor(() => {
@@ -82,21 +88,17 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('renders status badges for each run', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
-    )
+    mockQueryFn.mockResolvedValue({ items: sampleRuns })
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('COMPLETED')).toBeInTheDocument()  // RUN_STATUS_ prefix stripped
-      expect(screen.getByText('RUNNING')).toBeInTheDocument()    // RUN_STATUS_ prefix stripped
+      expect(screen.getByText('COMPLETED')).toBeInTheDocument()
+      expect(screen.getByText('RUNNING')).toBeInTheDocument()
     })
   })
 
   it('renders period column with formatted dates', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
-    )
+    mockQueryFn.mockResolvedValue({ items: sampleRuns })
     renderPage()
 
     await waitFor(() => {
@@ -105,9 +107,6 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('renders column headers', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
-    )
     renderPage()
 
     await waitFor(() => {
@@ -119,9 +118,6 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('shows filters for status and account ID', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
-    )
     renderPage()
 
     await waitFor(() => {
@@ -131,10 +127,7 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('navigates to detail page on row click', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: sampleRuns }), { status: 200 }),
-    )
-
+    mockQueryFn.mockResolvedValue({ items: sampleRuns })
     renderPage()
 
     await waitFor(() => {
@@ -155,7 +148,7 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('shows error state when fetch fails', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'))
+    mockQueryFn.mockRejectedValue(new Error('Network error'))
     renderPage()
 
     await waitFor(() => {
@@ -164,9 +157,6 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('shows empty state when no runs returned', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
-    )
     renderPage()
 
     await waitFor(() => {
@@ -175,9 +165,6 @@ describe('ReconciliationPage - list view', () => {
   })
 
   it('renders Start Reconciliation button in header', () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ runs: [] }), { status: 200 }),
-    )
     renderPage()
     expect(screen.getByRole('button', { name: /start reconciliation/i })).toBeInTheDocument()
   })

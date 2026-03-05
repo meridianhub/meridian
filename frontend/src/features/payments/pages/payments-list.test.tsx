@@ -6,15 +6,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
-import { PaymentsPage } from './index'
+// Mock the payments hook
+const mockQueryFn = vi.fn()
 
-// Mock the payments query function
-vi.mock('./payments-query', () => ({
-  fetchPayments: vi.fn(),
+vi.mock('../hooks', () => ({
+  usePaymentsTable: vi.fn(() => ({
+    queryKey: ['test-tenant', 'payments'],
+    queryFn: mockQueryFn,
+    tenantSlug: 'test-tenant',
+  })),
 }))
 
-import { fetchPayments } from './payments-query'
-const mockFetchPayments = vi.mocked(fetchPayments)
+import { PaymentsPage } from './index'
 
 function makeQueryClient() {
   return new QueryClient({
@@ -60,7 +63,7 @@ const samplePayments = [
 
 describe('PaymentsPage - list rendering', () => {
   it('renders page heading', async () => {
-    mockFetchPayments.mockResolvedValue({ items: [] })
+    mockQueryFn.mockResolvedValue({ items: [] })
 
     render(
       <Wrapper>
@@ -72,7 +75,7 @@ describe('PaymentsPage - list rendering', () => {
   })
 
   it('renders column headers', async () => {
-    mockFetchPayments.mockResolvedValue({ items: [] })
+    mockQueryFn.mockResolvedValue({ items: [] })
 
     render(
       <Wrapper>
@@ -91,7 +94,7 @@ describe('PaymentsPage - list rendering', () => {
   })
 
   it('renders payment rows with data', async () => {
-    mockFetchPayments.mockResolvedValue({ items: samplePayments })
+    mockQueryFn.mockResolvedValue({ items: samplePayments })
 
     render(
       <Wrapper>
@@ -106,7 +109,7 @@ describe('PaymentsPage - list rendering', () => {
   })
 
   it('renders amount using MoneyDisplay', async () => {
-    mockFetchPayments.mockResolvedValue({ items: samplePayments })
+    mockQueryFn.mockResolvedValue({ items: samplePayments })
 
     render(
       <Wrapper>
@@ -121,7 +124,7 @@ describe('PaymentsPage - list rendering', () => {
   })
 
   it('renders status using StatusBadge', async () => {
-    mockFetchPayments.mockResolvedValue({ items: samplePayments })
+    mockQueryFn.mockResolvedValue({ items: samplePayments })
 
     render(
       <Wrapper>
@@ -138,7 +141,7 @@ describe('PaymentsPage - list rendering', () => {
 
 describe('PaymentsPage - navigation', () => {
   it('navigates to detail page on row click', async () => {
-    mockFetchPayments.mockResolvedValue({ items: samplePayments })
+    mockQueryFn.mockResolvedValue({ items: samplePayments })
 
     const onNavigate = vi.fn()
 
@@ -166,7 +169,7 @@ describe('PaymentsPage - navigation', () => {
 
 describe('PaymentsPage - filters', () => {
   it('renders status filter select', async () => {
-    mockFetchPayments.mockResolvedValue({ items: [] })
+    mockQueryFn.mockResolvedValue({ items: [] })
 
     render(
       <Wrapper>

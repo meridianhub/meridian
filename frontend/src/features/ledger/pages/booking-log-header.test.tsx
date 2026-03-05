@@ -9,7 +9,7 @@ const mockBookingLog: FinancialBookingLog = {
   productServiceReference: 'PRODUCT-A',
   businessUnitReference: 'BU-TRADING',
   chartOfAccountsRules: 'STANDARD',
-  baseCurrency: 'GBP',
+  instrumentCode: 'GBP',
   status: 'PENDING',
   createdAt: { seconds: 1700000000n, nanos: 0 },
   updatedAt: { seconds: 1700001000n, nanos: 0 },
