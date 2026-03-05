@@ -114,7 +114,11 @@ export function ThemePreviewPanel() {
       </button>
 
       {/* Panel body */}
-      <div className="w-72 rounded-l-md border bg-background shadow-xl">
+      <div
+        className="w-72 rounded-l-md border bg-background shadow-xl"
+        aria-hidden={!isOpen}
+        inert={!isOpen ? true : undefined}
+      >
         <div className="flex items-center justify-between border-b px-4 py-2">
           <span className="text-sm font-semibold">Theme Preview</span>
           <div className="flex items-center gap-1">
@@ -124,11 +128,17 @@ export function ThemePreviewPanel() {
                 size="icon-xs"
                 onClick={handleReset}
                 title="Reset to defaults"
+                aria-label="Reset to defaults"
               >
                 <RotateCcw className="size-3" />
               </Button>
             )}
-            <Button variant="ghost" size="icon-xs" onClick={() => setIsOpen(false)}>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setIsOpen(false)}
+              aria-label="Close preview panel"
+            >
               <X className="size-3" />
             </Button>
           </div>

@@ -35,8 +35,8 @@ describe('ThemePreviewPanel', () => {
     await user.click(screen.getByRole('button', { name: /open theme panel/i }))
     expect(screen.getByText('Theme Preview')).toBeVisible()
 
-    // Close with X
-    await user.click(screen.getByRole('button', { name: /close/i }))
+    // Close with X button specifically
+    await user.click(screen.getByRole('button', { name: /close preview panel/i }))
     expect(screen.getByRole('button', { name: /open theme panel/i })).toBeInTheDocument()
   })
 
