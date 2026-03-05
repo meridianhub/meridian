@@ -40,7 +40,8 @@ curl -X POST http://localhost:8090/v1/current-accounts \
   -d '{"partyId": "...", "baseCurrency": "CURRENCY_GBP"}'
 
 # Deposit — ledger entries, position updates, and audit trail created atomically
-curl -X POST http://localhost:8090/v1/current-accounts/{id}/deposits \
+ACCOUNT_ID="<account-id-from-above>"
+curl -X POST "http://localhost:8090/v1/current-accounts/$ACCOUNT_ID/deposits" \
   -H "X-Tenant-ID: default" \
   -d '{"amount": {"amount": {"currencyCode": "GBP", "units": "100"}}}'
 ```

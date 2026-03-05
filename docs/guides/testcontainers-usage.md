@@ -21,44 +21,29 @@ The testhelpers package implements a complete testing environment with:
 ```go
 import (
     "testing"
-    "github.com/meridianhub/meridian/internal/position-keeping/repository/testhelpers"
+    "github.com/meridianhub/meridian/shared/platform/testdb"
 )
 
 func TestMyRepository(t *testing.T) {
-    // Setup test environment
-    tc := testhelpers.SetupTestContainer(t)
-    defer tc.Cleanup(t)
+    // Setup test environment with CockroachDB testcontainer
+    db, cleanup := testdb.SetupCockroachDB(t, nil)
+    defer cleanup()
 
-    // Use the repository
+    // Use the GORM database handle
+    repo := repository.NewRepository(db)
     log := createTestLog(t, "ACC-001")
-    err := tc.Repo.Create(context.Background(), log)
-    require.NoError(t, err)
-
-    // Or use the connection pool directly
-    var count int
-    err = tc.Pool.QueryRow(context.Background(),
-        "SELECT COUNT(*) FROM position_keeping.financial_position_logs").Scan(&count)
+    err := repo.Create(context.Background(), log)
     require.NoError(t, err)
 }
 ```
 
 ## Architecture
 
-### TestContainer Structure
-
-```go
-type TestContainer struct {
-    container *postgres.PostgresContainer  // Docker container
-    Pool      *pgxpool.Pool                 // Database connection pool
-    Repo      *repository.PostgresRepository // Repository instance
-}
-```
-
 ### Test Flow
 
-1. **Setup** - `SetupTestContainer(t)` creates container, loads schema, connects
-2. **Test** - Use `tc.Repo` or `tc.Pool` for test operations
-3. **Cleanup** - `defer tc.Cleanup(t)` terminates container and closes connections
+1. **Setup** - `testdb.SetupCockroachDB(t, models)` creates container, runs migrations
+2. **Test** - Use the returned GORM `*gorm.DB` handle for repository operations
+3. **Cleanup** - `defer cleanup()` terminates container and closes connections
 
 ## Database Schema
 

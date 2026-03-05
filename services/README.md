@@ -86,7 +86,7 @@ flowchart LR
 
     %% Event routing (saga triggering + billing)
     Kafka -->|"Domain Events"| ER
-    ER -->|"TriggerSaga (gRPC)"| CP
+    ER -->|"ExecuteSaga (gRPC)"| CP
     ER -->|"RecordMeasurement (gRPC)"| PK
 
     %% Financial & operational gateways
@@ -186,7 +186,7 @@ Event-driven communication for eventual consistency:
 | Publisher | Topic Pattern | Consumer | Purpose |
 |-----------|---------------|----------|---------|
 | PositionKeeping | `position-keeping.transaction-*.v1` | FinancialAccounting | Trigger ledger postings |
-| All Services | `*.audit.events` | EventRouter | Platform billing and saga triggering |
+| All Services | `audit.events.<service>` | EventRouter | Platform billing and saga triggering |
 
 **Event Types:**
 
