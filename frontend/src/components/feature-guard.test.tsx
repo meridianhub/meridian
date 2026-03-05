@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { FeatureGuard } from '@/components/feature-guard'
+import type { TenantFeaturesResult } from '@/hooks/use-tenant-features'
+import type { FeatureId } from '@/lib/tenant-ui-config'
 
 vi.mock('@/hooks/use-tenant-features', () => ({
   useTenantFeatures: vi.fn(),
@@ -9,20 +11,21 @@ vi.mock('@/hooks/use-tenant-features', () => ({
 
 import { useTenantFeatures } from '@/hooks/use-tenant-features'
 
-function makeFeatures(enabled: string[]) {
+function makeFeatures(enabled: readonly FeatureId[]): TenantFeaturesResult {
+  const enabledSet = new Set<string>(enabled)
   return {
-    isFeatureEnabled: (feature: string) => enabled.includes(feature),
-    enabledFeatures: enabled as never,
+    isFeatureEnabled: (feature: string) => enabledSet.has(feature),
+    enabledFeatures: enabled,
     defaultFeature: enabled[0] ?? 'dashboard',
   }
 }
 
-function renderGuard(feature: string, isEnabled: boolean, fallback?: string) {
+function renderGuard(feature: FeatureId, isEnabled: boolean, fallback?: string) {
   vi.mocked(useTenantFeatures).mockReturnValue(makeFeatures(isEnabled ? [feature] : []))
 
   return render(
     <MemoryRouter initialEntries={[`/${feature}`]}>
-      <FeatureGuard feature={feature as never} fallback={fallback}>
+      <FeatureGuard feature={feature} fallback={fallback}>
         <div>Protected content</div>
       </FeatureGuard>
     </MemoryRouter>,
@@ -36,33 +39,49 @@ describe('FeatureGuard', () => {
   })
 
   it('redirects to "/" by default when feature is disabled', () => {
-    // Render with a route structure that can show the redirect target
     vi.mocked(useTenantFeatures).mockReturnValue(makeFeatures([]))
 
     render(
       <MemoryRouter initialEntries={['/accounts']}>
-        <FeatureGuard feature="accounts">
-          <div>Protected content</div>
-        </FeatureGuard>
+        <Routes>
+          <Route
+            path="/accounts"
+            element={
+              <FeatureGuard feature="accounts">
+                <div>Protected content</div>
+              </FeatureGuard>
+            }
+          />
+          <Route path="/" element={<div>Home fallback</div>} />
+        </Routes>
       </MemoryRouter>,
     )
 
     expect(screen.queryByText('Protected content')).not.toBeInTheDocument()
+    expect(screen.getByText('Home fallback')).toBeInTheDocument()
   })
 
   it('redirects to custom fallback when feature is disabled', () => {
     vi.mocked(useTenantFeatures).mockReturnValue(makeFeatures(['dashboard']))
 
-    // Render with routes to verify the redirect target
     render(
       <MemoryRouter initialEntries={['/payments']}>
-        <FeatureGuard feature="payments" fallback="/dashboard">
-          <div>Protected content</div>
-        </FeatureGuard>
+        <Routes>
+          <Route
+            path="/payments"
+            element={
+              <FeatureGuard feature="payments" fallback="/dashboard">
+                <div>Protected content</div>
+              </FeatureGuard>
+            }
+          />
+          <Route path="/dashboard" element={<div>Dashboard fallback</div>} />
+        </Routes>
       </MemoryRouter>,
     )
 
     expect(screen.queryByText('Protected content')).not.toBeInTheDocument()
+    expect(screen.getByText('Dashboard fallback')).toBeInTheDocument()
   })
 
   it('renders children when multiple features are enabled', () => {
