@@ -21,13 +21,13 @@ const PARTY_STATUS_LABELS: Record<number, string> = {
 }
 
 function formatPartyType(value: unknown): string {
-  if (typeof value === 'string') return value
+  if (typeof value === 'string') return value.replace(/^PARTY_TYPE_/, '')
   if (typeof value === 'number') return PARTY_TYPE_LABELS[value] ?? String(value)
   return String(value ?? '')
 }
 
 function formatPartyStatus(value: unknown): string {
-  if (typeof value === 'string') return value
+  if (typeof value === 'string') return value.replace(/^PARTY_STATUS_/, '')
   if (typeof value === 'number') return PARTY_STATUS_LABELS[value] ?? String(value)
   return String(value ?? '')
 }

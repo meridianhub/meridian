@@ -115,13 +115,13 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
     >
       <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto py-4">
         <ul role="list" className="px-2">
-          {TENANT_NAV_GROUPS.map((group) => {
+          {TENANT_NAV_GROUPS.reduce<{ elements: React.ReactNode[]; visibleIndex: number }>((acc, group) => {
             const visibleItems = group.items.filter(isItemVisible)
-            if (visibleItems.length === 0) return null
+            if (visibleItems.length === 0) return acc
 
-            return (
+            acc.elements.push(
               <li key={group.label}>
-                <div className="mb-1 mt-4 first:mt-0 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                <div className={cn('mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500', acc.visibleIndex > 0 && 'mt-4')}>
                   {group.label}
                 </div>
                 <ul role="list" className="space-y-0.5">
@@ -149,7 +149,9 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
                 </ul>
               </li>
             )
-          })}
+            acc.visibleIndex++
+            return acc
+          }, { elements: [], visibleIndex: 0 }).elements}
 
           {showPlatformItems && (
             <>

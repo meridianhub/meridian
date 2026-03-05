@@ -44,7 +44,7 @@ export function AccountsPage() {
       accessorKey: 'partyId',
       header: 'Party',
       cell: ({ row }) => row.original.partyId
-        ? <EntityLink type="party" id={row.original.partyId} />
+        ? <span onClick={(e) => e.stopPropagation()}><EntityLink type="party" id={row.original.partyId} /></span>
         : <span className="text-muted-foreground">—</span>,
     },
     {

@@ -37,8 +37,10 @@ const OPERATION_NAMES: Record<number, AuditOperation> = {
   [AuditOperationEnum.DELETE]: 'DELETE',
 };
 
+const VALID_OPERATIONS = new Set<string>(['INSERT', 'UPDATE', 'DELETE']);
+
 function toOperationName(op: unknown): AuditOperation {
-  if (typeof op === 'string') return op as AuditOperation;
+  if (typeof op === 'string' && VALID_OPERATIONS.has(op)) return op as AuditOperation;
   if (typeof op === 'number') return OPERATION_NAMES[op] ?? 'UPDATE';
   return 'UPDATE';
 }
