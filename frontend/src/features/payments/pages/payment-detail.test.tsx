@@ -7,8 +7,6 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 // Mock the payment detail hook
-const mockPaymentDetailQuery = vi.fn()
-
 vi.mock('../hooks', () => ({
   usePaymentDetail: vi.fn(() => ({
     data: null,

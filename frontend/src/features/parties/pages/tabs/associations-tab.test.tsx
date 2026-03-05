@@ -28,7 +28,7 @@ vi.mock('@/hooks/use-tenant-context', () => ({
   useClearTenant: () => vi.fn(),
 }))
 
-import { useClients, useApiClients } from '@/api/context'
+import { useApiClients } from '@/api/context'
 import { AssociationsTab } from './associations-tab'
 
 function makeQueryClient() {
