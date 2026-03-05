@@ -61,7 +61,16 @@ export function useReconciliationRunDetail(runId: string | undefined) {
         runId: runId ?? '',
       })
       if (!response) return null
-      return response as unknown as ReconciliationRunDetail
+      return {
+        runId: response.runId ?? '',
+        accountId: response.accountId ?? '',
+        scope: (response.scope ?? '').replace('RECONCILIATION_SCOPE_', ''),
+        settlementType: (response.settlementType ?? '').replace('SETTLEMENT_TYPE_', ''),
+        status: (response.status ?? '').replace('RUN_STATUS_', ''),
+        varianceCount: response.varianceCount ?? 0,
+        periodStart: response.periodStart ?? '',
+        periodEnd: response.periodEnd ?? '',
+      }
     },
     enabled: Boolean(tenantSlug && runId),
   })

@@ -28,8 +28,8 @@ export function useDatasetsTable() {
   ): Promise<DataTableResult<DataSetRow>> {
     if (!tenantSlug) return { items: [] }
 
-    const statusFilter = params.filters?.status ? parseInt(params.filters.status, 10) : 0
-    const categoryFilter = params.filters?.category ? parseInt(params.filters.category, 10) : 0
+    const statusFilter = params.filters?.status ? (parseInt(params.filters.status, 10) || 0) : 0
+    const categoryFilter = params.filters?.category ? (parseInt(params.filters.category, 10) || 0) : 0
 
     const res = await clients.marketInformation.listDataSets({
       statusFilter,

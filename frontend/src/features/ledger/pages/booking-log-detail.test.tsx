@@ -86,7 +86,7 @@ const mockBookingLog = {
   productServiceReference: 'PROD-A',
   businessUnitReference: 'BU-TRADE',
   chartOfAccountsRules: 'STANDARD',
-  baseCurrency: 'GBP',
+  baseInstrumentCode: 'GBP',
   status: 'PENDING',
   createdAt: { seconds: 1700000000n, nanos: 0 },
   updatedAt: { seconds: 1700001000n, nanos: 0 },
@@ -369,7 +369,7 @@ describe('BookingLogDetailPage', () => {
   })
 
   it('handles numeric currency code (GBP=1)', async () => {
-    const logWithNumericCurrency = { ...mockBookingLog, baseCurrency: 1 }
+    const logWithNumericCurrency = { ...mockBookingLog, baseInstrumentCode: 1 }
     setupMockClients({ result: { financialBookingLog: logWithNumericCurrency } })
     renderWithApiClients(<BookingLogDetailPage />, {
       initialToken: createTenantUserToken('tenant-001'),

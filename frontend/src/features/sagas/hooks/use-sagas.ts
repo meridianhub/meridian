@@ -45,7 +45,7 @@ export function useSagaDetail(definitionId: string | undefined) {
       const response = await sagaRegistry.getSaga({ id: definitionId ?? '' })
       return response.saga
     },
-    enabled: !!definitionId,
+    enabled: Boolean(tenantSlug && definitionId),
   })
 }
 
@@ -59,12 +59,8 @@ export function useActiveSaga(sagaName: string | undefined, enabled: boolean = t
     queryKey: ['starlark-config', 'active', sagaName],
     queryFn: async () => {
       if (!sagaName) return null
-      try {
-        const response = await sagaRegistry.getActiveSaga({ name: sagaName })
-        return response
-      } catch {
-        return null
-      }
+      const response = await sagaRegistry.getActiveSaga({ name: sagaName })
+      return response
     },
     enabled: !!sagaName && enabled,
   })

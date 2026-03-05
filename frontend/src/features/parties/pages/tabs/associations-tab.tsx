@@ -12,6 +12,7 @@ interface AssociationsTabProps {
 export function AssociationsTab({ partyId }: AssociationsTabProps) {
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
+  // TODO: Use fetched association data to populate the table once the UI is built
   const { isLoading } = usePartyAssociations(partyId)
 
   if (isLoading) {

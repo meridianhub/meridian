@@ -24,7 +24,7 @@ export function usePositionLogsTable() {
     const response = await clients.positionKeeping.listFinancialPositionLogs({
       pageToken: params.pageToken ?? '',
       accountId: params.filters?.accountId ?? '',
-      status: statusValue ? (Number(statusValue) as TransactionStatus) : TransactionStatus.UNSPECIFIED,
+      status: statusValue && !Number.isNaN(Number(statusValue)) ? (Number(statusValue) as TransactionStatus) : TransactionStatus.UNSPECIFIED,
       pagination: {
         pageSize: params.pageSize,
         pageToken: params.pageToken ?? '',
@@ -53,6 +53,6 @@ export function usePositionLogDetail(logId: string | undefined) {
       : ['positions', logId],
     queryFn: () =>
       clients.positionKeeping.retrieveFinancialPositionLog({ logId: logId! }),
-    enabled: !!logId,
+    enabled: Boolean(tenantSlug && logId),
   })
 }

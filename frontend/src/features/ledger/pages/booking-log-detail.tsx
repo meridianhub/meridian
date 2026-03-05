@@ -155,7 +155,8 @@ export function BookingLogDetailPage() {
   const { data, isLoading, isError } = useBookingLogDetail(bookingLogId)
 
   const postings = data?.postings ?? []
-  const currency = data?.instrumentCode ?? 'GBP'
+  const postingCurrency = postings.find((p) => p.postingAmount?.currencyCode)?.postingAmount?.currencyCode
+  const currency = data?.instrumentCode || postingCurrency || ''
   const { debitTotal, creditTotal } = computeTotals(postings, currency)
 
   if (isLoading) {

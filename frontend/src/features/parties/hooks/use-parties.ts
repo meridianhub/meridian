@@ -1,4 +1,3 @@
-import { useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
@@ -37,7 +36,7 @@ export function usePartiesTable() {
 
   const queryKey = tenantKeys.parties(tenantSlug ?? '')
 
-  const queryFn = useCallback(async (params: DataTableQueryParams): Promise<DataTableResult<Party>> => {
+  async function queryFn(params: DataTableQueryParams): Promise<DataTableResult<Party>> {
     const response = await clients.party.listParties({
       pageToken: params.pageToken,
       pageSize: params.pageSize,
@@ -59,7 +58,7 @@ export function usePartiesTable() {
       items: parties,
       nextPageToken: response.nextPageToken,
     }
-  }, [clients.party])
+  }
 
   return { queryKey, queryFn, tenantSlug }
 }

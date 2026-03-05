@@ -63,7 +63,18 @@ export function usePaymentDetail(paymentOrderId: string | undefined) {
       })
       const p = response.paymentOrder
       if (!p) return null
-      return p as unknown as PaymentOrderDetail
+      return {
+        paymentOrderId: p.paymentOrderId ?? '',
+        debtorAccountId: p.debtorAccountId ?? '',
+        creditorReference: p.creditorReference ?? '',
+        amount: p.amount ?? '',
+        currency: p.currency ?? '',
+        status: p.status ?? '',
+        reference: p.reference ?? undefined,
+        createdAt: p.createdAt ?? null,
+        sagaSteps: (p.sagaSteps ?? []) as PaymentOrderDetail['sagaSteps'],
+        compensationSteps: (p.compensationSteps ?? []) as PaymentOrderDetail['compensationSteps'],
+      }
     },
     enabled: Boolean(tenantSlug && paymentOrderId),
   })
