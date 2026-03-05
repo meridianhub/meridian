@@ -108,10 +108,15 @@ makes the intent accessible to non-engineers.
 **Parsing approach:** The renderer does NOT execute Starlark.
 It performs lightweight static analysis on the `.star` text:
 
-- Regex/AST extraction of `step()` calls and their names
-- Regex extraction of `service_module.method()` calls within
-  each step block
-- Detection of `if ... return` blocks for early-exit paths
+- Line-by-line regex extraction of `step()` calls and
+  their names (each step is a top-level call, never
+  nested — Starlark's flat structure makes this safe)
+- Regex extraction of `service_module.method()` calls
+  within each step block (identified by the
+  `module.method(` pattern between consecutive `step()`
+  calls)
+- Detection of `if ... return` blocks for early-exit
+  paths
 - Header comment parsing for trigger/filter metadata
 
 This is intentionally simple. Starlark's bounded nature
@@ -441,10 +446,11 @@ theme tokens, and is queryable alongside economy patterns.
 /cookbook/graph                  # Full composition graph
 ```
 
-The cookbook page is a **staff-only** feature module.
-It appears in the sidebar under a "Platform" or
-"Developer" section. It is not tenant-configurable
-(every staff user sees the same cookbook).
+The cookbook page is a feature module in the sidebar
+under a "Platform" or "Developer" section. It is not
+tenant-configurable (the cookbook content is the same
+for all users). Access control (which roles see the
+page) is an open question — see OQ5.
 
 ## Implementation Phases
 
@@ -581,11 +587,14 @@ This means two rendering approaches:
 
 ## Open Questions
 
-1. **Parser scope**: How much of Starlark's syntax should
-   the flow parser handle? The initial implementation
-   covers `step()`, `service.method()`, and `if...return`.
-   Should it also handle `for` loops (iterating over
-   collections) and nested function calls?
+1. **Parser scope**: The initial parser covers `step()`,
+   `service.method()`, and `if...return` — sufficient
+   for all current cookbook patterns. The open question
+   is whether to extend it proactively (e.g., `for`
+   loops, nested function calls) or reactively when a
+   new pattern requires it. SC8 requires the parser to
+   handle all patterns without manual annotation; this
+   question is about how far ahead to build.
 
 2. **Graph library weight**: @xyflow/react adds ~150KB
    gzipped. Is this acceptable for a staff-only page?
@@ -596,10 +605,13 @@ This means two rendering approaches:
    need sample data. Where does this come from?
    Options: hardcoded fixtures in component.json, a
    `preview` field with sample props, or generated from
-   prop types.
+   prop types. **Constraint**: Preview fixtures must be
+   synthetic data only — never real tenant or production
+   data. The browser is a platform tool, not a tenant
+   data viewer.
 
 4. **Discovery duplication**: The HATEOAS discovery logic
-   currently lives in the MCP server (Go). Phase 6
+   currently lives in the MCP server (Go). Phase 8
    needs this in the frontend. Options: call existing
    gRPC services and compute compatibility client-side,
    add a dedicated gRPC endpoint for discovery, or
@@ -644,8 +656,10 @@ This means two rendering approaches:
    with prop documentation
 7. All data comes from gRPC or static files — no MCP
    dependency
-8. The saga flow parser handles all 11 existing cookbook
-   patterns without manual annotation
+8. The saga flow parser handles all cookbook patterns
+   present at implementation time without manual
+   annotation (currently 11; this criterion scales
+   with the registry)
 9. Page loads in < 2s on a standard connection
    (static bundling for catalogue, lazy fetch for detail)
 
