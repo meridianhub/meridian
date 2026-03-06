@@ -148,6 +148,12 @@ func (p *GRPCReferenceDataProvider) resolveFromAccountTypes(ctx context.Context,
 			if vm.GetInputInstrument() == instrumentCode {
 				methodID, err := uuid.Parse(vm.GetValuationMethodId())
 				if err != nil {
+					p.logger.WarnContext(ctx, "invalid valuation method UUID in account type definition",
+						"account_type", def.GetCode(),
+						"instrument_code", instrumentCode,
+						"raw_id", vm.GetValuationMethodId(),
+						"error", err,
+					)
 					continue
 				}
 				return methodID, nil
