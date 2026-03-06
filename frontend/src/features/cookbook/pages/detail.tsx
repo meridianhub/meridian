@@ -9,10 +9,8 @@ import { HandlerReference } from '@/shared/handler-reference'
 import { StarlarkEditor } from '@/features/sagas/components/starlark-editor'
 import { ManifestViewer } from '../components/manifest-viewer'
 import { ComponentDetail } from '../components/component-detail'
-import { SagaFlowDiagram } from '../components/saga-flow'
-import { PreviewSourceTabs } from '../components/preview-source-tabs'
+import { LinkedPatternDetail } from '../components/linked-detail'
 import { parseStarlarkSaga } from '../lib/star-parser'
-import { generateMermaidMarkup } from '../lib/saga-mermaid'
 import { useCookbook } from '../hooks/use-cookbook'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 import { usePatternFiles } from '../hooks/use-pattern-files'
@@ -207,11 +205,6 @@ export function CookbookDetailPage() {
     return parseStarlarkSaga(starlarkContent)
   }, [starlarkContent])
 
-  const mermaidMarkup = useMemo(() => {
-    if (!sagaFlow) return ''
-    return generateMermaidMarkup(sagaFlow)
-  }, [sagaFlow])
-
   if (catalogueLoading) {
     return <DetailSkeleton fieldCount={3} tabCount={3} showBackNav />
   }
@@ -273,16 +266,8 @@ export function CookbookDetailPage() {
             <TabsContent value="flow" className="mt-4">
               {isLoading ? (
                 <div className="h-[400px] animate-pulse rounded border bg-muted" />
-              ) : sagaFlow && sagaFlow.steps.length > 0 ? (
-                <PreviewSourceTabs
-                  preview={
-                    <div className="h-[500px] rounded-lg border">
-                      <SagaFlowDiagram flow={sagaFlow} />
-                    </div>
-                  }
-                  source={mermaidMarkup}
-                  sourceLabel="Mermaid"
-                />
+              ) : sagaFlow && sagaFlow.steps.length > 0 && starlarkContent ? (
+                <LinkedPatternDetail flow={sagaFlow} starlarkContent={starlarkContent} />
               ) : (
                 <p className="text-sm text-muted-foreground">No saga flow detected in Starlark source.</p>
               )}
