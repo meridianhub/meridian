@@ -5,11 +5,12 @@
     "title": "Phantom Cost Basis Adjustment",
     "description": "Adjusts cost basis for all holdings of an instrument when a corporate action occurs. Handles phantom events where no cash or units move but the tax position changes, such as accumulating ETF dividends. The cost basis account position log serves as the HMRC audit trail.",
     "registryDependencies": ["base-fiat-gbp"],
-    "categories": ["economy", "corporate-actions", "cost-basis", "event-driven"],
+    "categories": ["corporate-actions", "cost-basis"],
     "meta": {
         "complexity": 5,
+        "trigger": "event-driven",
         "design_pattern": "phantom-transaction-event",
-        "industries": ["trading", "corporate-actions"],
+        "industries": ["trading"],
         "provides": {
             "instruments": [],
             "account_types": [],

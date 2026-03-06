@@ -5,7 +5,7 @@
     "title": "Stripe Payment Gateway",
     "description": "Stripe payment integration via the Operational Gateway abstraction layer. Includes provider connection configuration, outbound/inbound mapping definitions for payload transformation, instruction routing, and a multi-step saga with lien reservation, gateway dispatch, and conditional ledger posting.",
     "registryDependencies": ["base-fiat-gbp"],
-    "categories": ["economy", "payments", "gateway", "integration"],
+    "categories": ["payments", "gateway", "integration"],
     "meta": {
         "complexity": 8,
         "design_pattern": "operational-gateway",

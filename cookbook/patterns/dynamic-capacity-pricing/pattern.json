@@ -5,7 +5,7 @@
     "title": "Dynamic Capacity Pricing",
     "description": "Self-referential feedback loop pricing for compute tokens. Bills token consumption at rates derived from the platform's own utilisation forecasts per data centre region. Usage patterns drive pricing, and pricing shapes usage patterns.",
     "registryDependencies": ["base-fiat-usd"],
-    "categories": ["economy", "compute", "pricing", "dynamic"],
+    "categories": ["compute", "pricing", "dynamic"],
     "meta": {
         "complexity": 5,
         "design_pattern": "feedback-loop-pricing",

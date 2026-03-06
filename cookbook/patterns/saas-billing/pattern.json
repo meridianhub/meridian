@@ -5,7 +5,7 @@
     "title": "SaaS Compute Billing",
     "description": "Usage-based billing for cloud compute resources. Meters GPU hours, API calls, and storage consumption, then converts to USD charges via valuation rules. Includes platform credits as a voucher instrument.",
     "registryDependencies": ["base-fiat-usd"],
-    "categories": ["economy", "billing", "compute", "usage-metering"],
+    "categories": ["billing", "compute", "usage-metering"],
     "meta": {
         "complexity": 5,
         "design_pattern": "compute-metering",

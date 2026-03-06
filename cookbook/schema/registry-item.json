@@ -119,6 +119,10 @@
                         "enum": [1, 2, 3, 5, 8],
                         "description": "Story point complexity estimate (Fibonacci: 1, 2, 3, 5, 8)."
                     },
+                    "trigger": {
+                        "type": "string",
+                        "description": "How the pattern is activated (e.g. event-driven, api, scheduled)."
+                    },
                     "design_pattern": {
                         "type": ["string", "null"],
                         "description": "Reference to a Meridian design patterns guide entry."

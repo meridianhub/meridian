@@ -5,7 +5,7 @@
     "title": "Time-of-Use Energy Pricing",
     "description": "Extends energy settlement with temporal pricing awareness. Values kWh consumption at dynamic rates that vary by settlement period (half-hour), using forecast-derived price curves from Market Data. Peak, off-peak, and overnight rates are resolved from the event timestamp.",
     "registryDependencies": ["base-fiat-gbp"],
-    "categories": ["economy", "energy", "pricing", "temporal"],
+    "categories": ["energy", "pricing", "temporal"],
     "meta": {
         "complexity": 5,
         "design_pattern": "time-based-pricing",

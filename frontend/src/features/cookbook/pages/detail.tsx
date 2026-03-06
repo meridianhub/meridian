@@ -54,6 +54,12 @@ function PatternInfoSection({ item }: { item: CookbookItem }) {
             <span className="font-medium">{meta.design_pattern}</span>
           </div>
         )}
+        {meta?.trigger && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">Trigger:</span>
+            <Badge variant="secondary" className="text-xs">{meta.trigger}</Badge>
+          </div>
+        )}
         {item.categories && item.categories.length > 0 && (
           <div className="flex items-center gap-1.5">
             <span className="text-muted-foreground">Categories:</span>
@@ -64,14 +70,18 @@ function PatternInfoSection({ item }: { item: CookbookItem }) {
             ))}
           </div>
         )}
-        {meta?.industries && meta.industries.length > 0 && (
+        {meta?.industries != null && (
           <div className="flex items-center gap-1.5">
             <span className="text-muted-foreground">Industries:</span>
-            {meta.industries.map((ind) => (
-              <Badge key={ind} variant="secondary" className="text-xs">
-                {ind}
-              </Badge>
-            ))}
+            {meta.industries.length > 0 ? (
+              meta.industries.map((ind) => (
+                <Badge key={ind} variant="secondary" className="text-xs">
+                  {ind}
+                </Badge>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground italic">Industry-agnostic</span>
+            )}
           </div>
         )}
       </div>

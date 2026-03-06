@@ -8,6 +8,7 @@
     "categories": ["energy", "utilities", "cross-instrument"],
     "meta": {
         "complexity": 3,
+        "trigger": "event-driven",
         "design_pattern": "cross-instrument-valuation",
         "industries": ["energy", "utilities"],
         "provides": {

@@ -9,7 +9,7 @@
     "meta": {
         "complexity": 1,
         "design_pattern": "foundation-denomination",
-        "industries": ["all"],
+        "industries": [],
         "provides": {
             "instruments": ["USD"],
             "account_types": [],

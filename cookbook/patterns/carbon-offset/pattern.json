@@ -5,7 +5,7 @@
     "title": "Carbon Credit Registry",
     "description": "Carbon credit trading and retirement with verified emission reductions (VERs) and certified emission reductions (CERs). Tracks credit provenance by vintage year and project, with a permanent retirement account for irrevocable credit retirement.",
     "registryDependencies": ["base-fiat-usd"],
-    "categories": ["economy", "carbon", "sustainability", "trading"],
+    "categories": ["carbon", "sustainability", "trading"],
     "meta": {
         "complexity": 5,
         "design_pattern": "credit-retirement-lifecycle",
