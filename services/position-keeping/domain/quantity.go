@@ -288,6 +288,34 @@ func ParseCurrency(s string) (Currency, error) {
 	return money.ParseCurrency(s)
 }
 
+// NewMoneyFromInstrumentCode creates a Money value from any instrument code (currency or non-currency).
+// For valid ISO 4217 currencies (GBP, USD, etc.), it uses the standard currency path with correct precision.
+// For non-currency instrument codes (KWH, GPU_HOUR, etc.), it creates a Money value using the code directly,
+// bypassing currency validation. This enables position-keeping to track non-fiat instruments while
+// reusing the same Money type for persistence and domain logic.
+func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, error) {
+	if code == "" {
+		return Money{}, ErrEmptyCode
+	}
+
+	// Try currency path first (preserves correct precision for fiat)
+	cur := Currency(code)
+	if cur.IsValid() {
+		return NewMoney(amount, cur)
+	}
+
+	// Non-currency instrument: use precision 2 to match the persistence layer's
+	// decimalToCents/centsToDecimal which assumes 2 decimal places for all instruments.
+	// Use ENERGY as the default non-currency dimension; this is a pragmatic choice since
+	// the dimension is not stored in the transaction_log_entry table and only the code matters
+	// for persistence round-trips.
+	inst, err := quantity.NewInstrument(code, 1, "ENERGY", 2)
+	if err != nil {
+		return Money{}, err
+	}
+	return quantity.NewMoney(amount, inst), nil
+}
+
 // =============================================================================
 // Money Accessor Functions (backward compatibility helpers)
 // =============================================================================

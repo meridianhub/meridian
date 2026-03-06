@@ -328,12 +328,12 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 
 		log.StatusTracking = &statusTracking
 
-		// Parse opening balance
+		// Parse opening balance (supports both currency and non-currency codes)
 		// Trim spaces since PostgreSQL CHAR(3) may pad with spaces
 		openingBalanceCurrency = strings.TrimSpace(openingBalanceCurrency)
-		openingBalance, err := domain.NewMoney(openingBalanceAmount, domain.Currency(openingBalanceCurrency))
+		openingBalance, err := domain.NewMoneyFromInstrumentCode(openingBalanceAmount, openingBalanceCurrency)
 		if err != nil {
-			return fmt.Errorf("failed to create opening balance Money: %w", err)
+			return fmt.Errorf("failed to create opening balance Money for instrument %q: %w", openingBalanceCurrency, err)
 		}
 		log.OpeningBalance = openingBalance
 		if openingBalanceRecordedAt.Valid {
@@ -819,7 +819,7 @@ func (r *PostgresRepository) insertTransactionLogEntries(ctx context.Context, tx
 	userID := audit.GetUserFromContext(ctx)
 
 	for _, entry := range entries {
-		// Convert decimal amount to cents (int64)
+		// Convert decimal amount to cents (int64) - uses 2 decimal places for all instruments
 		amountCents := decimalToCents(entry.Amount.Amount)
 
 		batch.Queue(query,
@@ -958,11 +958,12 @@ func (r *PostgresRepository) loadTransactionLogEntriesTx(ctx context.Context, tx
 			return fmt.Errorf("failed to scan transaction log entry: %w", err)
 		}
 
-		// Convert cents to decimal and create Money
+		// Convert cents to decimal and create Money (supports both currency and non-currency codes)
 		amount := centsToDecimal(amountCents)
-		money, err := domain.NewMoney(amount, domain.Currency(currency))
+		currency = strings.TrimSpace(currency)
+		money, err := domain.NewMoneyFromInstrumentCode(amount, currency)
 		if err != nil {
-			return fmt.Errorf("failed to create Money value: %w", err)
+			return fmt.Errorf("failed to create Money value for instrument %q: %w", currency, err)
 		}
 		entry.Amount = money
 		entry.Direction = domain.ParsePostingDirection(direction)
@@ -1165,11 +1166,12 @@ func (r *PostgresRepository) loadTransactionLogEntriesBatchTx(ctx context.Contex
 			return fmt.Errorf("failed to scan transaction log entry in batch: %w", err)
 		}
 
-		// Convert cents to decimal and create Money
+		// Convert cents to decimal and create Money (supports both currency and non-currency codes)
 		amount := centsToDecimal(amountCents)
-		money, err := domain.NewMoney(amount, domain.Currency(currency))
+		currency = strings.TrimSpace(currency)
+		money, err := domain.NewMoneyFromInstrumentCode(amount, currency)
 		if err != nil {
-			return fmt.Errorf("failed to create Money value in batch: %w", err)
+			return fmt.Errorf("failed to create Money value for instrument %q in batch: %w", currency, err)
 		}
 		entry.Amount = money
 		entry.Direction = domain.ParsePostingDirection(direction)
@@ -1384,12 +1386,12 @@ func (r *PostgresRepository) scanLogsTx(ctx context.Context, tx pgx.Tx, rows pgx
 
 		log.StatusTracking = &statusTracking
 
-		// Parse opening balance
+		// Parse opening balance (supports both currency and non-currency codes)
 		// Trim spaces since PostgreSQL CHAR(3) may pad with spaces
 		openingBalanceCurrency = strings.TrimSpace(openingBalanceCurrency)
-		openingBalance, err := domain.NewMoney(openingBalanceAmount, domain.Currency(openingBalanceCurrency))
+		openingBalance, err := domain.NewMoneyFromInstrumentCode(openingBalanceAmount, openingBalanceCurrency)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create opening balance Money: %w", err)
+			return nil, fmt.Errorf("failed to create opening balance Money for instrument %q: %w", openingBalanceCurrency, err)
 		}
 		log.OpeningBalance = openingBalance
 		if openingBalanceRecordedAt.Valid {

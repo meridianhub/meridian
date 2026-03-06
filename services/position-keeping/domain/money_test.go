@@ -373,3 +373,115 @@ func TestMoney_ToMinorUnits(t *testing.T) {
 		})
 	}
 }
+
+func TestNewMoneyFromInstrumentCode(t *testing.T) {
+	tests := []struct {
+		name           string
+		amount         decimal.Decimal
+		code           string
+		wantErr        bool
+		expectedCode   string
+		expectedAmount decimal.Decimal
+	}{
+		{
+			name:           "valid currency GBP",
+			amount:         decimal.NewFromFloat(100.50),
+			code:           "GBP",
+			expectedCode:   "GBP",
+			expectedAmount: decimal.NewFromFloat(100.50),
+		},
+		{
+			name:           "valid currency USD",
+			amount:         decimal.NewFromFloat(42.00),
+			code:           "USD",
+			expectedCode:   "USD",
+			expectedAmount: decimal.NewFromFloat(42.00),
+		},
+		{
+			name:           "non-currency instrument KWH",
+			amount:         decimal.NewFromFloat(8.54),
+			code:           "KWH",
+			expectedCode:   "KWH",
+			expectedAmount: decimal.NewFromFloat(8.54),
+		},
+		{
+			name:           "non-currency instrument GPU_HOUR",
+			amount:         decimal.NewFromFloat(1.25),
+			code:           "GPU_HOUR",
+			expectedCode:   "GPU_HOUR",
+			expectedAmount: decimal.NewFromFloat(1.25),
+		},
+		{
+			name:    "empty code",
+			amount:  decimal.NewFromInt(100),
+			code:    "",
+			wantErr: true,
+		},
+		{
+			name:           "zero amount with KWH",
+			amount:         decimal.Zero,
+			code:           "KWH",
+			expectedCode:   "KWH",
+			expectedAmount: decimal.Zero,
+		},
+		{
+			name:           "negative amount with KWH",
+			amount:         decimal.NewFromFloat(-5.00),
+			code:           "KWH",
+			expectedCode:   "KWH",
+			expectedAmount: decimal.NewFromFloat(-5.00),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			money, err := NewMoneyFromInstrumentCode(tt.amount, tt.code)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error but got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if money.Instrument.Code != tt.expectedCode {
+				t.Errorf("Expected instrument code %q, got %q", tt.expectedCode, money.Instrument.Code)
+			}
+
+			if !money.Amount.Equal(tt.expectedAmount) {
+				t.Errorf("Expected amount %v, got %v", tt.expectedAmount, money.Amount)
+			}
+		})
+	}
+}
+
+func TestNewMoneyFromInstrumentCode_RoundTrip(t *testing.T) {
+	// Verify that KWH values round-trip through the same paths as GBP
+	kwhMoney, err := NewMoneyFromInstrumentCode(decimal.NewFromFloat(8.54), "KWH")
+	if err != nil {
+		t.Fatalf("NewMoneyFromInstrumentCode() error = %v", err)
+	}
+
+	// The instrument code should be accessible via MoneyCurrency
+	if MoneyCurrency(kwhMoney) != Currency("KWH") {
+		t.Errorf("MoneyCurrency() = %q, want %q", MoneyCurrency(kwhMoney), "KWH")
+	}
+
+	// IsPositive should work
+	if !kwhMoney.IsPositive() {
+		t.Error("Expected positive KWH amount")
+	}
+
+	// IsZero should work on zero
+	zeroKWH, err := NewMoneyFromInstrumentCode(decimal.Zero, "KWH")
+	if err != nil {
+		t.Fatalf("NewMoneyFromInstrumentCode() error = %v", err)
+	}
+	if !zeroKWH.IsZero() {
+		t.Error("Expected zero KWH amount")
+	}
+}

@@ -388,6 +388,61 @@ func TestWithAccountValidator_Option(t *testing.T) {
 	})
 }
 
+func TestInitiateFinancialPositionLog_NonCurrencyInstrumentCode_KWH(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		newTestOutboxPublisher(t),
+	)
+	require.NoError(t, err)
+
+	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
+		AccountId: "kwh-account-001",
+		InitialEntry: &positionkeepingv1.TransactionLogEntry{
+			EntryId:       uuid.NewString(),
+			TransactionId: uuid.NewString(),
+			AccountId:     "kwh-account-001",
+			Amount: &commonv1.MoneyAmount{
+				Amount: &money.Money{
+					CurrencyCode: "KWH",
+					Units:        8,
+					Nanos:        540000000, // 8.54 kWh
+				},
+			},
+			Direction:   commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+			Description: "Meter read 2026-03-06",
+		},
+	}
+
+	// Mock repository create
+	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+
+	// Act
+	resp, err := svc.InitiateFinancialPositionLog(ctx, req)
+
+	// Assert - KWH should be accepted as a valid instrument code
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "kwh-account-001", resp.Log.AccountId)
+
+	// Verify the amount round-trips correctly through proto
+	require.NotEmpty(t, resp.Log.TransactionLogEntries)
+	entry := resp.Log.TransactionLogEntries[0]
+	assert.Equal(t, "KWH", entry.Amount.Amount.CurrencyCode)
+	assert.Equal(t, int64(8), entry.Amount.Amount.Units)
+	assert.Equal(t, int32(540000000), entry.Amount.Amount.Nanos)
+
+	mockRepo.AssertExpectations(t)
+}
+
 func TestWithAccountValidationEnabled_Option(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
