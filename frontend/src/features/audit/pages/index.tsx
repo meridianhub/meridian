@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 // Types
 // ---------------------------------------------------------------------------
 
-export type AuditOperation = 'INSERT' | 'UPDATE' | 'DELETE'
+export type AuditOperation = 'INSERT' | 'UPDATE' | 'DELETE' | 'UNKNOWN'
 
 export interface AuditLogEntry {
   entryId: string
@@ -36,42 +36,24 @@ const OPERATION_NAMES: Record<number, AuditOperation> = {
   [AuditOperationEnum.DELETE]: 'DELETE',
 }
 
-const VALID_OPERATIONS = new Set<string>(['INSERT', 'UPDATE', 'DELETE'])
+const VALID_OPERATIONS = new Set<string>(['INSERT', 'UPDATE', 'DELETE', 'UNKNOWN'])
 
 function toOperationName(op: unknown): AuditOperation {
   if (typeof op === 'string' && VALID_OPERATIONS.has(op)) return op as AuditOperation
-  if (typeof op === 'number') return OPERATION_NAMES[op] ?? 'UPDATE'
-  return 'UPDATE'
+  if (typeof op === 'number') return OPERATION_NAMES[op] ?? 'UNKNOWN'
+  return 'UNKNOWN'
 }
 
 // ---------------------------------------------------------------------------
-// Struct helpers — convert protobuf Struct/Value to plain objects
+// Struct helpers
 // ---------------------------------------------------------------------------
 
-function structToObject(struct: unknown): object | null {
-  if (!struct || typeof struct !== 'object') return null
-  const s = struct as { fields?: Record<string, unknown> }
-  if (!s.fields) return null
-  const result: Record<string, unknown> = {}
-  for (const [key, val] of Object.entries(s.fields)) {
-    result[key] = valueToPlain(val)
-  }
-  return result
-}
-
-function valueToPlain(val: unknown): unknown {
-  if (!val || typeof val !== 'object') return val
-  const v = val as Record<string, unknown>
-  if ('stringValue' in v) return v.stringValue
-  if ('numberValue' in v) return v.numberValue
-  if ('boolValue' in v) return v.boolValue
-  if ('nullValue' in v) return null
-  if ('structValue' in v) return structToObject(v.structValue)
-  if ('listValue' in v) {
-    const list = v.listValue as { values?: unknown[] }
-    return (list.values ?? []).map(valueToPlain)
-  }
-  return val
+/** Convert a value to a plain object, or null if falsy.
+ *  Connect-es deserializes google.protobuf.Struct to JsonObject (plain JS objects),
+ *  so this is just a type narrowing helper. */
+function toObject(value: unknown): object | null {
+  if (!value || typeof value !== 'object') return null
+  return value as object
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +64,7 @@ const OPERATION_STYLES: Record<AuditOperation, string> = {
   INSERT: 'bg-green-100 text-green-800 border-green-200',
   UPDATE: 'bg-blue-100 text-blue-800 border-blue-200',
   DELETE: 'bg-red-100 text-red-800 border-red-200',
+  UNKNOWN: 'bg-gray-100 text-gray-800 border-gray-200',
 }
 
 function OperationBadge({ operation }: { operation: AuditOperation }) {
@@ -258,9 +241,17 @@ export function AuditLogPage() {
   const clients = useApiClients()
 
   const fetchAuditEntries = useCallback(async (params: DataTableQueryParams): Promise<DataTableResult<AuditLogEntry>> => {
+    const operationFilter = params.filters?.operation
+    const parsedOperation =
+      operationFilter && operationFilter !== ''
+        ? (AuditOperationEnum[operationFilter as keyof typeof AuditOperationEnum] ?? 0)
+        : 0
+
     const response = await clients.audit.listAuditEntries({
       tableName: params.filters?.tableName ?? '',
       recordId: params.filters?.recordId ?? '',
+      changedBy: params.filters?.changedBy ?? '',
+      operation: parsedOperation as AuditOperationEnum,
       pageSize: params.pageSize,
       pageToken: params.pageToken ?? '',
     })
@@ -272,8 +263,8 @@ export function AuditLogPage() {
       operation: toOperationName(e.operation),
       recordId: e.recordId ?? '',
       changedBy: e.changedBy ?? '',
-      oldValues: structToObject(e.oldValues),
-      newValues: structToObject(e.newValues),
+      oldValues: toObject(e.oldValues),
+      newValues: toObject(e.newValues),
     }))
 
     return { items: entries, nextPageToken: response.nextPageToken || undefined }

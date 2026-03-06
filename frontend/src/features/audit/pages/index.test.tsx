@@ -43,7 +43,7 @@ const mockEntry = {
   recordId: 'acc-123',
   changedBy: 'user@example.com',
   oldValues: null,
-  newValues: { fields: { id: { stringValue: 'acc-123' }, name: { stringValue: 'Test Account' } } },
+  newValues: { id: 'acc-123', name: 'Test Account' },
 }
 
 const mockUpdateEntry = {
@@ -53,8 +53,8 @@ const mockUpdateEntry = {
   operation: 2, // UPDATE enum
   recordId: 'acc-123',
   changedBy: 'admin@example.com',
-  oldValues: { fields: { name: { stringValue: 'Test Account' } } },
-  newValues: { fields: { name: { stringValue: 'Updated Account' } } },
+  oldValues: { name: 'Test Account' },
+  newValues: { name: 'Updated Account' },
 }
 
 const mockDeleteEntry = {
@@ -64,7 +64,7 @@ const mockDeleteEntry = {
   operation: 3, // DELETE enum
   recordId: 'party-456',
   changedBy: 'admin@example.com',
-  oldValues: { fields: { id: { stringValue: 'party-456' } } },
+  oldValues: { id: 'party-456' },
   newValues: null,
 }
 

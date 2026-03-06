@@ -11,6 +11,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { usePositionLogDetail } from '../hooks'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
 
+// Currencies with non-standard decimal places (ISO 4217)
+const CURRENCY_PRECISION: Record<string, number> = {
+  JPY: 0, KRW: 0, VND: 0, BHD: 3, KWD: 3, OMR: 3,
+}
+
 function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -37,16 +42,26 @@ function BalanceView({ log }: BalanceViewProps) {
     const money = entry.amount?.amount
     if (money === undefined || money === null) continue
     // money is google.type.Money: { units: bigint|number, nanos: number, currencyCode: string }
-    // or a primitive bigint/string in some serialization paths
+    // or a primitive bigint/string in some serialization paths.
+    // MoneyDisplay expects minor units (e.g. cents), so convert accordingly.
     let amt: bigint
-    if (typeof money === 'bigint') {
-      amt = money
-    } else if (typeof money === 'string') {
-      amt = BigInt(money)
-    } else if (typeof money === 'object' && 'units' in money) {
-      const units = typeof money.units === 'bigint' ? money.units : BigInt(money.units ?? 0)
-      amt = units
-    } else {
+    try {
+      if (typeof money === 'bigint') {
+        amt = money
+      } else if (typeof money === 'string') {
+        amt = BigInt(money)
+      } else if (typeof money === 'object' && 'units' in money) {
+        const units = typeof money.units === 'bigint' ? money.units : BigInt(money.units ?? 0)
+        const nanos = (money as { nanos?: number }).nanos ?? 0
+        // Convert units (major) + nanos to minor units (e.g. cents for 2-decimal currencies)
+        const precision = CURRENCY_PRECISION[currency] ?? 2
+        const factor = BigInt(10 ** precision)
+        const nanosDivisor = 10 ** (9 - precision)
+        amt = units * factor + BigInt(Math.round(nanos / nanosDivisor))
+      } else {
+        continue
+      }
+    } catch {
       continue
     }
     const signed = entry.direction === 'CREDIT' ? amt : -amt

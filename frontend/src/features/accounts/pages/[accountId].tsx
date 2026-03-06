@@ -41,7 +41,7 @@ function AccountDetailSkeleton() {
 // Not found
 // ---------------------------------------------------------------------------
 
-function AccountNotFound() {
+function AccountNotFound({ accountId }: { accountId?: string }) {
   return (
     <div data-testid="account-not-found" className="p-6">
       <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: 'Not found' }]} />
@@ -50,6 +50,12 @@ function AccountNotFound() {
         <p className="mt-2 text-sm text-muted-foreground">
           The account you are looking for does not exist or has been removed.
         </p>
+        {accountId && (
+          <p className="mt-3 text-sm">
+            Looking for an internal account?{' '}
+            <EntityLink type="internal-account" id={accountId} label="View internal account" />
+          </p>
+        )}
       </div>
     </div>
   )
@@ -354,7 +360,7 @@ export function AccountDetailPage() {
 
   // null = 404 from server; isError = network/server failure; undefined = query not yet resolved
   if (account === null) {
-    return <AccountNotFound />
+    return <AccountNotFound accountId={accountId} />
   }
 
   if (isError || account === undefined) {
