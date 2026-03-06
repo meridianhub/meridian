@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -358,6 +358,13 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
 
   const serviceColors = useMemo(() => buildServiceColorMap(flow), [flow])
 
+  // Reset highlight when selected service no longer exists in the flow
+  useEffect(() => {
+    if (highlightedService && !serviceColors.has(highlightedService)) {
+      setHighlightedService(null)
+    }
+  }, [serviceColors, highlightedService])
+
   const { nodes, edges } = useMemo(
     () => buildFlowGraph(flow, serviceColors, highlightedService),
     [flow, serviceColors, highlightedService],
@@ -398,6 +405,7 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
               <button
                 key={svc}
                 type="button"
+                aria-pressed={isActive}
                 className={`flex items-center gap-2 cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-muted/50 ${isActive ? 'font-semibold' : ''}`}
                 onClick={() => setHighlightedService((prev) => (prev === svc ? null : svc))}
               >
