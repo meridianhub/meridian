@@ -117,4 +117,9 @@ describe('applyFilters', () => {
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe('energy-trading')
   })
+
+  it('filters out all items for unknown type value', () => {
+    const result = applyFilters(mockItems, { ...emptyFilters, type: 'invalid' })
+    expect(result).toHaveLength(0)
+  })
 })

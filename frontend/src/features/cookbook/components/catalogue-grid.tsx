@@ -37,8 +37,16 @@ function CookbookCard({ item }: { item: CookbookItem }) {
 
   return (
     <Card
-      className="cursor-pointer transition-colors hover:border-primary/50"
+      role="link"
+      tabIndex={0}
+      className="cursor-pointer transition-colors hover:border-primary/50 focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none"
       onClick={() => navigate(`/cookbook/${item.name}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          navigate(`/cookbook/${item.name}`)
+        }
+      }}
     >
       <CardHeader>
         <div className="flex items-start justify-between gap-2">

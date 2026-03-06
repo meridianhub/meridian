@@ -63,8 +63,9 @@ export function useFilterState(): [FilterState, (patch: Partial<FilterState>) =>
 export function applyFilters(items: CookbookItem[], filters: FilterState): CookbookItem[] {
   return items.filter((item) => {
     if (filters.type) {
-      const typeLabel = filters.type === 'pattern' ? 'registry:pattern' : 'registry:ui'
-      if (item.type !== typeLabel) return false
+      const typeMap: Record<string, string> = { pattern: 'registry:pattern', ui: 'registry:ui' }
+      const typeLabel = typeMap[filters.type]
+      if (!typeLabel || item.type !== typeLabel) return false
     }
 
     if (filters.category) {
@@ -163,17 +164,22 @@ interface FilterChipGroupProps {
 
 function FilterChipGroup({ label, options, value, onChange }: FilterChipGroupProps) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" role="group" aria-label={`${label} filter`}>
       <span className="text-xs text-muted-foreground mr-1">{label}:</span>
       {options.map((opt) => (
-        <Badge
+        <button
           key={opt.value}
-          variant={value === opt.value ? 'default' : 'outline'}
-          className="cursor-pointer text-xs"
+          type="button"
+          aria-pressed={value === opt.value}
           onClick={() => onChange(value === opt.value ? '' : opt.value)}
         >
-          {opt.label}
-        </Badge>
+          <Badge
+            variant={value === opt.value ? 'default' : 'outline'}
+            className="cursor-pointer text-xs"
+          >
+            {opt.label}
+          </Badge>
+        </button>
       ))}
     </div>
   )
