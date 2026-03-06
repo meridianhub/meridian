@@ -32,8 +32,15 @@ function toMinorUnits(money: unknown, currency: string): bigint | null {
       const nanos = m.nanos ?? 0
       const precision = CURRENCY_PRECISION[currency] ?? 2
       const factor = BigInt(10 ** precision)
-      const nanosDivisor = 10 ** (9 - precision)
-      return units * factor + BigInt(Math.round(nanos / nanosDivisor))
+      // Use BigInt arithmetic for rounding to avoid Math.round asymmetry on negative nanos
+      const nanosDivisor = BigInt(10 ** (9 - precision))
+      const nanosBig = BigInt(nanos)
+      const half = nanosDivisor / 2n
+      const roundedNanos =
+        nanosBig >= 0n
+          ? (nanosBig + half) / nanosDivisor
+          : (nanosBig - half) / nanosDivisor
+      return units * factor + roundedNanos
     }
   } catch {
     // Invalid BigInt conversion — skip
