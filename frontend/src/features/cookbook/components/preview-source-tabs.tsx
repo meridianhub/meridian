@@ -11,10 +11,13 @@ interface PreviewSourceTabsProps {
 export function PreviewSourceTabs({ preview, source, sourceLabel = 'Source', className }: PreviewSourceTabsProps) {
   const [copied, setCopied] = useState(false)
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(source)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(source).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {
+      // Silently fail in restricted contexts
+    })
   }
 
   return (
@@ -31,6 +34,7 @@ export function PreviewSourceTabs({ preview, source, sourceLabel = 'Source', cla
       <TabsContent value="source" className="mt-4">
         <div className="relative">
           <button
+            type="button"
             onClick={handleCopy}
             className="absolute right-2 top-2 z-10 rounded border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
           >

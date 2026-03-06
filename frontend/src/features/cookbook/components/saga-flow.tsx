@@ -228,7 +228,7 @@ function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
   }
 
   // Step + decision + exit nodes
-  let prevId = 'start'
+  let prevId: string | null = 'start'
 
   for (let i = 0; i < flow.steps.length; i++) {
     const step = flow.steps[i]
@@ -245,11 +245,14 @@ function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
       } satisfies StepNodeData,
     })
 
-    edges.push({
-      id: `${prevId}-${stepId}`,
-      source: prevId,
-      target: stepId,
-    })
+    // Connect from previous node (null when previous decision's "No" edge already connects)
+    if (prevId) {
+      edges.push({
+        id: `${prevId}-${stepId}`,
+        source: prevId,
+        target: stepId,
+      })
+    }
 
     if (step.earlyExit) {
       const decisionId = `decision-${i}`
@@ -285,7 +288,7 @@ function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
         style: { stroke: '#ef4444', strokeDasharray: '6 3' },
       })
 
-      // "No" -> next step
+      // "No" -> next step (already connects to nextId, so skip prevId for next iteration)
       edges.push({
         id: `${decisionId}-${nextId}`,
         source: decisionId,
@@ -293,7 +296,7 @@ function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
         label: 'No',
       })
 
-      prevId = decisionId
+      prevId = null
     } else {
       prevId = stepId
     }
@@ -307,9 +310,8 @@ function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
     data: {},
   })
 
-  // Connect last step to end (only if no early exit on last step)
-  const lastStep = flow.steps[flow.steps.length - 1]
-  if (!lastStep.earlyExit) {
+  // Connect last step to end (only if no early exit on last step already connected it)
+  if (prevId) {
     edges.push({
       id: `${prevId}-end`,
       source: prevId,
@@ -343,7 +345,7 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
   }, [flow])
 
   return (
-    <div className={className} style={{ width: '100%', height: '100%', minHeight: 400 }}>
+    <div className={`relative ${className ?? ''}`} style={{ width: '100%', height: '100%', minHeight: 400 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
