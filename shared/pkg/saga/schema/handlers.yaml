@@ -546,7 +546,7 @@ handlers:
 
   payment_order.send_to_gateway:
     description: "Send a payment order to the external payment gateway"
-    compensation_strategy: none
+    compensation_strategy: saga_managed
     external: true
     params:
       payment_order_id:
