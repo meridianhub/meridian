@@ -292,12 +292,12 @@ func ParseCurrency(s string) (Currency, error) {
 
 // NewMoneyFromInstrumentCode creates a Money value from any instrument code (currency or non-currency).
 // For valid ISO 4217 currencies (GBP, USD, etc.), it uses the standard currency path with correct precision.
-// For non-currency instrument codes (KWH, GAS, etc.), it creates a Money value using the code directly,
-// bypassing currency validation. This enables position-keeping to track non-fiat instruments while
+// For non-currency instrument codes, it creates a Money value using the code directly, bypassing
+// currency validation. This enables position-keeping to track any registered instrument while
 // reusing the same Money type for persistence and domain logic.
 //
 // Persistence constraint: the transaction_log_entry.currency column is CHAR(3), so codes must be
-// exactly 3 characters to persist correctly. Codes longer than 3 characters will fail at DB insert time.
+// exactly 3 characters to persist correctly.
 func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, error) {
 	if code == "" {
 		return Money{}, ErrEmptyCode
@@ -317,10 +317,9 @@ func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, err
 
 	// Non-currency instrument: use precision 2 to match the persistence layer's
 	// decimalToCents/centsToDecimal which assumes 2 decimal places for all instruments.
-	// Use ENERGY as the default non-currency dimension; this is a pragmatic choice since
-	// the dimension is not stored in the transaction_log_entry table and only the code matters
-	// for persistence round-trips.
-	inst, err := quantity.NewInstrument(code, 1, "ENERGY", 2)
+	// Use COUNT as a dimension-agnostic placeholder; the dimension is not stored in the
+	// transaction_log_entry table and only the code matters for persistence round-trips.
+	inst, err := quantity.NewInstrument(code, 1, "COUNT", 2)
 	if err != nil {
 		return Money{}, err
 	}

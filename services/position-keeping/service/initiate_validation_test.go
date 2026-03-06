@@ -388,59 +388,72 @@ func TestWithAccountValidator_Option(t *testing.T) {
 	})
 }
 
-func TestInitiateFinancialPositionLog_NonCurrencyInstrumentCode_KWH(t *testing.T) {
-	ctx := context.Background()
-	mockRepo := new(MockRepository)
-	mockEventPublisher := domain.NewInMemoryEventPublisher()
-	mockIdempotency := new(MockIdempotencyService)
-	mockMeasurementRepo := new(MockMeasurementRepository)
-
-	svc, err := service.NewPositionKeepingService(
-		mockRepo,
-		mockMeasurementRepo,
-		mockEventPublisher,
-		mockIdempotency,
-		newTestOutboxPublisher(t),
-	)
-	require.NoError(t, err)
-
-	req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
-		AccountId: "kwh-account-001",
-		InitialEntry: &positionkeepingv1.TransactionLogEntry{
-			EntryId:       uuid.NewString(),
-			TransactionId: uuid.NewString(),
-			AccountId:     "kwh-account-001",
-			Amount: &commonv1.MoneyAmount{
-				Amount: &money.Money{
-					CurrencyCode: "KWH",
-					Units:        8,
-					Nanos:        540000000, // 8.54 kWh
-				},
-			},
-			Direction:   commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-			Description: "Meter read 2026-03-06",
-		},
+func TestInitiateFinancialPositionLog_NonCurrencyInstrumentCodes(t *testing.T) {
+	instruments := []struct {
+		code  string
+		units int64
+		nanos int32
+		desc  string
+	}{
+		{"KWH", 8, 540000000, "energy meter read"},
+		{"CO2", 50, 0, "carbon credit purchase"},
+		{"GPU", 3, 750000000, "compute allocation"},
+		{"GAS", 1, 250000000, "gas meter read"},
 	}
 
-	// Mock repository create
-	mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+	for _, inst := range instruments {
+		t.Run(inst.code, func(t *testing.T) {
+			ctx := context.Background()
+			mockRepo := new(MockRepository)
+			mockEventPublisher := domain.NewInMemoryEventPublisher()
+			mockIdempotency := new(MockIdempotencyService)
+			mockMeasurementRepo := new(MockMeasurementRepository)
 
-	// Act
-	resp, err := svc.InitiateFinancialPositionLog(ctx, req)
+			svc, err := service.NewPositionKeepingService(
+				mockRepo,
+				mockMeasurementRepo,
+				mockEventPublisher,
+				mockIdempotency,
+				newTestOutboxPublisher(t),
+			)
+			require.NoError(t, err)
 
-	// Assert - KWH should be accepted as a valid instrument code
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	assert.Equal(t, "kwh-account-001", resp.Log.AccountId)
+			accountID := inst.code + "-account-001"
+			req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
+				AccountId: accountID,
+				InitialEntry: &positionkeepingv1.TransactionLogEntry{
+					EntryId:       uuid.NewString(),
+					TransactionId: uuid.NewString(),
+					AccountId:     accountID,
+					Amount: &commonv1.MoneyAmount{
+						Amount: &money.Money{
+							CurrencyCode: inst.code,
+							Units:        inst.units,
+							Nanos:        inst.nanos,
+						},
+					},
+					Direction:   commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+					Description: inst.desc,
+				},
+			}
 
-	// Verify the amount round-trips correctly through proto
-	require.NotEmpty(t, resp.Log.TransactionLogEntries)
-	entry := resp.Log.TransactionLogEntries[0]
-	assert.Equal(t, "KWH", entry.Amount.Amount.CurrencyCode)
-	assert.Equal(t, int64(8), entry.Amount.Amount.Units)
-	assert.Equal(t, int32(540000000), entry.Amount.Amount.Nanos)
+			mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
 
-	mockRepo.AssertExpectations(t)
+			resp, err := svc.InitiateFinancialPositionLog(ctx, req)
+
+			require.NoError(t, err, "instrument %s should be accepted", inst.code)
+			require.NotNil(t, resp)
+			assert.Equal(t, accountID, resp.Log.AccountId)
+
+			require.NotEmpty(t, resp.Log.TransactionLogEntries)
+			entry := resp.Log.TransactionLogEntries[0]
+			assert.Equal(t, inst.code, entry.Amount.Amount.CurrencyCode)
+			assert.Equal(t, inst.units, entry.Amount.Amount.Units)
+			assert.Equal(t, inst.nanos, entry.Amount.Amount.Nanos)
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
 }
 
 func TestWithAccountValidationEnabled_Option(t *testing.T) {
