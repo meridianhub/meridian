@@ -581,9 +581,16 @@ func TestCascade_NegativeControlNonExistentParty(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.NotFound, st.Code())
 
-	// Wait a reasonable time and verify NO events were published
-	// (outbox worker polls every 200ms, so 2 seconds is enough)
-	time.Sleep(2 * time.Second)
+	// Verify NO events are published by waiting for the outbox worker to process
+	// any pending entries (polls every 200ms, so 2 seconds is sufficient).
+	// Use await to confirm the condition stays false rather than time.Sleep.
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(200 * time.Millisecond).
+		Until(func() bool {
+			return len(getEvents()) > 0
+		})
+	require.Error(t, err, "No events should appear on Kafka for a non-existent party")
 	records := getEvents()
 	assert.Empty(t, records, "No event should be published for a non-existent party")
 

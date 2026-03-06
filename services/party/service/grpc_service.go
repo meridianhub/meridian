@@ -664,7 +664,7 @@ func (s *Service) ControlParty(ctx context.Context, req *pb.ControlPartyRequest)
 	}
 
 	// Persist updated party and publish control event atomically
-	actionTime := time.Now()
+	actionTime := time.Now().UTC()
 	if err := s.savePartyWithEvent(saveCtx, party, func(tx *gorm.DB) error {
 		event := &eventsv1.PartyControlledEvent{
 			EventId:       uuid.New().String(),
