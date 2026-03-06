@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { SagaFlowDiagram, parseTriggerService } from './saga-flow'
+import { SagaFlowDiagram } from './saga-flow'
+import { parseTriggerService } from '../lib/star-parser'
 import type { SagaFlow } from '../lib/star-parser'
 
 // Mock @xyflow/react to avoid canvas rendering issues in jsdom

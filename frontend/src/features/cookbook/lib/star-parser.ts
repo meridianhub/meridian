@@ -24,6 +24,22 @@ export interface EarlyExit {
 }
 
 /**
+ * Extract the producing service name from a trigger string.
+ * - "event:position-keeping.transaction-captured.v1" → "position-keeping"
+ * - "webhook:stripe.payment_intent.succeeded" → "stripe"
+ * - "api:/v1/payments/stripe" → null (no service)
+ */
+export function parseTriggerService(trigger: string | null): string | null {
+  if (!trigger) return null
+  if (trigger.startsWith('event:') || trigger.startsWith('webhook:')) {
+    const rest = trigger.slice(trigger.indexOf(':') + 1)
+    const dotIdx = rest.indexOf('.')
+    return dotIdx > 0 ? rest.slice(0, dotIdx) : rest
+  }
+  return null
+}
+
+/**
  * Parse a Starlark saga source file into a structured SagaFlow.
  * Uses regex-based static analysis (not execution).
  */

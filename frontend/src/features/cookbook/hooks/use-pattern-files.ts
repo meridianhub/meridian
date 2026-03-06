@@ -39,10 +39,6 @@ function parseManifestSagas(manifestContent: string | null): ManifestSaga[] {
   }
 }
 
-function detectSagas(manifestContent: string | null, starlarkFiles: StarlarkFile[]): boolean {
-  if (starlarkFiles.length > 0) return true
-  return parseManifestSagas(manifestContent).length > 0
-}
 
 export function usePatternFiles(item: CookbookItem | undefined): PatternFilesState {
   return useMemo(() => {

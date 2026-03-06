@@ -12,6 +12,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import Dagre from '@dagrejs/dagre'
 import type { SagaFlow } from '../lib/star-parser'
+import { parseTriggerService } from '../lib/star-parser'
 
 // Curated palette of visually distinct service colors
 const SERVICE_PALETTE = [
@@ -24,22 +25,6 @@ const SERVICE_PALETTE = [
   { bg: 'hsl(50, 80%, 90%)', fg: 'hsl(50, 80%, 35%)' },    // Yellow
   { bg: 'hsl(330, 60%, 92%)', fg: 'hsl(330, 60%, 45%)' },  // Pink
 ]
-
-/**
- * Extract the producing service name from a trigger string.
- * - "event:position-keeping.transaction-captured.v1" → "position-keeping"
- * - "webhook:stripe.payment_intent.succeeded" → "stripe"
- * - "api:/v1/payments/stripe" → null (no service)
- */
-export function parseTriggerService(trigger: string | null): string | null {
-  if (!trigger) return null
-  if (trigger.startsWith('event:') || trigger.startsWith('webhook:')) {
-    const rest = trigger.slice(trigger.indexOf(':') + 1)
-    const dotIdx = rest.indexOf('.')
-    return dotIdx > 0 ? rest.slice(0, dotIdx) : rest
-  }
-  return null
-}
 
 function buildServiceColorMap(flow: SagaFlow): Map<string, { bg: string; fg: string }> {
   const services = new Set<string>()
