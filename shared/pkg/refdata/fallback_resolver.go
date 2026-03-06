@@ -48,7 +48,7 @@ func (f *FileSnapshotStorage) Load() ([]InstrumentProperties, error) {
 	return instruments, nil
 }
 
-// Save persists instruments using atomic write (temp file + rename).
+// Save persists instruments using atomic write (temp file + fsync + rename).
 func (f *FileSnapshotStorage) Save(instruments []InstrumentProperties) error {
 	data, err := json.Marshal(instruments)
 	if err != nil {
@@ -95,6 +95,9 @@ type FallbackResolverConfig struct {
 
 const defaultSnapshotInterval = time.Minute
 
+// ErrAlreadyStarted is returned when Start is called on a running FallbackResolver.
+var ErrAlreadyStarted = fmt.Errorf("fallback resolver already started")
+
 // FallbackResolver wraps a CachedResolver with snapshot-based fallback.
 // When the upstream source is unavailable at startup, it loads from the
 // last-known-good snapshot.
@@ -107,8 +110,10 @@ type FallbackResolver struct {
 	fallbackActive atomic.Bool
 	fallbackData   sync.Map // map[string]InstrumentProperties
 
-	cancel context.CancelFunc
-	done   chan struct{}
+	mu      sync.Mutex
+	started bool
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // Verify FallbackResolver implements InstrumentResolver.
@@ -116,6 +121,13 @@ var _ InstrumentResolver = (*FallbackResolver)(nil)
 
 // NewFallbackResolver creates a FallbackResolver wrapping the given CachedResolver.
 func NewFallbackResolver(primary *CachedResolver, storage SnapshotStorage, cfg FallbackResolverConfig) *FallbackResolver {
+	if primary == nil {
+		panic("refdata: primary resolver must not be nil")
+	}
+	if storage == nil {
+		panic("refdata: snapshot storage must not be nil")
+	}
+
 	interval := cfg.SnapshotInterval
 	if interval == 0 {
 		interval = defaultSnapshotInterval
@@ -129,13 +141,20 @@ func NewFallbackResolver(primary *CachedResolver, storage SnapshotStorage, cfg F
 		storage:  storage,
 		logger:   logger,
 		interval: interval,
-		done:     make(chan struct{}),
 	}
 }
 
 // Start initializes the resolver: tries upstream preload, falls back to snapshot,
 // and starts a background goroutine for periodic snapshots.
+// Returns ErrAlreadyStarted if called while already running.
 func (r *FallbackResolver) Start(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.started {
+		return ErrAlreadyStarted
+	}
+
 	// Try upstream preload first
 	if err := r.primary.Preload(ctx); err != nil {
 		r.logger.Warn("upstream preload failed, loading snapshot", "error", err)
@@ -162,18 +181,29 @@ func (r *FallbackResolver) Start(ctx context.Context) error {
 	// The snapshot loop must outlive the Start() call's context and is controlled
 	// by Stop() via the cancel function.
 	bgCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck // intentional detached context
+	r.done = make(chan struct{})
 	r.cancel = cancel
+	r.started = true
 	r.startSnapshotLoop(bgCtx) //nolint:contextcheck // detached context is intentional
 
 	return nil
 }
 
-// Stop shuts down the background snapshot goroutine.
+// Stop shuts down the background snapshot goroutine. Safe to call multiple times.
 func (r *FallbackResolver) Stop() {
-	if r.cancel != nil {
-		r.cancel()
-		<-r.done
+	r.mu.Lock()
+	if !r.started {
+		r.mu.Unlock()
+		return
 	}
+	cancel := r.cancel
+	done := r.done
+	r.cancel = nil
+	r.started = false
+	r.mu.Unlock()
+
+	cancel()
+	<-done
 }
 
 // Resolve returns instrument properties. Uses primary (CachedResolver) when available,

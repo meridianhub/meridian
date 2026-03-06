@@ -66,6 +66,9 @@ var _ InstrumentResolver = (*CachedResolver)(nil)
 
 // NewCachedResolver creates a new CachedResolver wrapping the given data source.
 func NewCachedResolver(source DataSource, cfg CachedResolverConfig) *CachedResolver {
+	if source == nil {
+		panic("refdata: DataSource must not be nil")
+	}
 	ttl := cfg.TTL
 	if ttl == 0 {
 		ttl = defaultCacheTTL
