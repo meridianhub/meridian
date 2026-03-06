@@ -681,6 +681,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test handler"
+    compensation_strategy: none
     params:
       required_field:
         type: string
@@ -771,6 +772,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test handler"
+    compensation_strategy: none
     params:
       required_field:
         type: string
@@ -865,6 +867,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test handler"
+    compensation_strategy: none
     params:
       required_field:
         type: string

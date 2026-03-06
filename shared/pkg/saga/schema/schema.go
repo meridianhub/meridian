@@ -57,14 +57,33 @@ func ParseFieldType(s string) (FieldType, error) {
 	return ft, nil
 }
 
+// CompensationStrategy declares how a handler handles compensation.
+type CompensationStrategy string
+
+// Valid compensation strategies for handler definitions.
+const (
+	CompensationStrategyAuto        CompensationStrategy = "auto"
+	CompensationStrategySagaManaged CompensationStrategy = "saga_managed"
+	CompensationStrategyNone        CompensationStrategy = "none"
+)
+
+var validCompensationStrategies = map[CompensationStrategy]bool{
+	CompensationStrategyAuto:        true,
+	CompensationStrategySagaManaged: true,
+	CompensationStrategyNone:        true,
+}
+
 // Schema errors.
 var (
-	ErrServiceRequired      = errors.New("service is required")
-	ErrUnknownType          = errors.New("unknown type")
-	ErrEnumRequiresValues   = errors.New("enum type requires values")
-	ErrHandlerNotFound      = errors.New("handler not found")
-	ErrMissingRequiredParam = errors.New("missing required parameter")
-	ErrInvalidEnumValue     = errors.New("invalid enum value")
+	ErrServiceRequired              = errors.New("service is required")
+	ErrUnknownType                  = errors.New("unknown type")
+	ErrEnumRequiresValues           = errors.New("enum type requires values")
+	ErrHandlerNotFound              = errors.New("handler not found")
+	ErrMissingRequiredParam         = errors.New("missing required parameter")
+	ErrInvalidEnumValue             = errors.New("invalid enum value")
+	ErrMissingCompensationStrategy  = errors.New("handler must declare either 'compensate' or 'compensation_strategy'")
+	ErrInvalidCompensationStrategy  = errors.New("invalid compensation_strategy value")
+	ErrConflictCompensationStrategy = errors.New("handler with 'compensate' should not set 'compensation_strategy' to non-auto value")
 )
 
 // Schema represents a collection of handler definitions for a service.
@@ -96,6 +115,10 @@ type HandlerDef struct {
 	// External indicates this handler calls external systems (non-idempotent).
 	// External handlers must have verify_external_state() called before invocation.
 	External bool `yaml:"external,omitempty"`
+
+	// CompensationStrategy declares how compensation is handled when no compensate handler is set.
+	// Valid values: "auto" (implicit when compensate is set), "saga_managed", "none".
+	CompensationStrategy CompensationStrategy `yaml:"compensation_strategy,omitempty"`
 }
 
 // FieldDef defines a single field (parameter or return value).
@@ -163,6 +186,17 @@ func (h *HandlerDef) Validate(handlerName string) error {
 		if err := field.Validate(fmt.Sprintf("%s.returns.%s", handlerName, fieldName)); err != nil {
 			return err
 		}
+	}
+
+	// Compensation coverage: every handler must declare either compensate or compensation_strategy
+	if h.Compensate == "" && h.CompensationStrategy == "" {
+		return fmt.Errorf("%w: %s", ErrMissingCompensationStrategy, handlerName)
+	}
+	if h.CompensationStrategy != "" && !validCompensationStrategies[h.CompensationStrategy] {
+		return fmt.Errorf("%w: %s has %q", ErrInvalidCompensationStrategy, handlerName, h.CompensationStrategy)
+	}
+	if h.Compensate != "" && h.CompensationStrategy != "" && h.CompensationStrategy != CompensationStrategyAuto {
+		return fmt.Errorf("%w: %s", ErrConflictCompensationStrategy, handlerName)
 	}
 
 	return nil
@@ -375,11 +409,17 @@ type LinterMetadata struct {
 
 	// RequiresPreCheck indicates verify_external_state must be called before this handler.
 	RequiresPreCheck bool
+
+	// CompensationStrategy indicates how compensation is handled ("auto", "saga_managed", "none", or "").
+	CompensationStrategy string
+
+	// HasAutoCompensation indicates the handler has a compensate: field.
+	HasAutoCompensation bool
 }
 
 // BuildLinterMetadata extracts linter metadata from the schema registry.
-// Returns a map of handler names to their metadata for pre-check validation.
-// Only external handlers (those marked with external: true) are included in the metadata.
+// Returns a map of handler names to their metadata for linter validation.
+// All handlers are included to support compensation coverage checks.
 func (r *Registry) BuildLinterMetadata() map[string]LinterMetadata {
 	metadata := make(map[string]LinterMetadata)
 
@@ -387,12 +427,18 @@ func (r *Registry) BuildLinterMetadata() map[string]LinterMetadata {
 	defer r.mu.RUnlock()
 
 	for name, handler := range r.handlers {
+		meta := LinterMetadata{}
 		if handler.External {
-			metadata[name] = LinterMetadata{
-				IsExternal:       true,
-				RequiresPreCheck: true, // All external handlers require pre-check
-			}
+			meta.IsExternal = true
+			meta.RequiresPreCheck = true
 		}
+		if handler.Compensate != "" {
+			meta.HasAutoCompensation = true
+			meta.CompensationStrategy = string(CompensationStrategyAuto)
+		} else {
+			meta.CompensationStrategy = string(handler.CompensationStrategy)
+		}
+		metadata[name] = meta
 	}
 
 	return metadata

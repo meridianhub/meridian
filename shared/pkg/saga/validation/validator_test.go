@@ -22,6 +22,7 @@ version: 1.0
 handlers:
   test.echo:
     description: Test echo handler
+    compensation_strategy: none
     params:
       message:
         type: string
@@ -114,6 +115,8 @@ service: test
 version: 1.0
 handlers:
   test.add_amount:
+    description: "Add amount handler"
+    compensation_strategy: none
     params:
       amount:
         type: Decimal
@@ -149,6 +152,8 @@ service: test
 version: 1.0
 handlers:
   test.process:
+    description: "Process handler"
+    compensation_strategy: none
     params:
       value:
         type: string
@@ -196,6 +201,8 @@ service: test
 version: 1.0
 handlers:
   test.step1:
+    description: "Step 1"
+    compensation_strategy: none
     params:
       input:
         type: string
@@ -204,6 +211,8 @@ handlers:
       output:
         type: string
   test.step2:
+    description: "Step 2"
+    compensation_strategy: none
     params:
       input:
         type: string

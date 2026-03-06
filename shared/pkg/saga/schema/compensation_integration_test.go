@@ -93,6 +93,7 @@ handlers:
 
   test_service.failing_step:
     description: "A step that fails"
+    compensation_strategy: none
     params: {}
     returns:
       status:
@@ -100,6 +101,7 @@ handlers:
 
   test_service.delete_resource:
     description: "Delete a resource (compensation)"
+    compensation_strategy: none
     params:
       resource_id:
         type: string
@@ -110,6 +112,7 @@ handlers:
 
   test_service.release_quota:
     description: "Release quota (compensation)"
+    compensation_strategy: none
     params:
       allocation_id:
         type: string
@@ -224,6 +227,7 @@ handlers:
     compensate: test.compensate
   test.compensate:
     description: "Compensation handler"
+    compensation_strategy: none
     params:
       id:
         type: string

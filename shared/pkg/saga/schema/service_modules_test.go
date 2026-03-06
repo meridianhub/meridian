@@ -134,6 +134,7 @@ version: "1.0"
 handlers:
   position_keeping.initiate_log:
     description: "Test handler"
+    compensation_strategy: none
     params:
       position_id:
         type: string
@@ -152,6 +153,7 @@ handlers:
         type: string
   repository.save:
     description: "Save entity"
+    compensation_strategy: none
     params:
       entity_type:
         type: string
@@ -211,6 +213,7 @@ version: "1.0"
 handlers:
   current_account.position_keeping.initiate_log:
     description: "Initiate log"
+    compensation_strategy: none
     params:
       position_id:
         type: string
@@ -220,6 +223,7 @@ handlers:
         type: string
   current_account.position_keeping.cancel_log:
     description: "Cancel log"
+    compensation_strategy: none
     params:
       log_id:
         type: string
@@ -485,6 +489,7 @@ version: "1.0"
 handlers:
   position_keeping.initiate_log:
     description: "Initiate position log"
+    compensation_strategy: none
     params:
       position_id:
         type: string
@@ -603,6 +608,7 @@ version: "1.0"
 handlers:
   test.missing:
     description: "This handler is not in registry"
+    compensation_strategy: none
     params: {}
     returns: {}
 `))
@@ -913,6 +919,7 @@ version: "1.0"
 handlers:
   test_service.process:
     description: "Process with numeric types"
+    compensation_strategy: none
     params:
       count:
         type: int32
@@ -981,6 +988,7 @@ version: "1.0"
 handlers:
   test_service.process:
     description: "Process with numeric types"
+    compensation_strategy: none
     params:
       count:
         type: int32
@@ -1068,6 +1076,7 @@ version: "1.0"
 handlers:
   position_keeping.initiate_log:
     description: "Initiate position log"
+    compensation_strategy: none
     params:
       position_id:
         type: string
@@ -1088,6 +1097,7 @@ handlers:
         type: string
   position_keeping.cancel_log:
     description: "Cancel position log"
+    compensation_strategy: none
     params:
       log_id:
         type: string

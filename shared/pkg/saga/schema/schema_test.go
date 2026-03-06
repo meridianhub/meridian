@@ -89,6 +89,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test"
+    compensation_strategy: none
 `,
 			wantErr: "service is required",
 		},
@@ -100,6 +101,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test"
+    compensation_strategy: none
     params:
       foo:
         type: invalid_type
@@ -115,6 +117,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test"
+    compensation_strategy: none
     params:
       direction:
         type: enum
@@ -175,6 +178,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "A test handler"
+    compensation_strategy: none
     params:
       id:
         type: string
@@ -210,6 +214,7 @@ version: "1.0"
 handlers:
   service_a.method1:
     description: "Method 1"
+    compensation_strategy: none
 `
 
 	yaml2 := `
@@ -218,6 +223,7 @@ version: "1.0"
 handlers:
   service_b.method1:
     description: "Method 1 in B"
+    compensation_strategy: none
 `
 
 	require.NoError(t, registry.LoadFromYAML([]byte(yaml1)))
@@ -236,6 +242,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test handler"
+    compensation_strategy: none
     params:
       required_field:
         type: string
@@ -318,6 +325,7 @@ version: "1.0"
 handlers:
   file_test.handler:
     description: "Handler loaded from file"
+    compensation_strategy: none
     params:
       id:
         type: string
@@ -356,6 +364,7 @@ version: "1.0"
 handlers:
   service_a.method1:
     description: "Method 1 from service A"
+    compensation_strategy: none
 `,
 		"service_b.yml": `
 service: service_b
@@ -363,6 +372,7 @@ version: "1.0"
 handlers:
   service_b.method1:
     description: "Method 1 from service B"
+    compensation_strategy: none
 `,
 		"not_a_schema.txt": `This should be ignored`,
 	}
@@ -424,6 +434,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test handler"
+    compensation_strategy: none
     params:
       required_field:
         type: string
@@ -469,6 +480,7 @@ version: "1.0"
 handlers:
   test.external_handler:
     description: "External payment gateway handler"
+    compensation_strategy: none
     external: true
     params:
       payment_id:
@@ -485,6 +497,7 @@ version: "1.0"
 handlers:
   test.internal_handler:
     description: "Internal handler"
+    compensation_strategy: none
     params:
       id:
         type: string
@@ -500,6 +513,7 @@ version: "1.0"
 handlers:
   test.internal_handler:
     description: "Internal handler"
+    compensation_strategy: none
     external: false
     params:
       id:
@@ -576,6 +590,7 @@ version: "1.0"
 handlers:
   internal.save:
     description: "Internal save operation"
+    compensation_strategy: none
     external: false
     params:
       id:
@@ -583,6 +598,7 @@ handlers:
         required: true
   gateway.send:
     description: "External gateway call"
+    compensation_strategy: none
     external: true
     params:
       amount:
@@ -590,6 +606,7 @@ handlers:
         required: true
   accounting.post:
     description: "No external field (defaults to false)"
+    compensation_strategy: none
     params:
       entry_id:
         type: string
@@ -597,8 +614,15 @@ handlers:
 `,
 			expectedMeta: map[string]LinterMetadata{
 				"gateway.send": {
-					IsExternal:       true,
-					RequiresPreCheck: true,
+					IsExternal:           true,
+					RequiresPreCheck:     true,
+					CompensationStrategy: "none",
+				},
+				"internal.save": {
+					CompensationStrategy: "none",
+				},
+				"accounting.post": {
+					CompensationStrategy: "none",
 				},
 			},
 			expectedCounts: struct {
@@ -617,13 +641,22 @@ version: "1.0"
 handlers:
   internal.handler1:
     description: "Internal handler 1"
+    compensation_strategy: none
     params: {}
   internal.handler2:
     description: "Internal handler 2"
+    compensation_strategy: none
     external: false
     params: {}
 `,
-			expectedMeta: map[string]LinterMetadata{},
+			expectedMeta: map[string]LinterMetadata{
+				"internal.handler1": {
+					CompensationStrategy: "none",
+				},
+				"internal.handler2": {
+					CompensationStrategy: "none",
+				},
+			},
 			expectedCounts: struct {
 				total    int
 				external int
@@ -658,33 +691,27 @@ handlers: {}
 
 			metadata := registry.BuildLinterMetadata()
 
-			// Verify expected metadata
+			// Verify expected metadata - all handlers should be in metadata now
 			assert.Equal(t, len(tt.expectedMeta), len(metadata),
-				"Expected %d external handlers, got %d", len(tt.expectedMeta), len(metadata))
+				"Expected %d handlers in metadata, got %d", len(tt.expectedMeta), len(metadata))
 
 			for handlerName, expectedMeta := range tt.expectedMeta {
 				actualMeta, exists := metadata[handlerName]
 				assert.True(t, exists, "Expected handler %s to be in metadata", handlerName)
 				assert.Equal(t, expectedMeta.IsExternal, actualMeta.IsExternal)
 				assert.Equal(t, expectedMeta.RequiresPreCheck, actualMeta.RequiresPreCheck)
+				assert.Equal(t, expectedMeta.CompensationStrategy, actualMeta.CompensationStrategy)
+				assert.Equal(t, expectedMeta.HasAutoCompensation, actualMeta.HasAutoCompensation)
 			}
 
-			// Verify internal handlers are NOT in metadata
+			// Verify all handlers are in metadata
 			allHandlers := registry.ListHandlers()
 			assert.Len(t, allHandlers, tt.expectedCounts.total,
 				"Expected %d total handlers", tt.expectedCounts.total)
 
 			for _, handlerName := range allHandlers {
-				handler, err := registry.GetHandler(handlerName)
-				require.NoError(t, err)
-
-				if handler.External {
-					_, exists := metadata[handlerName]
-					assert.True(t, exists, "External handler %s should be in metadata", handlerName)
-				} else {
-					_, exists := metadata[handlerName]
-					assert.False(t, exists, "Internal handler %s should NOT be in metadata", handlerName)
-				}
+				_, exists := metadata[handlerName]
+				assert.True(t, exists, "Handler %s should be in metadata", handlerName)
 			}
 		})
 	}

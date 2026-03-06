@@ -59,6 +59,7 @@ handlers:
 
   position_keeping.update_log:
     description: "Update an existing position log entry"
+    compensation_strategy: none
     params:
       log_id:
         type: string
@@ -74,6 +75,7 @@ handlers:
 
   position_keeping.cancel_log:
     description: "Cancel a position log entry (compensation handler)"
+    compensation_strategy: none
     params:
       log_id:
         type: string
@@ -106,6 +108,7 @@ handlers:
 
   financial_accounting.reverse_entries:
     description: "Reverse previously posted accounting entries (compensation handler)"
+    compensation_strategy: none
     params:
       posting_ids:
         type: array
@@ -121,6 +124,7 @@ handlers:
 
   financial_accounting.create_booking:
     description: "Create a booking log entry for audit purposes"
+    compensation_strategy: none
     params:
       description:
         type: string
@@ -139,6 +143,7 @@ handlers:
 
   financial_accounting.initiate_booking_log:
     description: "Initiate a booking log for a deposit or withdrawal transaction"
+    compensation_strategy: none
     params:
       account_id:
         type: string
@@ -215,6 +220,7 @@ handlers:
 
   financial_accounting.compensate_posting:
     description: "Compensate (reverse) a captured posting entry"
+    compensation_strategy: none
     params:
       booking_log_id:
         type: string
@@ -259,6 +265,7 @@ handlers:
 
   financial_accounting.update_booking_log:
     description: "Update the status of an existing booking log"
+    compensation_strategy: none
     params:
       booking_log_id:
         type: string
@@ -305,6 +312,7 @@ handlers:
 
   current_account.execute_lien:
     description: "Execute (consume) a previously created lien"
+    compensation_strategy: none
     params:
       lien_id:
         type: string
@@ -320,6 +328,7 @@ handlers:
 
   current_account.terminate_lien:
     description: "Terminate (release) a lien without execution (compensation handler)"
+    compensation_strategy: none
     params:
       lien_id:
         type: string
@@ -335,6 +344,7 @@ handlers:
 
   current_account.control:
     description: "Perform lifecycle control action on an account (FREEZE, UNFREEZE, CLOSE)"
+    compensation_strategy: saga_managed
     params:
       account_id:
         type: string
@@ -362,6 +372,7 @@ handlers:
 
   current_account.save:
     description: "Persist current account metadata for a transaction"
+    compensation_strategy: none
     params:
       account_id:
         type: string
@@ -382,6 +393,7 @@ handlers:
   # Valuation Engine Service
   valuation_engine.valuate:
     description: "Valuate an instrument at a specific point in time"
+    compensation_strategy: none
     params:
       instrument:
         type: string
@@ -421,6 +433,7 @@ handlers:
   # Repository Service
   repository.save:
     description: "Persist an entity to the repository"
+    compensation_strategy: none
     params:
       entity_type:
         type: string
@@ -447,6 +460,7 @@ handlers:
   # Notification Service
   notification.send:
     description: "Send a notification to a recipient"
+    compensation_strategy: none
     params:
       type:
         type: string
@@ -512,6 +526,7 @@ handlers:
 
   payment_order.terminate_lien:
     description: "Terminate (release) a payment order lien (compensation handler)"
+    compensation_strategy: none
     params:
       lien_id:
         type: string
@@ -531,6 +546,7 @@ handlers:
 
   payment_order.send_to_gateway:
     description: "Send a payment order to the external payment gateway"
+    compensation_strategy: none
     external: true
     params:
       payment_order_id:
@@ -567,6 +583,7 @@ handlers:
 
   payment_order.post_ledger_entries:
     description: "Post ledger entries for a confirmed payment order"
+    compensation_strategy: none
     params:
       payment_order_id:
         type: string
@@ -606,6 +623,7 @@ handlers:
 
   payment_order.execute_lien:
     description: "Execute (finalize) a payment order lien after ledger posting"
+    compensation_strategy: none
     params:
       lien_id:
         type: string
@@ -619,6 +637,7 @@ handlers:
   # Party Service
   party.get_default_payment_method:
     description: "Retrieve the default payment method for a party"
+    compensation_strategy: none
     params:
       party_id:
         type: string
@@ -671,6 +690,7 @@ handlers:
 
   reconciliation.execute_run:
     description: "Trigger execution of a pending settlement run"
+    compensation_strategy: none
     params:
       run_id:
         type: string
@@ -686,6 +706,7 @@ handlers:
 
   reconciliation.retrieve_run:
     description: "Retrieve a settlement run summary"
+    compensation_strategy: none
     params:
       run_id:
         type: string
@@ -704,6 +725,7 @@ handlers:
 
   reconciliation.cancel_run:
     description: "Cancel a settlement run (compensation handler)"
+    compensation_strategy: none
     params:
       run_id:
         type: string
@@ -723,6 +745,7 @@ handlers:
 
   reconciliation.assert_balance:
     description: "Evaluate a balance assertion against current positions"
+    compensation_strategy: none
     params:
       account_id:
         type: string
@@ -750,6 +773,7 @@ handlers:
 
   reconciliation.initiate_dispute:
     description: "Raise a formal dispute against a detected variance"
+    compensation_strategy: none
     params:
       variance_id:
         type: string
@@ -819,6 +843,7 @@ handlers:
 
   operational_gateway.cancel_instruction:
     description: "Cancel a pending instruction before it is dispatched (compensation handler)"
+    compensation_strategy: none
     params:
       instruction_id:
         type: string
@@ -838,6 +863,7 @@ handlers:
 
   operational_gateway.get_instruction:
     description: "Get instruction status and details by ID"
+    compensation_strategy: none
     params:
       instruction_id:
         type: string
@@ -904,6 +930,7 @@ handlers:
 
   financial_gateway.cancel_payment:
     description: "Cancel a pending payment dispatch (compensation handler)"
+    compensation_strategy: none
     params:
       payment_order_id:
         type: string
@@ -923,6 +950,7 @@ handlers:
 
   financial_gateway.dispatch_refund:
     description: "Dispatch a refund for a previously processed payment via the Financial Gateway"
+    compensation_strategy: none
     params:
       payment_order_id:
         type: string
