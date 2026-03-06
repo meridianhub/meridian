@@ -219,7 +219,14 @@ func run(logger *slog.Logger) error {
 	)
 
 	// Wire VarianceValuator with real valuation engine and reference data provider
-	valuationEngine, refDataProvider := buildValuationComponents(cfg, logger)
+	valuationEngine, refDataProvider, refDataConn := buildValuationComponents(cfg, logger)
+	defer func() {
+		if refDataConn != nil {
+			if err := refDataConn.Close(); err != nil {
+				logger.Error("failed to close reference data connection", "error", err)
+			}
+		}
+	}()
 	valuator := service.NewVarianceValuator(valuationEngine, refDataProvider, varianceRepo, runRepo)
 	serviceOpts = append(serviceOpts,
 		service.WithVarianceValuator(valuator.ValueVariances),
@@ -508,7 +515,7 @@ func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckR
 // When the Reference Data gRPC URL is configured, it creates gRPC clients for instrument
 // and account type lookups. Otherwise, it falls back to the identity conversion method
 // with default materiality thresholds.
-func buildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuation.Engine, service.ReferenceDataProvider) {
+func buildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuation.Engine, service.ReferenceDataProvider, *grpc.ClientConn) {
 	// Create valuation engine runtime components
 	policyRT, err := valuation.NewPolicyRuntime()
 	if err != nil {
@@ -538,13 +545,16 @@ func buildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuatio
 		Logger:          logger,
 	}
 
+	var refDataConn *grpc.ClientConn
 	if cfg.Services.ReferenceDataURL != "" {
-		refDataConn, connErr := grpc.NewClient(
+		var connErr error
+		refDataConn, connErr = grpc.NewClient(
 			cfg.Services.ReferenceDataURL,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
 		if connErr != nil {
 			logger.Warn("failed to create reference data gRPC client", "error", connErr)
+			refDataConn = nil
 		} else {
 			providerCfg.InstrumentClient = referencedatav1.NewReferenceDataServiceClient(refDataConn)
 			providerCfg.AccountTypeClient = referencedatav1.NewAccountTypeRegistryServiceClient(refDataConn)
@@ -563,7 +573,7 @@ func buildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuatio
 		"reference_data_url", cfg.Services.ReferenceDataURL,
 	)
 
-	return adaptedEngine, refDataProvider
+	return adaptedEngine, refDataProvider, refDataConn
 }
 
 // parseLogLevel converts a string log level to slog.Level.

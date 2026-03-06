@@ -127,6 +127,8 @@ func (p *GRPCReferenceDataProvider) GetMaterialityThreshold(ctx context.Context,
 
 // resolveFromAccountTypes searches active account type definitions for a valuation
 // method template matching the given instrument code.
+// Note: queries up to 100 active account types. Deployments with more than 100
+// active account types should extend this with pagination.
 func (p *GRPCReferenceDataProvider) resolveFromAccountTypes(ctx context.Context, instrumentCode string) (uuid.UUID, error) {
 	resp, err := p.accountTypeClient.ListActive(ctx, &referencedatav1.ListActiveRequest{
 		PageSize: 100,
@@ -135,6 +137,7 @@ func (p *GRPCReferenceDataProvider) resolveFromAccountTypes(ctx context.Context,
 		return uuid.Nil, fmt.Errorf("failed to list active account types: %w", err)
 	}
 
+	// First pass: look for an exact instrument match in valuation method templates
 	for _, def := range resp.GetDefinitions() {
 		for _, vm := range def.GetValuationMethods() {
 			if vm.GetInputInstrument() == instrumentCode {
@@ -142,14 +145,6 @@ func (p *GRPCReferenceDataProvider) resolveFromAccountTypes(ctx context.Context,
 				if err != nil {
 					continue
 				}
-				return methodID, nil
-			}
-		}
-
-		// Check default conversion method as fallback
-		if convID := def.GetDefaultConversionMethodId(); convID != "" {
-			methodID, err := uuid.Parse(convID)
-			if err == nil {
 				return methodID, nil
 			}
 		}

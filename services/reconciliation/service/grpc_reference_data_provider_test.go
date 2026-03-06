@@ -183,13 +183,13 @@ func TestGRPCReferenceDataProvider_GetValuationMethodID_AccountTypeError_FallsBa
 	assert.Equal(t, defaultID, result)
 }
 
-func TestGRPCReferenceDataProvider_GetValuationMethodID_DefaultConversionFallback(t *testing.T) {
-	conversionID := uuid.New()
+func TestGRPCReferenceDataProvider_GetValuationMethodID_NoMatchFallsToDefault(t *testing.T) {
+	defaultID := uuid.New()
 	acctClient := &mockAccountTypeClient{
 		definitions: []*referencedatav1.AccountTypeDefinition{
 			{
 				Code:                      "CUSTOMER_CURRENT",
-				DefaultConversionMethodId: conversionID.String(),
+				DefaultConversionMethodId: uuid.New().String(),
 				// No ValuationMethods matching "EXOTIC" instrument
 			},
 		},
@@ -197,10 +197,11 @@ func TestGRPCReferenceDataProvider_GetValuationMethodID_DefaultConversionFallbac
 
 	provider := NewGRPCReferenceDataProvider(GRPCReferenceDataProviderConfig{
 		AccountTypeClient: acctClient,
+		DefaultMethodID:   defaultID,
 		Logger:            testLogger(),
 	})
 
 	result, err := provider.GetValuationMethodID(context.Background(), "EXOTIC")
 	require.NoError(t, err)
-	assert.Equal(t, conversionID, result)
+	assert.Equal(t, defaultID, result, "should fall back to default when no instrument match")
 }
