@@ -282,7 +282,7 @@ interface EventHop {
 interface ProducedEvent {
   channel: string // e.g., "position-keeping.transaction-captured.v1"
   instrumentCode: string | null // from initiate_log params
-  accountType: string | null // from initiate_log params
+  accountId: string | null // from initiate_log params (runtime value)
 }
 ```
 
@@ -355,7 +355,7 @@ The visualization mirrors what the event-router does at runtime:
 
 | Runtime (event-router) | Visualization (frontend) |
 |---|---|
-| `SagaRegistry.Reload()` indexes by channel | `manifest-graph-model.ts` builds trigger edges |
+| `SagaRegistry.Reload()` indexes by channel | `manifest-graph-model.ts` stores trigger metadata on saga nodes |
 | `SagaDispatchHandler.Handle()` evaluates CEL | `cel-filter-analyzer.ts` static filter analysis |
 | `x-meridian-chain-depth` limits depth | `transitive-closure.ts` stops at `maxChainDepth` |
 | `saga.EventToInputData()` converts events | `saga-output-analyzer.ts` extracts outputs |
@@ -373,8 +373,9 @@ produce, and where the chain terminates.
 - `manifest-graph-model.ts`: transform `Manifest` proto into typed
   graph
 - Build nodes from instruments, account types, valuation rules, sagas
-- Build edges from `allowed_instruments`, `from/to_instrument`, saga
-  `trigger` fields
+- Build edges from `allowed_instruments`, `from/to_instrument`
+  relationships; store saga trigger/filter as node metadata (not
+  edges, since event channels are implicit, not manifest entities)
 - Unit tests with the energy-settlement manifest fragment as fixture
 
 ### Phase 2: Manifest Graph View
