@@ -273,8 +273,8 @@ Mermaid is the right tool here because:
 
 - The Starlark flow is inherently linear with branches
   — exactly what Mermaid flowcharts express
-- mermaid.js is already a standard rendering library
-  (< 50KB gzipped for the flowchart module)
+- mermaid.js is a standard rendering library with
+  automatic layout (dagre) built in
 - GitHub, GitLab, and Markdown tools render it natively,
   making the generated diagrams portable
 - Starlark's bounded nature (no while loops, no
@@ -329,10 +329,12 @@ Service: position_keeping
 ```
 
 **Data path**: The handlers.yaml is already parsed by
-the schema registry at startup and served via an
-existing gRPC endpoint (`handlers_describe`). The
-browser reads from this same endpoint — no new data
-path, no separate docs to maintain. When a developer
+the schema registry at startup. The MCP server exposes
+this via `meridian_handlers_describe`, and the
+underlying data is available through the schema
+registry's gRPC service. The browser reads from this
+same service — no new data path, no separate docs to
+maintain. When a developer
 adds a parameter to handlers.yaml, it appears in the
 browser on the next deploy because it IS the same
 data.
@@ -517,8 +519,8 @@ page) is an open question — see OQ5.
 
 ### Phase 4: Service Module Reference
 
-- Fetch handler definitions from existing gRPC
-  endpoint (handlers_describe)
+- Fetch handler definitions from the schema registry
+  gRPC service (same data backing `meridian_handlers_describe`)
 - Render as collapsible API reference panel: service
   name, handler signature, typed params, returns,
   compensation chain
@@ -579,8 +581,7 @@ Rationale:
 
 - Starlark's bounded structure (no while, no recursion)
   maps perfectly to finite Mermaid flowcharts
-- mermaid.js is lightweight (< 50KB gzipped for
-  flowcharts), well-maintained, and renders natively
+- mermaid.js is well-maintained and renders natively
   in GitHub/GitLab/Markdown tools
 - The generated Mermaid markup is portable — it can be
   embedded in ADRs, PRDs, or issue descriptions
@@ -592,8 +593,9 @@ Rationale:
 Alternatives considered:
 
 - **@xyflow/react**: More interactive (drag, zoom) but
-  adds ~150KB, requires layout logic, and the
-  interactivity isn't needed for a read-only flow view
+  requires manual layout logic, produces non-portable
+  output, and the interactivity isn't needed for a
+  read-only flow view
 - **Custom SVG**: Full design control but high
   implementation cost for layout algorithms
 
