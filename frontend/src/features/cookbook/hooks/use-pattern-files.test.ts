@@ -1,58 +1,91 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { renderHook } from '@testing-library/react'
 import { usePatternFiles } from './use-pattern-files'
+import type { CookbookItem } from './use-cookbook'
+
+function makeItem(overrides: Partial<CookbookItem> = {}): CookbookItem {
+  return {
+    name: 'test-pattern',
+    type: 'registry:pattern',
+    title: 'Test Pattern',
+    files: [
+      { path: 'patterns/test/saga.star', content: 'def execute():\n  pass' },
+      { path: 'patterns/test/manifest.yaml', content: 'name: test\ntype: registry:pattern' },
+    ],
+    ...overrides,
+  }
+}
 
 describe('usePatternFiles', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('returns null content when no pattern name provided', () => {
+  it('returns empty state when no item provided', () => {
     const { result } = renderHook(() => usePatternFiles(undefined))
-    expect(result.current.starlarkContent).toBeNull()
+    expect(result.current.starlarkFiles).toEqual([])
     expect(result.current.manifestContent).toBeNull()
     expect(result.current.isLoading).toBe(false)
   })
 
-  it('fetches starlark and manifest files', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-      const path = typeof url === 'string' ? url : url.toString()
-      if (path.includes('saga.star')) {
-        return new Response('def execute():\n  pass', { status: 200 })
-      }
-      if (path.includes('manifest.yaml')) {
-        return new Response('name: test\ntype: registry:pattern', { status: 200 })
-      }
-      return new Response('', { status: 404 })
-    })
-
-    const { result } = renderHook(() => usePatternFiles('test-pattern'))
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    expect(result.current.starlarkContent).toBe('def execute():\n  pass')
-    expect(result.current.manifestContent).toBe('name: test\ntype: registry:pattern')
-  })
-
-  it('returns null for files that return 404', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }))
-
-    const { result } = renderHook(() => usePatternFiles('missing-pattern'))
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    expect(result.current.starlarkContent).toBeNull()
+  it('returns empty state for UI component items', () => {
+    const item = makeItem({ type: 'registry:ui' })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.starlarkFiles).toEqual([])
     expect(result.current.manifestContent).toBeNull()
   })
 
-  it('returns null for fetch errors', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'))
+  it('extracts starlark and manifest content from bundled files', () => {
+    const item = makeItem()
+    const { result } = renderHook(() => usePatternFiles(item))
 
-    const { result } = renderHook(() => usePatternFiles('broken-pattern'))
+    expect(result.current.starlarkFiles).toEqual([
+      { name: 'saga.star', content: 'def execute():\n  pass' },
+    ])
+    expect(result.current.manifestContent).toBe('name: test\ntype: registry:pattern')
+    expect(result.current.isLoading).toBe(false)
+  })
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
+  it('handles multiple starlark files', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/billing.star', content: 'def billing(): pass' },
+        { path: 'patterns/test/onboarding.star', content: 'def onboard(): pass' },
+        { path: 'patterns/test/manifest.yaml', content: 'name: test' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
 
-    expect(result.current.starlarkContent).toBeNull()
+    expect(result.current.starlarkFiles).toHaveLength(2)
+    expect(result.current.starlarkFiles[0].name).toBe('billing.star')
+    expect(result.current.starlarkFiles[1].name).toBe('onboarding.star')
+  })
+
+  it('returns null manifest when no yaml file present', () => {
+    const item = makeItem({
+      files: [{ path: 'patterns/test/saga.star', content: 'def execute(): pass' }],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.manifestContent).toBeNull()
+  })
+
+  it('rejects HTML content as invalid (SPA fallback protection)', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/saga.star', content: '<!DOCTYPE html><html></html>' },
+        { path: 'patterns/test/manifest.yaml', content: '<html><body>not yaml</body></html>' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.starlarkFiles).toEqual([])
+    expect(result.current.manifestContent).toBeNull()
+  })
+
+  it('handles files with no content', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/saga.star' },
+        { path: 'patterns/test/manifest.yaml' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.starlarkFiles).toEqual([])
     expect(result.current.manifestContent).toBeNull()
   })
 })

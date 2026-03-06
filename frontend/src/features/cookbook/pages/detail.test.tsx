@@ -38,7 +38,7 @@ vi.mock('../hooks/use-cookbook', () => ({
   useCookbook: () => mockUseCookbook(),
 }))
 
-const mockUsePatternFiles = vi.fn<() => { starlarkContent: string | null; manifestContent: string | null; isLoading: boolean }>()
+const mockUsePatternFiles = vi.fn<() => { starlarkFiles: Array<{ name: string; content: string }>; manifestContent: string | null; isLoading: false }>()
 vi.mock('../hooks/use-pattern-files', () => ({
   usePatternFiles: () => mockUsePatternFiles(),
 }))
@@ -82,7 +82,7 @@ describe('CookbookDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseCookbook.mockReturnValue({ items: [patternItem, uiItem], isLoading: false })
-    mockUsePatternFiles.mockReturnValue({ starlarkContent: null, manifestContent: null, isLoading: false })
+    mockUsePatternFiles.mockReturnValue({ starlarkFiles: [], manifestContent: null, isLoading: false as const })
   })
 
   it('shows loading skeleton while catalogue is loading', () => {
@@ -134,11 +134,12 @@ describe('CookbookDetailPage', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
   })
 
-  it('renders breadcrumb navigation', () => {
+  it('renders breadcrumb navigation with sub-section', () => {
     renderDetail('fiat-current-account')
     const breadcrumb = screen.getByLabelText('Breadcrumb')
     expect(breadcrumb).toBeInTheDocument()
     expect(screen.getByText('Cookbook')).toBeInTheDocument()
+    expect(screen.getByText('Patterns')).toBeInTheDocument()
     // Title appears in both breadcrumb and heading
     expect(screen.getAllByText('Fiat Current Account').length).toBe(2)
   })
@@ -150,9 +151,9 @@ describe('CookbookDetailPage', () => {
 
   it('renders manifest viewer when content available', () => {
     mockUsePatternFiles.mockReturnValue({
-      starlarkContent: null,
+      starlarkFiles: [],
       manifestContent: 'name: test\ntype: registry:pattern',
-      isLoading: false,
+      isLoading: false as const,
     })
     renderDetail('fiat-current-account')
     expect(screen.getByTestId('manifest-viewer')).toBeInTheDocument()
