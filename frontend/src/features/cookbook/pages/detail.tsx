@@ -150,6 +150,16 @@ export function CookbookDetailPage() {
   const item = items.find((i) => i.name === name)
   const isLoading = catalogueLoading || filesLoading
 
+  const sagaFlow = useMemo(() => {
+    if (!starlarkContent) return null
+    return parseStarlarkSaga(starlarkContent)
+  }, [starlarkContent])
+
+  const mermaidMarkup = useMemo(() => {
+    if (!sagaFlow) return ''
+    return generateMermaidMarkup(sagaFlow)
+  }, [sagaFlow])
+
   if (catalogueLoading) {
     return <DetailSkeleton fieldCount={3} tabCount={3} showBackNav />
   }
@@ -167,16 +177,6 @@ export function CookbookDetailPage() {
 
   const isPattern = item.type === 'registry:pattern'
   const meta = item.meta as PatternMeta | undefined
-
-  const sagaFlow = useMemo(() => {
-    if (!starlarkContent) return null
-    return parseStarlarkSaga(starlarkContent)
-  }, [starlarkContent])
-
-  const mermaidMarkup = useMemo(() => {
-    if (!sagaFlow) return ''
-    return generateMermaidMarkup(sagaFlow)
-  }, [sagaFlow])
 
   return (
     <div className="space-y-6">
