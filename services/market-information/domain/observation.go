@@ -25,21 +25,22 @@ import (
 //   - SupersededBy forms a chain linking to the observation that replaced this one
 //   - CausationID enables event sourcing correlation
 type MarketPriceObservation struct {
-	id            uuid.UUID
-	dataSetCode   string          // References DataSetDefinition.Code
-	sourceID      uuid.UUID       // References DataSource.ID
-	resolutionKey string          // Unique key from CEL expression evaluation
-	value         decimal.Decimal // High-precision market value
-	unit          string          // Unit of measurement (e.g., "USD", "kWh")
-	observedAt    time.Time       // When the measurement was taken
-	validFrom     time.Time       // Start of effective time range
-	validTo       time.Time       // End of effective time range
-	createdAt     time.Time       // Knowledge time: when we learned about this
-	supersededAt  *time.Time      // When this observation was replaced
-	supersededBy  *uuid.UUID      // ID of the observation that replaced this one
-	causationID   uuid.UUID       // For event sourcing correlation
-	qualityLevel  QualityLevel    // ESTIMATE, ACTUAL, or VERIFIED
-	trustLevel    int             // 0-100, derived from DataSource
+	id                 uuid.UUID
+	dataSetCode        string             // References DataSetDefinition.Code
+	sourceID           uuid.UUID          // References DataSource.ID
+	resolutionKey      string             // Unique key from CEL expression evaluation
+	value              decimal.Decimal    // High-precision market value
+	unit               string             // Unit of measurement (e.g., "USD", "kWh")
+	observedAt         time.Time          // When the measurement was taken
+	validFrom          time.Time          // Start of effective time range
+	validTo            time.Time          // End of effective time range
+	createdAt          time.Time          // Knowledge time: when we learned about this
+	supersededAt       *time.Time         // When this observation was replaced
+	supersededBy       *uuid.UUID         // ID of the observation that replaced this one
+	causationID        uuid.UUID          // For event sourcing correlation
+	qualityLevel       QualityLevel       // ESTIMATE, ACTUAL, or VERIFIED
+	trustLevel         int                // 0-100, derived from DataSource
+	observationContext ObservationContext // Typed metadata about collection and processing
 }
 
 // NewMarketPriceObservation creates a new MarketPriceObservation with validated fields.
@@ -70,6 +71,7 @@ func NewMarketPriceObservation(
 	causationID uuid.UUID,
 	qualityLevel QualityLevel,
 	trustLevel int,
+	observationContext ObservationContext,
 ) (MarketPriceObservation, error) {
 	if dataSetCode == "" {
 		return MarketPriceObservation{}, ErrDataSetCodeRequired
@@ -97,21 +99,22 @@ func NewMarketPriceObservation(
 	}
 
 	return MarketPriceObservation{
-		id:            uuid.New(),
-		dataSetCode:   dataSetCode,
-		sourceID:      sourceID,
-		resolutionKey: resolutionKey,
-		value:         value,
-		unit:          unit,
-		observedAt:    observedAt,
-		validFrom:     validFrom,
-		validTo:       validTo,
-		createdAt:     time.Now(),
-		supersededAt:  nil,
-		supersededBy:  nil,
-		causationID:   causationID,
-		qualityLevel:  qualityLevel,
-		trustLevel:    trustLevel,
+		id:                 uuid.New(),
+		dataSetCode:        dataSetCode,
+		sourceID:           sourceID,
+		resolutionKey:      resolutionKey,
+		value:              value,
+		unit:               unit,
+		observedAt:         observedAt,
+		validFrom:          validFrom,
+		validTo:            validTo,
+		createdAt:          time.Now(),
+		supersededAt:       nil,
+		supersededBy:       nil,
+		causationID:        causationID,
+		qualityLevel:       qualityLevel,
+		trustLevel:         trustLevel,
+		observationContext: observationContext,
 	}, nil
 }
 
@@ -223,6 +226,21 @@ func (o MarketPriceObservation) TrustLevel() int {
 	return o.trustLevel
 }
 
+// ObservationContext returns the typed metadata about collection and processing.
+// Returns a defensive copy to preserve the immutability contract (the Attributes
+// map is a reference type).
+func (o MarketPriceObservation) ObservationContext() ObservationContext {
+	ctx := o.observationContext
+	if ctx.Attributes != nil {
+		cp := make(map[string]string, len(ctx.Attributes))
+		for k, v := range ctx.Attributes {
+			cp[k] = v
+		}
+		ctx.Attributes = cp
+	}
+	return ctx
+}
+
 // MarketPriceObservationBuilder provides a builder pattern for reconstructing
 // MarketPriceObservation from the persistence layer. This bypasses normal validation
 // since we assume persisted data was already validated.
@@ -324,6 +342,12 @@ func (b *MarketPriceObservationBuilder) WithQualityLevel(level QualityLevel) *Ma
 // WithTrustLevel sets the trust score.
 func (b *MarketPriceObservationBuilder) WithTrustLevel(level int) *MarketPriceObservationBuilder {
 	b.observation.trustLevel = level
+	return b
+}
+
+// WithObservationContext sets the observation context metadata.
+func (b *MarketPriceObservationBuilder) WithObservationContext(ctx ObservationContext) *MarketPriceObservationBuilder {
+	b.observation.observationContext = ctx
 	return b
 }
 

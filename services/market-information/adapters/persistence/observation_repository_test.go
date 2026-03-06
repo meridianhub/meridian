@@ -83,6 +83,7 @@ func TestObservationRepository_Record_NewObservation(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 
@@ -122,6 +123,7 @@ func TestObservationRepository_Record_SupersessionByQuality(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelEstimate,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, estimate)
@@ -145,6 +147,7 @@ func TestObservationRepository_Record_SupersessionByQuality(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, actual)
@@ -196,6 +199,7 @@ func TestObservationRepository_Query_ByDataSetCode(t *testing.T) {
 			uuid.New(),
 			domain.QualityLevelActual,
 			source.TrustLevel(),
+			domain.ObservationContext{},
 		)
 		require.NoError(t, err)
 		err = tc.Repos.Observation.Record(ctx, obs)
@@ -237,6 +241,7 @@ func TestObservationRepository_Query_ByResolutionKey(t *testing.T) {
 			uuid.New(),
 			domain.QualityLevelActual,
 			source.TrustLevel(),
+			domain.ObservationContext{},
 		)
 		require.NoError(t, err)
 		err = tc.Repos.Observation.Record(ctx, obs)
@@ -286,6 +291,7 @@ func TestObservationRepository_Query_ByQualityLevel(t *testing.T) {
 			uuid.New(),
 			q,
 			source.TrustLevel(),
+			domain.ObservationContext{},
 		)
 		require.NoError(t, err)
 		err = tc.Repos.Observation.Record(ctx, obs)
@@ -325,6 +331,7 @@ func TestObservationRepository_Query_IncludeSuperseded(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelEstimate,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, estimate)
@@ -343,6 +350,7 @@ func TestObservationRepository_Query_IncludeSuperseded(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, actual)
@@ -391,6 +399,7 @@ func TestObservationRepository_GetLatest_QualityLadder(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelVerified,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, verified)
@@ -409,6 +418,7 @@ func TestObservationRepository_GetLatest_QualityLadder(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, actual)
@@ -427,6 +437,7 @@ func TestObservationRepository_GetLatest_QualityLadder(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelEstimate,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, estimate)
@@ -464,6 +475,7 @@ func TestObservationRepository_RetrieveObservation_KnowledgeBaseTime(t *testing.
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, obs)
@@ -514,6 +526,7 @@ func TestObservationRepository_Record_InvalidDataSetCode(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 
@@ -610,6 +623,7 @@ func TestObservationRepository_HierarchicalLookup_TenantOverride(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, masterObs)
@@ -633,6 +647,7 @@ func TestObservationRepository_HierarchicalLookup_TenantOverride(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(tenantCtx, tenantObs)
@@ -669,6 +684,7 @@ func TestObservationRepository_HierarchicalLookup_MasterFallback(t *testing.T) {
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, masterObs)
@@ -763,6 +779,7 @@ func TestObservationRepository_HierarchicalLookup_PrivateDatasetNoFallback(t *te
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, masterObs)
@@ -802,6 +819,7 @@ func TestObservationRepository_HierarchicalLookup_RestrictedAccessDenied(t *test
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, masterObs)
@@ -840,6 +858,7 @@ func TestObservationRepository_HierarchicalLookup_RestrictedAccessGranted(t *tes
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, masterObs)
@@ -884,6 +903,7 @@ func TestObservationRepository_HierarchicalLookup_RestrictedAccessExpired(t *tes
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, masterObs)
@@ -927,6 +947,7 @@ func TestObservationRepository_HierarchicalLookup_RestrictedAccessInactive(t *te
 		uuid.New(),
 		domain.QualityLevelActual,
 		source.TrustLevel(),
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err)
 	err = tc.Repos.Observation.Record(ctx, masterObs)
@@ -974,6 +995,7 @@ func TestObservationRepository_CountByDataset_Basic(t *testing.T) {
 			uuid.New(),
 			domain.QualityLevelActual,
 			source.TrustLevel(),
+			domain.ObservationContext{},
 		)
 		require.NoError(t, err)
 		err = tc.Repos.Observation.Record(ctx, obs)
@@ -1017,6 +1039,7 @@ func TestObservationRepository_CountByDataset_ExcludesSuperseded(t *testing.T) {
 			uuid.New(),
 			quality,
 			source.TrustLevel(),
+			domain.ObservationContext{},
 		)
 		require.NoError(t, err)
 		err = tc.Repos.Observation.Record(ctx, obs)

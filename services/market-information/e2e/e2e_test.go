@@ -340,6 +340,7 @@ func createTestObservation(
 		uuid.New(),
 		quality,
 		trustLevel,
+		domain.ObservationContext{},
 	)
 	require.NoError(t, err, "Failed to create observation")
 
@@ -970,6 +971,7 @@ func TestE2E_ConcurrentIngestion(t *testing.T) {
 						uuid.New(),
 						domain.QualityLevelActual,
 						source.TrustLevel(),
+						domain.ObservationContext{},
 					)
 					if err != nil {
 						errChan <- err
@@ -1063,6 +1065,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 				uuid.New(),
 				domain.QualityLevelActual,
 				source.TrustLevel(),
+				domain.ObservationContext{},
 			)
 			_ = tc.repos.Observation.Record(ctx, obs)
 		}()

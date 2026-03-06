@@ -193,6 +193,7 @@ func TestObservationRepository_Record(t *testing.T) {
 		uuid.New(),
 		QualityLevelActual,
 		85,
+		ObservationContext{},
 	)
 	require.NoError(t, err)
 
