@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { Blocks, BookOpen, SearchX } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/ui/empty-state'
 import type { CookbookItem, PatternMeta, ComponentMeta } from '../hooks/use-cookbook'
 
@@ -16,16 +17,21 @@ function isPatternMeta(meta: PatternMeta | ComponentMeta | undefined): meta is P
 
 function ComplexityIndicator({ score }: { score: number }) {
   return (
-    <div className="flex items-center gap-1" title={`Complexity: ${score}/10`}>
-      {Array.from({ length: 5 }, (_, i) => (
-        <div
-          key={i}
-          className={`size-1.5 rounded-full ${
-            i < Math.ceil(score / 2) ? 'bg-primary' : 'bg-muted'
-          }`}
-        />
-      ))}
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-1" data-testid="complexity-indicator">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div
+              key={i}
+              className={`size-1.5 rounded-full ${
+                i < Math.ceil(score / 2) ? 'bg-primary' : 'bg-muted'
+              }`}
+            />
+          ))}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>Complexity: {score}/10</TooltipContent>
+    </Tooltip>
   )
 }
 

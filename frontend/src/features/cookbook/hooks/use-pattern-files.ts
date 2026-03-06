@@ -1,68 +1,41 @@
-import { useEffect, useReducer } from 'react'
+import { useMemo } from 'react'
+import type { CookbookItem } from './use-cookbook'
 
-interface PatternFilesState {
-  starlarkContent: string | null
+export interface StarlarkFile {
+  name: string
+  content: string
+}
+
+export interface PatternFilesState {
+  starlarkFiles: StarlarkFile[]
   manifestContent: string | null
-  isLoading: boolean
+  isLoading: false
 }
 
-type PatternFilesAction =
-  | { type: 'reset' }
-  | { type: 'fetch_start' }
-  | { type: 'fetch_done'; starlark: string | null; manifest: string | null }
-
-const initialState: PatternFilesState = {
-  starlarkContent: null,
-  manifestContent: null,
-  isLoading: false,
+function isValidContent(content: string | undefined): content is string {
+  if (!content) return false
+  const trimmed = content.trimStart()
+  return !trimmed.startsWith('<!DOCTYPE') && !trimmed.startsWith('<html')
 }
 
-function reducer(_state: PatternFilesState, action: PatternFilesAction): PatternFilesState {
-  switch (action.type) {
-    case 'reset':
-      return initialState
-    case 'fetch_start':
-      return { starlarkContent: null, manifestContent: null, isLoading: true }
-    case 'fetch_done':
-      return { starlarkContent: action.starlark, manifestContent: action.manifest, isLoading: false }
-  }
-}
+export function usePatternFiles(item: CookbookItem | undefined): PatternFilesState {
+  return useMemo(() => {
+    const empty: PatternFilesState = { starlarkFiles: [], manifestContent: null, isLoading: false }
+    if (!item || item.type !== 'registry:pattern') return empty
 
-export function usePatternFiles(patternName: string | undefined): PatternFilesState {
-  const [state, dispatch] = useReducer(reducer, initialState)
+    const files = item.files ?? []
 
-  useEffect(() => {
-    if (!patternName) {
-      dispatch({ type: 'reset' })
-      return
-    }
+    const manifestFile = files.find((f) => f.path.endsWith('.yaml'))
+    const manifestContent = isValidContent(manifestFile?.content) ? manifestFile!.content : null
 
-    let cancelled = false
-    dispatch({ type: 'fetch_start' })
+    const starlarkFiles: StarlarkFile[] = files
+      .filter((f) => f.path.endsWith('.star'))
+      .map((f) => ({
+        name: f.path.split('/').pop() ?? f.path,
+        content: isValidContent(f.content) ? f.content : '',
+      }))
+      .filter((f) => f.content.length > 0)
 
-    const fetchFile = async (path: string): Promise<string | null> => {
-      try {
-        const res = await fetch(path)
-        if (!res.ok) return null
-        return await res.text()
-      } catch {
-        return null
-      }
-    }
-
-    const encoded = encodeURIComponent(patternName)
-    Promise.all([
-      fetchFile(`/cookbook/patterns/${encoded}/saga.star`),
-      fetchFile(`/cookbook/patterns/${encoded}/manifest.yaml`),
-    ]).then(([star, yaml]) => {
-      if (cancelled) return
-      dispatch({ type: 'fetch_done', starlark: star, manifest: yaml })
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [patternName])
-
-  return state
+    return { starlarkFiles, manifestContent, isLoading: false }
+  }, [item])
 }

@@ -30,9 +30,10 @@ interface FilterBarProps {
   items: CookbookItem[]
   filters: FilterState
   onFilterChange: (patch: Partial<FilterState>) => void
+  hideTypeFilter?: boolean
 }
 
-export function FilterBar({ items, filters, onFilterChange }: FilterBarProps) {
+export function FilterBar({ items, filters, onFilterChange, hideTypeFilter }: FilterBarProps) {
   const categories = getUniqueCategories(items)
   const industries = getUniqueIndustries(items)
   const hasActiveFilters = filters.search || filters.type || filters.category || filters.industry
@@ -50,15 +51,17 @@ export function FilterBar({ items, filters, onFilterChange }: FilterBarProps) {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <FilterChipGroup
-          label="Type"
-          options={[
-            { value: 'pattern', label: 'Patterns' },
-            { value: 'ui', label: 'UI Components' },
-          ]}
-          value={filters.type}
-          onChange={(value) => onFilterChange({ type: value })}
-        />
+        {!hideTypeFilter && (
+          <FilterChipGroup
+            label="Type"
+            options={[
+              { value: 'pattern', label: 'Patterns' },
+              { value: 'ui', label: 'UI Components' },
+            ]}
+            value={filters.type}
+            onChange={(value) => onFilterChange({ type: value })}
+          />
+        )}
 
         {categories.length > 0 && (
           <FilterChipGroup

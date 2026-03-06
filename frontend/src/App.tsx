@@ -32,6 +32,12 @@ import { McpConfigPage } from '@/features/mcp-config'
 import { TransactionsPage } from '@/features/transactions'
 import { CookbookPage } from '@/features/cookbook'
 
+const CookbookPatternsPage = lazy(() =>
+  import('@/features/cookbook/pages/patterns').then((m) => ({ default: m.CookbookPatternsPage })),
+)
+const CookbookComponentsPage = lazy(() =>
+  import('@/features/cookbook/pages/components').then((m) => ({ default: m.CookbookComponentsPage })),
+)
 const CookbookDetailPage = lazy(() =>
   import('@/features/cookbook/pages/detail').then((m) => ({ default: m.CookbookDetailPage })),
 )
@@ -265,6 +271,8 @@ function AppShellLayout() {
         <Route path="/manifests" element={<FeatureGuard feature="manifests">{guarded(<ManifestsPage />)}</FeatureGuard>} />
         <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config">{guarded(<McpConfigPage />)}</FeatureGuard>} />
         <Route path="/cookbook" element={guarded(<CookbookPage />)} />
+        <Route path="/cookbook/patterns" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookPatternsPage /></Suspense>)} />
+        <Route path="/cookbook/components" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookComponentsPage /></Suspense>)} />
         <Route path="/cookbook/graph" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookGraphPage /></Suspense>)} />
         <Route path="/cookbook/:name" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookDetailPage /></Suspense>)} />
         <Route path="/audit-log" element={<FeatureGuard feature="audit">{guarded(<AuditLogPage />)}</FeatureGuard>} />

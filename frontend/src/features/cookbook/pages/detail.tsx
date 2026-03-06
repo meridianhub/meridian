@@ -14,6 +14,7 @@ import { parseStarlarkSaga } from '../lib/star-parser'
 import { useCookbook } from '../hooks/use-cookbook'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 import { usePatternFiles } from '../hooks/use-pattern-files'
+import type { StarlarkFile } from '../hooks/use-pattern-files'
 
 function complexityLabel(score: number): string {
   if (score <= 3) return 'Low'
@@ -192,18 +193,53 @@ function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | 
   )
 }
 
+function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }) {
+  const [activeFile, setActiveFile] = useState(0)
+
+  if (starlarkFiles.length === 0) {
+    return <p className="text-sm text-muted-foreground">No Starlark file found.</p>
+  }
+
+  if (starlarkFiles.length === 1) {
+    return <StarlarkEditor value={starlarkFiles[0].content} onChange={() => {}} readOnly />
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1 border-b">
+        {starlarkFiles.map((f, i) => (
+          <button
+            key={f.name}
+            type="button"
+            onClick={() => setActiveFile(i)}
+            className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+              i === activeFile
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {f.name}
+          </button>
+        ))}
+      </div>
+      <StarlarkEditor value={starlarkFiles[activeFile].content} onChange={() => {}} readOnly />
+    </div>
+  )
+}
+
 export function CookbookDetailPage() {
   const { name } = useParams<{ name: string }>()
   const { items, isLoading: catalogueLoading } = useCookbook()
-  const { starlarkContent, manifestContent, isLoading: filesLoading } = usePatternFiles(name)
 
   const item = items.find((i) => i.name === name)
-  const isLoading = catalogueLoading || filesLoading
+  const { starlarkFiles, manifestContent } = usePatternFiles(item)
+
+  const firstStarlarkContent = starlarkFiles.length > 0 ? starlarkFiles[0].content : null
 
   const sagaFlow = useMemo(() => {
-    if (!starlarkContent) return null
-    return parseStarlarkSaga(starlarkContent)
-  }, [starlarkContent])
+    if (!firstStarlarkContent) return null
+    return parseStarlarkSaga(firstStarlarkContent)
+  }, [firstStarlarkContent])
 
   if (catalogueLoading) {
     return <DetailSkeleton fieldCount={3} tabCount={3} showBackNav />
@@ -222,10 +258,13 @@ export function CookbookDetailPage() {
 
   const isPattern = item.type === 'registry:pattern'
   const meta = item.meta as PatternMeta | undefined
+  const parentSection = isPattern
+    ? { label: 'Patterns', href: '/cookbook/patterns' }
+    : { label: 'UI Components', href: '/cookbook/components' }
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[{ label: 'Cookbook', href: '/cookbook' }, { label: item.title }]} />
+      <Breadcrumbs items={[{ label: 'Cookbook', href: '/cookbook' }, parentSection, { label: item.title }]} />
 
       <PatternInfoSection item={item} />
 
@@ -240,9 +279,7 @@ export function CookbookDetailPage() {
             </TabsList>
 
             <TabsContent value="manifest" className="mt-4">
-              {isLoading ? (
-                <div className="h-[200px] animate-pulse rounded border bg-muted" />
-              ) : manifestContent ? (
+              {manifestContent ? (
                 <ManifestViewer content={manifestContent} />
               ) : (
                 <p className="text-sm text-muted-foreground">No manifest file found.</p>
@@ -250,24 +287,12 @@ export function CookbookDetailPage() {
             </TabsContent>
 
             <TabsContent value="starlark" className="mt-4">
-              {isLoading ? (
-                <div className="h-[200px] animate-pulse rounded border bg-muted" />
-              ) : starlarkContent ? (
-                <StarlarkEditor
-                  value={starlarkContent}
-                  onChange={() => {}}
-                  readOnly
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">No Starlark file found.</p>
-              )}
+              <StarlarkTabContent starlarkFiles={starlarkFiles} />
             </TabsContent>
 
             <TabsContent value="flow" className="mt-4">
-              {isLoading ? (
-                <div className="h-[400px] animate-pulse rounded border bg-muted" />
-              ) : sagaFlow && sagaFlow.steps.length > 0 && starlarkContent ? (
-                <LinkedPatternDetail flow={sagaFlow} starlarkContent={starlarkContent} />
+              {sagaFlow && sagaFlow.steps.length > 0 && firstStarlarkContent ? (
+                <LinkedPatternDetail flow={sagaFlow} starlarkContent={firstStarlarkContent} />
               ) : (
                 <p className="text-sm text-muted-foreground">No saga flow detected in Starlark source.</p>
               )}
@@ -282,7 +307,7 @@ export function CookbookDetailPage() {
             </TabsContent>
           </Tabs>
 
-          <HandlerReferencePanel starlarkContent={starlarkContent} />
+          <HandlerReferencePanel starlarkContent={firstStarlarkContent} />
         </>
       ) : (
         <ComponentDetail item={item} />

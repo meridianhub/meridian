@@ -1,4 +1,6 @@
 export { CookbookPage } from './pages/index'
+export { CookbookPatternsPage } from './pages/patterns'
+export { CookbookComponentsPage } from './pages/components'
 export { CookbookDetailPage } from './pages/detail'
 export { CookbookGraphPage } from './pages/graph'
 export { CompositionGraph } from './components/composition-graph'

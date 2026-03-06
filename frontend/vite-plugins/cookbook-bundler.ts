@@ -41,12 +41,17 @@ function loadCookbookData(cookbookDir: string): string {
     }
 
     const detail = JSON.parse(readFileSync(metaPath, 'utf-8'))
+    const filesWithContent = (detail.files ?? []).map((file: { path: string; [k: string]: unknown }) => {
+      const filePath = resolve(cookbookDir, file.path)
+      if (!existsSync(filePath)) return file
+      return { ...file, content: readFileSync(filePath, 'utf-8') }
+    })
     return {
       ...entry,
       description: detail.description ?? entry.description,
       categories: detail.categories ?? entry.categories,
       meta: detail.meta,
-      files: detail.files,
+      files: filesWithContent,
     }
   })
 

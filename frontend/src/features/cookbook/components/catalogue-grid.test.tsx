@@ -86,8 +86,8 @@ describe('CatalogueGrid', () => {
 
   it('shows complexity indicator for patterns', () => {
     renderGrid(mockItems)
-    const complexityDots = document.querySelectorAll('[title="Complexity: 7/10"]')
-    expect(complexityDots.length).toBe(1)
+    const indicators = screen.getAllByTestId('complexity-indicator')
+    expect(indicators.length).toBe(1)
   })
 
   it('shows design pattern label', () => {
