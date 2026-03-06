@@ -4,3 +4,6 @@ export type { CookbookItem, CookbookFile, CookbookRegistry, PatternMeta, Compone
 export { useCookbook } from './hooks/use-cookbook'
 export { usePatternFiles } from './hooks/use-pattern-files'
 export { ManifestViewer } from './components/manifest-viewer'
+export { parseStarlarkSaga } from './lib/star-parser'
+export type { SagaFlow, SagaFlowStep, ServiceCall, EarlyExit } from './lib/star-parser'
+export { generateMermaidMarkup } from './lib/saga-mermaid'

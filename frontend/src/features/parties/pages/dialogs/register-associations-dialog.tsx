@@ -198,12 +198,13 @@ export function RegisterAssociationsDialog({
   }
 
   function handleSelectParty(party: Party) {
+    const name = party.displayName || party.legalName || party.partyId
     setFormData((prev) => ({
       ...prev,
       relatedPartyId: party.partyId,
-      relatedPartyName: party.displayName,
+      relatedPartyName: name,
     }))
-    setSearchInput(party.displayName)
+    setSearchInput(name)
     setShowDropdown(false)
   }
 
@@ -281,7 +282,7 @@ export function RegisterAssociationsDialog({
                         handleSelectParty(party)
                       }}
                     >
-                      <span className="font-medium">{party.displayName}</span>
+                      <span className="font-medium">{party.displayName || party.legalName}</span>
                       <span className="ml-2 text-xs text-muted-foreground">{party.partyId}</span>
                     </li>
                   ))}
