@@ -4,7 +4,7 @@ import { join } from 'path'
 import { generateMermaidMarkup } from './saga-mermaid'
 import { parseStarlarkSaga, type SagaFlow } from './star-parser'
 
-const PATTERNS_DIR = join(__dirname, '..', '..', '..', '..', '..', 'cookbook', 'patterns')
+const PATTERNS_DIR = join(__dirname, '..', '..', '..', '..', 'cookbook', 'patterns')
 
 function readPattern(subdir: string, file: string): string {
   return readFileSync(join(PATTERNS_DIR, subdir, file), 'utf-8')

@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { parseStarlarkSaga } from './star-parser'
 
-const PATTERNS_DIR = join(__dirname, '..', '..', '..', '..', '..', 'cookbook', 'patterns')
+const PATTERNS_DIR = join(__dirname, '..', '..', '..', '..', 'cookbook', 'patterns')
 
 function readPattern(subdir: string, file: string): string {
   return readFileSync(join(PATTERNS_DIR, subdir, file), 'utf-8')

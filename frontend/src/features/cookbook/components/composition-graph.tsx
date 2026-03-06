@@ -14,7 +14,6 @@ import {
   Handle,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import ELK from 'elkjs/lib/elk.bundled.js'
 import { useNavigate } from 'react-router-dom'
 import {
   Tooltip,
@@ -22,9 +21,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  layoutWithELK,
+  EDGE_STYLES,
+  NODE_WIDTH,
+  NODE_BASE_HEIGHT,
+  NODE_PADDING,
+  type RelationshipType,
+} from '@/lib/visualization/graph-layout'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
-
-const elk = new ELK()
 
 // Category color mapping
 const CATEGORY_COLORS: Record<string, string> = {
@@ -47,16 +52,6 @@ function getCategoryColor(categories?: string[]): string {
   }
   return '#71717a'
 }
-
-// Edge styles by relationship type
-const EDGE_STYLES = {
-  registryDependencies: { stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: undefined },
-  composes_with: { stroke: '#22c55e', strokeWidth: 1.5, strokeDasharray: '6 3' },
-  extends: { stroke: '#8b5cf6', strokeWidth: 3, strokeDasharray: undefined },
-  conflicts_with: { stroke: '#ef4444', strokeWidth: 1.5, strokeDasharray: '4 4' },
-} as const
-
-type RelationshipType = keyof typeof EDGE_STYLES
 
 // Custom node component
 interface PatternNodeData {
@@ -205,50 +200,38 @@ async function layoutGraph(
   patterns: CookbookItem[],
   edges: Edge[],
 ): Promise<Node[]> {
-  const elkNodes = patterns.map((p) => {
+  const patternMap = new Map(patterns.map((p) => [p.name, p]))
+
+  const layoutNodes = patterns.map((p) => {
     const complexity = (p.meta as PatternMeta | undefined)?.complexity ?? 1
-    const height = 40 + complexity * 12
-    return { id: p.name, width: 200, height: height + 20 }
+    const height = NODE_BASE_HEIGHT + complexity * 12
+    return { id: p.name, width: NODE_WIDTH, height: height + NODE_PADDING }
   })
 
-  const elkEdges = edges.map((e) => ({
-    id: e.id,
-    sources: [e.source],
-    targets: [e.target],
-  }))
-
-  const layout = await elk.layout({
-    id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'DOWN',
-      'elk.spacing.nodeNode': '60',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '100',
+  return layoutWithELK<PatternNodeData>(
+    layoutNodes,
+    edges,
+    (id, position) => {
+      const p = patternMap.get(id)!
+      const meta = p.meta as PatternMeta | undefined
+      const color = getCategoryColor(p.categories)
+      return {
+        id,
+        type: 'pattern',
+        position,
+        data: {
+          label: p.title,
+          fullTitle: p.title,
+          designPattern: meta?.design_pattern,
+          complexity: meta?.complexity ?? 1,
+          categories: p.categories ?? [],
+          color,
+          highlighted: false,
+          dimmed: false,
+        } satisfies PatternNodeData,
+      }
     },
-    children: elkNodes,
-    edges: elkEdges,
-  })
-
-  return patterns.map((p) => {
-    const elkNode = layout.children?.find((n) => n.id === p.name)
-    const meta = p.meta as PatternMeta | undefined
-    const color = getCategoryColor(p.categories)
-    return {
-      id: p.name,
-      type: 'pattern',
-      position: { x: elkNode?.x ?? 0, y: elkNode?.y ?? 0 },
-      data: {
-        label: p.title,
-        fullTitle: p.title,
-        designPattern: meta?.design_pattern,
-        complexity: meta?.complexity ?? 1,
-        categories: p.categories ?? [],
-        color,
-        highlighted: false,
-        dimmed: false,
-      } satisfies PatternNodeData,
-    }
-  })
+  )
 }
 
 // Collect all unique categories and industries from patterns
