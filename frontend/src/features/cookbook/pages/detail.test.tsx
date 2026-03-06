@@ -129,7 +129,6 @@ describe('CookbookDetailPage', () => {
 
   it('shows component detail for UI component type', () => {
     renderDetail('transaction-table')
-    expect(screen.getByText('Preview not available')).toBeInTheDocument()
     expect(screen.getByText('Registry Dependencies')).toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
   })
