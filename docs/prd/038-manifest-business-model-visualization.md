@@ -252,8 +252,17 @@ type ManifestRelationship =
   | 'converts_to' // valuation_rule -> instrument
   | 'reads_from' // saga -> account_type (star-parser)
   | 'writes_to' // saga -> account_type (star-parser, static)
-  | 'writes_to_dynamic' // saga -> unknown (runtime-resolved target)
   | 'uses_valuation' // saga -> valuation_rule (star-parser)
+
+// When star-parser cannot statically determine the target account
+// type (e.g., account_id comes from reference_data.get_account()),
+// no edge is created. Instead, the saga node carries metadata:
+interface SagaNodeMetadata {
+  dynamicTargets?: Array<{
+    variableName: string // e.g., "account_id"
+    codeSnippet: string  // source line for tooltip
+  }>
+}
 ```
 
 The `reads_from`, `writes_to`, and `uses_valuation` edges are
@@ -404,9 +413,17 @@ produce, and where the chain terminates.
 - Add `reads_from` and `writes_to` edges to the manifest graph model
   when the target account type is statically determinable (e.g.,
   `instrument_code="GBP"` as a literal). When the target is a
-  runtime variable, emit a `writes_to_dynamic` marker on the saga
-  node with the variable name, rendered in the UI as "writes to
-  (resolved at runtime)" with the relevant code snippet as tooltip
+  runtime variable, add `dynamicTargets` metadata to the saga node
+  (see `SagaNodeMetadata` in the graph model) with the variable
+  name, rendered in the UI as "writes to (resolved at runtime)"
+  with the relevant code snippet as tooltip. No edge is created
+  for dynamic targets since the target node is unknown.
+- **Caveat:** The scope of `reads_from`/`writes_to` edges depends
+  on the resolution of open question 2. At minimum, Phase 3
+  produces edges for statically determinable targets only; sagas
+  that resolve account types via `reference_data.get_account()`
+  will show `dynamicTargets` metadata instead of edges until
+  OQ-2 is decided.
 - Unit tests against all cookbook saga patterns
 
 ### Phase 4: Transitive Closure Engine
