@@ -250,8 +250,14 @@ as the entry point at the top.
 runtime. It is a text → visual transformation, like a
 Mermaid renderer.
 
-**Mermaid as the rendering engine**: The parsed flow
-model maps directly to Mermaid flowchart syntax:
+**@xyflow/react as the rendering engine**: The parsed
+flow model maps to React Flow nodes and edges. Each
+step becomes a custom node; each transition becomes an
+edge. The same parser also generates Mermaid markup as
+a portable export format.
+
+Example flow (the same saga renders interactively in
+the browser and as copyable Mermaid markup):
 
 ```mermaid
 flowchart TD
@@ -269,20 +275,23 @@ flowchart TD
     S8[book_wholesale_position\n position_keeping.initiate_log] --> END([VALUED])
 ```
 
-Mermaid is the right tool here because:
+@xyflow/react is the right tool here because:
 
-- The Starlark flow is inherently linear with branches
-  — exactly what Mermaid flowcharts express
-- mermaid.js is a standard rendering library with
-  automatic layout (dagre) built in
-- GitHub, GitLab, and Markdown tools render it natively,
-  making the generated diagrams portable
+- It is already in the bundle for the composition graph
+  (Phase 5) — zero incremental cost for saga flows
+- Custom React nodes enable the linked experience:
+  click a step node to highlight code in the editor,
+  hover to show handler signatures from handlers.yaml
 - Starlark's bounded nature (no while loops, no
-  recursion) means every saga maps to a finite flowchart
+  recursion) means every saga maps to a finite graph
+  with straightforward automatic layout (dagre-d3 or
+  elkjs)
 
-The parser generates Mermaid markup as a string; the
-component renders it with mermaid.js. This keeps the
-rendering stateless and cacheable.
+**Mermaid as the export format**: The parser also
+generates Mermaid markup as a string. This serves as
+the "Source" tab content in the preview/source toggle,
+giving readers a portable diagram they can paste into
+GitHub issues, ADRs, or Confluence.
 
 ### Service Module Reference (Live from handlers.yaml)
 
@@ -356,7 +365,7 @@ reference — are interconnected:
 
 ```text
 +---------------------------+---------------------------+
-|  Starlark Editor          |  Flow Diagram (Mermaid)   |
+|  Starlark Editor          |  Flow Diagram (React Flow)|
 |                           |                           |
 |  step("create_lien")  <---|--- [create_lien]          |
 |  lien = payment_order.    |       payment_order       |
@@ -373,15 +382,17 @@ reference — are interconnected:
 +-------------------------------------------------------+
 ```
 
-**Interactions:**
+**Interactions** (native with @xyflow/react nodes):
 
-- Click a node in the Mermaid diagram → scroll to and
+- Click a node in the flow diagram → scroll to and
   highlight the corresponding `step()` block in the
   editor
 - Click a `service.method()` call in the editor →
-  expand the API reference panel for that handler
+  highlight the corresponding node and expand the API
+  reference panel for that handler
 - Hover a service badge in the flow diagram → tooltip
   showing handler signature and compensation chain
+- Zoom and pan the flow diagram for complex sagas
 
 This linked experience is what makes the cookbook
 browser more than a static catalogue: it's an
@@ -402,7 +413,7 @@ reuse what they see.
 
 | Context | Preview tab | Source tab |
 |---------|------------|-----------|
-| Saga flow diagram | Rendered Mermaid flowchart | Generated Mermaid markup |
+| Saga flow diagram | Interactive @xyflow/react graph | Generated Mermaid markup |
 | Starlark editor | Syntax-highlighted code | Raw `.star` file content |
 | Service module reference | Formatted API docs | Raw `handlers.yaml` block |
 | UI component preview | Live rendered component | Component JSX + props |
@@ -574,48 +585,55 @@ page) is an open question — see OQ5.
 
 ### Saga Flow Rendering
 
-**Decision: Mermaid** — Parse `.star` → generate Mermaid
-flowchart syntax → render with mermaid.js.
+**Decision: @xyflow/react + Mermaid export** — Parse
+`.star` → build flow model → render interactively with
+@xyflow/react (preview tab) and generate Mermaid markup
+(source tab).
 
 Rationale:
 
+- @xyflow/react is already in the bundle for the
+  composition graph — zero incremental cost
+- Custom React nodes enable the linked experience
+  natively: click to highlight code, hover for handler
+  tooltips, zoom/pan for complex sagas
 - Starlark's bounded structure (no while, no recursion)
-  maps perfectly to finite Mermaid flowcharts
-- mermaid.js is well-maintained and renders natively
-  in GitHub/GitLab/Markdown tools
-- The generated Mermaid markup is portable — it can be
-  embedded in ADRs, PRDs, or issue descriptions
-- Mermaid handles layout automatically (no manual
-  positioning or force-directed physics)
-- The parser output is a string (Mermaid markup), not
-  a component tree — trivially cacheable and testable
+  maps perfectly to a finite directed graph
+- Layout via dagre-d3 or elkjs (same libraries Mermaid
+  uses internally, exposed directly)
+- Mermaid markup is generated alongside for the source
+  tab — portable to GitHub, ADRs, and issue descriptions
 
 Alternatives considered:
 
-- **@xyflow/react**: More interactive (drag, zoom) but
-  requires manual layout logic, produces non-portable
-  output, and the interactivity isn't needed for a
-  read-only flow view
+- **Mermaid only**: Portable and auto-layout, but
+  interactivity requires DOM manipulation on generated
+  SVG. Click-to-highlight and hover tooltips are
+  awkward to wire up. No incremental cost advantage
+  since @xyflow/react is already bundled.
 - **Custom SVG**: Full design control but high
   implementation cost for layout algorithms
 
 ### Composition Graph
 
-**Decision: @xyflow/react (React Flow)** — For the
-pattern relationship graph only (not saga flows).
+**Decision: @xyflow/react (React Flow)** — Shared with
+saga flow rendering. The composition graph uses the
+same library with different node types and a
+force-directed layout instead of dagre.
 
 The composition graph benefits from interactivity
 (click to navigate, hover to highlight neighbours,
-filter by category) in a way that saga flows do not.
+filter by category).
 Force-directed layout with **elkjs** running in a web
 worker for automatic positioning.
 
-This means two rendering approaches:
+Both views share @xyflow/react with different
+configurations:
 
-| View | Library | Why |
-|------|---------|-----|
-| Saga flow | mermaid.js | Linear flow, read-only, portable |
-| Composition graph | @xyflow/react | Interactive exploration, force layout |
+| View | Layout | Node type |
+|------|--------|-----------|
+| Saga flow | dagre (top-down) | Step nodes with service badges |
+| Composition graph | Force-directed | Pattern nodes sized by complexity |
 
 ## Open Questions
 
@@ -628,10 +646,11 @@ This means two rendering approaches:
    handle all patterns without manual annotation; this
    question is about how far ahead to build.
 
-2. **Graph library weight**: @xyflow/react adds ~150KB
-   gzipped. Is this acceptable for a staff-only page?
-   Alternative: render to SVG server-side and serve as
-   static images (loses interactivity).
+2. **Layout engine**: @xyflow/react handles rendering
+   but needs a layout engine. dagre-d3 is the standard
+   choice (same as Mermaid uses). elkjs is an
+   alternative with better compound node support.
+   Decision deferred to implementation.
 
 3. **Component preview mocking**: UI component previews
    need sample data. Where does this come from?
