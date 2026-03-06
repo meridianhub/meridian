@@ -306,12 +306,18 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
       return
     }
     let cancelled = false
-    void layoutGraph(filteredPatterns, graphEdges).then((layoutNodes) => {
-      if (!cancelled) {
-        setNodes(layoutNodes)
-        setEdges(graphEdges)
-      }
-    })
+    void layoutGraph(filteredPatterns, graphEdges)
+      .then((layoutNodes) => {
+        if (!cancelled) {
+          setNodes(layoutNodes)
+          setEdges(graphEdges)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('[CompositionGraph] layout failed:', err)
+        }
+      })
     return () => { cancelled = true }
   }, [filteredPatterns, graphEdges, setNodes, setEdges])
 
