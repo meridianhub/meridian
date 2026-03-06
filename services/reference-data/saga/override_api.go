@@ -412,7 +412,7 @@ func (s *OverrideService) loadPlatformSagas(ctx context.Context) (map[string]Pla
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, version, script, display_name, description
 		FROM public.platform_saga_definition
-		ORDER BY name`)
+		ORDER BY name, version`)
 	if err != nil {
 		return nil, fmt.Errorf("query platform sagas: %w", err)
 	}
