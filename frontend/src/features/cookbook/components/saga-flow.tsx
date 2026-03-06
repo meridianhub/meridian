@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -13,21 +13,31 @@ import '@xyflow/react/dist/style.css'
 import Dagre from '@dagrejs/dagre'
 import type { SagaFlow } from '../lib/star-parser'
 
-// Hash a service name to a HSL hue for consistent coloring
-function serviceHue(service: string): number {
-  let hash = 0
-  for (let i = 0; i < service.length; i++) {
-    hash = service.charCodeAt(i) + ((hash << 5) - hash)
+// Curated palette of visually distinct service colors
+const SERVICE_PALETTE = [
+  { bg: 'hsl(220, 70%, 92%)', fg: 'hsl(220, 70%, 45%)' },  // Blue
+  { bg: 'hsl(150, 60%, 90%)', fg: 'hsl(150, 60%, 35%)' },  // Green
+  { bg: 'hsl(30, 80%, 92%)', fg: 'hsl(30, 80%, 45%)' },    // Orange
+  { bg: 'hsl(280, 60%, 92%)', fg: 'hsl(280, 60%, 45%)' },  // Purple
+  { bg: 'hsl(0, 70%, 92%)', fg: 'hsl(0, 70%, 45%)' },      // Red
+  { bg: 'hsl(180, 60%, 90%)', fg: 'hsl(180, 60%, 35%)' },  // Teal
+  { bg: 'hsl(50, 80%, 90%)', fg: 'hsl(50, 80%, 35%)' },    // Yellow
+  { bg: 'hsl(330, 60%, 92%)', fg: 'hsl(330, 60%, 45%)' },  // Pink
+]
+
+function buildServiceColorMap(flow: SagaFlow): Map<string, { bg: string; fg: string }> {
+  const services = new Set<string>()
+  for (const step of flow.steps) {
+    for (const call of step.serviceCalls) {
+      services.add(call.service)
+    }
   }
-  return ((hash % 360) + 360) % 360
-}
-
-function serviceColor(service: string): string {
-  return `hsl(${serviceHue(service)}, 65%, 50%)`
-}
-
-function serviceBgColor(service: string): string {
-  return `hsl(${serviceHue(service)}, 65%, 92%)`
+  const sorted = [...services].sort()
+  const map = new Map<string, { bg: string; fg: string }>()
+  sorted.forEach((svc, i) => {
+    map.set(svc, SERVICE_PALETTE[i % SERVICE_PALETTE.length])
+  })
+  return map
 }
 
 // --- Custom Node Components ---
@@ -55,35 +65,51 @@ function StartNode({ data }: { data: StartNodeData }) {
 interface StepNodeData {
   label: string
   serviceCalls: { service: string; method: string }[]
+  serviceColors: Map<string, { bg: string; fg: string }>
+  highlightedService: string | null
   [key: string]: unknown
 }
 
 function StepNode({ data }: { data: StepNodeData }) {
   const primaryService = data.serviceCalls[0]?.service
-  const borderColor = primaryService ? serviceColor(primaryService) : '#71717a'
+  const primaryColors = primaryService ? data.serviceColors.get(primaryService) : undefined
+  const borderColor = primaryColors?.fg ?? '#71717a'
+
+  const usesHighlighted = data.highlightedService
+    ? data.serviceCalls.some((c) => c.service === data.highlightedService)
+    : true
+  const dimmed = data.highlightedService && !usesHighlighted
 
   return (
     <>
       <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
       <div
-        className="flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[180px]"
-        style={{ borderColor }}
+        className={`flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[180px] transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
+        style={{
+          borderColor,
+          ...(data.highlightedService && usesHighlighted
+            ? { boxShadow: `0 0 0 2px ${borderColor}`, outline: `2px solid ${borderColor}`, outlineOffset: '2px' }
+            : {}),
+        }}
       >
         <span className="text-xs font-semibold text-foreground">{data.label}</span>
         {data.serviceCalls.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {data.serviceCalls.map((call, idx) => (
-              <span
-                key={`${call.service}.${call.method}.${idx}`}
-                className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                style={{
-                  backgroundColor: serviceBgColor(call.service),
-                  color: serviceColor(call.service),
-                }}
-              >
-                {call.service}.{call.method}
-              </span>
-            ))}
+            {data.serviceCalls.map((call, idx) => {
+              const colors = data.serviceColors.get(call.service)
+              return (
+                <span
+                  key={`${call.service}.${call.method}.${idx}`}
+                  className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                  style={{
+                    backgroundColor: colors?.bg ?? 'hsl(0, 0%, 92%)',
+                    color: colors?.fg ?? 'hsl(0, 0%, 45%)',
+                  }}
+                >
+                  {call.service}.{call.method}
+                </span>
+              )
+            })}
           </div>
         )}
       </div>
@@ -101,35 +127,20 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
   return (
     <>
       <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
-      <div className="flex items-center justify-center" style={{ width: 140, height: 70 }}>
-        <div
-          className="flex items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40"
-          style={{
-            width: 120,
-            height: 60,
-            transform: 'rotate(45deg)',
-          }}
-        >
-          <span
-            className="text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-1 max-w-[80px]"
-            style={{ transform: 'rotate(-45deg)' }}
-          >
-            {data.label}
-          </span>
-        </div>
+      <div
+        className="flex items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40"
+        style={{
+          width: 120,
+          height: 80,
+          clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+        }}
+      >
+        <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-4 max-w-[90px]">
+          {data.label}
+        </span>
       </div>
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="exit"
-        className="!bg-transparent !border-0 !w-0 !h-0"
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="no"
-        className="!bg-transparent !border-0 !w-0 !h-0"
-      />
+      <Handle type="source" position={Position.Bottom} id="exit" className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={Position.Right} id="no" className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 }
@@ -174,7 +185,7 @@ const nodeTypes = {
 const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
   sagaStart: { width: 160, height: 50 },
   sagaStep: { width: 200, height: 60 },
-  sagaDecision: { width: 140, height: 70 },
+  sagaDecision: { width: 120, height: 80 },
   sagaExit: { width: 120, height: 36 },
   sagaEnd: { width: 140, height: 44 },
 }
@@ -209,7 +220,11 @@ function layoutNodes(nodes: Node[], edges: Edge[]): Node[] {
 
 // --- Build Graph from SagaFlow ---
 
-function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
+function buildFlowGraph(
+  flow: SagaFlow,
+  serviceColors: Map<string, { bg: string; fg: string }>,
+  highlightedService: string | null,
+): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
@@ -247,6 +262,8 @@ function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
       data: {
         label: step.name,
         serviceCalls: step.serviceCalls,
+        serviceColors,
+        highlightedService,
       } satisfies StepNodeData,
     })
 
@@ -337,18 +354,22 @@ interface SagaFlowDiagramProps {
 }
 
 export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagramProps) {
-  const { nodes, edges } = useMemo(() => buildFlowGraph(flow), [flow])
+  const [highlightedService, setHighlightedService] = useState<string | null>(null)
+
+  const serviceColors = useMemo(() => buildServiceColorMap(flow), [flow])
+
+  // Derive effective highlight — auto-clears when selected service no longer exists
+  const effectiveHighlight = highlightedService && serviceColors.has(highlightedService)
+    ? highlightedService
+    : null
+
+  const { nodes, edges } = useMemo(
+    () => buildFlowGraph(flow, serviceColors, effectiveHighlight),
+    [flow, serviceColors, effectiveHighlight],
+  )
 
   // Collect unique services for the legend
-  const services = useMemo(() => {
-    const set = new Set<string>()
-    for (const step of flow.steps) {
-      for (const call of step.serviceCalls) {
-        set.add(call.service)
-      }
-    }
-    return [...set].sort()
-  }, [flow])
+  const services = useMemo(() => [...serviceColors.keys()].sort(), [serviceColors])
 
   return (
     <div className={`relative ${className ?? ''}`} style={{ width: '100%', height: '100%', minHeight: 300 }}>
@@ -368,22 +389,32 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
         nodesDraggable={false}
         nodesConnectable={false}
       >
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} position="top-right" />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
       </ReactFlow>
 
       {services.length > 0 && (
         <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Services</span>
-          {services.map((svc) => (
-            <div key={svc} className="flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: serviceColor(svc) }}
-              />
-              <span className="text-xs text-muted-foreground">{svc}</span>
-            </div>
-          ))}
+          {services.map((svc) => {
+            const colors = serviceColors.get(svc)
+            const isActive = effectiveHighlight === svc
+            return (
+              <button
+                key={svc}
+                type="button"
+                aria-pressed={isActive}
+                className={`flex items-center gap-2 cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-muted/50 ${isActive ? 'font-semibold' : ''}`}
+                onClick={() => setHighlightedService((prev) => (prev === svc ? null : svc))}
+              >
+                <span
+                  className={`inline-block h-2.5 w-2.5 rounded-full ${isActive ? 'ring-2 ring-offset-1' : ''}`}
+                  style={{ backgroundColor: colors?.fg }}
+                />
+                <span className="text-xs text-muted-foreground">{svc}</span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

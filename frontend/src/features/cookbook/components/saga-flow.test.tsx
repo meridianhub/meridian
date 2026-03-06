@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { SagaFlowDiagram } from './saga-flow'
 import type { SagaFlow } from '../lib/star-parser'
 
@@ -163,5 +163,35 @@ describe('SagaFlowDiagram', () => {
     render(<SagaFlowDiagram flow={simpleFlow} />)
     // start->step0, step0->step1, step1->end = 3 edges
     expect(screen.getByTestId('react-flow')).toHaveAttribute('data-edge-count', '3')
+  })
+
+  it('renders service legend items as clickable buttons', () => {
+    render(<SagaFlowDiagram flow={simpleFlow} />)
+    const refDataBtn = screen.getByRole('button', { name: /reference_data/ })
+    expect(refDataBtn).toBeInTheDocument()
+    const posKeepBtn = screen.getByRole('button', { name: /position_keeping/ })
+    expect(posKeepBtn).toBeInTheDocument()
+  })
+
+  it('toggles service highlight on legend click', () => {
+    render(<SagaFlowDiagram flow={simpleFlow} />)
+    const refDataBtn = screen.getByRole('button', { name: /reference_data/ })
+
+    // Click to highlight
+    fireEvent.click(refDataBtn)
+    expect(refDataBtn).toHaveAttribute('aria-pressed', 'true')
+
+    // Click again to unhighlight
+    fireEvent.click(refDataBtn)
+    expect(refDataBtn).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('assigns distinct colors to different services', () => {
+    render(<SagaFlowDiagram flow={simpleFlow} />)
+    const refDataBtn = screen.getByRole('button', { name: /reference_data/ })
+    const posKeepBtn = screen.getByRole('button', { name: /position_keeping/ })
+    const refDot = refDataBtn.querySelector('span[class*="rounded-full"]')
+    const posDot = posKeepBtn.querySelector('span[class*="rounded-full"]')
+    expect(refDot?.getAttribute('style')).not.toEqual(posDot?.getAttribute('style'))
   })
 })
