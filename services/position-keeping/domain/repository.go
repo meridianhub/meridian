@@ -122,11 +122,14 @@ type MeasurementRepository interface {
 //   - Database trigger prevents UPDATE on amount column
 //   - Achieves O(1) writes without locks for high-throughput scenarios
 //
-// FUTURE: Background compaction (Phase 2) will be documented in ADR-00XX.
-// Compaction considerations:
-//   - Compacted records will be marked with a compaction_batch_id
-//   - reference_id chain will be preserved for audit trail
-//   - RecordCount in AggregatedPosition will reflect pre-compaction counts
+// COMPACTION: Background compaction is implemented in worker/compaction_worker.go
+// but disabled by default. See ADR-0034 for the compaction strategy, trigger
+// criteria for enabling it, and pre-activation checklist.
+// Compaction behavior when enabled:
+//   - Fragmented buckets are consolidated into single rows with soft-deletion of originals
+//   - Compaction metadata stored in attributes (_compacted_from_count, _compaction_ref)
+//   - Optional audit trail via position_compaction_audit table
+//   - RecordCount in AggregatedPosition reflects pre-compaction counts
 type PositionRepository interface {
 	// Insert persists a new Position record to the database.
 	// This is the ONLY write method - append-only semantics are enforced.
