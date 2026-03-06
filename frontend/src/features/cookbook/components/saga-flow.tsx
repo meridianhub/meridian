@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -56,6 +56,7 @@ interface StepNodeData {
   label: string
   serviceCalls: { service: string; method: string }[]
   serviceIndex: Map<string, number>
+  highlightedService: string | null
   [key: string]: unknown
 }
 
@@ -63,12 +64,22 @@ function StepNode({ data }: { data: StepNodeData }) {
   const primaryService = data.serviceCalls[0]?.service
   const borderColor = primaryService ? getServiceColors(primaryService, data.serviceIndex).fg : '#71717a'
 
+  const isHighlightActive = data.highlightedService !== null
+  const isHighlighted = isHighlightActive && data.serviceCalls.some((c) => c.service === data.highlightedService)
+  const isDimmed = isHighlightActive && !isHighlighted
+
   return (
     <>
       <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
       <div
-        className="flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[180px]"
-        style={{ borderColor }}
+        className="flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[180px] transition-opacity duration-200"
+        style={{
+          borderColor,
+          opacity: isDimmed ? 0.3 : 1,
+          ...(isHighlighted
+            ? { boxShadow: `0 0 0 2px white, 0 0 0 4px ${borderColor}` }
+            : {}),
+        }}
       >
         <span className="text-xs font-semibold text-foreground">{data.label}</span>
         {data.serviceCalls.length > 0 && (
@@ -220,7 +231,11 @@ function buildServiceIndex(flow: SagaFlow): Map<string, number> {
   return seen
 }
 
-function buildFlowGraph(flow: SagaFlow, serviceIndex: Map<string, number>): { nodes: Node[]; edges: Edge[] } {
+function buildFlowGraph(
+  flow: SagaFlow,
+  serviceIndex: Map<string, number>,
+  highlightedService: string | null,
+): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
@@ -259,6 +274,7 @@ function buildFlowGraph(flow: SagaFlow, serviceIndex: Map<string, number>): { no
         label: step.name,
         serviceCalls: step.serviceCalls,
         serviceIndex,
+        highlightedService,
       } satisfies StepNodeData,
     })
 
@@ -349,8 +365,12 @@ interface SagaFlowDiagramProps {
 }
 
 export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagramProps) {
+  const [highlightedService, setHighlightedService] = useState<string | null>(null)
   const serviceIndex = useMemo(() => buildServiceIndex(flow), [flow])
-  const { nodes, edges } = useMemo(() => buildFlowGraph(flow, serviceIndex), [flow, serviceIndex])
+  const { nodes, edges } = useMemo(
+    () => buildFlowGraph(flow, serviceIndex, highlightedService),
+    [flow, serviceIndex, highlightedService],
+  )
 
   // Collect unique services for the legend (sorted alphabetically)
   const services = useMemo(() => [...serviceIndex.keys()].sort(), [serviceIndex])
@@ -382,14 +402,21 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Services</span>
           {services.map((svc) => {
             const colors = getServiceColors(svc, serviceIndex)
+            const isActive = highlightedService === svc
             return (
-              <div key={svc} className="flex items-center gap-2">
+              <button
+                key={svc}
+                type="button"
+                className="flex items-center gap-2 rounded px-1 -mx-1 transition-colors hover:bg-muted/50"
+                style={isActive ? { backgroundColor: colors.bg } : undefined}
+                onClick={() => setHighlightedService(isActive ? null : svc)}
+              >
                 <span
                   className="inline-block h-2.5 w-2.5 rounded-full"
                   style={{ backgroundColor: colors.fg }}
                 />
                 <span className="text-xs text-muted-foreground">{svc}</span>
-              </div>
+              </button>
             )
           })}
         </div>
