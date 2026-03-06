@@ -144,15 +144,18 @@ function MeasurementHistory({ entries }: MeasurementHistoryProps) {
                 <DirectionBadge direction={entry.direction} />
               </td>
               <td className="py-2 pr-4 tabular-nums">
-                {entry.amount ? (
-                  <MoneyDisplay
-                    amount={toMinorUnits(entry.amount.amount, entry.amount.currency)}
-                    currency={entry.amount.currency}
-                    showSign={entry.direction === 'DEBIT'}
-                  />
-                ) : (
-                  '—'
-                )}
+                {(() => {
+                  if (!entry.amount) return '—'
+                  const minor = toMinorUnits(entry.amount.amount, entry.amount.currency)
+                  if (minor === null) return '—'
+                  return (
+                    <MoneyDisplay
+                      amount={minor}
+                      currency={entry.amount.currency}
+                      showSign={entry.direction === 'DEBIT'}
+                    />
+                  )
+                })()}
               </td>
               <td className="py-2 pr-4">
                 <QualityLadderBadge quality={entry.qualityLevel ?? 'ESTIMATE'} />
