@@ -315,44 +315,43 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
     return () => { cancelled = true }
   }, [filteredPatterns, graphEdges, setNodes, setEdges])
 
-  // Hover highlighting
+  // Hover highlighting — use graphEdges (memoized) not edges (mutable state)
   useEffect(() => {
-    if (!hoveredNode) {
-      setNodes((nds) =>
-        nds.map((n) => ({
-          ...n,
-          data: { ...n.data, highlighted: false, dimmed: false },
-        })),
-      )
-      setEdges((eds) => eds.map((e) => ({ ...e, animated: false })))
-      return
-    }
-
-    const connectedNodes = new Set<string>([hoveredNode])
-    for (const e of edges) {
-      if (e.source === hoveredNode || e.target === hoveredNode) {
-        connectedNodes.add(e.source)
-        connectedNodes.add(e.target)
+    const connectedNodes = new Set<string>()
+    if (hoveredNode) {
+      connectedNodes.add(hoveredNode)
+      for (const e of graphEdges) {
+        if (e.source === hoveredNode || e.target === hoveredNode) {
+          connectedNodes.add(e.source)
+          connectedNodes.add(e.target)
+        }
       }
     }
 
-    setNodes((nds) =>
-      nds.map((n) => ({
-        ...n,
-        data: {
-          ...n.data,
-          highlighted: n.id === hoveredNode,
-          dimmed: !connectedNodes.has(n.id),
-        },
-      })),
-    )
-    setEdges((eds) =>
-      eds.map((e) => ({
-        ...e,
-        animated: e.source === hoveredNode || e.target === hoveredNode,
-      })),
-    )
-  }, [hoveredNode, edges, setNodes, setEdges])
+    setNodes((nds) => {
+      let changed = false
+      const next = nds.map((n) => {
+        const highlighted = hoveredNode ? n.id === hoveredNode : false
+        const dimmed = hoveredNode ? !connectedNodes.has(n.id) : false
+        const current = n.data as PatternNodeData
+        if (current.highlighted === highlighted && current.dimmed === dimmed) return n
+        changed = true
+        return { ...n, data: { ...n.data, highlighted, dimmed } }
+      })
+      return changed ? next : nds
+    })
+
+    setEdges((eds) => {
+      let changed = false
+      const next = eds.map((e) => {
+        const animated = hoveredNode ? e.source === hoveredNode || e.target === hoveredNode : false
+        if (e.animated === animated) return e
+        changed = true
+        return { ...e, animated }
+      })
+      return changed ? next : eds
+    })
+  }, [hoveredNode, graphEdges, setNodes, setEdges])
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
@@ -395,6 +394,7 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
       <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Filters</span>
         <select
+          aria-label="Filter by category"
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
           className="rounded border bg-background px-2 py-1 text-xs"
@@ -405,6 +405,7 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
           ))}
         </select>
         <select
+          aria-label="Filter by industry"
           value={industryFilter}
           onChange={(e) => setIndustryFilter(e.target.value)}
           className="rounded border bg-background px-2 py-1 text-xs"
