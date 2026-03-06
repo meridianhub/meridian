@@ -5,9 +5,10 @@
     "title": "KYC Compliance Workflow",
     "description": "Initiates KYC verification when an individual party is created. Uses the compliance marker pattern: books a zero-amount position log to track outstanding KYC obligations per jurisdiction. Compliance accounts are resolved via entity graph traversal.",
     "registryDependencies": ["base-fiat-gbp"],
-    "categories": ["compliance", "kyc", "event-driven"],
+    "categories": ["compliance", "kyc"],
     "meta": {
         "complexity": 3,
+        "trigger": "event-driven",
         "design_pattern": "compliance-marker",
         "industries": ["banking", "compliance"],
         "provides": {

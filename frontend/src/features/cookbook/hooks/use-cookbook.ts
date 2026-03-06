@@ -11,6 +11,7 @@ export interface CookbookItem {
 
 export interface PatternMeta {
   complexity?: number
+  trigger?: string
   design_pattern?: string
   industries?: string[]
   provides?: {

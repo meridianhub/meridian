@@ -5,9 +5,10 @@
     "title": "Precious Metals Trading",
     "description": "Precious metals trading platform with event-triggered valuation. When gold, silver, or platinum positions are captured, an event-driven saga automatically books the GBP settlement value at the current spot rate from LBMA/LPPM price fixes.",
     "registryDependencies": ["base-fiat-gbp"],
-    "categories": ["commodities", "trading", "event-driven"],
+    "categories": ["commodities", "trading"],
     "meta": {
         "complexity": 5,
+        "trigger": "event-driven",
         "design_pattern": "valuation-on-capture",
         "industries": ["commodities", "trading"],
         "provides": {
