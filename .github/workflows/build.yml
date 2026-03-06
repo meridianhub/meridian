@@ -11,7 +11,10 @@ on:
       - 'go.sum'
       - 'Dockerfile'
       - 'api/proto/**'
+      - 'buf.yaml'
       - 'buf.gen.yaml'
+      - 'buf.lock'
+      - 'Makefile'
       - '.github/workflows/build.yml'
   pull_request:
     branches: [develop, main]
@@ -21,7 +24,10 @@ on:
       - 'go.sum'
       - 'Dockerfile'
       - 'api/proto/**'
+      - 'buf.yaml'
       - 'buf.gen.yaml'
+      - 'buf.lock'
+      - 'Makefile'
       - '.github/workflows/build.yml'
 
 permissions:

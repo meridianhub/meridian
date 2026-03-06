@@ -8,7 +8,9 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'api/proto/**'
+      - 'buf.yaml'
       - 'buf.gen.yaml'
+      - 'buf.lock'
       - 'Makefile'
       - '.github/workflows/test.yml'
   pull_request:
@@ -18,7 +20,9 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'api/proto/**'
+      - 'buf.yaml'
       - 'buf.gen.yaml'
+      - 'buf.lock'
       - 'Makefile'
       - '.github/workflows/test.yml'
 

@@ -10,7 +10,9 @@ on:
       - '**.sh'
       - 'Tiltfile'
       - 'api/proto/**'
+      - 'buf.yaml'
       - 'buf.gen.yaml'
+      - 'buf.lock'
       - '.golangci.yml'
       - '.github/workflows/quality.yml'
   pull_request:
@@ -22,7 +24,9 @@ on:
       - '**.sh'
       - 'Tiltfile'
       - 'api/proto/**'
+      - 'buf.yaml'
       - 'buf.gen.yaml'
+      - 'buf.lock'
       - '.golangci.yml'
       - '.github/workflows/quality.yml'
 
