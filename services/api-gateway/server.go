@@ -148,7 +148,7 @@ func (s *Server) registerRoutes() {
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy
 	// prefix-based reverse proxy when Backends are provided; otherwise use a
-	// placeholder that returns 501 Not Implemented.
+	// fallback that returns 503 Service Unavailable (misconfiguration/degraded).
 	//
 	// For the transcoder path, metadataPropagationMiddleware wraps the handler to
 	// strip spoofed incoming identity headers and inject authenticated identity
@@ -352,18 +352,18 @@ func (s *Server) logHealthCheckResult(ctx context.Context, report *health.Report
 	}
 }
 
-// handleAPI is a placeholder handler for API routes.
-// This will be replaced with actual routing logic in future tasks.
+// handleAPI is the fallback handler for API routes when neither the Vanguard
+// transcoder nor a legacy proxy backend is configured. This indicates a
+// misconfiguration or degraded state (e.g. transcoder build failure).
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
-	s.logger.Debug("received API request",
+	s.logger.Warn("API request reached fallback handler: no transcoder or proxy backend configured",
 		"method", r.Method,
 		"path", r.URL.Path,
 		"host", r.Host)
 
-	// Placeholder response - actual routing will be implemented in future tasks
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusNotImplemented)
-	if _, err := w.Write([]byte(`{"error":"gateway routing not yet implemented"}`)); err != nil {
+	w.WriteHeader(http.StatusServiceUnavailable)
+	if _, err := w.Write([]byte(`{"error":"no API backend configured","detail":"neither Vanguard transcoder nor proxy backends are available; check gateway startup logs"}`)); err != nil {
 		s.logger.Warn("failed to write API response",
 			"error", err,
 			"endpoint", r.URL.Path,

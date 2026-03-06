@@ -20,7 +20,7 @@ type PartyVerificationEntity struct {
 	// Provider's verification ID (external reference)
 	VerificationID string `gorm:"column:verification_id;type:varchar(255);not null;uniqueIndex:idx_party_verification_verification_id"`
 
-	// Provider name (e.g., "onfido", "jumio")
+	// Provider name (e.g., "onfido", "stripe")
 	Provider string `gorm:"column:provider;type:varchar(100);not null"`
 
 	// Verification status (PENDING, APPROVED, REJECTED, MANUAL_REVIEW)

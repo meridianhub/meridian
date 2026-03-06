@@ -120,6 +120,7 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		uuid.New(), // CausationID - generate new for this request
 		qualityLevel,
 		source.TrustLevel(),
+		domain.NewObservationContext(observationContext),
 	)
 	if err != nil {
 		s.logger.Warn("failed to create observation",
@@ -393,6 +394,7 @@ func (s *Server) RecordObservationBatch(ctx context.Context, req *pb.RecordObser
 			uuid.New(),
 			qualityLevel,
 			source.TrustLevel(),
+			domain.NewObservationContext(observationContext),
 		)
 		if err != nil {
 			results[i] = &pb.BatchObservationResult{

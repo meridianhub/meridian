@@ -29,9 +29,15 @@
 //   - ListFinancialPositionLogs: Query logs with filtering and pagination
 //   - UpdateFinancialPositionLog: Update an existing log with optimistic locking
 //
-// Future work:
-//   - ControlFinancialPositionLog: Manage log lifecycle transitions
-//   - BulkImportTransactions: Import multiple transactions atomically
+// Planned:
+//   - BulkImportTransactions: Import multiple transactions atomically.
+//     Proto defined (position_keeping.proto), client stub exists (client/client.go),
+//     consumed by current-account service. Server implementation not yet built.
+//
+// Removed from scope:
+//   - ControlFinancialPositionLog: Originally planned for log lifecycle transitions.
+//     No proto definition, no consumer references, no implementation. Log lifecycle
+//     is managed through UpdateFinancialPositionLog with optimistic locking instead.
 //
 // # Error Handling
 //

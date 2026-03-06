@@ -28,6 +28,7 @@ func createValidObservation(t *testing.T) MarketPriceObservation {
 		causationID,
 		QualityLevelActual,
 		85,
+		ObservationContext{},
 	)
 	require.NoError(t, err)
 	return obs
@@ -55,6 +56,7 @@ func TestNewMarketPriceObservation_Success(t *testing.T) {
 		causationID,
 		QualityLevelActual,
 		85,
+		ObservationContext{},
 	)
 
 	require.NoError(t, err)
@@ -102,6 +104,7 @@ func TestNewMarketPriceObservation_AllQualityLevels(t *testing.T) {
 				uuid.New(),
 				level,
 				50,
+				ObservationContext{},
 			)
 
 			require.NoError(t, err)
@@ -138,6 +141,7 @@ func TestNewMarketPriceObservation_TrustLevelBoundaries(t *testing.T) {
 				uuid.New(),
 				QualityLevelActual,
 				tt.trustLevel,
+				ObservationContext{},
 			)
 
 			if tt.expectErr {
@@ -309,6 +313,7 @@ func TestNewMarketPriceObservation_ValidationErrors(t *testing.T) {
 				tt.causationID,
 				tt.qualityLevel,
 				tt.trustLevel,
+				ObservationContext{},
 			)
 			assert.ErrorIs(t, err, tt.expectedErr)
 		})
@@ -370,6 +375,7 @@ func TestNewMarketPriceObservation_TemporalBoundsValidation(t *testing.T) {
 				uuid.New(),
 				QualityLevelActual,
 				50,
+				ObservationContext{},
 			)
 
 			if tt.expectErr {
@@ -558,6 +564,7 @@ func TestMarketPriceObservation_DecimalPrecision(t *testing.T) {
 				uuid.New(),
 				QualityLevelActual,
 				50,
+				ObservationContext{},
 			)
 
 			require.NoError(t, err)
@@ -610,6 +617,7 @@ func TestMarketPriceObservation_UniqueIDs(t *testing.T) {
 			uuid.New(),
 			QualityLevelActual,
 			50,
+			ObservationContext{},
 		)
 		require.NoError(t, err)
 		assert.False(t, ids[obs.ID()], "Duplicate ID generated")
@@ -697,6 +705,7 @@ func TestMarketPriceObservation_BiTemporalFields(t *testing.T) {
 		uuid.New(),
 		QualityLevelActual,
 		85,
+		ObservationContext{},
 	)
 
 	require.NoError(t, err)
@@ -730,6 +739,7 @@ func TestMarketPriceObservation_LineageTracking(t *testing.T) {
 		uuid.New(),
 		QualityLevelEstimate,
 		50,
+		ObservationContext{},
 	)
 	require.NoError(t, err)
 
@@ -746,6 +756,7 @@ func TestMarketPriceObservation_LineageTracking(t *testing.T) {
 		uuid.New(),
 		QualityLevelActual, // Higher quality
 		75,
+		ObservationContext{},
 	)
 	require.NoError(t, err)
 
@@ -778,6 +789,7 @@ func TestMarketPriceObservation_ZeroValue(t *testing.T) {
 			uuid.New(),
 			QualityLevelActual,
 			50,
+			ObservationContext{},
 		)
 		require.NoError(t, err)
 		assert.True(t, zeroValue.Equal(obs.Value()))
@@ -796,6 +808,7 @@ func TestMarketPriceObservation_ZeroValue(t *testing.T) {
 			uuid.New(),
 			QualityLevelActual,
 			50,
+			ObservationContext{},
 		)
 		require.NoError(t, err)
 		assert.True(t, negValue.Equal(obs.Value()))

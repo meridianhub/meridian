@@ -49,20 +49,6 @@ func TestNewProvider_MockProviderCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestNewProvider_JumioProvider_NotImplemented(t *testing.T) {
-	cfg := &config.VerificationConfig{
-		Provider:       "jumio",
-		WebhookSecret:  "secret",
-		WebhookURL:     "https://example.com/webhook",
-		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
-	}
-
-	provider, err := NewProvider(cfg)
-
-	assert.Nil(t, provider)
-	assert.ErrorIs(t, err, ErrUnsupportedProvider)
-}
-
 func TestNewProvider_OnfidoProvider(t *testing.T) {
 	cfg := &config.VerificationConfig{
 		Provider:       "onfido",
@@ -174,7 +160,7 @@ func TestNewProviderWithOptions_RespectsAsyncMode(t *testing.T) {
 }
 
 func TestNewProviderWithOptions_NonMockProvider_ReturnsError(t *testing.T) {
-	testCases := []string{"jumio", "unknown"}
+	testCases := []string{"unknown", "nonexistent"}
 
 	for _, providerName := range testCases {
 		t.Run(providerName, func(t *testing.T) {

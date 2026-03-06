@@ -3,6 +3,7 @@ package persistence
 
 import (
 	"database/sql"
+	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/market-information/domain"
@@ -157,7 +158,7 @@ func ObservationToEntity(o domain.MarketPriceObservation, dataSetDefinitionID uu
 		ObservedAt:          o.ObservedAt(),
 		CreatedAt:           o.CreatedAt(),
 		Quality:             o.QualityLevel().Int(),
-		ObservationContext:  []byte("{}"), // Placeholder - actual context handling TBD
+		ObservationContext:  marshalObservationContext(o.ObservationContext()),
 	}
 
 	// Set numeric value from decimal
@@ -224,5 +225,35 @@ func EntityToObservation(e MarketPriceObservationEntity, dataSetCode string, tru
 		builder.WithCausationID(e.CausationID.UUID)
 	}
 
+	// Set observation context (backward-compatible with empty/null JSONB)
+	builder.WithObservationContext(unmarshalObservationContext(e.ObservationContext))
+
 	return builder.Build()
+}
+
+// marshalObservationContext serializes an ObservationContext to JSON bytes for JSONB storage.
+// Returns "{}" for empty contexts to maintain a valid JSONB value.
+func marshalObservationContext(ctx domain.ObservationContext) []byte {
+	if ctx.IsEmpty() {
+		return []byte("{}")
+	}
+	data, err := json.Marshal(ctx)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+// unmarshalObservationContext deserializes JSON bytes from JSONB into an ObservationContext.
+// Returns an empty ObservationContext for nil, empty, or invalid JSON (backward compatibility
+// with existing records that store "{}").
+func unmarshalObservationContext(data []byte) domain.ObservationContext {
+	if len(data) == 0 {
+		return domain.ObservationContext{}
+	}
+	var ctx domain.ObservationContext
+	if err := json.Unmarshal(data, &ctx); err != nil {
+		return domain.ObservationContext{}
+	}
+	return ctx
 }

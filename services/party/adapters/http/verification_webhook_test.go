@@ -50,7 +50,7 @@ func TestNewVerificationWebhookHandler(t *testing.T) {
 				VerificationService: &mockVerificationService{},
 				HMACSecrets: map[string][]byte{
 					"onfido": []byte("onfido-secret"),
-					"jumio":  []byte("jumio-secret"),
+					"stripe": []byte("stripe-secret"),
 				},
 			},
 			wantErr: false,
@@ -397,14 +397,14 @@ func TestVerificationWebhookHandler_HandleWebhook_MethodNotAllowed(t *testing.T)
 
 func TestVerificationWebhookHandler_HandleWebhook_MultipleProviders(t *testing.T) {
 	onfidoSecret := []byte("onfido-secret")
-	jumioSecret := []byte("jumio-secret")
+	stripeSecret := []byte("stripe-secret")
 
 	mockService := &mockVerificationService{}
 	handler, err := NewVerificationWebhookHandler(VerificationWebhookHandlerConfig{
 		VerificationService: mockService,
 		HMACSecrets: map[string][]byte{
 			"onfido": onfidoSecret,
-			"jumio":  jumioSecret,
+			"stripe": stripeSecret,
 		},
 	})
 	require.NoError(t, err)
@@ -429,11 +429,11 @@ func TestVerificationWebhookHandler_HandleWebhook_MultipleProviders(t *testing.T
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	// Test with jumio provider - should fail with onfido signature
+	// Test with stripe provider - should fail with onfido signature
 	body2, _ := json.Marshal(webhookReq)
 	wrongSig := GenerateWebhookSignature(body2, onfidoSecret) // Using wrong secret
 
-	req2 := httptest.NewRequest(http.MethodPost, "/webhooks/verification/jumio", bytes.NewReader(body2))
+	req2 := httptest.NewRequest(http.MethodPost, "/webhooks/verification/stripe", bytes.NewReader(body2))
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set(WebhookSignatureHeader, wrongSig)
 
@@ -620,7 +620,7 @@ func TestExtractProvider(t *testing.T) {
 		expected string
 	}{
 		{"/webhooks/verification/onfido", "onfido"},
-		{"/webhooks/verification/jumio", "jumio"},
+		{"/webhooks/verification/stripe", "stripe"},
 		{"/webhooks/verification/onfido/", "onfido"},
 		{"/api/v1/webhooks/verification/provider", "provider"},
 		{"/webhooks/verification", ""},

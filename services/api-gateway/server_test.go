@@ -207,9 +207,9 @@ func TestAPIRoutes_WithoutTenantResolver(t *testing.T) {
 
 	server.mux.ServeHTTP(rec, req)
 
-	// Should return 501 Not Implemented (placeholder response)
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
-	assert.Contains(t, rec.Body.String(), "gateway routing not yet implemented")
+	// Should return 503 Service Unavailable (no backend configured)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), "no API backend configured")
 }
 
 // TestWithTranscoder_UsedOverProxy verifies that when WithTranscoder is set,
@@ -262,8 +262,8 @@ func TestWithTranscoder_FallsBackToProxy(t *testing.T) {
 
 	server.mux.ServeHTTP(rec, req)
 
-	// Should return 501 Not Implemented from the placeholder handler
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
+	// Should return 503 Service Unavailable from the fallback handler
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
 // TestWithTranscoder_StripsAndInjectsIdentityHeaders verifies that the
@@ -808,8 +808,8 @@ func TestWithEventStreamHandler_NotRegisteredWhenNil(t *testing.T) {
 
 	// Without an event stream handler, the route is not registered.
 	// The request falls through to the "/" catch-all API handler which
-	// returns 501 when no transcoder or proxy is configured.
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
+	// returns 503 when no transcoder or proxy is configured.
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
 // TestWithEventStreamHandler_HealthEndpointsUnaffected verifies that adding the
