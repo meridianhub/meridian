@@ -16,6 +16,12 @@ import {
 import '@xyflow/react/dist/style.css'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { useNavigate } from 'react-router-dom'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 
 const elk = new ELK()
@@ -55,6 +61,8 @@ type RelationshipType = keyof typeof EDGE_STYLES
 // Custom node component
 interface PatternNodeData {
   label: string
+  fullTitle: string
+  designPattern?: string
   complexity: number
   categories: string[]
   color: string
@@ -64,33 +72,43 @@ interface PatternNodeData {
 }
 
 function PatternNode({ data }: { data: PatternNodeData }) {
-  const size = 40 + (data.complexity ?? 1) * 12
+  const height = 40 + (data.complexity ?? 1) * 12
+  const tooltipText = data.designPattern
+    ? `${data.fullTitle} (${data.designPattern})`
+    : data.fullTitle
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
-      <div
-        className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150"
-        style={{
-          width: size,
-          height: size,
-          borderColor: data.color,
-          backgroundColor: `${data.color}18`,
-          opacity: data.dimmed ? 0.25 : 1,
-          boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
-        }}
-      >
-        <span className="text-[10px] font-semibold leading-tight text-foreground truncate w-full">
-          {data.label}
-        </span>
-        {data.complexity > 0 && (
-          <span
-            className="mt-0.5 inline-flex items-center justify-center rounded-full text-[8px] font-bold text-white"
-            style={{ backgroundColor: data.color, width: 16, height: 16 }}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150"
+            style={{
+              width: 180,
+              height,
+              borderColor: data.color,
+              backgroundColor: `${data.color}18`,
+              opacity: data.dimmed ? 0.25 : 1,
+              boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
+            }}
           >
-            {data.complexity}
-          </span>
-        )}
-      </div>
+            <span className="text-[10px] font-semibold leading-tight text-foreground truncate w-full">
+              {data.label}
+            </span>
+            {data.complexity > 0 && (
+              <span
+                className="mt-0.5 inline-flex items-center justify-center rounded-full text-[8px] font-bold text-white"
+                style={{ backgroundColor: data.color, width: 16, height: 16 }}
+              >
+                {data.complexity}
+              </span>
+            )}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {tooltipText}
+        </TooltipContent>
+      </Tooltip>
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
@@ -189,8 +207,8 @@ async function layoutGraph(
 ): Promise<Node[]> {
   const elkNodes = patterns.map((p) => {
     const complexity = (p.meta as PatternMeta | undefined)?.complexity ?? 1
-    const size = 40 + complexity * 12
-    return { id: p.name, width: size + 20, height: size + 20 }
+    const height = 40 + complexity * 12
+    return { id: p.name, width: 200, height: height + 20 }
   })
 
   const elkEdges = edges.map((e) => ({
@@ -204,7 +222,7 @@ async function layoutGraph(
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'DOWN',
-      'elk.spacing.nodeNode': '80',
+      'elk.spacing.nodeNode': '60',
       'elk.layered.spacing.nodeNodeBetweenLayers': '100',
     },
     children: elkNodes,
@@ -221,6 +239,8 @@ async function layoutGraph(
       position: { x: elkNode?.x ?? 0, y: elkNode?.y ?? 0 },
       data: {
         label: p.title,
+        fullTitle: p.title,
+        designPattern: meta?.design_pattern,
         complexity: meta?.complexity ?? 1,
         categories: p.categories ?? [],
         color,
@@ -376,6 +396,7 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
 
   return (
     <div className={className} style={{ width: '100%', height: '100%' }}>
+      <TooltipProvider>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -395,6 +416,7 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
           maskColor="rgba(0, 0, 0, 0.15)"
         />
       </ReactFlow>
+      </TooltipProvider>
 
       {/* Filter sidebar */}
       <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
