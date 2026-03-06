@@ -28,6 +28,10 @@ Superseded
 
 See implementation details in ADR-0009 and `/services/README.md`.
 
+**Disposition verified 2026-03-06**: SUPERSEDED status is accurate. The per-service embedded worker
+approach described here was not adopted. The implementation phases (Refactor Worker, Embed Workers,
+Deprecate Centralized) are all CANCELLED in favor of the Kafka-based dual-path architecture.
+
 ## Context
 
 ADR-0009 established the transactional outbox pattern for application-level audit logging. The current implementation (`services/audit-worker/main.go`) deploys a centralized audit-worker service that connects to a single database and processes audit_outbox entries.

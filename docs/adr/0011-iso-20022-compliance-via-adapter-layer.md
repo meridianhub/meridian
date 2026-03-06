@@ -282,26 +282,35 @@ func mapAmount(m *money.Money) pain001.ActiveCurrencyAndAmount {
 
 ## Implementation Phases
 
-### Phase 1 (5-8 story points): Core Payment Messages
+### Phase 1 (5-8 story points): Core Payment Messages — PLANNED
+
+No implementation exists. No `adapters/iso20022/` directory has been created.
 
 - Implement pain.001 (payment initiation) adapter
 - Implement camt.053 (account reporting) adapter
 - Create XSD validation framework
 - Document mapping patterns
 
-### Phase 2 (3-5 points): Status and Error Handling
+### Phase 2 (3-5 points): Status and Error Handling — PLANNED
+
+Depends on Phase 1 adapter infrastructure.
 
 - Implement pacs.002 (payment status) adapter
 - Map transaction status to ISO reason codes
 - Add structured rejection reason handling
 
-### Phase 3 (5-8 points): Account Management
+### Phase 3 (5-8 points): Account Management — PLANNED
+
+Depends on Phase 1 adapter infrastructure.
 
 - Implement acmt.001 (account opening) adapter
 - Add party identification structures
 - Support BIC/LEI code validation
 
-### Phase 4 (Optional): Additional Standards
+### Phase 4 (Optional): Additional Standards — DEFERRED
+
+No current demand for legacy or alternative format support. Re-evaluate when
+external payment network integration becomes a priority.
 
 - SWIFT MT adapter (legacy format support)
 - Proprietary bank formats as needed
