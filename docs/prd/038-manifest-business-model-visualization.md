@@ -239,6 +239,15 @@ interface ManifestNode {
 // This avoids introducing a node type that has no manifest-level
 // definition — event channels are implicit, not configured.
 
+interface SagaTriggerMetadata {
+  channel: string       // e.g., "position-keeping.transaction-captured.v1"
+  filterExpression: string | null  // CEL filter, null if unfiltered
+}
+
+// SagaDefinition nodes extend ManifestNode.data with:
+// - trigger: SagaTriggerMetadata (from saga.trigger field)
+// - dynamicTargets: SagaNodeMetadata.dynamicTargets (from Phase 3)
+
 interface ManifestEdge {
   id: string
   source: string
@@ -303,12 +312,14 @@ complex filters, the result is `indeterminate` and the UI shows the
 filter expression with a "may or may not match" indicator.
 
 **Chain depth limit:** The engine defaults to 10 (matching the
-event-router's `defaultMaxChainDepth`). If a future configuration
-endpoint exposes the effective chain depth per tenant, the UI should
-read it from there. Until then, the frontend uses a shared constant
-that must be kept in sync with the event-router's default. The
-current depth is displayed in the UI so users understand the runtime
-safety boundary.
+event-router's `defaultMaxChainDepth`). The frontend defines this as
+a named constant (e.g., `DEFAULT_MAX_CHAIN_DEPTH = 10`) imported
+from a single location. Phase 4 should add a TODO marker for
+replacing this constant with a value from a tenant configuration
+endpoint when one becomes available. Until then, the constant is
+the single source of truth for the UI, kept in sync with the
+event-router's Go constant manually. The current depth is displayed
+in the UI so users understand the runtime safety boundary.
 
 ### Component Architecture
 
