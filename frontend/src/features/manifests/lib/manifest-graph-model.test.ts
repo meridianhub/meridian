@@ -148,7 +148,7 @@ describe('buildManifestGraph', () => {
 
       expect(ruleNodes).toHaveLength(1)
       expect(ruleNodes[0]).toMatchObject({
-        id: 'valuation_rule:KWH:GBP:1',
+        id: 'valuation_rule:KWH:GBP:0',
         label: 'KWH -> GBP',
       })
     })
@@ -161,13 +161,13 @@ describe('buildManifestGraph', () => {
 
       expect(fromEdges).toHaveLength(1)
       expect(fromEdges[0]).toMatchObject({
-        source: 'valuation_rule:KWH:GBP:1',
+        source: 'valuation_rule:KWH:GBP:0',
         target: 'instrument:KWH',
       })
 
       expect(toEdges).toHaveLength(1)
       expect(toEdges[0]).toMatchObject({
-        source: 'valuation_rule:KWH:GBP:1',
+        source: 'valuation_rule:KWH:GBP:0',
         target: 'instrument:GBP',
       })
     })
@@ -232,6 +232,58 @@ describe('buildManifestGraph', () => {
 
       expect(graph.nodes).toHaveLength(1)
       expect(graph.edges).toHaveLength(0)
+    })
+
+    it('skips allowed_by edges referencing nonexistent instruments', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        ],
+        accountTypes: [
+          { code: 'MIXED', name: 'Mixed Account', normalBalance: 1, allowedInstruments: ['GBP', 'MISSING'] },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const allowedEdges = graph.edges.filter((e) => e.relationship === 'allowed_by')
+
+      expect(allowedEdges).toHaveLength(1)
+      expect(allowedEdges[0]).toMatchObject({ target: 'instrument:GBP' })
+    })
+
+    it('skips valuation edges referencing nonexistent instruments', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        ],
+        valuationRules: [
+          { fromInstrument: 'MISSING', toInstrument: 'GBP', method: 1, source: 'test' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const fromEdges = graph.edges.filter((e) => e.relationship === 'converts_from')
+      const toEdges = graph.edges.filter((e) => e.relationship === 'converts_to')
+
+      expect(fromEdges).toHaveLength(0)
+      expect(toEdges).toHaveLength(1)
+    })
+
+    it('assigns unique IDs to duplicate from/to valuation rules', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
+          { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        ],
+        valuationRules: [
+          { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'nordpool_spot' },
+          { fromInstrument: 'KWH', toInstrument: 'GBP', method: 2, source: 'admin_override' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const ruleNodes = graph.nodes.filter((n) => n.type === 'valuation_rule')
+
+      expect(ruleNodes).toHaveLength(2)
+      expect(ruleNodes[0].id).toBe('valuation_rule:KWH:GBP:0')
+      expect(ruleNodes[1].id).toBe('valuation_rule:KWH:GBP:1')
     })
   })
 })

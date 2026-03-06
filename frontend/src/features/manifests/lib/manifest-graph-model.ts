@@ -90,6 +90,8 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   const valuationRules = m.valuationRules ?? []
   const sagas = m.sagas ?? []
 
+  const instrumentCodes = new Set(instruments.map((i) => i.code))
+
   for (const inst of instruments) {
     nodes.push({
       id: `instrument:${inst.code}`,
@@ -109,19 +111,22 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
 
     if (at.allowedInstruments) {
       for (const instrumentCode of at.allowedInstruments) {
-        edges.push({
-          id: `allowed_by:${at.code}:${instrumentCode}`,
-          source: `account_type:${at.code}`,
-          target: `instrument:${instrumentCode}`,
-          relationship: 'allowed_by',
-        })
+        if (instrumentCodes.has(instrumentCode)) {
+          edges.push({
+            id: `allowed_by:${at.code}:${instrumentCode}`,
+            source: `account_type:${at.code}`,
+            target: `instrument:${instrumentCode}`,
+            relationship: 'allowed_by',
+          })
+        }
       }
     }
   }
 
-  for (const rule of valuationRules) {
-    const { fromInstrument: from, toInstrument: to, method } = rule
-    const ruleId = `valuation_rule:${from}:${to}:${method}`
+  for (let i = 0; i < valuationRules.length; i++) {
+    const rule = valuationRules[i]
+    const { fromInstrument: from, toInstrument: to } = rule
+    const ruleId = `valuation_rule:${from}:${to}:${i}`
 
     nodes.push({
       id: ruleId,
@@ -130,19 +135,23 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
       data: { ...rule },
     })
 
-    edges.push({
-      id: `converts_from:${from}:${to}:${method}`,
-      source: ruleId,
-      target: `instrument:${from}`,
-      relationship: 'converts_from',
-    })
+    if (instrumentCodes.has(from)) {
+      edges.push({
+        id: `converts_from:${from}:${to}:${i}`,
+        source: ruleId,
+        target: `instrument:${from}`,
+        relationship: 'converts_from',
+      })
+    }
 
-    edges.push({
-      id: `converts_to:${from}:${to}:${method}`,
-      source: ruleId,
-      target: `instrument:${to}`,
-      relationship: 'converts_to',
-    })
+    if (instrumentCodes.has(to)) {
+      edges.push({
+        id: `converts_to:${from}:${to}:${i}`,
+        source: ruleId,
+        target: `instrument:${to}`,
+        relationship: 'converts_to',
+      })
+    }
   }
 
   for (const saga of sagas) {
