@@ -90,8 +90,14 @@ describe('CatalogueGrid', () => {
     expect(indicators.length).toBe(1)
   })
 
-  it('shows design pattern label', () => {
+  it('has accessible complexity label', () => {
     renderGrid(mockItems)
-    expect(screen.getByText('saga')).toBeInTheDocument()
+    const indicator = screen.getByTestId('complexity-indicator')
+    expect(indicator).toHaveAttribute('aria-label', 'Complexity: 7 — High')
+  })
+
+  it('does not show design pattern slug on card', () => {
+    renderGrid(mockItems)
+    expect(screen.queryByText('saga')).not.toBeInTheDocument()
   })
 })

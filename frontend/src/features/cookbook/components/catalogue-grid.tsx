@@ -15,13 +15,22 @@ function isPatternMeta(meta: PatternMeta | ComponentMeta | undefined): meta is P
   return meta !== undefined && 'complexity' in meta
 }
 
+function complexityLabel(score: number): string {
+  if (score <= 2) return 'Simple'
+  if (score <= 4) return 'Low'
+  if (score <= 6) return 'Moderate'
+  if (score <= 8) return 'High'
+  return 'Very High'
+}
+
 function ComplexityIndicator({ score }: { score: number }) {
+  const label = complexityLabel(score)
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           tabIndex={0}
-          aria-label={`Complexity: ${score}/10`}
+          aria-label={`Complexity: ${score} — ${label}`}
           className="flex items-center gap-1"
           data-testid="complexity-indicator"
         >
@@ -35,7 +44,7 @@ function ComplexityIndicator({ score }: { score: number }) {
           ))}
         </span>
       </TooltipTrigger>
-      <TooltipContent>Complexity: {score}/10</TooltipContent>
+      <TooltipContent side="top" sideOffset={4}>Complexity: {score} — {label}</TooltipContent>
     </Tooltip>
   )
 }
@@ -93,11 +102,8 @@ function CookbookCard({ item }: { item: CookbookItem }) {
       )}
 
       {patternMeta?.complexity !== undefined && (
-        <CardFooter className="justify-between">
+        <CardFooter>
           <ComplexityIndicator score={patternMeta.complexity} />
-          {patternMeta.design_pattern && (
-            <span className="text-[10px] text-muted-foreground">{patternMeta.design_pattern}</span>
-          )}
         </CardFooter>
       )}
     </Card>
