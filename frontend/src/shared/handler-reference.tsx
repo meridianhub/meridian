@@ -59,6 +59,8 @@ export interface HandlerReferenceProps {
   serviceNames?: string[]
   /** Callback invoked when user clicks insert button with Starlark call template. When omitted, insert buttons are hidden. */
   onInsert?: (template: string) => void
+  /** Highlight a specific handler by "service.handler" key (e.g., "position_keeping.initiate_log") */
+  highlightedHandler?: string
   /** Optional CSS class names to apply to the root container */
   className?: string
 }
@@ -76,7 +78,7 @@ export interface HandlerReferenceProps {
  * @param props Component props
  * @returns React component displaying handler reference
  */
-export function HandlerReference({ filter = '', serviceNames: serviceNameFilter, onInsert, className }: HandlerReferenceProps) {
+export function HandlerReference({ filter = '', serviceNames: serviceNameFilter, onInsert, highlightedHandler, className }: HandlerReferenceProps) {
   const clients = useApiClients()
 
   const { data: schema, isLoading, isError, error, refetch } = useQuery({
@@ -212,10 +214,18 @@ export function HandlerReference({ filter = '', serviceNames: serviceNameFilter,
             </AccordionTrigger>
             <AccordionContent className="pt-2">
               <div className="space-y-3">
-                {service.handlers.map((handler, handlerIndex) => (
+                {service.handlers.map((handler, handlerIndex) => {
+                  const handlerKey = `${service.serviceName}.${handler.name}`
+                  const isHighlighted = highlightedHandler === handlerKey
+                  return (
                   <div
                     key={handlerIndex}
-                    className="rounded border border-border bg-muted/50 p-3"
+                    className={cn(
+                      'rounded border p-3 transition-colors',
+                      isHighlighted
+                        ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
+                        : 'border-border bg-muted/50',
+                    )}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
@@ -258,7 +268,8 @@ export function HandlerReference({ filter = '', serviceNames: serviceNameFilter,
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </AccordionContent>
           </AccordionItem>

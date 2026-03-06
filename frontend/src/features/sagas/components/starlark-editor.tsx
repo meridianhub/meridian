@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type MutableRefObject } from 'react'
 import { EditorView } from '@codemirror/view'
 import { Compartment, Transaction } from '@codemirror/state'
 import { python } from '@codemirror/lang-python'
@@ -29,6 +29,8 @@ export interface StarlarkEditorProps {
   readOnly?: boolean
   complexityMetrics?: ComplexityMetrics
   onErrorClick?: (error: ValidationError) => void
+  /** Ref to capture the CodeMirror EditorView instance for external control (e.g., scroll-to-line). */
+  editorViewRef?: MutableRefObject<EditorView | null>
   className?: string
 }
 
@@ -65,6 +67,7 @@ export function StarlarkEditor({
   readOnly = false,
   complexityMetrics,
   onErrorClick,
+  editorViewRef,
   className,
 }: StarlarkEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
@@ -122,10 +125,12 @@ export function StarlarkEditor({
     })
 
     viewRef.current = view
+    if (editorViewRef) editorViewRef.current = view
 
     return () => {
       view.destroy()
       viewRef.current = null
+      if (editorViewRef) editorViewRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
