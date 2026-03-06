@@ -1,3 +1,31 @@
+export interface SagaOutputAnalysis {
+  producedEvents: ProducedEvent[]
+  valuationCalls: ValuationCall[]
+  dynamicTargets: DynamicTarget[]
+}
+
+export interface ProducedEvent {
+  stepName: string
+  lineNumber: number
+  instrumentCode: string | null
+  accountId: string | null
+  direction: 'DEBIT' | 'CREDIT' | null
+}
+
+export interface ValuationCall {
+  stepName: string
+  lineNumber: number
+  fromInstrument: string | null
+  toInstrument: string | null
+  methodId: string | null
+}
+
+export interface DynamicTarget {
+  variableName: string
+  codeSnippet: string
+  lineNumber: number
+}
+
 export interface SagaFlow {
   name: string
   trigger: string | null
@@ -290,4 +318,154 @@ function extractReturnStatus(lines: string[], returnLineIdx: number): string | n
     if (combined.includes('}')) break
   }
   return null
+}
+
+/**
+ * Extract parameter value from a function call text.
+ * Returns the literal string value if quoted, or marks as dynamic if a variable reference.
+ */
+function extractParamValue(callText: string, paramName: string): { value: string | null; isDynamic: boolean } {
+  const literalMatch = callText.match(new RegExp(`${paramName}\\s*=\\s*"([^"]+)"`))
+  if (literalMatch) return { value: literalMatch[1], isDynamic: false }
+  const varMatch = callText.match(new RegExp(`${paramName}\\s*=\\s*(\\w+)`))
+  if (varMatch) return { value: null, isDynamic: true }
+  return { value: null, isDynamic: false }
+}
+
+/**
+ * Collect a potentially multi-line function call starting from a given line index.
+ * Joins lines until parentheses are balanced.
+ */
+function collectCallText(lines: string[], startIdx: number): string {
+  let depth = 0
+  let result = ''
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i]
+    result += ' ' + line
+    for (const ch of line) {
+      if (ch === '(') depth++
+      if (ch === ')') depth--
+    }
+    if (depth <= 0) break
+  }
+  return result
+}
+
+/**
+ * Find the step name that contains a given line index.
+ */
+function findEnclosingStep(lines: string[], targetIdx: number): string {
+  for (let i = targetIdx; i >= 0; i--) {
+    const match = lines[i].match(/step\(\s*name\s*=\s*"([^"]+)"/)
+    if (match) return match[1]
+  }
+  return 'unknown'
+}
+
+/**
+ * Analyze saga source for output-producing calls: position_keeping.initiate_log
+ * and valuation_engine.compute.
+ */
+export function analyzeSagaOutputs(source: string): SagaOutputAnalysis {
+  const lines = source.split('\n')
+  const producedEvents: ProducedEvent[] = []
+  const valuationCalls: ValuationCall[] = []
+  const dynamicTargets: DynamicTarget[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    if (trimmed.startsWith('#')) continue
+
+    if (trimmed.includes('position_keeping.initiate_log(')) {
+      const callText = collectCallText(lines, i)
+      const stepName = findEnclosingStep(lines, i)
+      const lineNumber = i + 1
+
+      const instrParam = extractParamValue(callText, 'instrument_code')
+      const accountParam = extractParamValue(callText, 'account_id')
+      const dirParam = extractParamValue(callText, 'direction')
+
+      const direction = dirParam.value === 'DEBIT' || dirParam.value === 'CREDIT' ? dirParam.value : null
+
+      producedEvents.push({
+        stepName,
+        lineNumber,
+        instrumentCode: instrParam.value,
+        accountId: accountParam.value,
+        direction,
+      })
+
+      if (instrParam.isDynamic) {
+        const varMatch = callText.match(/instrument_code\s*=\s*(\w+)/)
+        if (varMatch) {
+          dynamicTargets.push({
+            variableName: varMatch[1],
+            codeSnippet: trimmed,
+            lineNumber,
+          })
+        }
+      }
+      if (accountParam.isDynamic) {
+        const varMatch = callText.match(/account_id\s*=\s*(\w+)/)
+        if (varMatch) {
+          dynamicTargets.push({
+            variableName: varMatch[1],
+            codeSnippet: trimmed,
+            lineNumber,
+          })
+        }
+      }
+    }
+
+    if (trimmed.includes('valuation_engine.compute(')) {
+      const callText = collectCallText(lines, i)
+      const stepName = findEnclosingStep(lines, i)
+      const lineNumber = i + 1
+
+      const fromParam = extractParamValue(callText, 'from_instrument')
+      const toParam = extractParamValue(callText, 'to_instrument')
+      const methodParam = extractParamValue(callText, 'method_id')
+
+      valuationCalls.push({
+        stepName,
+        lineNumber,
+        fromInstrument: fromParam.value,
+        toInstrument: toParam.value,
+        methodId: methodParam.value,
+      })
+
+      if (fromParam.isDynamic) {
+        const varMatch = callText.match(/from_instrument\s*=\s*(\w+)/)
+        if (varMatch) {
+          dynamicTargets.push({
+            variableName: varMatch[1],
+            codeSnippet: trimmed,
+            lineNumber,
+          })
+        }
+      }
+      if (toParam.isDynamic) {
+        const varMatch = callText.match(/to_instrument\s*=\s*(\w+)/)
+        if (varMatch) {
+          dynamicTargets.push({
+            variableName: varMatch[1],
+            codeSnippet: trimmed,
+            lineNumber,
+          })
+        }
+      }
+      if (methodParam.isDynamic) {
+        const varMatch = callText.match(/method_id\s*=\s*(\w+)/)
+        if (varMatch) {
+          dynamicTargets.push({
+            variableName: varMatch[1],
+            codeSnippet: trimmed,
+            lineNumber,
+          })
+        }
+      }
+    }
+  }
+
+  return { producedEvents, valuationCalls, dynamicTargets }
 }
