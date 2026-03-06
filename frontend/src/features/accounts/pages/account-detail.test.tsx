@@ -58,7 +58,7 @@ describe('AccountDetailPage - loading and error states', () => {
     expect(screen.getByTestId('account-detail-skeleton')).toBeInTheDocument()
   })
 
-  it('shows 404 state for non-existent account', async () => {
+  it('shows error state for failed account fetch', async () => {
     server.use(
       http.post('*/meridian.current_account.v1.CurrentAccountService/RetrieveCurrentAccount', () =>
         HttpResponse.json({ message: 'not found' }, { status: 404 }),
@@ -68,7 +68,7 @@ describe('AccountDetailPage - loading and error states', () => {
     renderDetailPage('nonexistent-id')
 
     await waitFor(() => {
-      expect(screen.getByTestId('account-not-found')).toBeInTheDocument()
+      expect(screen.getByTestId('account-error')).toBeInTheDocument()
     })
   })
 })

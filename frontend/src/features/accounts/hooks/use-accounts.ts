@@ -126,7 +126,10 @@ export function useAccountDetail(accountId: string | undefined) {
           partyId: f.orgPartyId || undefined,
         }
       } catch (err: unknown) {
-        if (ConnectError.from(err).code === Code.NotFound) return null
+        const code = ConnectError.from(err).code
+        if (code === Code.NotFound) return null
+        // Log but don't crash for server errors (e.g. balance hydration failures)
+        console.error('Failed to retrieve account:', err)
         throw err
       }
     },

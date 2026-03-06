@@ -19,6 +19,14 @@ export interface Party {
   createdAt?: { seconds: bigint | number; nanos?: number }
 }
 
+function formatPartyStatus(value: string): string {
+  return value.replace(/^PARTY_STATUS_/, '')
+}
+
+function formatPartyType(value: string): string {
+  return value.replace(/^PARTY_TYPE_/, '')
+}
+
 export function PartiesPage() {
   const navigate = useNavigate()
   const { queryKey, queryFn, tenantSlug } = usePartiesTable()
@@ -34,15 +42,14 @@ export function PartiesPage() {
     {
       accessorKey: 'partyType',
       header: 'Party Type',
-      cell: ({ row }) => {
-        const type = row.original.partyType
-        return <span className="text-sm">{type}</span>
-      },
+      cell: ({ row }) => (
+        <span className="text-sm">{formatPartyType(row.original.partyType)}</span>
+      ),
     },
     {
       accessorKey: 'status',
       header: 'Status',
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      cell: ({ row }) => <StatusBadge status={formatPartyStatus(row.original.status)} />,
     },
     {
       accessorKey: 'externalReference',

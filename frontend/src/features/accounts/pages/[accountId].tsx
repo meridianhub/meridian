@@ -353,8 +353,22 @@ export function AccountDetailPage() {
   }
 
   // null = 404 from server; isError = network/server failure; undefined = query not yet resolved
-  if (isError || account === null || account === undefined) {
+  if (account === null) {
     return <AccountNotFound />
+  }
+
+  if (isError || account === undefined) {
+    return (
+      <div data-testid="account-error" className="p-6">
+        <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: accountId ?? 'Error' }]} />
+        <div className="mt-8 text-center">
+          <h2 className="text-xl font-semibold">Failed to load account</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            There was a problem loading this account. Please try again.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (

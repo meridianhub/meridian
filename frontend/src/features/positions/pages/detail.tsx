@@ -34,9 +34,21 @@ function BalanceView({ log }: BalanceViewProps) {
   let availableTotal = 0n
 
   for (const entry of entries) {
-    const rawAmount = entry.amount?.amount
-    if (rawAmount === undefined || rawAmount === null) continue
-    const amt = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount)
+    const money = entry.amount?.amount
+    if (money === undefined || money === null) continue
+    // money is google.type.Money: { units: bigint|number, nanos: number, currencyCode: string }
+    // or a primitive bigint/string in some serialization paths
+    let amt: bigint
+    if (typeof money === 'bigint') {
+      amt = money
+    } else if (typeof money === 'string') {
+      amt = BigInt(money)
+    } else if (typeof money === 'object' && 'units' in money) {
+      const units = typeof money.units === 'bigint' ? money.units : BigInt(money.units ?? 0)
+      amt = units
+    } else {
+      continue
+    }
     const signed = entry.direction === 'CREDIT' ? amt : -amt
 
     provisionalTotal += signed

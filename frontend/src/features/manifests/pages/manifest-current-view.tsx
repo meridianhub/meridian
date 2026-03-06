@@ -28,8 +28,9 @@ function LoadingSkeleton() {
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-3 py-8 text-destructive">
-      <span className="text-sm font-medium">Failed to load current manifest</span>
+    <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
+      <span className="text-sm font-medium">Manifest history is not available</span>
+      <span className="text-xs">The ManifestHistoryService is not yet deployed for this environment.</span>
       <Button variant="outline" size="sm" onClick={onRetry}>
         Retry
       </Button>

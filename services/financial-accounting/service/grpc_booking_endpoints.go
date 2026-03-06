@@ -182,6 +182,17 @@ func (s *FinancialAccountingService) RetrieveFinancialBookingLog(
 		return nil, status.Error(codes.Internal, "failed to retrieve booking log")
 	}
 
+	// Load postings separately (not embedded in GetBookingLog to avoid N+1 in list queries)
+	postings, err := s.repository.GetPostingsByBookingLogID(ctx, bookingLogID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to retrieve postings for booking log: %v", err)
+	}
+	enriched := *bookingLog
+	for _, p := range postings {
+		enriched = enriched.WithPosting(p)
+	}
+	bookingLog = &enriched
+
 	// Convert to protobuf and return
 	return &financialaccountingv1.RetrieveFinancialBookingLogResponse{
 		FinancialBookingLog: toProtoFinancialBookingLog(bookingLog),

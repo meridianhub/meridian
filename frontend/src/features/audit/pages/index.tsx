@@ -5,7 +5,8 @@ import { Card } from '@/components/ui/card'
 import { DataTable, type DataTableQueryParams, type DataTableResult, type FilterConfig } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { JsonDiffViewer } from '@/shared/audit-trail'
-import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
+import { useApiClients } from '@/api/context'
+import { AuditOperation as AuditOperationEnum } from '@/api/gen/meridian/audit/v1/audit_events_pb'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -25,9 +26,52 @@ export interface AuditLogEntry {
   newValues: object | null
 }
 
-export interface AuditLogResponse {
-  entries: AuditLogEntry[]
-  nextPageToken?: string
+// ---------------------------------------------------------------------------
+// Enum helpers
+// ---------------------------------------------------------------------------
+
+const OPERATION_NAMES: Record<number, AuditOperation> = {
+  [AuditOperationEnum.INSERT]: 'INSERT',
+  [AuditOperationEnum.UPDATE]: 'UPDATE',
+  [AuditOperationEnum.DELETE]: 'DELETE',
+}
+
+const VALID_OPERATIONS = new Set<string>(['INSERT', 'UPDATE', 'DELETE'])
+
+function toOperationName(op: unknown): AuditOperation {
+  if (typeof op === 'string' && VALID_OPERATIONS.has(op)) return op as AuditOperation
+  if (typeof op === 'number') return OPERATION_NAMES[op] ?? 'UPDATE'
+  return 'UPDATE'
+}
+
+// ---------------------------------------------------------------------------
+// Struct helpers — convert protobuf Struct/Value to plain objects
+// ---------------------------------------------------------------------------
+
+function structToObject(struct: unknown): object | null {
+  if (!struct || typeof struct !== 'object') return null
+  const s = struct as { fields?: Record<string, unknown> }
+  if (!s.fields) return null
+  const result: Record<string, unknown> = {}
+  for (const [key, val] of Object.entries(s.fields)) {
+    result[key] = valueToPlain(val)
+  }
+  return result
+}
+
+function valueToPlain(val: unknown): unknown {
+  if (!val || typeof val !== 'object') return val
+  const v = val as Record<string, unknown>
+  if ('stringValue' in v) return v.stringValue
+  if ('numberValue' in v) return v.numberValue
+  if ('boolValue' in v) return v.boolValue
+  if ('nullValue' in v) return null
+  if ('structValue' in v) return structToObject(v.structValue)
+  if ('listValue' in v) {
+    const list = v.listValue as { values?: unknown[] }
+    return (list.values ?? []).map(valueToPlain)
+  }
+  return val
 }
 
 // ---------------------------------------------------------------------------
@@ -211,32 +255,29 @@ const columns: ColumnDef<AuditLogEntry>[] = [
 
 export function AuditLogPage() {
   const [selectedEntry, setSelectedEntry] = useState<AuditLogEntry | null>(null)
-  const authFetch = useAuthenticatedFetch()
+  const clients = useApiClients()
 
   const fetchAuditEntries = useCallback(async (params: DataTableQueryParams): Promise<DataTableResult<AuditLogEntry>> => {
-    const body: Record<string, unknown> = {
+    const response = await clients.audit.listAuditEntries({
+      tableName: params.filters?.tableName ?? '',
+      recordId: params.filters?.recordId ?? '',
       pageSize: params.pageSize,
-    }
-    if (params.pageToken) body.pageToken = params.pageToken
-    if (params.filters) {
-      Object.entries(params.filters).forEach(([key, value]) => {
-        if (value) body[key] = value
-      })
-    }
-    const response = await authFetch('/meridian.audit.v1.AuditService/ListAuditEntries', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      pageToken: params.pageToken ?? '',
     })
-    if (!response.ok) {
-      if (response.status === 501 || response.status === 503) {
-        return { items: [], nextPageToken: undefined }
-      }
-      throw new Error(`Failed to fetch audit entries: ${response.status}`)
-    }
-    const data = (await response.json()) as AuditLogResponse
-    return { items: data.entries ?? [], nextPageToken: data.nextPageToken }
-  }, [authFetch])
+
+    const entries: AuditLogEntry[] = (response.entries ?? []).map((e) => ({
+      entryId: e.entryId ?? '',
+      timestamp: e.timestamp ?? null,
+      tableName: e.tableName ?? '',
+      operation: toOperationName(e.operation),
+      recordId: e.recordId ?? '',
+      changedBy: e.changedBy ?? '',
+      oldValues: structToObject(e.oldValues),
+      newValues: structToObject(e.newValues),
+    }))
+
+    return { items: entries, nextPageToken: response.nextPageToken || undefined }
+  }, [clients])
 
   return (
     <div className="flex flex-col gap-6">
