@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -358,16 +358,14 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
 
   const serviceColors = useMemo(() => buildServiceColorMap(flow), [flow])
 
-  // Reset highlight when selected service no longer exists in the flow
-  useEffect(() => {
-    if (highlightedService && !serviceColors.has(highlightedService)) {
-      setHighlightedService(null)
-    }
-  }, [serviceColors, highlightedService])
+  // Derive effective highlight — auto-clears when selected service no longer exists
+  const effectiveHighlight = highlightedService && serviceColors.has(highlightedService)
+    ? highlightedService
+    : null
 
   const { nodes, edges } = useMemo(
-    () => buildFlowGraph(flow, serviceColors, highlightedService),
-    [flow, serviceColors, highlightedService],
+    () => buildFlowGraph(flow, serviceColors, effectiveHighlight),
+    [flow, serviceColors, effectiveHighlight],
   )
 
   // Collect unique services for the legend
@@ -400,7 +398,7 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Services</span>
           {services.map((svc) => {
             const colors = serviceColors.get(svc)
-            const isActive = highlightedService === svc
+            const isActive = effectiveHighlight === svc
             return (
               <button
                 key={svc}
