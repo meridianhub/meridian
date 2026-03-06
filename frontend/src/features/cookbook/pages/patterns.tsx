@@ -8,7 +8,8 @@ export function CookbookPatternsPage() {
   const { items } = useCookbook()
   const patterns = items.filter((i) => i.type === 'registry:pattern')
   const [filters, setFilters] = useFilterState()
-  const filtered = applyFilters(patterns, filters)
+  const effectiveFilters = { ...filters, type: '' }
+  const filtered = applyFilters(patterns, effectiveFilters)
   const hasActiveFilters = !!(filters.search || filters.category || filters.industry)
 
   return (

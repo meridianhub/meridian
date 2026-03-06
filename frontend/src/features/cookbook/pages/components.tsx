@@ -8,7 +8,8 @@ export function CookbookComponentsPage() {
   const { items } = useCookbook()
   const components = items.filter((i) => i.type === 'registry:ui')
   const [filters, setFilters] = useFilterState()
-  const filtered = applyFilters(components, filters)
+  const effectiveFilters = { ...filters, type: '' }
+  const filtered = applyFilters(components, effectiveFilters)
   const hasActiveFilters = !!(filters.search || filters.category || filters.industry)
 
   return (

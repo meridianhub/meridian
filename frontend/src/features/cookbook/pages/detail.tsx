@@ -195,6 +195,7 @@ function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | 
 
 function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }) {
   const [activeFile, setActiveFile] = useState(0)
+  const activeIndex = activeFile >= starlarkFiles.length ? 0 : activeFile
 
   if (starlarkFiles.length === 0) {
     return <p className="text-sm text-muted-foreground">No Starlark file found.</p>
@@ -213,7 +214,7 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
             type="button"
             onClick={() => setActiveFile(i)}
             className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-              i === activeFile
+              i === activeIndex
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
@@ -222,7 +223,7 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
           </button>
         ))}
       </div>
-      <StarlarkEditor value={starlarkFiles[activeFile].content} onChange={() => {}} readOnly />
+      <StarlarkEditor value={starlarkFiles[activeIndex].content} onChange={() => {}} readOnly />
     </div>
   )
 }

@@ -19,7 +19,12 @@ function ComplexityIndicator({ score }: { score: number }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex items-center gap-1" data-testid="complexity-indicator">
+        <span
+          tabIndex={0}
+          aria-label={`Complexity: ${score}/10`}
+          className="flex items-center gap-1"
+          data-testid="complexity-indicator"
+        >
           {Array.from({ length: 5 }, (_, i) => (
             <div
               key={i}
@@ -28,7 +33,7 @@ function ComplexityIndicator({ score }: { score: number }) {
               }`}
             />
           ))}
-        </div>
+        </span>
       </TooltipTrigger>
       <TooltipContent>Complexity: {score}/10</TooltipContent>
     </Tooltip>
