@@ -217,14 +217,17 @@ export function CookbookDetailPage() {
   const { items, isLoading: catalogueLoading } = useCookbook()
 
   const item = items.find((i) => i.name === name)
-  const { starlarkFiles, manifestContent, hasSagas } = usePatternFiles(item)
+  const { starlarkFiles, manifestContent, hasSagas, sagaTrigger } = usePatternFiles(item)
 
   const firstStarlarkContent = starlarkFiles.length > 0 ? starlarkFiles[0].content : null
 
   const sagaFlow = useMemo(() => {
     if (!firstStarlarkContent) return null
-    return parseStarlarkSaga(firstStarlarkContent)
-  }, [firstStarlarkContent])
+    const flow = parseStarlarkSaga(firstStarlarkContent)
+    // Manifest YAML is source of truth for trigger
+    flow.trigger = sagaTrigger
+    return flow
+  }, [firstStarlarkContent, sagaTrigger])
 
   if (catalogueLoading) {
     return <DetailSkeleton fieldCount={3} tabCount={3} showBackNav />

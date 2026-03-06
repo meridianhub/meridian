@@ -12,6 +12,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import Dagre from '@dagrejs/dagre'
 import type { SagaFlow } from '../lib/star-parser'
+import { parseTriggerService } from '../lib/star-parser'
 
 // Curated palette of visually distinct service colors
 const SERVICE_PALETTE = [
@@ -27,6 +28,10 @@ const SERVICE_PALETTE = [
 
 function buildServiceColorMap(flow: SagaFlow): Map<string, { bg: string; fg: string }> {
   const services = new Set<string>()
+  // Include trigger producing service
+  const triggerSvc = parseTriggerService(flow.trigger)
+  if (triggerSvc) services.add(triggerSvc)
+  // Include called services
   for (const step of flow.steps) {
     for (const call of step.serviceCalls) {
       services.add(call.service)
@@ -45,16 +50,35 @@ function buildServiceColorMap(flow: SagaFlow): Map<string, { bg: string; fg: str
 interface StartNodeData {
   label: string
   trigger: string | null
+  triggerService: string | null
+  serviceColors: Map<string, { bg: string; fg: string }>
+  highlightedService: string | null
   [key: string]: unknown
 }
 
 function StartNode({ data }: { data: StartNodeData }) {
+  const triggerColors = data.triggerService ? data.serviceColors.get(data.triggerService) : undefined
+  const isTriggerHighlighted = data.highlightedService === data.triggerService && data.triggerService != null
+  const dimmed = data.highlightedService && !isTriggerHighlighted
+
   return (
     <>
-      <div className="flex flex-col items-center justify-center rounded-full border-2 border-emerald-500 bg-emerald-50 px-4 py-2 dark:bg-emerald-950/40">
+      <div
+        className={`flex flex-col items-center justify-center rounded-full border-2 border-emerald-500 bg-emerald-50 px-4 py-2 dark:bg-emerald-950/40 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
+        style={isTriggerHighlighted && triggerColors
+          ? { borderColor: triggerColors.fg, boxShadow: `0 0 0 2px ${triggerColors.fg}`, outline: `2px solid ${triggerColors.fg}`, outlineOffset: '2px' }
+          : {}}
+      >
         <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{data.label}</span>
         {data.trigger && (
-          <span className="text-[10px] text-emerald-600 dark:text-emerald-400">{data.trigger}</span>
+          <span
+            className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium mt-0.5"
+            style={triggerColors
+              ? { backgroundColor: triggerColors.bg, color: triggerColors.fg }
+              : {}}
+          >
+            {data.trigger}
+          </span>
         )}
       </div>
       <Handle type="source" position={Position.Right} className="!bg-emerald-500 !border-0 !w-2 !h-2" />
@@ -228,12 +252,20 @@ function buildFlowGraph(
   const nodes: Node[] = []
   const edges: Edge[] = []
 
+  const triggerService = parseTriggerService(flow.trigger)
+
   // Start node
   nodes.push({
     id: 'start',
     type: 'sagaStart',
     position: { x: 0, y: 0 },
-    data: { label: flow.name, trigger: flow.trigger } satisfies StartNodeData,
+    data: {
+      label: flow.name,
+      trigger: flow.trigger,
+      triggerService,
+      serviceColors,
+      highlightedService,
+    } satisfies StartNodeData,
   })
 
   if (flow.steps.length === 0) {
@@ -412,6 +444,9 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
                   style={{ backgroundColor: colors?.fg }}
                 />
                 <span className="text-xs text-muted-foreground">{svc}</span>
+                {svc === parseTriggerService(flow.trigger) && (
+                  <span className="text-[9px] text-muted-foreground/60 italic">trigger</span>
+                )}
               </button>
             )
           })}

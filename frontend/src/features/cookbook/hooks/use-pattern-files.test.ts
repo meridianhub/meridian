@@ -129,4 +129,29 @@ describe('usePatternFiles', () => {
     const { result } = renderHook(() => usePatternFiles(undefined))
     expect(result.current.hasSagas).toBe(false)
   })
+
+  it('extracts sagaTrigger from manifest YAML', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/manifest.yaml', content: 'name: test\nsagas:\n  - name: deposit\n    trigger: "event:position-keeping.transaction-captured.v1"' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.sagaTrigger).toBe('event:position-keeping.transaction-captured.v1')
+  })
+
+  it('returns null sagaTrigger when no sagas in manifest', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/manifest.yaml', content: 'name: test\ntype: registry:pattern' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.sagaTrigger).toBeNull()
+  })
+
+  it('returns null sagaTrigger for undefined item', () => {
+    const { result } = renderHook(() => usePatternFiles(undefined))
+    expect(result.current.sagaTrigger).toBeNull()
+  })
 })
