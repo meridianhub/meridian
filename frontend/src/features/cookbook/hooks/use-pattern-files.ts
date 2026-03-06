@@ -1,23 +1,38 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer } from 'react'
 
-interface PatternFilesResult {
+interface PatternFilesState {
   starlarkContent: string | null
   manifestContent: string | null
   isLoading: boolean
 }
 
-export function usePatternFiles(patternName: string | undefined): PatternFilesResult {
-  const [starlarkContent, setStarlarkContent] = useState<string | null>(null)
-  const [manifestContent, setManifestContent] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+type PatternFilesAction =
+  | { type: 'fetch_start' }
+  | { type: 'fetch_done'; starlark: string | null; manifest: string | null }
+
+const initialState: PatternFilesState = {
+  starlarkContent: null,
+  manifestContent: null,
+  isLoading: false,
+}
+
+function reducer(_state: PatternFilesState, action: PatternFilesAction): PatternFilesState {
+  switch (action.type) {
+    case 'fetch_start':
+      return { starlarkContent: null, manifestContent: null, isLoading: true }
+    case 'fetch_done':
+      return { starlarkContent: action.starlark, manifestContent: action.manifest, isLoading: false }
+  }
+}
+
+export function usePatternFiles(patternName: string | undefined): PatternFilesState {
+  const [state, dispatch] = useReducer(reducer, initialState)
 
   useEffect(() => {
     if (!patternName) return
 
     let cancelled = false
-    setIsLoading(true)
-    setStarlarkContent(null)
-    setManifestContent(null)
+    dispatch({ type: 'fetch_start' })
 
     const fetchFile = async (path: string): Promise<string | null> => {
       try {
@@ -34,9 +49,7 @@ export function usePatternFiles(patternName: string | undefined): PatternFilesRe
       fetchFile(`/cookbook/patterns/${patternName}/manifest.yaml`),
     ]).then(([star, yaml]) => {
       if (cancelled) return
-      setStarlarkContent(star)
-      setManifestContent(yaml)
-      setIsLoading(false)
+      dispatch({ type: 'fetch_done', starlark: star, manifest: yaml })
     })
 
     return () => {
@@ -44,5 +57,5 @@ export function usePatternFiles(patternName: string | undefined): PatternFilesRe
     }
   }, [patternName])
 
-  return { starlarkContent, manifestContent, isLoading }
+  return state
 }
