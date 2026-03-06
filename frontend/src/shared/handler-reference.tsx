@@ -55,8 +55,8 @@ export interface HandlerSchemaResponse {
 export interface HandlerReferenceProps {
   /** Filter string to search handlers and services (case-insensitive) */
   filter?: string
-  /** Callback invoked when user clicks insert button with Starlark call template */
-  onInsert: (template: string) => void
+  /** Callback invoked when user clicks insert button with Starlark call template. When omitted, insert buttons are hidden. */
+  onInsert?: (template: string) => void
   /** Optional CSS class names to apply to the root container */
   className?: string
 }
@@ -123,6 +123,7 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
    * @param handler The handler to insert
    */
   const handleInsert = (serviceName: string, handler: Handler) => {
+    if (!onInsert) return
     const template = generateTemplate(serviceName, handler)
     onInsert(template)
   }
@@ -233,16 +234,18 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
                           </ul>
                         )}
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleInsert(service.serviceName, handler)}
-                        className="shrink-0"
-                        aria-label={`Insert ${handler.name}`}
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </Button>
+                      {onInsert && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleInsert(service.serviceName, handler)}
+                          className="shrink-0"
+                          aria-label={`Insert ${handler.name}`}
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}

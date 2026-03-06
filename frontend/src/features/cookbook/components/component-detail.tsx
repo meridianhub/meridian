@@ -54,6 +54,14 @@ export function ComponentDetail({ item }: ComponentDetailProps) {
                 <Badge variant="outline">{meta.feature_module}</Badge>
               </div>
             )}
+            {meta?.tenant_configurable != null && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Tenant configurable:</span>
+                <Badge variant={meta.tenant_configurable ? 'default' : 'secondary'}>
+                  {meta.tenant_configurable ? 'Yes' : 'No'}
+                </Badge>
+              </div>
+            )}
             {meta?.used_by && meta.used_by.length > 0 && (
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-muted-foreground">Used by:</span>

@@ -186,7 +186,6 @@ function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | 
         <div className="border-t px-4 py-3">
           <HandlerReference
             filter={filterString}
-            onInsert={() => {}}
           />
         </div>
       )}
