@@ -111,7 +111,7 @@ The following issues were identified in an initial codebase audit. Task 1 (Deep 
 | `services/internal-account/service/lien_service.go` | 709, 716 | `const defaultPrecision = 2` — wrong for energy (6), carbon (3). |
 | `services/current-account/service/grpc_account_endpoints.go` | 54, 83-89 | Falls back to precision `2` when instrument not in currency registry. |
 | `services/position-keeping/adapters/balance_mapper.go` | 256-272 | `inferInstrumentProperties()` switch statement maps specific codes to dimensions. |
-| `services/position-keeping/domain/quantity.go` | ~310-320 | `NewMoneyFromInstrumentCode()` hardcodes `"ENERGY"` and precision `2` for non-currency (PR #1457). |
+| `services/position-keeping/domain/quantity.go` | ~310-320 | (Open PR #1457, not yet merged) `NewMoneyFromInstrumentCode()` hardcodes `"ENERGY"` and precision `2`. |
 
 ### Medium: Database Schema Constraints
 
@@ -124,7 +124,7 @@ The following issues were identified in an initial codebase audit. Task 1 (Deep 
 
 | File | Lines | Issue |
 |------|-------|-------|
-| `services/financial-accounting/domain/ledger_posting.go` | 12, 68 | Rejects zero/negative amounts per BIAN. Review for physical quantities. |
+| `services/financial-accounting/domain/ledger_posting.go` | 12, 68 | Rejects zero/negative amounts per BIAN. Deferred: requires BIAN compliance review before changing for non-CURRENCY dimensions. |
 
 ## Design Principles
 
@@ -183,18 +183,35 @@ Services resolve instrument properties through Reference Data with in-process ca
 
 ### Schema Migrations
 
-Instrument code columns must be widened to support the full `InstrumentCodePattern` (`^[A-Z][A-Z0-9_]*$`, max 32 chars):
+Instrument code columns must be widened to support the full
+`InstrumentCodePattern` (`^[A-Z][A-Z0-9_]*$`, max 32 chars):
 
 - `CHAR(3)` -> `VARCHAR(32)`
 - Identify all affected tables across services
 - Create Atlas migrations per service, ordered before code changes
+
+**Migration safety requirements:**
+
+- **Index/constraint audit**: For each affected table, verify indexes,
+  unique constraints, FK lengths, and expression indexes that reference
+  the column. Ensure all are compatible with `VARCHAR(32)`.
+- **Rollback strategy**: Each Atlas migration must document how to revert
+  schema and data if needed. Column widening (`CHAR(3)` -> `VARCHAR(32)`)
+  is backward-compatible for existing data but test the reverse path.
+- **Mixed-version compatibility**: During rollout, old code (expecting
+  `CHAR(3)`) and new code (writing longer codes) may run concurrently.
+  Schema widening must deploy before any code that writes longer codes.
+  Read paths must tolerate both short and long values.
 
 ### CI Lint Rule
 
 Add a CI check that scans production Go files (excluding `*_test.go`, `cmd/seed-*`, `utilities/`) for:
 
 - Direct string comparisons against known instrument codes
-- Imports of deprecated `shared/domain/money` or `shared/platform/quantity/currency`
+- Imports of deprecated `shared/domain/money` or
+  `shared/platform/quantity/currency` (exclude external adapter paths
+  like `**/adapters/stripe/**` where currency-specific logic is
+  intentionally retained)
 - `defaultPrecision` or similar hardcoded precision constants
 
 ## Success Criteria
@@ -211,7 +228,7 @@ Add a CI check that scans production Go files (excluding `*_test.go`, `cmd/seed-
 
 | Risk | Mitigation |
 |------|------------|
-| Reference Data service unavailability | Cache instrument properties with appropriate TTL. Services must not start if initial cache population fails. |
+| Reference Data service unavailability | Cache instrument properties with appropriate TTL. On startup, attempt to populate cache from Reference Data; if unavailable, fall back to a last-known-good snapshot from durable storage. Surface an alert when snapshot fallback is used. Fail closed only for truly unknown instruments at request time. |
 | Performance regression from runtime lookups | Instrument properties are immutable per tenant deployment. Cache aggressively (per-process in-memory). |
 | Breaking existing API contracts | Proto fields remain string-typed. No wire format changes. |
 | Migration ordering | Schema migrations (widen columns) must precede code changes that use longer codes. |
