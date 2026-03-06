@@ -6,15 +6,15 @@ import type { SagaFlow } from './star-parser'
 export function generateMermaidMarkup(flow: SagaFlow): string {
   const lines: string[] = ['flowchart TD']
 
-  if (flow.steps.length === 0) {
-    lines.push(`    START(["${escapeMermaid(flow.name)}"]) --> END(["COMPLETED"])`)
-    return lines.join('\n')
-  }
-
-  // Start node
   const startLabel = flow.trigger
     ? `${escapeMermaid(flow.name)}\\n${escapeMermaid(flow.trigger)}`
     : escapeMermaid(flow.name)
+
+  if (flow.steps.length === 0) {
+    lines.push(`    START(["${startLabel}"]) --> END(["COMPLETED"])`)
+    return lines.join('\n')
+  }
+
   lines.push(`    START(["${startLabel}"]) --> S1`)
 
   // Steps

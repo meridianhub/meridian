@@ -71,31 +71,25 @@ function extractSteps(lines: string[]): SagaFlowStep[] {
   const stepPositions: { name: string; lineNumber: number; lineIndex: number }[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/step\(\s*name\s*=\s*"([^"]+)"/)
-    if (match) {
+    // Check dynamic pattern first (step(name="prefix_" + expr))
+    const dynamicMatch = lines[i].match(/step\(\s*name\s*=\s*"([^"]+)"\s*\+/)
+    if (dynamicMatch) {
       stepPositions.push({
-        name: match[1],
+        name: `${dynamicMatch[1]}*`,
         lineNumber: i + 1,
         lineIndex: i,
       })
+      continue
     }
-  }
 
-  // For dynamic step names (e.g., step(name="book_payout_" + str(...))), extract base name
-  for (let i = 0; i < lines.length; i++) {
-    const dynamicMatch = lines[i].match(
-      /step\(\s*name\s*=\s*"([^"]+)"\s*\+/,
-    )
-    if (dynamicMatch) {
-      // Check if this was already captured as a static step
-      const alreadyCaptured = stepPositions.some((s) => s.lineIndex === i)
-      if (!alreadyCaptured) {
-        stepPositions.push({
-          name: dynamicMatch[1] + '*',
-          lineNumber: i + 1,
-          lineIndex: i,
-        })
-      }
+    // Static step name
+    const staticMatch = lines[i].match(/step\(\s*name\s*=\s*"([^"]+)"/)
+    if (staticMatch) {
+      stepPositions.push({
+        name: staticMatch[1],
+        lineNumber: i + 1,
+        lineIndex: i,
+      })
     }
   }
 
