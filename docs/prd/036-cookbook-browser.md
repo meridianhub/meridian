@@ -387,6 +387,36 @@ interactive exploration tool where the visual flow,
 the source code, and the API documentation are all
 connected.
 
+### Preview / Source Toggle
+
+Every rendered artefact in the browser uses a
+consistent **tabbed preview pattern**: a "Preview" tab
+showing the rendered output, a "Source" tab showing
+the underlying markup or code, and a copy-to-clipboard
+button. This is the standard pattern from technical
+documentation sites (MDN, Storybook, component
+libraries) where readers need to both understand and
+reuse what they see.
+
+| Context | Preview tab | Source tab |
+|---------|------------|-----------|
+| Saga flow diagram | Rendered Mermaid flowchart | Generated Mermaid markup |
+| Starlark editor | Syntax-highlighted code | Raw `.star` file content |
+| Service module reference | Formatted API docs | Raw `handlers.yaml` block |
+| UI component preview | Live rendered component | Component JSX + props |
+
+The copy button copies the source tab content. For
+Mermaid diagrams, this means a reader can paste the
+generated markup into any Mermaid-compatible tool
+(GitHub markdown, Notion, Confluence) and get the same
+diagram — the portability argument for choosing Mermaid
+over a custom renderer.
+
+Implementation: a shared `PreviewSourceTabs` component
+composing shadcn/ui `Tabs` with a `CopyButton`. Each
+content area provides its own preview and source
+renderers.
+
 ### Composition Graph
 
 An interactive node graph using a lightweight graph
