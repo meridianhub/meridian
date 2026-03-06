@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -42,6 +42,7 @@ function AccountDetailSkeleton() {
 // ---------------------------------------------------------------------------
 
 function AccountNotFound() {
+  const { accountId } = useParams<{ accountId: string }>()
   return (
     <div data-testid="account-not-found" className="p-6">
       <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: 'Not found' }]} />
@@ -50,6 +51,14 @@ function AccountNotFound() {
         <p className="mt-2 text-sm text-muted-foreground">
           The account you are looking for does not exist or has been removed.
         </p>
+        {accountId && (
+          <p className="mt-3 text-sm">
+            Did you mean?{' '}
+            <Link to={`/internal-accounts/${encodeURIComponent(accountId)}`} className="text-blue-600 hover:underline dark:text-blue-400">
+              View as internal account
+            </Link>
+          </p>
+        )}
       </div>
     </div>
   )

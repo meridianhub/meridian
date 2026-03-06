@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -20,27 +21,37 @@ export function useReconciliationRunsTable() {
   ): Promise<DataTableResult<ReconciliationRun>> {
     if (!tenantSlug) return { items: [] }
 
-    const response = await clients.accountReconciliation.listReconciliationRuns({
-      pageSize: params.pageSize,
-      pageToken: params.pageToken ?? '',
-      ...(params.filters?.status ? { status: params.filters.status } : {}),
-      ...(params.filters?.account_id ? { accountId: params.filters.account_id } : {}),
-    })
+    try {
+      const response = await clients.accountReconciliation.listReconciliationRuns({
+        pageSize: params.pageSize,
+        pageToken: params.pageToken ?? '',
+        ...(params.filters?.status ? { status: params.filters.status } : {}),
+        ...(params.filters?.account_id ? { accountId: params.filters.account_id } : {}),
+      })
 
-    const items: ReconciliationRun[] = (response.runs ?? []).map((run) => ({
-      runId: run.runId ?? '',
-      accountId: run.accountId ?? '',
-      scope: (run.scope ?? '').replace('RECONCILIATION_SCOPE_', ''),
-      settlementType: (run.settlementType ?? '').replace('SETTLEMENT_TYPE_', ''),
-      status: (run.status ?? '').replace('RUN_STATUS_', ''),
-      varianceCount: run.varianceCount ?? 0,
-      periodStart: run.periodStart ?? '',
-      periodEnd: run.periodEnd ?? '',
-    }))
+      const items: ReconciliationRun[] = (response.runs ?? []).map((run) => ({
+        runId: run.runId ?? '',
+        accountId: run.accountId ?? '',
+        scope: (run.scope ?? '').replace('RECONCILIATION_SCOPE_', ''),
+        settlementType: (run.settlementType ?? '').replace('SETTLEMENT_TYPE_', ''),
+        status: (run.status ?? '').replace('RUN_STATUS_', ''),
+        varianceCount: run.varianceCount ?? 0,
+        periodStart: run.periodStart ?? '',
+        periodEnd: run.periodEnd ?? '',
+      }))
 
-    return {
-      items,
-      nextPageToken: response.nextPageToken || undefined,
+      return {
+        items,
+        nextPageToken: response.nextPageToken || undefined,
+      }
+    } catch (error) {
+      if (
+        error instanceof ConnectError &&
+        (error.code === Code.NotFound || error.code === Code.Unimplemented)
+      ) {
+        return { items: [] }
+      }
+      throw error
     }
   }
 
