@@ -177,6 +177,12 @@ message CurrentAccountFacility {
   // Derived from product_type_code at creation time and stored for query efficiency.
   // Examples: "CUSTOMER", "CLEARING", "NOSTRO". Empty for legacy accounts.
   string behavior_class = 15;
+
+  // party_id references the owning party from the Party Service.
+  // Set at account creation and immutable thereafter.
+  string party_id = 16 [(buf.validate.field).string = {
+    max_len: 100
+  }];
 }
 
 // AccountBalance represents the current balance state of an account
