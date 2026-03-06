@@ -13,6 +13,15 @@ vi.mock('@/api/clients', () => ({
   createServiceClients: vi.fn(() => ({})),
 }))
 
+vi.mock('@/components/ui/tooltip', () => ({
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="tooltip-content">{children}</div>
+  ),
+}))
+
 // Mock @xyflow/react
 vi.mock('@xyflow/react', () => {
   const Position = { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' }
@@ -23,8 +32,8 @@ vi.mock('@xyflow/react', () => {
   function ReactFlow({ nodes, edges, children }: { nodes: unknown[]; edges: unknown[]; children?: React.ReactNode }) {
     return (
       <div data-testid="react-flow" data-node-count={nodes.length} data-edge-count={edges.length}>
-        {(nodes as { id: string; data: { label?: string } }[]).map((n) => (
-          <div key={n.id} data-testid={`node-${n.id}`}>
+        {(nodes as { id: string; data: { label?: string; fullTitle?: string; designPattern?: string } }[]).map((n) => (
+          <div key={n.id} data-testid={`node-${n.id}`} data-full-title={n.data?.fullTitle} data-design-pattern={n.data?.designPattern}>
             {n.data?.label ?? n.id}
           </div>
         ))}
@@ -166,5 +175,30 @@ describe('CompositionGraph', () => {
     renderGraph([])
     expect(screen.getByTestId('react-flow')).toBeInTheDocument()
     expect(screen.getByText('0 patterns')).toBeInTheDocument()
+  })
+
+  it('passes fullTitle and designPattern to node data', async () => {
+    const patternsWithDesign: CookbookItem[] = [
+      {
+        name: 'energy-trading',
+        type: 'registry:pattern',
+        title: 'Energy Trading',
+        categories: ['energy'],
+        meta: {
+          complexity: 7,
+          design_pattern: 'Saga',
+        } satisfies PatternMeta,
+      },
+    ]
+    renderGraph(patternsWithDesign)
+    const node = await screen.findByTestId('node-energy-trading')
+    expect(node).toHaveAttribute('data-full-title', 'Energy Trading')
+    expect(node).toHaveAttribute('data-design-pattern', 'Saga')
+  })
+
+  it('renders full title text in node', async () => {
+    renderGraph(patterns)
+    const node = await screen.findByText('Energy Trading')
+    expect(node).toBeInTheDocument()
   })
 })
