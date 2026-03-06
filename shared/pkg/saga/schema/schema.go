@@ -195,6 +195,9 @@ func (h *HandlerDef) Validate(handlerName string) error {
 	if h.CompensationStrategy != "" && !validCompensationStrategies[h.CompensationStrategy] {
 		return fmt.Errorf("%w: %s has %q", ErrInvalidCompensationStrategy, handlerName, h.CompensationStrategy)
 	}
+	if h.Compensate == "" && h.CompensationStrategy == CompensationStrategyAuto {
+		return fmt.Errorf("%w: %s has %q without compensate", ErrInvalidCompensationStrategy, handlerName, h.CompensationStrategy)
+	}
 	if h.Compensate != "" && h.CompensationStrategy != "" && h.CompensationStrategy != CompensationStrategyAuto {
 		return fmt.Errorf("%w: %s", ErrConflictCompensationStrategy, handlerName)
 	}
