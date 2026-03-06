@@ -75,7 +75,7 @@ type Money struct {
 // instrumentForCurrency returns the quantity.Instrument for the given currency code.
 // Returns an error if the currency is not recognized.
 func instrumentForCurrency(code string) (quantity.Instrument, error) {
-	inst, ok := currency.ByCode(strings.ToUpper(code))
+	inst, ok := currency.ByCode(strings.ToUpper(code)) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 	if !ok {
 		return quantity.Instrument{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, code)
 	}

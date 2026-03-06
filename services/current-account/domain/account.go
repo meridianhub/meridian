@@ -116,7 +116,7 @@ func WithBehaviorClass(behaviorClass string) AccountOption {
 // Precision is derived automatically from the currency registry.
 // Dimension defaults to "CURRENCY". Use NewCurrentAccountWithDimension for explicit dimensions.
 func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode string, opts ...AccountOption) (CurrentAccount, error) {
-	inst, ok := currency.ByCode(strings.ToUpper(instrumentCode))
+	inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 	if !ok {
 		return CurrentAccount{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, instrumentCode)
 	}
@@ -141,7 +141,7 @@ func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, inst
 	// the Reference Data service), precision validation is deferred: NewAmountFromInstrument
 	// will return ErrInvalidCurrency if the code is genuinely unknown.
 	if normalizedDimension == quantity.DimensionCurrency {
-		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok {
+		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok { //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 			if inst.Precision != precision {
 				return CurrentAccount{}, fmt.Errorf("%w: currency %s requires precision %d, got %d",
 					ErrPrecisionMismatch, strings.ToUpper(instrumentCode), inst.Precision, precision)

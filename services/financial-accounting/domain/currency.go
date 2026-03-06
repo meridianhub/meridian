@@ -5,15 +5,17 @@
 package domain
 
 import (
-	"github.com/meridianhub/meridian/shared/domain/money"
+	"github.com/meridianhub/meridian/shared/domain/money" //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // Currency is an alias for the shared money.Currency type.
 // This is maintained for backward compatibility with FinancialBookingLog.BaseCurrency.
-type Currency = money.Currency
+type Currency = money.Currency //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 
 // Supported currency codes following ISO 4217 standard.
+//
+//nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 const (
 	CurrencyGBP = money.CurrencyGBP
 	CurrencyUSD = money.CurrencyUSD
@@ -26,7 +28,7 @@ const (
 
 // ParseCurrency converts a string to a Currency type with validation.
 func ParseCurrency(s string) (Currency, error) {
-	return money.ParseCurrency(s)
+	return money.ParseCurrency(s) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 }
 
 // CurrencyToInstrument converts a Currency to an Instrument for use with Qty[Monetary].
@@ -40,14 +42,14 @@ func ParseCurrency(s string) (Currency, error) {
 //
 // Returns an error if the currency is invalid.
 func CurrencyToInstrument(c Currency) (Instrument, error) {
-	if !c.IsValid() {
+	if !c.IsValid() { //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 		return Instrument{}, ErrInvalidDimension
 	}
 	return quantity.NewInstrument(
 		string(c),
 		1,
 		DimensionCurrency,
-		int(c.DecimalPlaces()),
+		int(c.DecimalPlaces()), //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 	)
 }
 
