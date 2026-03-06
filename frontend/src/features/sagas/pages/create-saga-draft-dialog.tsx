@@ -166,8 +166,8 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0">
+        <DialogHeader className="p-6 pb-0 flex-shrink-0">
           <DialogTitle>Create Saga Draft</DialogTitle>
           <DialogDescription>
             Define a new Starlark saga workflow. It will be created in DRAFT status and must be
@@ -175,124 +175,126 @@ export function CreateSagaDraftDialog({ open, onOpenChange }: CreateSagaDraftDia
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={(e) => void handleSubmit(e)} id="create-saga-draft-form">
-          <div className="space-y-4 py-2">
-            {errors.general && (
-              <div
-                role="alert"
-                className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              >
-                {errors.general}
+        <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
+          <form onSubmit={(e) => void handleSubmit(e)} id="create-saga-draft-form">
+            <div className="space-y-4">
+              {errors.general && (
+                <div
+                  role="alert"
+                  className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                >
+                  {errors.general}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label htmlFor="saga-name" className="text-sm font-medium">
+                  Name <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  id="saga-name"
+                  value={formData.name}
+                  onChange={handleChange('name')}
+                  placeholder="savings.withdraw"
+                  aria-label="Name"
+                  aria-describedby={
+                    errors.name ? 'saga-name-error' : 'saga-name-hint'
+                  }
+                  maxLength={100}
+                />
+                <p id="saga-name-hint" className="text-xs text-muted-foreground">
+                  Use <code className="font-mono">prefix.operation</code> format to link with an
+                  account type (e.g., <code className="font-mono">savings.withdraw</code>).
+                </p>
+                {errors.name && (
+                  <p id="saga-name-error" className="text-sm text-destructive">
+                    {errors.name}
+                  </p>
+                )}
               </div>
-            )}
 
-            <div className="space-y-1">
-              <label htmlFor="saga-name" className="text-sm font-medium">
-                Name <span className="text-destructive">*</span>
-              </label>
-              <Input
-                id="saga-name"
-                value={formData.name}
-                onChange={handleChange('name')}
-                placeholder="savings.withdraw"
-                aria-label="Name"
-                aria-describedby={
-                  errors.name ? 'saga-name-error' : 'saga-name-hint'
-                }
-                maxLength={100}
-              />
-              <p id="saga-name-hint" className="text-xs text-muted-foreground">
-                Use <code className="font-mono">prefix.operation</code> format to link with an
-                account type (e.g., <code className="font-mono">savings.withdraw</code>).
-              </p>
-              {errors.name && (
-                <p id="saga-name-error" className="text-sm text-destructive">
-                  {errors.name}
+              <div className="space-y-1">
+                <label htmlFor="saga-display-name" className="text-sm font-medium">
+                  Display Name{' '}
+                  <span className="font-normal text-muted-foreground">(optional)</span>
+                </label>
+                <Input
+                  id="saga-display-name"
+                  value={formData.displayName}
+                  onChange={handleChange('displayName')}
+                  placeholder="Savings Withdrawal"
+                  aria-label="Display Name"
+                  aria-describedby={errors.displayName ? 'saga-display-name-error' : undefined}
+                  maxLength={255}
+                />
+                {errors.displayName && (
+                  <p id="saga-display-name-error" className="text-sm text-destructive">
+                    {errors.displayName}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="saga-description" className="text-sm font-medium">
+                  Description{' '}
+                  <span className="font-normal text-muted-foreground">(optional)</span>
+                </label>
+                <textarea
+                  id="saga-description"
+                  value={formData.description}
+                  onChange={handleChange('description')}
+                  placeholder="Describe what this saga does..."
+                  aria-label="Description"
+                  aria-describedby={errors.description ? 'saga-description-error' : undefined}
+                  maxLength={1000}
+                  rows={3}
+                  className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground"
+                />
+                {errors.description && (
+                  <p id="saga-description-error" className="text-sm text-destructive">
+                    {errors.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">
+                  Script <span className="text-destructive">*</span>
+                </label>
+                <StarlarkEditor
+                  value={formData.script}
+                  onChange={handleScriptChange}
+                  className="min-h-[200px]"
+                />
+                {errors.script && (
+                  <p id="saga-script-error" className="text-sm text-destructive">
+                    {errors.script}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="saga-preconditions" className="text-sm font-medium">
+                  Preconditions CEL{' '}
+                  <span className="font-normal text-muted-foreground">(optional)</span>
+                </label>
+                <Input
+                  id="saga-preconditions"
+                  value={formData.preconditionsCel}
+                  onChange={handleChange('preconditionsCel')}
+                  placeholder="amount > 0"
+                  aria-label="Preconditions CEL"
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  CEL expression evaluated before saga execution. Leave empty for no preconditions.
                 </p>
-              )}
+              </div>
             </div>
+          </form>
+        </div>
 
-            <div className="space-y-1">
-              <label htmlFor="saga-display-name" className="text-sm font-medium">
-                Display Name{' '}
-                <span className="font-normal text-muted-foreground">(optional)</span>
-              </label>
-              <Input
-                id="saga-display-name"
-                value={formData.displayName}
-                onChange={handleChange('displayName')}
-                placeholder="Savings Withdrawal"
-                aria-label="Display Name"
-                aria-describedby={errors.displayName ? 'saga-display-name-error' : undefined}
-                maxLength={255}
-              />
-              {errors.displayName && (
-                <p id="saga-display-name-error" className="text-sm text-destructive">
-                  {errors.displayName}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label htmlFor="saga-description" className="text-sm font-medium">
-                Description{' '}
-                <span className="font-normal text-muted-foreground">(optional)</span>
-              </label>
-              <textarea
-                id="saga-description"
-                value={formData.description}
-                onChange={handleChange('description')}
-                placeholder="Describe what this saga does..."
-                aria-label="Description"
-                aria-describedby={errors.description ? 'saga-description-error' : undefined}
-                maxLength={1000}
-                rows={3}
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground"
-              />
-              {errors.description && (
-                <p id="saga-description-error" className="text-sm text-destructive">
-                  {errors.description}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm font-medium">
-                Script <span className="text-destructive">*</span>
-              </label>
-              <StarlarkEditor
-                value={formData.script}
-                onChange={handleScriptChange}
-                className="min-h-[200px]"
-              />
-              {errors.script && (
-                <p id="saga-script-error" className="text-sm text-destructive">
-                  {errors.script}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label htmlFor="saga-preconditions" className="text-sm font-medium">
-                Preconditions CEL{' '}
-                <span className="font-normal text-muted-foreground">(optional)</span>
-              </label>
-              <Input
-                id="saga-preconditions"
-                value={formData.preconditionsCel}
-                onChange={handleChange('preconditionsCel')}
-                placeholder="amount > 0"
-                aria-label="Preconditions CEL"
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                CEL expression evaluated before saga execution. Leave empty for no preconditions.
-              </p>
-            </div>
-          </div>
-        </form>
-
-        <DialogFooter className="sticky bottom-0 bg-background pt-4 border-t">
+        <DialogFooter className="flex-shrink-0 p-6 pt-4 border-t bg-background">
           <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
