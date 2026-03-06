@@ -882,15 +882,28 @@ data corruption could occur.
 
 ### Migration Path
 
-1. **Phase 1: Foundation** — Schema, registry, runtime, caching (no production impact)
-2. **Phase 2: Prove the Pattern** — Migrate withdrawal saga, shadow mode alongside Go
-3. **Phase 3: Expand** — Migrate remaining sagas, deprecate Go orchestrators
-4. **Phase 4: Enable Tenants** — Simulation mode, admin API, tenant self-service
-5. **Phase 5: Party Isolation** — Party scope resolution, contextual cross-party posting
-6. **Phase 6: Bi-Temporal** — Historical saga replay, `verify_execution()` for audit
-7. **Phase 7: Attribute Validation** — AST extraction, instrument schema validation at ACTIVATION
-8. **Phase 8: Durable Execution** — `saga_instances`, lease-based claiming, pod death recovery
-9. **Phase 9: Hardening** — `valuate_batch()`, Logic/Physics Linter, external integration guardrails
+Phase dispositions assessed 2026-03-06 against current implementation in `shared/pkg/saga/`.
+
+1. **Phase 1: Foundation** — COMPLETED. Registry (`handlers.go`), runtime (`runtime.go`, `starlark_runner.go`),
+   schema (`schema/`), CEL evaluator (`cel_evaluator.go`), caching (`validation/cache.go`).
+2. **Phase 2: Prove the Pattern** — PLANNED. No Go orchestrators have been migrated to Starlark yet.
+   The runtime and service bindings are ready, but no production saga scripts exist.
+3. **Phase 3: Expand** — PLANNED. Depends on Phase 2 completion.
+4. **Phase 4: Enable Tenants** — PLANNED. Admin handler exists (`admin_handler.go`) but tenant
+   self-service saga authoring is not yet exposed.
+5. **Phase 5: Party Isolation** — COMPLETED. `party_scope.go` implements `PartyScope`,
+   `PartyScopeResolver`, `PartyHierarchyClient` with immutable scope enforcement.
+6. **Phase 6: Bi-Temporal** — PARTIALLY COMPLETED. Replay implemented (`replay.go`) with
+   deterministic UUID generation (`uuid_generator.go`). `verify_execution()` audit builtin
+   not yet implemented.
+7. **Phase 7: Attribute Validation** — COMPLETED. Validator (`validator.go`) with AST extraction,
+   handler schema validation (`validation/validator.go`), cached validation (`validation/cached_validator.go`).
+8. **Phase 8: Durable Execution** — COMPLETED. Saga instances with lease-based claiming (`claiming.go`),
+   orphan detection (`orphan_watcher.go`), step execution persistence (`step_execution.go`),
+   migrations (`migrations.go`), lease renewal (`lease_renewer.go`), suspend/resume (`suspend.go`).
+9. **Phase 9: Hardening** — PARTIALLY COMPLETED. Logic/Physics Linter implemented (`linter.go`).
+   `valuate_batch()` builtin not yet implemented. External integration guardrails
+   (Pre-Step Check pattern) enforced via linter.
 
 See the Implementation PRDs above for detailed tasks organized into parallel work streams.
 
