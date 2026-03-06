@@ -1511,7 +1511,7 @@ func openingBalanceCurrencyCode(m domain.Money) string {
 // domain.Currency constants.
 // Example: 123.45 -> 12345 cents
 func decimalToCents(d decimal.Decimal) int64 {
-	cents := d.Mul(decimal.NewFromInt(100))
+	cents := d.Mul(decimal.NewFromInt(100)).RoundBank(0)
 	return cents.IntPart()
 }
 

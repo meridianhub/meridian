@@ -12,6 +12,8 @@
 package domain
 
 import (
+	"fmt"
+
 	"github.com/meridianhub/meridian/shared/domain/money"
 	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
@@ -305,6 +307,12 @@ func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, err
 	cur := Currency(code)
 	if cur.IsValid() {
 		return NewMoney(amount, cur)
+	}
+
+	// Fail fast: the transaction_log_entry.currency column is CHAR(3), so non-currency
+	// codes must also be exactly 3 characters to persist correctly.
+	if len(code) != 3 {
+		return Money{}, fmt.Errorf("%w: non-currency instrument code %q must be exactly 3 characters for persistence", ErrInvalidCodeFormat, code)
 	}
 
 	// Non-currency instrument: use precision 2 to match the persistence layer's
