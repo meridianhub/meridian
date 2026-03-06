@@ -69,10 +69,10 @@ function CookbookCard({ item }: { item: CookbookItem }) {
         )}
       </CardHeader>
 
-      {(item.categories?.length || patternMeta?.complexity) && (
+      {item.categories && item.categories.length > 0 && (
         <CardContent>
           <div className="flex flex-wrap gap-1">
-            {item.categories?.map((cat) => (
+            {item.categories.map((cat) => (
               <Badge key={cat} variant="outline" className="text-[10px]">
                 {cat}
               </Badge>
