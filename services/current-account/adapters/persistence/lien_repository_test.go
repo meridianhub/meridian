@@ -385,12 +385,14 @@ func TestLienRepository_SumActiveAmountByAccountID_CurrencyInconsistency(t *test
 	lien1, _ := domain.NewLien(accountID, amount1, "", "PO-001", nil)
 	require.NoError(t, repo.Create(ctx, lien1))
 
-	// Manually insert lien with different currency (simulating data corruption)
+	// Manually insert lien with different instrument code (simulating data corruption)
 	corruptedEntity := &LienEntity{
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           15000,
-		Currency:              "EUR", // Different currency - data corruption
+		InstrumentCode:        "EUR", // Different instrument - data corruption
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-CORRUPT",
@@ -494,12 +496,14 @@ func TestLienRepository_SumActiveAmountByAccountIDAndBucket_CurrencyInconsistenc
 	lien1, _ := domain.NewLien(accountID, amount1, bucketID, "PO-001", nil)
 	require.NoError(t, repo.Create(ctx, lien1))
 
-	// Manually insert lien with different currency (simulating data corruption)
+	// Manually insert lien with different instrument code (simulating data corruption)
 	corruptedEntity := &LienEntity{
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           15000,
-		Currency:              "EUR", // Different currency - data corruption
+		InstrumentCode:        "EUR", // Different instrument - data corruption
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		BucketID:              bucketID,
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-CORRUPT",
@@ -537,12 +541,14 @@ func TestLienRepository_CreateWithExpiration(t *testing.T) {
 
 // Defensive tests for toLienDomain error handling
 
-func TestToLienDomain_InvalidCurrency_ReturnsError(t *testing.T) {
+func TestToLienDomain_InvalidInstrumentCode_ReturnsError(t *testing.T) {
 	entity := &LienEntity{
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           10000,
-		Currency:              "", // Invalid: empty currency
+		InstrumentCode:        "", // Invalid: empty instrument code
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-001",
@@ -563,12 +569,14 @@ func TestLienRepository_FindByID_CorruptedData_ReturnsError(t *testing.T) {
 
 	repo := NewLienRepository(db)
 
-	// Manually insert corrupted data (empty currency)
+	// Manually insert corrupted data (empty instrument code)
 	corruptedEntity := &LienEntity{
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           10000,
-		Currency:              "", // Corrupted
+		InstrumentCode:        "", // Corrupted
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-CORRUPT",
@@ -601,7 +609,9 @@ func TestLienRepository_FindByAccountID_PartialCorruption_ReturnsError(t *testin
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           5000,
-		Currency:              "", // Corrupted
+		InstrumentCode:        "", // Corrupted
+		Dimension:             "CURRENCY",
+		Precision:             2,
 		BucketID:              "",
 		Status:                "ACTIVE",
 		PaymentOrderReference: "PO-CORRUPT",

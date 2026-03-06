@@ -1,6 +1,7 @@
-h1:qqIomRIer3O1BpkAU6wWqSOPCPvNJAcR9YHSvMOQgic=
+h1:9VMizA8oymyPqyxUUU16HcHtpa9hMW43yA5aA1m6LAg=
 20251216000001_initial.sql h1:QyCFEl6iIRccIm/rlDMmm0p0IrN93AlxtaHZHiWWYq0=
 20251217000001_audit_system.sql h1:yyJlrBFDysy+cDtEsb+QePFjXJSFi8OKO+di10S7tYs=
 20251219000001_fix_audit_schema_compatibility.sql h1:kvPAApDaUen53jDQKyCXYWb2031nv1xwYwrPbP2iJVk=
 20251223000001_event_outbox.sql h1:iEWjypSO2WK65ow4socPow0NG/LFUu8+pp0wzsrBRWE=
 20260105000001_multi_asset_support.sql h1:UdBdBTr5/ntFOfwNBNX+40vGClwbDr5i94U3EYNRoJY=
+20260306000001_widen_base_currency.sql h1:p6asVVIzCZNc8dl+81ELz0uxIET05c6KQq93i6mtfws=
