@@ -195,6 +195,7 @@ func TestAll_ContainsAllConstants(t *testing.T) {
 		topics.PositionKeepingOpeningBalanceRecordedV1,
 		topics.PartyCreatedV1,
 		topics.PartyUpdatedV1,
+		topics.PartyControlledV1,
 		topics.PartyVerificationCompletedV1,
 		topics.InternalAccountFacilityCreatedV1,
 		topics.InternalAccountBookingCreatedV1,

@@ -663,13 +663,29 @@ func (s *Service) ControlParty(ctx context.Context, req *pb.ControlPartyRequest)
 		saveCtx = context.WithValue(ctx, auth.UserIDContextKey, req.ActorId)
 	}
 
-	// Persist updated party (actor_id captured in audit via context)
-	if err := s.repo.Save(saveCtx, party); err != nil {
+	// Persist updated party and publish control event atomically
+	actionTime := time.Now().UTC()
+	if err := s.savePartyWithEvent(saveCtx, party, func(tx *gorm.DB) error {
+		event := &eventsv1.PartyControlledEvent{
+			EventId:       uuid.New().String(),
+			PartyId:       party.ID().String(),
+			ControlAction: string(action),
+			NewStatus:     string(party.Status()),
+			Reason:        req.Reason,
+			ActorId:       req.ActorId,
+			Timestamp:     timestamppb.New(actionTime),
+		}
+		return s.outboxPublisher.Publish(saveCtx, tx, event, events.PublishConfig{
+			EventType:     "party.controlled.v1",
+			AggregateID:   party.ID().String(),
+			AggregateType: "Party",
+			Topic:         topics.PartyControlledV1,
+		})
+	}); err != nil {
 		s.logger.Error("failed to save party after control action", "party_id", req.PartyId, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save party: %v", err)
 	}
 
-	actionTime := time.Now()
 	s.logger.Info("party control action executed",
 		"party_id", req.PartyId,
 		"action", action,

@@ -90,6 +90,57 @@ message PartyUpdatedEvent {
   google.protobuf.Timestamp timestamp = 7 [(buf.validate.field).required = true];
 }
 
+// PartyControlledEvent is published when a control action is applied to a party
+// (e.g., SUSPEND, TERMINATE, ACTIVATE). Downstream services can use this event
+// to react to party lifecycle changes, such as freezing linked accounts when a
+// party is terminated.
+message PartyControlledEvent {
+  // event_id uniquely identifies this event instance
+  string event_id = 1 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // party_id identifies the party that was controlled
+  string party_id = 2 [(buf.validate.field).string = {
+    uuid: true
+  }];
+
+  // control_action is the action applied (e.g., "SUSPEND", "TERMINATE", "ACTIVATE")
+  string control_action = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // new_status is the party's status after the control action
+  string new_status = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // reason explains why the control action was taken
+  string reason = 5 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+
+  // actor_id identifies who performed the control action
+  string actor_id = 6 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // correlation_id links related events across services
+  string correlation_id = 7 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // causation_id identifies the event or command that caused this event
+  string causation_id = 8 [(buf.validate.field).string = {
+    max_len: 255
+  }];
+
+  // timestamp when the event was created
+  google.protobuf.Timestamp timestamp = 9 [(buf.validate.field).required = true];
+}
+
 // PartyVerificationCompletedEvent is published when a KYC/AML verification
 // transitions to a terminal state (APPROVED, REJECTED, or MANUAL_REVIEW).
 // This event enables downstream services to react to verification outcomes,

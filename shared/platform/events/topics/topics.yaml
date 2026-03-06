@@ -216,6 +216,12 @@ services:
         event_type: party.updated.v1
         proto_message: PartyUpdatedEvent
 
+      - name: party.controlled.v1
+        constant: PartyControlledV1
+        description: Published when a control action (suspend, terminate, reactivate) is applied to a party
+        event_type: party.controlled.v1
+        proto_message: PartyControlledEvent
+
       - name: party.verification-completed.v1
         constant: PartyVerificationCompletedV1
         description: Published when a KYC/AML verification reaches a terminal state (APPROVED, REJECTED, MANUAL_REVIEW)
