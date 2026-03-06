@@ -225,7 +225,7 @@ export function CookbookDetailPage() {
     if (!firstStarlarkContent) return null
     const flow = parseStarlarkSaga(firstStarlarkContent)
     // Manifest YAML is source of truth for trigger
-    if (sagaTrigger) flow.trigger = sagaTrigger
+    flow.trigger = sagaTrigger
     return flow
   }, [firstStarlarkContent, sagaTrigger])
 
