@@ -38,7 +38,7 @@ vi.mock('../hooks/use-cookbook', () => ({
   useCookbook: () => mockUseCookbook(),
 }))
 
-const mockUsePatternFiles = vi.fn<() => { starlarkFiles: Array<{ name: string; content: string }>; manifestContent: string | null; isLoading: false }>()
+const mockUsePatternFiles = vi.fn<() => { starlarkFiles: Array<{ name: string; content: string }>; manifestContent: string | null; hasSagas: boolean; isLoading: false }>()
 vi.mock('../hooks/use-pattern-files', () => ({
   usePatternFiles: () => mockUsePatternFiles(),
 }))
@@ -82,7 +82,7 @@ describe('CookbookDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseCookbook.mockReturnValue({ items: [patternItem, uiItem], isLoading: false })
-    mockUsePatternFiles.mockReturnValue({ starlarkFiles: [], manifestContent: null, isLoading: false as const })
+    mockUsePatternFiles.mockReturnValue({ starlarkFiles: [], manifestContent: null, hasSagas: false, isLoading: false as const })
   })
 
   it('shows loading skeleton while catalogue is loading', () => {
@@ -112,18 +112,43 @@ describe('CookbookDetailPage', () => {
     expect(screen.getByText(/Complexity: 3/)).toBeInTheDocument()
   })
 
-  it('renders categories as badges', () => {
+  it('renders categories as clickable links to filtered catalogue', () => {
     renderDetail('fiat-current-account')
-    expect(screen.getByText('retail')).toBeInTheDocument()
-    // 'banking' appears in both categories and industries
-    expect(screen.getAllByText('banking').length).toBeGreaterThanOrEqual(1)
+    const retailLink = screen.getByText('retail').closest('a')
+    expect(retailLink).toHaveAttribute('href', '/cookbook/patterns?category=retail')
+    const bankingLinks = screen.getAllByText('banking').map((el) => el.closest('a'))
+    const categoryLink = bankingLinks.find((a) => a?.getAttribute('href')?.includes('category='))
+    expect(categoryLink).toHaveAttribute('href', '/cookbook/patterns?category=banking')
   })
 
-  it('renders tabs for pattern type', () => {
+  it('renders industries as clickable links to filtered catalogue', () => {
+    renderDetail('fiat-current-account')
+    const bankingLinks = screen.getAllByText('banking').map((el) => el.closest('a'))
+    const industryLink = bankingLinks.find((a) => a?.getAttribute('href')?.includes('industry='))
+    expect(industryLink).toHaveAttribute('href', '/cookbook/patterns?industry=banking')
+  })
+
+  it('renders only Manifest and Composition tabs when no sagas', () => {
+    renderDetail('fiat-current-account')
+    expect(screen.getByRole('tab', { name: 'Manifest' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Composition' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Starlark' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Flow' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Handlers' })).not.toBeInTheDocument()
+  })
+
+  it('renders all tabs including Handlers when hasSagas is true', () => {
+    mockUsePatternFiles.mockReturnValue({
+      starlarkFiles: [{ name: 'saga.star', content: 'def execute(): pass' }],
+      manifestContent: 'name: test',
+      hasSagas: true,
+      isLoading: false as const,
+    })
     renderDetail('fiat-current-account')
     expect(screen.getByRole('tab', { name: 'Manifest' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Starlark' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Flow' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Handlers' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Composition' })).toBeInTheDocument()
   })
 
@@ -152,6 +177,7 @@ describe('CookbookDetailPage', () => {
     mockUsePatternFiles.mockReturnValue({
       starlarkFiles: [],
       manifestContent: 'name: test\ntype: registry:pattern',
+      hasSagas: false,
       isLoading: false as const,
     })
     renderDetail('fiat-current-account')
