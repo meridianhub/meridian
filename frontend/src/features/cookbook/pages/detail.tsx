@@ -72,30 +72,37 @@ function PatternInfoSection({ item }: { item: CookbookItem }) {
   )
 }
 
-function CompositionSection({ meta }: { meta: PatternMeta }) {
-  const sections: { label: string; items: string[] }[] = []
+interface CompositionItem {
+  label: string
+  linkTo?: string
+}
 
-  if (meta.composes_with?.length) sections.push({ label: 'Composes With', items: meta.composes_with })
-  if (meta.extends?.length) sections.push({ label: 'Extends', items: meta.extends })
-  if (meta.conflicts_with?.length) sections.push({ label: 'Conflicts With', items: meta.conflicts_with })
+function CompositionSection({ meta }: { meta: PatternMeta }) {
+  const sections: { label: string; items: CompositionItem[] }[] = []
+
+  const asLinks = (names: string[]) => names.map((n) => ({ label: n, linkTo: `/cookbook/${encodeURIComponent(n)}` }))
+
+  if (meta.composes_with?.length) sections.push({ label: 'Composes With', items: asLinks(meta.composes_with) })
+  if (meta.extends?.length) sections.push({ label: 'Extends', items: asLinks(meta.extends) })
+  if (meta.conflicts_with?.length) sections.push({ label: 'Conflicts With', items: asLinks(meta.conflicts_with) })
 
   if (meta.provides) {
     const provides = meta.provides
-    const provideItems: string[] = [
-      ...(provides.instruments ?? []).map((i) => `instrument:${i}`),
-      ...(provides.account_types ?? []).map((a) => `account:${a}`),
-      ...(provides.sagas ?? []).map((s) => `saga:${s}`),
-      ...(provides.valuation_rules ?? []).map((v) => `valuation:${v}`),
-      ...(provides.triggers ?? []).map((t) => `trigger:${t}`),
+    const provideItems: CompositionItem[] = [
+      ...(provides.instruments ?? []).map((i) => ({ label: `instrument:${i}` })),
+      ...(provides.account_types ?? []).map((a) => ({ label: `account:${a}` })),
+      ...(provides.sagas ?? []).map((s) => ({ label: `saga:${s}` })),
+      ...(provides.valuation_rules ?? []).map((v) => ({ label: `valuation:${v}` })),
+      ...(provides.triggers ?? []).map((t) => ({ label: `trigger:${t}` })),
     ]
     if (provideItems.length) sections.push({ label: 'Provides', items: provideItems })
   }
 
   if (meta.requires) {
     const requires = meta.requires
-    const requireItems: string[] = [
-      ...(requires.instruments ?? []).map((i) => `instrument:${i}`),
-      ...(requires.market_data ?? []).map((m) => `market_data:${m}`),
+    const requireItems: CompositionItem[] = [
+      ...(requires.instruments ?? []).map((i) => ({ label: `instrument:${i}` })),
+      ...(requires.market_data ?? []).map((m) => ({ label: `market_data:${m}` })),
     ]
     if (requireItems.length) sections.push({ label: 'Requires', items: requireItems })
   }
@@ -110,20 +117,19 @@ function CompositionSection({ meta }: { meta: PatternMeta }) {
         <div key={section.label}>
           <h3 className="mb-2 text-sm font-medium text-muted-foreground">{section.label}</h3>
           <div className="flex flex-wrap gap-1.5">
-            {section.items.map((item) => {
-              const isLinkable = !item.includes(':')
-              return isLinkable ? (
-                <Link key={item} to={`/cookbook/${encodeURIComponent(item)}`}>
+            {section.items.map((item) =>
+              item.linkTo ? (
+                <Link key={item.label} to={item.linkTo}>
                   <Badge variant="outline" className="cursor-pointer hover:bg-accent">
-                    {item}
+                    {item.label}
                   </Badge>
                 </Link>
               ) : (
-                <Badge key={item} variant="secondary">
-                  {item}
+                <Badge key={item.label} variant="secondary">
+                  {item.label}
                 </Badge>
-              )
-            })}
+              ),
+            )}
           </div>
         </div>
       ))}

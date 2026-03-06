@@ -7,6 +7,7 @@ interface PatternFilesState {
 }
 
 type PatternFilesAction =
+  | { type: 'reset' }
   | { type: 'fetch_start' }
   | { type: 'fetch_done'; starlark: string | null; manifest: string | null }
 
@@ -18,6 +19,8 @@ const initialState: PatternFilesState = {
 
 function reducer(_state: PatternFilesState, action: PatternFilesAction): PatternFilesState {
   switch (action.type) {
+    case 'reset':
+      return initialState
     case 'fetch_start':
       return { starlarkContent: null, manifestContent: null, isLoading: true }
     case 'fetch_done':
@@ -29,7 +32,10 @@ export function usePatternFiles(patternName: string | undefined): PatternFilesSt
   const [state, dispatch] = useReducer(reducer, initialState)
 
   useEffect(() => {
-    if (!patternName) return
+    if (!patternName) {
+      dispatch({ type: 'reset' })
+      return
+    }
 
     let cancelled = false
     dispatch({ type: 'fetch_start' })
