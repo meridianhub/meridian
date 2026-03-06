@@ -22,31 +22,19 @@ vi.mock('@/components/ui/tooltip', () => ({
   ),
 }))
 
-// Track click/hover handlers for assertions
-const mockHandlers: {
-  onNodeClick?: (event: unknown, node: unknown) => void
-  onNodeMouseEnter?: (event: unknown, node: unknown) => void
-  onNodeMouseLeave?: () => void
-} = {}
-
 vi.mock('@xyflow/react', () => {
   const Position = { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' }
   const BackgroundVariant = { Dots: 'dots' }
 
   function Handle() { return null }
 
-  function ReactFlow({ nodes, edges, onNodeClick, onNodeMouseEnter, onNodeMouseLeave, children }: {
+  function ReactFlow({ nodes, edges, onNodeClick, children }: {
     nodes: { id: string; type?: string; data: Record<string, unknown> }[]
     edges: { id: string; source: string; target: string; data?: Record<string, unknown> }[]
     onNodeClick?: (event: unknown, node: unknown) => void
-    onNodeMouseEnter?: (event: unknown, node: unknown) => void
-    onNodeMouseLeave?: () => void
     children?: React.ReactNode
     [key: string]: unknown
   }) {
-    mockHandlers.onNodeClick = onNodeClick
-    mockHandlers.onNodeMouseEnter = onNodeMouseEnter
-    mockHandlers.onNodeMouseLeave = onNodeMouseLeave
     return (
       <div data-testid="react-flow" data-node-count={nodes.length} data-edge-count={edges.length}>
         {nodes.map((n) => {
@@ -113,7 +101,7 @@ vi.mock('elkjs/lib/elk.bundled.js', () => ({
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  const actual = await vi.importActual('react-router-dom')
   return {
     ...actual,
     useNavigate: () => mockNavigate,
