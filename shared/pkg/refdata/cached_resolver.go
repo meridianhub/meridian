@@ -99,6 +99,7 @@ func (r *CachedResolver) Preload(ctx context.Context) error {
 		return fmt.Errorf("preload instruments: %w", err)
 	}
 
+	r.cache.Purge() // Replace active set rather than merging to remove deactivated instruments
 	now := time.Now()
 	for _, props := range instruments {
 		r.cache.Add(props.Code, &cachedEntry{

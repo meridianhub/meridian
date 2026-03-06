@@ -155,6 +155,13 @@ func (r *FallbackResolver) Start(ctx context.Context) error {
 		return ErrAlreadyStarted
 	}
 
+	// Clear stale fallback state from any previous run
+	r.fallbackActive.Store(false)
+	r.fallbackData.Range(func(key, _ any) bool {
+		r.fallbackData.Delete(key)
+		return true
+	})
+
 	// Try upstream preload first
 	if err := r.primary.Preload(ctx); err != nil {
 		r.logger.Warn("upstream preload failed, loading snapshot", "error", err)
