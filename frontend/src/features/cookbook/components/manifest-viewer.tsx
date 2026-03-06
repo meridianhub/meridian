@@ -14,6 +14,7 @@ interface ManifestViewerProps {
 export function ManifestViewer({ content, className }: ManifestViewerProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -39,10 +40,21 @@ export function ManifestViewer({ content, className }: ManifestViewerProps) {
     }
   }, [content])
 
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+    }
+  }, [])
+
   const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(content)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    try {
+      await navigator.clipboard.writeText(content)
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
+      setCopied(true)
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard access denied (non-HTTPS or permission denied)
+    }
   }, [content])
 
   return (
