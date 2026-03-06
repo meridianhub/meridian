@@ -22,22 +22,20 @@ func TestNewHistoryHandler_NilHistory(t *testing.T) {
 
 func TestNewHistoryHandler_NilLogger(t *testing.T) {
 	repo := &Repository{}
-	svc, _ := NewHistoryService(repo)
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
 
 	handler, err := NewHistoryHandler(svc, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, handler)
 }
 
-// stubRepo implements the repository methods needed for handler tests
-// by embedding Repository and overriding methods via the HistoryService.
-// Since HistoryService delegates to Repository, we use a test approach
-// that provides pre-populated data through a mock-like pattern.
-
-func newTestEntity(version string) *VersionEntity {
+func newTestEntity(t *testing.T, version string) *VersionEntity {
+	t.Helper()
 	m := testManifest(version)
 	marshaler := protojson.MarshalOptions{UseProtoNames: true}
-	jsonBytes, _ := marshaler.Marshal(m)
+	jsonBytes, err := marshaler.Marshal(m)
+	require.NoError(t, err)
 
 	return &VersionEntity{
 		ID:           uuid.New(),
@@ -51,7 +49,7 @@ func newTestEntity(version string) *VersionEntity {
 }
 
 func TestGetCurrentManifest_EntityToProtoConversion(t *testing.T) {
-	entity := newTestEntity("1.0")
+	entity := newTestEntity(t, "1.0")
 	proto, err := EntityToProto(entity)
 	require.NoError(t, err)
 
@@ -64,7 +62,8 @@ func TestGetCurrentManifest_EntityToProtoConversion(t *testing.T) {
 
 func TestGetManifestVersion_EmptyVersionReturnsInvalidArgument(t *testing.T) {
 	repo := &Repository{}
-	svc, _ := NewHistoryService(repo)
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
 	handler, err := NewHistoryHandler(svc, nil)
 	require.NoError(t, err)
 
