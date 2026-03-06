@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { parseStarlarkSaga, type SagaFlow } from './star-parser'
+import { parseStarlarkSaga } from './star-parser'
 
 const PATTERNS_DIR = join(__dirname, '..', '..', '..', '..', '..', 'cookbook', 'patterns')
 
