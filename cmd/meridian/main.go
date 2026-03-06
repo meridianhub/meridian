@@ -373,7 +373,9 @@ func registerServices(
 		{"internal-account", func() error {
 			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), refDataComps, logger)
 		}},
-		{"control-plane", func() error { return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), logger) }},
+		{"control-plane", func() error {
+			return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), logger)
+		}},
 		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
 		{"identity", func() error { return wireIdentity(grpcServer, conns.gormDB("identity"), logger) }},
 	} {
@@ -836,7 +838,7 @@ func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
-func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, logger *slog.Logger) error {
 	// Register ApplyManifestService without executor for now.
 	// HandlerDeps (reference-data, internal-account, operational-gateway gRPC clients)
 	// will be wired in a follow-up once cross-service connections are established here.
@@ -848,6 +850,16 @@ func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logg
 		return err
 	}
 	logger.Info("registered control-plane service (ApplyManifestService)")
+
+	// Register ManifestHistoryService for manifest version history queries.
+	if err := controlplaneservice.RegisterManifestHistoryService(server, controlplaneservice.ManifestHistoryServiceConfig{
+		DB:     db,
+		Logger: logger,
+	}); err != nil {
+		return err
+	}
+	logger.Info("registered control-plane service (ManifestHistoryService)")
+
 	return nil
 }
 
