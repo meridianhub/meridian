@@ -157,8 +157,6 @@ function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | 
     return Array.from(names)
   }, [starlarkContent])
 
-  const filterString = serviceNames.join(' ')
-
   return (
     <div className="rounded-lg border">
       <button
@@ -185,7 +183,7 @@ function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | 
       {expanded && (
         <div className="border-t px-4 py-3">
           <HandlerReference
-            filter={filterString}
+            serviceNames={serviceNames.length > 0 ? serviceNames : undefined}
           />
         </div>
       )}
