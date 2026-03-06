@@ -230,11 +230,12 @@ func (r *FallbackResolver) IsFallbackActive() bool {
 }
 
 func (r *FallbackResolver) startSnapshotLoop(ctx context.Context) {
-	go r.snapshotLoop(ctx)
+	done := r.done // capture at launch-time to avoid reading r.done at close-time
+	go r.snapshotLoop(ctx, done)
 }
 
-func (r *FallbackResolver) snapshotLoop(ctx context.Context) {
-	defer close(r.done)
+func (r *FallbackResolver) snapshotLoop(ctx context.Context, done chan struct{}) {
+	defer close(done)
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 

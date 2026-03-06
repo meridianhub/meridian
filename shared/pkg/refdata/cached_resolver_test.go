@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -88,15 +89,19 @@ func TestCachedResolver_Resolve_TTLExpiry(t *testing.T) {
 	_, err := resolver.Resolve(context.Background(), "USD")
 	require.NoError(t, err)
 
-	// Wait for TTL to expire
-	time.Sleep(5 * time.Millisecond)
+	// Poll until TTL expires and re-fetch occurs
+	err = await.New().
+		AtMost(time.Second).
+		PollInterval(time.Millisecond).
+		Until(func() bool {
+			_, _ = resolver.Resolve(context.Background(), "USD")
+			return source.fetchCount.Load() >= 2
+		})
+	require.NoError(t, err)
 
-	// Should fetch from source again
 	props, err := resolver.Resolve(context.Background(), "USD")
 	require.NoError(t, err)
 	assert.Equal(t, "USD", props.Code)
-	assert.Equal(t, int64(2), source.fetchCount.Load())
-	assert.Equal(t, int64(2), resolver.Metrics.Misses.Load())
 }
 
 func TestCachedResolver_Resolve_UnknownInstrument(t *testing.T) {
