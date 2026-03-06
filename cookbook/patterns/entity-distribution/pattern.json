@@ -5,7 +5,7 @@
     "title": "Entity Hierarchy Distribution",
     "description": "Distributes value across a party hierarchy based on structuring data (allocation shares). Triggered by market data events, traverses the party organization graph to find participants and their payout ratios, then books proportional position logs for each participant.",
     "registryDependencies": ["base-fiat-gbp"],
-    "categories": ["economy", "distribution", "party-hierarchy", "event-driven"],
+    "categories": ["distribution", "party-hierarchy", "event-driven"],
     "meta": {
         "complexity": 5,
         "design_pattern": "party-hierarchy-distribution",
