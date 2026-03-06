@@ -101,22 +101,17 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
   return (
     <>
       <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
-      <div className="flex items-center justify-center" style={{ width: 140, height: 70 }}>
-        <div
-          className="flex items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40"
-          style={{
-            width: 120,
-            height: 60,
-            transform: 'rotate(45deg)',
-          }}
-        >
-          <span
-            className="text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-1 max-w-[80px]"
-            style={{ transform: 'rotate(-45deg)' }}
-          >
-            {data.label}
-          </span>
-        </div>
+      <div
+        className="flex items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40"
+        style={{
+          width: 140,
+          height: 70,
+          clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+        }}
+      >
+        <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-1 max-w-[80px]">
+          {data.label}
+        </span>
       </div>
       <Handle
         type="source"
