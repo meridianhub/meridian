@@ -13,21 +13,21 @@ import '@xyflow/react/dist/style.css'
 import Dagre from '@dagrejs/dagre'
 import type { SagaFlow } from '../lib/star-parser'
 
-// Hash a service name to a HSL hue for consistent coloring
-function serviceHue(service: string): number {
-  let hash = 0
-  for (let i = 0; i < service.length; i++) {
-    hash = service.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return ((hash % 360) + 360) % 360
-}
+// Curated palette of visually distinct service colors
+const SERVICE_PALETTE = [
+  { bg: 'hsl(220, 70%, 92%)', fg: 'hsl(220, 70%, 45%)' },  // Blue
+  { bg: 'hsl(150, 60%, 90%)', fg: 'hsl(150, 60%, 35%)' },  // Green
+  { bg: 'hsl(30, 80%, 92%)', fg: 'hsl(30, 80%, 45%)' },    // Orange
+  { bg: 'hsl(280, 60%, 92%)', fg: 'hsl(280, 60%, 45%)' },  // Purple
+  { bg: 'hsl(0, 70%, 92%)', fg: 'hsl(0, 70%, 45%)' },      // Red
+  { bg: 'hsl(180, 60%, 90%)', fg: 'hsl(180, 60%, 35%)' },  // Teal
+  { bg: 'hsl(50, 80%, 90%)', fg: 'hsl(50, 80%, 35%)' },    // Yellow
+  { bg: 'hsl(330, 60%, 92%)', fg: 'hsl(330, 60%, 45%)' },  // Pink
+]
 
-function serviceColor(service: string): string {
-  return `hsl(${serviceHue(service)}, 65%, 50%)`
-}
-
-function serviceBgColor(service: string): string {
-  return `hsl(${serviceHue(service)}, 65%, 92%)`
+function getServiceColors(service: string, serviceIndex: Map<string, number>): { fg: string; bg: string } {
+  const idx = serviceIndex.get(service) ?? 0
+  return SERVICE_PALETTE[idx % SERVICE_PALETTE.length]
 }
 
 // --- Custom Node Components ---
@@ -55,12 +55,13 @@ function StartNode({ data }: { data: StartNodeData }) {
 interface StepNodeData {
   label: string
   serviceCalls: { service: string; method: string }[]
+  serviceIndex: Map<string, number>
   [key: string]: unknown
 }
 
 function StepNode({ data }: { data: StepNodeData }) {
   const primaryService = data.serviceCalls[0]?.service
-  const borderColor = primaryService ? serviceColor(primaryService) : '#71717a'
+  const borderColor = primaryService ? getServiceColors(primaryService, data.serviceIndex).fg : '#71717a'
 
   return (
     <>
@@ -72,18 +73,21 @@ function StepNode({ data }: { data: StepNodeData }) {
         <span className="text-xs font-semibold text-foreground">{data.label}</span>
         {data.serviceCalls.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {data.serviceCalls.map((call, idx) => (
-              <span
-                key={`${call.service}.${call.method}.${idx}`}
-                className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                style={{
-                  backgroundColor: serviceBgColor(call.service),
-                  color: serviceColor(call.service),
-                }}
-              >
-                {call.service}.{call.method}
-              </span>
-            ))}
+            {data.serviceCalls.map((call, idx) => {
+              const colors = getServiceColors(call.service, data.serviceIndex)
+              return (
+                <span
+                  key={`${call.service}.${call.method}.${idx}`}
+                  className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                  style={{
+                    backgroundColor: colors.bg,
+                    color: colors.fg,
+                  }}
+                >
+                  {call.service}.{call.method}
+                </span>
+              )
+            })}
           </div>
         )}
       </div>
@@ -204,7 +208,19 @@ function layoutNodes(nodes: Node[], edges: Edge[]): Node[] {
 
 // --- Build Graph from SagaFlow ---
 
-function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
+function buildServiceIndex(flow: SagaFlow): Map<string, number> {
+  const seen = new Map<string, number>()
+  for (const step of flow.steps) {
+    for (const call of step.serviceCalls) {
+      if (!seen.has(call.service)) {
+        seen.set(call.service, seen.size)
+      }
+    }
+  }
+  return seen
+}
+
+function buildFlowGraph(flow: SagaFlow, serviceIndex: Map<string, number>): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
@@ -242,6 +258,7 @@ function buildFlowGraph(flow: SagaFlow): { nodes: Node[]; edges: Edge[] } {
       data: {
         label: step.name,
         serviceCalls: step.serviceCalls,
+        serviceIndex,
       } satisfies StepNodeData,
     })
 
@@ -332,18 +349,11 @@ interface SagaFlowDiagramProps {
 }
 
 export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagramProps) {
-  const { nodes, edges } = useMemo(() => buildFlowGraph(flow), [flow])
+  const serviceIndex = useMemo(() => buildServiceIndex(flow), [flow])
+  const { nodes, edges } = useMemo(() => buildFlowGraph(flow, serviceIndex), [flow, serviceIndex])
 
-  // Collect unique services for the legend
-  const services = useMemo(() => {
-    const set = new Set<string>()
-    for (const step of flow.steps) {
-      for (const call of step.serviceCalls) {
-        set.add(call.service)
-      }
-    }
-    return [...set].sort()
-  }, [flow])
+  // Collect unique services for the legend (sorted alphabetically)
+  const services = useMemo(() => [...serviceIndex.keys()].sort(), [serviceIndex])
 
   return (
     <div className={`relative ${className ?? ''}`} style={{ width: '100%', height: '100%', minHeight: 300 }}>
@@ -370,15 +380,18 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
       {services.length > 0 && (
         <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Services</span>
-          {services.map((svc) => (
-            <div key={svc} className="flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: serviceColor(svc) }}
-              />
-              <span className="text-xs text-muted-foreground">{svc}</span>
-            </div>
-          ))}
+          {services.map((svc) => {
+            const colors = getServiceColors(svc, serviceIndex)
+            return (
+              <div key={svc} className="flex items-center gap-2">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: colors.fg }}
+                />
+                <span className="text-xs text-muted-foreground">{svc}</span>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
