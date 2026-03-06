@@ -72,9 +72,9 @@ function StepNode({ data }: { data: StepNodeData }) {
         <span className="text-xs font-semibold text-foreground">{data.label}</span>
         {data.serviceCalls.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {data.serviceCalls.map((call) => (
+            {data.serviceCalls.map((call, idx) => (
               <span
-                key={`${call.service}.${call.method}`}
+                key={`${call.service}.${call.method}.${idx}`}
                 className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
                 style={{
                   backgroundColor: serviceBgColor(call.service),
