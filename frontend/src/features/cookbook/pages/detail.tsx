@@ -9,10 +9,13 @@ import { HandlerReference } from '@/shared/handler-reference'
 import { StarlarkEditor } from '@/features/sagas/components/starlark-editor'
 import { ManifestViewer } from '../components/manifest-viewer'
 import { ComponentDetail } from '../components/component-detail'
+import { SagaFlowDiagram } from '../components/saga-flow'
+import { PreviewSourceTabs } from '../components/preview-source-tabs'
+import { parseStarlarkSaga } from '../lib/star-parser'
+import { generateMermaidMarkup } from '../lib/saga-mermaid'
 import { useCookbook } from '../hooks/use-cookbook'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 import { usePatternFiles } from '../hooks/use-pattern-files'
-import { parseStarlarkSaga } from '../lib/star-parser'
 
 function complexityLabel(score: number): string {
   if (score <= 3) return 'Low'
@@ -199,6 +202,16 @@ export function CookbookDetailPage() {
   const item = items.find((i) => i.name === name)
   const isLoading = catalogueLoading || filesLoading
 
+  const sagaFlow = useMemo(() => {
+    if (!starlarkContent) return null
+    return parseStarlarkSaga(starlarkContent)
+  }, [starlarkContent])
+
+  const mermaidMarkup = useMemo(() => {
+    if (!sagaFlow) return ''
+    return generateMermaidMarkup(sagaFlow)
+  }, [sagaFlow])
+
   if (catalogueLoading) {
     return <DetailSkeleton fieldCount={3} tabCount={3} showBackNav />
   }
@@ -229,6 +242,7 @@ export function CookbookDetailPage() {
             <TabsList>
               <TabsTrigger value="manifest">Manifest</TabsTrigger>
               <TabsTrigger value="starlark">Starlark</TabsTrigger>
+              <TabsTrigger value="flow">Flow</TabsTrigger>
               <TabsTrigger value="composition">Composition</TabsTrigger>
             </TabsList>
 
@@ -253,6 +267,24 @@ export function CookbookDetailPage() {
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">No Starlark file found.</p>
+              )}
+            </TabsContent>
+
+            <TabsContent value="flow" className="mt-4">
+              {isLoading ? (
+                <div className="h-[400px] animate-pulse rounded border bg-muted" />
+              ) : sagaFlow && sagaFlow.steps.length > 0 ? (
+                <PreviewSourceTabs
+                  preview={
+                    <div className="h-[500px] rounded-lg border">
+                      <SagaFlowDiagram flow={sagaFlow} />
+                    </div>
+                  }
+                  source={mermaidMarkup}
+                  sourceLabel="Mermaid"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">No saga flow detected in Starlark source.</p>
               )}
             </TabsContent>
 

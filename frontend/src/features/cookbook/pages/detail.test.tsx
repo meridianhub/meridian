@@ -123,6 +123,7 @@ describe('CookbookDetailPage', () => {
     renderDetail('fiat-current-account')
     expect(screen.getByRole('tab', { name: 'Manifest' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Starlark' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Flow' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Composition' })).toBeInTheDocument()
   })
 
