@@ -145,7 +145,23 @@ function analyzeExpression(
     return simple;
   }
 
-  // Compound && expression
+  // Compound || expression (lower precedence, split first)
+  const orParts = splitCompoundParts(trimmed, '||');
+  if (orParts) {
+    const results = orParts.map((part) => analyzeExpression(part, context));
+    if (results.some((r) => r.result === 'pass')) {
+      return { result: 'pass', reason: 'At least one condition passes' };
+    }
+    if (results.every((r) => r.result === 'fail')) {
+      return { result: 'fail', reason: 'All conditions fail' };
+    }
+    return {
+      result: 'indeterminate',
+      reason: 'Some conditions require runtime evaluation',
+    };
+  }
+
+  // Compound && expression (higher precedence, split second)
   const andParts = splitCompoundParts(trimmed, '&&');
   if (andParts) {
     const results = andParts.map((part) => analyzeExpression(part, context));
@@ -155,22 +171,6 @@ function analyzeExpression(
     if (results.some((r) => r.result === 'fail')) {
       const failing = results.find((r) => r.result === 'fail')!;
       return { result: 'fail', reason: failing.reason };
-    }
-    return {
-      result: 'indeterminate',
-      reason: 'Some conditions require runtime evaluation',
-    };
-  }
-
-  // Compound || expression
-  const orParts = splitCompoundParts(trimmed, '||');
-  if (orParts) {
-    const results = orParts.map((part) => analyzeExpression(part, context));
-    if (results.some((r) => r.result === 'pass')) {
-      return { result: 'pass', reason: 'At least one condition passes' };
-    }
-    if (results.every((r) => r.result === 'fail')) {
-      return { result: 'fail', reason: 'All conditions fail' };
     }
     return {
       result: 'indeterminate',
