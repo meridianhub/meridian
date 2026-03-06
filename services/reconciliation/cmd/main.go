@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	"github.com/meridianhub/meridian/services/reconciliation/config"
@@ -22,6 +24,7 @@ import (
 	"github.com/meridianhub/meridian/services/reconciliation/service"
 	"github.com/meridianhub/meridian/services/reconciliation/worker"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/pkg/valuation"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
@@ -215,17 +218,12 @@ func run(logger *slog.Logger) error {
 		service.WithVarianceDetector(detector.DetectVariances),
 	)
 
-	// Wire VarianceValuator with stub engine (temporary until valuation service ready)
-	// TODO: Replace stub engine with shared/pkg/valuation concrete Engine when available
-	// TODO: Replace stub ref data with gRPC client to Reference Data service
-	stubEngine := service.NewStubValuationEngine()
-	stubRefData := service.NewStubReferenceDataProvider()
-	valuator := service.NewVarianceValuator(stubEngine, stubRefData, varianceRepo, runRepo)
+	// Wire VarianceValuator with real valuation engine and reference data provider
+	valuationEngine, refDataProvider := buildValuationComponents(cfg, logger)
+	valuator := service.NewVarianceValuator(valuationEngine, refDataProvider, varianceRepo, runRepo)
 	serviceOpts = append(serviceOpts,
 		service.WithVarianceValuator(valuator.ValueVariances),
 	)
-	logger.Info("variance valuator configured (using stub engine)",
-		"note", "identity valuation until shared/pkg/valuation implementation available")
 
 	// Create AccountReconciliationService
 	reconciliationSvc := service.NewAccountReconciliationService(serviceOpts...)
@@ -504,6 +502,68 @@ func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckR
 	return &grpc_health_v1.HealthCheckResponse{
 		Status: grpcStatus,
 	}, nil
+}
+
+// buildValuationComponents creates the real valuation engine and reference data provider.
+// When the Reference Data gRPC URL is configured, it creates gRPC clients for instrument
+// and account type lookups. Otherwise, it falls back to the identity conversion method
+// with default materiality thresholds.
+func buildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuation.Engine, service.ReferenceDataProvider) {
+	// Create valuation engine runtime components
+	policyRT, err := valuation.NewPolicyRuntime()
+	if err != nil {
+		logger.Warn("failed to create CEL policy runtime, using identity method resolver", "error", err)
+	}
+
+	starlarkRT := valuation.NewStarlarkRuntime(valuation.StarlarkRuntimeConfig{
+		PolicyRuntime: policyRT,
+	})
+
+	cache := valuation.NewInMemoryCache(valuation.InMemoryCacheConfig{})
+
+	// Use identity method resolver as the base; gRPC method resolution can extend this later
+	methodResolver := valuation.NewIdentityMethodResolver()
+
+	engine := valuation.NewEngine(valuation.Config{
+		StarlarkRuntime: starlarkRT,
+		PolicyRuntime:   policyRT,
+		Cache:           cache,
+	}, methodResolver)
+
+	adaptedEngine := service.NewValuationEngineAdapter(engine, logger)
+
+	// Build reference data provider with gRPC clients if available
+	providerCfg := service.GRPCReferenceDataProviderConfig{
+		DefaultMethodID: uuid.MustParse(valuation.IdentityMethodID),
+		Logger:          logger,
+	}
+
+	if cfg.Services.ReferenceDataURL != "" {
+		refDataConn, connErr := grpc.NewClient(
+			cfg.Services.ReferenceDataURL,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if connErr != nil {
+			logger.Warn("failed to create reference data gRPC client", "error", connErr)
+		} else {
+			providerCfg.InstrumentClient = referencedatav1.NewReferenceDataServiceClient(refDataConn)
+			providerCfg.AccountTypeClient = referencedatav1.NewAccountTypeRegistryServiceClient(refDataConn)
+			logger.Info("reference data gRPC clients configured",
+				"url", cfg.Services.ReferenceDataURL)
+		}
+	} else {
+		logger.Info("reference data gRPC not configured, using default valuation method and materiality threshold")
+	}
+
+	refDataProvider := service.NewGRPCReferenceDataProvider(providerCfg)
+
+	logger.Info("variance valuator configured",
+		"engine", "starlark+cel",
+		"method_resolver", "identity (fallback)",
+		"reference_data_url", cfg.Services.ReferenceDataURL,
+	)
+
+	return adaptedEngine, refDataProvider
 }
 
 // parseLogLevel converts a string log level to slog.Level.
