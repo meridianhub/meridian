@@ -3,70 +3,6 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { LinkedPatternDetail } from './linked-detail'
 import type { SagaFlow } from '../lib/star-parser'
 
-// Mock CodeMirror (jsdom doesn't support it)
-vi.mock('codemirror', () => ({ basicSetup: [] }))
-
-const mockDispatch = vi.fn()
-let lastEditorDoc = ''
-
-vi.mock('@codemirror/view', () => ({
-  EditorView: class MockEditorView {
-    static editable = { of: vi.fn(() => ({})) }
-    static updateListener = { of: vi.fn(() => ({})) }
-    static lineWrapping = {}
-    dom: HTMLElement
-    state: { doc: { toString: () => string; line: (n: number) => { from: number; to: number } } }
-    dispatch = mockDispatch
-
-    constructor(config: { doc?: string; extensions?: unknown[]; parent?: HTMLElement }) {
-      this.dom = document.createElement('div')
-      this.dom.className = 'cm-editor'
-      lastEditorDoc = config.doc ?? ''
-      this.state = {
-        doc: {
-          toString: () => lastEditorDoc,
-          line: (n: number) => ({ from: (n - 1) * 20, to: n * 20 }),
-        },
-      }
-      if (config.parent) config.parent.appendChild(this.dom)
-    }
-
-    destroy() {
-      this.dom.remove()
-    }
-  },
-  Decoration: {
-    mark: vi.fn(() => ({
-      range: vi.fn((_from: number, _to: number) => ({})),
-    })),
-    set: vi.fn(() => ({})),
-  },
-  ViewPlugin: {
-    fromClass: vi.fn(() => ({})),
-  },
-}))
-
-vi.mock('@codemirror/state', () => ({
-  Compartment: class {
-    of = vi.fn(() => ({}))
-    reconfigure = vi.fn(() => ({}))
-  },
-  EditorState: { create: vi.fn(() => ({})), readOnly: { of: vi.fn(() => ({})) } },
-  Transaction: { userEvent: 'user-event' },
-  RangeSetBuilder: class {
-    add = vi.fn()
-    finish = vi.fn(() => ({}))
-  },
-  StateField: { define: vi.fn(() => ({})) },
-  StateEffect: { define: vi.fn(() => ({ of: vi.fn(() => ({})) })) },
-}))
-
-vi.mock('@codemirror/lang-python', () => ({ python: vi.fn(() => ({})) }))
-vi.mock('@codemirror/lint', () => ({
-  linter: vi.fn(() => ({})),
-  lintGutter: vi.fn(() => ({})),
-}))
-
 // Mock @xyflow/react
 vi.mock('@xyflow/react', () => ({
   ReactFlow: ({ onNodeClick, nodes }: { onNodeClick?: (e: unknown, node: unknown) => void; nodes: unknown[] }) => (
@@ -154,51 +90,27 @@ const sampleFlow: SagaFlow = {
   ],
 }
 
-const sampleStarlark = `# Saga: deposit-saga
-# Trigger: payment.inbound
-def execute(input_data):
-    step(name="validate_payment")
-    position_keeping.initiate_log(amount=input_data.amount)
-
-    step(name="apply_credit")
-    position_keeping.apply_credit(amount=input_data.amount, direction="CREDIT")
-    fees.calculate(amount=input_data.amount)
-`
-
 describe('LinkedPatternDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('renders editor, diagram, and handler reference panels', () => {
-    render(
-      <LinkedPatternDetail
-        flow={sampleFlow}
-        starlarkContent={sampleStarlark}
-      />,
-    )
-    expect(screen.getByTestId('starlark-editor')).toBeInTheDocument()
+  it('renders diagram and handler reference panels', () => {
+    render(<LinkedPatternDetail flow={sampleFlow} />)
     expect(screen.getByTestId('react-flow')).toBeInTheDocument()
     expect(screen.getByTestId('handler-reference')).toBeInTheDocument()
   })
 
-  it('renders three-panel layout with resizable areas', () => {
-    const { container } = render(
-      <LinkedPatternDetail
-        flow={sampleFlow}
-        starlarkContent={sampleStarlark}
-      />,
-    )
-    expect(container.querySelector('[data-testid="linked-detail"]')).toBeInTheDocument()
+  it('renders full-width layout without editor panel', () => {
+    const { container } = render(<LinkedPatternDetail flow={sampleFlow} />)
+    const detail = container.querySelector('[data-testid="linked-detail"]')
+    expect(detail).toBeInTheDocument()
+    // Should not contain starlark editor
+    expect(screen.queryByTestId('starlark-editor')).not.toBeInTheDocument()
   })
 
   it('highlights handler reference when step is clicked in diagram', () => {
-    render(
-      <LinkedPatternDetail
-        flow={sampleFlow}
-        starlarkContent={sampleStarlark}
-      />,
-    )
+    render(<LinkedPatternDetail flow={sampleFlow} />)
 
     const stepNode = screen.getByTestId('flow-node-step-0')
     fireEvent.click(stepNode)
@@ -208,48 +120,22 @@ describe('LinkedPatternDetail', () => {
   })
 
   it('updates selected step state when diagram step is clicked', () => {
-    render(
-      <LinkedPatternDetail
-        flow={sampleFlow}
-        starlarkContent={sampleStarlark}
-      />,
-    )
+    render(<LinkedPatternDetail flow={sampleFlow} />)
 
     const step1 = screen.getByTestId('flow-node-step-1')
     fireEvent.click(step1)
 
     const handlerRef = screen.getByTestId('handler-reference')
-    // The second step has position_keeping.apply_credit as first service call
     expect(handlerRef.dataset.highlighted).toBe('position_keeping.apply_credit')
   })
 
   it('passes service names to handler reference from flow', () => {
-    render(
-      <LinkedPatternDetail
-        flow={sampleFlow}
-        starlarkContent={sampleStarlark}
-      />,
-    )
+    render(<LinkedPatternDetail flow={sampleFlow} />)
 
     const handlerRef = screen.getByTestId('handler-reference')
     const services = handlerRef.dataset.services?.split(',') ?? []
     expect(services).toContain('position_keeping')
     expect(services).toContain('fees')
-  })
-
-  it('dispatches to editor when step is clicked to scroll to line', () => {
-    render(
-      <LinkedPatternDetail
-        flow={sampleFlow}
-        starlarkContent={sampleStarlark}
-      />,
-    )
-
-    const stepNode = screen.getByTestId('flow-node-step-0')
-    fireEvent.click(stepNode)
-
-    // Editor dispatch should be called to scroll/highlight
-    expect(mockDispatch).toHaveBeenCalled()
   })
 
   it('clears highlighted handler when clicked step has no service calls', () => {
@@ -261,7 +147,7 @@ describe('LinkedPatternDetail', () => {
       ],
     }
 
-    render(<LinkedPatternDetail flow={flowWithNoop} starlarkContent={sampleStarlark} />)
+    render(<LinkedPatternDetail flow={flowWithNoop} />)
 
     fireEvent.click(screen.getByTestId('flow-node-step-0'))
     expect(screen.getByTestId('handler-reference').dataset.highlighted).toBe('position_keeping.initiate_log')
@@ -278,12 +164,7 @@ describe('LinkedPatternDetail', () => {
       steps: [],
     }
 
-    render(
-      <LinkedPatternDetail
-        flow={emptyFlow}
-        starlarkContent=""
-      />,
-    )
+    render(<LinkedPatternDetail flow={emptyFlow} />)
 
     expect(screen.getByTestId('linked-detail')).toBeInTheDocument()
   })
