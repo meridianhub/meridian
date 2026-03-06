@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -21,27 +22,37 @@ export function usePaymentsTable() {
   ): Promise<DataTableResult<PaymentOrder>> {
     if (!tenantSlug) return { items: [] }
 
-    const response = await clients.paymentOrder.listPaymentOrders({
-      pagination: {
-        pageSize: params.pageSize,
-        pageToken: params.pageToken ?? '',
-      },
-      ...(params.filters?.status ? { status: params.filters.status } : {}),
-    })
+    try {
+      const response = await clients.paymentOrder.listPaymentOrders({
+        pagination: {
+          pageSize: params.pageSize,
+          pageToken: params.pageToken ?? '',
+        },
+        ...(params.filters?.status ? { status: params.filters.status } : {}),
+      })
 
-    const items: PaymentOrder[] = (response.paymentOrders ?? []).map((p) => ({
-      paymentOrderId: p.paymentOrderId ?? '',
-      debtorAccountId: p.debtorAccountId ?? '',
-      creditorReference: p.creditorReference ?? '',
-      amount: p.amount ?? '',
-      currency: p.currency ?? '',
-      status: p.status ?? '',
-      createdAt: p.createdAt ?? null,
-    }))
+      const items: PaymentOrder[] = (response.paymentOrders ?? []).map((p) => ({
+        paymentOrderId: p.paymentOrderId ?? '',
+        debtorAccountId: p.debtorAccountId ?? '',
+        creditorReference: p.creditorReference ?? '',
+        amount: p.amount ?? '',
+        currency: p.currency ?? '',
+        status: p.status ?? '',
+        createdAt: p.createdAt ?? null,
+      }))
 
-    return {
-      items,
-      nextPageToken: response.pagination?.nextPageToken || undefined,
+      return {
+        items,
+        nextPageToken: response.pagination?.nextPageToken || undefined,
+      }
+    } catch (error) {
+      if (
+        error instanceof ConnectError &&
+        (error.code === Code.NotFound || error.code === Code.Unimplemented)
+      ) {
+        return { items: [] }
+      }
+      throw error
     }
   }
 

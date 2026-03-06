@@ -55,8 +55,10 @@ export interface HandlerSchemaResponse {
 export interface HandlerReferenceProps {
   /** Filter string to search handlers and services (case-insensitive) */
   filter?: string
-  /** Callback invoked when user clicks insert button with Starlark call template */
-  onInsert: (template: string) => void
+  /** Filter to only show these specific service names (exact match). Takes precedence over filter when set. */
+  serviceNames?: string[]
+  /** Callback invoked when user clicks insert button with Starlark call template. When omitted, insert buttons are hidden. */
+  onInsert?: (template: string) => void
   /** Optional CSS class names to apply to the root container */
   className?: string
 }
@@ -74,7 +76,7 @@ export interface HandlerReferenceProps {
  * @param props Component props
  * @returns React component displaying handler reference
  */
-export function HandlerReference({ filter = '', onInsert, className }: HandlerReferenceProps) {
+export function HandlerReference({ filter = '', serviceNames: serviceNameFilter, onInsert, className }: HandlerReferenceProps) {
   const clients = useApiClients()
 
   const { data: schema, isLoading, isError, error, refetch } = useQuery({
@@ -123,16 +125,25 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
    * @param handler The handler to insert
    */
   const handleInsert = (serviceName: string, handler: Handler) => {
+    if (!onInsert) return
     const template = generateTemplate(serviceName, handler)
     onInsert(template)
   }
 
   const filterLowerCase = filter.toLowerCase()
+  const serviceNameSet = serviceNameFilter
+    ? new Set(serviceNameFilter.map((n) => n.toLowerCase()))
+    : null
 
   const filteredServices = schema?.services
+    .filter((service) => {
+      if (serviceNameSet) return serviceNameSet.has(service.serviceName.toLowerCase())
+      return true
+    })
     .map((service) => ({
       ...service,
       handlers: service.handlers.filter((handler) => {
+        if (serviceNameSet) return true
         const serviceLowerCase = service.serviceName.toLowerCase()
         const handlerLowerCase = handler.name.toLowerCase()
         return (
@@ -233,16 +244,18 @@ export function HandlerReference({ filter = '', onInsert, className }: HandlerRe
                           </ul>
                         )}
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleInsert(service.serviceName, handler)}
-                        className="shrink-0"
-                        aria-label={`Insert ${handler.name}`}
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </Button>
+                      {onInsert && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleInsert(service.serviceName, handler)}
+                          className="shrink-0"
+                          aria-label={`Insert ${handler.name}`}
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}

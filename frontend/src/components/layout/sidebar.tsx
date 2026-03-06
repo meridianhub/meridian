@@ -19,6 +19,7 @@ import {
   CheckSquare,
   FileJson,
   Bot,
+  Library,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTenantFeatures } from '@/hooks/use-tenant-features'
@@ -61,6 +62,7 @@ const TENANT_NAV_GROUPS: NavGroup[] = [
       { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map, feature: 'mappings' },
       { label: 'Manifests', href: '/manifests', icon: FileJson, feature: 'manifests' },
       { label: 'MCP Config', href: '/mcp-config', icon: Bot, feature: 'mcp-config' },
+      { label: 'Cookbook', href: '/cookbook', icon: Library },
     ],
   },
   {

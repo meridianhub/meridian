@@ -38,6 +38,7 @@ import (
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
 	identityv1 "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
+	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	paymentorderv1 "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
@@ -84,6 +85,7 @@ import (
 	refcache "github.com/meridianhub/meridian/services/reference-data/cache"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	refhandler "github.com/meridianhub/meridian/services/reference-data/handler"
+	refmapping "github.com/meridianhub/meridian/services/reference-data/mapping"
 	refnode "github.com/meridianhub/meridian/services/reference-data/node"
 	refregistry "github.com/meridianhub/meridian/services/reference-data/registry"
 	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
@@ -371,7 +373,9 @@ func registerServices(
 		{"internal-account", func() error {
 			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), refDataComps, logger)
 		}},
-		{"control-plane", func() error { return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), logger) }},
+		{"control-plane", func() error {
+			return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), logger)
+		}},
 		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
 		{"identity", func() error { return wireIdentity(grpcServer, conns.gormDB("identity"), logger) }},
 	} {
@@ -497,10 +501,21 @@ func wireReferenceData(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Log
 		return nil, fmt.Errorf("account type service: %w", err)
 	}
 
+	mappingRepo := refmapping.NewPostgresRepository(pool)
+	mappingValidator, err := refmapping.NewValidator(compiler)
+	if err != nil {
+		return nil, fmt.Errorf("mapping validator: %w", err)
+	}
+	mappingSvc, err := refhandler.NewMappingService(mappingRepo, mappingValidator, logger)
+	if err != nil {
+		return nil, fmt.Errorf("mapping service: %w", err)
+	}
+
 	referencedatav1.RegisterReferenceDataServiceServer(server, refDataSvc)
 	referencedatav1.RegisterNodeServiceServer(server, nodeSvc)
 	referencedatav1.RegisterAccountTypeRegistryServiceServer(server, acctTypeSvc)
 	sagav1.RegisterSagaRegistryServiceServer(server, sagaSvc)
+	mappingv1.RegisterMappingServiceServer(server, mappingSvc)
 	logger.Info("registered reference-data service")
 	return &refDataComponents{
 		accountTypeRegistry: acctTypeReg,
@@ -823,7 +838,7 @@ func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
-func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
+func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, logger *slog.Logger) error {
 	// Register ApplyManifestService without executor for now.
 	// HandlerDeps (reference-data, internal-account, operational-gateway gRPC clients)
 	// will be wired in a follow-up once cross-service connections are established here.
@@ -835,6 +850,16 @@ func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, logger *slog.Logg
 		return err
 	}
 	logger.Info("registered control-plane service (ApplyManifestService)")
+
+	// Register ManifestHistoryService for manifest version history queries.
+	if err := controlplaneservice.RegisterManifestHistoryService(server, controlplaneservice.ManifestHistoryServiceConfig{
+		DB:     db,
+		Logger: logger,
+	}); err != nil {
+		return err
+	}
+	logger.Info("registered control-plane service (ManifestHistoryService)")
+
 	return nil
 }
 

@@ -113,22 +113,33 @@ interface AuthProviderProps {
   initialToken?: string
 }
 
+const SESSION_STORAGE_KEY = 'meridian_access_token'
+
+function restoreToken(initialToken?: string): { token: string | null; claims: JWTClaims | null } {
+  // Prefer explicit initialToken over stored token
+  const candidate = initialToken ?? sessionStorage.getItem(SESSION_STORAGE_KEY)
+  if (!candidate) return { token: null, claims: null }
+
+  const parsed = parseJWT(candidate)
+  if (!parsed || isTokenExpired(parsed)) {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY)
+    return { token: null, claims: null }
+  }
+
+  sessionStorage.setItem(SESSION_STORAGE_KEY, candidate)
+  return { token: candidate, claims: parsed }
+}
+
 export function AuthProvider({ children, initialToken }: AuthProviderProps) {
-  // Tokens are stored in memory only - never persisted to localStorage/sessionStorage
-  const [accessToken, setAccessToken] = useState<string | null>(() => {
-    if (!initialToken) return null
-    // Only store token if it parses successfully
-    return parseJWT(initialToken) ? initialToken : null
-  })
-  const [claims, setClaims] = useState<JWTClaims | null>(() => {
-    if (!initialToken) return null
-    return parseJWT(initialToken)
-  })
+  const [restored] = useState(() => restoreToken(initialToken))
+  const [accessToken, setAccessToken] = useState<string | null>(restored.token)
+  const [claims, setClaims] = useState<JWTClaims | null>(restored.claims)
 
   const updateToken = useCallback((token: string | null) => {
     if (!token) {
       setAccessToken(null)
       setClaims(null)
+      sessionStorage.removeItem(SESSION_STORAGE_KEY)
       return
     }
     const parsed = parseJWT(token)
@@ -136,10 +147,12 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       // Malformed token - clear both token and claims
       setAccessToken(null)
       setClaims(null)
+      sessionStorage.removeItem(SESSION_STORAGE_KEY)
       return
     }
     setAccessToken(token)
     setClaims(parsed)
+    sessionStorage.setItem(SESSION_STORAGE_KEY, token)
   }, [])
 
   const login = useCallback(
