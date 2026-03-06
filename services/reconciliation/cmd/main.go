@@ -512,8 +512,8 @@ func (h *healthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckR
 }
 
 // buildValuationComponents creates the real valuation engine and reference data provider.
-// When the Reference Data gRPC URL is configured, it creates gRPC clients for instrument
-// and account type lookups. Otherwise, it falls back to the identity conversion method
+// When the Reference Data gRPC URL is configured, it creates a gRPC client for instrument
+// lookups. Otherwise, it falls back to the identity conversion method
 // with default materiality thresholds.
 func buildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuation.Engine, service.ReferenceDataProvider, *grpc.ClientConn) {
 	// Create valuation engine runtime components
