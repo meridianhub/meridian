@@ -5,14 +5,15 @@ import { Card } from '@/components/ui/card'
 import { DataTable, type DataTableQueryParams, type DataTableResult, type FilterConfig } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { JsonDiffViewer } from '@/shared/audit-trail'
-import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
+import { useApiClients } from '@/api/context'
+import { AuditOperation as AuditOperationEnum } from '@/api/gen/meridian/audit/v1/audit_events_pb'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type AuditOperation = 'INSERT' | 'UPDATE' | 'DELETE'
+export type AuditOperation = 'INSERT' | 'UPDATE' | 'DELETE' | 'UNKNOWN'
 
 export interface AuditLogEntry {
   entryId: string
@@ -25,9 +26,34 @@ export interface AuditLogEntry {
   newValues: object | null
 }
 
-export interface AuditLogResponse {
-  entries: AuditLogEntry[]
-  nextPageToken?: string
+// ---------------------------------------------------------------------------
+// Enum helpers
+// ---------------------------------------------------------------------------
+
+const OPERATION_NAMES: Record<number, AuditOperation> = {
+  [AuditOperationEnum.INSERT]: 'INSERT',
+  [AuditOperationEnum.UPDATE]: 'UPDATE',
+  [AuditOperationEnum.DELETE]: 'DELETE',
+}
+
+const VALID_OPERATIONS = new Set<string>(['INSERT', 'UPDATE', 'DELETE', 'UNKNOWN'])
+
+function toOperationName(op: unknown): AuditOperation {
+  if (typeof op === 'string' && VALID_OPERATIONS.has(op)) return op as AuditOperation
+  if (typeof op === 'number') return OPERATION_NAMES[op] ?? 'UNKNOWN'
+  return 'UNKNOWN'
+}
+
+// ---------------------------------------------------------------------------
+// Struct helpers
+// ---------------------------------------------------------------------------
+
+/** Convert a value to a plain object, or null if falsy.
+ *  Connect-es deserializes google.protobuf.Struct to JsonObject (plain JS objects),
+ *  so this is just a type narrowing helper. */
+function toObject(value: unknown): object | null {
+  if (!value || typeof value !== 'object') return null
+  return value as object
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +64,7 @@ const OPERATION_STYLES: Record<AuditOperation, string> = {
   INSERT: 'bg-green-100 text-green-800 border-green-200',
   UPDATE: 'bg-blue-100 text-blue-800 border-blue-200',
   DELETE: 'bg-red-100 text-red-800 border-red-200',
+  UNKNOWN: 'bg-gray-100 text-gray-800 border-gray-200',
 }
 
 function OperationBadge({ operation }: { operation: AuditOperation }) {
@@ -211,32 +238,37 @@ const columns: ColumnDef<AuditLogEntry>[] = [
 
 export function AuditLogPage() {
   const [selectedEntry, setSelectedEntry] = useState<AuditLogEntry | null>(null)
-  const authFetch = useAuthenticatedFetch()
+  const clients = useApiClients()
 
   const fetchAuditEntries = useCallback(async (params: DataTableQueryParams): Promise<DataTableResult<AuditLogEntry>> => {
-    const body: Record<string, unknown> = {
+    const operationFilter = params.filters?.operation
+    const parsedOperation =
+      operationFilter && operationFilter !== ''
+        ? (AuditOperationEnum[operationFilter as keyof typeof AuditOperationEnum] ?? 0)
+        : 0
+
+    const response = await clients.audit.listAuditEntries({
+      tableName: params.filters?.tableName ?? '',
+      recordId: params.filters?.recordId ?? '',
+      changedBy: params.filters?.changedBy ?? '',
+      operation: parsedOperation as AuditOperationEnum,
       pageSize: params.pageSize,
-    }
-    if (params.pageToken) body.pageToken = params.pageToken
-    if (params.filters) {
-      Object.entries(params.filters).forEach(([key, value]) => {
-        if (value) body[key] = value
-      })
-    }
-    const response = await authFetch('/meridian.audit.v1.AuditService/ListAuditEntries', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      pageToken: params.pageToken ?? '',
     })
-    if (!response.ok) {
-      if (response.status === 501 || response.status === 503) {
-        return { items: [], nextPageToken: undefined }
-      }
-      throw new Error(`Failed to fetch audit entries: ${response.status}`)
-    }
-    const data = (await response.json()) as AuditLogResponse
-    return { items: data.entries ?? [], nextPageToken: data.nextPageToken }
-  }, [authFetch])
+
+    const entries: AuditLogEntry[] = (response.entries ?? []).map((e) => ({
+      entryId: e.entryId ?? '',
+      timestamp: e.timestamp ?? null,
+      tableName: e.tableName ?? '',
+      operation: toOperationName(e.operation),
+      recordId: e.recordId ?? '',
+      changedBy: e.changedBy ?? '',
+      oldValues: toObject(e.oldValues),
+      newValues: toObject(e.newValues),
+    }))
+
+    return { items: entries, nextPageToken: response.nextPageToken || undefined }
+  }, [clients])
 
   return (
     <div className="flex flex-col gap-6">

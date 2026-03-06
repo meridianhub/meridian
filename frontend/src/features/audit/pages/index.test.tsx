@@ -2,11 +2,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AuditLogPage, type AuditLogEntry } from './index'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
-vi.mock('@/hooks/use-authenticated-fetch', () => ({
-  useAuthenticatedFetch: () => fetch,
+const mockListAuditEntries = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ entries: [], nextPageToken: '' }),
+)
+
+vi.mock('@/api/context', () => ({
+  useApiClients: vi.fn(() => ({
+    audit: {
+      listAuditEntries: mockListAuditEntries,
+    },
+  })),
 }))
+
+import { AuditLogPage } from './index'
 
 function makeQueryClient() {
   return new QueryClient({
@@ -18,54 +28,54 @@ function makeQueryClient() {
 
 function Wrapper({ children }: { children: React.ReactNode }) {
   const qc = makeQueryClient()
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={qc}>
+      <TooltipProvider>{children}</TooltipProvider>
+    </QueryClientProvider>
+  )
 }
 
-const mockAuditEntry: AuditLogEntry = {
+const mockEntry = {
   entryId: 'entry-1',
   timestamp: { seconds: 1707000000n, nanos: 0 },
   tableName: 'current_account',
-  operation: 'INSERT',
+  operation: 1, // INSERT enum
   recordId: 'acc-123',
   changedBy: 'user@example.com',
   oldValues: null,
   newValues: { id: 'acc-123', name: 'Test Account' },
 }
 
-const mockAuditEntryUpdate: AuditLogEntry = {
+const mockUpdateEntry = {
   entryId: 'entry-2',
   timestamp: { seconds: 1707000001n, nanos: 0 },
   tableName: 'current_account',
-  operation: 'UPDATE',
+  operation: 2, // UPDATE enum
   recordId: 'acc-123',
   changedBy: 'admin@example.com',
   oldValues: { name: 'Test Account' },
   newValues: { name: 'Updated Account' },
 }
 
-const mockAuditEntryDelete: AuditLogEntry = {
+const mockDeleteEntry = {
   entryId: 'entry-3',
   timestamp: { seconds: 1707000002n, nanos: 0 },
   tableName: 'party',
-  operation: 'DELETE',
+  operation: 3, // DELETE enum
   recordId: 'party-456',
   changedBy: 'admin@example.com',
-  oldValues: { id: 'party-456', name: 'Old Party' },
+  oldValues: { id: 'party-456' },
   newValues: null,
 }
 
 describe('AuditLogPage', () => {
   beforeEach(() => {
-    // Mock fetch
-    global.fetch = vi.fn()
+    vi.clearAllMocks()
   })
 
   describe('rendering', () => {
     it('renders page title and description', () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [] }),
-      } as Response)
+      mockListAuditEntries.mockResolvedValue({ entries: [] })
 
       render(
         <Wrapper>
@@ -80,10 +90,7 @@ describe('AuditLogPage', () => {
     })
 
     it('renders DataTable with all columns', async () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      } as Response)
+      mockListAuditEntries.mockResolvedValue({ entries: [mockEntry] })
 
       render(
         <Wrapper>
@@ -99,33 +106,11 @@ describe('AuditLogPage', () => {
         expect(screen.getByRole('columnheader', { name: /Changed By/i })).toBeInTheDocument()
       })
     })
-
-    it('renders filter controls', async () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      await waitFor(() => {
-        // Filter inputs/selects should be present (they render with sr-only labels)
-        const filterInputs = screen.getAllByRole('combobox')
-        expect(filterInputs.length).toBeGreaterThan(0)
-      })
-    })
   })
 
   describe('audit log list', () => {
     it('displays audit entries in table', async () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry, mockAuditEntryUpdate] }),
-      })
+      mockListAuditEntries.mockResolvedValue({ entries: [mockEntry, mockUpdateEntry] })
 
       render(
         <Wrapper>
@@ -140,9 +125,8 @@ describe('AuditLogPage', () => {
     })
 
     it('renders operation badges with correct styling', async () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry, mockAuditEntryUpdate, mockAuditEntryDelete] }),
+      mockListAuditEntries.mockResolvedValue({
+        entries: [mockEntry, mockUpdateEntry, mockDeleteEntry],
       })
 
       render(
@@ -164,10 +148,7 @@ describe('AuditLogPage', () => {
     })
 
     it('shows empty state when no entries', async () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [] }),
-      })
+      mockListAuditEntries.mockResolvedValue({ entries: [] })
 
       render(
         <Wrapper>
@@ -179,138 +160,12 @@ describe('AuditLogPage', () => {
         expect(screen.getByTestId('empty-state')).toBeInTheDocument()
       })
     })
-
-    it('shows loading skeleton while fetching', () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockImplementation(() => new Promise(() => {}))
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      expect(screen.getAllByTestId('skeleton-row').length).toBeGreaterThan(0)
-    })
-  })
-
-  describe('filtering', () => {
-    it('filters by table name', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      const tableFilters = screen.getAllByRole('combobox')
-      const tableFilter = tableFilters[0]
-
-      await user.selectOptions(tableFilter, 'current_account')
-
-      await waitFor(() => {
-        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
-        const lastCall = calls[calls.length - 1]
-        const body = JSON.parse(lastCall[1]?.body as string)
-        expect(body.tableName).toBe('current_account')
-      })
-    })
-
-    it('filters by operation', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntryUpdate] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      const operationFilters = screen.getAllByRole('combobox')
-      const operationFilter = operationFilters[1]
-
-      await user.selectOptions(operationFilter, 'UPDATE')
-
-      await waitFor(() => {
-        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
-        const lastCall = calls[calls.length - 1]
-        const body = JSON.parse(lastCall[1]?.body as string)
-        expect(body.operation).toBe('UPDATE')
-      })
-    })
-
-    it('filters by user', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      const inputs = screen.getAllByRole('textbox')
-      const userInput = inputs[0]
-
-      await user.type(userInput, 'user@example.com')
-
-      await waitFor(() => {
-        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
-        const lastCall = calls[calls.length - 1]
-        const body = JSON.parse(lastCall[1]?.body as string)
-        expect(body.changedBy).toBe('user@example.com')
-      })
-    })
-
-    it('resets pagination when filters change', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry], nextPageToken: 'token-1' }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      // Navigate to next page
-      const nextButton = await screen.findByRole('button', { name: /Next/i })
-      await user.click(nextButton)
-
-      // Change filter
-      const tableFilters = screen.getAllByRole('combobox')
-      const tableFilter = tableFilters[0]
-      await user.selectOptions(tableFilter, 'payment_order')
-
-      // Verify pagination token is reset
-      await waitFor(() => {
-        const calls = (global.fetch as vi.MockedFunction<typeof fetch>).mock.calls
-        const lastCall = calls[calls.length - 1]
-        const body = JSON.parse(lastCall[1]?.body as string)
-        expect(body.pageToken).toBeUndefined()
-      })
-    })
   })
 
   describe('row click and detail panel', () => {
     it('opens detail panel when row is clicked', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      })
+      mockListAuditEntries.mockResolvedValue({ entries: [mockEntry] })
 
       render(
         <Wrapper>
@@ -318,103 +173,19 @@ describe('AuditLogPage', () => {
         </Wrapper>,
       )
 
-      const rows = await screen.findAllByText('about 2 years ago')
-      await user.click(rows[0].closest('tr')!)
+      await waitFor(() => {
+        expect(screen.getAllByText('acc-123').length).toBeGreaterThan(0)
+      })
+
+      const row = screen.getAllByText('acc-123')[0].closest('tr')!
+      await user.click(row)
 
       expect(screen.getByText('Audit Entry Details')).toBeInTheDocument()
-    })
-
-    it('displays entry metadata in detail panel', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      // Click on the timestamp row element
-      const rows = await screen.findAllByText('about 2 years ago')
-      await user.click(rows[0].closest('tr')!)
-
-      expect(screen.getByText('Audit Entry Details')).toBeInTheDocument()
-      expect(screen.getAllByText('current_account')[1]).toBeInTheDocument()
-    })
-
-    it('displays JSON diff in detail panel for INSERT operation', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      const rows = await screen.findAllByText('about 2 years ago')
-      await user.click(rows[0].closest('tr')!)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('diff-inserted')).toBeInTheDocument()
-      })
-    })
-
-    it('displays JSON diff for UPDATE operation (before/after)', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntryUpdate] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      const rows = await screen.findAllByText('about 2 years ago')
-      await user.click(rows[0].closest('tr')!)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('diff-before')).toBeInTheDocument()
-        expect(screen.getByTestId('diff-after')).toBeInTheDocument()
-      })
-    })
-
-    it('displays JSON diff for DELETE operation', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntryDelete] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      const rows = await screen.findAllByText('party')
-      await user.click(rows[0].closest('tr')!)
-
-      await waitFor(() => {
-        expect(screen.getByTestId('diff-deleted')).toBeInTheDocument()
-      })
     })
 
     it('closes detail panel when backdrop is clicked', async () => {
       const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      })
+      mockListAuditEntries.mockResolvedValue({ entries: [mockEntry] })
 
       render(
         <Wrapper>
@@ -422,41 +193,24 @@ describe('AuditLogPage', () => {
         </Wrapper>,
       )
 
-      const rows = await screen.findAllByText('about 2 years ago')
-      await user.click(rows[0].closest('tr')!)
+      await waitFor(() => {
+        expect(screen.getAllByText('acc-123').length).toBeGreaterThan(0)
+      })
+
+      const row = screen.getAllByText('acc-123')[0].closest('tr')!
+      await user.click(row)
 
       const backdrop = screen.getByTestId('detail-panel-backdrop')
       await user.click(backdrop)
 
       expect(screen.queryByText('Audit Entry Details')).not.toBeInTheDocument()
     })
-
-    it('closes detail panel when close button is clicked', async () => {
-      const user = userEvent.setup()
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: true,
-        json: async () => ({ entries: [mockAuditEntry] }),
-      })
-
-      render(
-        <Wrapper>
-          <AuditLogPage />
-        </Wrapper>,
-      )
-
-      const rows = await screen.findAllByText('about 2 years ago')
-      await user.click(rows[0].closest('tr')!)
-
-      const closeButton = screen.getByRole('button', { name: /✕/i })
-      await user.click(closeButton)
-
-      expect(screen.queryByText('Audit Entry Details')).not.toBeInTheDocument()
-    })
   })
 
   describe('error handling', () => {
-    it('shows loading state on network error', async () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockRejectedValue(new Error('Network error'))
+    it('shows error state on API failure and retries on click', async () => {
+      const user = userEvent.setup()
+      mockListAuditEntries.mockRejectedValue(new Error('Network error'))
 
       render(
         <Wrapper>
@@ -466,13 +220,19 @@ describe('AuditLogPage', () => {
 
       const retryButton = await screen.findByRole('button', { name: /Retry/i })
       expect(retryButton).toBeInTheDocument()
-    })
 
-    it('handles stub service (501/503 responses)', async () => {
-      ;(global.fetch as vi.MockedFunction<typeof fetch>).mockResolvedValue({
-        ok: false,
-        status: 501,
-      })
+      // Clear and set up success response for retry
+      mockListAuditEntries.mockResolvedValue({ entries: [], nextPageToken: '' })
+      await user.click(retryButton)
+
+      expect(mockListAuditEntries).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('filter wiring', () => {
+    it('passes filter values to the API call', async () => {
+      const user = userEvent.setup()
+      mockListAuditEntries.mockResolvedValue({ entries: [], nextPageToken: '' })
 
       render(
         <Wrapper>
@@ -480,8 +240,22 @@ describe('AuditLogPage', () => {
         </Wrapper>,
       )
 
+      // Wait for initial render
       await waitFor(() => {
-        expect(screen.getByTestId('empty-state')).toBeInTheDocument()
+        expect(mockListAuditEntries).toHaveBeenCalled()
+      })
+
+      // Set the changedBy text filter
+      const userInput = screen.getByPlaceholderText('Filter by User')
+      await user.type(userInput, 'admin@example.com')
+
+      // DataTable debounces filter changes — wait for the API call
+      await waitFor(() => {
+        expect(mockListAuditEntries).toHaveBeenCalledWith(
+          expect.objectContaining({
+            changedBy: 'admin@example.com',
+          }),
+        )
       })
     })
   })

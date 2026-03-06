@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -41,8 +41,7 @@ function AccountDetailSkeleton() {
 // Not found
 // ---------------------------------------------------------------------------
 
-function AccountNotFound() {
-  const { accountId } = useParams<{ accountId: string }>()
+function AccountNotFound({ accountId }: { accountId?: string }) {
   return (
     <div data-testid="account-not-found" className="p-6">
       <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: 'Not found' }]} />
@@ -53,10 +52,8 @@ function AccountNotFound() {
         </p>
         {accountId && (
           <p className="mt-3 text-sm">
-            Did you mean?{' '}
-            <Link to={`/internal-accounts/${encodeURIComponent(accountId)}`} className="text-blue-600 hover:underline dark:text-blue-400">
-              View as internal account
-            </Link>
+            Looking for an internal account?{' '}
+            <EntityLink type="internal-account" id={accountId} label="View internal account" />
           </p>
         )}
       </div>
@@ -355,15 +352,38 @@ function AccountLiens({ accountId, instrumentCode }: { accountId: string; instru
 export function AccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>()
 
-  const { data: account, isLoading, isError } = useAccountDetail(accountId)
+  const { data: account, isLoading, isError, refetch, isFetching } = useAccountDetail(accountId)
 
   if (isLoading) {
     return <AccountDetailSkeleton />
   }
 
   // null = 404 from server; isError = network/server failure; undefined = query not yet resolved
-  if (isError || account === null || account === undefined) {
-    return <AccountNotFound />
+  if (account === null) {
+    return <AccountNotFound accountId={accountId} />
+  }
+
+  if (isError || account === undefined) {
+    return (
+      <div data-testid="account-error" className="p-6">
+        <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: accountId ?? 'Error' }]} />
+        <div className="mt-8 text-center">
+          <h2 className="text-xl font-semibold">Failed to load account</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            There was a problem loading this account. Please try again.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            disabled={isFetching}
+            onClick={() => void refetch()}
+          >
+            {isFetching ? 'Retrying…' : 'Retry'}
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (
