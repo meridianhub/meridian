@@ -1,14 +1,10 @@
 // Package money provides a unified Money type for monetary amounts across all services.
 //
-// This package consolidates the various Money implementations that existed across
-// current-account, financial-accounting, and position-keeping services into a single,
-// currency-aware decimal-based Money type.
-//
-// Key features:
-//   - Decimal-based arithmetic for precision (no floating-point errors)
-//   - Currency-aware decimal places (JPY=0, most others=2)
-//   - Overflow protection when converting to minor units
-//   - Immutable value semantics
+// Deprecated: This package is superseded by the Universal Asset System. Use
+// shared/pkg/refdata.InstrumentResolver for instrument lookup and
+// shared/platform/quantity for dimensioned quantities. The money package only
+// supports a hardcoded set of fiat currencies and cannot represent non-monetary
+// assets (energy, compute, carbon). It will be removed in a future release.
 package money
 
 import (
@@ -20,6 +16,8 @@ import (
 )
 
 // Errors for Money operations.
+//
+// Deprecated: Use shared/platform/quantity error types instead.
 var (
 	ErrCurrencyMismatch = errors.New("currency mismatch")
 	ErrInvalidCurrency  = errors.New("invalid currency")
@@ -28,9 +26,15 @@ var (
 )
 
 // Currency represents an ISO 4217 currency code.
+//
+// Deprecated: Use shared/pkg/refdata.InstrumentResolver to resolve instrument
+// properties by code. Currency is a string typedef with a hardcoded validation
+// set that cannot represent non-monetary instruments.
 type Currency string
 
 // Supported currencies following ISO 4217 standard.
+//
+// Deprecated: Use shared/pkg/refdata.InstrumentResolver for dynamic instrument lookup.
 const (
 	CurrencyGBP Currency = "GBP" // British Pound Sterling
 	CurrencyUSD Currency = "USD" // United States Dollar
@@ -42,6 +46,9 @@ const (
 )
 
 // IsValid checks if the currency is a supported ISO 4217 code.
+//
+// Deprecated: Use shared/pkg/refdata.InstrumentResolver.Resolve() which validates
+// against the Reference Data service rather than a hardcoded set.
 func (c Currency) IsValid() bool {
 	switch c {
 	case CurrencyGBP, CurrencyUSD, CurrencyEUR, CurrencyJPY, CurrencyCHF, CurrencyCAD, CurrencyAUD:
@@ -57,6 +64,8 @@ func (c Currency) String() string {
 
 // DecimalPlaces returns the number of decimal places for the currency.
 // Most currencies use 2 decimal places, but some (like JPY) use 0.
+//
+// Deprecated: Use shared/pkg/refdata.InstrumentProperties.Precision instead.
 func (c Currency) DecimalPlaces() int32 {
 	switch c {
 	case CurrencyJPY:
@@ -69,6 +78,8 @@ func (c Currency) DecimalPlaces() int32 {
 }
 
 // ParseCurrency converts a string to a Currency type with validation.
+//
+// Deprecated: Use shared/pkg/refdata.InstrumentResolver.Resolve() instead.
 func ParseCurrency(s string) (Currency, error) {
 	c := Currency(s)
 	if !c.IsValid() {
@@ -80,12 +91,8 @@ func ParseCurrency(s string) (Currency, error) {
 // Money represents an immutable monetary amount with currency.
 // It uses decimal.Decimal for precise arithmetic operations.
 //
-// Concurrency: Money is safe for concurrent read access. All methods that
-// perform calculations (Add, Subtract, etc.) return new Money instances
-// rather than modifying the receiver, following value semantics.
-// However, the underlying decimal.Decimal is not inherently thread-safe
-// for concurrent writes; since Money values are immutable, this is not
-// a concern for normal usage patterns.
+// Deprecated: Use shared/platform/quantity.Money (Qty[Monetary]) which supports
+// any instrument dimension, not just currencies.
 type Money struct {
 	amount   decimal.Decimal
 	currency Currency
@@ -93,6 +100,8 @@ type Money struct {
 
 // New creates a Money value with the given amount and currency.
 // Returns an error if the currency is not supported.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) instead.
 func New(amount decimal.Decimal, currency Currency) (Money, error) {
 	if !currency.IsValid() {
 		return Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, currency)
@@ -105,6 +114,8 @@ func New(amount decimal.Decimal, currency Currency) (Money, error) {
 
 // MustNew creates a Money value, panicking if the currency is invalid.
 // Use only in tests or when the currency is known to be valid at compile time.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) instead.
 func MustNew(amount decimal.Decimal, currency Currency) Money {
 	m, err := New(amount, currency)
 	if err != nil {
@@ -115,12 +126,16 @@ func MustNew(amount decimal.Decimal, currency Currency) Money {
 
 // NewFromInt64 creates Money from an int64 amount in the currency's major units.
 // For example, NewFromInt64(100, CurrencyGBP) creates £100.00.
+//
+// Deprecated: Use quantity.NewMoney(decimal.NewFromInt(amount), instrument) instead.
 func NewFromInt64(amount int64, currency Currency) (Money, error) {
 	return New(decimal.NewFromInt(amount), currency)
 }
 
 // NewFromMinorUnits creates Money from minor units (cents, pence, etc.).
 // For example, NewFromMinorUnits(10000, CurrencyGBP) creates £100.00.
+//
+// Deprecated: Use quantity.NewMoney with decimal shifted by instrument precision.
 func NewFromMinorUnits(minorUnits int64, currency Currency) (Money, error) {
 	if !currency.IsValid() {
 		return Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, currency)
@@ -134,6 +149,8 @@ func NewFromMinorUnits(minorUnits int64, currency Currency) (Money, error) {
 }
 
 // Zero returns a zero Money value for the given currency.
+//
+// Deprecated: Use quantity.NewMoney(decimal.Zero, instrument) instead.
 func Zero(currency Currency) (Money, error) {
 	return New(decimal.Zero, currency)
 }
