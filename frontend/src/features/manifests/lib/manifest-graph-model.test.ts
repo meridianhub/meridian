@@ -46,7 +46,8 @@ const energyManifest = createMockManifest({
   sagas: [
     {
       name: 'usage_to_value',
-      trigger: 'event:position-keeping.transaction-captured.v1|event.instrument_code == "KWH"',
+      trigger: 'event:position-keeping.transaction-captured.v1',
+      filter: 'event.instrument_code == "KWH"',
       script: 'def main(): pass',
     },
     {
@@ -147,7 +148,7 @@ describe('buildManifestGraph', () => {
 
       expect(ruleNodes).toHaveLength(1)
       expect(ruleNodes[0]).toMatchObject({
-        id: 'valuation_rule:KWH:GBP',
+        id: 'valuation_rule:KWH:GBP:1',
         label: 'KWH -> GBP',
       })
     })
@@ -160,13 +161,13 @@ describe('buildManifestGraph', () => {
 
       expect(fromEdges).toHaveLength(1)
       expect(fromEdges[0]).toMatchObject({
-        source: 'valuation_rule:KWH:GBP',
+        source: 'valuation_rule:KWH:GBP:1',
         target: 'instrument:KWH',
       })
 
       expect(toEdges).toHaveLength(1)
       expect(toEdges[0]).toMatchObject({
-        source: 'valuation_rule:KWH:GBP',
+        source: 'valuation_rule:KWH:GBP:1',
         target: 'instrument:GBP',
       })
     })

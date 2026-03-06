@@ -1,5 +1,39 @@
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 
+interface ManifestInstrument {
+  code: string
+  name: string
+  [key: string]: unknown
+}
+
+interface ManifestAccountType {
+  code: string
+  name: string
+  allowedInstruments?: string[]
+  [key: string]: unknown
+}
+
+interface ManifestValuationRule {
+  fromInstrument: string
+  toInstrument: string
+  method: number
+  [key: string]: unknown
+}
+
+interface ManifestSaga {
+  name: string
+  trigger: string
+  filter?: string
+  [key: string]: unknown
+}
+
+interface ManifestInput {
+  instruments?: ManifestInstrument[]
+  accountTypes?: ManifestAccountType[]
+  valuationRules?: ManifestValuationRule[]
+  sagas?: ManifestSaga[]
+}
+
 export type ManifestNodeType = 'instrument' | 'account_type' | 'valuation_rule' | 'saga'
 
 export interface SagaTriggerMetadata {
@@ -33,19 +67,16 @@ export interface ManifestGraph {
   edges: ManifestEdge[]
 }
 
-function parseSagaTrigger(trigger: string): SagaTriggerMetadata | undefined {
+function parseSagaTrigger(
+  trigger: string,
+  filter?: string,
+): SagaTriggerMetadata | undefined {
   if (!trigger.startsWith('event:')) return undefined
 
-  const rest = trigger.slice('event:'.length)
-  const pipeIndex = rest.indexOf('|')
-
-  if (pipeIndex === -1) {
-    return { channel: rest }
-  }
-
+  const channel = trigger.slice('event:'.length)
   return {
-    channel: rest.slice(0, pipeIndex),
-    filterExpression: rest.slice(pipeIndex + 1),
+    channel,
+    ...(filter ? { filterExpression: filter } : {}),
   }
 }
 
@@ -53,16 +84,17 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   const nodes: ManifestNode[] = []
   const edges: ManifestEdge[] = []
 
-  const instruments = (manifest as Record<string, unknown>).instruments as Array<Record<string, unknown>> ?? []
-  const accountTypes = (manifest as Record<string, unknown>).accountTypes as Array<Record<string, unknown>> ?? []
-  const valuationRules = (manifest as Record<string, unknown>).valuationRules as Array<Record<string, unknown>> ?? []
-  const sagas = (manifest as Record<string, unknown>).sagas as Array<Record<string, unknown>> ?? []
+  const m = manifest as unknown as ManifestInput
+  const instruments = m.instruments ?? []
+  const accountTypes = m.accountTypes ?? []
+  const valuationRules = m.valuationRules ?? []
+  const sagas = m.sagas ?? []
 
   for (const inst of instruments) {
     nodes.push({
       id: `instrument:${inst.code}`,
       type: 'instrument',
-      label: inst.name as string,
+      label: inst.name,
       data: { ...inst },
     })
   }
@@ -71,13 +103,12 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
     nodes.push({
       id: `account_type:${at.code}`,
       type: 'account_type',
-      label: at.name as string,
+      label: at.name,
       data: { ...at },
     })
 
-    const allowed = at.allowedInstruments as string[] | undefined
-    if (allowed) {
-      for (const instrumentCode of allowed) {
+    if (at.allowedInstruments) {
+      for (const instrumentCode of at.allowedInstruments) {
         edges.push({
           id: `allowed_by:${at.code}:${instrumentCode}`,
           source: `account_type:${at.code}`,
@@ -89,9 +120,8 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   }
 
   for (const rule of valuationRules) {
-    const from = rule.fromInstrument as string
-    const to = rule.toInstrument as string
-    const ruleId = `valuation_rule:${from}:${to}`
+    const { fromInstrument: from, toInstrument: to, method } = rule
+    const ruleId = `valuation_rule:${from}:${to}:${method}`
 
     nodes.push({
       id: ruleId,
@@ -101,14 +131,14 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
     })
 
     edges.push({
-      id: `converts_from:${from}:${to}`,
+      id: `converts_from:${from}:${to}:${method}`,
       source: ruleId,
       target: `instrument:${from}`,
       relationship: 'converts_from',
     })
 
     edges.push({
-      id: `converts_to:${from}:${to}`,
+      id: `converts_to:${from}:${to}:${method}`,
       source: ruleId,
       target: `instrument:${to}`,
       relationship: 'converts_to',
@@ -116,9 +146,8 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   }
 
   for (const saga of sagas) {
-    const name = saga.name as string
-    const trigger = saga.trigger as string
-    const triggerMetadata = parseSagaTrigger(trigger)
+    const { name, trigger, filter } = saga
+    const triggerMetadata = parseSagaTrigger(trigger, filter)
 
     nodes.push({
       id: `saga:${name}`,
