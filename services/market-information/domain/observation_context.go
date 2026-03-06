@@ -35,11 +35,12 @@ type ObservationContext struct {
 // This is the primary constructor used during observation ingestion where
 // attributes come from the proto AttributeEntry list.
 func NewObservationContext(attributes map[string]string) ObservationContext {
-	if attributes == nil {
-		attributes = make(map[string]string)
+	cp := make(map[string]string, len(attributes))
+	for k, v := range attributes {
+		cp[k] = v
 	}
 	return ObservationContext{
-		Attributes: attributes,
+		Attributes: cp,
 	}
 }
 

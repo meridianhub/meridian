@@ -227,8 +227,18 @@ func (o MarketPriceObservation) TrustLevel() int {
 }
 
 // ObservationContext returns the typed metadata about collection and processing.
+// Returns a defensive copy to preserve the immutability contract (the Attributes
+// map is a reference type).
 func (o MarketPriceObservation) ObservationContext() ObservationContext {
-	return o.observationContext
+	ctx := o.observationContext
+	if ctx.Attributes != nil {
+		cp := make(map[string]string, len(ctx.Attributes))
+		for k, v := range ctx.Attributes {
+			cp[k] = v
+		}
+		ctx.Attributes = cp
+	}
+	return ctx
 }
 
 // MarketPriceObservationBuilder provides a builder pattern for reconstructing
