@@ -1,6 +1,7 @@
 import { useCookbook } from '../hooks/use-cookbook'
+import { useFilterState, applyFilters } from '../hooks/use-filter-state'
 import { CatalogueGrid } from '../components/catalogue-grid'
-import { FilterBar, useFilterState, applyFilters } from '../components/filter-bar'
+import { FilterBar } from '../components/filter-bar'
 
 export function CookbookPage() {
   const { items } = useCookbook()

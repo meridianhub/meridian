@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { applyFilters, type FilterState } from './filter-bar'
+import { applyFilters, type FilterState } from '../hooks/use-filter-state'
 import type { CookbookItem } from '../hooks/use-cookbook'
 
 const mockItems: CookbookItem[] = [
