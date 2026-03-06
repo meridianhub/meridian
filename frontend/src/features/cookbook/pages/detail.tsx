@@ -293,7 +293,7 @@ export function CookbookDetailPage() {
 
             <TabsContent value="flow" className="mt-4">
               {sagaFlow && sagaFlow.steps.length > 0 && firstStarlarkContent ? (
-                <LinkedPatternDetail flow={sagaFlow} starlarkContent={firstStarlarkContent} />
+                <LinkedPatternDetail flow={sagaFlow} />
               ) : (
                 <p className="text-sm text-muted-foreground">No saga flow detected in Starlark source.</p>
               )}
