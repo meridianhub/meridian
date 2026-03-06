@@ -44,9 +44,10 @@ export function usePatternFiles(patternName: string | undefined): PatternFilesSt
       }
     }
 
+    const encoded = encodeURIComponent(patternName)
     Promise.all([
-      fetchFile(`/cookbook/patterns/${patternName}/saga.star`),
-      fetchFile(`/cookbook/patterns/${patternName}/manifest.yaml`),
+      fetchFile(`/cookbook/patterns/${encoded}/saga.star`),
+      fetchFile(`/cookbook/patterns/${encoded}/manifest.yaml`),
     ]).then(([star, yaml]) => {
       if (cancelled) return
       dispatch({ type: 'fetch_done', starlark: star, manifest: yaml })

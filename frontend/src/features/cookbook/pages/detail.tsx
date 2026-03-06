@@ -113,7 +113,7 @@ function CompositionSection({ meta }: { meta: PatternMeta }) {
             {section.items.map((item) => {
               const isLinkable = !item.includes(':')
               return isLinkable ? (
-                <Link key={item} to={`/cookbook/${item}`}>
+                <Link key={item} to={`/cookbook/${encodeURIComponent(item)}`}>
                   <Badge variant="outline" className="cursor-pointer hover:bg-accent">
                     {item}
                   </Badge>
