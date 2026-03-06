@@ -42,7 +42,7 @@ export function ComponentDetail({ item }: ComponentDetailProps) {
       )}
 
       {/* Feature Module Context */}
-      {(meta?.feature_module || (meta?.used_by && meta.used_by.length > 0)) && (
+      {(meta?.feature_module || meta?.tenant_configurable != null || (meta?.used_by && meta.used_by.length > 0)) && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Usage Context</CardTitle>
