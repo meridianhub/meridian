@@ -105,7 +105,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 				"payment_order_reference already used for a different account")
 		}
 		operationStatus = opStatusLienAlreadyExists
-		return s.buildInitiateLienResponse(ctx, existingLien), nil
+		resp, buildErr := s.buildInitiateLienResponse(ctx, existingLien)
+		if buildErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, buildErr
+		}
+		return resp, nil
 	}
 	if !errors.Is(err, persistence.ErrLienNotFound) {
 		operationStatus = operationStatusFailed
@@ -224,7 +229,12 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 				operationStatus = opStatusLienCreateFailed
 				return nil, status.Errorf(codes.Internal, "lien creation race condition: %v", err)
 			}
-			return s.buildInitiateLienResponse(ctx, existingLien), nil
+			resp, buildErr := s.buildInitiateLienResponse(ctx, existingLien)
+			if buildErr != nil {
+				operationStatus = opStatusLienCreateFailed
+				return nil, buildErr
+			}
+			return resp, nil
 		}
 		operationStatus = opStatusLienCreateFailed
 		return nil, status.Errorf(codes.Internal, "failed to create lien: %v", err)
@@ -234,10 +244,10 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		"lien_id", lien.ID,
 		"account_id", req.AccountId,
 		"amount_cents", lien.AmountCents,
-		"currency", lien.Currency,
+		"instrument_code", lien.InstrumentCode,
 		"has_valuation", lien.HasValuation())
 
-	return s.buildInitiateLienResponse(ctx, lien), nil
+	return s.buildInitiateLienResponse(ctx, lien)
 }
 
 // ExecuteLien converts a lien reservation to an actual debit.
@@ -334,9 +344,12 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 
 	if lien.Status == domain.LienStatusExecuted {
 		// Idempotent: already executed — cache result and release pending lock.
-		resp := &pb.ExecuteLienResponse{
-			Lien: s.domainToProtoLien(ctx, lien),
+		protoLien, protoErr := s.domainToProtoLien(ctx, lien)
+		if protoErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, protoErr
 		}
+		resp := &pb.ExecuteLienResponse{Lien: protoLien}
 		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "execute_lien:pre-lock")
 		return resp, nil
 	}
@@ -354,9 +367,12 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 
 	// Re-check after lock: another request may have executed between read and lock.
 	if lien.Status == domain.LienStatusExecuted {
-		resp := &pb.ExecuteLienResponse{
-			Lien: s.domainToProtoLien(ctx, lien),
+		protoLien, protoErr := s.domainToProtoLien(ctx, lien)
+		if protoErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, protoErr
 		}
+		resp := &pb.ExecuteLienResponse{Lien: protoLien}
 		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "execute_lien:post-lock")
 		return resp, nil
 	}
@@ -389,9 +405,12 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		"lien_id", lien.ID,
 		"account_id", lien.AccountID)
 
-	resp := &pb.ExecuteLienResponse{
-		Lien: s.domainToProtoLien(ctx, lien),
+	protoLien, protoErr := s.domainToProtoLien(ctx, lien)
+	if protoErr != nil {
+		operationStatus = operationStatusFailed
+		return nil, protoErr
 	}
+	resp := &pb.ExecuteLienResponse{Lien: protoLien}
 
 	// Store successful result in Redis for future idempotency checks.
 	s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "execute_lien")
@@ -493,9 +512,12 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 
 	if lien.Status == domain.LienStatusTerminated {
 		// Idempotent: already terminated — cache result and release pending lock.
-		resp := &pb.TerminateLienResponse{
-			Lien: s.domainToProtoLien(ctx, lien),
+		protoLien, protoErr := s.domainToProtoLien(ctx, lien)
+		if protoErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, protoErr
 		}
+		resp := &pb.TerminateLienResponse{Lien: protoLien}
 		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "terminate_lien:pre-lock")
 		return resp, nil
 	}
@@ -513,9 +535,12 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 
 	// Re-check after lock: another request may have terminated between read and lock.
 	if lien.Status == domain.LienStatusTerminated {
-		resp := &pb.TerminateLienResponse{
-			Lien: s.domainToProtoLien(ctx, lien),
+		protoLien, protoErr := s.domainToProtoLien(ctx, lien)
+		if protoErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, protoErr
 		}
+		resp := &pb.TerminateLienResponse{Lien: protoLien}
 		s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "terminate_lien:post-lock")
 		return resp, nil
 	}
@@ -545,9 +570,12 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		"account_id", lien.AccountID,
 		"reason", req.Reason)
 
-	resp := &pb.TerminateLienResponse{
-		Lien: s.domainToProtoLien(ctx, lien),
+	protoLien, protoErr := s.domainToProtoLien(ctx, lien)
+	if protoErr != nil {
+		operationStatus = operationStatusFailed
+		return nil, protoErr
 	}
+	resp := &pb.TerminateLienResponse{Lien: protoLien}
 
 	// Store successful result in Redis for future idempotency checks.
 	s.storeIdempotencyResultOrCleanup(ctx, idempKey, resp, "terminate_lien")
@@ -584,9 +612,12 @@ func (s *Service) RetrieveLien(ctx context.Context, req *pb.RetrieveLienRequest)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve lien: %v", err)
 	}
 
-	return &pb.RetrieveLienResponse{
-		Lien: s.domainToProtoLien(ctx, lien),
-	}, nil
+	protoLien, protoErr := s.domainToProtoLien(ctx, lien)
+	if protoErr != nil {
+		operationStatus = operationStatusFailed
+		return nil, protoErr
+	}
+	return &pb.RetrieveLienResponse{Lien: protoLien}, nil
 }
 
 // storeIdempotencyResultOrCleanup marshals resp, stores it in the idempotency
@@ -621,10 +652,12 @@ func (s *Service) storeIdempotencyResultOrCleanup(ctx context.Context, idempKey 
 
 // buildInitiateLienResponse constructs a consistent InitiateLienResponse
 // including valuation fields when present.
-func (s *Service) buildInitiateLienResponse(ctx context.Context, lien *domain.Lien) *pb.InitiateLienResponse {
-	resp := &pb.InitiateLienResponse{
-		Lien: s.domainToProtoLien(ctx, lien),
+func (s *Service) buildInitiateLienResponse(ctx context.Context, lien *domain.Lien) (*pb.InitiateLienResponse, error) {
+	protoLien, err := s.domainToProtoLien(ctx, lien)
+	if err != nil {
+		return nil, err
 	}
+	resp := &pb.InitiateLienResponse{Lien: protoLien}
 	if lien.HasValuation() {
 		resp.ValuedAmount = &quantityv1.InstrumentAmount{
 			Amount:         lien.ValuedAmount.Amount.String(),
@@ -632,24 +665,21 @@ func (s *Service) buildInitiateLienResponse(ctx context.Context, lien *domain.Li
 		}
 		if lien.ValuationAnalysis != nil {
 			var analysis pb.ValuationAnalysis
-			if err := json.Unmarshal(lien.ValuationAnalysis, &analysis); err == nil {
+			if unmarshalErr := json.Unmarshal(lien.ValuationAnalysis, &analysis); unmarshalErr == nil {
 				resp.Basis = &analysis
 			}
 		}
 	}
-	return resp
+	return resp, nil
 }
 
 // domainToProtoLien converts a domain Lien to proto Lien.
 // AmountCents is stored as minor units (e.g. 10000 = 100.00 GBP).
-// Uses instrument precision from reference data; falls back to 2 on lookup failure.
-func (s *Service) domainToProtoLien(ctx context.Context, lien *domain.Lien) *pb.Lien {
-	precision := int32(2) // default fallback for reads
-	if looked, err := s.getInstrumentPrecision(ctx, lien.Currency); err == nil {
-		precision = looked
-	} else {
-		s.logger.Warn("precision lookup failed for lien display, falling back to 2",
-			"currency", lien.Currency, "lien_id", lien.ID, "error", err)
+// Requires reference data for instrument precision resolution.
+func (s *Service) domainToProtoLien(ctx context.Context, lien *domain.Lien) (*pb.Lien, error) {
+	precision, err := s.getInstrumentPrecision(ctx, lien.InstrumentCode)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "precision lookup failed for instrument %s: %v", lien.InstrumentCode, err)
 	}
 	displayAmount := decimal.NewFromInt(lien.AmountCents).Shift(-precision).String()
 
@@ -658,7 +688,7 @@ func (s *Service) domainToProtoLien(ctx context.Context, lien *domain.Lien) *pb.
 		AccountId: lien.AccountID.String(),
 		Amount: &quantityv1.InstrumentAmount{
 			Amount:         displayAmount,
-			InstrumentCode: lien.Currency,
+			InstrumentCode: lien.InstrumentCode,
 		},
 		Status:                mapLienStatusToProto(lien.Status),
 		PaymentOrderReference: lien.PaymentOrderReference,
@@ -687,7 +717,7 @@ func (s *Service) domainToProtoLien(ctx context.Context, lien *domain.Lien) *pb.
 		}
 	}
 
-	return protoLien
+	return protoLien, nil
 }
 
 // mapLienStatusToProto converts domain LienStatus to proto LienStatus.
@@ -704,16 +734,11 @@ func mapLienStatusToProto(status domain.LienStatus) pb.LienStatus {
 	}
 }
 
-// defaultPrecision is the fallback decimal precision used when the reference data client
-// is not configured. This matches the ISO 4217 standard for most fiat currencies.
-const defaultPrecision = 2
-
 // getInstrumentPrecision retrieves the decimal precision for an instrument from reference data.
-// Returns a gRPC-compatible error if the lookup fails and the reference data client is configured.
-// Falls back to defaultPrecision (2) when the reference data client is not wired.
+// Fails closed: returns FailedPrecondition if the reference data client is not configured.
 func (s *Service) getInstrumentPrecision(ctx context.Context, instrumentCode string) (int32, error) {
 	if s.referenceDataClient == nil {
-		return defaultPrecision, nil
+		return 0, status.Error(codes.FailedPrecondition, "reference data client is required for instrument precision lookup")
 	}
 
 	refCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

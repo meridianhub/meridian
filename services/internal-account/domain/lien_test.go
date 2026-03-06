@@ -22,7 +22,7 @@ func TestNewLien_Success(t *testing.T) {
 	assert.NotEqual(t, uuid.Nil, lien.ID)
 	assert.Equal(t, accountID, lien.AccountID)
 	assert.Equal(t, int64(10000), lien.AmountCents)
-	assert.Equal(t, "GBP", lien.Currency)
+	assert.Equal(t, "GBP", lien.InstrumentCode)
 	assert.Equal(t, "bucket-123", lien.BucketID)
 	assert.Equal(t, LienStatusActive, lien.Status)
 	assert.Equal(t, "PO-001", lien.PaymentOrderReference)
@@ -61,7 +61,7 @@ func TestNewLien_MultiAssetInstrument(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(50000), lien.AmountCents)
-	assert.Equal(t, "kWh", lien.Currency)
+	assert.Equal(t, "kWh", lien.InstrumentCode)
 }
 
 func TestNewLien_ZeroAmount_Fails(t *testing.T) {
@@ -76,7 +76,7 @@ func TestNewLien_NegativeAmount_Fails(t *testing.T) {
 
 func TestNewLien_EmptyCurrency_Fails(t *testing.T) {
 	_, err := NewLien(uuid.New(), 10000, "", "", "PO-001", nil)
-	assert.ErrorIs(t, err, ErrInvalidLienCurrency)
+	assert.ErrorIs(t, err, ErrInvalidLienInstrumentCode)
 }
 
 func TestNewLien_EmptyPaymentOrderReference_Fails(t *testing.T) {
@@ -102,7 +102,7 @@ func TestNewValuedLien_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(3550), lien.AmountCents)
-	assert.Equal(t, "GBP", lien.Currency)
+	assert.Equal(t, "GBP", lien.InstrumentCode)
 	assert.True(t, lien.HasValuation())
 	assert.Equal(t, "kWh", lien.ReservedQuantity.InstrumentCode)
 	assert.True(t, lien.ReservedQuantity.Amount.Equal(decimal.NewFromInt(100)))
@@ -384,7 +384,7 @@ func createTestLien(t *testing.T, status LienStatus) *Lien {
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           10000,
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
 		Status:                status,
 		PaymentOrderReference: "PO-TEST-001",
 		Version:               1,

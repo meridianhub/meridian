@@ -53,13 +53,13 @@ func testLogger() *slog.Logger {
 
 // --- getInstrumentPrecision tests ---
 
-func TestGetInstrumentPrecision_WithoutClient(t *testing.T) {
+func TestGetInstrumentPrecision_WithoutClient_FailsClosed(t *testing.T) {
 	svc := &Service{logger: testLogger()}
 
-	precision, err := svc.getInstrumentPrecision(context.Background(), "GBP")
+	_, err := svc.getInstrumentPrecision(context.Background(), "GBP")
 
-	require.NoError(t, err)
-	assert.Equal(t, int32(defaultPrecision), precision)
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 }
 
 func TestGetInstrumentPrecision_StandardCurrency(t *testing.T) {
@@ -197,14 +197,15 @@ func TestDomainToProtoLien_StandardPrecision(t *testing.T) {
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           10050,
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
 		Status:                domain.LienStatusActive,
 		PaymentOrderReference: "PO-001",
 		Version:               1,
 	}
 
-	protoLien := svc.domainToProtoLien(context.Background(), lien)
+	protoLien, err := svc.domainToProtoLien(context.Background(), lien)
 
+	require.NoError(t, err)
 	assert.Equal(t, "100.5", protoLien.Amount.Amount)
 	assert.Equal(t, "GBP", protoLien.Amount.InstrumentCode)
 }
@@ -217,14 +218,15 @@ func TestDomainToProtoLien_ZeroPrecision_JPY(t *testing.T) {
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           10000,
-		Currency:              "JPY",
+		InstrumentCode:        "JPY",
 		Status:                domain.LienStatusActive,
 		PaymentOrderReference: "PO-002",
 		Version:               1,
 	}
 
-	protoLien := svc.domainToProtoLien(context.Background(), lien)
+	protoLien, err := svc.domainToProtoLien(context.Background(), lien)
 
+	require.NoError(t, err)
 	// With precision 0, 10000 minor units = 10000 major units (no shift)
 	assert.Equal(t, "10000", protoLien.Amount.Amount)
 }
@@ -237,14 +239,15 @@ func TestDomainToProtoLien_ThreeDecimalPlaces_BHD(t *testing.T) {
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           100125,
-		Currency:              "BHD",
+		InstrumentCode:        "BHD",
 		Status:                domain.LienStatusActive,
 		PaymentOrderReference: "PO-003",
 		Version:               1,
 	}
 
-	protoLien := svc.domainToProtoLien(context.Background(), lien)
+	protoLien, err := svc.domainToProtoLien(context.Background(), lien)
 
+	require.NoError(t, err)
 	assert.Equal(t, "100.125", protoLien.Amount.Amount)
 }
 
@@ -256,19 +259,19 @@ func TestDomainToProtoLien_HighPrecision_BTC(t *testing.T) {
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           100000000, // 1 BTC in satoshis
-		Currency:              "BTC",
+		InstrumentCode:        "BTC",
 		Status:                domain.LienStatusActive,
 		PaymentOrderReference: "PO-004",
 		Version:               1,
 	}
 
-	protoLien := svc.domainToProtoLien(context.Background(), lien)
+	protoLien, err := svc.domainToProtoLien(context.Background(), lien)
 
+	require.NoError(t, err)
 	assert.Equal(t, "1", protoLien.Amount.Amount)
 }
 
-func TestDomainToProtoLien_FallbackOnError(t *testing.T) {
-	// Reference data client that always fails
+func TestDomainToProtoLien_ErrorOnClientFailure(t *testing.T) {
 	refClient := &instrumentMap{
 		defaultErr: status.Error(codes.Unavailable, "service down"),
 	}
@@ -278,36 +281,35 @@ func TestDomainToProtoLien_FallbackOnError(t *testing.T) {
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           10050,
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
 		Status:                domain.LienStatusActive,
 		PaymentOrderReference: "PO-005",
 		Version:               1,
 	}
 
-	// Should not panic, should fall back to precision 2
-	protoLien := svc.domainToProtoLien(context.Background(), lien)
+	_, err := svc.domainToProtoLien(context.Background(), lien)
 
-	assert.Equal(t, "100.5", protoLien.Amount.Amount)
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
 }
 
-func TestDomainToProtoLien_FallbackWithoutClient(t *testing.T) {
-	// No reference data client at all
+func TestDomainToProtoLien_ErrorWithoutClient(t *testing.T) {
 	svc := &Service{logger: testLogger()}
 
 	lien := &domain.Lien{
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(),
 		AmountCents:           10050,
-		Currency:              "GBP",
+		InstrumentCode:        "GBP",
 		Status:                domain.LienStatusActive,
 		PaymentOrderReference: "PO-006",
 		Version:               1,
 	}
 
-	protoLien := svc.domainToProtoLien(context.Background(), lien)
+	_, err := svc.domainToProtoLien(context.Background(), lien)
 
-	// Falls back to default precision 2
-	assert.Equal(t, "100.5", protoLien.Amount.Amount)
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
 }
 
 // --- Precision truncation validation tests ---
@@ -367,4 +369,96 @@ func TestPrecisionRoundtrip(t *testing.T) {
 				"roundtrip failed: %s -> %d -> %s (expected %s)", tt.amount, minor, major, tt.amount)
 		})
 	}
+}
+
+// --- Non-currency instrument precision tests (Task 8.3) ---
+
+func TestGetInstrumentPrecision_NonCurrencyInstrument_KWH(t *testing.T) {
+	refClient := newInstrumentMap(map[string]int32{"KWH": 6})
+	svc := &Service{referenceDataClient: refClient, logger: testLogger()}
+
+	precision, err := svc.getInstrumentPrecision(context.Background(), "KWH")
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(6), precision)
+}
+
+func TestGetInstrumentPrecision_NonCurrencyInstrument_TONNE_CO2E(t *testing.T) {
+	refClient := newInstrumentMap(map[string]int32{"TONNE_CO2E": 4})
+	svc := &Service{referenceDataClient: refClient, logger: testLogger()}
+
+	precision, err := svc.getInstrumentPrecision(context.Background(), "TONNE_CO2E")
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(4), precision)
+}
+
+func TestGetInstrumentPrecision_NonCurrencyInstrument_GPU_HOUR(t *testing.T) {
+	refClient := newInstrumentMap(map[string]int32{"GPU_HOUR": 3})
+	svc := &Service{referenceDataClient: refClient, logger: testLogger()}
+
+	precision, err := svc.getInstrumentPrecision(context.Background(), "GPU_HOUR")
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), precision)
+}
+
+func TestDomainToProtoLien_NonCurrencyInstrument_KWH(t *testing.T) {
+	refClient := newInstrumentMap(map[string]int32{"KWH": 6})
+	svc := &Service{referenceDataClient: refClient, logger: testLogger()}
+
+	lien := &domain.Lien{
+		ID:                    uuid.New(),
+		AccountID:             uuid.New(),
+		AmountCents:           123456789, // 123.456789 KWH
+		InstrumentCode:        "KWH",
+		Status:                domain.LienStatusActive,
+		PaymentOrderReference: "PO-KWH-001",
+		Version:               1,
+	}
+
+	protoLien, err := svc.domainToProtoLien(context.Background(), lien)
+
+	require.NoError(t, err)
+	assert.Equal(t, "123.456789", protoLien.Amount.Amount)
+	assert.Equal(t, "KWH", protoLien.Amount.InstrumentCode)
+}
+
+func TestPrecisionRoundtrip_NonCurrencyInstruments(t *testing.T) {
+	tests := []struct {
+		name      string
+		amount    string
+		precision int32
+	}{
+		{"KWH six decimals", "123.456789", 6},
+		{"TONNE_CO2E four decimals", "50.1234", 4},
+		{"GPU_HOUR three decimals", "1000.125", 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original, _ := decimal.NewFromString(tt.amount)
+			minor := toMinorUnits(original, tt.precision)
+			major := toMajorUnits(minor, tt.precision)
+
+			roundtripped, _ := decimal.NewFromString(major)
+			assert.True(t, original.Equal(roundtripped),
+				"roundtrip failed: %s -> %d -> %s (expected %s)", tt.amount, minor, major, tt.amount)
+		})
+	}
+}
+
+func TestFailClosed_NilReferenceDataClient_BlocksLienCreation(t *testing.T) {
+	// Without a reference data client, getInstrumentPrecision should fail closed.
+	// This verifies that lien operations cannot silently use a default precision.
+	svc := &Service{logger: testLogger()}
+
+	_, err := svc.getInstrumentPrecision(context.Background(), "KWH")
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+	assert.Contains(t, status.Convert(err).Message(), "reference data client is required")
+
+	_, err = svc.getInstrumentPrecision(context.Background(), "GBP")
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 }

@@ -1,4 +1,4 @@
-h1:5dElTjnFDz01GNIhlDUsftxW4TpWTCApj2Ryk+WguD8=
+h1:H62DzCn/M9/3x8BwZOAFL814oEPF3wME7E4591qLSIg=
 20260112000001_initial.sql h1:DGFY67QMovT7UV5WkUEOrSZE7dLYIppV90Ix2x+qMls=
 20260116000001_add_clearing_purpose_column.sql h1:DHT3cTeEUEWjJEysajU7QV4uy5D+7N4nuygKLsjrzn8=
 20260116000002_backfill_clearing_purpose.sql h1:hvClf5iYdeyiKLCN3tg5l86OKAOMF7Lby+Bi+0Lyrls=
@@ -11,3 +11,4 @@ h1:5dElTjnFDz01GNIhlDUsftxW4TpWTCApj2Ryk+WguD8=
 20260225000001_rename_to_internal_account.sql h1:LxTeb38T0fOarR8DMvUrtHfN1pQpe8owZGzwgEZIQBg=
 20260225000002_rename_correspondent_to_counterparty.sql h1:XgZMSx6sXeDTGfHmHPnGRbdFoWlbdy3b0qoxXvQj0W8=
 20260306000001_widen_lien_currency.sql h1:D399yH87nMHAAvn7oM2plimiVYWx8ZAxLajocpQEGT4=
+20260306000002_rename_lien_currency_to_instrument_code.sql h1:3XMfNdfo3aVHzPI+BpNaEF/pdy2h/z4FcXtl+Y5aycY=
