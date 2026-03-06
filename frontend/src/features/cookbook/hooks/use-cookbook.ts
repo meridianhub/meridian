@@ -45,8 +45,8 @@ export interface CookbookRegistry {
   items: CookbookItem[]
 }
 
-// Hook stub - returns empty data initially. Task 2 (Vite plugin) will provide real data.
+import cookbookData from 'virtual:cookbook-data'
+
 export function useCookbook(): { items: CookbookItem[]; isLoading: boolean } {
-  // TODO: Replace with Vite plugin bundled data (Task 2)
-  return { items: [], isLoading: false }
+  return { items: cookbookData.items, isLoading: false }
 }

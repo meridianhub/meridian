@@ -3,12 +3,13 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import cookbookBundler from './vite-plugins/cookbook-bundler'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), cookbookBundler()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

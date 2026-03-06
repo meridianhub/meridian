@@ -76,8 +76,10 @@ function genStubPlugin(): Plugin {
   }
 }
 
+import cookbookBundler from './vite-plugins/cookbook-bundler'
+
 export default defineConfig({
-  plugins: [genStubPlugin(), react()],
+  plugins: [genStubPlugin(), cookbookBundler(), react()],
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
