@@ -26,7 +26,7 @@ export function LinkedPatternDetail({ flow, starlarkContent }: LinkedPatternDeta
 
   const handleStepClick = useCallback((stepName: string, lineNumber: number) => {
     const view = editorViewRef.current
-    if (view) {
+    if (view && lineNumber >= 1 && lineNumber <= view.state.doc.lines) {
       const line = view.state.doc.line(lineNumber)
       view.dispatch({
         selection: { anchor: line.from },
@@ -38,6 +38,8 @@ export function LinkedPatternDetail({ flow, starlarkContent }: LinkedPatternDeta
     if (step && step.serviceCalls.length > 0) {
       const firstCall = step.serviceCalls[0]
       setHighlightedHandler(`${firstCall.service}.${firstCall.method}`)
+    } else {
+      setHighlightedHandler(null)
     }
   }, [flow])
 
