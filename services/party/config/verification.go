@@ -11,7 +11,6 @@ import (
 //
 // Provider identifies which verification provider to use. Supported values:
 //   - "mock": Mock provider for testing (always available)
-//   - "jumio": Jumio identity verification
 //   - "onfido": Onfido identity verification
 //   - "stripe": Stripe Identity verification
 //
@@ -29,11 +28,11 @@ import (
 // WebhookURL is the publicly accessible URL where providers send verification
 // callbacks. Required for production deployments.
 type VerificationConfig struct {
-	// Provider is the verification provider to use ("mock", "jumio", "onfido", "stripe").
+	// Provider is the verification provider to use ("mock", "onfido", "stripe").
 	Provider string
 
 	// ProviderConfig contains provider-specific configuration.
-	// For jumio/onfido: "api_key", "api_secret", "base_url" (optional).
+	// For onfido: "api_key", "api_secret", "base_url" (optional).
 	// For stripe: "api_key", "base_url" (optional), "stripe_account" (optional).
 	ProviderConfig map[string]string
 
@@ -65,7 +64,7 @@ var (
 )
 
 // SupportedProviders lists all supported verification provider names.
-var SupportedProviders = []string{"mock", "jumio", "onfido", "stripe"}
+var SupportedProviders = []string{"mock", "onfido", "stripe"}
 
 // LoadVerificationConfig loads verification configuration from environment variables.
 //

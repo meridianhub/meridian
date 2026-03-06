@@ -108,7 +108,7 @@ func (sr SanctionsResult) Validate() error {
 }
 
 // Provider defines the interface for KYC/AML verification services.
-// Implementations may integrate with external providers like Onfido, Jumio, etc.
+// Implementations may integrate with external providers like Onfido, Stripe Identity, etc.
 type Provider interface {
 	// VerifyIdentity initiates an identity verification check for the given party.
 	// Returns a Result with a unique VerificationID that can be used

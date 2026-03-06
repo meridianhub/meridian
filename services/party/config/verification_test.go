@@ -52,7 +52,7 @@ func TestLoadVerificationConfig_MockProvider_WithOptionalFields(t *testing.T) {
 
 func TestLoadVerificationConfig_NonMockProvider_RequiresWebhookSecret(t *testing.T) {
 	clearVerificationEnv(t)
-	t.Setenv("VERIFICATION_PROVIDER", "jumio")
+	t.Setenv("VERIFICATION_PROVIDER", "onfido")
 	t.Setenv("VERIFICATION_WEBHOOK_URL", "https://example.com/webhook")
 	t.Setenv("VERIFICATION_API_KEY", "api-key")
 	t.Setenv("VERIFICATION_API_SECRET", "api-secret")
@@ -66,7 +66,7 @@ func TestLoadVerificationConfig_NonMockProvider_RequiresWebhookSecret(t *testing
 
 func TestLoadVerificationConfig_NonMockProvider_RequiresWebhookURL(t *testing.T) {
 	clearVerificationEnv(t)
-	t.Setenv("VERIFICATION_PROVIDER", "jumio")
+	t.Setenv("VERIFICATION_PROVIDER", "onfido")
 	t.Setenv("VERIFICATION_WEBHOOK_SECRET", "secret")
 	// Missing VERIFICATION_WEBHOOK_URL
 	t.Setenv("VERIFICATION_API_KEY", "api-key")
@@ -108,22 +108,22 @@ func TestLoadVerificationConfig_NonMockProvider_RequiresAPISecret(t *testing.T) 
 
 func TestLoadVerificationConfig_NonMockProvider_ValidFullConfig(t *testing.T) {
 	clearVerificationEnv(t)
-	t.Setenv("VERIFICATION_PROVIDER", "jumio")
+	t.Setenv("VERIFICATION_PROVIDER", "onfido")
 	t.Setenv("VERIFICATION_WEBHOOK_SECRET", "webhook-secret")
 	t.Setenv("VERIFICATION_WEBHOOK_URL", "https://api.example.com/webhooks/verification")
 	t.Setenv("VERIFICATION_API_KEY", "my-api-key")
 	t.Setenv("VERIFICATION_API_SECRET", "my-api-secret")
-	t.Setenv("VERIFICATION_BASE_URL", "https://custom.jumio.com/api")
+	t.Setenv("VERIFICATION_BASE_URL", "https://custom.onfido.com/api")
 
 	cfg, err := LoadVerificationConfig()
 
 	require.NoError(t, err)
-	assert.Equal(t, "jumio", cfg.Provider)
+	assert.Equal(t, "onfido", cfg.Provider)
 	assert.Equal(t, "webhook-secret", cfg.WebhookSecret)
 	assert.Equal(t, "https://api.example.com/webhooks/verification", cfg.WebhookURL)
 	assert.Equal(t, "my-api-key", cfg.ProviderConfig["api_key"])
 	assert.Equal(t, "my-api-secret", cfg.ProviderConfig["api_secret"])
-	assert.Equal(t, "https://custom.jumio.com/api", cfg.ProviderConfig["base_url"])
+	assert.Equal(t, "https://custom.onfido.com/api", cfg.ProviderConfig["base_url"])
 }
 
 func TestLoadVerificationConfig_MissingProvider(t *testing.T) {
@@ -206,9 +206,6 @@ func TestVerificationConfig_Validate_ProviderCaseInsensitive(t *testing.T) {
 		{"mock"},
 		{"MOCK"},
 		{"Mock"},
-		{"jumio"},
-		{"JUMIO"},
-		{"Jumio"},
 		{"onfido"},
 		{"ONFIDO"},
 		{"Onfido"},
@@ -244,8 +241,8 @@ func TestVerificationConfig_IsMock(t *testing.T) {
 		{"mock", true},
 		{"MOCK", true},
 		{"Mock", true},
-		{"jumio", false},
 		{"onfido", false},
+		{"stripe", false},
 		{"", false},
 	}
 
@@ -260,10 +257,9 @@ func TestVerificationConfig_IsMock(t *testing.T) {
 func TestVerificationConfig_SupportedProviders(t *testing.T) {
 	// Verify the SupportedProviders list contains expected values
 	assert.Contains(t, SupportedProviders, "mock")
-	assert.Contains(t, SupportedProviders, "jumio")
 	assert.Contains(t, SupportedProviders, "onfido")
 	assert.Contains(t, SupportedProviders, "stripe")
-	assert.Len(t, SupportedProviders, 4)
+	assert.Len(t, SupportedProviders, 3)
 }
 
 func TestLoadVerificationConfig_StripeProvider_OnlyNeedsAPIKey(t *testing.T) {
@@ -353,7 +349,7 @@ func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsMock(t *test
 
 func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsHTTPWebhook(t *testing.T) {
 	cfg := &VerificationConfig{
-		Provider:       "jumio",
+		Provider:       "onfido",
 		WebhookSecret:  "a]strongsecretthatis32charslong!!", // 32+ chars
 		WebhookURL:     "http://api.example.com/webhooks",   // HTTP, not HTTPS
 		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
@@ -367,7 +363,7 @@ func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsHTTPWebhook(
 
 func TestVerificationConfig_ValidateForEnvironment_ProductionRejectsWeakSecret(t *testing.T) {
 	cfg := &VerificationConfig{
-		Provider:       "jumio",
+		Provider:       "onfido",
 		WebhookSecret:  "short-secret", // < 32 chars
 		WebhookURL:     "https://api.example.com/webhooks",
 		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
@@ -391,7 +387,7 @@ func TestVerificationConfig_ValidateForEnvironment_DevelopmentAllowsMock(t *test
 
 func TestVerificationConfig_ValidateForEnvironment_ProductionAcceptsValidConfig(t *testing.T) {
 	cfg := &VerificationConfig{
-		Provider:       "jumio",
+		Provider:       "onfido",
 		WebhookSecret:  "a-very-strong-secret-that-is-at-least-32-characters-long",
 		WebhookURL:     "https://api.example.com/webhooks/verification",
 		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},

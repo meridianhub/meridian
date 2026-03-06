@@ -151,7 +151,7 @@ func TestCreateVerification_GeneratesID(t *testing.T) {
 	verification := &PartyVerificationEntity{
 		PartyID:        partyID,
 		VerificationID: "prov-67890",
-		Provider:       "jumio",
+		Provider:       "onfido",
 		Status:         "PENDING",
 	}
 
