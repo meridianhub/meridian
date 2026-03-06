@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { analyzeFilter, EventContext } from './cel-filter-analyzer';
+import { analyzeFilter, type EventContext } from './cel-filter-analyzer';
 
 describe('analyzeFilter', () => {
   it('returns pass for empty filter', () => {
