@@ -63,8 +63,13 @@ export async function layoutWithELK<T extends Record<string, unknown>>(
     edges: elkEdges,
   })
 
+  const childrenById = new Map((layout.children ?? []).map((child) => [child.id, child]))
+
   return nodes.map((n) => {
-    const elkNode = layout.children?.find((c) => c.id === n.id)
-    return nodeDataFactory(n.id, { x: elkNode?.x ?? 0, y: elkNode?.y ?? 0 })
+    const elkNode = childrenById.get(n.id)
+    if (!elkNode || elkNode.x == null || elkNode.y == null) {
+      throw new Error(`ELK did not return coordinates for node "${n.id}"`)
+    }
+    return nodeDataFactory(n.id, { x: elkNode.x, y: elkNode.y })
   })
 }
