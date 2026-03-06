@@ -21,7 +21,7 @@ type FinancialBookingLogEntity struct {
 	ProductServiceReference string `gorm:"not null;size:255;index"`
 	BusinessUnitReference   string `gorm:"not null;size:255;index"`
 	ChartOfAccountsRules    string `gorm:"not null;type:text"`
-	BaseCurrency            string `gorm:"not null;size:3;index"`
+	BaseCurrency            string `gorm:"not null;size:32;index"`
 	Status                  string `gorm:"not null;size:50;index"`
 
 	// Idempotency

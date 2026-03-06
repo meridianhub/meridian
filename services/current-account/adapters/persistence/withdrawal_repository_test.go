@@ -36,7 +36,6 @@ func setupWithdrawalTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
-		currency VARCHAR(3) NOT NULL,
 		instrument_code VARCHAR(32) NOT NULL DEFAULT '',
 		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
 		precision INT NOT NULL DEFAULT 2,
@@ -95,7 +94,6 @@ func createWithdrawalTableInSchema(t *testing.T, db *gorm.DB, schemaName string)
 		id UUID PRIMARY KEY,
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
-		currency VARCHAR(3) NOT NULL,
 		instrument_code VARCHAR(32) NOT NULL DEFAULT '',
 		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
 		precision INT NOT NULL DEFAULT 2,
@@ -417,17 +415,19 @@ func TestWithdrawalRepository_FindByID_CorruptedData_ReturnsError(t *testing.T) 
 
 	repo := NewWithdrawalRepository(db)
 
-	// Manually insert corrupted data (empty currency)
+	// Manually insert corrupted data (empty instrument code)
 	corruptedEntity := &WithdrawalEntity{
-		ID:          uuid.New(),
-		AccountID:   uuid.New(),
-		AmountCents: 10000,
-		Currency:    "", // Corrupted: empty currency
-		Status:      "PENDING",
-		Reference:   "WD-CORRUPT",
-		Version:     1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:             uuid.New(),
+		AccountID:      uuid.New(),
+		AmountCents:    10000,
+		InstrumentCode: "", // Corrupted: empty instrument code
+		Dimension:      "CURRENCY",
+		Precision:      2,
+		Status:         "PENDING",
+		Reference:      "WD-CORRUPT",
+		Version:        1,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 	require.NoError(t, db.Create(corruptedEntity).Error)
 
@@ -450,15 +450,17 @@ func TestWithdrawalRepository_List_PartialCorruption_ReturnsError(t *testing.T) 
 
 	// Manually insert corrupted withdrawal for same account
 	corruptedEntity := &WithdrawalEntity{
-		ID:          uuid.New(),
-		AccountID:   accountID,
-		AmountCents: 5000,
-		Currency:    "", // Corrupted: empty currency
-		Status:      "PENDING",
-		Reference:   "WD-CORRUPT-LIST",
-		Version:     1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:             uuid.New(),
+		AccountID:      accountID,
+		AmountCents:    5000,
+		InstrumentCode: "", // Corrupted: empty instrument code
+		Dimension:      "CURRENCY",
+		Precision:      2,
+		Status:         "PENDING",
+		Reference:      "WD-CORRUPT-LIST",
+		Version:        1,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 	require.NoError(t, db.Create(corruptedEntity).Error)
 

@@ -244,29 +244,3 @@ func TestWithdrawalCreateAndRetrieve_NonCurrency(t *testing.T) {
 	assert.Equal(t, 3, retrieved.Amount.Precision())
 	assert.Equal(t, int64(5000), retrieved.Amount.ToMinorUnitsUnchecked(), "minor units should be preserved")
 }
-
-// TestBackwardCompat_LegacyCurrencyColumn validates that lien/withdrawal rows
-// with empty instrument_code fall back to using the legacy currency column.
-func TestBackwardCompat_LegacyCurrencyColumn(t *testing.T) {
-	db, ctx, cleanup := setupLienTestDB(t)
-	defer cleanup()
-
-	repo := NewLienRepository(db)
-	accountID := uuid.New()
-
-	// Insert a lien with empty instrument_code (simulating pre-migration row)
-	lienID := uuid.New()
-	err := db.Exec(`INSERT INTO lien (id, account_id, amount_cents, currency, instrument_code, dimension, precision, bucket_id, status, payment_order_reference, created_at, updated_at, version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 1)`,
-		lienID, accountID, 5000, "GBP", "", "CURRENCY", 2, "", "ACTIVE", "PO-LEGACY-001",
-	).Error
-	require.NoError(t, err)
-
-	retrieved, err := repo.FindByID(ctx, lienID)
-	require.NoError(t, err)
-
-	// Should fall back to currency column ("GBP") when instrument_code is empty
-	assert.Equal(t, "GBP", retrieved.Amount.InstrumentCode())
-	assert.Equal(t, "CURRENCY", retrieved.Amount.Dimension())
-	assert.Equal(t, int64(5000), retrieved.Amount.ToMinorUnitsUnchecked())
-}
