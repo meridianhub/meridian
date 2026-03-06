@@ -265,7 +265,7 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('userId').textContent).toBe('user-123')
   })
 
-  it('does NOT persist tokens to localStorage', async () => {
+  it('persists token to sessionStorage but NOT localStorage', async () => {
     const token = createTestToken({ userId: 'user-123' })
 
     const TestComponent = () => {
@@ -283,19 +283,114 @@ describe('AuthProvider', () => {
 
     expect(screen.getByTestId('auth').textContent).toBe('true')
 
-    // Verify nothing in localStorage or sessionStorage
-    const localStorageKeys = Object.keys(localStorage)
-    const sessionStorageKeys = Object.keys(sessionStorage)
+    // Token should be in sessionStorage
+    expect(sessionStorage.getItem('meridian_access_token')).toBe(token)
 
+    // Token must NOT be in localStorage
+    const localStorageKeys = Object.keys(localStorage)
     const tokenInLocalStorage = localStorageKeys.some(
       (key) => localStorage.getItem(key)?.includes(token),
     )
-    const tokenInSessionStorage = sessionStorageKeys.some(
-      (key) => sessionStorage.getItem(key)?.includes(token),
-    )
-
     expect(tokenInLocalStorage).toBe(false)
-    expect(tokenInSessionStorage).toBe(false)
+  })
+
+  it('restores auth state from sessionStorage on mount', async () => {
+    const token = createTestToken({ userId: 'user-restored' })
+    sessionStorage.setItem('meridian_access_token', token)
+
+    const TestComponent = () => {
+      const { isAuthenticated, claims } = useAuth()
+      return (
+        <div>
+          <span data-testid="auth">{String(isAuthenticated)}</span>
+          <span data-testid="userId">{claims?.userId ?? 'none'}</span>
+        </div>
+      )
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+    expect(screen.getByTestId('userId').textContent).toBe('user-restored')
+  })
+
+  it('clears expired token from sessionStorage on mount', async () => {
+    const expiredToken = createExpiredToken()
+    sessionStorage.setItem('meridian_access_token', expiredToken)
+
+    const TestComponent = () => {
+      const { isAuthenticated } = useAuth()
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    // Mock refresh to fail so we stay unauthenticated
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(sessionStorage.getItem('meridian_access_token')).toBeNull()
+  })
+
+  it('clears sessionStorage on logout', async () => {
+    const token = createTestToken({ userId: 'user-123' })
+
+    let logoutFn: (() => void) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, logout } = useAuth()
+      logoutFn = logout
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider initialToken={token}>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(sessionStorage.getItem('meridian_access_token')).toBe(token)
+
+    await act(async () => {
+      logoutFn!()
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(sessionStorage.getItem('meridian_access_token')).toBeNull()
+  })
+
+  it('clears malformed token from sessionStorage on mount', async () => {
+    sessionStorage.setItem('meridian_access_token', 'not-a-valid-jwt')
+
+    const TestComponent = () => {
+      const { isAuthenticated } = useAuth()
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(sessionStorage.getItem('meridian_access_token')).toBeNull()
   })
 
   it('calls refresh endpoint and updates token on refresh', async () => {
