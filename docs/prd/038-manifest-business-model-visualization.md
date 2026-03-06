@@ -151,7 +151,7 @@ Hop 1: usage_to_value saga executes
   |-- book_retail_position -> SETTLEMENT (GBP, DEBIT)
   |-- book_wholesale_position -> REVENUE (GBP, CREDIT)
        |
-       | emits: event:transaction-captured.v1
+       | emits: event:position-keeping.transaction-captured.v1
        | filter fails: instrument_code != 'GBP' (GBP -> false)
        |
        x Chain terminates (CEL filter rejection)
@@ -234,6 +234,11 @@ interface ManifestNode {
     | SagaDefinition
 }
 
+// Saga nodes carry trigger metadata directly (channel, filter)
+// rather than modeling event channels as separate graph nodes.
+// This avoids introducing a node type that has no manifest-level
+// definition — event channels are implicit, not configured.
+
 interface ManifestEdge {
   id: string
   source: string
@@ -245,7 +250,6 @@ type ManifestRelationship =
   | 'allowed_by' // instrument -> account_type
   | 'converts_from' // valuation_rule -> instrument
   | 'converts_to' // valuation_rule -> instrument
-  | 'triggered_by' // saga -> event channel
   | 'reads_from' // saga -> account_type (star-parser)
   | 'writes_to' // saga -> account_type (star-parser)
   | 'uses_valuation' // saga -> valuation_rule (star-parser)
@@ -288,9 +292,13 @@ pass/fail when the produced event's instrument code is known. For
 complex filters, the result is `indeterminate` and the UI shows the
 filter expression with a "may or may not match" indicator.
 
-**Chain depth limit:** The engine stops at the same depth the runtime
-enforces (`defaultMaxChainDepth = 10` in the event-router). This is
-displayed in the UI so users understand the runtime safety boundary.
+**Chain depth limit:** The engine defaults to 10 (matching the
+event-router's `defaultMaxChainDepth`). If a future configuration
+endpoint exposes the effective chain depth per tenant, the UI should
+read it from there. Until then, the frontend uses a shared constant
+that must be kept in sync with the event-router's default. The
+current depth is displayed in the UI so users understand the runtime
+safety boundary.
 
 ### Component Architecture
 
@@ -330,6 +338,16 @@ frontend/src/features/reference-data/
 | `composition-graph.tsx` | ReactFlow + ELK layout patterns |
 | `manifest-viewer.tsx` | Existing manifest YAML view (unchanged) |
 | `@xyflow/react` + `elkjs` | Same layout engines, different nodes |
+
+**Reuse mechanism:** The shared visualization primitives
+(`star-parser.ts`, `SagaFlowDiagram`, graph layout utilities) live
+in `frontend/src/features/cookbook/` today. Phase 1 of this PRD
+should extract the reusable modules (`star-parser.ts`,
+`saga-mermaid.ts`, and the ReactFlow layout helpers) to
+`frontend/src/lib/visualization/` so both `features/cookbook/` and
+`features/manifests/` import from a shared location. This avoids
+cross-feature imports and establishes `lib/` as the home for
+reusable visualization utilities.
 
 ### Relationship to Event-Router Runtime
 
@@ -381,6 +399,11 @@ produce, and where the chain terminates.
 - Identify `valuation_engine.compute()` calls and extract `method_id`,
   `from/to_instrument` params
 - Add `reads_from` and `writes_to` edges to the manifest graph model
+  when the target account type is statically determinable (e.g.,
+  `instrument_code="GBP"` as a literal). When the target is a
+  runtime variable, emit a `writes_to_dynamic` marker on the saga
+  node with the variable name, rendered in the UI as "writes to
+  (resolved at runtime)" with the relevant code snippet as tooltip
 - Unit tests against all cookbook saga patterns
 
 ### Phase 4: Transitive Closure Engine
@@ -538,7 +561,11 @@ on top of existing parsing.
    between two manifest versions
 7. All visualization is derived from the existing `GetCurrentManifest`
    gRPC response and client-side static analysis — no new backend
-   endpoints required for Phases 1-5
+   endpoints required for Phases 1-5. Phase 5 may additionally call
+   existing reference data gRPC endpoints (e.g., to resolve account
+   type mappings) depending on the resolution of open question 2;
+   the constraint is against creating new backend services, not
+   against using existing ones
 
 ## Relationship to Previous PRDs
 
