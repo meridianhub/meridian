@@ -325,9 +325,11 @@ function extractReturnStatus(lines: string[], returnLineIdx: number): string | n
  * Returns the literal string value if quoted, or marks as dynamic if a variable reference.
  */
 function extractParamValue(callText: string, paramName: string): { value: string | null; isDynamic: boolean } {
-  const literalMatch = callText.match(new RegExp(`${paramName}\\s*=\\s*"([^"]+)"`))
-  if (literalMatch) return { value: literalMatch[1], isDynamic: false }
-  const varMatch = callText.match(new RegExp(`${paramName}\\s*=\\s*(\\w+)`))
+  const escapedParam = paramName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const prefix = `(?:^|[\\s,(])${escapedParam}\\s*=\\s*`
+  const literalMatch = callText.match(new RegExp(`${prefix}(['"])(.*?)\\1`))
+  if (literalMatch) return { value: literalMatch[2], isDynamic: false }
+  const varMatch = callText.match(new RegExp(`${prefix}(\\w+)`))
   if (varMatch) return { value: null, isDynamic: true }
   return { value: null, isDynamic: false }
 }
@@ -356,8 +358,10 @@ function collectCallText(lines: string[], startIdx: number): string {
  */
 function findEnclosingStep(lines: string[], targetIdx: number): string {
   for (let i = targetIdx; i >= 0; i--) {
-    const match = lines[i].match(/step\(\s*name\s*=\s*"([^"]+)"/)
-    if (match) return match[1]
+    const dynamicMatch = lines[i].match(/step\(\s*name\s*=\s*"([^"]+)"\s*\+/)
+    if (dynamicMatch) return `${dynamicMatch[1]}*`
+    const staticMatch = lines[i].match(/step\(\s*name\s*=\s*"([^"]+)"/)
+    if (staticMatch) return staticMatch[1]
   }
   return 'unknown'
 }
@@ -400,7 +404,7 @@ export function analyzeSagaOutputs(source: string): SagaOutputAnalysis {
         if (varMatch) {
           dynamicTargets.push({
             variableName: varMatch[1],
-            codeSnippet: trimmed,
+            codeSnippet: callText.trim(),
             lineNumber,
           })
         }
@@ -410,7 +414,7 @@ export function analyzeSagaOutputs(source: string): SagaOutputAnalysis {
         if (varMatch) {
           dynamicTargets.push({
             variableName: varMatch[1],
-            codeSnippet: trimmed,
+            codeSnippet: callText.trim(),
             lineNumber,
           })
         }
@@ -439,7 +443,7 @@ export function analyzeSagaOutputs(source: string): SagaOutputAnalysis {
         if (varMatch) {
           dynamicTargets.push({
             variableName: varMatch[1],
-            codeSnippet: trimmed,
+            codeSnippet: callText.trim(),
             lineNumber,
           })
         }
@@ -449,7 +453,7 @@ export function analyzeSagaOutputs(source: string): SagaOutputAnalysis {
         if (varMatch) {
           dynamicTargets.push({
             variableName: varMatch[1],
-            codeSnippet: trimmed,
+            codeSnippet: callText.trim(),
             lineNumber,
           })
         }
@@ -459,7 +463,7 @@ export function analyzeSagaOutputs(source: string): SagaOutputAnalysis {
         if (varMatch) {
           dynamicTargets.push({
             variableName: varMatch[1],
-            codeSnippet: trimmed,
+            codeSnippet: callText.trim(),
             lineNumber,
           })
         }
