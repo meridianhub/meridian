@@ -70,11 +70,11 @@ func NewCachedResolver(source DataSource, cfg CachedResolverConfig) *CachedResol
 		panic("refdata: DataSource must not be nil")
 	}
 	ttl := cfg.TTL
-	if ttl == 0 {
+	if ttl <= 0 {
 		ttl = defaultCacheTTL
 	}
 	maxEntries := cfg.MaxEntries
-	if maxEntries == 0 {
+	if maxEntries <= 0 {
 		maxEntries = defaultCacheMaxEntries
 	}
 	logger := cfg.Logger

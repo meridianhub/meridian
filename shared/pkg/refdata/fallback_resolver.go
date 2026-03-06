@@ -129,7 +129,7 @@ func NewFallbackResolver(primary *CachedResolver, storage SnapshotStorage, cfg F
 	}
 
 	interval := cfg.SnapshotInterval
-	if interval == 0 {
+	if interval <= 0 {
 		interval = defaultSnapshotInterval
 	}
 	logger := cfg.Logger
