@@ -405,10 +405,10 @@ func TestNewMoneyFromInstrumentCode(t *testing.T) {
 			expectedAmount: decimal.NewFromFloat(8.54),
 		},
 		{
-			name:           "non-currency instrument GPU_HOUR",
+			name:           "non-currency instrument GAS",
 			amount:         decimal.NewFromFloat(1.25),
-			code:           "GPU_HOUR",
-			expectedCode:   "GPU_HOUR",
+			code:           "GAS",
+			expectedCode:   "GAS",
 			expectedAmount: decimal.NewFromFloat(1.25),
 		},
 		{

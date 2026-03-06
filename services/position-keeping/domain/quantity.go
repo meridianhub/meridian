@@ -290,9 +290,12 @@ func ParseCurrency(s string) (Currency, error) {
 
 // NewMoneyFromInstrumentCode creates a Money value from any instrument code (currency or non-currency).
 // For valid ISO 4217 currencies (GBP, USD, etc.), it uses the standard currency path with correct precision.
-// For non-currency instrument codes (KWH, GPU_HOUR, etc.), it creates a Money value using the code directly,
+// For non-currency instrument codes (KWH, GAS, etc.), it creates a Money value using the code directly,
 // bypassing currency validation. This enables position-keeping to track non-fiat instruments while
 // reusing the same Money type for persistence and domain logic.
+//
+// Persistence constraint: the transaction_log_entry.currency column is CHAR(3), so codes must be
+// exactly 3 characters to persist correctly. Codes longer than 3 characters will fail at DB insert time.
 func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, error) {
 	if code == "" {
 		return Money{}, ErrEmptyCode
