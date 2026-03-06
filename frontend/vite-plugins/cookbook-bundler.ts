@@ -1,6 +1,6 @@
 import type { Plugin } from 'vite'
 import { readFileSync, existsSync } from 'node:fs'
-import { resolve, join } from 'node:path'
+import { resolve } from 'node:path'
 
 const VIRTUAL_MODULE_ID = 'virtual:cookbook-data'
 const RESOLVED_VIRTUAL_MODULE_ID = '\0' + VIRTUAL_MODULE_ID
