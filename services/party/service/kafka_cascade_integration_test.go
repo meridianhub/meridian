@@ -525,11 +525,9 @@ func TestCascade_LoadTest100Terminations(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Allow some failures due to optimistic locking, but most should succeed
-	successCount := partyCount - int(failCount.Load())
-	t.Logf("Terminations: %d succeeded, %d failed", successCount, failCount.Load())
-	assert.GreaterOrEqual(t, successCount, partyCount*9/10,
-		"At least 90%% of terminations should succeed")
+	// Each termination targets a distinct party; failures should be zero.
+	t.Logf("Terminations: %d succeeded, %d failed", partyCount-int(failCount.Load()), failCount.Load())
+	require.Zero(t, failCount.Load(), "All terminations should succeed")
 
 	// Wait for all events to arrive on Kafka
 	err := await.New().
@@ -537,12 +535,12 @@ func TestCascade_LoadTest100Terminations(t *testing.T) {
 		PollInterval(500 * time.Millisecond).
 		Until(func() bool {
 			got := len(getEvents())
-			if got > 0 && got < successCount {
-				t.Logf("Kafka events received: %d/%d", got, successCount)
+			if got > 0 && got < partyCount {
+				t.Logf("Kafka events received: %d/%d", got, partyCount)
 			}
-			return got >= successCount
+			return got >= partyCount
 		})
-	require.NoError(t, err, "All %d events should arrive on Kafka (got %d)", successCount, len(getEvents()))
+	require.NoError(t, err, "All %d events should arrive on Kafka (got %d)", partyCount, len(getEvents()))
 
 	// Verify no duplicate event_ids
 	records := getEvents()
@@ -554,8 +552,8 @@ func TestCascade_LoadTest100Terminations(t *testing.T) {
 		eventIDs[event.EventId] = true
 	}
 
-	assert.Equal(t, successCount, len(eventIDs),
-		"Each successful termination should produce exactly one unique event")
+	assert.Equal(t, partyCount, len(eventIDs),
+		"Each termination should produce exactly one unique event")
 }
 
 // TestCascade_NegativeControlNonExistentParty verifies that controlling a non-existent
@@ -596,6 +594,7 @@ func TestCascade_NegativeControlNonExistentParty(t *testing.T) {
 
 	// Also verify no event_outbox entries exist for this party
 	var count int64
-	env.db.Model(&events.EventOutbox{}).Where("aggregate_id = ?", nonExistentID).Count(&count)
+	result := env.db.Model(&events.EventOutbox{}).Where("aggregate_id = ?", nonExistentID).Count(&count)
+	require.NoError(t, result.Error, "Outbox query should succeed")
 	assert.Equal(t, int64(0), count, "No outbox entry should exist for non-existent party")
 }

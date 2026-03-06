@@ -91,7 +91,7 @@ message PartyUpdatedEvent {
 }
 
 // PartyControlledEvent is published when a control action is applied to a party
-// (e.g., SUSPEND, TERMINATE, REACTIVATE). Downstream services can use this event
+// (e.g., SUSPEND, TERMINATE, ACTIVATE). Downstream services can use this event
 // to react to party lifecycle changes, such as freezing linked accounts when a
 // party is terminated.
 message PartyControlledEvent {
@@ -105,7 +105,7 @@ message PartyControlledEvent {
     uuid: true
   }];
 
-  // control_action is the action applied (e.g., "SUSPEND", "TERMINATE", "REACTIVATE")
+  // control_action is the action applied (e.g., "SUSPEND", "TERMINATE", "ACTIVATE")
   string control_action = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
