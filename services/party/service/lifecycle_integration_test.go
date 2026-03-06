@@ -550,105 +550,13 @@ func TestEventOrdering_UpdateThenControl(t *testing.T) {
 	assert.Greater(t, updateResp.Party.Version, party.Version, "Update should increment version")
 }
 
-// --- Cross-Service Cascade Tests (Placeholder for Future Implementation) ---
-
-// NOTE: The following tests are PLACEHOLDERS for future implementation once
-// Kafka event infrastructure is fully integrated. Current codebase has audit_outbox
-// for event tracking but not yet connected to Kafka for cross-service messaging.
-
-// TestCascade_PartyTerminatedFreezesAccount is a PLACEHOLDER test.
-//
-// Future implementation (once Kafka is integrated):
-// 1. Setup: Create Party via RegisterParty
-// 2. Setup: Create Current Account linked to party (via CurrentAccount service)
-// 3. Action: ControlParty(TERMINATE) on party
-// 4. Verify: PartyTerminated event published to Kafka topic
-// 5. Verify: Current Account service consumes event and freezes account (status→FROZEN)
-// 6. Verify: Attempt withdrawal on frozen account fails with appropriate error
-// 7. Use Testcontainers for Kafka and verify latency < 1 second using await.Until
-//
-// Infrastructure needed:
-// - Kafka Testcontainer setup
-// - PartyTerminated event proto definition
-// - Current Account Kafka consumer for party events
-// - Account freeze logic in Current Account domain
-func TestCascade_PartyTerminatedFreezesAccount_PLACEHOLDER(t *testing.T) {
-	t.Skip("PLACEHOLDER: Requires Kafka infrastructure - implement after Kafka integration")
-
-	// Future test structure:
-	// svc, kafkaContainer, ctx, cleanup := setupCrossServiceIntegrationTest(t)
-	// defer cleanup()
-	//
-	// party := registerTestParty(t, ctx, svc, "Cross-Service Test")
-	// account := createCurrentAccount(t, ctx, currentAccountSvc, party.PartyId)
-	//
-	// controlReq := &pb.ControlPartyRequest{
-	//     PartyId:       party.PartyId,
-	//     ControlAction: pb.ControlAction_CONTROL_ACTION_TERMINATE,
-	//     Reason:        "Test termination",
-	//     ActorId:       "TEST-ACTOR",
-	// }
-	// _, err := svc.ControlParty(ctx, controlReq)
-	// require.NoError(t, err)
-	//
-	// // Wait for event consumption and account freeze (use await.Until, NOT time.Sleep)
-	// err = await.New().AtMost(1 * time.Second).Until(func() bool {
-	//     acc, _ := currentAccountSvc.GetAccount(ctx, account.AccountId)
-	//     return acc.Status == "FROZEN"
-	// })
-	// require.NoError(t, err, "Account should freeze within 1 second")
-	//
-	// // Verify withdrawal fails
-	// _, withdrawErr := currentAccountSvc.Withdraw(ctx, account.AccountId, 100)
-	// require.Error(t, withdrawErr)
-	// assert.Contains(t, withdrawErr.Error(), "account frozen")
-}
-
-// TestCascade_EventReplayIdempotency is a PLACEHOLDER test.
-//
-// Future implementation:
-// 1. Terminate party and freeze account
-// 2. Republish PartyTerminated event to Kafka
-// 3. Verify idempotency: account already frozen, no duplicate freeze events
-// 4. Verify event consumer tracks processed event IDs to prevent duplicate processing
-func TestCascade_EventReplayIdempotency_PLACEHOLDER(t *testing.T) {
-	t.Skip("PLACEHOLDER: Requires Kafka infrastructure - implement after Kafka integration")
-}
-
-// TestCascade_PartialFailureRecovery is a PLACEHOLDER test.
-//
-// Future implementation:
-// 1. Party service publishes event but Current Account service is down
-// 2. Verify event persists in Kafka topic
-// 3. Restart Current Account service
-// 4. Verify event consumed after service restart and account freezes
-// 5. Use Testcontainers lifecycle management to stop/start services
-func TestCascade_PartialFailureRecovery_PLACEHOLDER(t *testing.T) {
-	t.Skip("PLACEHOLDER: Requires Kafka infrastructure - implement after Kafka integration")
-}
-
-// TestCascade_LoadTest100Terminations is a PLACEHOLDER test.
-//
-// Future implementation:
-// 1. Terminate 100 parties concurrently
-// 2. Verify all PartyTerminated events published to Kafka
-// 3. Verify all 100 linked accounts freeze successfully
-// 4. Verify no race conditions or duplicate events
-// 5. Use await.Until with reasonable timeout (e.g., 10 seconds for 100 parties)
-func TestCascade_LoadTest100Terminations_PLACEHOLDER(t *testing.T) {
-	t.Skip("PLACEHOLDER: Requires Kafka infrastructure - implement after Kafka integration")
-}
-
-// TestCascade_NegativeControlNonExistentParty is a PLACEHOLDER test.
-//
-// Future implementation:
-// 1. ControlParty(TERMINATE) with non-existent party_id
-// 2. Verify no event published to Kafka
-// 3. Verify error returned to caller (NotFound)
-// 4. Verify audit_outbox contains no entry for failed operation
-func TestCascade_NegativeControlNonExistentParty_PLACEHOLDER(t *testing.T) {
-	t.Skip("PLACEHOLDER: Requires Kafka infrastructure - implement after Kafka integration")
-}
+// Cross-Service Cascade Tests have been moved to kafka_cascade_integration_test.go
+// with real Kafka testcontainer infrastructure. See:
+// - TestCascade_PartyTerminatedPublishesEvent
+// - TestCascade_EventReplayIdempotency
+// - TestCascade_PartialFailureRecovery
+// - TestCascade_LoadTest100Terminations
+// - TestCascade_NegativeControlNonExistentParty
 
 // --- Additional Workflow Tests ---
 

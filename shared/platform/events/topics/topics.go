@@ -92,6 +92,8 @@ const (
 	PartyCreatedV1 = "party.created.v1"
 	// PartyUpdatedV1 is the Kafka topic for party updated events.
 	PartyUpdatedV1 = "party.updated.v1"
+	// PartyControlledV1 is the Kafka topic for party controlled events (suspend, terminate, reactivate).
+	PartyControlledV1 = "party.controlled.v1"
 	// PartyVerificationCompletedV1 is the Kafka topic for party verification completed events.
 	PartyVerificationCompletedV1 = "party.verification-completed.v1"
 )
@@ -187,6 +189,7 @@ func All() []string {
 		PositionKeepingOpeningBalanceRecordedV1,
 		PartyCreatedV1,
 		PartyUpdatedV1,
+		PartyControlledV1,
 		PartyVerificationCompletedV1,
 		InternalAccountFacilityCreatedV1,
 		InternalAccountBookingCreatedV1,
