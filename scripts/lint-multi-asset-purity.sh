@@ -13,7 +13,7 @@
 #   - Utilities (utilities/)
 #   - External adapters (adapters/stripe/)
 #   - payment-order service (intentionally currency-only by business rule)
-#   - Known violations tracked in .taskmaster/docs/037-audit-results.md
+#   - Known violations tracked in docs/audit/multi-asset-purity.md
 #
 # Usage:
 #   ./scripts/lint-multi-asset-purity.sh [--strict]
@@ -216,7 +216,7 @@ while IFS=: read -r file line_num content; do
     report_violation "INSTRUMENT_SWITCH" "$file" "$line_num" "$content"
 done < <(grep -rn \
     "${GREP_EXCLUDES[@]}" \
-    -E 'case\s+"(USD|EUR|GBP|JPY|CHF|CAD|AUD|KWH|GPU_HOUR|CARBON_TONNE|CARBON_CREDIT)"' \
+    -E 'case\s+"(GBP|USD|EUR|JPY|CHF|CAD|AUD|NZD|KWH|MWH|GPU_HOUR|CARBON_CREDIT|CARBON_TONNE|GAS|WATER)"' \
     "$REPO_ROOT/services" "$REPO_ROOT/shared" 2>/dev/null || true)
 
 # --- Check 3: Deprecated shared/domain/money imports ---
@@ -266,12 +266,17 @@ if [ "$VIOLATIONS" -gt 0 ]; then
     echo ""
     echo "New violations must be resolved before merge."
     echo "If a violation is intentional, add it to the known violations list in this script"
-    echo "and document the reason in .taskmaster/docs/037-audit-results.md."
+    echo "and document the reason in docs/audit/multi-asset-purity.md."
     exit 1
 elif [ "$KNOWN_VIOLATIONS" -gt 0 ]; then
+    if [ "$STRICT" = "--strict" ]; then
+        echo -e "${RED}Strict mode: $KNOWN_VIOLATIONS known violation(s) must also be resolved.${NC}"
+        echo "See docs/audit/multi-asset-purity.md for details."
+        exit 1
+    fi
     echo -e "${GREEN}No new violations.${NC}"
     echo -e "${YELLOW}$KNOWN_VIOLATIONS known violation(s) tracked for remediation.${NC}"
-    echo "See .taskmaster/docs/037-audit-results.md for details."
+    echo "See docs/audit/multi-asset-purity.md for details."
     exit 0
 else
     echo -e "${GREEN}No violations detected.${NC}"
