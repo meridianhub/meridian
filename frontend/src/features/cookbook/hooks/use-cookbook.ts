@@ -3,6 +3,7 @@ export interface CookbookItem {
   type: 'registry:pattern' | 'registry:ui'
   title: string
   description?: string
+  registryDependencies?: string[]
   categories?: string[]
   meta?: PatternMeta | ComponentMeta
   files?: CookbookFile[]

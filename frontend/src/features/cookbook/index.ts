@@ -1,5 +1,7 @@
 export { CookbookPage } from './pages/index'
 export { CookbookDetailPage } from './pages/detail'
+export { CookbookGraphPage } from './pages/graph'
+export { CompositionGraph } from './components/composition-graph'
 export type { CookbookItem, CookbookFile, CookbookRegistry, PatternMeta, ComponentMeta } from './hooks/use-cookbook'
 export { useCookbook } from './hooks/use-cookbook'
 export { parseStarlarkSaga } from './lib/star-parser'
