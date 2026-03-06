@@ -111,12 +111,12 @@ relationships between them:
 ```text
 [KWH] ──allowed_by──> [ENERGY_INVENTORY]
   |                           |
-  |──from_instrument──> [kwh_to_gbp_retail]
+  |──converts_from──> [kwh_to_gbp_retail]
   |                           |        event:transaction-captured
-  |──from_instrument──> [kwh_to_gbp_wholesale]       |
-  |                                                   v
-  v                                       [usage_to_value saga]
-[GBP] <──to_instrument── [kwh_to_gbp_*]    |          |
+  |──converts_from──> [kwh_to_gbp_wholesale]       |
+  |                                                 v
+  v                                     [usage_to_value saga]
+[GBP] <──converts_to── [kwh_to_gbp_*]    |          |
   |                                         v          v
   |──allowed_by──> [SETTLEMENT] <── retail leg
   |──allowed_by──> [REVENUE] <───── wholesale leg
@@ -251,7 +251,8 @@ type ManifestRelationship =
   | 'converts_from' // valuation_rule -> instrument
   | 'converts_to' // valuation_rule -> instrument
   | 'reads_from' // saga -> account_type (star-parser)
-  | 'writes_to' // saga -> account_type (star-parser)
+  | 'writes_to' // saga -> account_type (star-parser, static)
+  | 'writes_to_dynamic' // saga -> unknown (runtime-resolved target)
   | 'uses_valuation' // saga -> valuation_rule (star-parser)
 ```
 
@@ -373,9 +374,10 @@ produce, and where the chain terminates.
 - `manifest-graph-model.ts`: transform `Manifest` proto into typed
   graph
 - Build nodes from instruments, account types, valuation rules, sagas
-- Build edges from `allowed_instruments`, `from/to_instrument`
-  relationships; store saga trigger/filter as node metadata (not
-  edges, since event channels are implicit, not manifest entities)
+- Build edges from `allowed_by` (instrument -> account type),
+  `converts_from`/`converts_to` (valuation rule -> instrument);
+  store saga trigger/filter as node metadata (not edges, since
+  event channels are implicit, not manifest entities)
 - Unit tests with the energy-settlement manifest fragment as fixture
 
 ### Phase 2: Manifest Graph View
