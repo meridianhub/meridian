@@ -1,13 +1,18 @@
+import { useState, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { DetailSkeleton } from '@/shared/detail-skeleton'
+import { HandlerReference } from '@/shared/handler-reference'
 import { StarlarkEditor } from '@/features/sagas/components/starlark-editor'
 import { ManifestViewer } from '../components/manifest-viewer'
+import { ComponentDetail } from '../components/component-detail'
 import { useCookbook } from '../hooks/use-cookbook'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 import { usePatternFiles } from '../hooks/use-pattern-files'
+import { parseStarlarkSaga } from '../lib/star-parser'
 
 function complexityLabel(score: number): string {
   if (score <= 3) return 'Low'
@@ -137,6 +142,58 @@ function CompositionSection({ meta }: { meta: PatternMeta }) {
   )
 }
 
+function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | null }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const serviceNames = useMemo(() => {
+    if (!starlarkContent) return []
+    const flow = parseStarlarkSaga(starlarkContent)
+    const names = new Set<string>()
+    for (const step of flow.steps) {
+      for (const call of step.serviceCalls) {
+        names.add(call.service)
+      }
+    }
+    return Array.from(names)
+  }, [starlarkContent])
+
+  const filterString = serviceNames.join(' ')
+
+  return (
+    <div className="rounded-lg border">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-muted/50"
+      >
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        )}
+        Handler Reference
+        {serviceNames.length > 0 && (
+          <span className="ml-auto flex gap-1.5">
+            {serviceNames.map((name) => (
+              <Badge key={name} variant="secondary" className="text-xs">
+                {name}
+              </Badge>
+            ))}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="border-t px-4 py-3">
+          <HandlerReference
+            filter={filterString}
+            onInsert={() => {}}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function CookbookDetailPage() {
   const { name } = useParams<{ name: string }>()
   const { items, isLoading: catalogueLoading } = useCookbook()
@@ -170,51 +227,51 @@ export function CookbookDetailPage() {
       <PatternInfoSection item={item} />
 
       {isPattern ? (
-        <Tabs defaultValue="manifest">
-          <TabsList>
-            <TabsTrigger value="manifest">Manifest</TabsTrigger>
-            <TabsTrigger value="starlark">Starlark</TabsTrigger>
-            <TabsTrigger value="composition">Composition</TabsTrigger>
-          </TabsList>
+        <>
+          <Tabs defaultValue="manifest">
+            <TabsList>
+              <TabsTrigger value="manifest">Manifest</TabsTrigger>
+              <TabsTrigger value="starlark">Starlark</TabsTrigger>
+              <TabsTrigger value="composition">Composition</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="manifest" className="mt-4">
-            {isLoading ? (
-              <div className="h-[200px] animate-pulse rounded border bg-muted" />
-            ) : manifestContent ? (
-              <ManifestViewer content={manifestContent} />
-            ) : (
-              <p className="text-sm text-muted-foreground">No manifest file found.</p>
-            )}
-          </TabsContent>
+            <TabsContent value="manifest" className="mt-4">
+              {isLoading ? (
+                <div className="h-[200px] animate-pulse rounded border bg-muted" />
+              ) : manifestContent ? (
+                <ManifestViewer content={manifestContent} />
+              ) : (
+                <p className="text-sm text-muted-foreground">No manifest file found.</p>
+              )}
+            </TabsContent>
 
-          <TabsContent value="starlark" className="mt-4">
-            {isLoading ? (
-              <div className="h-[200px] animate-pulse rounded border bg-muted" />
-            ) : starlarkContent ? (
-              <StarlarkEditor
-                value={starlarkContent}
-                onChange={() => {}}
-                readOnly
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">No Starlark file found.</p>
-            )}
-          </TabsContent>
+            <TabsContent value="starlark" className="mt-4">
+              {isLoading ? (
+                <div className="h-[200px] animate-pulse rounded border bg-muted" />
+              ) : starlarkContent ? (
+                <StarlarkEditor
+                  value={starlarkContent}
+                  onChange={() => {}}
+                  readOnly
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">No Starlark file found.</p>
+              )}
+            </TabsContent>
 
-          <TabsContent value="composition" className="mt-4">
-            {meta ? (
-              <CompositionSection meta={meta} />
-            ) : (
-              <p className="text-sm text-muted-foreground">No composition metadata available.</p>
-            )}
-          </TabsContent>
-        </Tabs>
+            <TabsContent value="composition" className="mt-4">
+              {meta ? (
+                <CompositionSection meta={meta} />
+              ) : (
+                <p className="text-sm text-muted-foreground">No composition metadata available.</p>
+              )}
+            </TabsContent>
+          </Tabs>
+
+          <HandlerReferencePanel starlarkContent={starlarkContent} />
+        </>
       ) : (
-        <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">
-            UI component preview will be available in a future update.
-          </p>
-        </div>
+        <ComponentDetail item={item} />
       )}
     </div>
   )

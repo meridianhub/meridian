@@ -33,6 +33,8 @@ export interface ComponentMeta {
   feature_module?: string
   used_by?: string[]
   configurable?: boolean
+  tenant_configurable?: boolean
+  configurable_props?: string[]
 }
 
 export interface CookbookFile {
