@@ -16,6 +16,7 @@ version: "1.0"
 handlers:
   position_keeping.initiate_log:
     description: "Initiate a log entry"
+    compensation_strategy: none
     params:
       amount:
         type: Decimal

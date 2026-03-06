@@ -556,8 +556,9 @@ handlers:
 	metadata := make(map[string]HandlerMetadata)
 	for name, meta := range linterMeta {
 		metadata[name] = HandlerMetadata{
-			IsExternal:       meta.IsExternal,
-			RequiresPreCheck: meta.RequiresPreCheck,
+			IsExternal:           meta.IsExternal,
+			RequiresPreCheck:     meta.RequiresPreCheck,
+			CompensationStrategy: "none", // Test handlers have no compensation
 		}
 	}
 
@@ -629,8 +630,9 @@ handlers:
 	metadata := make(map[string]HandlerMetadata)
 	for name, meta := range linterMeta {
 		metadata[name] = HandlerMetadata{
-			IsExternal:       meta.IsExternal,
-			RequiresPreCheck: meta.RequiresPreCheck,
+			IsExternal:           meta.IsExternal,
+			RequiresPreCheck:     meta.RequiresPreCheck,
+			CompensationStrategy: "none", // Test handlers have no compensation
 		}
 	}
 
@@ -669,8 +671,9 @@ handlers:
 	metadata := make(map[string]HandlerMetadata)
 	for name, meta := range linterMeta {
 		metadata[name] = HandlerMetadata{
-			IsExternal:       meta.IsExternal,
-			RequiresPreCheck: meta.RequiresPreCheck,
+			IsExternal:           meta.IsExternal,
+			RequiresPreCheck:     meta.RequiresPreCheck,
+			CompensationStrategy: "none", // Test handlers have no compensation
 		}
 	}
 

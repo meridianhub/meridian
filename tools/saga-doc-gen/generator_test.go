@@ -69,6 +69,7 @@ version: "1.0"
 handlers:
   complex.handler:
     description: "Handler with complex types"
+    compensation_strategy: none
     params:
       status:
         type: enum
@@ -129,6 +130,7 @@ version: "1.0"
 handlers:
   test.handler:
     description: "Test handler"
+    compensation_strategy: none
     params:
       name:
         type: string
@@ -181,6 +183,7 @@ version: "1.0"
 handlers:
   enum.handler:
     description: "Handler with enum"
+    compensation_strategy: none
     params:
       status:
         type: enum
@@ -224,6 +227,7 @@ version: "1.0"
 handlers:
   collection.handler:
     description: "Handler with collections"
+    compensation_strategy: none
     params:
       tags:
         type: array

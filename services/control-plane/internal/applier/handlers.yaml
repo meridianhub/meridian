@@ -40,6 +40,7 @@ handlers:
 
   reference_data.delete_instrument:
     description: "Delete an instrument (compensation for register)"
+    compensation_strategy: none
     params:
       instrument_code:
         type: string
@@ -118,6 +119,7 @@ handlers:
 
   reference_data.delete_account_type:
     description: "Delete an account type (compensation for register)"
+    compensation_strategy: none
     params:
       account_type_code:
         type: string
@@ -134,6 +136,7 @@ handlers:
   # Reference Data - Valuation Rules
   reference_data.register_valuation_rule:
     description: "Register a valuation rule for cross-instrument conversion"
+    compensation_strategy: none
     params:
       from_instrument:
         type: string
@@ -169,6 +172,7 @@ handlers:
   # Reference Data - Saga Definition
   reference_data.register_saga_definition:
     description: "Register a saga definition in the saga registry"
+    compensation_strategy: none
     params:
       saga_name:
         type: string
@@ -201,6 +205,7 @@ handlers:
   # Operational Gateway - Provider Connection Management
   operational_gateway.upsert_connection:
     description: "Create or update a provider connection in the Operational Gateway service"
+    compensation_strategy: none
     params:
       connection_id:
         type: string
@@ -251,6 +256,7 @@ handlers:
   # Operational Gateway - Instruction Route Management
   operational_gateway.upsert_route:
     description: "Create or update an instruction route in the Operational Gateway service"
+    compensation_strategy: none
     params:
       instruction_type:
         type: string
@@ -291,6 +297,7 @@ handlers:
   # Internal Account - Account Provisioning
   internal_account.initiate:
     description: "Initiate a new internal account"
+    compensation_strategy: none
     params:
       account_code:
         type: string

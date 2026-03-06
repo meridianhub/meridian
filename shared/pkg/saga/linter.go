@@ -25,6 +25,9 @@ const (
 
 	// LintIssueTypeMissingPreCheck indicates an external step without verify_external_state.
 	LintIssueTypeMissingPreCheck LintIssueType = "MISSING_PRE_CHECK"
+
+	// LintIssueTypeMissingCompensationStrategy indicates a handler call without declared compensation handling.
+	LintIssueTypeMissingCompensationStrategy LintIssueType = "MISSING_COMPENSATION_STRATEGY"
 )
 
 // LintSeverity indicates how severe the lint issue is.
@@ -92,6 +95,12 @@ type HandlerMetadata struct {
 	// Empty means the handler doesn't produce instruments.
 	// Used for conservation rule enforcement to prevent causation loops.
 	ProducesInstruments []string
+
+	// CompensationStrategy indicates how compensation is handled ("auto", "saga_managed", "none", or "").
+	CompensationStrategy string
+
+	// HasAutoCompensation indicates the handler has a compensate: field.
+	HasAutoCompensation bool
 }
 
 // SemanticLinter performs AST-based semantic analysis on Starlark scripts.
@@ -108,11 +117,12 @@ type SemanticLinter struct {
 func NewSemanticLinter() *SemanticLinter {
 	return &SemanticLinter{
 		enforcementLevels: map[LintIssueType]EnforcementLevel{
-			LintIssueTypeDecimalArithmetic: EnforcementLevelWarning,
-			LintIssueTypeMagicNumber:       EnforcementLevelWarning,
-			LintIssueTypeNestedConditional: EnforcementLevelWarning,
-			LintIssueTypeHardcodedCode:     EnforcementLevelWarning,
-			LintIssueTypeMissingPreCheck:   EnforcementLevelError, // External handlers require pre-check
+			LintIssueTypeDecimalArithmetic:           EnforcementLevelWarning,
+			LintIssueTypeMagicNumber:                 EnforcementLevelWarning,
+			LintIssueTypeNestedConditional:           EnforcementLevelWarning,
+			LintIssueTypeHardcodedCode:               EnforcementLevelWarning,
+			LintIssueTypeMissingPreCheck:             EnforcementLevelError, // External handlers require pre-check
+			LintIssueTypeMissingCompensationStrategy: EnforcementLevelWarning,
 		},
 		handlerMetadata: make(map[string]HandlerMetadata),
 	}
@@ -361,7 +371,7 @@ func (v *lintVisitor) handleVerifyExternalState(e *syntax.CallExpr) {
 	}
 }
 
-// handleStepCall checks if external handler has Pre-Step Check.
+// handleStepCall checks handler calls for pre-check and compensation coverage.
 func (v *lintVisitor) handleStepCall(e *syntax.CallExpr) {
 	handlerName := v.extractHandlerArg(e)
 	if handlerName == "" {
@@ -369,18 +379,24 @@ func (v *lintVisitor) handleStepCall(e *syntax.CallExpr) {
 	}
 
 	meta, ok := v.linter.handlerMetadata[handlerName]
-	if !ok || !meta.IsExternal || !meta.RequiresPreCheck {
+	if !ok {
 		return
 	}
 
-	if v.verifiedHandlers[handlerName] {
-		return
+	// Pre-check validation for external handlers
+	if meta.IsExternal && meta.RequiresPreCheck && !v.verifiedHandlers[handlerName] {
+		stepName := v.extractStepName(e)
+		v.addIssue(LintIssueTypeMissingPreCheck, int(e.Lparen.Line),
+			fmt.Sprintf("External handler %q requires Pre-Step Check", handlerName),
+			fmt.Sprintf("Add verify_external_state before step '%s'", stepName))
 	}
 
-	stepName := v.extractStepName(e)
-	v.addIssue(LintIssueTypeMissingPreCheck, int(e.Lparen.Line),
-		fmt.Sprintf("External handler %q requires Pre-Step Check", handlerName),
-		fmt.Sprintf("Add verify_external_state before step '%s'", stepName))
+	// Compensation coverage validation
+	if !meta.HasAutoCompensation && meta.CompensationStrategy == "" {
+		v.addIssue(LintIssueTypeMissingCompensationStrategy, int(e.Lparen.Line),
+			fmt.Sprintf("Handler %q has no compensation strategy declared", handlerName),
+			fmt.Sprintf("Add 'compensation_strategy: none' or 'compensation_strategy: saga_managed' to %s in handlers.yaml", handlerName))
+	}
 }
 
 // handleValuateCall checks for hardcoded instrument codes.

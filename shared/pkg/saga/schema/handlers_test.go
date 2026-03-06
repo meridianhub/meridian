@@ -85,6 +85,94 @@ func TestCompensationHandlersExist(t *testing.T) {
 	}
 }
 
+func TestCompensationCoverage(t *testing.T) {
+	schema, err := Parse(platformHandlersYAML)
+	require.NoError(t, err)
+
+	for name, handler := range schema.Handlers {
+		t.Run(name, func(t *testing.T) {
+			hasCompensate := handler.Compensate != ""
+			hasStrategy := handler.CompensationStrategy != ""
+
+			assert.True(t, hasCompensate || hasStrategy,
+				"handler %q must declare either 'compensate' or 'compensation_strategy'", name)
+
+			if hasCompensate && hasStrategy {
+				assert.Equal(t, CompensationStrategyAuto, handler.CompensationStrategy,
+					"handler %q with 'compensate' should only use strategy 'auto'", name)
+			}
+		})
+	}
+}
+
+func TestCompensationSchemaValidation_RejectsInvalidStrategy(t *testing.T) {
+	yaml := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    compensation_strategy: invalid_value
+    params: {}
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid compensation_strategy value")
+}
+
+func TestCompensationSchemaValidation_RejectsMissing(t *testing.T) {
+	yaml := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    params: {}
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must declare either")
+}
+
+func TestCompensationSchemaValidation_RejectsConflict(t *testing.T) {
+	yaml := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    compensate: test.undo
+    compensation_strategy: none
+    params: {}
+  test.undo:
+    description: "Undo handler"
+    compensation_strategy: none
+    params: {}
+`
+	_, err := Parse([]byte(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "should not set")
+}
+
+func TestCompensationSchemaValidation_AcceptsCompensateWithAutoStrategy(t *testing.T) {
+	yaml := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test handler"
+    compensate: test.undo
+    compensation_strategy: auto
+    params: {}
+  test.undo:
+    description: "Undo handler"
+    compensation_strategy: none
+    params: {}
+`
+	_, err := Parse([]byte(yaml))
+	require.NoError(t, err, "compensate + auto strategy should be valid")
+}
+
 func TestHandlerParamTypes(t *testing.T) {
 	schema, err := Parse(platformHandlersYAML)
 	require.NoError(t, err)

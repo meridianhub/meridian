@@ -390,8 +390,9 @@ func ValidateActivation(script string, handlerMetadata map[string]HandlerMetadat
 		linter.SetHandlerMetadata(handlerMetadata)
 	}
 
-	// Enforce ERROR level for Decimal arithmetic in activation
+	// Enforce ERROR level for Decimal arithmetic and compensation coverage in activation
 	linter.SetEnforcementLevel(LintIssueTypeDecimalArithmetic, EnforcementLevelError)
+	linter.SetEnforcementLevel(LintIssueTypeMissingCompensationStrategy, EnforcementLevelError)
 
 	result, err := ValidateWithLinter(script, linter)
 	if err != nil {

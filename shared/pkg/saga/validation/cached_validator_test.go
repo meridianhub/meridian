@@ -19,6 +19,7 @@ version: 1.0
 handlers:
   test.echo:
     description: Test echo handler
+    compensation_strategy: none
     params:
       message:
         type: string
@@ -68,11 +69,13 @@ service: test
 version: 1.0
 handlers:
   test.handler1:
+    compensation_strategy: none
     params: {}
     returns:
       result:
         type: string
   test.handler2:
+    compensation_strategy: none
     params: {}
     returns:
       result:
@@ -114,6 +117,7 @@ service: test
 version: 1.0
 handlers:
   test.valid_handler:
+    compensation_strategy: none
     params: {}
     returns:
       result:
@@ -152,6 +156,7 @@ service: test
 version: 1.0
 handlers:
   test.handler:
+    compensation_strategy: none
     params: {}
     returns:
       result:
@@ -189,6 +194,7 @@ service: test
 version: 1.0
 handlers:
   test.handler:
+    compensation_strategy: none
     params: {}
     returns:
       result:
@@ -258,6 +264,7 @@ service: test
 version: 1.0
 handlers:
   test.handler:
+    compensation_strategy: none
     params: {}
     returns:
       result:

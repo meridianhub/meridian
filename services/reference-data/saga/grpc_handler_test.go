@@ -648,6 +648,7 @@ version: 1.0
 handlers:
   test_service.test_method:
     description: Test method
+    compensation_strategy: none
     params: {}
     returns:
       result:
@@ -656,6 +657,7 @@ handlers:
         type: string
   payment.create_lien:
     description: Create payment lien
+    compensation_strategy: none
     params:
       amount:
         type: string
