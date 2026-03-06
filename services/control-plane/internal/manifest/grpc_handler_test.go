@@ -78,15 +78,7 @@ func TestGetManifestVersion_EmptyVersionReturnsInvalidArgument(t *testing.T) {
 	assert.Contains(t, st.Message(), "version is required")
 }
 
-func TestListManifestVersions_EmptyListReturnsOK(t *testing.T) {
-	// EntityToProto on empty slice should produce empty response
-	versions := make([]*controlplanev1.ManifestVersion, 0)
-	assert.Empty(t, versions)
-
-	resp := &controlplanev1.ListManifestVersionsResponse{
-		Versions:   versions,
-		TotalCount: 0,
-	}
-	assert.Equal(t, int32(0), resp.TotalCount)
-	assert.Empty(t, resp.Versions)
+func TestNewHistoryHandler_ErrorSentinel(t *testing.T) {
+	_, err := NewHistoryHandler(nil, nil)
+	assert.ErrorIs(t, err, ErrHistoryServiceRequired)
 }
