@@ -40,26 +40,29 @@ type ReferenceDataProvider interface {
 // It calls the valuation engine in-process (not via gRPC) to convert quantity deltas
 // into monetary value deltas in settlement currency.
 type VarianceValuator struct {
-	engine       valuation.Engine
-	refData      ReferenceDataProvider
-	varianceRepo domain.VarianceRepository
-	runRepo      domain.SettlementRunRepository
-	concurrency  int
+	engine        valuation.Engine
+	refData       ReferenceDataProvider
+	partyResolver AccountPartyResolver
+	varianceRepo  domain.VarianceRepository
+	runRepo       domain.SettlementRunRepository
+	concurrency   int
 }
 
 // NewVarianceValuator creates a new VarianceValuator.
 func NewVarianceValuator(
 	engine valuation.Engine,
 	refData ReferenceDataProvider,
+	partyResolver AccountPartyResolver,
 	varianceRepo domain.VarianceRepository,
 	runRepo domain.SettlementRunRepository,
 ) *VarianceValuator {
 	return &VarianceValuator{
-		engine:       engine,
-		refData:      refData,
-		varianceRepo: varianceRepo,
-		runRepo:      runRepo,
-		concurrency:  defaultValuationConcurrency,
+		engine:        engine,
+		refData:       refData,
+		partyResolver: partyResolver,
+		varianceRepo:  varianceRepo,
+		runRepo:       runRepo,
+		concurrency:   defaultValuationConcurrency,
 	}
 }
 
@@ -174,6 +177,16 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 		return nil, decimal.Zero, fmt.Errorf("failed to get valuation method for %s: %w", v.InstrumentCode, err)
 	}
 
+	// Resolve the owning party for this account
+	partyID, err := vv.resolvePartyID(ctx, v.AccountID)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to resolve party for account, falling back to account ID",
+			"account_id", v.AccountID,
+			"error", err,
+		)
+		partyID = uuidFromString(v.AccountID)
+	}
+
 	// Build valuation request
 	req := &valuation.Request{
 		RequestID: uuid.New(),
@@ -184,7 +197,7 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 			Attributes:     v.Attributes,
 		},
 		AccountID:   uuidFromString(v.AccountID),
-		PartyID:     uuidFromString(v.AccountID), // TODO: resolve from tenant/party context when available
+		PartyID:     partyID,
 		KnowledgeAt: v.CreatedAt,
 	}
 
@@ -221,6 +234,15 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 	}
 
 	return v, valueDelta, nil
+}
+
+// resolvePartyID resolves the owning party ID for an account.
+// If no resolver is configured, it falls back to parsing the account ID as a UUID.
+func (vv *VarianceValuator) resolvePartyID(ctx context.Context, accountID string) (uuid.UUID, error) {
+	if vv.partyResolver == nil {
+		return uuidFromString(accountID), nil
+	}
+	return vv.partyResolver.ResolvePartyID(ctx, accountID)
 }
 
 // uuidFromString tries to parse a string as UUID, returns uuid.Nil on failure.
