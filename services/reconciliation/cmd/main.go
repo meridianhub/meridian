@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
@@ -227,7 +228,30 @@ func run(logger *slog.Logger) error {
 			}
 		}
 	}()
-	valuator := service.NewVarianceValuator(valuationEngine, refDataProvider, varianceRepo, runRepo)
+	// Wire AccountPartyResolver if Current Account URL is configured
+	var partyResolver service.AccountPartyResolver
+	if cfg.Services.CurrentAccountURL != "" {
+		caConn, caErr := grpc.NewClient(
+			cfg.Services.CurrentAccountURL,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if caErr != nil {
+			logger.Warn("failed to create current account gRPC client, party resolution will fall back to account ID",
+				"error", caErr)
+		} else {
+			defer func() {
+				if err := caConn.Close(); err != nil {
+					logger.Error("failed to close current account connection", "error", err)
+				}
+			}()
+			caClient := currentaccountv1.NewCurrentAccountServiceClient(caConn)
+			partyResolver = service.NewGRPCAccountPartyResolver(caClient)
+			logger.Info("current account party resolver configured",
+				"current_account_url", cfg.Services.CurrentAccountURL)
+		}
+	}
+
+	valuator := service.NewVarianceValuator(valuationEngine, refDataProvider, partyResolver, varianceRepo, runRepo)
 	serviceOpts = append(serviceOpts,
 		service.WithVarianceValuator(valuator.ValueVariances),
 	)

@@ -40,26 +40,29 @@ type ReferenceDataProvider interface {
 // It calls the valuation engine in-process (not via gRPC) to convert quantity deltas
 // into monetary value deltas in settlement currency.
 type VarianceValuator struct {
-	engine       valuation.Engine
-	refData      ReferenceDataProvider
-	varianceRepo domain.VarianceRepository
-	runRepo      domain.SettlementRunRepository
-	concurrency  int
+	engine        valuation.Engine
+	refData       ReferenceDataProvider
+	partyResolver AccountPartyResolver
+	varianceRepo  domain.VarianceRepository
+	runRepo       domain.SettlementRunRepository
+	concurrency   int
 }
 
 // NewVarianceValuator creates a new VarianceValuator.
 func NewVarianceValuator(
 	engine valuation.Engine,
 	refData ReferenceDataProvider,
+	partyResolver AccountPartyResolver,
 	varianceRepo domain.VarianceRepository,
 	runRepo domain.SettlementRunRepository,
 ) *VarianceValuator {
 	return &VarianceValuator{
-		engine:       engine,
-		refData:      refData,
-		varianceRepo: varianceRepo,
-		runRepo:      runRepo,
-		concurrency:  defaultValuationConcurrency,
+		engine:        engine,
+		refData:       refData,
+		partyResolver: partyResolver,
+		varianceRepo:  varianceRepo,
+		runRepo:       runRepo,
+		concurrency:   defaultValuationConcurrency,
 	}
 }
 
@@ -101,6 +104,23 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 		"variance_count", len(detected),
 	)
 
+	// Pre-resolve party IDs to avoid N+1 gRPC calls per variance.
+	// Multiple variances may share the same account, so we deduplicate lookups.
+	partyIDs := make(map[string]uuid.UUID)
+	for _, v := range detected {
+		if _, ok := partyIDs[v.AccountID]; !ok {
+			pid, pidErr := vv.resolvePartyID(ctx, v.AccountID)
+			if pidErr != nil {
+				slog.WarnContext(ctx, "failed to resolve party for account, falling back to account ID",
+					"account_id", v.AccountID,
+					"error", pidErr,
+				)
+				pid = uuidFromString(v.AccountID)
+			}
+			partyIDs[v.AccountID] = pid
+		}
+	}
+
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(vv.concurrency)
 
@@ -113,8 +133,9 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 
 	for _, v := range detected {
 		v := v // capture for closure
+		partyID := partyIDs[v.AccountID]
 		g.Go(func() error {
-			valued, valueDelta, err := vv.valueVariance(gCtx, v)
+			valued, valueDelta, err := vv.valueVariance(gCtx, v, partyID)
 			if err != nil {
 				slog.WarnContext(gCtx, "failed to value variance",
 					"variance_id", v.VarianceID,
@@ -167,7 +188,8 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 }
 
 // valueVariance values a single variance using the in-process valuation engine.
-func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Variance) (*domain.Variance, decimal.Decimal, error) {
+// partyID is pre-resolved by the caller to avoid N+1 gRPC lookups.
+func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Variance, partyID uuid.UUID) (*domain.Variance, decimal.Decimal, error) {
 	// Look up the valuation method for this instrument
 	methodID, err := vv.refData.GetValuationMethodID(ctx, v.InstrumentCode)
 	if err != nil {
@@ -184,7 +206,7 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 			Attributes:     v.Attributes,
 		},
 		AccountID:   uuidFromString(v.AccountID),
-		PartyID:     uuidFromString(v.AccountID), // TODO: resolve from tenant/party context when available
+		PartyID:     partyID,
 		KnowledgeAt: v.CreatedAt,
 	}
 
@@ -221,6 +243,15 @@ func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Varianc
 	}
 
 	return v, valueDelta, nil
+}
+
+// resolvePartyID resolves the owning party ID for an account.
+// If no resolver is configured, it falls back to parsing the account ID as a UUID.
+func (vv *VarianceValuator) resolvePartyID(ctx context.Context, accountID string) (uuid.UUID, error) {
+	if vv.partyResolver == nil {
+		return uuidFromString(accountID), nil
+	}
+	return vv.partyResolver.ResolvePartyID(ctx, accountID)
 }
 
 // uuidFromString tries to parse a string as UUID, returns uuid.Nil on failure.

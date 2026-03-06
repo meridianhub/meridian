@@ -107,7 +107,7 @@ func TestValueVariances_SuccessfulValuation(t *testing.T) {
 		},
 	}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
@@ -142,7 +142,7 @@ func TestValueVariances_MaterialityFiltering(t *testing.T) {
 		},
 	}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
@@ -167,7 +167,7 @@ func TestValueVariances_NoDetectedVariances(t *testing.T) {
 	engine := &mockValuationEngine{}
 	refData := &mockRefData{}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
@@ -188,7 +188,7 @@ func TestValueVariances_ValuationEngineError(t *testing.T) {
 	engine := &mockValuationEngine{err: errors.New("starlark timeout")}
 	refData := &mockRefData{}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	// When all variances fail valuation, the method returns an error
 	require.Error(t, err)
@@ -211,7 +211,7 @@ func TestValueVariances_ReferenceDataError(t *testing.T) {
 	engine := &mockValuationEngine{}
 	refData := &mockRefData{methodErr: errors.New("reference data unavailable")}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	// When all variances fail valuation, the method returns an error
 	require.Error(t, err)
@@ -231,7 +231,7 @@ func TestValueVariances_ThresholdError_StillValues(t *testing.T) {
 	engine := &mockValuationEngine{}
 	refData := &mockRefData{threshErr: errors.New("threshold lookup failed")}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
@@ -257,7 +257,7 @@ func TestValueVariances_UpdatesRunSummary(t *testing.T) {
 		},
 	}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
@@ -287,7 +287,7 @@ func TestValueVariances_ConcurrentValuation(t *testing.T) {
 		},
 	}
 
-	valuator := NewVarianceValuator(engine, refData, varianceRepo, runRepo)
+	valuator := NewVarianceValuator(engine, refData, nil, varianceRepo, runRepo)
 	err := valuator.ValueVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 
@@ -297,4 +297,125 @@ func TestValueVariances_ConcurrentValuation(t *testing.T) {
 	for _, v := range varianceRepo.variances {
 		assert.Equal(t, domain.VarianceStatusValued, v.Status)
 	}
+}
+
+// --- Mock AccountPartyResolver ---
+
+type mockPartyResolver struct {
+	partyIDs map[string]uuid.UUID
+	err      error
+}
+
+func (m *mockPartyResolver) ResolvePartyID(_ context.Context, accountID string) (uuid.UUID, error) {
+	if m.err != nil {
+		return uuid.Nil, m.err
+	}
+	if id, ok := m.partyIDs[accountID]; ok {
+		return id, nil
+	}
+	return uuid.Nil, errors.New("account not found")
+}
+
+func TestValueVariances_UsesPartyResolver(t *testing.T) {
+	runRepo := newMockRunRepo()
+	varianceRepo := &mockVarianceRepoFull{}
+
+	run := newRunningTestRun(t)
+	_ = runRepo.Create(context.Background(), run)
+
+	partyID := uuid.New()
+	v := createDetectedVariance(t, run.RunID, "ACC-001", "GBP", decimal.NewFromFloat(50.00))
+	varianceRepo.variances = []*domain.Variance{v}
+
+	var capturedPartyID uuid.UUID
+	engine := &mockValuationEngine{
+		responses: map[uuid.UUID]*valuation.Response{},
+	}
+	// Override to capture the request
+	capturingEngine := &partyCapturingEngine{delegate: engine, captured: &capturedPartyID}
+
+	resolver := &mockPartyResolver{
+		partyIDs: map[string]uuid.UUID{
+			"ACC-001": partyID,
+		},
+	}
+	refData := &mockRefData{
+		thresholds: map[string]decimal.Decimal{
+			"GBP": decimal.NewFromFloat(0.01),
+		},
+	}
+
+	valuator := NewVarianceValuator(capturingEngine, refData, resolver, varianceRepo, runRepo)
+	err := valuator.ValueVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+
+	assert.Equal(t, partyID, capturedPartyID, "valuator should use resolved party ID")
+}
+
+func TestValueVariances_PartyResolverError_FallsBackToAccountID(t *testing.T) {
+	runRepo := newMockRunRepo()
+	varianceRepo := &mockVarianceRepoFull{}
+
+	run := newRunningTestRun(t)
+	_ = runRepo.Create(context.Background(), run)
+
+	v := createDetectedVariance(t, run.RunID, "ACC-001", "GBP", decimal.NewFromFloat(50.00))
+	varianceRepo.variances = []*domain.Variance{v}
+
+	var capturedPartyID uuid.UUID
+	engine := &mockValuationEngine{}
+	capturingEngine := &partyCapturingEngine{delegate: engine, captured: &capturedPartyID}
+
+	resolver := &mockPartyResolver{err: errors.New("service unavailable")}
+	refData := &mockRefData{
+		thresholds: map[string]decimal.Decimal{
+			"GBP": decimal.NewFromFloat(0.01),
+		},
+	}
+
+	valuator := NewVarianceValuator(capturingEngine, refData, resolver, varianceRepo, runRepo)
+	err := valuator.ValueVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+
+	// Should fall back to uuidFromString("ACC-001") which is uuid.Nil
+	assert.Equal(t, uuid.Nil, capturedPartyID, "should fall back to account ID parse on resolver error")
+}
+
+func TestValueVariances_NilPartyResolver_FallsBackToAccountID(t *testing.T) {
+	runRepo := newMockRunRepo()
+	varianceRepo := &mockVarianceRepoFull{}
+
+	run := newRunningTestRun(t)
+	_ = runRepo.Create(context.Background(), run)
+
+	v := createDetectedVariance(t, run.RunID, "ACC-001", "GBP", decimal.NewFromFloat(50.00))
+	varianceRepo.variances = []*domain.Variance{v}
+
+	var capturedPartyID uuid.UUID
+	engine := &mockValuationEngine{}
+	capturingEngine := &partyCapturingEngine{delegate: engine, captured: &capturedPartyID}
+
+	refData := &mockRefData{
+		thresholds: map[string]decimal.Decimal{
+			"GBP": decimal.NewFromFloat(0.01),
+		},
+	}
+
+	valuator := NewVarianceValuator(capturingEngine, refData, nil, varianceRepo, runRepo)
+	err := valuator.ValueVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+
+	// nil resolver falls back to uuidFromString("ACC-001") = uuid.Nil
+	assert.Equal(t, uuid.Nil, capturedPartyID, "nil resolver should fall back to account ID parse")
+}
+
+// partyCapturingEngine wraps a valuation engine and captures the PartyID from requests.
+type partyCapturingEngine struct {
+	delegate valuation.Engine
+	captured *uuid.UUID
+}
+
+func (e *partyCapturingEngine) Valuate(ctx context.Context, req *valuation.Request) (*valuation.Response, error) {
+	*e.captured = req.PartyID
+	return e.delegate.Valuate(ctx, req)
 }

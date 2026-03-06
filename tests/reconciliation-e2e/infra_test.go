@@ -139,6 +139,7 @@ func setupE2EInfra(t *testing.T) *e2eTestInfra {
 	infra.valuator = service.NewVarianceValuator(
 		infra.mockValEngine,
 		infra.mockRefData,
+		nil, // party resolver not needed in e2e tests (falls back to account ID)
 		infra.varianceRepo,
 		infra.runRepo,
 	)

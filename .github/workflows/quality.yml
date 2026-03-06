@@ -85,6 +85,18 @@ jobs:
           version: v2.9.0
           args: --timeout=5m --config=.golangci.yml
 
+  multi-asset-purity:
+    name: Multi-Asset Purity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run multi-asset purity lint
+        run: ./scripts/lint-multi-asset-purity.sh
+
   tiltfile-syntax:
     name: Tiltfile Syntax
     runs-on: ubuntu-latest
