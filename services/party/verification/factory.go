@@ -22,9 +22,6 @@ var (
 //   - "onfido": Onfido identity verification
 //   - "stripe": Stripe Identity verification
 //
-// Future providers (stubs, not yet implemented):
-//   - "jumio": Jumio identity verification
-//
 // Returns ErrUnsupportedProvider for any unrecognized provider name.
 // The MockProvider is configured with AlwaysApprove=true by default.
 func NewProvider(cfg *config.VerificationConfig) (Provider, error) {
@@ -36,9 +33,6 @@ func NewProvider(cfg *config.VerificationConfig) (Provider, error) {
 	switch provider {
 	case "mock":
 		return NewMockProvider().WithAlwaysApprove(true), nil
-	case "jumio":
-		// Jumio provider not yet implemented
-		return nil, ErrUnsupportedProvider
 	case "onfido":
 		return NewOnfidoProvider(cfg, slog.Default())
 	case "stripe":
@@ -77,8 +71,6 @@ func NewProviderWithOptions(cfg *config.VerificationConfig, opts ProviderOptions
 		return NewMockProvider().
 			WithAlwaysApprove(opts.MockAlwaysApprove).
 			WithAsyncMode(opts.MockAsyncMode), nil
-	case "jumio":
-		return nil, ErrUnsupportedProvider
 	case "onfido":
 		return NewOnfidoProvider(cfg, slog.Default())
 	case "stripe":

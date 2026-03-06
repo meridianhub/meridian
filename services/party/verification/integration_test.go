@@ -38,16 +38,16 @@ func TestProviderFactory_SwitchProviderViaConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, verification.StatusApproved, result.Status)
 
-	// Attempt to switch to jumio (should return error since not implemented)
-	jumioCfg := &config.VerificationConfig{
-		Provider:       "jumio",
+	// Attempt unsupported provider (should return error)
+	unsupportedCfg := &config.VerificationConfig{
+		Provider:       "unsupported",
 		WebhookSecret:  "secret",
 		WebhookURL:     "https://example.com/webhook",
 		ProviderConfig: map[string]string{"api_key": "key", "api_secret": "secret"},
 	}
 
-	jumioProvider, err := verification.NewProvider(jumioCfg)
-	assert.Nil(t, jumioProvider)
+	unsupportedProvider, err := verification.NewProvider(unsupportedCfg)
+	assert.Nil(t, unsupportedProvider)
 	assert.ErrorIs(t, err, verification.ErrUnsupportedProvider)
 
 	// Can switch back to mock with different options
@@ -286,14 +286,14 @@ func TestWebhookSecurity_TamperedBodyRejected(t *testing.T) {
 // TestMultiProviderWebhooks tests that different providers use different secrets
 func TestMultiProviderWebhooks(t *testing.T) {
 	onfidoSecret := []byte("onfido-secret-key")
-	jumioSecret := []byte("jumio-secret-key")
+	stripeSecret := []byte("stripe-secret-key")
 
 	mockService := &mockWebhookService{}
 	handler, err := partyhttp.NewVerificationWebhookHandler(partyhttp.VerificationWebhookHandlerConfig{
 		VerificationService: mockService,
 		HMACSecrets: map[string][]byte{
 			"onfido": onfidoSecret,
-			"jumio":  jumioSecret,
+			"stripe": stripeSecret,
 		},
 	})
 	require.NoError(t, err)
@@ -319,18 +319,18 @@ func TestMultiProviderWebhooks(t *testing.T) {
 		assert.Equal(t, 200, rr.Code)
 	})
 
-	t.Run("jumio webhook with correct secret succeeds", func(t *testing.T) {
+	t.Run("stripe webhook with correct secret succeeds", func(t *testing.T) {
 		mockService.calls = nil // Reset
 
 		webhookReq := partyhttp.VerificationWebhookRequest{
-			VerificationID: "jumio-verify-456",
+			VerificationID: "stripe-verify-456",
 			Status:         "REJECTED",
 			Timestamp:      time.Now(),
 		}
 		body, _ := json.Marshal(webhookReq)
-		signature := partyhttp.GenerateWebhookSignature(body, jumioSecret)
+		signature := partyhttp.GenerateWebhookSignature(body, stripeSecret)
 
-		req := httptest.NewRequest("POST", "/webhooks/verification/jumio", bytes.NewReader(body))
+		req := httptest.NewRequest("POST", "/webhooks/verification/stripe", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set(partyhttp.WebhookSignatureHeader, signature)
 
@@ -340,7 +340,7 @@ func TestMultiProviderWebhooks(t *testing.T) {
 		assert.Equal(t, 200, rr.Code)
 	})
 
-	t.Run("onfido webhook with jumio secret fails", func(t *testing.T) {
+	t.Run("onfido webhook with stripe secret fails", func(t *testing.T) {
 		mockService.calls = nil // Reset
 
 		webhookReq := partyhttp.VerificationWebhookRequest{
@@ -350,7 +350,7 @@ func TestMultiProviderWebhooks(t *testing.T) {
 		}
 		body, _ := json.Marshal(webhookReq)
 		// Sign with wrong provider's secret
-		wrongSignature := partyhttp.GenerateWebhookSignature(body, jumioSecret)
+		wrongSignature := partyhttp.GenerateWebhookSignature(body, stripeSecret)
 
 		req := httptest.NewRequest("POST", "/webhooks/verification/onfido", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
