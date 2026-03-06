@@ -19,7 +19,7 @@ type LienEntity struct {
 	AccountID uuid.UUID `gorm:"not null;index:idx_lien_account_status"`
 
 	AmountCents int64  `gorm:"not null;check:amount_cents > 0"`
-	Currency    string `gorm:"not null;size:3"`
+	Currency    string `gorm:"not null;size:32"`
 
 	BucketID string `gorm:"column:bucket_id;size:255;not null;default:'';index:idx_lien_account_bucket"`
 	Status   string `gorm:"not null;size:20;index:idx_lien_account_status;check:status IN ('ACTIVE','EXECUTED','TERMINATED')"`

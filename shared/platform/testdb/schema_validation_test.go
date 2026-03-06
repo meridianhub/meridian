@@ -237,7 +237,6 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           10000,
-		Currency:              "GBP",
 		InstrumentCode:        "GBP",
 		Dimension:             "CURRENCY",
 		Precision:             2,
@@ -265,7 +264,6 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 	// Verify data integrity
 	assert.Equal(t, entity.AccountID, retrieved.AccountID)
 	assert.Equal(t, entity.AmountCents, retrieved.AmountCents)
-	assert.Equal(t, entity.Currency, retrieved.Currency)
 	assert.Equal(t, entity.Status, retrieved.Status)
 	assert.Equal(t, entity.PaymentOrderReference, retrieved.PaymentOrderReference)
 	assert.NotNil(t, retrieved.ExpiresAt)
@@ -290,7 +288,6 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           5000,
-		Currency:              "GBP",
 		InstrumentCode:        "GBP",
 		Dimension:             "CURRENCY",
 		Precision:             2,
@@ -312,7 +309,6 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           0, // Invalid: must be > 0
-		Currency:              "GBP",
 		InstrumentCode:        "GBP",
 		Dimension:             "CURRENCY",
 		Precision:             2,
@@ -330,7 +326,6 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           5000,
-		Currency:              "GBP",
 		InstrumentCode:        "GBP",
 		Dimension:             "CURRENCY",
 		Precision:             2,
@@ -348,7 +343,6 @@ func testLienEntity(t *testing.T, db *gorm.DB) {
 		ID:                    uuid.New(),
 		AccountID:             uuid.New(), // Non-existent account
 		AmountCents:           5000,
-		Currency:              "GBP",
 		InstrumentCode:        "GBP",
 		Dimension:             "CURRENCY",
 		Precision:             2,
@@ -393,7 +387,6 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 		ID:             uuid.New(),
 		AccountID:      accountID,
 		AmountCents:    10000,
-		Currency:       "GBP",
 		InstrumentCode: "GBP",
 		Dimension:      "CURRENCY",
 		Precision:      2,
@@ -420,7 +413,6 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 	// Verify data integrity
 	assert.Equal(t, entity.AccountID, retrieved.AccountID)
 	assert.Equal(t, entity.AmountCents, retrieved.AmountCents)
-	assert.Equal(t, entity.Currency, retrieved.Currency)
 	assert.Equal(t, entity.Status, retrieved.Status)
 	assert.Equal(t, entity.Reference, retrieved.Reference)
 	assert.Equal(t, int64(1), retrieved.Version)
@@ -451,7 +443,6 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 			ID:             uuid.New(),
 			AccountID:      accountID,
 			AmountCents:    5000,
-			Currency:       "GBP",
 			InstrumentCode: "GBP",
 			Dimension:      "CURRENCY",
 			Precision:      2,
@@ -470,7 +461,6 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 		ID:             uuid.New(),
 		AccountID:      accountID,
 		AmountCents:    0, // Invalid: must be > 0
-		Currency:       "GBP",
 		InstrumentCode: "GBP",
 		Dimension:      "CURRENCY",
 		Precision:      2,
@@ -488,7 +478,6 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 		ID:             uuid.New(),
 		AccountID:      accountID,
 		AmountCents:    5000,
-		Currency:       "GBP",
 		InstrumentCode: "GBP",
 		Dimension:      "CURRENCY",
 		Precision:      2,
@@ -506,7 +495,6 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 		ID:             uuid.New(),
 		AccountID:      accountID,
 		AmountCents:    5000,
-		Currency:       "GBP",
 		InstrumentCode: "GBP",
 		Dimension:      "CURRENCY",
 		Precision:      2,
@@ -524,7 +512,6 @@ func testWithdrawalEntity(t *testing.T, db *gorm.DB) {
 		ID:             uuid.New(),
 		AccountID:      uuid.New(), // Non-existent account
 		AmountCents:    5000,
-		Currency:       "GBP",
 		InstrumentCode: "GBP",
 		Dimension:      "CURRENCY",
 		Precision:      2,
