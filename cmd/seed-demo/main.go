@@ -731,9 +731,14 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 			return fmt.Errorf("deposit GBP for %s day %d: %w", acct.customerName, day, err)
 		}
 
-		// KWH meter read deposits are skipped for now — position-keeping service
-		// does not yet support non-fiat instrument codes in InitiateLog.
-		// TODO: Enable after multi-asset position keeping is implemented.
+		// KWH meter read deposit — CREDIT customer kWh account, DEBIT GSP inventory account
+		if err := depositIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
+			fmt.Sprintf("Meter read %s: %.2f kWh", date.Format("2006-01-02"), dailyKWH),
+			fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
+			acct.gspKwhAccountID, // GSP inventory account is the debit (clearing) side
+		); err != nil {
+			return fmt.Errorf("deposit KWH for %s day %d: %w", acct.customerName, day, err)
+		}
 	}
 
 	fmt.Printf("  %s: %.1f kWh consumed, £%.2f billed (30 days)\n", acct.customerName, totalKWH, totalGBP)

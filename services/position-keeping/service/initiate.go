@@ -159,6 +159,7 @@ func validateInitiateRequest(req *positionkeepingv1.InitiateFinancialPositionLog
 
 // googleMoneyToDomain converts google.type.Money to domain.Money.
 // This is the shared conversion logic for all proto-to-domain money conversions.
+// Accepts both ISO 4217 currency codes (GBP, USD) and non-currency instrument codes (KWH, GAS).
 func googleMoneyToDomain(m *money.Money) (domain.Money, error) {
 	if m == nil {
 		return domain.Money{}, nil
@@ -169,7 +170,7 @@ func googleMoneyToDomain(m *money.Money) (domain.Money, error) {
 	nanos := decimal.NewFromInt(int64(m.Nanos)).Div(decimal.NewFromInt(1_000_000_000))
 	totalAmount := amount.Add(nanos)
 
-	return domain.NewMoney(totalAmount, domain.Currency(m.CurrencyCode))
+	return domain.NewMoneyFromInstrumentCode(totalAmount, m.CurrencyCode)
 }
 
 // protoEntryToDomain converts a proto TransactionLogEntry to domain.

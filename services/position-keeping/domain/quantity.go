@@ -12,6 +12,8 @@
 package domain
 
 import (
+	"fmt"
+
 	"github.com/meridianhub/meridian/shared/domain/money"
 	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
@@ -286,6 +288,42 @@ func ZeroQty[D quantity.Dimension](instrument Instrument) Qty[D] {
 // ParseCurrency converts a string to a Currency type with validation.
 func ParseCurrency(s string) (Currency, error) {
 	return money.ParseCurrency(s)
+}
+
+// NewMoneyFromInstrumentCode creates a Money value from any instrument code (currency or non-currency).
+// For valid ISO 4217 currencies (GBP, USD, etc.), it uses the standard currency path with correct precision.
+// For non-currency instrument codes, it creates a Money value using the code directly, bypassing
+// currency validation. This enables position-keeping to track any registered instrument while
+// reusing the same Money type for persistence and domain logic.
+//
+// Persistence constraint: the transaction_log_entry.currency column is CHAR(3), so codes must be
+// exactly 3 characters to persist correctly.
+func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, error) {
+	if code == "" {
+		return Money{}, ErrEmptyCode
+	}
+
+	// Try currency path first (preserves correct precision for fiat)
+	cur := Currency(code)
+	if cur.IsValid() {
+		return NewMoney(amount, cur)
+	}
+
+	// Fail fast: the transaction_log_entry.currency column is CHAR(3), so non-currency
+	// codes must also be exactly 3 characters to persist correctly.
+	if len(code) != 3 {
+		return Money{}, fmt.Errorf("%w: non-currency instrument code %q must be exactly 3 characters for persistence", ErrInvalidCodeFormat, code)
+	}
+
+	// Non-currency instrument: use precision 2 to match the persistence layer's
+	// decimalToCents/centsToDecimal which assumes 2 decimal places for all instruments.
+	// Use COUNT as a dimension-agnostic placeholder; the dimension is not stored in the
+	// transaction_log_entry table and only the code matters for persistence round-trips.
+	inst, err := quantity.NewInstrument(code, 1, "COUNT", 2)
+	if err != nil {
+		return Money{}, err
+	}
+	return quantity.NewMoney(amount, inst), nil
 }
 
 // =============================================================================

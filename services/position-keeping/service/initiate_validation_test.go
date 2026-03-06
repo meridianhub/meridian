@@ -388,6 +388,74 @@ func TestWithAccountValidator_Option(t *testing.T) {
 	})
 }
 
+func TestInitiateFinancialPositionLog_NonCurrencyInstrumentCodes(t *testing.T) {
+	instruments := []struct {
+		code  string
+		units int64
+		nanos int32
+		desc  string
+	}{
+		{"KWH", 8, 540000000, "energy meter read"},
+		{"CO2", 50, 0, "carbon credit purchase"},
+		{"GPU", 3, 750000000, "compute allocation"},
+		{"GAS", 1, 250000000, "gas meter read"},
+	}
+
+	for _, inst := range instruments {
+		t.Run(inst.code, func(t *testing.T) {
+			ctx := context.Background()
+			mockRepo := new(MockRepository)
+			mockEventPublisher := domain.NewInMemoryEventPublisher()
+			mockIdempotency := new(MockIdempotencyService)
+			mockMeasurementRepo := new(MockMeasurementRepository)
+
+			svc, err := service.NewPositionKeepingService(
+				mockRepo,
+				mockMeasurementRepo,
+				mockEventPublisher,
+				mockIdempotency,
+				newTestOutboxPublisher(t),
+			)
+			require.NoError(t, err)
+
+			accountID := inst.code + "-account-001"
+			req := &positionkeepingv1.InitiateFinancialPositionLogRequest{
+				AccountId: accountID,
+				InitialEntry: &positionkeepingv1.TransactionLogEntry{
+					EntryId:       uuid.NewString(),
+					TransactionId: uuid.NewString(),
+					AccountId:     accountID,
+					Amount: &commonv1.MoneyAmount{
+						Amount: &money.Money{
+							CurrencyCode: inst.code,
+							Units:        inst.units,
+							Nanos:        inst.nanos,
+						},
+					},
+					Direction:   commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
+					Description: inst.desc,
+				},
+			}
+
+			mockRepo.On("CreateWithOutbox", ctx, mock.AnythingOfType("*domain.FinancialPositionLog")).Return(nil)
+
+			resp, err := svc.InitiateFinancialPositionLog(ctx, req)
+
+			require.NoError(t, err, "instrument %s should be accepted", inst.code)
+			require.NotNil(t, resp)
+			assert.Equal(t, accountID, resp.Log.AccountId)
+
+			require.NotEmpty(t, resp.Log.TransactionLogEntries)
+			entry := resp.Log.TransactionLogEntries[0]
+			assert.Equal(t, inst.code, entry.Amount.Amount.CurrencyCode)
+			assert.Equal(t, inst.units, entry.Amount.Amount.Units)
+			assert.Equal(t, inst.nanos, entry.Amount.Amount.Nanos)
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
+}
+
 func TestWithAccountValidationEnabled_Option(t *testing.T) {
 	mockRepo := new(MockRepository)
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
