@@ -406,8 +406,21 @@ func run(logger *slog.Logger) error {
 			worker.BillingExecutorConfig{ShadowMode: svcConfig.BillingShadowMode},
 			logger,
 		)
-		// TODO: Wire once position-keeping client is available:
-		// billingExecutor.WithInvoiceGenerator(invoiceGen).WithPaymentInitiator(paymentInit)
+		// BLOCKED: Cannot wire InvoiceGenerator or PaymentInitiator yet.
+		//
+		// InvoiceGenerator requires a worker.PositionKeepingClient adapter that wraps the gRPC
+		// positionkeepingclient.Client with simplified signatures (GetAccountBalance returns
+		// (int64, string, error) vs the proto request/response pattern). This adapter does not
+		// exist yet.
+		//
+		// PaymentInitiator requires a worker.SagaClient (StartSaga/GetSagaStatus), which depends
+		// on the Starlark saga runner being integrated into payment-order. The saga runtime exists
+		// in shared/pkg/saga but is not wired into this service's main.go.
+		//
+		// Prerequisites:
+		//   1. Create posKeepingClient adapter implementing worker.PositionKeepingClient
+		//   2. Wire saga runner into payment-order and create SagaClient adapter
+		//   3. Then: billingExecutor.WithInvoiceGenerator(invoiceGen).WithPaymentInitiator(paymentInit)
 
 		// Create schedule provider (static single-tenant schedule)
 		billingProvider := worker.NewBillingScheduleProvider(tenantID, svcConfig.BillingCronSchedule)
