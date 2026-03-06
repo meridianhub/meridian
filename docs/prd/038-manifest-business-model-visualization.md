@@ -522,14 +522,15 @@ on top of existing parsing.
 
 ## Open Questions
 
-1. **Dynamic parameters in saga scripts.** When a saga calls
-   `position_keeping.initiate_log(instrument_code="GBP")`, the
-   instrument code is statically extractable. But when it calls
-   `initiate_log(instrument_code=computed_value)`, the code is
-   determined at runtime. How should the visualization handle this?
-   Options: show as "dynamic" with a tooltip explaining the
-   variable, or trace the variable assignment backward through
-   the script.
+1. **Dynamic parameters in saga scripts.** *(Partially resolved by
+   Phase 3.)* Phase 3 specifies the `dynamicTargets` metadata
+   approach: show variable name + code snippet tooltip, no edge
+   created. The remaining sub-question is whether to also trace
+   variable assignments backward through the script (e.g.,
+   `val = reference_data.get_instrument(...)` followed by
+   `initiate_log(instrument_code=val)`) — this adds complexity for
+   marginal gain and is deferred unless user research indicates
+   demand.
 
 2. **Account type resolution.** Sagas often resolve account IDs at
    runtime via `reference_data.get_account()`. The visualization
@@ -542,8 +543,11 @@ on top of existing parsing.
 3. **Filter complexity threshold.** At what point should the CEL
    analyzer give up and return `indeterminate`? Current proposal:
    handle field comparisons (`==`, `!=`, `>`, `<`), boolean
-   operators (`&&`, `||`), and `has()` checks. Anything else is
-   indeterminate.
+   operators (`&&`, `||`), and `has()` checks. References to
+   runtime-only values like `chain_depth` (set by the event-router
+   via `x-meridian-chain-depth` header, not available to static
+   analysis) should also return `indeterminate`. Anything beyond
+   these patterns is indeterminate.
 
 4. **Manifest size scaling.** A complex tenant might have 20+
    instruments, 30+ account types, and 50+ sagas. The graph could
