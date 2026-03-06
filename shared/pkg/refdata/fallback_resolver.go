@@ -67,6 +67,11 @@ func (f *FileSnapshotStorage) Save(instruments []InstrumentProperties) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write temp file: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("sync temp file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close temp file: %w", err)
