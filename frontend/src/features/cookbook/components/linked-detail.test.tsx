@@ -252,6 +252,24 @@ describe('LinkedPatternDetail', () => {
     expect(mockDispatch).toHaveBeenCalled()
   })
 
+  it('clears highlighted handler when clicked step has no service calls', () => {
+    const flowWithNoop: SagaFlow = {
+      ...sampleFlow,
+      steps: [
+        ...sampleFlow.steps,
+        { name: 'noop', lineNumber: 20, serviceCalls: [], earlyExit: null },
+      ],
+    }
+
+    render(<LinkedPatternDetail flow={flowWithNoop} starlarkContent={sampleStarlark} />)
+
+    fireEvent.click(screen.getByTestId('flow-node-step-0'))
+    expect(screen.getByTestId('handler-reference').dataset.highlighted).toBe('position_keeping.initiate_log')
+
+    fireEvent.click(screen.getByTestId('flow-node-step-2'))
+    expect(screen.getByTestId('handler-reference').dataset.highlighted).toBe('')
+  })
+
   it('renders without crashing when flow has no steps', () => {
     const emptyFlow: SagaFlow = {
       name: 'empty-saga',
