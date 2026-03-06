@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -5,6 +6,10 @@ import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { DetailSkeleton } from '@/shared/detail-skeleton'
 import { StarlarkEditor } from '@/features/sagas/components/starlark-editor'
 import { ManifestViewer } from '../components/manifest-viewer'
+import { SagaFlowDiagram } from '../components/saga-flow'
+import { PreviewSourceTabs } from '../components/preview-source-tabs'
+import { parseStarlarkSaga } from '../lib/star-parser'
+import { generateMermaidMarkup } from '../lib/saga-mermaid'
 import { useCookbook } from '../hooks/use-cookbook'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 import { usePatternFiles } from '../hooks/use-pattern-files'
@@ -163,6 +168,16 @@ export function CookbookDetailPage() {
   const isPattern = item.type === 'registry:pattern'
   const meta = item.meta as PatternMeta | undefined
 
+  const sagaFlow = useMemo(() => {
+    if (!starlarkContent) return null
+    return parseStarlarkSaga(starlarkContent)
+  }, [starlarkContent])
+
+  const mermaidMarkup = useMemo(() => {
+    if (!sagaFlow) return ''
+    return generateMermaidMarkup(sagaFlow)
+  }, [sagaFlow])
+
   return (
     <div className="space-y-6">
       <Breadcrumbs items={[{ label: 'Cookbook', href: '/cookbook' }, { label: item.title }]} />
@@ -174,6 +189,7 @@ export function CookbookDetailPage() {
           <TabsList>
             <TabsTrigger value="manifest">Manifest</TabsTrigger>
             <TabsTrigger value="starlark">Starlark</TabsTrigger>
+            <TabsTrigger value="flow">Flow</TabsTrigger>
             <TabsTrigger value="composition">Composition</TabsTrigger>
           </TabsList>
 
@@ -198,6 +214,24 @@ export function CookbookDetailPage() {
               />
             ) : (
               <p className="text-sm text-muted-foreground">No Starlark file found.</p>
+            )}
+          </TabsContent>
+
+          <TabsContent value="flow" className="mt-4">
+            {isLoading ? (
+              <div className="h-[400px] animate-pulse rounded border bg-muted" />
+            ) : sagaFlow && sagaFlow.steps.length > 0 ? (
+              <PreviewSourceTabs
+                preview={
+                  <div className="h-[500px] rounded-lg border">
+                    <SagaFlowDiagram flow={sagaFlow} />
+                  </div>
+                }
+                source={mermaidMarkup}
+                sourceLabel="Mermaid"
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">No saga flow detected in Starlark source.</p>
             )}
           </TabsContent>
 
