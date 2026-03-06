@@ -12,8 +12,6 @@
 package domain
 
 import (
-	"fmt"
-
 	"github.com/meridianhub/meridian/shared/domain/money"
 	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
@@ -296,8 +294,8 @@ func ParseCurrency(s string) (Currency, error) {
 // currency validation. This enables position-keeping to track any registered instrument while
 // reusing the same Money type for persistence and domain logic.
 //
-// Persistence constraint: the transaction_log_entry.currency column is CHAR(3), so codes must be
-// exactly 3 characters to persist correctly.
+// Callers are expected to have resolved instrument properties from Reference Data before calling
+// this function. The domain layer trusts that the code is a valid registered instrument.
 func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, error) {
 	if code == "" {
 		return Money{}, ErrEmptyCode
@@ -307,12 +305,6 @@ func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, err
 	cur := Currency(code)
 	if cur.IsValid() {
 		return NewMoney(amount, cur)
-	}
-
-	// Fail fast: the transaction_log_entry.currency column is CHAR(3), so non-currency
-	// codes must also be exactly 3 characters to persist correctly.
-	if len(code) != 3 {
-		return Money{}, fmt.Errorf("%w: non-currency instrument code %q must be exactly 3 characters for persistence", ErrInvalidCodeFormat, code)
 	}
 
 	// Non-currency instrument: use precision 2 to match the persistence layer's

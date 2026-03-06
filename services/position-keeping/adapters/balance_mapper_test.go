@@ -1,6 +1,7 @@
 package adapters_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -13,7 +14,31 @@ import (
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 )
+
+// stubResolver is a test InstrumentResolver that returns predefined properties.
+type stubResolver struct {
+	instruments map[string]refdata.InstrumentProperties
+}
+
+func (s *stubResolver) Resolve(_ context.Context, code string) (refdata.InstrumentProperties, error) {
+	props, ok := s.instruments[code]
+	if !ok {
+		return refdata.InstrumentProperties{}, refdata.ErrUnknownInstrument
+	}
+	return props, nil
+}
+
+func newTestResolver() *stubResolver {
+	return &stubResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"KWH":          {Code: "KWH", Dimension: "ENERGY", Precision: 6, RoundingMode: "HALF_EVEN"},
+			"GPU_HOUR":     {Code: "GPU_HOUR", Dimension: "COMPUTE", Precision: 6, RoundingMode: "HALF_EVEN"},
+			"CARBON_TONNE": {Code: "CARBON_TONNE", Dimension: "CARBON", Precision: 3, RoundingMode: "HALF_EVEN"},
+		},
+	}
+}
 
 // TestToProtoBalanceType tests conversion of all 7 domain balance types to proto.
 func TestToProtoBalanceType(t *testing.T) {
@@ -777,6 +802,9 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 
 // TestToDomainAssetFromInstrumentAmount tests conversion of proto InstrumentAmount to domain Asset.
 func TestToDomainAssetFromInstrumentAmount(t *testing.T) {
+	resolver := newTestResolver()
+	ctx := context.Background()
+
 	tests := []struct {
 		name         string
 		proto        *quantityv1.InstrumentAmount
@@ -865,11 +893,21 @@ func TestToDomainAssetFromInstrumentAmount(t *testing.T) {
 			expectError: true,
 			errContains: "version",
 		},
+		{
+			name: "unknown instrument returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "UNKNOWN_ASSET",
+				Version:        1,
+			},
+			expectError: true,
+			errContains: "instrument",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := adapters.ToDomainAssetFromInstrumentAmount(tt.proto)
+			result, err := adapters.ToDomainAssetFromInstrumentAmount(ctx, resolver, tt.proto)
 
 			if tt.expectError {
 				require.Error(t, err)

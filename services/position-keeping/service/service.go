@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 )
 
 // Service initialization errors
@@ -66,6 +67,9 @@ type PositionKeepingService struct {
 	reservationRepo domain.ReservationRepository
 	// positionRepo is OPTIONAL - if nil, projected balance RPCs return FailedPrecondition.
 	positionRepo domain.PositionRepository
+	// instrumentResolver is OPTIONAL - if nil, asset instrument resolution falls back to defaults.
+	// When set, resolves instrument dimension and precision from Reference Data.
+	instrumentResolver refdata.InstrumentResolver
 }
 
 // Option configures optional dependencies for PositionKeepingService.
@@ -131,6 +135,15 @@ func WithReservationRepository(repo domain.ReservationRepository) Option {
 func WithPositionRepository(repo domain.PositionRepository) Option {
 	return func(s *PositionKeepingService) {
 		s.positionRepo = repo
+	}
+}
+
+// WithInstrumentResolver sets the InstrumentResolver for resolving instrument properties
+// (dimension, precision) from Reference Data. If not set, asset instrument resolution
+// uses hardcoded defaults for backwards compatibility.
+func WithInstrumentResolver(resolver refdata.InstrumentResolver) Option {
+	return func(s *PositionKeepingService) {
+		s.instrumentResolver = resolver
 	}
 }
 

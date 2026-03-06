@@ -2,6 +2,7 @@
 package adapters
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -12,6 +13,7 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 )
 
 // ErrUnspecifiedBalanceType is returned when attempting to convert BALANCE_TYPE_UNSPECIFIED
@@ -213,8 +215,9 @@ func ToDomainMoneyFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount)
 
 // ToDomainAssetFromInstrumentAmount converts a protobuf InstrumentAmount to its domain Asset representation.
 // This function is for non-monetary quantities like energy (KWH), compute (GPU_HOUR), and carbon credits.
-// Returns an error if the amount is invalid or the instrument code is empty.
-func ToDomainAssetFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount) (domain.Asset, error) {
+// Resolves instrument dimension and precision from Reference Data via the provided resolver.
+// Returns an error if the amount is invalid, the instrument code is empty, or the instrument is unknown.
+func ToDomainAssetFromInstrumentAmount(ctx context.Context, resolver refdata.InstrumentResolver, protoAmount *quantityv1.InstrumentAmount) (domain.Asset, error) {
 	if protoAmount == nil {
 		return domain.Asset{}, ErrNilInstrumentAmount
 	}
@@ -228,8 +231,11 @@ func ToDomainAssetFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount)
 		return domain.Asset{}, fmt.Errorf("%w: %s", ErrInvalidAmount, protoAmount.Amount)
 	}
 
-	// Infer dimension and precision from instrument code
-	dimension, precision := inferInstrumentProperties(protoAmount.InstrumentCode)
+	// Resolve dimension and precision from Reference Data
+	props, err := resolver.Resolve(ctx, protoAmount.InstrumentCode)
+	if err != nil {
+		return domain.Asset{}, fmt.Errorf("%w: failed to resolve instrument %q: %w", ErrInvalidInstrumentCode, protoAmount.InstrumentCode, err)
+	}
 
 	// Reject negative version values (would wrap to large uint32)
 	if protoAmount.Version < 0 {
@@ -241,33 +247,10 @@ func ToDomainAssetFromInstrumentAmount(protoAmount *quantityv1.InstrumentAmount)
 		version = 1 // Default version
 	}
 
-	instrument, err := domain.NewInstrument(protoAmount.InstrumentCode, version, dimension, precision)
+	instrument, err := domain.NewInstrument(protoAmount.InstrumentCode, version, props.Dimension, props.Precision)
 	if err != nil {
 		return domain.Asset{}, fmt.Errorf("%w: %w", ErrInvalidInstrumentCode, err)
 	}
 
 	return domain.NewAsset(amount, instrument), nil
-}
-
-// inferInstrumentProperties returns the dimension and precision for a given instrument code.
-// Known instrument codes get specific precision, others default to 6 decimal places.
-func inferInstrumentProperties(code string) (dimension string, precision int) {
-	// Currency codes (3-char uppercase letters)
-	switch code {
-	case "USD", "EUR", "GBP", "CHF", "CAD", "AUD":
-		return domain.DimensionCurrency, 2
-	case "JPY":
-		return domain.DimensionCurrency, 0
-	case "KWH":
-		return "ENERGY", 6 // Kilowatt-hours
-	case "GPU_HOUR":
-		return "COMPUTE", 6 // GPU compute hours
-	case "CARBON_TONNE":
-		return "CARBON", 3 // Carbon credits
-	case "CARBON_CREDIT":
-		return "CARBON", 3 // Carbon credits
-	default:
-		// Default to commodity dimension with 6 decimal places
-		return "COMMODITY", 6
-	}
 }

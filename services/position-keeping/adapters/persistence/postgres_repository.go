@@ -329,8 +329,6 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 		log.StatusTracking = &statusTracking
 
 		// Parse opening balance (supports both currency and non-currency codes)
-		// Trim spaces since PostgreSQL CHAR(3) may pad with spaces
-		openingBalanceCurrency = strings.TrimSpace(openingBalanceCurrency)
 		openingBalance, err := domain.NewMoneyFromInstrumentCode(openingBalanceAmount, openingBalanceCurrency)
 		if err != nil {
 			return fmt.Errorf("failed to create opening balance Money for instrument %q: %w", openingBalanceCurrency, err)
@@ -960,7 +958,6 @@ func (r *PostgresRepository) loadTransactionLogEntriesTx(ctx context.Context, tx
 
 		// Convert cents to decimal and create Money (supports both currency and non-currency codes)
 		amount := centsToDecimal(amountCents)
-		currency = strings.TrimSpace(currency)
 		money, err := domain.NewMoneyFromInstrumentCode(amount, currency)
 		if err != nil {
 			return fmt.Errorf("failed to create Money value for instrument %q: %w", currency, err)
@@ -1168,7 +1165,6 @@ func (r *PostgresRepository) loadTransactionLogEntriesBatchTx(ctx context.Contex
 
 		// Convert cents to decimal and create Money (supports both currency and non-currency codes)
 		amount := centsToDecimal(amountCents)
-		currency = strings.TrimSpace(currency)
 		money, err := domain.NewMoneyFromInstrumentCode(amount, currency)
 		if err != nil {
 			return fmt.Errorf("failed to create Money value for instrument %q in batch: %w", currency, err)
@@ -1387,8 +1383,6 @@ func (r *PostgresRepository) scanLogsTx(ctx context.Context, tx pgx.Tx, rows pgx
 		log.StatusTracking = &statusTracking
 
 		// Parse opening balance (supports both currency and non-currency codes)
-		// Trim spaces since PostgreSQL CHAR(3) may pad with spaces
-		openingBalanceCurrency = strings.TrimSpace(openingBalanceCurrency)
 		openingBalance, err := domain.NewMoneyFromInstrumentCode(openingBalanceAmount, openingBalanceCurrency)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create opening balance Money for instrument %q: %w", openingBalanceCurrency, err)

@@ -15,6 +15,7 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/app"
 	"github.com/meridianhub/meridian/services/position-keeping/observability"
 	"github.com/meridianhub/meridian/services/position-keeping/service"
@@ -22,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -395,6 +397,47 @@ func run(logger *slog.Logger) error {
 		if internalAccountConn != nil {
 			if err := internalAccountConn.Close(); err != nil {
 				logger.Error("failed to close internal account connection", "error", err)
+			}
+		}
+	}()
+
+	// Initialize InstrumentResolver from Reference Data service (optional)
+	var refDataConn *grpc.ClientConn
+	if config.ReferenceData.ServiceURL != "" {
+		var connErr error
+		refDataConn, connErr = grpc.NewClient(
+			config.ReferenceData.ServiceURL,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if connErr != nil {
+			return fmt.Errorf("failed to create reference data client at %s: %w",
+				config.ReferenceData.ServiceURL, connErr)
+		}
+
+		refDataClient := referencedatav1.NewReferenceDataServiceClient(refDataConn)
+		dataSource := refdata.NewGRPCDataSource(refDataClient)
+		cachedResolver := refdata.NewCachedResolver(dataSource, refdata.CachedResolverConfig{
+			Logger: logger,
+		})
+
+		// Preload cache at startup (log warning on failure, don't block startup)
+		if preloadErr := cachedResolver.Preload(ctx); preloadErr != nil {
+			logger.Warn("failed to preload instrument cache from reference data, will resolve on demand",
+				"error", preloadErr)
+		}
+
+		serviceOpts = append(serviceOpts, service.WithInstrumentResolver(cachedResolver))
+		logger.Info("instrument resolver configured",
+			"url", config.ReferenceData.ServiceURL)
+	} else {
+		logger.Info("instrument resolver disabled (REFERENCE_DATA_SERVICE_URL not configured)")
+	}
+
+	// Ensure reference data connection is closed on shutdown
+	defer func() {
+		if refDataConn != nil {
+			if err := refDataConn.Close(); err != nil {
+				logger.Error("failed to close reference data connection", "error", err)
 			}
 		}
 	}()
