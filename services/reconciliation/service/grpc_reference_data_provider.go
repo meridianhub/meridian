@@ -42,11 +42,16 @@ type GRPCReferenceDataProviderConfig struct {
 
 // NewGRPCReferenceDataProvider creates a new provider backed by Reference Data gRPC services.
 func NewGRPCReferenceDataProvider(cfg GRPCReferenceDataProviderConfig) *GRPCReferenceDataProvider {
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &GRPCReferenceDataProvider{
 		instrumentClient:  cfg.InstrumentClient,
 		accountTypeClient: cfg.AccountTypeClient,
 		defaultMethodID:   cfg.DefaultMethodID,
-		logger:            cfg.Logger,
+		logger:            logger,
 	}
 }
 

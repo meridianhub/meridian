@@ -557,8 +557,10 @@ func buildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuatio
 			refDataConn = nil
 		} else {
 			providerCfg.InstrumentClient = referencedatav1.NewReferenceDataServiceClient(refDataConn)
-			providerCfg.AccountTypeClient = referencedatav1.NewAccountTypeRegistryServiceClient(refDataConn)
-			logger.Info("reference data gRPC clients configured",
+			// AccountTypeClient is not wired here because the identity-only method resolver
+			// cannot resolve non-identity method IDs that account type lookups may return.
+			// Wire AccountTypeClient when a full gRPC method resolver is available.
+			logger.Info("reference data gRPC client configured for instrument lookups",
 				"url", cfg.Services.ReferenceDataURL)
 		}
 	} else {
