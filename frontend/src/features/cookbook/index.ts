@@ -6,6 +6,7 @@ export type { CookbookItem, CookbookFile, CookbookRegistry, PatternMeta, Compone
 export { useCookbook } from './hooks/use-cookbook'
 export { usePatternFiles } from './hooks/use-pattern-files'
 export { ManifestViewer } from './components/manifest-viewer'
+export { ComponentDetail } from './components/component-detail'
 export { SagaFlowDiagram } from './components/saga-flow'
 export { PreviewSourceTabs } from './components/preview-source-tabs'
 export { parseStarlarkSaga } from './lib/star-parser'
