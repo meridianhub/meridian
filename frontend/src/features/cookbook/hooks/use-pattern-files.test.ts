@@ -88,4 +88,70 @@ describe('usePatternFiles', () => {
     expect(result.current.starlarkFiles).toEqual([])
     expect(result.current.manifestContent).toBeNull()
   })
+
+  it('sets hasSagas true when starlark files are present', () => {
+    const item = makeItem()
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.hasSagas).toBe(true)
+  })
+
+  it('sets hasSagas true when manifest YAML contains sagas array', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/manifest.yaml', content: 'name: test\nsagas:\n  - name: deposit\n    file: deposit.star' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.hasSagas).toBe(true)
+  })
+
+  it('sets hasSagas false when no starlark files and no sagas in manifest', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/manifest.yaml', content: 'name: test\ntype: registry:pattern' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.hasSagas).toBe(false)
+  })
+
+  it('sets hasSagas false when manifest has empty sagas array', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/manifest.yaml', content: 'name: test\nsagas: []' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.hasSagas).toBe(false)
+  })
+
+  it('sets hasSagas false for undefined item', () => {
+    const { result } = renderHook(() => usePatternFiles(undefined))
+    expect(result.current.hasSagas).toBe(false)
+  })
+
+  it('extracts sagaTrigger from manifest YAML', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/manifest.yaml', content: 'name: test\nsagas:\n  - name: deposit\n    trigger: "event:position-keeping.transaction-captured.v1"' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.sagaTrigger).toBe('event:position-keeping.transaction-captured.v1')
+  })
+
+  it('returns null sagaTrigger when no sagas in manifest', () => {
+    const item = makeItem({
+      files: [
+        { path: 'patterns/test/manifest.yaml', content: 'name: test\ntype: registry:pattern' },
+      ],
+    })
+    const { result } = renderHook(() => usePatternFiles(item))
+    expect(result.current.sagaTrigger).toBeNull()
+  })
+
+  it('returns null sagaTrigger for undefined item', () => {
+    const { result } = renderHook(() => usePatternFiles(undefined))
+    expect(result.current.sagaTrigger).toBeNull()
+  })
 })

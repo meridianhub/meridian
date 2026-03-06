@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
@@ -64,9 +63,11 @@ function PatternInfoSection({ item }: { item: CookbookItem }) {
           <div className="flex items-center gap-1.5">
             <span className="text-muted-foreground">Categories:</span>
             {item.categories.map((cat) => (
-              <Badge key={cat} variant="secondary" className="text-xs">
-                {cat}
-              </Badge>
+              <Link key={cat} to={`/cookbook/patterns?category=${encodeURIComponent(cat)}`}>
+                <Badge variant="secondary" className="cursor-pointer text-xs hover:bg-accent">
+                  {cat}
+                </Badge>
+              </Link>
             ))}
           </div>
         )}
@@ -75,9 +76,11 @@ function PatternInfoSection({ item }: { item: CookbookItem }) {
             <span className="text-muted-foreground">Industries:</span>
             {meta.industries.length > 0 ? (
               meta.industries.map((ind) => (
-                <Badge key={ind} variant="secondary" className="text-xs">
-                  {ind}
-                </Badge>
+                <Link key={ind} to={`/cookbook/patterns?industry=${encodeURIComponent(ind)}`}>
+                  <Badge variant="secondary" className="cursor-pointer text-xs hover:bg-accent">
+                    {ind}
+                  </Badge>
+                </Link>
               ))
             ) : (
               <span className="text-xs text-muted-foreground italic">Industry-agnostic</span>
@@ -154,9 +157,7 @@ function CompositionSection({ meta }: { meta: PatternMeta }) {
   )
 }
 
-function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | null }) {
-  const [expanded, setExpanded] = useState(false)
-
+function HandlerReferenceTab({ starlarkContent }: { starlarkContent: string | null }) {
   const serviceNames = useMemo(() => {
     if (!starlarkContent) return []
     const flow = parseStarlarkSaga(starlarkContent)
@@ -170,36 +171,9 @@ function HandlerReferencePanel({ starlarkContent }: { starlarkContent: string | 
   }, [starlarkContent])
 
   return (
-    <div className="rounded-lg border">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-muted/50"
-      >
-        {expanded ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-        Handler Reference
-        {serviceNames.length > 0 && (
-          <span className="ml-auto flex gap-1.5">
-            {serviceNames.map((name) => (
-              <Badge key={name} variant="secondary" className="text-xs">
-                {name}
-              </Badge>
-            ))}
-          </span>
-        )}
-      </button>
-      {expanded && (
-        <div className="border-t px-4 py-3">
-          <HandlerReference
-            serviceNames={serviceNames.length > 0 ? serviceNames : undefined}
-          />
-        </div>
-      )}
-    </div>
+    <HandlerReference
+      serviceNames={serviceNames.length > 0 ? serviceNames : undefined}
+    />
   )
 }
 
@@ -243,14 +217,17 @@ export function CookbookDetailPage() {
   const { items, isLoading: catalogueLoading } = useCookbook()
 
   const item = items.find((i) => i.name === name)
-  const { starlarkFiles, manifestContent } = usePatternFiles(item)
+  const { starlarkFiles, manifestContent, hasSagas, sagaTrigger } = usePatternFiles(item)
 
   const firstStarlarkContent = starlarkFiles.length > 0 ? starlarkFiles[0].content : null
 
   const sagaFlow = useMemo(() => {
     if (!firstStarlarkContent) return null
-    return parseStarlarkSaga(firstStarlarkContent)
-  }, [firstStarlarkContent])
+    const flow = parseStarlarkSaga(firstStarlarkContent)
+    // Manifest YAML is source of truth for trigger
+    flow.trigger = sagaTrigger
+    return flow
+  }, [firstStarlarkContent, sagaTrigger])
 
   if (catalogueLoading) {
     return <DetailSkeleton fieldCount={3} tabCount={3} showBackNav />
@@ -280,27 +257,30 @@ export function CookbookDetailPage() {
       <PatternInfoSection item={item} />
 
       {isPattern ? (
-        <>
-          <Tabs defaultValue="manifest">
-            <TabsList>
-              <TabsTrigger value="manifest">Manifest</TabsTrigger>
-              <TabsTrigger value="starlark">Starlark</TabsTrigger>
-              <TabsTrigger value="flow">Flow</TabsTrigger>
-              <TabsTrigger value="composition">Composition</TabsTrigger>
-            </TabsList>
+        <Tabs defaultValue="manifest">
+          <TabsList>
+            <TabsTrigger value="manifest">Manifest</TabsTrigger>
+            {hasSagas && <TabsTrigger value="starlark">Starlark</TabsTrigger>}
+            {hasSagas && <TabsTrigger value="flow">Flow</TabsTrigger>}
+            {hasSagas && <TabsTrigger value="handlers">Handlers</TabsTrigger>}
+            <TabsTrigger value="composition">Composition</TabsTrigger>
+          </TabsList>
 
-            <TabsContent value="manifest" className="mt-4">
-              {manifestContent ? (
-                <ManifestViewer content={manifestContent} />
-              ) : (
-                <p className="text-sm text-muted-foreground">No manifest file found.</p>
-              )}
-            </TabsContent>
+          <TabsContent value="manifest" className="mt-4">
+            {manifestContent ? (
+              <ManifestViewer content={manifestContent} />
+            ) : (
+              <p className="text-sm text-muted-foreground">No manifest file found.</p>
+            )}
+          </TabsContent>
 
+          {hasSagas && (
             <TabsContent value="starlark" className="mt-4">
               <StarlarkTabContent starlarkFiles={starlarkFiles} />
             </TabsContent>
+          )}
 
+          {hasSagas && (
             <TabsContent value="flow" className="mt-4">
               {sagaFlow && sagaFlow.steps.length > 0 && firstStarlarkContent ? (
                 <LinkedPatternDetail flow={sagaFlow} />
@@ -308,18 +288,22 @@ export function CookbookDetailPage() {
                 <p className="text-sm text-muted-foreground">No saga flow detected in Starlark source.</p>
               )}
             </TabsContent>
+          )}
 
-            <TabsContent value="composition" className="mt-4">
-              {meta ? (
-                <CompositionSection meta={meta} />
-              ) : (
-                <p className="text-sm text-muted-foreground">No composition metadata available.</p>
-              )}
+          {hasSagas && (
+            <TabsContent value="handlers" className="mt-4">
+              <HandlerReferenceTab starlarkContent={firstStarlarkContent} />
             </TabsContent>
-          </Tabs>
+          )}
 
-          <HandlerReferencePanel starlarkContent={firstStarlarkContent} />
-        </>
+          <TabsContent value="composition" className="mt-4">
+            {meta ? (
+              <CompositionSection meta={meta} />
+            ) : (
+              <p className="text-sm text-muted-foreground">No composition metadata available.</p>
+            )}
+          </TabsContent>
+        </Tabs>
       ) : (
         <ComponentDetail item={item} />
       )}

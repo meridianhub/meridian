@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import yaml from 'js-yaml'
 import type { CookbookItem } from './use-cookbook'
 
 export interface StarlarkFile {
@@ -9,6 +10,8 @@ export interface StarlarkFile {
 export interface PatternFilesState {
   starlarkFiles: StarlarkFile[]
   manifestContent: string | null
+  hasSagas: boolean
+  sagaTrigger: string | null
   isLoading: false
 }
 
@@ -18,9 +21,28 @@ function isValidContent(content: string | undefined): content is string {
   return !trimmed.startsWith('<!DOCTYPE') && !trimmed.startsWith('<html')
 }
 
+interface ManifestSaga {
+  name?: string
+  trigger?: string
+  filter?: string
+}
+
+function parseManifestSagas(manifestContent: string | null): ManifestSaga[] {
+  if (!manifestContent) return []
+  try {
+    const doc = yaml.load(manifestContent) as Record<string, unknown> | null
+    if (!doc || typeof doc !== 'object') return []
+    const sagas = doc.sagas
+    return Array.isArray(sagas) ? sagas : []
+  } catch {
+    return []
+  }
+}
+
+
 export function usePatternFiles(item: CookbookItem | undefined): PatternFilesState {
   return useMemo(() => {
-    const empty: PatternFilesState = { starlarkFiles: [], manifestContent: null, isLoading: false }
+    const empty: PatternFilesState = { starlarkFiles: [], manifestContent: null, hasSagas: false, sagaTrigger: null, isLoading: false }
     if (!item || item.type !== 'registry:pattern') return empty
 
     const files = item.files ?? []
@@ -36,6 +58,10 @@ export function usePatternFiles(item: CookbookItem | undefined): PatternFilesSta
       }))
       .filter((f) => f.content.length > 0)
 
-    return { starlarkFiles, manifestContent, isLoading: false }
+    const manifestSagas = parseManifestSagas(manifestContent)
+    const hasSagas = starlarkFiles.length > 0 || manifestSagas.length > 0
+    const sagaTrigger = manifestSagas[0]?.trigger ?? null
+
+    return { starlarkFiles, manifestContent, hasSagas, sagaTrigger, isLoading: false }
   }, [item])
 }

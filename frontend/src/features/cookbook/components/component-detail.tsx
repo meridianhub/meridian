@@ -3,6 +3,20 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { CookbookItem, ComponentMeta } from '../hooks/use-cookbook'
 
+const featureModuleRoutes: Record<string, string> = {
+  'accounts': '/accounts',
+  'internal-accounts': '/internal-accounts',
+  'payments': '/payments',
+  'positions': '/positions',
+  'ledger': '/ledger',
+  'parties': '/parties',
+  'reconciliation': '/reconciliation',
+  'sagas': '/starlark-config',
+  'reference-data': '/reference-data',
+  'market-data': '/market-data',
+  'manifests': '/manifests',
+}
+
 interface ComponentDetailProps {
   item: CookbookItem
 }
@@ -66,11 +80,20 @@ export function ComponentDetail({ item }: ComponentDetailProps) {
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-muted-foreground">Used by:</span>
                 <div className="flex flex-wrap gap-1.5">
-                  {meta.used_by.map((name) => (
-                    <Badge key={name} variant="secondary" className="text-xs">
-                      {name}
-                    </Badge>
-                  ))}
+                  {meta.used_by.map((name) => {
+                    const route = featureModuleRoutes[name]
+                    return route ? (
+                      <Link key={name} to={route}>
+                        <Badge variant="secondary" className="cursor-pointer text-xs hover:bg-accent hover:text-accent-foreground">
+                          {name}
+                        </Badge>
+                      </Link>
+                    ) : (
+                      <Badge key={name} variant="secondary" className="text-xs">
+                        {name}
+                      </Badge>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -123,20 +146,6 @@ export function ComponentDetail({ item }: ComponentDetailProps) {
         </Card>
       )}
 
-      {/* Preview Placeholder */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Live Preview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
-            <p className="text-sm font-medium text-muted-foreground">Preview not available</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Live component rendering requires a sandboxed runtime environment.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

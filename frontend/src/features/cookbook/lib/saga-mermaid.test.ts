@@ -19,7 +19,7 @@ describe('generateMermaidMarkup', () => {
       steps: [],
     }
     const markup = generateMermaidMarkup(flow)
-    expect(markup).toMatch(/^flowchart TD/)
+    expect(markup).toMatch(/^flowchart LR/)
   })
 
   it('renders empty saga with start and end', () => {
@@ -149,7 +149,7 @@ describe('generateMermaidMarkup', () => {
         const markup = generateMermaidMarkup(flow)
 
         // Basic structural validation
-        expect(markup).toMatch(/^flowchart TD/)
+        expect(markup).toMatch(/^flowchart LR/)
         expect(markup).toContain('START')
         expect(markup).toContain('END')
 

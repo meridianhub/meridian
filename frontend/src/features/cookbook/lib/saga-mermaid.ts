@@ -1,10 +1,10 @@
 import type { SagaFlow } from './star-parser'
 
 /**
- * Generate a Mermaid flowchart TD markup from a parsed SagaFlow.
+ * Generate a Mermaid flowchart LR markup from a parsed SagaFlow.
  */
 export function generateMermaidMarkup(flow: SagaFlow): string {
-  const lines: string[] = ['flowchart TD']
+  const lines: string[] = ['flowchart LR']
 
   const startLabel = flow.trigger
     ? `${escapeMermaid(flow.name)}\\n${escapeMermaid(flow.trigger)}`
