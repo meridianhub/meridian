@@ -30,6 +30,7 @@ import { DashboardPage } from '@/features/dashboard'
 import { ManifestsPage } from '@/features/manifests'
 import { McpConfigPage } from '@/features/mcp-config'
 import { TransactionsPage } from '@/features/transactions'
+import { CookbookPage, CookbookDetailPage } from '@/features/cookbook'
 import { ThemePreviewPanel } from '@/components/dev/theme-preview-panel'
 
 // Placeholder page components - replaced as each page task is implemented
@@ -256,6 +257,8 @@ function AppShellLayout() {
         <Route path="/gateway-mappings/:mappingId" element={<FeatureGuard feature="mappings">{guarded(<MappingDetailPage />)}</FeatureGuard>} />
         <Route path="/manifests" element={<FeatureGuard feature="manifests">{guarded(<ManifestsPage />)}</FeatureGuard>} />
         <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config">{guarded(<McpConfigPage />)}</FeatureGuard>} />
+        <Route path="/cookbook" element={guarded(<CookbookPage />)} />
+        <Route path="/cookbook/:name" element={guarded(<CookbookDetailPage />)} />
         <Route path="/audit-log" element={<FeatureGuard feature="audit">{guarded(<AuditLogPage />)}</FeatureGuard>} />
 
         {/* Platform-only routes */}

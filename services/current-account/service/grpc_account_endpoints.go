@@ -417,13 +417,14 @@ func (s *Service) RetrieveCurrentAccount(ctx context.Context, req *pb.RetrieveCu
 
 	// Hydrate account with balance from Position Keeping service.
 	// Balance is no longer persisted locally - Position Keeping is the source of truth.
-	account, err = s.hydrateAccountWithBalance(ctx, account)
+	// Best-effort: return account without balance if Position Keeping is unavailable.
+	hydratedAccount, err := s.hydrateAccountWithBalance(ctx, account)
 	if err != nil {
-		operationStatus = opStatusRetrieveFailed
-		s.logger.Error("failed to retrieve balance from Position Keeping",
+		s.logger.Warn("failed to retrieve balance from Position Keeping, returning account without balance",
 			"account_id", req.AccountId,
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+	} else {
+		account = hydratedAccount
 	}
 
 	return &pb.RetrieveCurrentAccountResponse{

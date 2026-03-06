@@ -1458,14 +1458,14 @@ func TestPositionKeeping_MultiAssetAPI_InstrumentCodeMismatch(t *testing.T) {
 		logger:           testLogger(),
 	}
 
-	// Retrieve account should fail due to instrument mismatch
-	_, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+	// Retrieve account should succeed with degraded response (best-effort)
+	resp, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
 		AccountId: "ACC-MULTI-002",
 	})
 
-	require.Error(t, err, "Retrieve should fail due to instrument mismatch")
-	assert.Contains(t, err.Error(), "instrument code mismatch",
-		"Error should indicate instrument code mismatch")
+	require.NoError(t, err, "Retrieve should succeed even with instrument mismatch (best-effort)")
+	assert.NotNil(t, resp.Facility, "Account facility should be returned")
+	assert.Equal(t, int64(0), resp.Facility.CurrentBalance.CurrentBalance.Amount.Units, "Balance should be zero when hydration fails")
 }
 
 // Circuit Breaker Tests for Position Keeping Balance Queries
@@ -1526,8 +1526,9 @@ func (m *mockPositionKeepingClientWithGetBalanceFailure) GetAccountBalances(_ co
 	}, nil
 }
 
-// TestPositionKeeping_CircuitBreaker_GetBalanceFailure verifies error handling
-// when GetAccountBalance fails.
+// TestPositionKeeping_CircuitBreaker_GetBalanceFailure verifies that
+// RetrieveCurrentAccount returns the account without balance when
+// GetAccountBalance fails (best-effort degradation).
 func TestPositionKeeping_CircuitBreaker_GetBalanceFailure(t *testing.T) {
 	db, ctx, cleanup := setupIntegrationTestDB(t)
 	defer cleanup()
@@ -1547,17 +1548,16 @@ func TestPositionKeeping_CircuitBreaker_GetBalanceFailure(t *testing.T) {
 		logger:           testLogger(),
 	}
 
-	// Retrieve account - should fail because Position Keeping is unavailable
-	_, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
+	// Retrieve account - should succeed with empty balance (best-effort)
+	resp, err := svc.RetrieveCurrentAccount(ctx, &pb.RetrieveCurrentAccountRequest{
 		AccountId: "ACC-CB-001",
 	})
 
-	// Verify error
-	require.Error(t, err, "Retrieve should fail when Position Keeping is unavailable")
-	st, ok := status.FromError(err)
-	require.True(t, ok, "Error should be gRPC status error")
-	assert.Equal(t, codes.Internal, st.Code(), "Should return Internal error")
-	assert.Contains(t, st.Message(), "Position Keeping", "Error should mention Position Keeping")
+	// Verify success with degraded response (zero balance, not hydrated)
+	require.NoError(t, err, "Retrieve should succeed even when Position Keeping is unavailable")
+	assert.NotNil(t, resp.Facility, "Account facility should be returned")
+	assert.Equal(t, int64(0), resp.Facility.CurrentBalance.CurrentBalance.Amount.Units, "Balance should be zero when Position Keeping is unavailable")
+	assert.Equal(t, int32(0), resp.Facility.CurrentBalance.CurrentBalance.Amount.Nanos, "Balance nanos should be zero when Position Keeping is unavailable")
 
 	// Verify Position Keeping was called
 	assert.Equal(t, 1, mockPosKeeping.getBalanceCalls, "GetAccountBalance should have been called once")
