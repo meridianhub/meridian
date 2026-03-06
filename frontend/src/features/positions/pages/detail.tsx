@@ -64,7 +64,8 @@ function BalanceView({ log }: BalanceViewProps) {
   let availableTotal = 0n
 
   for (const entry of entries) {
-    const amt = toMinorUnits(entry.amount?.amount, currency)
+    const entryCurrency = entry.amount?.currency ?? currency
+    const amt = toMinorUnits(entry.amount?.amount, entryCurrency)
     if (amt === null) continue
     const signed = entry.direction === 'CREDIT' ? amt : -amt
 
