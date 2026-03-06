@@ -975,7 +975,7 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, 
 	var opts []gateway.ServerOption
 	transcoder, err := gateway.NewTranscoder(GetProtoDescriptors(), backends)
 	if err != nil {
-		logger.Warn("failed to build Vanguard transcoder; API routes will return 501",
+		logger.Warn("failed to build Vanguard transcoder; API routes will return 503",
 			"error", err)
 	} else {
 		opts = append(opts, gateway.WithTranscoder(transcoder))

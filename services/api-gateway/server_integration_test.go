@@ -198,17 +198,17 @@ func TestIntegration_APIRoutes_RequiresTenantContext(t *testing.T) {
 		})
 	require.NoError(t, err)
 
-	// Test API route returns placeholder response
-	t.Run("GET /v1/test returns 501 Not Implemented", func(t *testing.T) {
+	// Test API route returns 503 when no backend is configured
+	t.Run("GET /v1/test returns 503 Service Unavailable", func(t *testing.T) {
 		resp, err := httpGet(ctx, baseURL+"/v1/test")
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
-		assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(body), "gateway routing not yet implemented")
+		assert.Contains(t, string(body), "no API backend configured")
 	})
 
 	// Cleanup
