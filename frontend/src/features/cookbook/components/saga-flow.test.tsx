@@ -179,19 +179,19 @@ describe('SagaFlowDiagram', () => {
 
     // Click to highlight
     fireEvent.click(refDataBtn)
-    expect(refDataBtn).toHaveClass('font-semibold')
+    expect(refDataBtn).toHaveAttribute('aria-pressed', 'true')
 
     // Click again to unhighlight
     fireEvent.click(refDataBtn)
-    expect(refDataBtn).not.toHaveClass('font-semibold')
+    expect(refDataBtn).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('assigns distinct colors to different services', () => {
     render(<SagaFlowDiagram flow={simpleFlow} />)
-    const buttons = screen.getAllByRole('button')
-    const dots = buttons.map((btn) => btn.querySelector('span[class*="rounded-full"]'))
-    // Each service dot should have a different background color
-    const colors = dots.map((dot) => dot?.getAttribute('style'))
-    expect(colors[0]).not.toEqual(colors[1])
+    const refDataBtn = screen.getByRole('button', { name: /reference_data/ })
+    const posKeepBtn = screen.getByRole('button', { name: /position_keeping/ })
+    const refDot = refDataBtn.querySelector('span[class*="rounded-full"]')
+    const posDot = posKeepBtn.querySelector('span[class*="rounded-full"]')
+    expect(refDot?.getAttribute('style')).not.toEqual(posDot?.getAttribute('style'))
   })
 })
