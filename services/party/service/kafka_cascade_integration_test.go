@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	kafkatc "github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -231,7 +233,7 @@ func createKafkaTopic(t *testing.T, broker, topic string) {
 	resp, err := admin.CreateTopics(ctx, 1, 1, nil, topic)
 	require.NoError(t, err)
 	for _, r := range resp {
-		if r.Err != nil && r.ErrMessage != "Topic already exists." {
+		if r.Err != nil && !errors.Is(r.Err, kerr.TopicAlreadyExists) {
 			t.Fatalf("topic %q: %v (%s)", r.Topic, r.Err, r.ErrMessage)
 		}
 	}
