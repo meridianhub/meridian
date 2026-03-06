@@ -3,12 +3,28 @@ name: Markdown
 on:
   push:
     branches: [develop, main]
+    paths:
+      - '**.md'
+      - '.markdownlint-cli2.jsonc'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/markdown.yml'
   pull_request:
     branches: [develop, main]
+    paths:
+      - '**.md'
+      - '.markdownlint-cli2.jsonc'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/markdown.yml'
 
 permissions:
   contents: read
   pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   markdown-lint:

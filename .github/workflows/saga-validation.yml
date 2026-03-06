@@ -3,6 +3,15 @@ name: Saga Script Validation
 on:
   push:
     branches: [develop, main]
+    paths:
+      - 'services/**/sagas/**/*.star'
+      - 'services/reference-data/saga/defaults/**/*.star'
+      - 'shared/pkg/saga/schema/handlers.yaml'
+      - 'shared/pkg/saga/validator.go'
+      - 'shared/pkg/saga/starlark_runner.go'
+      - 'shared/pkg/saga/schema/**/*.go'
+      - 'services/reference-data/saga/reference_validator.go'
+      - '.github/workflows/saga-validation.yml'
   pull_request:
     branches: [develop, main]
     paths:
@@ -18,6 +27,10 @@ on:
 permissions:
   contents: read
   pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate-saga-scripts:

@@ -3,12 +3,28 @@ name: Proto
 on:
   push:
     branches: [develop, main]
+    paths:
+      - 'api/proto/**'
+      - 'buf.yaml'
+      - 'buf.gen.yaml'
+      - 'buf.lock'
+      - '.github/workflows/proto.yml'
   pull_request:
     branches: [develop, main]
+    paths:
+      - 'api/proto/**'
+      - 'buf.yaml'
+      - 'buf.gen.yaml'
+      - 'buf.lock'
+      - '.github/workflows/proto.yml'
 
 permissions:
   contents: read
   pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   proto-lint:

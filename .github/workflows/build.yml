@@ -5,8 +5,24 @@ on:
     branches: [develop, main]
     tags:
       - 'v*'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - 'api/proto/**'
+      - 'buf.gen.yaml'
+      - '.github/workflows/build.yml'
   pull_request:
     branches: [develop, main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - 'api/proto/**'
+      - 'buf.gen.yaml'
+      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
