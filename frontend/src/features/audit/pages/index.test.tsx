@@ -208,7 +208,8 @@ describe('AuditLogPage', () => {
   })
 
   describe('error handling', () => {
-    it('shows error state on API failure', async () => {
+    it('shows error state on API failure and retries on click', async () => {
+      const user = userEvent.setup()
       mockListAuditEntries.mockRejectedValue(new Error('Network error'))
 
       render(
@@ -219,6 +220,43 @@ describe('AuditLogPage', () => {
 
       const retryButton = await screen.findByRole('button', { name: /Retry/i })
       expect(retryButton).toBeInTheDocument()
+
+      // Clear and set up success response for retry
+      mockListAuditEntries.mockResolvedValue({ entries: [], nextPageToken: '' })
+      await user.click(retryButton)
+
+      expect(mockListAuditEntries).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('filter wiring', () => {
+    it('passes filter values to the API call', async () => {
+      const user = userEvent.setup()
+      mockListAuditEntries.mockResolvedValue({ entries: [], nextPageToken: '' })
+
+      render(
+        <Wrapper>
+          <AuditLogPage />
+        </Wrapper>,
+      )
+
+      // Wait for initial render
+      await waitFor(() => {
+        expect(mockListAuditEntries).toHaveBeenCalled()
+      })
+
+      // Set the changedBy text filter
+      const userInput = screen.getByPlaceholderText('Filter by User')
+      await user.type(userInput, 'admin@example.com')
+
+      // DataTable debounces filter changes — wait for the API call
+      await waitFor(() => {
+        expect(mockListAuditEntries).toHaveBeenCalledWith(
+          expect.objectContaining({
+            changedBy: 'admin@example.com',
+          }),
+        )
+      })
     })
   })
 })

@@ -26,11 +26,13 @@ function LoadingSkeleton() {
   )
 }
 
-function ErrorState({ onRetry }: { onRetry: () => void }) {
+function ErrorState({ onRetry, error }: { onRetry: () => void; error?: Error | null }) {
   return (
     <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
-      <span className="text-sm font-medium">Failed to load manifest</span>
-      <span className="text-xs">The manifest history service may not be available for this environment.</span>
+      <span className="text-sm font-medium">Unable to load manifest</span>
+      {error?.message && (
+        <span className="text-xs max-w-md text-center">{error.message}</span>
+      )}
       <Button variant="outline" size="sm" onClick={onRetry}>
         Retry
       </Button>
@@ -82,7 +84,7 @@ export function ManifestCurrentView() {
   })
 
   if (isLoading) return <LoadingSkeleton />
-  if (error) return <ErrorState onRetry={() => void refetch()} />
+  if (error) return <ErrorState onRetry={() => void refetch()} error={error} />
   if (!data?.version) return <EmptyState />
 
   const { version, manifest, appliedAt, appliedBy, applyStatus } = data.version

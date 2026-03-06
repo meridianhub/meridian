@@ -352,7 +352,7 @@ function AccountLiens({ accountId, instrumentCode }: { accountId: string; instru
 export function AccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>()
 
-  const { data: account, isLoading, isError } = useAccountDetail(accountId)
+  const { data: account, isLoading, isError, refetch, isFetching } = useAccountDetail(accountId)
 
   if (isLoading) {
     return <AccountDetailSkeleton />
@@ -372,6 +372,15 @@ export function AccountDetailPage() {
           <p className="mt-2 text-sm text-muted-foreground">
             There was a problem loading this account. Please try again.
           </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            disabled={isFetching}
+            onClick={() => void refetch()}
+          >
+            {isFetching ? 'Retrying…' : 'Retry'}
+          </Button>
         </div>
       </div>
     )

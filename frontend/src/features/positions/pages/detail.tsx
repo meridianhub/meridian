@@ -16,6 +16,31 @@ const CURRENCY_PRECISION: Record<string, number> = {
   JPY: 0, KRW: 0, VND: 0, BHD: 3, KWD: 3, OMR: 3,
 }
 
+/**
+ * Convert a google.type.Money value (or primitive bigint/string) to minor units
+ * (e.g. cents for 2-decimal currencies) suitable for MoneyDisplay/formatMoney.
+ * Returns null if the value cannot be converted.
+ */
+function toMinorUnits(money: unknown, currency: string): bigint | null {
+  if (money === undefined || money === null) return null
+  try {
+    if (typeof money === 'bigint') return money
+    if (typeof money === 'string') return BigInt(money)
+    if (typeof money === 'object' && 'units' in money) {
+      const m = money as { units?: bigint | number | string; nanos?: number }
+      const units = typeof m.units === 'bigint' ? m.units : BigInt(m.units ?? 0)
+      const nanos = m.nanos ?? 0
+      const precision = CURRENCY_PRECISION[currency] ?? 2
+      const factor = BigInt(10 ** precision)
+      const nanosDivisor = 10 ** (9 - precision)
+      return units * factor + BigInt(Math.round(nanos / nanosDivisor))
+    }
+  } catch {
+    // Invalid BigInt conversion — skip
+  }
+  return null
+}
+
 function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -39,31 +64,8 @@ function BalanceView({ log }: BalanceViewProps) {
   let availableTotal = 0n
 
   for (const entry of entries) {
-    const money = entry.amount?.amount
-    if (money === undefined || money === null) continue
-    // money is google.type.Money: { units: bigint|number, nanos: number, currencyCode: string }
-    // or a primitive bigint/string in some serialization paths.
-    // MoneyDisplay expects minor units (e.g. cents), so convert accordingly.
-    let amt: bigint
-    try {
-      if (typeof money === 'bigint') {
-        amt = money
-      } else if (typeof money === 'string') {
-        amt = BigInt(money)
-      } else if (typeof money === 'object' && 'units' in money) {
-        const units = typeof money.units === 'bigint' ? money.units : BigInt(money.units ?? 0)
-        const nanos = (money as { nanos?: number }).nanos ?? 0
-        // Convert units (major) + nanos to minor units (e.g. cents for 2-decimal currencies)
-        const precision = CURRENCY_PRECISION[currency] ?? 2
-        const factor = BigInt(10 ** precision)
-        const nanosDivisor = 10 ** (9 - precision)
-        amt = units * factor + BigInt(Math.round(nanos / nanosDivisor))
-      } else {
-        continue
-      }
-    } catch {
-      continue
-    }
+    const amt = toMinorUnits(entry.amount?.amount, currency)
+    if (amt === null) continue
     const signed = entry.direction === 'CREDIT' ? amt : -amt
 
     provisionalTotal += signed
@@ -143,7 +145,7 @@ function MeasurementHistory({ entries }: MeasurementHistoryProps) {
               <td className="py-2 pr-4 tabular-nums">
                 {entry.amount ? (
                   <MoneyDisplay
-                    amount={entry.amount.amount}
+                    amount={toMinorUnits(entry.amount.amount, entry.amount.currency)}
                     currency={entry.amount.currency}
                     showSign={entry.direction === 'DEBIT'}
                   />
