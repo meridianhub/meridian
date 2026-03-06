@@ -104,6 +104,23 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 		"variance_count", len(detected),
 	)
 
+	// Pre-resolve party IDs to avoid N+1 gRPC calls per variance.
+	// Multiple variances may share the same account, so we deduplicate lookups.
+	partyIDs := make(map[string]uuid.UUID)
+	for _, v := range detected {
+		if _, ok := partyIDs[v.AccountID]; !ok {
+			pid, pidErr := vv.resolvePartyID(ctx, v.AccountID)
+			if pidErr != nil {
+				slog.WarnContext(ctx, "failed to resolve party for account, falling back to account ID",
+					"account_id", v.AccountID,
+					"error", pidErr,
+				)
+				pid = uuidFromString(v.AccountID)
+			}
+			partyIDs[v.AccountID] = pid
+		}
+	}
+
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(vv.concurrency)
 
@@ -116,8 +133,9 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 
 	for _, v := range detected {
 		v := v // capture for closure
+		partyID := partyIDs[v.AccountID]
 		g.Go(func() error {
-			valued, valueDelta, err := vv.valueVariance(gCtx, v)
+			valued, valueDelta, err := vv.valueVariance(gCtx, v, partyID)
 			if err != nil {
 				slog.WarnContext(gCtx, "failed to value variance",
 					"variance_id", v.VarianceID,
@@ -170,21 +188,12 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 }
 
 // valueVariance values a single variance using the in-process valuation engine.
-func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Variance) (*domain.Variance, decimal.Decimal, error) {
+// partyID is pre-resolved by the caller to avoid N+1 gRPC lookups.
+func (vv *VarianceValuator) valueVariance(ctx context.Context, v *domain.Variance, partyID uuid.UUID) (*domain.Variance, decimal.Decimal, error) {
 	// Look up the valuation method for this instrument
 	methodID, err := vv.refData.GetValuationMethodID(ctx, v.InstrumentCode)
 	if err != nil {
 		return nil, decimal.Zero, fmt.Errorf("failed to get valuation method for %s: %w", v.InstrumentCode, err)
-	}
-
-	// Resolve the owning party for this account
-	partyID, err := vv.resolvePartyID(ctx, v.AccountID)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to resolve party for account, falling back to account ID",
-			"account_id", v.AccountID,
-			"error", err,
-		)
-		partyID = uuidFromString(v.AccountID)
 	}
 
 	// Build valuation request

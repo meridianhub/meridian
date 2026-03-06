@@ -181,7 +181,6 @@ message CurrentAccountFacility {
   // party_id references the owning party from the Party Service.
   // Set at account creation and immutable thereafter.
   string party_id = 16 [(buf.validate.field).string = {
-    min_len: 1
     max_len: 100
   }];
 }
