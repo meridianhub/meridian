@@ -92,9 +92,20 @@ describe('ComponentDetail', () => {
     expect(screen.getByText('components/balance-card.css')).toBeInTheDocument()
   })
 
-  it('renders live preview placeholder', () => {
-    renderDetail(fullItem)
-    expect(screen.getByText('Preview not available')).toBeInTheDocument()
+  it('renders used_by badges as links when route exists', () => {
+    const item: CookbookItem = {
+      name: 'test-comp',
+      type: 'registry:ui',
+      title: 'Test',
+      meta: {
+        used_by: ['accounts', 'unknown-module'],
+      } satisfies ComponentMeta,
+    }
+    renderDetail(item)
+    const accountsLink = screen.getByText('accounts').closest('a')
+    expect(accountsLink).toHaveAttribute('href', '/accounts')
+    const unknownBadge = screen.getByText('unknown-module')
+    expect(unknownBadge.closest('a')).toBeNull()
   })
 
   it('hides props table when no configurable_props', () => {
