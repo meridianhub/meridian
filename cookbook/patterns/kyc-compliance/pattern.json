@@ -10,7 +10,7 @@
         "complexity": 3,
         "trigger": "event-driven",
         "design_pattern": "compliance-marker",
-        "industries": ["banking", "compliance"],
+        "industries": ["banking"],
         "provides": {
             "instruments": [],
             "account_types": ["KYC_COMPLIANCE"],

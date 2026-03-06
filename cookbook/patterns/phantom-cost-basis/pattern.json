@@ -10,7 +10,7 @@
         "complexity": 5,
         "trigger": "event-driven",
         "design_pattern": "phantom-transaction-event",
-        "industries": ["trading", "corporate-actions"],
+        "industries": ["trading"],
         "provides": {
             "instruments": [],
             "account_types": [],
