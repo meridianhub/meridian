@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { SagaFlowDiagram } from './saga-flow'
+import { SagaFlowDiagram, parseTriggerService } from './saga-flow'
 import type { SagaFlow } from '../lib/star-parser'
 
 // Mock @xyflow/react to avoid canvas rendering issues in jsdom
@@ -193,5 +193,38 @@ describe('SagaFlowDiagram', () => {
     const refDot = refDataBtn.querySelector('span[class*="rounded-full"]')
     const posDot = posKeepBtn.querySelector('span[class*="rounded-full"]')
     expect(refDot?.getAttribute('style')).not.toEqual(posDot?.getAttribute('style'))
+  })
+
+  it('includes trigger service in legend', () => {
+    render(<SagaFlowDiagram flow={simpleFlow} />)
+    // simpleFlow has trigger "event:payments.received.v1" → service "payments"
+    expect(screen.getByRole('button', { name: /payments/ })).toBeInTheDocument()
+  })
+
+  it('shows trigger label next to trigger service in legend', () => {
+    render(<SagaFlowDiagram flow={simpleFlow} />)
+    expect(screen.getByText('trigger')).toBeInTheDocument()
+  })
+})
+
+describe('parseTriggerService', () => {
+  it('extracts service from event trigger', () => {
+    expect(parseTriggerService('event:position-keeping.transaction-captured.v1')).toBe('position-keeping')
+  })
+
+  it('extracts service from webhook trigger', () => {
+    expect(parseTriggerService('webhook:stripe.payment_intent.succeeded')).toBe('stripe')
+  })
+
+  it('returns null for api trigger', () => {
+    expect(parseTriggerService('api:/v1/payments/stripe')).toBeNull()
+  })
+
+  it('returns null for null trigger', () => {
+    expect(parseTriggerService(null)).toBeNull()
+  })
+
+  it('handles event with no dot separator', () => {
+    expect(parseTriggerService('event:simple')).toBe('simple')
   })
 })

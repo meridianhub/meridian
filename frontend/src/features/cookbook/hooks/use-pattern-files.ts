@@ -11,6 +11,7 @@ export interface PatternFilesState {
   starlarkFiles: StarlarkFile[]
   manifestContent: string | null
   hasSagas: boolean
+  sagaTrigger: string | null
   isLoading: false
 }
 
@@ -20,22 +21,32 @@ function isValidContent(content: string | undefined): content is string {
   return !trimmed.startsWith('<!DOCTYPE') && !trimmed.startsWith('<html')
 }
 
-function detectSagas(manifestContent: string | null, starlarkFiles: StarlarkFile[]): boolean {
-  if (starlarkFiles.length > 0) return true
-  if (!manifestContent) return false
+interface ManifestSaga {
+  name?: string
+  trigger?: string
+  filter?: string
+}
+
+function parseManifestSagas(manifestContent: string | null): ManifestSaga[] {
+  if (!manifestContent) return []
   try {
     const doc = yaml.load(manifestContent) as Record<string, unknown> | null
-    if (!doc || typeof doc !== 'object') return false
+    if (!doc || typeof doc !== 'object') return []
     const sagas = doc.sagas
-    return Array.isArray(sagas) && sagas.length > 0
+    return Array.isArray(sagas) ? sagas : []
   } catch {
-    return false
+    return []
   }
+}
+
+function detectSagas(manifestContent: string | null, starlarkFiles: StarlarkFile[]): boolean {
+  if (starlarkFiles.length > 0) return true
+  return parseManifestSagas(manifestContent).length > 0
 }
 
 export function usePatternFiles(item: CookbookItem | undefined): PatternFilesState {
   return useMemo(() => {
-    const empty: PatternFilesState = { starlarkFiles: [], manifestContent: null, hasSagas: false, isLoading: false }
+    const empty: PatternFilesState = { starlarkFiles: [], manifestContent: null, hasSagas: false, sagaTrigger: null, isLoading: false }
     if (!item || item.type !== 'registry:pattern') return empty
 
     const files = item.files ?? []
@@ -51,8 +62,10 @@ export function usePatternFiles(item: CookbookItem | undefined): PatternFilesSta
       }))
       .filter((f) => f.content.length > 0)
 
-    const hasSagas = detectSagas(manifestContent, starlarkFiles)
+    const manifestSagas = parseManifestSagas(manifestContent)
+    const hasSagas = starlarkFiles.length > 0 || manifestSagas.length > 0
+    const sagaTrigger = manifestSagas[0]?.trigger ?? null
 
-    return { starlarkFiles, manifestContent, hasSagas, isLoading: false }
+    return { starlarkFiles, manifestContent, hasSagas, sagaTrigger, isLoading: false }
   }, [item])
 }
