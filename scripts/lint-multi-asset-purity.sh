@@ -82,86 +82,32 @@ is_allowlisted() {
     return 1
 }
 
-# Known violation files that are tracked in the audit document.
-# These are existing violations that will be fixed by other tasks.
+# Known violation files tracked in docs/audit/multi-asset-purity.md.
+# Each entry is a specific file (not a directory) to avoid silently
+# exempting new files added to the same directory.
 is_known_violation() {
     local file="$1"
-    local line="$2"
 
-    # position-keeping balance_mapper.go inferInstrumentProperties (Task 3)
-    [[ "$file" == *position-keeping/adapters/balance_mapper.go ]] && return 0
-    # saga handlers.go IsPhysicsInstrument (Task 5)
-    [[ "$file" == *shared/pkg/saga/handlers.go ]] && return 0
-    # internal-account defaultPrecision (Task 4)
-    [[ "$file" == *internal-account/service/lien_service.go ]] && return 0
-    # financial-accounting persistence backward-compat defaults (Task 6)
-    [[ "$file" == *financial-accounting/adapters/persistence/repository.go ]] && return 0
-    # financial-accounting domain currency re-exports (Task 7)
-    [[ "$file" == *financial-accounting/domain/currency.go ]] && return 0
-    # position-keeping domain currency re-exports (Task 7)
-    [[ "$file" == *position-keeping/domain/quantity.go ]] && return 0
-    # current-account domain currency re-exports (Task 7)
-    [[ "$file" == *current-account/domain/quantity.go ]] && return 0
-    # current-account hardcoded GBP (intentional business rule)
-    [[ "$file" == *current-account/service/lien_service.go ]] && return 0
-    [[ "$file" == *current-account/service/client_interfaces.go ]] && return 0
-    # Starlark client default handler schemas (Task 8)
-    [[ "$file" == *client/starlark.go ]] && return 0
-    # current-account domain account.go currency.ByCode usage (Task 7)
-    [[ "$file" == *current-account/domain/account.go ]] && return 0
-    # current-account service grpc_account_endpoints.go currency.ByCode (Task 7)
-    [[ "$file" == *current-account/service/grpc_account_endpoints.go ]] && return 0
-    # reference-data service (it IS the source of truth)
-    [[ "$file" == *services/reference-data/* ]] && return 0
-    # control-plane admin balance sheet (reads from proto, not hardcoding)
-    [[ "$file" == *services/control-plane/* ]] && return 0
-    # instrument-cli simulate command
-    [[ "$file" == *cmd/instrument-cli/* ]] && return 0
-    # position-tool validation types
-    [[ "$file" == *cmd/position-tool/* ]] && return 0
-    # reconciliation pk client (reads from proto response)
-    [[ "$file" == *services/reconciliation/* ]] && return 0
-    # mcp-server audit tool (reads from proto response)
-    [[ "$file" == *services/mcp-server/* ]] && return 0
-    # event-router domain metrics (comment/doc only)
-    [[ "$file" == *services/event-router/* ]] && return 0
-    # financial-gateway client starlark (handler schema)
-    [[ "$file" == *services/financial-gateway/client/* ]] && return 0
-    # market-information (deals with actual currency pairs)
-    [[ "$file" == *services/market-information/* ]] && return 0
-    # shared/pkg/valuation (uses instrument codes in type-safe context)
-    [[ "$file" == *shared/pkg/valuation/* ]] && return 0
-    # shared/pkg/saga/linter.go (documents instrument patterns)
-    [[ "$file" == *shared/pkg/saga/linter.go ]] && return 0
-    # internal-account provisioning templates (seed-like default accounts)
-    [[ "$file" == *internal-account/provisioning/* ]] && return 0
-    # internal-account examples
-    [[ "$file" == *internal-account/examples/* ]] && return 0
-    # internal-account domain (doc comments)
-    [[ "$file" == *internal-account/domain/* ]] && return 0
-    # internal-account adapters persistence doc
-    [[ "$file" == *internal-account/adapters/persistence/doc.go ]] && return 0
-    # financial-accounting service files (using ParseCurrency from domain)
-    [[ "$file" == *financial-accounting/service/* ]] && return 0
-    # financial-accounting observability (metric label docs)
-    [[ "$file" == *financial-accounting/observability/* ]] && return 0
-    # position-keeping service (adapters/initiate using domain types)
-    [[ "$file" == *position-keeping/service/* ]] && return 0
-    # position-keeping adapters persistence (uses domain currency)
-    [[ "$file" == *position-keeping/adapters/persistence/* ]] && return 0
-    # position-keeping domain (doc.go, position.go comments)
-    [[ "$file" == *position-keeping/domain/doc.go ]] && return 0
-    [[ "$file" == *position-keeping/domain/position.go ]] && return 0
-    # position-keeping domain position.go (doc comments)
-    [[ "$file" == */position-keeping/domain/position.go ]] && return 0
-    # current-account service files (grpc mappers, saga handlers, etc.)
-    [[ "$file" == *current-account/service/* ]] && return 0
-    # current-account webhook notifier (struct field)
-    [[ "$file" == *current-account/webhook/* ]] && return 0
-    # current-account client starlark
-    [[ "$file" == *current-account/client/* ]] && return 0
-
-    return 1
+    case "$file" in
+        # Critical: hardcoded switch on instrument codes (Task 3)
+        *position-keeping/adapters/balance_mapper.go) return 0 ;;
+        # Critical: deprecated currency re-exports (Task 7)
+        *financial-accounting/domain/currency.go) return 0 ;;
+        *position-keeping/domain/quantity.go) return 0 ;;
+        # High: IsPhysicsInstrument hardcodes "KWH"/"GAS" (Task 5)
+        *shared/pkg/saga/handlers.go) return 0 ;;
+        # High: defaultPrecision = 2 fallback (Task 4)
+        *internal-account/service/lien_service.go) return 0 ;;
+        # High: backward-compat precision defaults (Task 6)
+        *financial-accounting/adapters/persistence/repository.go) return 0 ;;
+        # Medium: current-account GBP (intentional business rule)
+        *current-account/domain/account.go) return 0 ;;
+        *current-account/service/lien_service.go) return 0 ;;
+        *current-account/service/client_interfaces.go) return 0 ;;
+        *current-account/service/grpc_account_endpoints.go) return 0 ;;
+        *current-account/service/grpc_control_endpoints.go) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 report_violation() {
@@ -177,7 +123,7 @@ report_violation() {
         return
     fi
 
-    if is_known_violation "$rel_file" "$line_num"; then
+    if is_known_violation "$rel_file"; then
         KNOWN_VIOLATIONS=$((KNOWN_VIOLATIONS + 1))
         return
     fi
