@@ -407,6 +407,8 @@ export function SagaFlowDiagram({ flow, onStepClick, className }: SagaFlowDiagra
               <button
                 key={svc}
                 type="button"
+                aria-pressed={isActive}
+                aria-label={`Highlight service ${svc}`}
                 className="flex items-center gap-2 rounded px-1 -mx-1 transition-colors hover:bg-muted/50"
                 style={isActive ? { backgroundColor: colors.bg } : undefined}
                 onClick={() => setHighlightedService(isActive ? null : svc)}
