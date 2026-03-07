@@ -30,6 +30,7 @@ function buildEventContext(event: ProducedEvent): EventContext {
   const ctx: EventContext = {}
   if (event.instrumentCode) ctx.instrumentCode = event.instrumentCode
   if (event.direction) ctx.direction = event.direction
+  if (event.accountId) ctx.accountType = event.accountId
   return ctx
 }
 
@@ -92,6 +93,10 @@ export function computeTransitiveClosure(
   startNodeId: string,
   maxDepth: number = DEFAULT_MAX_CHAIN_DEPTH,
 ): EventChain {
+  if (maxDepth <= 0) {
+    return { hops: [], terminationReason: 'chain_depth_limit', maxDepthUsed: 0 }
+  }
+
   const startNode = graph.nodes.find((n) => n.id === startNodeId)
   if (!startNode) {
     return { hops: [], terminationReason: 'no_matching_sagas', maxDepthUsed: 0 }

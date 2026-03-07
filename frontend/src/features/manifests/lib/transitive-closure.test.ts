@@ -299,6 +299,19 @@ step(name="echo_step")
     expect(result.terminationReason).toBe('no_matching_sagas')
   })
 
+  it('returns chain_depth_limit immediately when maxDepth is zero', () => {
+    const graph: ManifestGraph = {
+      nodes: [makeInstrumentNode('KWH')],
+      edges: [],
+    }
+
+    const result = computeTransitiveClosure(graph, 'instrument:KWH', 0)
+
+    expect(result.terminationReason).toBe('chain_depth_limit')
+    expect(result.maxDepthUsed).toBe(0)
+    expect(result.hops).toHaveLength(0)
+  })
+
   it('handles saga node without source gracefully', () => {
     const graph: ManifestGraph = {
       nodes: [
