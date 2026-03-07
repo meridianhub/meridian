@@ -151,7 +151,10 @@ function HopItem({ hop, index, onSagaClick }: HopItemProps) {
           {hop.filterResult}
         </Badge>
         <div className="ml-auto">
-          <AccordionTrigger className="py-0 text-sm hover:no-underline" />
+          <AccordionTrigger
+            aria-label={`Toggle details for ${hop.saga}`}
+            className="py-0 text-sm hover:no-underline"
+          />
         </div>
       </div>
       <AccordionContent>
