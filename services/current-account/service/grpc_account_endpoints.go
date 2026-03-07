@@ -57,21 +57,29 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 
 	cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
 	if err != nil {
-		if errors.Is(err, registry.ErrNotFound) {
+		switch {
+		case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+			operationStatus = "request_canceled"
+			return nil, status.Error(codes.Canceled, "request canceled")
+		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+			operationStatus = "instrument_lookup_timeout"
+			return nil, status.Error(codes.DeadlineExceeded, "instrument lookup timed out")
+		case errors.Is(err, registry.ErrNotFound):
 			operationStatus = "instrument_not_found"
 			s.logger.Warn("instrument not found in Reference Data, cannot create account",
 				"instrument_code", instrumentCode,
 				"account_id", accountID)
 			return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
+		default:
+			// Transient failure (network error, service unavailable)
+			operationStatus = "instrument_lookup_failed"
+			s.logger.Error("instrument lookup failed due to transient error, cannot create account",
+				"instrument_code", instrumentCode,
+				"account_id", accountID,
+				"error", err)
+			caobservability.RecordExternalServiceError("reference_data", "get_instrument")
+			return nil, status.Errorf(codes.Unavailable, "instrument lookup failed, please retry")
 		}
-		// Transient failure (network error, service unavailable, timeout)
-		operationStatus = "instrument_lookup_failed"
-		s.logger.Error("instrument lookup failed due to transient error, cannot create account",
-			"instrument_code", instrumentCode,
-			"account_id", accountID,
-			"error", err)
-		caobservability.RecordExternalServiceError("reference_data", "get_instrument")
-		return nil, status.Errorf(codes.Unavailable, "instrument lookup failed, please retry")
 	}
 	// Map from reference-data registry dimension ("MONETARY") to domain quantity
 	// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
