@@ -17,7 +17,7 @@ func TestCurrency_IsValid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.currency.IsValid(); got != tt.expected {
+			if got := tt.currency.IsValid(); got != tt.expected { //nolint:staticcheck // Tests deprecated type
 				t.Errorf("IsValid() = %v, want %v", got, tt.expected)
 			}
 		})

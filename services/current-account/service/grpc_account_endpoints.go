@@ -80,7 +80,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	} else {
 		// Fallback path: no Reference Data service configured.
 		// Derive precision from the currency registry for correctness (e.g. JPY needs 0, not 2).
-		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok {
+		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok { //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 			precision = inst.Precision
 		} else {
 			s.logger.Warn("currency not found in local registry, using default precision",

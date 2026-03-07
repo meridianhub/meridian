@@ -186,6 +186,16 @@ linters:
         linters:
           - misspell
 
+      # Suppress SA1019 for deprecated shared/domain/money and shared/platform/quantity/currency
+      # These packages are deprecated in favour of shared/pkg/refdata.InstrumentResolver but
+      # are still imported across the codebase during the migration period.
+      - text: "SA1019:.*shared/(domain/money|platform/quantity/currency)"
+        linters:
+          - staticcheck
+      - text: "SA1019:.*deprecated.*(InstrumentResolver|InstrumentProperties|quantity package|quantity error|quantity\\.|dynamic instrument)"
+        linters:
+          - staticcheck
+
   settings:
     govet:
       enable-all: true

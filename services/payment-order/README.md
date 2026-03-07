@@ -72,6 +72,19 @@ reference-data service via `GetSaga()` RPC.
 To modify this saga, update the file in reference-data service and run
 `PlatformSync.SyncPlatformDefaults()`.
 
+## Currency-Only Constraint
+
+Payment Order is **intentionally restricted to CURRENCY dimension instruments**. This is a permanent business rule:
+
+- Payment orders model fiat money movements (bank transfers, direct debits, SEPA/SWIFT settlements)
+- These real-world payment rails only carry ISO 4217 currencies
+- The database stores currency as `CHAR(3)` for ISO 4217 codes
+- Non-currency assets (energy kWh, compute GPU_HOUR, carbon credits) belong in
+  the **position-keeping** service
+
+The `ValidateCurrencyDimension()` helper in `domain/quantity.go` enforces this
+at the service boundary by rejecting instruments outside the CURRENCY dimension.
+
 ## Domain Model
 
 ```mermaid
