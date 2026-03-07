@@ -126,7 +126,7 @@ export function ManifestHistoryTable() {
   }
 
   function handleCompare() {
-    if (compareVersions.length === 2) {
+    if (compareVersions.length === 2 && compareVersions[0].manifest && compareVersions[1].manifest) {
       setShowDiff(true)
     }
   }
@@ -196,7 +196,7 @@ export function ManifestHistoryTable() {
       </Dialog>
 
       <Dialog open={showDiff} onOpenChange={closeDiff}>
-        <DialogContent className="max-w-5xl h-[80vh]">
+        <DialogContent className="max-w-5xl h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               Diff: Version {diffGraphs?.v1Label} vs {diffGraphs?.v2Label}
