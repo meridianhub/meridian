@@ -46,7 +46,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		product_service_reference VARCHAR(255) NOT NULL,
 		business_unit_reference VARCHAR(255) NOT NULL,
 		chart_of_accounts_rules TEXT NOT NULL,
-		base_currency VARCHAR(3) NOT NULL,
+		base_currency VARCHAR(32) NOT NULL,
 		status VARCHAR(20) NOT NULL,
 		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL,

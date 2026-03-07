@@ -11,6 +11,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/meridianhub/meridian/shared/platform/events"
 )
 
@@ -185,6 +186,11 @@ type FinancialAccountingService struct {
 	// May be nil if fungibility validation is disabled (e.g., in tests or legacy mode).
 	// When nil, fungibility validation is skipped (all instruments treated as fully fungible).
 	registry InstrumentRegistry
+
+	// instrumentResolver resolves instrument properties from Reference Data.
+	// Used for validating instrument codes (replacing legacy isValidCurrencyCode).
+	// May be nil if Reference Data is unavailable; validation is skipped when nil.
+	instrumentResolver refdata.InstrumentResolver
 }
 
 // Option configures a FinancialAccountingService.
@@ -196,6 +202,16 @@ type Option func(*FinancialAccountingService)
 func WithRegistry(registry InstrumentRegistry) Option {
 	return func(s *FinancialAccountingService) {
 		s.registry = registry
+	}
+}
+
+// WithInstrumentResolver enables instrument code validation via Reference Data lookup.
+// When configured, instrument codes are validated by resolving them through the resolver
+// instead of the legacy isValidCurrencyCode() check (which only accepted 3-char ISO 4217 codes).
+// When nil or not used, instrument code validation in list filters is skipped.
+func WithInstrumentResolver(resolver refdata.InstrumentResolver) Option {
+	return func(s *FinancialAccountingService) {
+		s.instrumentResolver = resolver
 	}
 }
 

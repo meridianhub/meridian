@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -92,6 +93,14 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 	// Validate base instrument code
 	if req.BaseInstrumentCode == "" {
 		return nil, status.Error(codes.InvalidArgument, "base_instrument_code must be specified")
+	}
+	if s.instrumentResolver != nil {
+		if _, err := s.instrumentResolver.Resolve(ctx, req.BaseInstrumentCode); err != nil {
+			if errors.Is(err, refdata.ErrUnknownInstrument) {
+				return nil, status.Errorf(codes.InvalidArgument, "unknown base_instrument_code: %s", req.BaseInstrumentCode)
+			}
+			return nil, status.Errorf(codes.Unavailable, "instrument lookup failed for %s, please retry", req.BaseInstrumentCode)
+		}
 	}
 	baseCurrency := domain.Currency(req.BaseInstrumentCode)
 

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -8,8 +10,10 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -438,4 +442,339 @@ func TestListLedgerPostings_MultipleFilters(t *testing.T) {
 		assert.Equal(t, "USD", posting.PostingAmount.CurrencyCode)
 		assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, posting.Status)
 	}
+}
+
+// mockInstrumentResolver is a test double for refdata.InstrumentResolver.
+type mockInstrumentResolver struct {
+	instruments map[string]refdata.InstrumentProperties
+	err         error // if set, all calls return this error
+}
+
+func (m *mockInstrumentResolver) Resolve(_ context.Context, code string) (refdata.InstrumentProperties, error) {
+	if m.err != nil {
+		return refdata.InstrumentProperties{}, m.err
+	}
+	props, ok := m.instruments[code]
+	if !ok {
+		return refdata.InstrumentProperties{}, refdata.ErrUnknownInstrument
+	}
+	return props, nil
+}
+
+// TestListLedgerPostings_InstrumentResolverValidation tests instrument code validation
+// via InstrumentResolver, replacing the legacy isValidCurrencyCode check.
+func TestListLedgerPostings_InstrumentResolverValidation(t *testing.T) {
+	resolver := &mockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"GBP":           {Code: "GBP", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"USD":           {Code: "USD", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"KWH":           {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_EVEN"},
+			"GPU_HOUR":      {Code: "GPU_HOUR", Dimension: "COMPUTE", Precision: 6, RoundingMode: "HALF_EVEN"},
+			"CARBON_CREDIT": {Code: "CARBON_CREDIT", Dimension: "ENVIRONMENTAL", Precision: 2, RoundingMode: "HALF_EVEN"},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		currency string
+		wantCode codes.Code
+		wantErr  bool
+	}{
+		{
+			name:     "valid currency instrument (GBP)",
+			currency: "GBP",
+			wantCode: codes.OK,
+			wantErr:  false,
+		},
+		{
+			name:     "valid non-currency instrument (KWH)",
+			currency: "KWH",
+			wantCode: codes.OK,
+			wantErr:  false,
+		},
+		{
+			name:     "valid multi-word instrument code (GPU_HOUR)",
+			currency: "GPU_HOUR",
+			wantCode: codes.OK,
+			wantErr:  false,
+		},
+		{
+			name:     "valid multi-word instrument code (CARBON_CREDIT)",
+			currency: "CARBON_CREDIT",
+			wantCode: codes.OK,
+			wantErr:  false,
+		},
+		{
+			name:     "unknown instrument code rejected",
+			currency: "INVALID_INSTRUMENT",
+			wantCode: codes.InvalidArgument,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, ctx, cleanup := setupTestDB(t)
+			defer cleanup()
+
+			// Seed a posting with the instrument code to verify filter works end-to-end
+			if !tt.wantErr {
+				bookingLogID := uuid.New()
+				bookingLog := persistence.FinancialBookingLogEntity{
+					ID:                      bookingLogID,
+					FinancialAccountType:    "ASSET",
+					ProductServiceReference: "PROD-INST",
+					BusinessUnitReference:   "BU-INST",
+					ChartOfAccountsRules:    "Standard",
+					BaseCurrency:            tt.currency,
+					Status:                  "PENDING",
+					IdempotencyKey:          uuid.New().String(),
+					CreatedAt:               time.Now().UTC(),
+					UpdatedAt:               time.Now().UTC(),
+					Version:                 1,
+				}
+				db.Create(&bookingLog)
+
+				posting := persistence.LedgerPostingEntity{
+					ID:                    uuid.New(),
+					FinancialBookingLogID: bookingLogID,
+					PostingDirection:      "DEBIT",
+					AmountMinorUnits:      100000,
+					Currency:              tt.currency,
+					AccountID:             "ACC-INST",
+					ValueDate:             time.Now().UTC(),
+					Status:                "PENDING",
+					CorrelationID:         uuid.New().String(),
+					CreatedAt:             time.Now().UTC(),
+				}
+				db.Create(&posting)
+			}
+
+			repo := persistence.NewLedgerRepository(db)
+			publisher := &mockEventPublisher{}
+			idempotencySvc := &mockIdempotencyService{}
+			outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+			outboxRepo := events.NewPostgresOutboxRepository(db)
+
+			svc, err := NewFinancialAccountingService(
+				repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+				WithInstrumentResolver(resolver),
+			)
+			if err != nil {
+				t.Fatalf("failed to create service: %v", err)
+			}
+
+			resp, err := svc.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+				Pagination: &commonv1.Pagination{PageSize: 50},
+				Currency:   tt.currency,
+			})
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				st, ok := status.FromError(err)
+				assert.True(t, ok)
+				assert.Equal(t, tt.wantCode, st.Code())
+				assert.Nil(t, resp)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, resp)
+				assert.Equal(t, 1, len(resp.LedgerPostings))
+			}
+		})
+	}
+}
+
+// TestListLedgerPostings_ResolverUnavailable verifies fail-closed behavior when the
+// instrument resolver is unavailable (returns a transient error).
+func TestListLedgerPostings_ResolverUnavailable(t *testing.T) {
+	resolver := &mockInstrumentResolver{
+		err: errors.New("connection refused"),
+	}
+
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+		WithInstrumentResolver(resolver),
+	)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+
+	resp, err := svc.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		Pagination: &commonv1.Pagination{PageSize: 50},
+		Currency:   "GBP",
+	})
+
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.Unavailable, st.Code())
+	assert.Nil(t, resp)
+}
+
+// TestListLedgerPostings_NoResolverSkipsValidation verifies backwards compatibility:
+// when no InstrumentResolver is configured, currency filter is passed through without validation.
+func TestListLedgerPostings_NoResolverSkipsValidation(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	// No WithInstrumentResolver - nil resolver
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+	)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+
+	// Previously "GPU_HOUR" would have been rejected by isValidCurrencyCode.
+	// With nil resolver, it passes through to the database filter.
+	resp, err := svc.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		Pagination: &commonv1.Pagination{PageSize: 50},
+		Currency:   "GPU_HOUR",
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, 0, len(resp.LedgerPostings))
+}
+
+// TestInitiateFinancialBookingLog_InstrumentResolverValidation tests that
+// InitiateFinancialBookingLog validates BaseInstrumentCode via InstrumentResolver.
+func TestInitiateFinancialBookingLog_InstrumentResolverValidation(t *testing.T) {
+	resolver := &mockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"GBP":      {Code: "GBP", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"KWH":      {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_EVEN"},
+			"GPU_HOUR": {Code: "GPU_HOUR", Dimension: "COMPUTE", Precision: 6, RoundingMode: "HALF_EVEN"},
+		},
+	}
+
+	tests := []struct {
+		name               string
+		baseInstrumentCode string
+		wantCode           codes.Code
+		wantErr            bool
+	}{
+		{
+			name:               "valid currency (GBP)",
+			baseInstrumentCode: "GBP",
+			wantCode:           codes.OK,
+			wantErr:            false,
+		},
+		{
+			name:               "valid non-currency (KWH)",
+			baseInstrumentCode: "KWH",
+			wantCode:           codes.OK,
+			wantErr:            false,
+		},
+		{
+			name:               "valid multi-word (GPU_HOUR)",
+			baseInstrumentCode: "GPU_HOUR",
+			wantCode:           codes.OK,
+			wantErr:            false,
+		},
+		{
+			name:               "unknown instrument rejected",
+			baseInstrumentCode: "INVALID",
+			wantCode:           codes.InvalidArgument,
+			wantErr:            true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, ctx, cleanup := setupTestDB(t)
+			defer cleanup()
+
+			repo := persistence.NewLedgerRepository(db)
+			publisher := &mockEventPublisher{}
+			idempotencySvc := &mockIdempotencyService{}
+			outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+			outboxRepo := events.NewPostgresOutboxRepository(db)
+
+			svc, err := NewFinancialAccountingService(
+				repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+				WithInstrumentResolver(resolver),
+			)
+			if err != nil {
+				t.Fatalf("failed to create service: %v", err)
+			}
+
+			req := &financialaccountingv1.InitiateFinancialBookingLogRequest{
+				FinancialAccountType:    "ASSET",
+				ProductServiceReference: "PROD-RESOLVER-TEST",
+				BusinessUnitReference:   "BU-RESOLVER-TEST",
+				ChartOfAccountsRules:    "Standard",
+				BaseInstrumentCode:      tt.baseInstrumentCode,
+				IdempotencyKey:          &commonv1.IdempotencyKey{Key: uuid.New().String()},
+			}
+
+			resp, err := svc.InitiateFinancialBookingLog(ctx, req)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				st, ok := status.FromError(err)
+				assert.True(t, ok)
+				assert.Equal(t, tt.wantCode, st.Code())
+				assert.Nil(t, resp)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				assert.Equal(t, tt.baseInstrumentCode, resp.FinancialBookingLog.BaseInstrumentCode)
+			}
+		})
+	}
+}
+
+// TestInitiateFinancialBookingLog_ResolverUnavailable tests fail-closed on resolver error.
+func TestInitiateFinancialBookingLog_ResolverUnavailable(t *testing.T) {
+	resolver := &mockInstrumentResolver{
+		err: errors.New("connection refused"),
+	}
+
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewLedgerRepository(db)
+	publisher := &mockEventPublisher{}
+	idempotencySvc := &mockIdempotencyService{}
+	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+
+	svc, err := NewFinancialAccountingService(
+		repo, publisher, idempotencySvc, outboxPublisher, outboxRepo,
+		WithInstrumentResolver(resolver),
+	)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+
+	resp, err := svc.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
+		FinancialAccountType:    "ASSET",
+		ProductServiceReference: "PROD-UNAVAILABLE",
+		BusinessUnitReference:   "BU-UNAVAILABLE",
+		ChartOfAccountsRules:    "Standard",
+		BaseInstrumentCode:      "GBP",
+		IdempotencyKey:          &commonv1.IdempotencyKey{Key: uuid.New().String()},
+	})
+
+	assert.Error(t, err)
+	st, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.Unavailable, st.Code())
+	assert.Nil(t, resp)
 }
