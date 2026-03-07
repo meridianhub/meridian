@@ -3,6 +3,7 @@ package domain
 import (
 	"testing"
 
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,6 +104,52 @@ func TestNewMoneyDecimal(t *testing.T) {
 		assert.Equal(t, "JPY", CurrencyCode(m))
 		assert.Equal(t, int64(1000), ToMinorUnits(m))
 	})
+}
+
+func TestValidateCurrencyDimension(t *testing.T) {
+	tests := []struct {
+		name      string
+		inst      Instrument
+		wantErr   bool
+		errTarget error
+	}{
+		{
+			name:    "CURRENCY dimension accepted",
+			inst:    quantity.Instrument{Code: "GBP", Dimension: quantity.DimensionCurrency, Precision: 2},
+			wantErr: false,
+		},
+		{
+			name:      "ENERGY dimension rejected",
+			inst:      quantity.Instrument{Code: "KWH", Dimension: "ENERGY", Precision: 3},
+			wantErr:   true,
+			errTarget: ErrNonCurrencyInstrument,
+		},
+		{
+			name:      "COMPUTE dimension rejected",
+			inst:      quantity.Instrument{Code: "GPU_HOUR", Dimension: "COMPUTE", Precision: 6},
+			wantErr:   true,
+			errTarget: ErrNonCurrencyInstrument,
+		},
+		{
+			name:      "empty dimension rejected",
+			inst:      quantity.Instrument{Code: "XXX", Dimension: "", Precision: 2},
+			wantErr:   true,
+			errTarget: ErrNonCurrencyInstrument,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCurrencyDimension(tt.inst)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tt.errTarget)
+				assert.Contains(t, err.Error(), tt.inst.Code)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestMoneyIsPositive(t *testing.T) {

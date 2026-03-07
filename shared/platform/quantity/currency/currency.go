@@ -1,24 +1,10 @@
 // Package currency provides predefined Instrument instances for major fiat currencies.
 //
-// # ISO 4217 Standard
-//
-// Currency codes and precisions follow the ISO 4217 standard:
-//   - Most currencies use 2 decimal places (cents, pence, etc.)
-//   - JPY uses 0 decimal places (no minor units)
-//
-// # Usage
-//
-// Use predefined instruments for compile-time safety:
-//
-//	usdAmount := currency.USD(decimal.NewFromInt(100))    // $100.00
-//	jpyAmount := currency.JPY(decimal.NewFromInt(10000))  // ¥10000
-//
-// Look up currencies by code:
-//
-//	instrument, ok := currency.ByCode("EUR")
-//	if ok {
-//	    euroAmount := quantity.NewMoney(decimal.NewFromInt(50), instrument)
-//	}
+// Deprecated: This package uses hardcoded instrument definitions. Use
+// shared/pkg/refdata.InstrumentResolver to resolve instrument properties from the
+// Reference Data service at runtime. The resolver supports all instrument dimensions
+// (currency, energy, compute, carbon) and stays in sync with the reference data
+// catalog. This package will be removed in a future release.
 package currency
 
 import (
@@ -29,6 +15,9 @@ import (
 
 // Currency instruments for major fiat currencies.
 // All instruments use version 0 (initial/unversioned) and CURRENCY dimension.
+//
+// Deprecated: Use shared/pkg/refdata.InstrumentResolver.Resolve() to obtain
+// instrument metadata dynamically from Reference Data.
 var (
 	// InstrumentUSD is the US Dollar instrument (2 decimal places).
 	InstrumentUSD = mustNewCurrency("USD", 2)
@@ -81,12 +70,17 @@ func mustNewCurrency(code string, precision int) quantity.Instrument {
 // Returns the instrument and true if found, or a zero Instrument and false if not found.
 //
 // Supported codes: USD, EUR, GBP, JPY, CHF, AUD, CAD, NZD.
+//
+// Deprecated: Use shared/pkg/refdata.InstrumentResolver.Resolve() instead, which
+// validates against the Reference Data service and supports all instrument types.
 func ByCode(code string) (quantity.Instrument, bool) {
 	inst, ok := currencies[code]
 	return inst, ok
 }
 
 // All returns a copy of all supported currency instruments.
+//
+// Deprecated: Query the Reference Data service for the full instrument catalog.
 func All() []quantity.Instrument {
 	result := make([]quantity.Instrument, 0, len(currencies))
 	for _, inst := range currencies {
@@ -96,6 +90,8 @@ func All() []quantity.Instrument {
 }
 
 // Codes returns all supported currency codes.
+//
+// Deprecated: Query the Reference Data service for the full instrument catalog.
 func Codes() []string {
 	codes := make([]string, 0, len(currencies))
 	for code := range currencies {
@@ -105,41 +101,65 @@ func Codes() []string {
 }
 
 // USD creates a Money quantity in US Dollars.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func USD(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentUSD)
 }
 
 // EUR creates a Money quantity in Euros.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func EUR(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentEUR)
 }
 
 // GBP creates a Money quantity in British Pounds.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func GBP(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentGBP)
 }
 
 // JPY creates a Money quantity in Japanese Yen.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func JPY(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentJPY)
 }
 
 // CHF creates a Money quantity in Swiss Francs.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func CHF(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentCHF)
 }
 
 // AUD creates a Money quantity in Australian Dollars.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func AUD(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentAUD)
 }
 
 // CAD creates a Money quantity in Canadian Dollars.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func CAD(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentCAD)
 }
 
 // NZD creates a Money quantity in New Zealand Dollars.
+//
+// Deprecated: Use quantity.NewMoney(amount, instrument) with an instrument
+// resolved via shared/pkg/refdata.InstrumentResolver.
 func NZD(amount decimal.Decimal) quantity.Money {
 	return quantity.NewMoney(amount, InstrumentNZD)
 }

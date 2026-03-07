@@ -3,22 +3,28 @@
 // This replaces the previous money.go which used shared/domain/money,
 // migrating to the new Universal Asset System quantity package.
 //
-// # Design Constraint: Currency-Only
+// # Design Constraint: Currency-Only (Intentional)
 //
-// Payment Order is intentionally restricted to CURRENCY dimension instruments.
-// This is by design: payment orders represent fiat money movements (bank transfers,
-// direct debits, credit card charges) which are always denominated in a currency.
+// Payment Order is permanently restricted to CURRENCY dimension instruments.
+// This is a deliberate business rule, not a migration gap:
 //
-// Non-currency assets (energy kWh, compute GPU_HOUR, carbon credits) are NOT
-// supported here. For multi-asset position tracking, see the position-keeping service
-// which uses the dimension-agnostic Amount type from shared/pkg/amount.
+//   - Payment orders model fiat money movements: bank transfers, direct debits,
+//     credit card charges, and SEPA/SWIFT settlements.
+//   - These real-world payment rails only carry ISO 4217 currencies.
+//   - The database stores currency as CHAR(3) for ISO 4217 codes.
+//   - Non-currency assets (energy kWh, compute GPU_HOUR, carbon credits) belong
+//     in the position-keeping service, which uses the dimension-agnostic Amount
+//     type from shared/pkg/amount.
+//
+// ValidateCurrencyDimension enforces this constraint at the domain boundary.
 package domain
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/meridianhub/meridian/shared/platform/quantity"
-	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
+	"github.com/meridianhub/meridian/shared/platform/quantity/currency" //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 	"github.com/shopspring/decimal"
 )
 
@@ -33,6 +39,10 @@ var (
 	// ErrOverflow is kept for API compatibility but the new quantity package
 	// uses arbitrary precision decimals so overflow is not a practical concern.
 	ErrOverflow = errors.New("overflow")
+
+	// ErrNonCurrencyInstrument is returned when a non-CURRENCY dimension instrument
+	// is used in a payment order. Payment orders only support fiat currencies.
+	ErrNonCurrencyInstrument = errors.New("payment orders only support CURRENCY dimension instruments")
 )
 
 // Money is an alias for the quantity.Money type (Qty[Monetary]).
@@ -41,7 +51,9 @@ type Money = quantity.Money
 // Instrument is an alias for the quantity.Instrument type.
 type Instrument = quantity.Instrument
 
-// Re-export currency instruments for convenient access
+// Re-export currency instruments for convenient access.
+//
+//nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 var (
 	InstrumentGBP = currency.InstrumentGBP
 	InstrumentUSD = currency.InstrumentUSD
@@ -59,7 +71,7 @@ var (
 //
 //	money, err := NewMoney("GBP", 10000) // Creates £100.00
 func NewMoney(currencyCode string, amountCents int64) (Money, error) {
-	inst, ok := currency.ByCode(currencyCode)
+	inst, ok := currency.ByCode(currencyCode) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 	if !ok {
 		return Money{}, ErrInvalidCurrency
 	}
@@ -115,4 +127,18 @@ func CurrencyCode(m Money) string {
 		panic("CurrencyCode: called on zero-value Money with no instrument")
 	}
 	return m.Instrument.Code
+}
+
+// ValidateCurrencyDimension checks that an instrument has the CURRENCY dimension.
+// Returns ErrNonCurrencyInstrument if the instrument represents a non-monetary
+// asset (energy, compute, carbon, etc.).
+//
+// Call this at the service boundary when accepting instrument codes from external
+// input to enforce the payment-order currency-only constraint.
+func ValidateCurrencyDimension(inst Instrument) error {
+	if inst.Dimension != quantity.DimensionCurrency {
+		return fmt.Errorf("%w: got dimension %q for instrument %q",
+			ErrNonCurrencyInstrument, inst.Dimension, inst.Code)
+	}
+	return nil
 }

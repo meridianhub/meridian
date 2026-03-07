@@ -15,7 +15,7 @@ var (
 	ErrInvalidLienTransition        = errors.New("invalid lien status transition")
 	ErrLienExpired                  = errors.New("lien has expired")
 	ErrInvalidLienAmount            = errors.New("lien amount must be positive")
-	ErrInvalidLienCurrency          = errors.New("lien currency must not be empty")
+	ErrInvalidLienInstrumentCode    = errors.New("lien instrument code must not be empty")
 	ErrInvalidPaymentOrderReference = errors.New("payment order reference must not be empty")
 	ErrInvalidInstrumentAmount      = errors.New("instrument amount must be positive with instrument code")
 )
@@ -54,8 +54,8 @@ type Lien struct {
 
 	// AmountCents is the reserved amount in minor units of the account's native instrument.
 	AmountCents int64
-	// Currency is the instrument code of the reserved amount (matches account's native instrument).
-	Currency string
+	// InstrumentCode is the instrument code of the reserved amount (matches account's native instrument).
+	InstrumentCode string
 
 	BucketID              string
 	Status                LienStatus
@@ -76,12 +76,12 @@ type Lien struct {
 }
 
 // NewLien creates a new lien in ACTIVE status.
-func NewLien(accountID uuid.UUID, amountCents int64, currency, bucketID, paymentOrderReference string, expiresAt *time.Time) (*Lien, error) {
+func NewLien(accountID uuid.UUID, amountCents int64, instrumentCode, bucketID, paymentOrderReference string, expiresAt *time.Time) (*Lien, error) {
 	if amountCents <= 0 {
 		return nil, ErrInvalidLienAmount
 	}
-	if currency == "" {
-		return nil, ErrInvalidLienCurrency
+	if instrumentCode == "" {
+		return nil, ErrInvalidLienInstrumentCode
 	}
 	if paymentOrderReference == "" {
 		return nil, ErrInvalidPaymentOrderReference
@@ -92,7 +92,7 @@ func NewLien(accountID uuid.UUID, amountCents int64, currency, bucketID, payment
 		ID:                    uuid.New(),
 		AccountID:             accountID,
 		AmountCents:           amountCents,
-		Currency:              currency,
+		InstrumentCode:        instrumentCode,
 		BucketID:              bucketID,
 		Status:                LienStatusActive,
 		PaymentOrderReference: paymentOrderReference,
@@ -109,7 +109,7 @@ func NewLien(accountID uuid.UUID, amountCents int64, currency, bucketID, payment
 func NewValuedLien(
 	accountID uuid.UUID,
 	amountCents int64,
-	currency, bucketID, paymentOrderReference string,
+	instrumentCode, bucketID, paymentOrderReference string,
 	expiresAt *time.Time,
 	reservedQuantity *InstrumentAmount,
 	valuedAmount *InstrumentAmount,
@@ -122,7 +122,7 @@ func NewValuedLien(
 		return nil, ErrInvalidInstrumentAmount
 	}
 
-	lien, err := NewLien(accountID, amountCents, currency, bucketID, paymentOrderReference, expiresAt)
+	lien, err := NewLien(accountID, amountCents, instrumentCode, bucketID, paymentOrderReference, expiresAt)
 	if err != nil {
 		return nil, err
 	}
