@@ -28,15 +28,19 @@ vi.mock('@xyflow/react', () => {
 
   function Handle() { return null }
 
-  function ReactFlow({ nodes, edges, onNodeClick, children }: {
+  function ReactFlow({ nodes, edges, onNodeClick, onNodeDoubleClick, onPaneClick, children }: {
     nodes: { id: string; type?: string; data: Record<string, unknown> }[]
     edges: { id: string; source: string; target: string; data?: Record<string, unknown> }[]
     onNodeClick?: (event: unknown, node: unknown) => void
+    onNodeDoubleClick?: (event: unknown, node: unknown) => void
+    onPaneClick?: () => void
     children?: React.ReactNode
     [key: string]: unknown
   }) {
     return (
-      <div data-testid="react-flow" data-node-count={nodes.length} data-edge-count={edges.length}>
+      <div data-testid="react-flow" data-node-count={nodes.length} data-edge-count={edges.length} onClick={(e) => {
+        if ((e.target as HTMLElement).getAttribute('data-testid') === 'react-flow') onPaneClick?.()
+      }}>
         {nodes.map((n) => {
           const mn = (n.data as { manifestNode?: { type: string; label: string; data: Record<string, unknown> } }).manifestNode
           return (
@@ -46,7 +50,8 @@ vi.mock('@xyflow/react', () => {
               data-node-type={n.type}
               data-dimmed={String((n.data as { dimmed?: boolean }).dimmed ?? false)}
               data-highlighted={String((n.data as { highlighted?: boolean }).highlighted ?? false)}
-              onClick={() => onNodeClick?.({}, n)}
+              onClick={(e) => { e.stopPropagation(); onNodeClick?.({}, n) }}
+              onDoubleClick={() => onNodeDoubleClick?.({}, n)}
             >
               {mn?.label ?? n.id}
             </div>
@@ -257,26 +262,102 @@ describe('ManifestGraph', () => {
     })
   })
 
-  describe('click navigation', () => {
-    it('navigates to instruments page on instrument click', async () => {
+  describe('double-click navigation', () => {
+    it('navigates to instruments page on instrument double-click', async () => {
       renderGraph(energyManifest)
       const node = await screen.findByTestId('node-instrument:KWH')
-      fireEvent.click(node)
+      fireEvent.doubleClick(node)
       expect(mockNavigate).toHaveBeenCalledWith('/reference-data/instruments')
     })
 
-    it('navigates to account types page on account type click', async () => {
+    it('navigates to account types page on account type double-click', async () => {
       renderGraph(energyManifest)
       const node = await screen.findByTestId('node-account_type:ENERGY_HOLDING')
-      fireEvent.click(node)
+      fireEvent.doubleClick(node)
       expect(mockNavigate).toHaveBeenCalledWith('/reference-data/account-types')
     })
 
-    it('navigates to saga detail page on saga click', async () => {
+    it('navigates to saga detail page on saga double-click', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-saga:usage_to_value')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/sagas/usage_to_value')
+    })
+  })
+
+  describe('node selection', () => {
+    it('shows toolbar when an instrument node is clicked', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      const toolbar = await screen.findByTestId('node-toolbar')
+      expect(toolbar).toBeInTheDocument()
+      expect(toolbar.textContent).toContain('Kilowatt Hour')
+    })
+
+    it('shows "Show Event Chain" button for instrument nodes', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('show-event-chain-button')).toBeInTheDocument()
+    })
+
+    it('shows "Show Event Chain" button for account_type nodes', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-account_type:ENERGY_HOLDING')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('show-event-chain-button')).toBeInTheDocument()
+    })
+
+    it('does not show "Show Event Chain" button for saga nodes', async () => {
       renderGraph(energyManifest)
       const node = await screen.findByTestId('node-saga:usage_to_value')
       fireEvent.click(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/sagas/usage_to_value')
+      expect(await screen.findByTestId('node-toolbar')).toBeInTheDocument()
+      expect(screen.queryByTestId('show-event-chain-button')).not.toBeInTheDocument()
+    })
+
+    it('deselects node when clicking the same node again', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('node-toolbar')).toBeInTheDocument()
+      fireEvent.click(node)
+      expect(screen.queryByTestId('node-toolbar')).not.toBeInTheDocument()
+    })
+
+    it('deselects node when clicking the pane', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('node-toolbar')).toBeInTheDocument()
+      const pane = screen.getByTestId('react-flow')
+      fireEvent.click(pane)
+      expect(screen.queryByTestId('node-toolbar')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('event chain panel', () => {
+    it('opens event chain panel when "Show Event Chain" is clicked', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      const button = await screen.findByTestId('show-event-chain-button')
+      fireEvent.click(button)
+      expect(await screen.findByTestId('event-chain-side-panel')).toBeInTheDocument()
+      expect(screen.getByTestId('event-chain-panel')).toBeInTheDocument()
+    })
+
+    it('closes event chain panel when close button is clicked', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      const button = await screen.findByTestId('show-event-chain-button')
+      fireEvent.click(button)
+      expect(await screen.findByTestId('event-chain-side-panel')).toBeInTheDocument()
+      const closeButton = screen.getByTestId('close-event-chain-panel')
+      fireEvent.click(closeButton)
+      expect(screen.queryByTestId('event-chain-side-panel')).not.toBeInTheDocument()
     })
   })
 })
