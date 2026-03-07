@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -560,6 +561,66 @@ func TestRegistry_ContainsAllPatterns(t *testing.T) {
 	allPatterns := append([]string{"base-fiat-gbp", "base-fiat-usd"}, allEconomyPatterns...)
 	for _, name := range allPatterns {
 		assert.True(t, registryNames[name], "registry.json should contain %s entry", name)
+	}
+}
+
+// --- event trigger validation ---
+
+// allPatternDirs returns all directories under the patterns dir that contain a manifest-fragment.yaml.
+func allPatternDirs(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(patternsDir(t))
+	require.NoError(t, err)
+
+	var dirs []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(patternsDir(t), e.Name(), "manifest-fragment.yaml")
+		if _, err := os.Stat(manifestPath); err == nil {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs
+}
+
+func TestAllPatterns_EventTriggersMapToValidTopics(t *testing.T) {
+	validTopics := make(map[string]bool, len(topics.All()))
+	for _, topic := range topics.All() {
+		validTopics[topic] = true
+	}
+
+	for _, name := range allPatternDirs(t) {
+		t.Run(name, func(t *testing.T) {
+			fragment := loadManifestFragment(t, name)
+
+			sagas, ok := fragment["sagas"].([]any)
+			if !ok {
+				return // no sagas in this pattern
+			}
+
+			for i, s := range sagas {
+				saga, ok := s.(map[string]any)
+				if !ok {
+					continue
+				}
+				trigger, ok := saga["trigger"].(string)
+				if !ok {
+					continue
+				}
+
+				if !strings.HasPrefix(trigger, "event:") {
+					continue // only validate event triggers against topic registry
+				}
+
+				channel := strings.TrimPrefix(trigger, "event:")
+				sagaName, _ := saga["name"].(string)
+				assert.True(t, validTopics[channel],
+					"saga[%d] %q has trigger %q but %q is not a registered topic; see shared/platform/events/topics/topics.go",
+					i, sagaName, trigger, channel)
+			}
+		})
 	}
 }
 
