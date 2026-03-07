@@ -328,14 +328,20 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
 
   const graph = useMemo(() => buildManifestGraph(manifest), [manifest])
 
+  // Derive effective selection: clear if the selected node no longer exists in the graph
+  const effectiveSelectedNode = useMemo(
+    () => (selectedNode && graph.nodes.some((n) => n.id === selectedNode) ? selectedNode : null),
+    [selectedNode, graph],
+  )
+
   const selectedManifestNode = useMemo(
-    () => (selectedNode ? graph.nodes.find((n) => n.id === selectedNode) ?? null : null),
-    [graph, selectedNode],
+    () => (effectiveSelectedNode ? graph.nodes.find((n) => n.id === effectiveSelectedNode) ?? null : null),
+    [graph, effectiveSelectedNode],
   )
 
   const canShowEventChain = selectedManifestNode?.type === 'instrument' || selectedManifestNode?.type === 'account_type'
 
-  const eventChainNodeId = showEventChain ? selectedNode : null
+  const eventChainNodeId = showEventChain ? effectiveSelectedNode : null
   const eventChain = useEventChain(graph, eventChainNodeId)
 
   const nodeCountByType = useMemo(() => {
@@ -381,7 +387,7 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
 
   // Hover + selection highlighting
   useEffect(() => {
-    const activeNode = hoveredNode ?? selectedNode
+    const activeNode = hoveredNode ?? effectiveSelectedNode
     const connectedNodes = new Set<string>()
     if (activeNode) {
       connectedNodes.add(activeNode)
@@ -416,7 +422,7 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
       })
       return changed ? next : eds
     })
-  }, [hoveredNode, selectedNode, currentEdges, setNodes, setEdges])
+  }, [hoveredNode, effectiveSelectedNode, currentEdges, setNodes, setEdges])
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
@@ -592,7 +598,7 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
               size="sm"
               variant="ghost"
               className="h-7 w-7 p-0"
-              onClick={() => setShowEventChain(false)}
+              onClick={() => { setSelectedNode(null); setShowEventChain(false) }}
               aria-label="Close event chain panel"
               data-testid="close-event-chain-panel"
             >
