@@ -156,4 +156,80 @@ describe('ManifestHistoryTable', () => {
     })
     expect(screen.getByText(/Manifest Version 1.0/)).toBeInTheDocument()
   })
+
+  it('renders compare checkboxes for each version', async () => {
+    renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-checkbox-1.0')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('compare-checkbox-1.1')).toBeInTheDocument()
+    expect(screen.getByTestId('compare-checkbox-1.2')).toBeInTheDocument()
+  })
+
+  it('shows compare toolbar when versions are selected', async () => {
+    renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-checkbox-1.0')).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByTestId('compare-checkbox-1.0'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-toolbar')).toBeInTheDocument()
+    })
+    expect(screen.getByText('1/2 versions selected')).toBeInTheDocument()
+  })
+
+  it('enables compare button when exactly 2 versions selected', async () => {
+    renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-checkbox-1.0')).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByTestId('compare-checkbox-1.0'))
+    await userEvent.click(screen.getByTestId('compare-checkbox-1.1'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-button')).not.toBeDisabled()
+    })
+    expect(screen.getByText('2/2 versions selected')).toBeInTheDocument()
+  })
+
+  it('disables additional checkboxes when 2 versions already selected', async () => {
+    renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-checkbox-1.0')).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByTestId('compare-checkbox-1.0'))
+    await userEvent.click(screen.getByTestId('compare-checkbox-1.1'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-checkbox-1.2')).toBeDisabled()
+    })
+  })
+
+  it('clears selection when clear button is clicked', async () => {
+    renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-checkbox-1.0')).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByTestId('compare-checkbox-1.0'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compare-toolbar')).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /clear/i }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('compare-toolbar')).not.toBeInTheDocument()
+    })
+  })
 })
