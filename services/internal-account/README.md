@@ -434,6 +434,8 @@ req := &iba.InitiateInternalAccountRequest{
 }
 ```
 
+See [ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
+
 ## Balance Delegation to Position Keeping
 
 **Critical Design Decision**: Internal Account does NOT store balance locally.

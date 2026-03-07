@@ -621,6 +621,30 @@ All webhook delivery attempts are recorded in the `webhook_deliveries` table for
 - `Content-Type: application/json` header is set
 - Tenants should validate the `tenant_id` matches their expected value
 
+## Instrument Resolution
+
+Account creation resolves instrument properties (dimension, precision) from Reference Data
+at the gRPC layer. The domain trusts caller-provided instrument properties.
+
+**Resolution flow:**
+
+1. `InitiateCurrentAccount` receives `instrument_code` (e.g., `"GBP"`, `"KWH"`)
+2. gRPC layer calls `instrumentGetter.GetInstrument(ctx, code, version)` to resolve dimension and precision
+3. Domain constructor `NewCurrentAccountWithDimension()` uses `quantity.NewInstrument()` directly (no local registry lookup)
+4. If Reference Data is unavailable, account creation fails closed (`codes.FailedPrecondition`)
+
+**Error handling for instrument lookup:**
+
+| Error | gRPC Code | Behavior |
+|-------|-----------|----------|
+| Instrument not found | `InvalidArgument` | Unknown instrument code |
+| Context canceled | `Canceled` | Client canceled the request |
+| Context deadline exceeded | `DeadlineExceeded` | Lookup timed out |
+| Reference Data unavailable | `FailedPrecondition` | Service not configured |
+| Other errors | `Unavailable` | Transient failure, client should retry |
+
+See [ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
+
 ## References
 
 - [BIAN Current Account Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/CurrentAccount.yaml)

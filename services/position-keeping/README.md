@@ -281,14 +281,29 @@ erDiagram
 | Max Transaction Entries | 10,000 | `ErrTooManyEntries` |
 | Max Audit Entries | 10,000 | `ErrTooManyEntries` |
 
-## Currency Support
+## Instrument Resolution
 
-7 currencies with proper decimal handling:
+Position-keeping supports all instrument dimensions (CURRENCY, ENERGY, CARBON, COMPUTE, etc.).
+Instrument properties are resolved via `InstrumentResolver` from Reference Data.
 
-| Currency | Decimals |
-|----------|----------|
-| GBP, USD, EUR, CHF, CAD, AUD | 2 |
-| JPY | 0 |
+**Resolution flow:**
+
+1. Transaction recording receives `instrument_code` and resolves properties via `InstrumentResolver`
+2. Balance computation uses the resolved precision for decimal arithmetic
+3. If instrument resolution is unavailable, the service uses `quantity.NewInstrument()` with
+   caller-provided properties from the transaction record
+
+**Supported dimensions:**
+
+| Dimension | Examples | Precision |
+|-----------|----------|-----------|
+| CURRENCY | GBP, USD, EUR, JPY | 0-2 (from Reference Data) |
+| ENERGY | KWH, MWH | 3-6 |
+| CARBON | CARBON_CREDIT | 0 |
+| COMPUTE | GPU_HOUR | 4 |
+| Any valid | Per Reference Data | Per Reference Data |
+
+See [ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
 
 ## Configuration
 

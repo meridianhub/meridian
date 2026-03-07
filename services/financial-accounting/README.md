@@ -210,6 +210,17 @@ erDiagram
 | `financial_accounting_double_entry_validations_total` | Counter | Balance checks |
 | `financial_accounting_errors_total` | Counter | Errors by category |
 
+## Instrument Resolution
+
+Ledger posting validation uses `InstrumentResolver` from Reference Data to verify instrument
+properties. This replaces the previous hardcoded currency validation and supports all instrument
+dimensions (CURRENCY, ENERGY, CARBON, COMPUTE, etc.).
+
+Journal entries carry `instrument_code` and `dimension` fields. The service validates that
+debit and credit entries use matching instruments (cross-instrument postings are rejected).
+
+See [ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
+
 ## References
 
 - [BIAN Financial Accounting Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/FinancialAccounting.yaml)
