@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { ExecutionSubgraph } from './execution-subgraph'
+import { ExecutionSubgraph, filterSubgraph } from './execution-subgraph'
 import type { ManifestGraph } from '@/features/manifests/lib/manifest-graph-model'
 
 vi.mock('@xyflow/react', () => ({
@@ -38,6 +38,42 @@ function buildTestGraph(): ManifestGraph {
   }
 }
 
+describe('filterSubgraph', () => {
+  it('includes focus node and directly connected nodes', () => {
+    const graph = buildTestGraph()
+    const result = filterSubgraph(graph, 'instrument:GBP')
+
+    const nodeIds = result.nodes.map((n) => n.id)
+    expect(nodeIds).toContain('instrument:GBP')
+    expect(nodeIds).toContain('account_type:CUSTOMER')
+  })
+
+  it('excludes unconnected nodes', () => {
+    const graph = buildTestGraph()
+    const result = filterSubgraph(graph, 'instrument:GBP')
+
+    const nodeIds = result.nodes.map((n) => n.id)
+    expect(nodeIds).not.toContain('instrument:USD')
+  })
+
+  it('includes sagas that write to connected nodes', () => {
+    const graph = buildTestGraph()
+    const result = filterSubgraph(graph, 'instrument:GBP')
+
+    const nodeIds = result.nodes.map((n) => n.id)
+    expect(nodeIds).toContain('saga:payment_saga')
+  })
+
+  it('returns only focus node when it has no edges', () => {
+    const graph = buildTestGraph()
+    const result = filterSubgraph(graph, 'instrument:USD')
+
+    expect(result.nodes).toHaveLength(1)
+    expect(result.nodes[0].id).toBe('instrument:USD')
+    expect(result.edges).toHaveLength(0)
+  })
+})
+
 describe('ExecutionSubgraph', () => {
   it('renders empty state when graph is null', () => {
     render(<ExecutionSubgraph graph={null} focusNodeId="instrument:GBP" />)
@@ -46,14 +82,6 @@ describe('ExecutionSubgraph', () => {
 
   it('renders ReactFlow when graph has connected nodes', () => {
     render(<ExecutionSubgraph graph={buildTestGraph()} focusNodeId="instrument:GBP" />)
-    expect(screen.getByTestId('react-flow')).toBeInTheDocument()
-  })
-
-  it('filters to only connected nodes', () => {
-    const graph = buildTestGraph()
-    render(<ExecutionSubgraph graph={graph} focusNodeId="instrument:GBP" />)
-    // USD is not connected to GBP, so it should be filtered out
-    // The ReactFlow mock doesn't render nodes, but we can check it renders
     expect(screen.getByTestId('react-flow')).toBeInTheDocument()
   })
 

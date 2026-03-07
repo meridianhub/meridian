@@ -87,7 +87,7 @@ const nodeTypes = {
   subgraph_node: SubgraphNode,
 }
 
-function filterSubgraph(
+export function filterSubgraph(
   graph: ManifestGraph,
   focusNodeId: string,
 ): { nodes: ManifestNode[]; edges: ManifestEdge[] } {
@@ -178,6 +178,10 @@ export function ExecutionSubgraph({ graph, focusNodeId }: ExecutionSubgraphProps
       if (!cancelled) {
         setNodes(rfNodes)
         setEdges(rfEdges)
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error('[ExecutionSubgraph] layout failed:', err)
       }
     })
 
