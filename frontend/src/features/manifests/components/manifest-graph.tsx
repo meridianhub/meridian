@@ -15,12 +15,14 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useNavigate } from 'react-router-dom'
+import { X } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
 import {
   layoutWithELK,
   NODE_WIDTH,
@@ -35,6 +37,8 @@ import {
   type ManifestGraph as ManifestGraphModel,
 } from '../lib/manifest-graph-model'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+import { useEventChain } from '../hooks/use-event-chain'
+import { EventChainPanel } from './event-chain-panel'
 
 // Theme colors per node type
 const NODE_THEMES: Record<ManifestNodeType, { color: string; label: string }> = {
@@ -316,11 +320,29 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
+  const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [showEventChain, setShowEventChain] = useState(false)
   const [visibleTypes, setVisibleTypes] = useState<Set<ManifestNodeType>>(
     () => new Set<ManifestNodeType>(['instrument', 'account_type', 'valuation_rule', 'saga']),
   )
 
   const graph = useMemo(() => buildManifestGraph(manifest), [manifest])
+
+  // Derive effective selection: clear if the selected node no longer exists in the graph
+  const effectiveSelectedNode = useMemo(
+    () => (selectedNode && graph.nodes.some((n) => n.id === selectedNode) ? selectedNode : null),
+    [selectedNode, graph],
+  )
+
+  const selectedManifestNode = useMemo(
+    () => (effectiveSelectedNode ? graph.nodes.find((n) => n.id === effectiveSelectedNode) ?? null : null),
+    [graph, effectiveSelectedNode],
+  )
+
+  const canShowEventChain = selectedManifestNode?.type === 'instrument' || selectedManifestNode?.type === 'account_type'
+
+  const eventChainNodeId = showEventChain ? effectiveSelectedNode : null
+  const eventChain = useEventChain(graph, eventChainNodeId)
 
   const nodeCountByType = useMemo(() => {
     const counts: Record<ManifestNodeType, number> = {
@@ -363,13 +385,14 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
     return () => { cancelled = true }
   }, [graph, visibleTypes, setNodes, setEdges])
 
-  // Hover highlighting
+  // Hover + selection highlighting
   useEffect(() => {
+    const activeNode = hoveredNode ?? effectiveSelectedNode
     const connectedNodes = new Set<string>()
-    if (hoveredNode) {
-      connectedNodes.add(hoveredNode)
+    if (activeNode) {
+      connectedNodes.add(activeNode)
       for (const e of currentEdges) {
-        if (e.source === hoveredNode || e.target === hoveredNode) {
+        if (e.source === activeNode || e.target === activeNode) {
           connectedNodes.add(e.source)
           connectedNodes.add(e.target)
         }
@@ -379,8 +402,8 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
     setNodes((nds) => {
       let changed = false
       const next = nds.map((n) => {
-        const highlighted = hoveredNode ? n.id === hoveredNode : false
-        const dimmed = hoveredNode ? !connectedNodes.has(n.id) : false
+        const highlighted = activeNode ? n.id === activeNode : false
+        const dimmed = activeNode ? !connectedNodes.has(n.id) : false
         const current = n.data as ManifestNodeData
         if (current.highlighted === highlighted && current.dimmed === dimmed) return n
         changed = true
@@ -399,9 +422,17 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
       })
       return changed ? next : eds
     })
-  }, [hoveredNode, currentEdges, setNodes, setEdges])
+  }, [hoveredNode, effectiveSelectedNode, currentEdges, setNodes, setEdges])
 
   const onNodeClick: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      setSelectedNode((prev) => (prev === node.id ? null : node.id))
+      setShowEventChain(false)
+    },
+    [],
+  )
+
+  const onNodeDoubleClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       const data = node.data as ManifestNodeData
       const mn = data.manifestNode
@@ -419,6 +450,11 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
     },
     [navigate],
   )
+
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null)
+    setShowEventChain(false)
+  }, [])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNode(node.id)
@@ -438,7 +474,12 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
       }
       return next
     })
-  }, [])
+    // Clear selection if the selected node's type was just hidden
+    if (selectedManifestNode?.type === type) {
+      setSelectedNode(null)
+      setShowEventChain(false)
+    }
+  }, [selectedManifestNode])
 
   const totalVisible = nodes.length
 
@@ -461,6 +502,8 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
+          onPaneClick={onPaneClick}
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
           nodeTypes={nodeTypes}
@@ -510,6 +553,67 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
           <LegendItem key={item.label} {...item} />
         ))}
       </div>
+
+      {/* Selection toolbar */}
+      {selectedManifestNode && (
+        <div
+          className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-lg border bg-background/95 p-2 backdrop-blur-sm shadow-sm"
+          data-testid="node-toolbar"
+        >
+          <span className="text-xs font-medium text-foreground px-1">
+            {selectedManifestNode.label}
+          </span>
+          {canShowEventChain && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-7"
+              onClick={() => setShowEventChain(true)}
+              data-testid="show-event-chain-button"
+            >
+              Show Event Chain
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            onClick={() => { setSelectedNode(null); setShowEventChain(false) }}
+            aria-label="Deselect node"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
+      {/* Event chain side panel */}
+      {showEventChain && eventChain && selectedManifestNode && (
+        <div
+          className="absolute top-0 right-0 z-20 h-full w-96 border-l bg-background shadow-lg overflow-y-auto"
+          data-testid="event-chain-side-panel"
+        >
+          <div className="flex items-center justify-between p-3 border-b">
+            <h3 className="text-sm font-semibold">Event Chain</h3>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => { setSelectedNode(null); setShowEventChain(false) }}
+              aria-label="Close event chain panel"
+              data-testid="close-event-chain-panel"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <div className="p-3">
+            <EventChainPanel
+              chain={eventChain}
+              startNodeLabel={selectedManifestNode.label}
+              onSagaClick={(sagaId) => navigate(`/sagas/${sagaId.replace(/^saga:/, '')}`)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
