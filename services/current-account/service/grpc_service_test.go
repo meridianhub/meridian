@@ -18,6 +18,8 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/services/reference-data/cache"
+	"github.com/meridianhub/meridian/services/reference-data/registry"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
@@ -84,8 +86,24 @@ func testSagaRunner(t *testing.T) (*saga.StarlarkSagaRunner, string, string) {
 	return sagaRunner, depositScript, withdrawalScript
 }
 
-// injectMandatoryClients sets up mock Position Keeping and Financial Accounting clients with orchestrators.
-// Position Keeping and orchestration are now mandatory for all deposit/withdrawal operations.
+// defaultMockInstrumentGetter returns a mock InstrumentGetter that resolves common
+// currency instruments (GBP, USD, EUR, JPY, CHF, CAD, AUD) from Reference Data.
+// Tests that need non-currency instruments should configure their own mock.
+func defaultMockInstrumentGetter() InstrumentGetter {
+	instruments := map[string]*cache.CachedInstrument{
+		"GBP": {Definition: &registry.InstrumentDefinition{Code: "GBP", Dimension: "MONETARY", Precision: 2}},
+		"USD": {Definition: &registry.InstrumentDefinition{Code: "USD", Dimension: "MONETARY", Precision: 2}},
+		"EUR": {Definition: &registry.InstrumentDefinition{Code: "EUR", Dimension: "MONETARY", Precision: 2}},
+		"JPY": {Definition: &registry.InstrumentDefinition{Code: "JPY", Dimension: "MONETARY", Precision: 0}},
+		"CHF": {Definition: &registry.InstrumentDefinition{Code: "CHF", Dimension: "MONETARY", Precision: 2}},
+		"CAD": {Definition: &registry.InstrumentDefinition{Code: "CAD", Dimension: "MONETARY", Precision: 2}},
+		"AUD": {Definition: &registry.InstrumentDefinition{Code: "AUD", Dimension: "MONETARY", Precision: 2}},
+	}
+	return &mockInstrumentGetter{instruments: instruments}
+}
+
+// injectMandatoryClients sets up mock Position Keeping, Financial Accounting, and InstrumentGetter
+// clients with orchestrators. These are now mandatory for all operations.
 func injectMandatoryClients(t *testing.T, svc *Service, repo *persistence.Repository, accountBalances map[string]int64) {
 	t.Helper()
 	if accountBalances == nil {
@@ -96,6 +114,11 @@ func injectMandatoryClients(t *testing.T, svc *Service, repo *persistence.Reposi
 
 	svc.posKeepingClient = mockPosKeeping
 	svc.finAcctClient = mockFinAcct
+
+	// InstrumentGetter is required for account creation (fail-closed without Reference Data)
+	if svc.instrumentGetter == nil {
+		svc.instrumentGetter = defaultMockInstrumentGetter()
+	}
 
 	// Create saga runner and load scripts
 	sagaRunner, depositScript, withdrawalScript := testSagaRunner(t)

@@ -163,6 +163,7 @@ func TestInitiateCurrentAccount_WithProductType_Success(t *testing.T) {
 		repo:             repo,
 		partyClient:      mockParty,
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -206,6 +207,7 @@ func TestInitiateCurrentAccount_WithProductType_VersionOverride(t *testing.T) {
 		repo:             repo,
 		partyClient:      mockParty,
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -244,6 +246,7 @@ func TestInitiateCurrentAccount_WithProductType_NotFound(t *testing.T) {
 		repo:             repo,
 		partyClient:      mockParty,
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -299,6 +302,7 @@ func TestInitiateCurrentAccount_WithProductType_NonCustomerBehaviorClass(t *test
 				repo:             repo,
 				partyClient:      mockParty,
 				accountTypeCache: cache,
+				instrumentGetter: defaultMockInstrumentGetter(),
 				logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			}
 
@@ -355,6 +359,7 @@ func TestInitiateCurrentAccount_WithProductType_CELEligibility(t *testing.T) {
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultMockInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -402,6 +407,7 @@ func TestInitiateCurrentAccount_WithProductType_CELEligibility(t *testing.T) {
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultMockInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -448,6 +454,7 @@ func TestInitiateCurrentAccount_WithProductType_EligibilityRequiresPartyClient(t
 		repo:             repo,
 		partyClient:      nil, // No party client configured
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -492,6 +499,7 @@ func TestInitiateCurrentAccount_WithProductType_VersionExceedsLatest(t *testing.
 		repo:             repo,
 		partyClient:      mockParty,
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -555,6 +563,7 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultMockInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -599,6 +608,7 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultMockInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -647,6 +657,7 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultMockInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -715,6 +726,7 @@ func TestInitiateCurrentAccount_WithProductType_ValuationFeatureSeeding(t *testi
 		partyClient:          mockParty,
 		accountTypeCache:     cache,
 		valuationFeatureRepo: vfRepo,
+		instrumentGetter:     defaultMockInstrumentGetter(),
 		logger:               slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -767,9 +779,10 @@ func TestInitiateCurrentAccount_BackwardsCompatibility(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultMockInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// No product_type_code - legacy behavior
@@ -802,8 +815,9 @@ func TestInitiateCurrentAccount_WithProductType_NoCacheConfigured(t *testing.T) 
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		// accountTypeCache is nil - not configured
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -840,6 +854,7 @@ func TestInitiateCurrentAccount_WithProductType_MissingTenantContext(t *testing.
 	svc := &Service{
 		repo:             repo,
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -880,6 +895,7 @@ func TestInitiateCurrentAccount_WithProductType_CacheError(t *testing.T) {
 		repo:             repo,
 		partyClient:      mockParty,
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -923,6 +939,7 @@ func TestInitiateCurrentAccount_WithProductType_BehaviorClassPersisted(t *testin
 		repo:             repo,
 		partyClient:      mockParty,
 		accountTypeCache: cache,
+		instrumentGetter: defaultMockInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -960,9 +977,10 @@ func TestInitiateCurrentAccount_BackwardsCompatibility_NoBehaviorClass(t *testin
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultMockInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
