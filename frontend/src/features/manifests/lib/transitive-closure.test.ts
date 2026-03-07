@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeTransitiveClosure, type EventChain } from './transitive-closure'
+import { computeTransitiveClosure } from './transitive-closure'
 import type { ManifestGraph, ManifestNode } from './manifest-graph-model'
 
 function makeInstrumentNode(code: string): ManifestNode {
