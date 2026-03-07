@@ -468,7 +468,12 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
       }
       return next
     })
-  }, [])
+    // Clear selection if the selected node's type was just hidden
+    if (selectedManifestNode?.type === type) {
+      setSelectedNode(null)
+      setShowEventChain(false)
+    }
+  }, [selectedManifestNode])
 
   const totalVisible = nodes.length
 
