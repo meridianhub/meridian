@@ -1,4 +1,4 @@
-package integration
+package amount_test
 
 import (
 	"testing"
@@ -7,19 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
+	"github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
-// TestMultiAsset_AccountCreationWithDifferentDimensions verifies that domain-level
-// account creation works with all supported instrument dimensions, not just CURRENCY.
-// This is the core multi-asset purity contract: any valid dimension + code + precision
-// combination must be accepted by the domain constructors.
-func TestMultiAsset_AccountCreationWithDifferentDimensions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
+// TestMultiDimension_InstrumentCreation verifies that quantity.NewInstrument and
+// amount.Zero/New work correctly for all supported instrument dimensions.
+func TestMultiDimension_InstrumentCreation(t *testing.T) {
 	instruments := []struct {
 		name      string
 		code      string
@@ -45,36 +39,29 @@ func TestMultiAsset_AccountCreationWithDifferentDimensions(t *testing.T) {
 			assert.Equal(t, tc.dimension, inst.Dimension)
 			assert.Equal(t, tc.precision, inst.Precision)
 
-			// Verify zero amount creation
-			zero := sharedamount.Zero(inst)
+			zero := amount.Zero(inst)
 			assert.True(t, zero.Amount().IsZero())
 			assert.Equal(t, tc.code, zero.InstrumentCode())
 			assert.Equal(t, tc.dimension, zero.Dimension())
 
-			// Verify amount creation with minor units
-			amt := sharedamount.New(inst, 1500)
+			amt := amount.New(inst, 1500)
 			assert.False(t, amt.Amount().IsZero())
 			assert.Equal(t, tc.code, amt.InstrumentCode())
 		})
 	}
 }
 
-// TestMultiAsset_AmountArithmeticAcrossDimensions verifies that arithmetic operations
-// (add, subtract, compare) work correctly for non-currency instruments and that
-// cross-dimension operations are rejected.
-func TestMultiAsset_AmountArithmeticAcrossDimensions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
+// TestMultiDimension_Arithmetic verifies that arithmetic operations work for
+// non-currency instruments and that cross-dimension operations are rejected.
+func TestMultiDimension_Arithmetic(t *testing.T) {
 	kwhInst, err := quantity.NewInstrument("KWH", 0, "ENERGY", 3)
 	require.NoError(t, err)
 	gpuInst, err := quantity.NewInstrument("GPU_HOUR", 0, "COMPUTE", 4)
 	require.NoError(t, err)
 
 	t.Run("same_instrument_addition", func(t *testing.T) {
-		a := sharedamount.New(kwhInst, 1500) // 1.500 KWH
-		b := sharedamount.New(kwhInst, 2500) // 2.500 KWH
+		a := amount.New(kwhInst, 1500) // 1.500 KWH
+		b := amount.New(kwhInst, 2500) // 2.500 KWH
 
 		sum, err := a.Add(b)
 		require.NoError(t, err)
@@ -83,8 +70,8 @@ func TestMultiAsset_AmountArithmeticAcrossDimensions(t *testing.T) {
 	})
 
 	t.Run("same_instrument_subtraction", func(t *testing.T) {
-		a := sharedamount.New(kwhInst, 5000) // 5.000 KWH
-		b := sharedamount.New(kwhInst, 2000) // 2.000 KWH
+		a := amount.New(kwhInst, 5000) // 5.000 KWH
+		b := amount.New(kwhInst, 2000) // 2.000 KWH
 
 		diff, err := a.Subtract(b)
 		require.NoError(t, err)
@@ -92,8 +79,8 @@ func TestMultiAsset_AmountArithmeticAcrossDimensions(t *testing.T) {
 	})
 
 	t.Run("same_instrument_comparison", func(t *testing.T) {
-		a := sharedamount.New(kwhInst, 5000)
-		b := sharedamount.New(kwhInst, 3000)
+		a := amount.New(kwhInst, 5000)
+		b := amount.New(kwhInst, 3000)
 
 		cmp, err := a.Compare(b)
 		require.NoError(t, err)
@@ -101,38 +88,43 @@ func TestMultiAsset_AmountArithmeticAcrossDimensions(t *testing.T) {
 	})
 
 	t.Run("cross_dimension_addition_rejected", func(t *testing.T) {
-		kwh := sharedamount.New(kwhInst, 1500)
-		gpu := sharedamount.New(gpuInst, 1000)
+		kwh := amount.New(kwhInst, 1500)
+		gpu := amount.New(gpuInst, 1000)
 
 		_, err := kwh.Add(gpu)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, sharedamount.ErrInstrumentMismatch)
+		assert.ErrorIs(t, err, amount.ErrInstrumentMismatch)
 	})
 
 	t.Run("cross_dimension_subtraction_rejected", func(t *testing.T) {
-		kwh := sharedamount.New(kwhInst, 5000)
-		gpu := sharedamount.New(gpuInst, 1000)
+		kwh := amount.New(kwhInst, 5000)
+		gpu := amount.New(gpuInst, 1000)
 
 		_, err := kwh.Subtract(gpu)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, sharedamount.ErrInstrumentMismatch)
+		assert.ErrorIs(t, err, amount.ErrInstrumentMismatch)
+	})
+
+	t.Run("cross_dimension_comparison_rejected", func(t *testing.T) {
+		kwh := amount.New(kwhInst, 5000)
+		gpu := amount.New(gpuInst, 1000)
+
+		_, err := kwh.Compare(gpu)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, amount.ErrInstrumentMismatch)
 	})
 }
 
-// TestMultiAsset_PrecisionHandling verifies that precision is respected correctly
+// TestMultiDimension_Precision verifies that precision is respected correctly
 // for instruments with different decimal places.
-func TestMultiAsset_PrecisionHandling(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
+func TestMultiDimension_Precision(t *testing.T) {
 	tests := []struct {
 		name       string
 		code       string
 		dimension  string
 		precision  int
 		minorUnits int64
-		expected   string // expected major-unit decimal string
+		expected   string
 	}{
 		{"GBP_2dp", "GBP", "CURRENCY", 2, 10050, "100.50"},
 		{"JPY_0dp", "JPY", "CURRENCY", 0, 1000, "1000"},
@@ -147,41 +139,35 @@ func TestMultiAsset_PrecisionHandling(t *testing.T) {
 			inst, err := quantity.NewInstrument(tc.code, 0, tc.dimension, tc.precision)
 			require.NoError(t, err)
 
-			amt := sharedamount.New(inst, tc.minorUnits)
+			amt := amount.New(inst, tc.minorUnits)
 			assert.Equal(t, tc.expected, amt.Amount().StringFixed(int32(tc.precision)))
 		})
 	}
 }
 
-// TestMultiAsset_InvalidDimensionRejected verifies that unrecognized dimensions
+// TestMultiDimension_InvalidDimensionRejected verifies that unrecognized dimensions
 // are rejected at instrument construction time.
-func TestMultiAsset_InvalidDimensionRejected(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
+func TestMultiDimension_InvalidDimensionRejected(t *testing.T) {
 	_, err := quantity.NewInstrument("UNOBTAINIUM", 0, "FANTASY", 2)
 	require.Error(t, err)
 }
 
-// TestMultiAsset_NewFromInstrumentCurrencyPath verifies that the NewFromInstrument
-// constructor for CURRENCY dimension still works via the legacy registry path
-// (this is the backward-compatible path used by persistence layer reconstruction).
-func TestMultiAsset_NewFromInstrumentCurrencyPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+// TestMultiDimension_NewFromInstrumentCompatibility verifies that the NewFromInstrument
+// constructor works for both CURRENCY (via legacy registry) and non-CURRENCY paths.
+// This backward-compatible path is used by persistence layer reconstruction.
+func TestMultiDimension_NewFromInstrumentCompatibility(t *testing.T) {
+	t.Run("currency_path_uses_registry", func(t *testing.T) {
+		amt, err := amount.NewFromInstrument("GBP", "CURRENCY", 2, 10000)
+		require.NoError(t, err)
+		assert.Equal(t, "100.00", amt.Amount().StringFixed(2))
+		assert.Equal(t, "GBP", amt.InstrumentCode())
+	})
 
-	// CURRENCY path uses the currency registry for precision lookup
-	amt, err := sharedamount.NewFromInstrument("GBP", "CURRENCY", 2, 10000)
-	require.NoError(t, err)
-	assert.Equal(t, "100.00", amt.Amount().StringFixed(2))
-	assert.Equal(t, "GBP", amt.InstrumentCode())
-
-	// Non-CURRENCY path uses caller-provided precision directly
-	kwh, err := sharedamount.NewFromInstrument("KWH", "ENERGY", 3, 1500)
-	require.NoError(t, err)
-	assert.Equal(t, "1.500", kwh.Amount().StringFixed(3))
-	assert.Equal(t, "KWH", kwh.InstrumentCode())
-	assert.Equal(t, "ENERGY", kwh.Dimension())
+	t.Run("non_currency_path_trusts_precision", func(t *testing.T) {
+		kwh, err := amount.NewFromInstrument("KWH", "ENERGY", 3, 1500)
+		require.NoError(t, err)
+		assert.Equal(t, "1.500", kwh.Amount().StringFixed(3))
+		assert.Equal(t, "KWH", kwh.InstrumentCode())
+		assert.Equal(t, "ENERGY", kwh.Dimension())
+	})
 }

@@ -103,6 +103,10 @@ Persistence Layer
 
 * Account creation requires Reference Data availability (fail-closed)
 * Persistence layer reconstruction uses `quantity.NewInstrument` directly (bypasses registry)
+* `amount.NewFromInstrument` retains a CURRENCY-specific path that consults the legacy currency
+  registry for backward compatibility during persistence reconstruction. Non-CURRENCY dimensions
+  use caller-provided precision directly. This compatibility path will be removed when the
+  legacy currency packages are deleted.
 * Legacy `shared/domain/money` and `shared/platform/quantity/currency` packages are deprecated
   but not yet removed (backward compatibility for tests and seed data)
 

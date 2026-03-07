@@ -290,20 +290,11 @@ Instrument properties are resolved via `InstrumentResolver` from Reference Data.
 
 1. Transaction recording receives `instrument_code` and resolves properties via `InstrumentResolver`
 2. Balance computation uses the resolved precision for decimal arithmetic
-3. If instrument resolution is unavailable, the service uses `quantity.NewInstrument()` with
-   caller-provided properties from the transaction record
+3. Persistence reconstruction uses stored `instrument_code`, `dimension`, and `precision` columns
+   with `quantity.NewInstrument()` directly (no Reference Data call on read path)
 
-**Supported dimensions:**
-
-| Dimension | Examples | Precision |
-|-----------|----------|-----------|
-| CURRENCY | GBP, USD, EUR, JPY | 0-2 (from Reference Data) |
-| ENERGY | KWH, MWH | 3-6 |
-| CARBON | CARBON_CREDIT | 0 |
-| COMPUTE | GPU_HOUR | 4 |
-| Any valid | Per Reference Data | Per Reference Data |
-
-See [ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
+All instrument dimensions and precision values are defined in Reference Data. See
+[ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
 
 ## Configuration
 

@@ -621,10 +621,12 @@ All webhook delivery attempts are recorded in the `webhook_deliveries` table for
 - `Content-Type: application/json` header is set
 - Tenants should validate the `tenant_id` matches their expected value
 
-## Instrument Resolution
+## Instrument Resolution (Account Creation)
 
 Account creation resolves instrument properties (dimension, precision) from Reference Data
-at the gRPC layer. The domain trusts caller-provided instrument properties.
+at the gRPC layer. The domain trusts caller-provided instrument properties. Downstream
+operations (deposits, withdrawals, balance queries) use the instrument properties stored
+at account creation time.
 
 **Resolution flow:**
 
