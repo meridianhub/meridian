@@ -695,6 +695,31 @@ func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {
 	}
 }
 
+func TestInitiateCurrentAccount_NoInstrumentGetter_FailsClosed(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	// Create service without instrumentGetter to test fail-closed behavior
+	svc, err := NewService(repo, nil)
+	require.NoError(t, err)
+	svc.logger = testLogger()
+
+	req := &pb.InitiateCurrentAccountRequest{
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            uuid.New().String(),
+		InstrumentCode:     "GBP",
+	}
+
+	_, err = svc.InitiateCurrentAccount(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "expected gRPC status error")
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+	require.Contains(t, st.Message(), "Reference Data service is required")
+}
+
 func TestToMoneyAmount(t *testing.T) {
 	tests := []struct {
 		name          string
