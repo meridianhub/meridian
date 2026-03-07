@@ -3,14 +3,12 @@ package domain
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/meridianhub/meridian/shared/platform/quantity"
-	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
 )
 
 // Domain errors
@@ -24,7 +22,6 @@ var (
 	ErrNonZeroBalance          = errors.New("account balance must be zero to close")
 	ErrActiveLiens             = errors.New("account has active liens and cannot be closed")
 	ErrOrgScopedWithoutParty   = errors.New("org-scoped account requires a party ID")
-	ErrPrecisionMismatch       = errors.New("precision mismatch for currency instrument")
 )
 
 // AccountStatus represents the lifecycle state of an account
@@ -112,42 +109,22 @@ func WithBehaviorClass(behaviorClass string) AccountOption {
 // Returns a value type (not pointer) following immutability principles.
 // Use WithOrgPartyID option to create an org-scoped account.
 //
-// instrumentCode must be a recognized ISO 4217 currency code (e.g. "GBP").
-// Precision is derived automatically from the currency registry.
-// Dimension defaults to "CURRENCY". Use NewCurrentAccountWithDimension for explicit dimensions.
+// instrumentCode must be a valid instrument code (e.g. "GBP", "KWH").
+// Dimension defaults to "CURRENCY" and precision to 2.
+// Use NewCurrentAccountWithDimension for explicit dimension and precision control.
+//
+// Deprecated: Prefer NewCurrentAccountWithDimension with caller-provided dimension and precision
+// resolved from Reference Data. This constructor assumes CURRENCY dimension with precision 2.
 func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode string, opts ...AccountOption) (CurrentAccount, error) {
-	inst, ok := currency.ByCode(strings.ToUpper(instrumentCode))
-	if !ok {
-		return CurrentAccount{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, instrumentCode)
-	}
-	return NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, quantity.DimensionCurrency, inst.Precision, opts...)
+	return NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, quantity.DimensionCurrency, 2, opts...)
 }
 
 // NewCurrentAccountWithDimension creates a new current account with explicit instrument code,
-// dimension, and precision.
-//
-// For CURRENCY dimension, precision is validated against the currency registry: the caller-supplied
-// precision must match the canonical precision for the currency (e.g. GBP=2, JPY=0). A mismatch
-// returns ErrPrecisionMismatch.
-//
-// For non-CURRENCY dimensions, precision is trusted as provided by the caller (validated at the
-// API boundary by the gRPC service layer using Reference Data).
+// dimension, and precision. All properties are trusted as provided by the caller - the gRPC
+// service layer validates them against Reference Data before calling this constructor.
 func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, dimension string, precision int, opts ...AccountOption) (CurrentAccount, error) {
 	now := time.Now()
 	normalizedDimension := strings.ToUpper(dimension)
-
-	// For CURRENCY, validate precision against canonical registry value.
-	// If the currency code is not in the local registry (e.g. a currency only defined in
-	// the Reference Data service), precision validation is deferred: NewAmountFromInstrument
-	// will return ErrInvalidCurrency if the code is genuinely unknown.
-	if normalizedDimension == quantity.DimensionCurrency {
-		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok {
-			if inst.Precision != precision {
-				return CurrentAccount{}, fmt.Errorf("%w: currency %s requires precision %d, got %d",
-					ErrPrecisionMismatch, strings.ToUpper(instrumentCode), inst.Precision, precision)
-			}
-		}
-	}
 
 	zeroAmount, err := NewAmountFromInstrument(instrumentCode, normalizedDimension, precision, 0)
 	if err != nil {

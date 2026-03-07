@@ -194,9 +194,10 @@ func TestInitiateCurrentAccount_WithPartyValidation_Success(t *testing.T) {
 
 	// Create service with party client
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// Execute account creation with valid UUID party ID
@@ -237,9 +238,10 @@ func TestInitiateCurrentAccount_PartyNotFound(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// Execute account creation with valid UUID party ID (even though party doesn't exist)
@@ -303,9 +305,10 @@ func TestInitiateCurrentAccount_InactiveParty(t *testing.T) {
 			}
 
 			svc := &Service{
-				repo:        repo,
-				partyClient: mockParty,
-				logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+				repo:             repo,
+				partyClient:      mockParty,
+				instrumentGetter: defaultInstrumentGetter(),
+				logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			}
 
 			// Execute account creation with valid UUID party ID
@@ -348,9 +351,10 @@ func TestInitiateCurrentAccount_PartyServiceUnavailable(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// Execute account creation with valid UUID party ID
@@ -392,9 +396,10 @@ func TestInitiateCurrentAccount_PartyServiceTimeout(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// Create context with short timeout, preserving tenant from baseCtx
@@ -433,9 +438,10 @@ func TestInitiateCurrentAccount_ConcurrentCreationSameParty(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// Create multiple accounts concurrently for the same party
@@ -487,9 +493,10 @@ func TestInitiateCurrentAccount_PartyValidationCalledBeforeAccountCreation(t *te
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// Execute account creation (will fail)
@@ -572,9 +579,10 @@ func TestInitiateCurrentAccount_TableDriven(t *testing.T) {
 			}
 
 			svc := &Service{
-				repo:        repo,
-				partyClient: mockParty,
-				logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+				repo:             repo,
+				partyClient:      mockParty,
+				instrumentGetter: defaultInstrumentGetter(),
+				logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			}
 
 			// Execute with valid UUID party ID

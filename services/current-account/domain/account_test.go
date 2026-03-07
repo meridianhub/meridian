@@ -1358,28 +1358,32 @@ func TestNewCurrentAccountWithDimension_CURRENCY_CorrectPrecision_Succeeds(t *te
 	}
 }
 
-func TestNewCurrentAccountWithDimension_CURRENCY_PrecisionMismatch_ReturnsError(t *testing.T) {
+func TestNewCurrentAccountWithDimension_CURRENCY_PrecisionFromCallerAccepted(t *testing.T) {
+	// Domain trusts caller-provided precision. For CURRENCY dimension, the underlying
+	// Amount package uses the canonical registry precision regardless of caller input.
 	tests := []struct {
 		name      string
 		currency  string
 		precision int
 	}{
-		{"GBP with precision 3 (expected 2)", "GBP", 3},
-		{"JPY with precision 2 (expected 0)", "JPY", 2},
-		{"USD with precision 0 (expected 2)", "USD", 0},
+		{"GBP with precision 3 (registry overrides to 2)", "GBP", 3},
+		{"JPY with precision 2 (registry overrides to 0)", "JPY", 2},
+		{"USD with precision 0 (registry overrides to 2)", "USD", 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", tt.currency, "CURRENCY", tt.precision)
-			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrPrecisionMismatch)
+			account, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", tt.currency, "CURRENCY", tt.precision)
+			require.NoError(t, err, "domain should accept caller precision without validation")
+			assert.Equal(t, tt.currency, account.InstrumentCode())
+			assert.Equal(t, "CURRENCY", account.Dimension())
 		})
 	}
 }
 
-func TestNewCurrentAccount_DerivesCorrectPrecision(t *testing.T) {
-	// NewCurrentAccount derives precision from the currency registry automatically.
+func TestNewCurrentAccount_DefaultsCurrencyDimension(t *testing.T) {
+	// NewCurrentAccount defaults to CURRENCY dimension with precision 2.
+	// The underlying Amount package resolves canonical precision from the currency registry.
 	tests := []struct {
 		currency string
 	}{
@@ -1398,8 +1402,9 @@ func TestNewCurrentAccount_DerivesCorrectPrecision(t *testing.T) {
 	}
 }
 
-func TestNewCurrentAccount_InvalidCurrency_StillReturnsError(t *testing.T) {
+func TestNewCurrentAccount_UnknownCurrencyCode_StillReturnsError(t *testing.T) {
+	// NewCurrentAccount delegates to NewAmountFromInstrument which validates
+	// currency codes against the registry for CURRENCY dimension.
 	_, err := NewCurrentAccount("ACC-001", "IDENT-001", "PARTY-001", "INVALID")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidCurrency)
 }

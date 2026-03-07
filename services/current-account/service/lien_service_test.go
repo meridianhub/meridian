@@ -82,7 +82,7 @@ func createTestAccountWithBalance(t *testing.T, ctx context.Context, repo *persi
 	t.Helper()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
-	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, accountID, uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	if balanceCents > 0 {

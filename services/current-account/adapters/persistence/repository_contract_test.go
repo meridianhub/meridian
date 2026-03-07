@@ -39,7 +39,7 @@ func TestFindByID_UsesAccountID(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]     // Short ID like "ACC-12345678"
 	accountIdentification := "GB82WEST12345698765432" // IBAN
 
-	account, err := domain.NewCurrentAccount(accountID, accountIdentification, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, accountIdentification, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, account)
@@ -69,7 +69,7 @@ func TestFindByIDForUpdate_UsesAccountID(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	accountIdentification := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, accountIdentification, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, accountIdentification, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, account)
@@ -93,7 +93,7 @@ func TestDelete_UsesAccountID(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	accountIdentification := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, accountIdentification, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, accountIdentification, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, account)

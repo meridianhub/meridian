@@ -18,6 +18,8 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/services/reference-data/cache"
+	"github.com/meridianhub/meridian/services/reference-data/registry"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
@@ -84,8 +86,33 @@ func testSagaRunner(t *testing.T) (*saga.StarlarkSagaRunner, string, string) {
 	return sagaRunner, depositScript, withdrawalScript
 }
 
-// injectMandatoryClients sets up mock Position Keeping and Financial Accounting clients with orchestrators.
-// Position Keeping and orchestration are now mandatory for all deposit/withdrawal operations.
+// defaultInstrumentGetter returns a mock InstrumentGetter pre-populated with common instruments.
+// Tests that need custom instruments can create their own mockInstrumentGetter instead.
+func defaultInstrumentGetter() *mockInstrumentGetter {
+	return &mockInstrumentGetter{
+		instruments: map[string]*cache.CachedInstrument{
+			"GBP": {Definition: &registry.InstrumentDefinition{
+				Code: "GBP", Dimension: registry.DimensionMonetary, Precision: 2, Version: 1,
+			}},
+			"USD": {Definition: &registry.InstrumentDefinition{
+				Code: "USD", Dimension: registry.DimensionMonetary, Precision: 2, Version: 1,
+			}},
+			"EUR": {Definition: &registry.InstrumentDefinition{
+				Code: "EUR", Dimension: registry.DimensionMonetary, Precision: 2, Version: 1,
+			}},
+			"JPY": {Definition: &registry.InstrumentDefinition{
+				Code: "JPY", Dimension: registry.DimensionMonetary, Precision: 0, Version: 1,
+			}},
+			"KWH": {Definition: &registry.InstrumentDefinition{
+				Code: "KWH", Dimension: registry.DimensionEnergy, Precision: 6, Version: 1,
+			}},
+		},
+	}
+}
+
+// injectMandatoryClients sets up mock Position Keeping, Financial Accounting, and Reference Data
+// clients with orchestrators. Position Keeping and orchestration are now mandatory for all
+// deposit/withdrawal operations. Reference Data (instrumentGetter) is required for account creation.
 func injectMandatoryClients(t *testing.T, svc *Service, repo *persistence.Repository, accountBalances map[string]int64) {
 	t.Helper()
 	if accountBalances == nil {
@@ -96,6 +123,11 @@ func injectMandatoryClients(t *testing.T, svc *Service, repo *persistence.Reposi
 
 	svc.posKeepingClient = mockPosKeeping
 	svc.finAcctClient = mockFinAcct
+
+	// Reference Data instrumentGetter is required for account creation
+	if svc.instrumentGetter == nil {
+		svc.instrumentGetter = defaultInstrumentGetter()
+	}
 
 	// Create saga runner and load scripts
 	sagaRunner, depositScript, withdrawalScript := testSagaRunner(t)
@@ -378,7 +410,7 @@ func TestExecuteDeposit(t *testing.T) {
 	})
 
 	// Create account first
-	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "ACC-001", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -466,7 +498,7 @@ func TestExecuteDepositInvalidAmount(t *testing.T) {
 	svc := mustNewService(t, repo, nil)
 
 	// Create account first
-	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "ACC-001", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -510,7 +542,7 @@ func TestRetrieveCurrentAccount(t *testing.T) {
 	})
 
 	// Create account first
-	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "ACC-001", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -607,7 +639,7 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	svc := mustNewService(t, repo, nil)
 
 	// Create GBP account
-	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "ACC-001", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account); err != nil {
 		t.Fatalf("Failed to create test account: %v", err)
@@ -746,7 +778,7 @@ func TestExecuteDeposit_OverflowPrevention_UnitsTooCents(t *testing.T) {
 	svc := mustNewService(t, repo, nil)
 
 	// Create account
-	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "ACC-001", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
@@ -811,7 +843,7 @@ func TestExecuteDeposit_SafeAddition_UnitsAndNanos(t *testing.T) {
 	svc := mustNewService(t, repo, nil)
 
 	// Create account
-	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "ACC-001", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
@@ -970,7 +1002,7 @@ func TestExecuteDeposit_IdempotencyReturnsCachedResponse(t *testing.T) {
 	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
-	account, err := domain.NewCurrentAccount("ACC-IDEMP-001", "ACC-IDEMP-001", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-IDEMP-001", "ACC-IDEMP-001", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
@@ -1021,7 +1053,7 @@ func TestExecuteDeposit_IdempotencyReturnsAbortedWhenInProgress(t *testing.T) {
 	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account
-	account, err := domain.NewCurrentAccount("ACC-IDEMP-002", "ACC-IDEMP-002", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-IDEMP-002", "ACC-IDEMP-002", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
@@ -1067,7 +1099,7 @@ func TestExecuteDeposit_IdempotencyProceedsWithoutKey(t *testing.T) {
 	})
 
 	// Create account
-	account, err := domain.NewCurrentAccount("ACC-IDEMP-003", "ACC-IDEMP-003", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-IDEMP-003", "ACC-IDEMP-003", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
@@ -1095,7 +1127,7 @@ func TestExecuteDeposit_IdempotencyCleanupOnFailure(t *testing.T) {
 	svc := mustNewServiceWithIdempotency(t, repo, nil, mockIdemp)
 
 	// Create account but with wrong currency
-	account, err := domain.NewCurrentAccount("ACC-IDEMP-004", "ACC-IDEMP-004", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-IDEMP-004", "ACC-IDEMP-004", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
@@ -1153,11 +1185,11 @@ func TestListCurrentAccounts(t *testing.T) {
 		svc := mustNewService(t, repo, nil)
 
 		// Create two accounts
-		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP")
+		acc1, err := domain.NewCurrentAccountWithDimension("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP", "CURRENCY", 2)
 		require.NoError(t, err)
 		require.NoError(t, repo.Save(ctx, acc1))
 
-		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR")
+		acc2, err := domain.NewCurrentAccountWithDimension("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR", "CURRENCY", 2)
 		require.NoError(t, err)
 		require.NoError(t, repo.Save(ctx, acc2))
 
@@ -1175,12 +1207,12 @@ func TestListCurrentAccounts(t *testing.T) {
 		svc := mustNewService(t, repo, nil)
 
 		// Create an active account
-		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP")
+		acc1, err := domain.NewCurrentAccountWithDimension("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP", "CURRENCY", 2)
 		require.NoError(t, err)
 		require.NoError(t, repo.Save(ctx, acc1))
 
 		// Create account and freeze it
-		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR")
+		acc2, err := domain.NewCurrentAccountWithDimension("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR", "CURRENCY", 2)
 		require.NoError(t, err)
 		acc2, err = acc2.Freeze("test freeze")
 		require.NoError(t, err)
@@ -1202,11 +1234,11 @@ func TestListCurrentAccounts(t *testing.T) {
 		repo := persistence.NewRepository(db)
 		svc := mustNewService(t, repo, nil)
 
-		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP")
+		acc1, err := domain.NewCurrentAccountWithDimension("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP", "CURRENCY", 2)
 		require.NoError(t, err)
 		require.NoError(t, repo.Save(ctx, acc1))
 
-		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR")
+		acc2, err := domain.NewCurrentAccountWithDimension("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR", "CURRENCY", 2)
 		require.NoError(t, err)
 		require.NoError(t, repo.Save(ctx, acc2))
 
@@ -1229,7 +1261,7 @@ func TestListCurrentAccounts(t *testing.T) {
 		// Create 3 accounts
 		for i := 0; i < 3; i++ {
 			iban := fmt.Sprintf("GB%02dWEST1234569876543%d", 10+i, i)
-			acc, err := domain.NewCurrentAccount(fmt.Sprintf("ACC-%03d", i), iban, uuid.New().String(), "GBP")
+			acc, err := domain.NewCurrentAccountWithDimension(fmt.Sprintf("ACC-%03d", i), iban, uuid.New().String(), "GBP", "CURRENCY", 2)
 			require.NoError(t, err)
 			require.NoError(t, repo.Save(ctx, acc))
 			time.Sleep(2 * time.Millisecond) // ensure distinct created_at for cursor ordering

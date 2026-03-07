@@ -242,7 +242,7 @@ func NewMockCurrentAccountService() *MockCurrentAccountService {
 
 // CreateAccount creates a new account.
 func (m *MockCurrentAccountService) CreateAccount(ctx context.Context, accountID, iban, partyID, currency string) (cadomain.CurrentAccount, error) {
-	account, err := cadomain.NewCurrentAccount(accountID, iban, partyID, currency)
+	account, err := cadomain.NewCurrentAccountWithDimension(accountID, iban, partyID, currency, "CURRENCY", 2)
 	if err != nil {
 		return cadomain.CurrentAccount{}, err
 	}

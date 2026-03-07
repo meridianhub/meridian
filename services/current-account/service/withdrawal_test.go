@@ -238,7 +238,7 @@ func TestExecuteWithdrawal_AccountFrozen(t *testing.T) {
 
 	repo := persistence.NewRepository(db)
 	// Create account, deposit funds, then freeze it
-	account, err := domain.NewCurrentAccount("ACC-WTH-FROZEN", "ACC-WTH-FROZEN", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-WTH-FROZEN", "ACC-WTH-FROZEN", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	depositAmount, err := domain.NewMoney("GBP", 100000) // $1000
@@ -272,7 +272,7 @@ func TestExecuteWithdrawal_AccountClosed(t *testing.T) {
 	repo := persistence.NewRepository(db)
 	// Create account with zero balance and close it
 	// Per domain rules, accounts must have zero balance to close
-	account, err := domain.NewCurrentAccount("ACC-WTH-CLOSED", "ACC-WTH-CLOSED", uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-WTH-CLOSED", "ACC-WTH-CLOSED", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// Close the zero-balance account

@@ -162,6 +162,7 @@ func TestInitiateCurrentAccount_WithProductType_Success(t *testing.T) {
 	svc := &Service{
 		repo:             repo,
 		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
 		accountTypeCache: cache,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -205,6 +206,7 @@ func TestInitiateCurrentAccount_WithProductType_VersionOverride(t *testing.T) {
 	svc := &Service{
 		repo:             repo,
 		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
 		accountTypeCache: cache,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -243,6 +245,7 @@ func TestInitiateCurrentAccount_WithProductType_NotFound(t *testing.T) {
 	svc := &Service{
 		repo:             repo,
 		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
 		accountTypeCache: cache,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -298,6 +301,7 @@ func TestInitiateCurrentAccount_WithProductType_NonCustomerBehaviorClass(t *test
 			svc := &Service{
 				repo:             repo,
 				partyClient:      mockParty,
+				instrumentGetter: defaultInstrumentGetter(),
 				accountTypeCache: cache,
 				logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 			}
@@ -355,6 +359,7 @@ func TestInitiateCurrentAccount_WithProductType_CELEligibility(t *testing.T) {
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -402,6 +407,7 @@ func TestInitiateCurrentAccount_WithProductType_CELEligibility(t *testing.T) {
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -448,6 +454,7 @@ func TestInitiateCurrentAccount_WithProductType_EligibilityRequiresPartyClient(t
 		repo:             repo,
 		partyClient:      nil, // No party client configured
 		accountTypeCache: cache,
+		instrumentGetter: defaultInstrumentGetter(),
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
@@ -491,6 +498,7 @@ func TestInitiateCurrentAccount_WithProductType_VersionExceedsLatest(t *testing.
 	svc := &Service{
 		repo:             repo,
 		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
 		accountTypeCache: cache,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -555,6 +563,7 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -599,6 +608,7 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -647,6 +657,7 @@ func TestInitiateCurrentAccount_WithProductType_AttributeValidation(t *testing.T
 			repo:             repo,
 			partyClient:      mockParty,
 			accountTypeCache: cache,
+			instrumentGetter: defaultInstrumentGetter(),
 			logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		}
 
@@ -713,6 +724,7 @@ func TestInitiateCurrentAccount_WithProductType_ValuationFeatureSeeding(t *testi
 	svc := &Service{
 		repo:                 repo,
 		partyClient:          mockParty,
+		instrumentGetter:     defaultInstrumentGetter(),
 		accountTypeCache:     cache,
 		valuationFeatureRepo: vfRepo,
 		logger:               slog.New(slog.NewTextHandler(os.Stdout, nil)),
@@ -767,9 +779,10 @@ func TestInitiateCurrentAccount_BackwardsCompatibility(t *testing.T) {
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	// No product_type_code - legacy behavior
@@ -805,7 +818,8 @@ func TestInitiateCurrentAccount_WithProductType_NoCacheConfigured(t *testing.T) 
 		repo:        repo,
 		partyClient: mockParty,
 		// accountTypeCache is nil - not configured
-		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{
@@ -839,6 +853,7 @@ func TestInitiateCurrentAccount_WithProductType_MissingTenantContext(t *testing.
 
 	svc := &Service{
 		repo:             repo,
+		instrumentGetter: defaultInstrumentGetter(),
 		accountTypeCache: cache,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -879,6 +894,7 @@ func TestInitiateCurrentAccount_WithProductType_CacheError(t *testing.T) {
 	svc := &Service{
 		repo:             repo,
 		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
 		accountTypeCache: cache,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -922,6 +938,7 @@ func TestInitiateCurrentAccount_WithProductType_BehaviorClassPersisted(t *testin
 	svc := &Service{
 		repo:             repo,
 		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
 		accountTypeCache: cache,
 		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
@@ -960,9 +977,10 @@ func TestInitiateCurrentAccount_BackwardsCompatibility_NoBehaviorClass(t *testin
 	}
 
 	svc := &Service{
-		repo:        repo,
-		partyClient: mockParty,
-		logger:      slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		repo:             repo,
+		partyClient:      mockParty,
+		instrumentGetter: defaultInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
 	}
 
 	req := &pb.InitiateCurrentAccountRequest{

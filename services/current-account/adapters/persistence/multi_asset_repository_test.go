@@ -24,7 +24,7 @@ func TestSaveAndFindAccount_GBP(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, account)
@@ -143,7 +143,7 @@ func TestPrecisionPersistedAndRetrieved(t *testing.T) {
 			var account domain.CurrentAccount
 			var err error
 			if tc.dimension == "CURRENCY" {
-				account, err = domain.NewCurrentAccount(tc.accountID, tc.iban, partyID, tc.instrumentCode)
+				account, err = domain.NewCurrentAccountWithDimension(tc.accountID, tc.iban, partyID, tc.instrumentCode, "CURRENCY", 2)
 			} else {
 				account, err = domain.NewCurrentAccountWithDimension(tc.accountID, tc.iban, partyID, tc.instrumentCode, tc.dimension, tc.precision)
 			}

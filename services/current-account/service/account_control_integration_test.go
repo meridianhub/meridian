@@ -122,7 +122,7 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 // createTestAccountForControl creates a test account with a unique ID for control tests.
 func createTestAccountForControl(t *testing.T, ctx context.Context, repo *persistence.Repository, accountID string) domain.CurrentAccount {
 	t.Helper()
-	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, accountID, uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err, "Failed to create test account")
 	require.NoError(t, repo.Save(ctx, account), "Failed to save test account")
 	return account

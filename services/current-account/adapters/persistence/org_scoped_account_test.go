@@ -74,7 +74,7 @@ func TestOrgScopedAccount_SaveWithOrgPartyID(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP",
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
@@ -98,7 +98,7 @@ func TestOrgScopedAccount_RoundTripPreservesOrgPartyID(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP",
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
@@ -122,7 +122,7 @@ func TestOrgScopedAccount_PersonalAccountHasNullOrgPartyID(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST98765432123456"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, account)
@@ -145,7 +145,7 @@ func TestOrgScopedAccount_FindByScopedParty(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP",
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
@@ -179,7 +179,7 @@ func TestOrgScopedAccount_FindByScopedParty_WrongCurrency(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP",
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
@@ -201,16 +201,16 @@ func TestOrgScopedAccount_ListByOrganization(t *testing.T) {
 	party1 := uuid.New().String()
 	party2 := uuid.New().String()
 
-	acc1, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST12345698765432", party1, "GBP",
+	acc1, err := domain.NewCurrentAccountWithDimension("ACC-"+uuid.New().String()[:8], "GB82WEST12345698765432", party1, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
-	acc2, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST98765432123456", party2, "GBP",
+	acc2, err := domain.NewCurrentAccountWithDimension("ACC-"+uuid.New().String()[:8], "GB82WEST98765432123456", party2, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
 	// Create a personal account (not org-scoped) - should not appear
-	acc3, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST55555555555555", uuid.New().String(), "GBP")
+	acc3, err := domain.NewCurrentAccountWithDimension("ACC-"+uuid.New().String()[:8], "GB82WEST55555555555555", uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, acc1)
@@ -250,7 +250,7 @@ func TestOrgScopedAccount_ListByOrganization_ExcludesDeleted(t *testing.T) {
 	partyID := uuid.New().String()
 	accountID := "ACC-" + uuid.New().String()[:8]
 
-	account, err := domain.NewCurrentAccount(accountID, "GB82WEST12345698765432", partyID, "GBP",
+	account, err := domain.NewCurrentAccountWithDimension(accountID, "GB82WEST12345698765432", partyID, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
@@ -273,7 +273,7 @@ func TestToEntity_MapsOrgPartyID(t *testing.T) {
 	orgPartyID := uuid.New()
 	partyID := uuid.New().String()
 
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", partyID, "GBP",
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "GB82WEST12345698765432", partyID, "GBP", "CURRENCY", 2,
 		domain.WithOrgPartyID(orgPartyID))
 	require.NoError(t, err)
 
@@ -287,7 +287,7 @@ func TestToEntity_MapsOrgPartyID(t *testing.T) {
 func TestToEntity_NilOrgPartyIDForPersonalAccount(t *testing.T) {
 	partyID := uuid.New().String()
 
-	account, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension("ACC-001", "GB82WEST12345698765432", partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	entity, err := toEntity(context.Background(), account)

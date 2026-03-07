@@ -458,7 +458,7 @@ func createTestAccount(t *testing.T, ctx context.Context, repo *persistence.Repo
 	t.Helper()
 	// Use accountID as AccountIdentification (stored in account_number column) for lookup compatibility.
 	// The repository's FindByID searches by account_number, so AccountIdentification must match the lookup key.
-	account, err := domain.NewCurrentAccount(accountID, accountID, uuid.New().String(), "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, accountID, uuid.New().String(), "GBP", "CURRENCY", 2)
 	require.NoError(t, err, "Failed to create test account")
 	require.NoError(t, repo.Save(ctx, account), "Failed to save test account")
 	return account

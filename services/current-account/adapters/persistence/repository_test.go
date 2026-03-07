@@ -81,7 +81,7 @@ func TestSaveNewAccount(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -110,7 +110,7 @@ func TestSaveNewAccount_InitialVersion(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -133,7 +133,7 @@ func TestSaveUpdateExisting(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -191,7 +191,7 @@ func TestFindByIBAN(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -226,9 +226,9 @@ func TestFindByPartyID(t *testing.T) {
 	iban1 := "GB82WEST12345698765432"
 	iban2 := "GB82WEST98765432123456"
 
-	account1, err := domain.NewCurrentAccount(accountID1, iban1, partyID, "GBP")
+	account1, err := domain.NewCurrentAccountWithDimension(accountID1, iban1, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
-	account2, err := domain.NewCurrentAccount(accountID2, iban2, partyID, "EUR")
+	account2, err := domain.NewCurrentAccountWithDimension(accountID2, iban2, partyID, "EUR", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -258,7 +258,7 @@ func TestDeleteAccount(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// ctx already provided by setupTestDB
@@ -290,7 +290,7 @@ func TestOptimisticLocking(t *testing.T) {
 	// ctx already provided by setupTestDB
 
 	// Create initial account
-	account1, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account1, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 	if err := repo.Save(ctx, account1); err != nil {
 		t.Fatalf("Initial save failed: %v", err)
@@ -354,7 +354,7 @@ func TestSave_InstrumentCodeAndDimensionRoundTrip(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "EUR")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "EUR", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, account)
@@ -376,7 +376,7 @@ func TestSave_InstrumentCodePersistedOnEntity(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, account)
@@ -525,7 +525,7 @@ func TestSave_PopulatesAuditFieldsFromContext(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// Create context with authenticated user AND tenant (tenant required for multi-tenant operations)
@@ -554,7 +554,7 @@ func TestSave_UsesSystemWhenNoUserInContext(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// Use empty context (no user)
@@ -582,7 +582,7 @@ func TestSave_UpdatePreservesCreatedByButUpdatesUpdatedBy(t *testing.T) {
 	accountID := "ACC-" + uuid.New().String()[:8]
 	iban := "GB82WEST12345698765432"
 
-	account, err := domain.NewCurrentAccount(accountID, iban, partyID, "GBP")
+	account, err := domain.NewCurrentAccountWithDimension(accountID, iban, partyID, "GBP", "CURRENCY", 2)
 	require.NoError(t, err)
 
 	// Create with user1 (ctx already has tenant from setupTestDB)

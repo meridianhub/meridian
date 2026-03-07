@@ -146,8 +146,8 @@ type AccountTypeCache interface {
 type Option func(*Service)
 
 // WithInstrumentGetter sets the instrument getter for dimension resolution from Reference Data.
-// When set, the service resolves the account dimension from the instrument_code during account creation.
-// When nil, dimension defaults to CURRENCY (backward-compatible behavior).
+// The service resolves the account dimension and precision from the instrument_code during account creation.
+// Required: account creation will fail with FailedPrecondition if not configured.
 func WithInstrumentGetter(getter InstrumentGetter) Option {
 	return func(s *Service) {
 		s.instrumentGetter = getter
@@ -210,7 +210,7 @@ type Service struct {
 	posKeepingClient       PositionKeepingClient
 	finAcctClient          FinancialAccountingClient
 	partyClient            PartyClient
-	instrumentGetter       InstrumentGetter // Optional: resolves dimension from instrument_code via Reference Data
+	instrumentGetter       InstrumentGetter // Required for account creation: resolves dimension and precision from instrument_code via Reference Data
 	accountTypeCache       AccountTypeCache // Optional: resolves product type definitions
 	valuationEngine        ValuationEngine  // Optional: executes valuation method logic
 	accountConfig          *config.AccountConfig
