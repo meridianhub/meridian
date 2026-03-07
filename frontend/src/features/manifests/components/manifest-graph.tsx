@@ -603,7 +603,7 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
             <EventChainPanel
               chain={eventChain}
               startNodeLabel={selectedManifestNode.label}
-              onSagaClick={(sagaName) => navigate(`/sagas/${sagaName}`)}
+              onSagaClick={(sagaId) => navigate(`/sagas/${sagaId.replace(/^saga:/, '')}`)}
             />
           </div>
         </div>
