@@ -11,7 +11,7 @@
 //   - Payment orders model fiat money movements: bank transfers, direct debits,
 //     credit card charges, and SEPA/SWIFT settlements.
 //   - These real-world payment rails only carry ISO 4217 currencies.
-//   - The database stores currency as VARCHAR(3) for ISO 4217 codes.
+//   - The database stores currency as CHAR(3) for ISO 4217 codes.
 //   - Non-currency assets (energy kWh, compute GPU_HOUR, carbon credits) belong
 //     in the position-keeping service, which uses the dimension-agnostic Amount
 //     type from shared/pkg/amount.
