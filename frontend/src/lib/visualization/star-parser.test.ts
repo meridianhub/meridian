@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { parseStarlarkSaga } from './star-parser'
+import { parseStarlarkSaga, analyzeSagaOutputs } from './star-parser'
 
 const PATTERNS_DIR = join(__dirname, '..', '..', '..', '..', 'cookbook', 'patterns')
 
@@ -339,6 +339,167 @@ position_keeping.initiate_log(account_id=aid)
       const lookupStep = result.steps.find((s) => s.name === 'lookup_account')!
       expect(lookupStep.earlyExit).not.toBeNull()
       expect(lookupStep.earlyExit!.returnStatus).toBe('CONFIG_ERROR')
+    })
+  })
+})
+
+describe('analyzeSagaOutputs', () => {
+  describe('literal value extraction', () => {
+    it('extracts literal instrument_code, account_id, and direction', () => {
+      const source = `
+saga(name="test")
+step(name="book")
+position_keeping.initiate_log(
+    account_id="ACC-001",
+    instrument_code="GBP",
+    direction="DEBIT",
+    amount=amt,
+)
+`
+      const result = analyzeSagaOutputs(source)
+      expect(result.producedEvents).toHaveLength(1)
+      expect(result.producedEvents[0]).toEqual({
+        stepName: 'book',
+        lineNumber: expect.any(Number),
+        instrumentCode: 'GBP',
+        accountId: 'ACC-001',
+        direction: 'DEBIT',
+      })
+      expect(result.dynamicTargets).toHaveLength(0)
+    })
+  })
+
+  describe('dynamic variable detection', () => {
+    it('detects dynamic instrument_code and account_id', () => {
+      const source = `
+saga(name="test")
+step(name="book")
+position_keeping.initiate_log(account_id=billing_account_id, instrument_code=inst_code, direction="CREDIT", amount=amt)
+`
+      const result = analyzeSagaOutputs(source)
+      expect(result.producedEvents).toHaveLength(1)
+      expect(result.producedEvents[0].instrumentCode).toBeNull()
+      expect(result.producedEvents[0].accountId).toBeNull()
+      expect(result.producedEvents[0].direction).toBe('CREDIT')
+      expect(result.dynamicTargets).toHaveLength(2)
+      expect(result.dynamicTargets[0].variableName).toBe('inst_code')
+      expect(result.dynamicTargets[1].variableName).toBe('billing_account_id')
+    })
+  })
+
+  describe('valuation_engine.compute extraction', () => {
+    it('extracts valuation call parameters', () => {
+      const source = `
+saga(name="test")
+step(name="compute")
+retail = valuation_engine.compute(
+    method_id="SPOT_RATE",
+    amount=amount,
+    from_instrument="KWH",
+    to_instrument="GBP",
+)
+`
+      const result = analyzeSagaOutputs(source)
+      expect(result.valuationCalls).toHaveLength(1)
+      expect(result.valuationCalls[0]).toEqual({
+        stepName: 'compute',
+        lineNumber: expect.any(Number),
+        fromInstrument: 'KWH',
+        toInstrument: 'GBP',
+        methodId: 'SPOT_RATE',
+      })
+    })
+
+    it('detects dynamic method_id and from_instrument', () => {
+      const source = `
+saga(name="test")
+step(name="compute")
+result = valuation_engine.compute(method_id=method, amount=amt, from_instrument=src_instr, to_instrument="GBP")
+`
+      const result = analyzeSagaOutputs(source)
+      expect(result.valuationCalls).toHaveLength(1)
+      expect(result.valuationCalls[0].methodId).toBeNull()
+      expect(result.valuationCalls[0].fromInstrument).toBeNull()
+      expect(result.valuationCalls[0].toInstrument).toBe('GBP')
+      expect(result.dynamicTargets).toHaveLength(2)
+      const varNames = result.dynamicTargets.map((d) => d.variableName)
+      expect(varNames).toContain('src_instr')
+      expect(varNames).toContain('method')
+    })
+  })
+
+  describe('multi-step saga', () => {
+    it('extracts multiple initiate_log calls across steps', () => {
+      const source = `
+saga(name="test")
+step(name="book_retail")
+position_keeping.initiate_log(account_id=billing_id, instrument_code="GBP", direction="DEBIT", amount=retail_amt)
+step(name="book_wholesale")
+position_keeping.initiate_log(account_id=counterparty_id, instrument_code="GBP", direction="CREDIT", amount=wholesale_amt)
+`
+      const result = analyzeSagaOutputs(source)
+      expect(result.producedEvents).toHaveLength(2)
+      expect(result.producedEvents[0].stepName).toBe('book_retail')
+      expect(result.producedEvents[0].instrumentCode).toBe('GBP')
+      expect(result.producedEvents[0].direction).toBe('DEBIT')
+      expect(result.producedEvents[1].stepName).toBe('book_wholesale')
+      expect(result.producedEvents[1].instrumentCode).toBe('GBP')
+      expect(result.producedEvents[1].direction).toBe('CREDIT')
+    })
+  })
+
+  describe('empty saga', () => {
+    it('returns empty arrays for saga with no position_keeping calls', () => {
+      const source = `
+saga(name="empty")
+step(name="lookup")
+account = reference_data.get_account(id=aid)
+`
+      const result = analyzeSagaOutputs(source)
+      expect(result.producedEvents).toHaveLength(0)
+      expect(result.valuationCalls).toHaveLength(0)
+      expect(result.dynamicTargets).toHaveLength(0)
+    })
+  })
+
+  describe('real patterns', () => {
+    it('analyzes usage_to_value.star outputs', () => {
+      const source = readPattern('energy-settlement', 'usage_to_value.star')
+      const result = analyzeSagaOutputs(source)
+
+      // Two position_keeping.initiate_log calls (retail + wholesale)
+      expect(result.producedEvents).toHaveLength(2)
+      expect(result.producedEvents[0].stepName).toBe('book_retail_position')
+      expect(result.producedEvents[0].instrumentCode).toBe('GBP')
+      expect(result.producedEvents[0].direction).toBe('DEBIT')
+      expect(result.producedEvents[1].stepName).toBe('book_wholesale_position')
+      expect(result.producedEvents[1].instrumentCode).toBe('GBP')
+      expect(result.producedEvents[1].direction).toBe('CREDIT')
+
+      // Two valuation_engine.compute calls
+      expect(result.valuationCalls).toHaveLength(2)
+      expect(result.valuationCalls[0].stepName).toBe('compute_retail_valuation')
+      expect(result.valuationCalls[0].toInstrument).toBe('GBP')
+      expect(result.valuationCalls[0].fromInstrument).toBeNull() // dynamic: instrument_code variable
+      expect(result.valuationCalls[1].stepName).toBe('compute_wholesale_valuation')
+
+      // Dynamic targets for from_instrument (variable references)
+      expect(result.dynamicTargets.length).toBeGreaterThan(0)
+      const dynamicVars = result.dynamicTargets.map((d) => d.variableName)
+      expect(dynamicVars).toContain('instrument_code')
+    })
+
+    it('analyzes stripe_payment_received.star outputs', () => {
+      const source = readPattern('payment-gateway-stripe', 'stripe_payment_received.star')
+      const result = analyzeSagaOutputs(source)
+
+      // Two position_keeping.initiate_log calls
+      expect(result.producedEvents).toHaveLength(2)
+      expect(result.producedEvents[0].stepName).toBe('debit_stripe_nostro')
+      expect(result.producedEvents[1].stepName).toBe('credit_customer_prepaid')
+
+      // No valuation calls
+      expect(result.valuationCalls).toHaveLength(0)
     })
   })
 })
