@@ -8,7 +8,6 @@ import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { referenceKeys } from '@/lib/query-keys'
 import {
   InstrumentStatus,
@@ -212,16 +211,6 @@ export function InstrumentsPage() {
         />
       </Card>
 
-      {selectedInstrument && (
-        <Tabs defaultValue="overview">
-          <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="executions">Executions</TabsTrigger>
-          </TabsList>
-          <TabsContent value="executions">
-            <ExecutionContextTab entityType="instrument" entityCode={selectedInstrument.code} />
-          </TabsContent>
-          <TabsContent value="overview">
       <Card data-testid="cel-playground">
         <CardHeader>
           <CardTitle>CEL Playground</CardTitle>
@@ -299,8 +288,16 @@ export function InstrumentsPage() {
           )}
         </CardContent>
       </Card>
-          </TabsContent>
-        </Tabs>
+
+      {selectedInstrument && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Execution Context — {selectedInstrument.code}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ExecutionContextTab entityType="instrument" entityCode={selectedInstrument.code} />
+          </CardContent>
+        </Card>
       )}
     </div>
   )

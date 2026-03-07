@@ -75,6 +75,7 @@ describe('ExecutionContextTab', () => {
     render(<ExecutionContextTab entityType="instrument" entityCode="GBP" />)
 
     expect(screen.getByText('Related Sagas')).toBeInTheDocument()
+    expect(screen.getByText('payment_saga')).toBeInTheDocument()
   })
 
   it('renders related sagas for an account type via writes_to edges', () => {

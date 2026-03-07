@@ -278,52 +278,24 @@ describe('InstrumentsPage', () => {
     })
   })
 
-  it('renders CEL playground section after selecting an instrument row', async () => {
-    const user = userEvent.setup()
-    mockListInstruments.mockResolvedValue({
-      instruments: mockInstruments,
-      nextPageToken: '',
-    })
-
+  it('renders CEL playground section', () => {
     render(
       <Wrapper>
         <InstrumentsPage />
       </Wrapper>,
     )
 
-    await waitFor(() => {
-      expect(screen.getByText('GBP')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByText('GBP'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('cel-playground')).toBeInTheDocument()
-    })
+    expect(screen.getByTestId('cel-playground')).toBeInTheDocument()
   })
 
   it('calls evaluateInstrument when CEL playground run button clicked', async () => {
     const user = userEvent.setup()
-    mockListInstruments.mockResolvedValue({
-      instruments: mockInstruments,
-      nextPageToken: '',
-    })
 
     render(
       <Wrapper>
         <InstrumentsPage />
       </Wrapper>,
     )
-
-    await waitFor(() => {
-      expect(screen.getByText('GBP')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByText('GBP'))
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /evaluate/i })).toBeInTheDocument()
-    })
 
     const runButton = screen.getByRole('button', { name: /evaluate/i })
     await user.click(runButton)
@@ -335,10 +307,6 @@ describe('InstrumentsPage', () => {
 
   it('shows CEL evaluation result after running', async () => {
     const user = userEvent.setup()
-    mockListInstruments.mockResolvedValue({
-      instruments: mockInstruments,
-      nextPageToken: '',
-    })
     mockEvaluateInstrument.mockResolvedValue({
       compileErrors: [],
       validationResult: true,
@@ -351,16 +319,6 @@ describe('InstrumentsPage', () => {
         <InstrumentsPage />
       </Wrapper>,
     )
-
-    await waitFor(() => {
-      expect(screen.getByText('GBP')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByText('GBP'))
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /evaluate/i })).toBeInTheDocument()
-    })
 
     const runButton = screen.getByRole('button', { name: /evaluate/i })
     await user.click(runButton)
