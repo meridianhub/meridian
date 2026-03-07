@@ -1,7 +1,7 @@
 # Saga: corporate_action_cost_adjustment
-# Version: 2.0.0
-# Previous: 1.0.0
-# Changed: Clarify this consumes a hypothetical corporate-action event type
+# Version: 3.0.0
+# Previous: 2.0.0
+# Changed: Use observation-recorded.v1 channel instead of aspirational corporate-action.v1
 # Author: Tenant Configuration (Wealth Management)
 # Date: 2026-03-03
 #
@@ -9,14 +9,14 @@
 # occurs. Handles "phantom events" where no cash or units move but the tax
 # position changes (e.g., accumulating ETF dividends).
 #
-# Trigger: event:market-information.corporate-action.v1
-# Filter:  event.action_type == 'ACCUMULATING_DIVIDEND'
+# Trigger: event:market-information.observation-recorded.v1
+# Filter:  event.observation_type == 'CORPORATE_ACTION' && event.metadata.action_type == 'ACCUMULATING_DIVIDEND'
 #
-# NOTE: The corporate-action.v1 channel is aspirational — it does not exist in
-# the current event inventory. When implemented, the proto would define fields
-# such as instrument_code, action_type, amount_per_unit, and ex_date. This
-# example validates the platform's ability to support wealth management use cases
-# once the event is defined.
+# Uses the market-information.observation-recorded.v1 channel with a CEL filter
+# to select corporate action observations. The observation payload carries
+# instrument_code, action_type, amount_per_unit, and ex_date in its metadata.
+# This demonstrates how wealth management use cases compose on top of the
+# existing market information event infrastructure.
 #
 # Account model:
 #   - Custody Account (instrument units): what you own (unchanged by this saga)

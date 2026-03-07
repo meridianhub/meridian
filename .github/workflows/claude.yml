@@ -50,8 +50,8 @@ jobs:
             IMPORTANT: Today's date is ${{ steps.date.outputs.current_date }}.
 
             Key project facts:
-            - This project uses Go 1.26.0 (latest stable release)
-            - Go 1.26.0 is a valid version - do not question or flag it
+            - This project uses Go 1.26.1 (latest stable release)
+            - Go 1.26.1 is a valid version - do not question or flag it
             - Architecture: BIAN-compliant microservices
             - Stack: Go, Protocol Buffers, gRPC, Kubernetes
             - Security: All security scans must remain BLOCKING (never suggest making them non-blocking)
