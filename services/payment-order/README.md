@@ -220,7 +220,7 @@ erDiagram
         varchar(255) debtor_account_id
         varchar(255) creditor_reference "IBAN"
         bigint amount_cents
-        char(3) currency "ISO 4217"
+        varchar(3) currency "ISO 4217"
         varchar(20) status "saga state"
         varchar(255) lien_id "CurrentAccount reservation"
         varchar(255) gateway_reference_id "external txn ID"
