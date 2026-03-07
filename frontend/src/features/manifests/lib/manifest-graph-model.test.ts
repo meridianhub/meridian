@@ -213,6 +213,251 @@ describe('buildManifestGraph', () => {
     })
   })
 
+  describe('writes_to edges', () => {
+    it('creates edges from saga to account types for static instrument_code', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
+        ],
+        accountTypes: [
+          { code: 'ENERGY_HOLDING', name: 'Energy Holding', normalBalance: 1, allowedInstruments: ['KWH'] },
+          { code: 'REVENUE', name: 'Revenue', normalBalance: 2, allowedInstruments: ['KWH'] },
+        ],
+        sagas: [{
+          name: 'log_energy',
+          trigger: 'event:meter.reading.v1',
+          script: [
+            'saga(name="log_energy")',
+            'step(name="record")',
+            'position_keeping.initiate_log(instrument_code="KWH", direction="CREDIT", amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const writesTo = graph.edges.filter((e) => e.relationship === 'writes_to')
+
+      expect(writesTo).toHaveLength(2)
+      expect(writesTo).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'saga:log_energy',
+            target: 'account_type:ENERGY_HOLDING',
+            relationship: 'writes_to',
+          }),
+          expect.objectContaining({
+            source: 'saga:log_energy',
+            target: 'account_type:REVENUE',
+            relationship: 'writes_to',
+          }),
+        ]),
+      )
+    })
+
+    it('creates no writes_to edges for fully dynamic sagas', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
+        ],
+        accountTypes: [
+          { code: 'ENERGY_HOLDING', name: 'Energy Holding', normalBalance: 1, allowedInstruments: ['KWH'] },
+        ],
+        sagas: [{
+          name: 'dynamic_saga',
+          trigger: 'event:some.event.v1',
+          script: [
+            'saga(name="dynamic_saga")',
+            'step(name="record")',
+            'position_keeping.initiate_log(instrument_code=instr_var, direction="CREDIT", amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const writesTo = graph.edges.filter((e) => e.relationship === 'writes_to')
+
+      expect(writesTo).toHaveLength(0)
+    })
+
+    it('creates unique edge IDs for multiple writes to same account type', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        ],
+        accountTypes: [
+          { code: 'REVENUE', name: 'Revenue', normalBalance: 2, allowedInstruments: ['GBP'] },
+        ],
+        sagas: [{
+          name: 'double_write',
+          trigger: 'event:payment.v1',
+          script: [
+            'saga(name="double_write")',
+            'step(name="debit")',
+            'position_keeping.initiate_log(instrument_code="GBP", direction="DEBIT", amount=amt)',
+            'step(name="credit")',
+            'position_keeping.initiate_log(instrument_code="GBP", direction="CREDIT", amount=amt)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const writesTo = graph.edges.filter((e) => e.relationship === 'writes_to')
+
+      expect(writesTo).toHaveLength(2)
+      const ids = writesTo.map((e) => e.id)
+      expect(new Set(ids).size).toBe(2)
+    })
+  })
+
+  describe('uses_valuation edges', () => {
+    it('creates edges from saga to matching valuation rules', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
+          { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        ],
+        valuationRules: [
+          { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'nordpool_spot' },
+        ],
+        sagas: [{
+          name: 'convert_energy',
+          trigger: 'event:meter.reading.v1',
+          script: [
+            'saga(name="convert_energy")',
+            'step(name="valuate")',
+            'valuation_engine.compute(from_instrument="KWH", to_instrument="GBP", amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const usesVal = graph.edges.filter((e) => e.relationship === 'uses_valuation')
+
+      expect(usesVal).toHaveLength(1)
+      expect(usesVal[0]).toMatchObject({
+        source: 'saga:convert_energy',
+        target: 'valuation_rule:KWH:GBP:0',
+        relationship: 'uses_valuation',
+      })
+    })
+
+    it('creates no uses_valuation edges when instruments are dynamic', () => {
+      const manifest = createMockManifest({
+        valuationRules: [
+          { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'test' },
+        ],
+        sagas: [{
+          name: 'dynamic_val',
+          trigger: 'event:some.v1',
+          script: [
+            'saga(name="dynamic_val")',
+            'step(name="valuate")',
+            'valuation_engine.compute(from_instrument=from_var, to_instrument=to_var, amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const usesVal = graph.edges.filter((e) => e.relationship === 'uses_valuation')
+
+      expect(usesVal).toHaveLength(0)
+    })
+  })
+
+  describe('dynamic targets', () => {
+    it('records dynamic targets when instrument_code is a variable', () => {
+      const manifest = createMockManifest({
+        sagas: [{
+          name: 'dynamic_saga',
+          trigger: 'event:some.v1',
+          script: [
+            'saga(name="dynamic_saga")',
+            'step(name="record")',
+            'position_keeping.initiate_log(instrument_code=instr_var, direction="CREDIT", amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const sagaNode = graph.nodes.find((n) => n.id === 'saga:dynamic_saga')
+
+      expect(sagaNode?.dynamicTargets).toBeDefined()
+      expect(sagaNode!.dynamicTargets!.length).toBeGreaterThan(0)
+      expect(sagaNode!.dynamicTargets![0]).toMatchObject({
+        variableName: 'instr_var',
+      })
+    })
+
+    it('does not set dynamicTargets for static sagas', () => {
+      const manifest = createMockManifest({
+        sagas: [{
+          name: 'static_saga',
+          trigger: 'event:some.v1',
+          script: [
+            'saga(name="static_saga")',
+            'step(name="record")',
+            'position_keeping.initiate_log(instrument_code="GBP", direction="CREDIT", amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const sagaNode = graph.nodes.find((n) => n.id === 'saga:static_saga')
+
+      expect(sagaNode?.dynamicTargets).toBeUndefined()
+    })
+  })
+
+  describe('integration: energy-settlement manifest', () => {
+    it('produces expected graph with writes_to and uses_valuation edges', () => {
+      const manifest = createMockManifest({
+        instruments: [
+          { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
+          { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        ],
+        accountTypes: [
+          { code: 'ENERGY_HOLDING', name: 'Energy Holding', normalBalance: 1, allowedInstruments: ['KWH'] },
+          { code: 'REVENUE', name: 'Revenue', normalBalance: 2, allowedInstruments: ['GBP', 'KWH'] },
+        ],
+        valuationRules: [
+          { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'nordpool_spot' },
+        ],
+        sagas: [{
+          name: 'energy_settlement',
+          trigger: 'event:meter.reading.v1',
+          filter: 'event.type == "HH"',
+          script: [
+            'saga(name="energy_settlement")',
+            'step(name="record_usage")',
+            'position_keeping.initiate_log(instrument_code="KWH", direction="DEBIT", amount=usage)',
+            'step(name="valuate")',
+            'valuation_engine.compute(from_instrument="KWH", to_instrument="GBP", amount=usage)',
+            'step(name="record_revenue")',
+            'position_keeping.initiate_log(instrument_code="GBP", direction="CREDIT", amount=value)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+
+      // Saga writes_to edges
+      const writesTo = graph.edges.filter((e) => e.relationship === 'writes_to')
+      // KWH -> ENERGY_HOLDING and REVENUE (step record_usage)
+      // GBP -> REVENUE (step record_revenue)
+      expect(writesTo).toHaveLength(3)
+      expect(writesTo).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ target: 'account_type:ENERGY_HOLDING' }),
+          expect.objectContaining({ target: 'account_type:REVENUE' }),
+        ]),
+      )
+
+      // uses_valuation edge
+      const usesVal = graph.edges.filter((e) => e.relationship === 'uses_valuation')
+      expect(usesVal).toHaveLength(1)
+      expect(usesVal[0]).toMatchObject({
+        source: 'saga:energy_settlement',
+        target: 'valuation_rule:KWH:GBP:0',
+      })
+
+      // No dynamic targets (all static)
+      const sagaNode = graph.nodes.find((n) => n.id === 'saga:energy_settlement')
+      expect(sagaNode?.dynamicTargets).toBeUndefined()
+    })
+  })
+
   describe('edge cases', () => {
     it('returns empty graph for empty manifest', () => {
       const manifest = createMockManifest()
