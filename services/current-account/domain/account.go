@@ -3,14 +3,13 @@ package domain
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
-	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
 )
 
 // Domain errors
@@ -24,7 +23,6 @@ var (
 	ErrNonZeroBalance          = errors.New("account balance must be zero to close")
 	ErrActiveLiens             = errors.New("account has active liens and cannot be closed")
 	ErrOrgScopedWithoutParty   = errors.New("org-scoped account requires a party ID")
-	ErrPrecisionMismatch       = errors.New("precision mismatch for currency instrument")
 )
 
 // AccountStatus represents the lifecycle state of an account
@@ -112,47 +110,27 @@ func WithBehaviorClass(behaviorClass string) AccountOption {
 // Returns a value type (not pointer) following immutability principles.
 // Use WithOrgPartyID option to create an org-scoped account.
 //
-// instrumentCode must be a recognized ISO 4217 currency code (e.g. "GBP").
-// Precision is derived automatically from the currency registry.
-// Dimension defaults to "CURRENCY". Use NewCurrentAccountWithDimension for explicit dimensions.
+// Defaults to CURRENCY dimension with precision 2. The gRPC layer resolves
+// instrument properties from Reference Data before calling this constructor.
+// Use NewCurrentAccountWithDimension for explicit dimensions and precision.
 func NewCurrentAccount(accountID, externalIdentifier, partyID, instrumentCode string, opts ...AccountOption) (CurrentAccount, error) {
-	inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
-	if !ok {
-		return CurrentAccount{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, instrumentCode)
-	}
-	return NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, quantity.DimensionCurrency, inst.Precision, opts...)
+	return NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, quantity.DimensionCurrency, 2, opts...)
 }
 
 // NewCurrentAccountWithDimension creates a new current account with explicit instrument code,
 // dimension, and precision.
 //
-// For CURRENCY dimension, precision is validated against the currency registry: the caller-supplied
-// precision must match the canonical precision for the currency (e.g. GBP=2, JPY=0). A mismatch
-// returns ErrPrecisionMismatch.
-//
-// For non-CURRENCY dimensions, precision is trusted as provided by the caller (validated at the
-// API boundary by the gRPC service layer using Reference Data).
+// Precision is trusted as provided by the caller. The gRPC service layer validates precision
+// against Reference Data before calling this constructor.
 func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, instrumentCode, dimension string, precision int, opts ...AccountOption) (CurrentAccount, error) {
 	now := time.Now()
 	normalizedDimension := strings.ToUpper(dimension)
 
-	// For CURRENCY, validate precision against canonical registry value.
-	// If the currency code is not in the local registry (e.g. a currency only defined in
-	// the Reference Data service), precision validation is deferred: NewAmountFromInstrument
-	// will return ErrInvalidCurrency if the code is genuinely unknown.
-	if normalizedDimension == quantity.DimensionCurrency {
-		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok { //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
-			if inst.Precision != precision {
-				return CurrentAccount{}, fmt.Errorf("%w: currency %s requires precision %d, got %d",
-					ErrPrecisionMismatch, strings.ToUpper(instrumentCode), inst.Precision, precision)
-			}
-		}
-	}
-
-	zeroAmount, err := NewAmountFromInstrument(instrumentCode, normalizedDimension, precision, 0)
+	inst, err := quantity.NewInstrument(instrumentCode, 0, normalizedDimension, precision)
 	if err != nil {
 		return CurrentAccount{}, err
 	}
+	zeroAmount := sharedamount.Zero(inst)
 
 	account := CurrentAccount{
 		id:                 uuid.New(),

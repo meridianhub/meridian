@@ -1358,24 +1358,14 @@ func TestNewCurrentAccountWithDimension_CURRENCY_CorrectPrecision_Succeeds(t *te
 	}
 }
 
-func TestNewCurrentAccountWithDimension_CURRENCY_PrecisionMismatch_ReturnsError(t *testing.T) {
-	tests := []struct {
-		name      string
-		currency  string
-		precision int
-	}{
-		{"GBP with precision 3 (expected 2)", "GBP", 3},
-		{"JPY with precision 2 (expected 0)", "JPY", 2},
-		{"USD with precision 0 (expected 2)", "USD", 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", tt.currency, "CURRENCY", tt.precision)
-			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrPrecisionMismatch)
-		})
-	}
+func TestNewCurrentAccountWithDimension_CURRENCY_TrustCallerPrecision(t *testing.T) {
+	// Domain trusts caller-provided precision. For CURRENCY dimension, the shared Amount
+	// package uses canonical precision from the currency registry regardless of what
+	// the caller passes, so mismatched precision is silently corrected.
+	account, err := NewCurrentAccountWithDimension("ACC-001", "IDENT-001", "PARTY-001", "GBP", "CURRENCY", 5)
+	require.NoError(t, err)
+	assert.Equal(t, "GBP", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
 }
 
 func TestNewCurrentAccount_DerivesCorrectPrecision(t *testing.T) {
@@ -1398,8 +1388,12 @@ func TestNewCurrentAccount_DerivesCorrectPrecision(t *testing.T) {
 	}
 }
 
-func TestNewCurrentAccount_InvalidCurrency_StillReturnsError(t *testing.T) {
-	_, err := NewCurrentAccount("ACC-001", "IDENT-001", "PARTY-001", "INVALID")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidCurrency)
+func TestNewCurrentAccount_TrustsCallerProvidedInstrument(t *testing.T) {
+	// Domain trusts caller-provided instrument codes. Validation of instrument codes
+	// is the responsibility of the gRPC layer via Reference Data service lookup.
+	// Any valid dimension + code combination should succeed at the domain level.
+	account, err := NewCurrentAccount("ACC-001", "IDENT-001", "PARTY-001", "EXOTIC_CCY")
+	require.NoError(t, err)
+	assert.Equal(t, "EXOTIC_CCY", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
 }

@@ -17,7 +17,6 @@ import (
 	celutil "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
-	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -46,24 +45,33 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		return nil, status.Errorf(codes.InvalidArgument, "instrument_code is required")
 	}
 
-	// Resolve dimension and precision from Reference Data service when available.
-	// Dimension classifies the instrument type (e.g. "CURRENCY", "ENERGY", "COMPUTE").
-	// When the getter is not configured, falls back to CURRENCY with precision derived
-	// from the currency registry (so JPY/0-decimal currencies work correctly in the fallback path).
-	dimension := "CURRENCY"
-	precision := 2 // safe default, overridden below
-	if s.instrumentGetter != nil {
-		cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
-		if err != nil {
-			if errors.Is(err, registry.ErrNotFound) {
-				// Instrument does not exist in Reference Data - caller supplied an invalid instrument_code
-				operationStatus = "instrument_not_found"
-				s.logger.Warn("instrument not found in Reference Data, cannot create account",
-					"instrument_code", instrumentCode,
-					"account_id", accountID)
-				return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
-			}
-			// Transient failure (network error, service unavailable, timeout)
+	// Resolve dimension and precision from Reference Data service.
+	// Reference Data is required - fail closed if unavailable.
+	if s.instrumentGetter == nil {
+		operationStatus = "reference_data_unavailable"
+		s.logger.Error("instrumentGetter not configured, cannot create account",
+			"instrument_code", instrumentCode,
+			"account_id", accountID)
+		return nil, status.Errorf(codes.FailedPrecondition, "Reference Data service is required for account creation")
+	}
+
+	cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
+	if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+			operationStatus = "request_canceled"
+			return nil, status.Error(codes.Canceled, "request canceled")
+		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+			operationStatus = "instrument_lookup_timeout"
+			return nil, status.Error(codes.DeadlineExceeded, "instrument lookup timed out")
+		case errors.Is(err, registry.ErrNotFound):
+			operationStatus = "instrument_not_found"
+			s.logger.Warn("instrument not found in Reference Data, cannot create account",
+				"instrument_code", instrumentCode,
+				"account_id", accountID)
+			return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
+		default:
+			// Transient failure (network error, service unavailable)
 			operationStatus = "instrument_lookup_failed"
 			s.logger.Error("instrument lookup failed due to transient error, cannot create account",
 				"instrument_code", instrumentCode,
@@ -72,22 +80,12 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			caobservability.RecordExternalServiceError("reference_data", "get_instrument")
 			return nil, status.Errorf(codes.Unavailable, "instrument lookup failed, please retry")
 		}
-		// Map from reference-data registry dimension ("MONETARY") to domain quantity
-		// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
-		// package uses "CURRENCY" - other dimensions are identical across both packages.
-		dimension = mapRegistryDimension(string(cachedInstrument.Definition.Dimension))
-		precision = cachedInstrument.Definition.Precision
-	} else {
-		// Fallback path: no Reference Data service configured.
-		// Derive precision from the currency registry for correctness (e.g. JPY needs 0, not 2).
-		if inst, ok := currency.ByCode(strings.ToUpper(instrumentCode)); ok { //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
-			precision = inst.Precision
-		} else {
-			s.logger.Warn("currency not found in local registry, using default precision",
-				"instrument_code", instrumentCode,
-				"default_precision", precision)
-		}
 	}
+	// Map from reference-data registry dimension ("MONETARY") to domain quantity
+	// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
+	// package uses "CURRENCY" - other dimensions are identical across both packages.
+	dimension := mapRegistryDimension(string(cachedInstrument.Definition.Dimension))
+	precision := cachedInstrument.Definition.Precision
 
 	// Validate party exists and is active (if party client is configured)
 	if s.partyClient != nil {
