@@ -169,19 +169,6 @@ linters:
         linters:
           - gocritic
 
-      # Suppress SA1019 (deprecated usage) for shared/domain/money and
-      # shared/platform/quantity/currency during the migration to
-      # shared/pkg/refdata.InstrumentResolver. These packages are deprecated
-      # but consumers will be migrated incrementally across multiple PRs.
-      # The patterns match import-level warnings (package path in quotes) and
-      # usage-level warnings (migration targets in the deprecation message).
-      - text: "SA1019:.*shared/(domain/money|platform/quantity/currency)"
-        linters:
-          - staticcheck
-      - text: "SA1019:.*deprecated.*(InstrumentResolver|InstrumentProperties|quantity package|quantity error|quantity\\.|dynamic instrument)"
-        linters:
-          - staticcheck
-
       # Exclude misspell for protobuf enum references (CANCELLED is the official enum name)
       - text: "CANCELLED.*is a misspelling of.*CANCELED"
         linters:
