@@ -274,9 +274,29 @@ position_keeping.record_entry:
         currency: instrument_code
         direction: side
       defaults:
-        correlation_id: "generate_correlation_id()"
+        correlation_id: "'auto_' + old_params.account_id"  # CEL expression
       sunset: "3.0"  # manifest version where v1 calls stop being auto-converted
 ```
+
+**Conversion default expression model:**
+
+Default values in conversion rules use **CEL expressions** evaluated against the old parameter
+values. The activation context is `{old_params: {<old param values>}}`. This reuses the same
+CEL engine already used for validation/pricing throughout Meridian.
+
+| Default Type | Example | Notes |
+|-------------|---------|-------|
+| Literal | `"USD"` | Simple string/number constant |
+| Rename | `old_params.amount` | Direct field reference (same as `param_mapping`) |
+| Computed | `"old_params.first + '_' + old_params.last"` | String concatenation, type coercion |
+
+CEL is the right choice because: (a) already used everywhere in Meridian, (b) pure and
+deterministic — no side effects, (c) sub-millisecond evaluation, (d) the same compiler
+validates the expression at handler schema load time.
+
+Side-effecting operations (ID generation, timestamps) are **not supported** in conversion
+defaults. If a new parameter requires generated values, the handler implementation must
+provide a server-side default when the parameter is absent.
 
 **Design principles (borrowed from K8s, Go, and Atlas):**
 
@@ -352,14 +372,19 @@ regex constraints, frontend parsers, and event router code.
 
 **API triggers** (new):
 
-- Path uniqueness: no two sagas may declare the same `api:` path
+API triggers bind existing gRPC endpoints to saga execution. When a request hits the
+endpoint, the gateway's Vanguard transcoder (REST→gRPC) routes to the
+`SagaExecutionService.ExecuteSaga` RPC, which dispatches the bound saga. Platform sagas
+provide default bindings; tenants can override them via `CreateTenantOverride`.
+
+- Path must reference a real gRPC endpoint: validate against the generated OpenAPI spec
+  (`api/openapi/meridian.swagger.json`, produced by `buf generate` via
+  `buf.build/grpc-ecosystem/openapiv2`). This mirrors how event triggers are validated
+  against the topics registry.
+- Path uniqueness: no two sagas may declare the same `api:` path within a manifest
 - Path format: must start with `/`, valid URL path characters
-- Validate against OpenAPI spec: `buf generate` produces a merged
-  `meridian.swagger.json` (via `buf.build/grpc-ecosystem/openapiv2`). API trigger paths
-  can be validated against the generated OpenAPI spec to ensure they reference real gRPC
-  service endpoints. This mirrors how event triggers are validated against the topics
-  registry -- the OpenAPI spec is the equivalent registry for API endpoints.
-- Configuration: `buf.gen.yaml` already defines the OpenAPI generator; `api/openapi/` is the output directory
+- Configuration: `buf.gen.yaml` already defines the OpenAPI generator; `api/openapi/`
+  is the output directory
 
 **Webhook triggers** (new):
 
@@ -440,7 +465,7 @@ today; unchecked are gaps to close in Phase 0.
 - [x] Event trigger "Did you mean?" suggestions (Levenshtein matching)
 - [x] Event trigger without filter produces warning (`MISSING_EVENT_FILTER`)
 - [ ] API trigger path uniqueness across all sagas
-- [ ] API trigger path validation against OpenAPI spec (`api/openapi/meridian.swagger.json`)
+- [ ] API trigger path references real gRPC endpoint (validated against `api/openapi/meridian.swagger.json`)
 - [ ] Webhook trigger source validation against provider connections
 - [ ] Scheduled trigger name uniqueness
 - [ ] CEL filter field validation against AsyncAPI event payload schemas
@@ -525,8 +550,9 @@ code snippet. Impact analysis should treat dynamic relationships as "possibly af
 
 ### 3.4 Storage
 
-Materialised at apply-time. Built when manifest is applied (or validated in dry-run
-mode), stored alongside the manifest version. Queryable via gRPC/REST and MCP tool.
+**Decision: embedded in manifest version record.** Built when manifest is applied (or
+validated in dry-run mode), stored as a JSON column alongside the manifest version snapshot.
+Queryable via gRPC/REST and MCP tool.
 
 Rebuilt on each manifest apply -- the graph is a derived artifact, not a primary data source.
 
@@ -537,7 +563,7 @@ Surface relationships contextually in the existing frontend:
 - **Account type detail page** -- "Sagas that touch this account" panel
 - **Saga detail page** -- "Triggered by" + "Reads/writes" + "Calls handlers" panels
 - **Instrument detail page** -- "Used by account types" + "Valuation rules" panels
-- **Manifest graph** -- Full dependency visualisation (partially exists)
+- **Manifest graph** -- Full dependency visualization (partially exists)
 
 ### 3.6 What This Unlocks
 
@@ -866,27 +892,52 @@ machine artifacts, Proto for the type system.**
 
 ### Phase 0: Foundational Improvements (prerequisite for all layers)
 
-#### 0.1 Typed Service Modules in Validator
+Phase 0 is sequenced as **four independent PRs** that can be developed in parallel.
+Each PR is self-contained and delivers value on its own.
+
+#### 0.1 Typed Service Modules in Validator (PR 1 -- highest priority)
+
+**Closes the single largest validation gap.** Today, the manifest validator uses stub
+Starlark modules that accept any handler call. This PR replaces them with typed modules
+generated from `handlers.yaml`.
 
 - Wire `BuildServiceModules` into the manifest validator
 - Replace stub `starlarkModule` with schema-generated typed modules
 - Handler calls validated against `handlers.yaml` at manifest validation time
-- Extract handler call metadata for relationship graph
+- Extract handler call metadata for relationship graph (data structure only -- UI in Phase 1)
+- **Test**: submit a manifest with `position_keeping.nonexistent_handler()` and verify rejection
 
-#### 0.2 Handler Evolution
+#### 0.2 Trigger Validation (PR 2 -- parallelisable with PR 1)
 
-- Add structured `conversions` block to `handlers.yaml`
+Extends existing event trigger validation to cover all trigger types.
+
+- API triggers: validate path references real gRPC endpoint (against OpenAPI spec),
+  path uniqueness, format validation
+- Webhook triggers: validate source against provider connections
+- Scheduled triggers: name uniqueness
+- Instruction routes: validate instruction type conventions, orphan warnings
+- **Test**: submit manifest with `api:/nonexistent/path` and verify rejection
+
+#### 0.3 AsyncAPI CEL Field Validation (PR 3 -- parallelisable)
+
+Validates that CEL filter expressions reference real event payload fields.
+
+- Load AsyncAPI specs for the event topic referenced in the trigger
+- Extract field references from CEL expression
+- Validate each field exists in the AsyncAPI payload schema
+- Warning (not error) for fields not found -- AsyncAPI specs may lag
+- **Test**: submit manifest with `filter: "event.typo_field == 'X'"` and verify warning
+
+#### 0.4 Handler Evolution (PR 4 -- can follow PR 1)
+
+Builds on typed service modules to support handler versioning.
+
+- Add structured `conversions` block to `handlers.yaml` (with CEL default expressions)
 - Add `deprecated` field to handler params (replace description-only deprecation)
 - Implement mutating validator phase (auto-convert deprecated calls)
 - Add `handlers.sum` hash file for ABI integrity
-
-#### 0.3 Full Trigger Validation
-
-- API triggers: path uniqueness, format validation
-- Webhook triggers: validate source against provider connections
-- Scheduled triggers: name uniqueness
-- Event triggers: validate CEL filter fields against AsyncAPI payload schemas
-- Instruction routes: validate instruction type conventions
+- **Test**: submit manifest with deprecated `initiate_log(amount=...)` and verify auto-conversion
+  to `initiate_log(quantity=...)`
 
 ### Phase 1: Relationship Graph
 
@@ -933,15 +984,74 @@ machine artifacts, Proto for the type system.**
 
 ---
 
-## 9. Open Questions
+## 9. Throughput Profile
 
-1. **Graph storage format**: Materialised table vs embedded in manifest version record?
-2. **AI model**: Which LLM powers the compiler? Claude via MCP? Pluggable?
-3. **Multi-manifest**: Can an economy be split across multiple manifests (like microservices), or always one file?
-4. **Versioning UX**: Git-like branching for manifests? Or linear version history only?
-5. **Handler sunset enforcement**: When do conversion rules get removed? After N manifest versions? Calendar date?
-6. **AsyncAPI field validation depth**: Full schema validation of CEL filter fields, or just existence checks?
-7. **Script ref implementation**: Proto `oneof` (script vs script_ref) or separate optional fields? Phase 0 or Phase 4?
+The architecture optimises for **correctness over raw throughput**. This is a deliberate
+design choice, not a limitation to fix.
+
+### Sustainable Throughput: 5-10k TPS per Cluster
+
+A single saga (e.g., a 4-step settlement) produces **18-22 database writes** (saga step
+results, position entries, event outbox, audit trail) with ~200-400ms end-to-end latency
+dominated by sequential gRPC handler calls.
+
+| Component | Per-Saga Cost | Why Sequential |
+|-----------|--------------|----------------|
+| Handler gRPC calls (4 steps) | 200-400ms | Compensation ordering requires step-by-step |
+| Saga state persistence | 8 writes | Per-step persistence enables recovery from any failure |
+| Position entries | 2 writes | Double-entry guarantee per step |
+| Event outbox | 4 writes | Exactly-once event delivery (FR-31 atomicity) |
+
+### Why This Is the Right Trade-off
+
+Each "expensive" property is load-bearing:
+
+- **Per-step persistence** = saga can compensate from any failure point
+- **Synchronous handler calls** = double-entry guarantee per step
+- **Strong consistency** = regulatory audit trail integrity
+- **Outbox pattern** = exactly-once event delivery
+
+Removing any of these to increase throughput would undermine the core value proposition.
+
+### Market Context
+
+| System | TPS | Notes |
+|--------|-----|-------|
+| UK Faster Payments (peak) | ~1,500 | Real-time payment rail |
+| BACS daily batch (amortised) | ~3,000 | UK batch payments |
+| Stripe (estimated) | ~10,000 | Payment processor |
+| Visa global peak | ~65,000 | Card network |
+
+**5-10k TPS covers every target use case** (energy settlement, carbon accounting, GPU billing,
+UN voucher programs). Visa-scale card processing is not our market.
+
+### Scaling Path (Without Sacrificing Guarantees)
+
+1. **Horizontal partitioning by economy** -- tenant sagas are independent, shard by tenant
+2. **gRPC co-location** -- reduce 50-100ms handler latency (single largest win)
+3. **Read replicas / follower reads** -- for query load, not write path
+4. **Pre-compiled Starlark caching** -- reduce interpreter startup overhead
+
+These optimisations reach **20-30k TPS** without sacrificing any correctness guarantees.
+
+---
+
+## 10. Decisions Made During Design Review
+
+| Decision | Resolution | Rationale |
+|----------|-----------|-----------|
+| **Graph storage format** | Embedded in manifest version record (JSON column) | Graph is a derived artifact, rebuilt on each apply. No need for separate table. |
+| **AsyncAPI field validation depth** | Full field existence validation (not just schema-level) | Catches typos in CEL filter field names. Same pattern as topic registry validation. |
+| **Script ref resolution** | Phase 4 (future). Inline `script:` only for now. | `script_ref` is a source-time convenience; resolved to full text at apply-time. |
+| **Conversion default expressions** | CEL expressions against old parameter values | Reuses existing CEL engine. Pure, deterministic, validated at schema load time. |
+| **API trigger model** | Endpoint-binding (maps existing gRPC endpoints to sagas) | Platform sagas provide defaults; tenants override via `CreateTenantOverride`. |
+
+## 11. Open Questions
+
+1. **AI model**: Which LLM powers the compiler? Claude via MCP? Pluggable?
+2. **Multi-manifest**: Can an economy be split across multiple manifests (like microservices), or always one file?
+3. **Versioning UX**: Git-like branching for manifests? Or linear version history only?
+4. **Handler sunset enforcement**: When do conversion rules get removed? After N manifest versions? Calendar date?
 
 ---
 
@@ -1030,9 +1140,10 @@ webhook:<source>.<event-type>
 
 api:<path>
   Example: api:/v1/deposits
-  Validated against: uniqueness within manifest
+  Validated against: OpenAPI spec (must reference real gRPC endpoint) + uniqueness
   Filter: none (request is the trigger)
-  Routing: HTTP gateway -> direct saga invocation
+  Routing: HTTP gateway (Vanguard REST->gRPC) -> SagaExecutionService -> saga
+  Override: platform sagas provide defaults; tenants override via CreateTenantOverride
 
 scheduled:<schedule-name>
   Example: scheduled:monthly_billing
