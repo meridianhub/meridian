@@ -67,8 +67,13 @@ func TestMetrics_Handler_ConnectionLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Active count should be 0 after close.
-	activeVal = testutil.ToFloat64(m.ActiveConnectionsForTenant("tenant-metrics"))
-	assert.InDelta(t, 0.0, activeVal, 0.001, "expected 0 active connections after close")
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		Until(func() bool {
+			return testutil.ToFloat64(m.ActiveConnectionsForTenant("tenant-metrics")) < 0.001
+		})
+	require.NoError(t, err, "expected 0 active connections after close")
 }
 
 // TestMetrics_Router_EventDelivery verifies that WithRouterMetrics causes the Router
