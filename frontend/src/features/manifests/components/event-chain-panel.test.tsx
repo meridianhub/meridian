@@ -66,8 +66,8 @@ describe('EventChainPanel', () => {
     expect(screen.queryByText('Trigger:')).toBeNull()
 
     // Click the accordion trigger to expand
-    const trigger = screen.getByText('process-payment')
-    await user.click(trigger.closest('[data-slot="accordion-trigger"]')!)
+    const accordionTrigger = document.querySelector('[data-slot="accordion-trigger"]')!
+    await user.click(accordionTrigger)
 
     expect(screen.getByText('Trigger:')).toBeDefined()
     expect(screen.getByText('Reason:')).toBeDefined()
@@ -183,8 +183,8 @@ describe('EventChainPanel', () => {
     render(<EventChainPanel chain={chain} startNodeLabel="GBP" />)
 
     // Expand accordion
-    const trigger = screen.getByText('process-payment')
-    await user.click(trigger.closest('[data-slot="accordion-trigger"]')!)
+    const accordionTrigger = document.querySelector('[data-slot="accordion-trigger"]')!
+    await user.click(accordionTrigger)
 
     expect(screen.getByText('Produced events:')).toBeDefined()
     expect(screen.getByText(/\[USD\].*\(CREDIT\)/)).toBeDefined()
@@ -199,8 +199,8 @@ describe('EventChainPanel', () => {
     render(<EventChainPanel chain={chain} startNodeLabel="GBP" />)
 
     // Expand accordion first
-    const trigger = screen.getByText('test-saga')
-    await user.click(trigger.closest('[data-slot="accordion-trigger"]')!)
+    const accordionTrigger = document.querySelector('[data-slot="accordion-trigger"]')!
+    await user.click(accordionTrigger)
 
     const toggleBtn = screen.getByTestId('saga-diagram-toggle-test-saga')
     expect(toggleBtn.textContent).toBe('Show saga flow')

@@ -128,36 +128,32 @@ function HopItem({ hop, index, onSagaClick }: HopItemProps) {
 
   return (
     <AccordionItem value={`${hop.saga}-${index}`} className="border rounded-md px-3">
-      <AccordionTrigger className="py-2 text-sm hover:no-underline">
-        <div className="flex flex-1 items-center gap-2">
-          <span
-            role="link"
-            tabIndex={0}
-            className="font-medium text-sm hover:underline text-left cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation()
-              onSagaClick?.(hop.saga)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.stopPropagation()
-                e.preventDefault()
-                onSagaClick?.(hop.saga)
-              }
-            }}
+      <div className="flex items-center gap-2 py-2">
+        {onSagaClick ? (
+          <button
+            type="button"
+            className="font-medium text-sm hover:underline text-left"
+            onClick={() => onSagaClick(hop.saga)}
             data-testid={`saga-link-${hop.saga}`}
           >
             {hop.saga}
+          </button>
+        ) : (
+          <span className="font-medium text-sm" data-testid={`saga-link-${hop.saga}`}>
+            {hop.saga}
           </span>
-          <Badge
-            variant="outline"
-            className={`text-[10px] ${filterStyle}`}
-            data-testid={`filter-badge-${hop.filterResult}`}
-          >
-            {hop.filterResult}
-          </Badge>
+        )}
+        <Badge
+          variant="outline"
+          className={`text-[10px] ${filterStyle}`}
+          data-testid={`filter-badge-${hop.filterResult}`}
+        >
+          {hop.filterResult}
+        </Badge>
+        <div className="ml-auto">
+          <AccordionTrigger className="py-0 text-sm hover:no-underline" />
         </div>
-      </AccordionTrigger>
+      </div>
       <AccordionContent>
         <div className="space-y-3 text-xs">
           {hop.trigger && (
