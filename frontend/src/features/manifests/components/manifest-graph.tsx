@@ -57,12 +57,12 @@ const EDGE_LEGEND: { label: string; color: string; dashed?: boolean }[] = [
   { label: 'Converts to', color: '#f59e0b' },
 ]
 
-// ELK layer ordering: instruments at top, account types below, valuation rules middle, sagas bottom
-const LAYER_ORDER: Record<ManifestNodeType, number> = {
-  instrument: 0,
-  account_type: 1,
-  valuation_rule: 2,
-  saga: 3,
+// ELK layer priority: higher values are placed earlier (top in DOWN direction)
+const LAYER_PRIORITY: Record<ManifestNodeType, string> = {
+  instrument: '40',
+  account_type: '30',
+  valuation_rule: '20',
+  saga: '10',
 }
 
 // Trigger type display
@@ -79,6 +79,7 @@ interface ManifestNodeData {
   color: string
   highlighted: boolean
   dimmed: boolean
+  connectedInstrumentCount?: number
   [key: string]: unknown
 }
 
@@ -116,7 +117,7 @@ function InstrumentNode({ data }: { data: ManifestNodeData }) {
 function AccountTypeNode({ data }: { data: ManifestNodeData }) {
   const node = data.manifestNode
   const code = node.data.code as string
-  const allowedCount = (node.data.allowedInstruments as string[] | undefined)?.length ?? 0
+  const allowedCount = data.connectedInstrumentCount ?? 0
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -241,10 +242,21 @@ async function layoutManifestGraph(
 
   const nodeMap = new Map(filteredNodes.map((n) => [n.id, n]))
 
+  // Compute connected instrument count per account_type node from actual edges
+  const connectedInstruments = new Map<string, number>()
+  for (const e of filteredEdges) {
+    if (e.relationship === 'allowed_by') {
+      connectedInstruments.set(e.source, (connectedInstruments.get(e.source) ?? 0) + 1)
+    }
+  }
+
   const layoutNodes = filteredNodes.map((n) => ({
     id: n.id,
     width: NODE_WIDTH,
     height: NODE_BASE_HEIGHT + NODE_PADDING,
+    layoutOptions: {
+      'elk.layered.layering.layerChoiceConstraint': LAYER_PRIORITY[n.type],
+    },
   }))
 
   const rfEdges = buildReactFlowEdges(filteredEdges)
@@ -264,6 +276,7 @@ async function layoutManifestGraph(
           color,
           highlighted: false,
           dimmed: false,
+          connectedInstrumentCount: connectedInstruments.get(id),
         } satisfies ManifestNodeData,
       }
     },
@@ -273,13 +286,6 @@ async function layoutManifestGraph(
       layerSpacing: '80',
     },
   )
-
-  // Sort by layer order for ELK placement hint
-  rfNodes.sort((a, b) => {
-    const aType = nodeMap.get(a.id)!.type
-    const bType = nodeMap.get(b.id)!.type
-    return LAYER_ORDER[aType] - LAYER_ORDER[bType]
-  })
 
   return { nodes: rfNodes, edges: rfEdges }
 }

@@ -27,6 +27,7 @@ export interface LayoutNode {
   id: string
   width: number
   height: number
+  layoutOptions?: Record<string, string>
 }
 
 /**
@@ -43,6 +44,7 @@ export async function layoutWithELK<T extends Record<string, unknown>>(
     id: n.id,
     width: n.width,
     height: n.height,
+    ...(n.layoutOptions ? { layoutOptions: n.layoutOptions } : {}),
   }))
 
   const elkEdges = edges.map((e) => ({
