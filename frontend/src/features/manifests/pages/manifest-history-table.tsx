@@ -137,7 +137,14 @@ export function ManifestHistoryTable() {
 
   const diffGraphs = useMemo(() => {
     if (!showDiff || compareVersions.length !== 2) return null
-    const [v1, v2] = compareVersions
+    // Sort by appliedAt so earlier version is always "before"
+    const sorted = [...compareVersions].sort((a, b) => {
+      const aTime = Number(a.appliedAt?.seconds ?? 0n)
+      const bTime = Number(b.appliedAt?.seconds ?? 0n)
+      return aTime - bTime
+    })
+    const [v1, v2] = sorted
+    if (!v1.manifest || !v2.manifest) return null
     const before = buildManifestGraph(v1.manifest as unknown as Manifest)
     const after = buildManifestGraph(v2.manifest as unknown as Manifest)
     return { before, after, v1Label: v1.version, v2Label: v2.version }
