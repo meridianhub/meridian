@@ -67,7 +67,7 @@ type PositionKeepingService struct {
 	reservationRepo domain.ReservationRepository
 	// positionRepo is OPTIONAL - if nil, projected balance RPCs return FailedPrecondition.
 	positionRepo domain.PositionRepository
-	// instrumentResolver is OPTIONAL - if nil, asset instrument resolution falls back to defaults.
+	// instrumentResolver is OPTIONAL - if nil, asset RPCs requiring instrument resolution will error.
 	// When set, resolves instrument dimension and precision from Reference Data.
 	instrumentResolver refdata.InstrumentResolver
 }
