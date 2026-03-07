@@ -11,12 +11,20 @@ vi.mock('@/api/context', () => ({
   ApiClientProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
+vi.mock('../components/manifest-graph', () => ({
+  ManifestGraph: (_props: { manifest: unknown }) => (
+    <div data-testid="manifest-graph">Graph rendered</div>
+  ),
+}))
+
 import { useApiClients } from '@/api/context'
 
-function mockApiClients() {
+function mockApiClients(overrides?: {
+  getCurrentManifest?: ReturnType<typeof vi.fn>
+}) {
   vi.mocked(useApiClients).mockReturnValue({
     manifestHistory: {
-      getCurrentManifest: vi.fn().mockResolvedValue({ version: null }),
+      getCurrentManifest: overrides?.getCurrentManifest ?? vi.fn().mockResolvedValue({ version: null }),
       listManifestVersions: vi.fn().mockResolvedValue({ versions: [], totalCount: 0 }),
       getManifestVersion: vi.fn(),
     },
@@ -68,12 +76,13 @@ describe('ManifestsPage', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('renders Current Manifest and Version History tabs', async () => {
+  it('renders Current Manifest, Version History, and Graph tabs', async () => {
     renderManifestsPage()
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /current manifest/i })).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: /version history/i })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: /graph/i })).toBeInTheDocument()
     })
   })
 
@@ -97,5 +106,71 @@ describe('ManifestsPage', () => {
 
     const historyTab = screen.getByRole('tab', { name: /version history/i })
     expect(historyTab).toHaveAttribute('data-state', 'active')
+  })
+
+  it('switches to Graph tab', async () => {
+    renderManifestsPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /graph/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('tab', { name: /graph/i }))
+
+    const graphTab = screen.getByRole('tab', { name: /graph/i })
+    expect(graphTab).toHaveAttribute('data-state', 'active')
+  })
+
+  it('shows empty state in Graph tab when no manifest is applied', async () => {
+    renderManifestsPage()
+
+    await userEvent.click(screen.getByRole('tab', { name: /graph/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-empty')).toBeInTheDocument()
+    })
+  })
+
+  it('shows error state in Graph tab on fetch failure', async () => {
+    mockApiClients({
+      getCurrentManifest: vi.fn().mockRejectedValue(new Error('Network error')),
+    })
+
+    renderManifestsPage()
+
+    await userEvent.click(screen.getByRole('tab', { name: /graph/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-error')).toBeInTheDocument()
+      expect(screen.getByText(/network error/i)).toBeInTheDocument()
+    })
+  })
+
+  it('renders ManifestGraph when manifest data is available', async () => {
+    mockApiClients({
+      getCurrentManifest: vi.fn().mockResolvedValue({
+        version: {
+          version: 1,
+          manifest: {
+            metadata: { name: 'Test', industry: 'energy' },
+            instruments: [],
+            accountTypes: [],
+            valuationRules: [],
+            sagas: [],
+          },
+          appliedAt: { seconds: BigInt(1700000000), nanos: 0 },
+          appliedBy: 'admin',
+          applyStatus: 1,
+        },
+      }),
+    })
+
+    renderManifestsPage()
+
+    await userEvent.click(screen.getByRole('tab', { name: /graph/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('manifest-graph')).toBeInTheDocument()
+    })
   })
 })
