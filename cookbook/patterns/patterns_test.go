@@ -595,19 +595,19 @@ func TestAllPatterns_EventTriggersMapToValidTopics(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fragment := loadManifestFragment(t, name)
 
-			sagas, ok := fragment["sagas"].([]any)
-			if !ok {
+			sagasRaw, hasSagas := fragment["sagas"]
+			if !hasSagas {
 				return // no sagas in this pattern
 			}
+			sagas, ok := sagasRaw.([]any)
+			require.True(t, ok, "sagas must be a list in %s", name)
 
 			for i, s := range sagas {
 				saga, ok := s.(map[string]any)
-				if !ok {
-					continue
-				}
+				require.True(t, ok, "saga[%d] in %s must be an object", i, name)
 				trigger, ok := saga["trigger"].(string)
 				if !ok {
-					continue
+					continue // saga may not have a trigger (e.g. manual invocation)
 				}
 
 				if !strings.HasPrefix(trigger, "event:") {
