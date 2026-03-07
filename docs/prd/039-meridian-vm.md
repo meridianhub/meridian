@@ -755,7 +755,263 @@ After initial deploy, the same IDE supports:
 
 ---
 
-## 6. Compiler Theory Applied to Meridian
+## 6. Economy Simulator (What-If Impact Analysis)
+
+### 6.1 The Vision
+
+A tenant changes one part of their economy — a pricing strategy, a tariff, a bucketing
+rule — and sees the financial impact **before deploying**. What would margins look like?
+Which counterparties become unprofitable? This is the killer feature for operational
+finance: simulate the new economy against existing data.
+
+### 6.2 Existing Simulation Infrastructure
+
+Meridian already has read-only simulation tools:
+
+| Tool | What It Does | Limitation |
+|------|-------------|------------|
+| `meridian_saga_simulate` | Traces Starlark execution with stubbed service calls | Single saga, no real data |
+| `meridian_valuation_simulate` | Dry-runs a valuation method | Single valuation, no batch |
+| `meridian_cel_evaluate` | Evaluates CEL expressions with injected variables | Expression-level only |
+| `meridian_manifest_plan` | Diffs manifest changes against current state | Structural diff, no financial impact |
+
+**Forecasting service** (`services/forecasting/`) executes Starlark strategies against
+market data to produce forward curves. Currently runs fixed strategies on schedule — not
+scenario-driven.
+
+### 6.3 The Gap: Scenario-Driven Impact Analysis
+
+None of the existing tools answer: "If I change my economy rules, what happens to my
+financial performance across historical data?"
+
+| Missing Capability | Example |
+|-------------------|---------|
+| Batch re-valuation | Re-run 10k historical postings with new pricing |
+| Position restatement | "What would balances be if bucketing rule changed?" |
+| Scenario parametrisation | "If fee tier = 5% instead of 3%?" |
+| Delta reporting | "Impact: +£2.5M revenue, -3 counterparties profitable" |
+| Reconciliation replay | "How would settlement variances change?" |
+
+### 6.4 Design: Economy Replay Engine
+
+The bitemporal data model makes this architecturally possible. Every position, posting,
+and valuation is timestamped with both valid-time and transaction-time. The quality ladder
+(ESTIMATE → COEFFICIENT → ACTUAL → REVISED) means the system already handles multiple
+versions of truth.
+
+```text
+Economy Replay Request:
+  manifest_changes: <modified manifest YAML>  -- the "what-if"
+  replay_scope:
+    date_range: [2025-01-01, 2025-12-31]
+    accounts: [FLEET_RECEIVABLE, ENERGY_DELIVERED]  -- or all
+    instruments: [GBP, KWH]  -- or all
+  comparison: CURRENT_ECONOMY  -- baseline
+
+Economy Replay Pipeline:
+  1. Validate modified manifest (full type-checking)
+  2. Extract changed valuation rules / saga logic / bucketing rules
+  3. Query historical postings within scope (bitemporal read)
+  4. Re-evaluate each posting against new rules:
+     - New valuation method → recalculate amounts
+     - New bucketing rule → recompute position assignments
+     - New saga logic → trace execution path (stubbed)
+  5. Compute deltas: (new_result - original_result) per posting
+  6. Aggregate into impact report
+```
+
+**Forecasting service integration**: The forecasting service already reads market data
+and produces forward curves. Extend it to accept scenario parameters (e.g.,
+"demand + 10%") and produce scenario-specific curves that feed into the replay engine.
+
+### 6.5 Impact Report
+
+```text
+Economy Impact Summary:
+  Date range: 2025-01-01 to 2025-12-31
+  Postings re-evaluated: 47,832
+  Changed rules: kwh_to_gbp_peak (valuation method)
+
+  Revenue impact: +£2.53M (+4.2%)
+  Margin impact: +1.8pp (from 12.3% to 14.1%)
+
+  Counterparty breakdown:
+    FLEET_ALPHA: +£890k (profitable → more profitable)
+    FLEET_BETA:  -£120k (marginal → unprofitable)  ⚠️
+    FLEET_GAMMA: +£340k (unprofitable → profitable) ✓
+
+  Position impact:
+    ENERGY_DELIVERED: -12,400 KWH (bucketing change)
+    CHARGING_REVENUE: +£2.53M GBP (pricing change)
+```
+
+### 6.6 Implementation Approach
+
+This is a **Phase 3-4 feature** that builds on earlier phases:
+
+- Phase 0: Typed service modules (required for accurate simulation)
+- Phase 1: Relationship graph (identifies what changes affect which accounts)
+- Phase 2: Compiler (generates modified manifests from natural language)
+- **Phase 3-4: Economy Simulator** (replays modified economy against historical data)
+
+The existing `meridian_valuation_simulate` and forecasting infrastructure provide the
+foundation. The new work is batch orchestration, delta computation, and impact reporting.
+
+---
+
+## 7. Operational Resilience
+
+### 7.1 Error Taxonomy (What Exists)
+
+Meridian classifies saga errors into two categories that drive automatic behaviour:
+
+| Classification | Behaviour | Examples |
+|---------------|-----------|---------|
+| **FATAL** | Immediate compensation (LIFO rollback) | Insufficient funds, account closed, validation failed, business rule violation |
+| **TRANSIENT** | Retry with backoff, release lease | Timeout, connection refused, deadlock, rate limit, circuit breaker |
+
+**Default: FATAL.** Unknown errors are treated as fatal (fail-safe). This prevents
+infinite retries on unexpected errors.
+
+**Zombie detection**: Sagas exceeding max replay count (default 5) transition to
+`FAILED_MANUAL_INTERVENTION` status.
+
+### 7.2 Compensation Model (LIFO Rollback)
+
+When a FATAL error occurs at step N:
+
+```text
+Forward:  Step A → Step B → Step C (FATAL error)
+Rollback: Compensate C → Compensate B → Compensate A  (reverse order)
+```
+
+- Only steps with a `CompensateHandler` defined are compensated
+- Compensation params derived automatically from forward step output (`*_id` pattern)
+- **Best-effort**: if one compensation fails, remaining compensations still execute
+- All compensation errors collected and reported
+
+### 7.3 Dead Letter Queue
+
+Failed Kafka messages (after exhausting retries) land in a per-topic DLQ with rich
+metadata:
+
+| DLQ Header | Purpose |
+|-----------|---------|
+| `dlq.original_topic` | Source topic for traceability |
+| `dlq.error_message` | Human-readable failure reason |
+| `dlq.retry_count` | Attempts made before DLQ |
+| `dlq.correlation_id` | End-to-end tracing |
+| `dlq.first_failure_time` | When it first failed |
+
+**DLQ Inspector API** exists (`shared/platform/kafka/dlq_admin.go`) with filtering,
+statistics, and replay capabilities. Individual or batch replay back to original topic.
+
+### 7.4 Gap: Operator Dashboard
+
+The APIs exist but there is no UI for operators to see and resolve failures:
+
+| Capability | API Status | UI Status |
+|-----------|-----------|-----------|
+| Saga execution history | Causation tree API (gRPC) | Timeline component exists, limited |
+| Failed saga list | Queryable via saga admin API | No dedicated view |
+| DLQ inspection | DLQ Inspector API | No UI |
+| DLQ replay | DLQ Replay API | No UI |
+| Zombie saga detection | Prometheus metric (`saga_zombie_detected_total`) | Alert only |
+| Error classification breakdown | Metrics exist | No dashboard |
+
+**Needed**: An operations dashboard that surfaces:
+
+- Failed/compensated/zombie sagas with error details and causation tree
+- DLQ messages with one-click replay
+- Error trend charts (by saga, by error classification, by tenant)
+- Resolution workflow: investigate → fix root cause → replay from DLQ
+
+### 7.5 In-Flight Saga Migration
+
+**Decision needed**: When a manifest is updated, what happens to sagas already executing
+on the old version?
+
+| Option | Trade-off |
+|--------|-----------|
+| **Drain** (recommended) | Running sagas complete on old version. New events trigger new version. Simple, safe, brief overlap. |
+| **Immediate switchover** | Risk of mid-execution schema mismatch. Only viable if handler ABI is backward-compatible (which conversion rules ensure). |
+| **Versioned execution** | Each saga instance records its manifest version. Most correct, highest complexity. |
+
+**Recommendation: Drain.** Running sagas complete on the version they started with. New
+saga instances use the new manifest version. The event router's `Reload()` atomically
+swaps the registry, so new events immediately use the new version while in-flight sagas
+continue with their existing state.
+
+This works because saga instances already persist their step results and handler params.
+A running saga doesn't re-read the manifest mid-execution — it follows its persisted
+execution plan. The overlap period is the time for the longest running saga to complete
+(typically seconds to minutes, bounded by Starlark's guaranteed termination).
+
+---
+
+## 8. Observability
+
+### 8.1 Current Stack
+
+Meridian has a complete Grafana-based observability stack:
+
+| Component | Purpose | Integration |
+|-----------|---------|-------------|
+| **Grafana Alloy** | OTel collector (OTLP gRPC :4317) | Receives traces/metrics from all services |
+| **Grafana Tempo** | Distributed tracing | Spans for every gRPC call, saga step, handler execution |
+| **Grafana Loki** | Log aggregation | JSON structured logs with tenant_id, correlation_id, trace_id |
+| **Prometheus** | Metrics | Per-tenant request counts, latencies, DB query durations |
+| **Grafana** | Dashboards | Visualization at localhost:3000 (dev) |
+
+**OpenTelemetry integration**: W3C Trace Context propagation across service boundaries.
+Every request carries trace_id and span_id through gRPC interceptors. Logs automatically
+include trace context for correlation.
+
+**Per-tenant metrics**: All Prometheus metrics include a `tenant` label. Cardinality
+managed via route patterns (not actual paths).
+
+### 8.2 Gap: Saga Flow Tracing
+
+The tracing infrastructure exists but lacks saga-specific visualization:
+
+- **Have**: Individual gRPC call spans, handler execution spans
+- **Need**: End-to-end saga flow view showing step sequence, handler calls, compensation
+  path, and produced events as a single trace waterfall
+- **Need**: Saga-specific Grafana dashboards (execution duration by saga type, error rates,
+  compensation frequency, DLQ depth)
+
+The causation tree API (`GetCausationTree`) provides the data model — what's missing is
+the dashboard that renders it alongside OTel traces.
+
+---
+
+## 9. Tenant Isolation Model
+
+### 9.1 Current Architecture
+
+| Layer | Isolation Mechanism |
+|-------|-------------------|
+| **Database** | Schema-per-tenant (`org_{tenant_id}`). `SET LOCAL search_path` scoped to transaction. |
+| **API Gateway** | Tenant resolved from subdomain or `X-Tenant-Slug` header. Injected into gRPC context. |
+| **Observability** | All metrics/logs tagged with `tenant_id`. Per-tenant query filtering. |
+| **Deployment (demo)** | Single Go binary, all services in-process. Shared pod. |
+| **Deployment (K8s)** | Separate pods per service. Resource limits per pod (CPU/memory). |
+
+### 9.2 Scaling Model
+
+- **Demo/single-binary**: Vertical scaling only. Suitable for dev and small deployments.
+- **K8s production**: Horizontal pod autoscaling per service. Each service independently
+  scalable. Resource limits enforced (e.g., tenant service: 50m-200m CPU, 64-256Mi memory).
+
+### 9.3 Gap: Per-Tenant Rate Limiting
+
+No per-tenant throttling exists today. A noisy tenant could consume disproportionate
+resources. The gateway middleware pattern supports adding rate limiting — this is an
+implementation task, not an architectural change.
+
+---
+
+## 10. Compiler Theory Applied to Meridian
 
 ### 6.1 Lessons from Runtime/Compiler Design
 
@@ -888,7 +1144,7 @@ machine artifacts, Proto for the type system.**
 
 ---
 
-## 7. Implementation Phases
+## 11. Implementation Phases
 
 ### Phase 0: Foundational Improvements (prerequisite for all layers)
 
@@ -961,17 +1217,34 @@ Builds on typed service modules to support handler versioning.
 - Deploy flow: validate -> plan diff -> one-click apply
 - Post-deploy dashboard with live relationship graph
 
-### Phase 4: Polish and Network Effects (future)
+### Phase 3.5: Operational Dashboard
+
+- Failed/compensated/zombie saga list with error details and causation tree
+- DLQ inspection and one-click replay UI
+- Error trend charts (by saga, by error classification, by tenant)
+- Resolution workflow: investigate → fix root cause → replay from DLQ
+- Saga-specific Grafana dashboards (execution duration, error rates, compensation frequency)
+
+### Phase 4: Economy Simulator
+
+- Batch re-valuation engine (replay historical postings with modified economy rules)
+- Position restatement simulator (what-if bucketing/validation changes)
+- Scenario parametrisation for forecasting service (e.g., "demand + 10%")
+- Impact report generation (revenue, margin, counterparty profitability)
+- Integration with compiler: "Change pricing" → generate manifest diff → simulate impact → approve
+
+### Phase 5: Polish and Network Effects (future)
 
 - Community pattern contributions (shadcn model)
 - "Explore economies" -- anonymised pattern sharing
 - Starlark standard library (reusable fragments -- the "libraries" concept)
 - Multi-tenant economy templates
 - `script_ref` support with separate `.star` file management
+- Per-tenant rate limiting in API gateway
 
 ---
 
-## 8. Success Criteria
+## 12. Success Criteria
 
 1. A user can describe a business in natural language and get a deployed economy in under 5 minutes
 2. The generated manifest is human-readable and freely editable (shadcn test)
@@ -981,10 +1254,14 @@ Builds on typed service modules to support handler versioning.
 5. The same workflow works via MCP tools (headless) and the built-in UI
 6. Handler evolution never breaks running sagas -- conversion rules maintain backward compatibility
 7. Every trigger type is validated against its respective registry before deploy
+8. A tenant can simulate economy changes against historical data and see financial impact
+   before deploying
+9. Failed sagas are visible in an operator dashboard with one-click DLQ replay
+10. In-flight sagas drain safely when manifests are updated (no mid-execution breakage)
 
 ---
 
-## 9. Throughput Profile
+## 13. Throughput Profile
 
 The architecture optimises for **correctness over raw throughput**. This is a deliberate
 design choice, not a limitation to fix.
@@ -1036,7 +1313,7 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 
 ---
 
-## 10. Decisions Made During Design Review
+## 14. Decisions Made During Design Review
 
 | Decision | Resolution | Rationale |
 |----------|-----------|-----------|
@@ -1045,13 +1322,19 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 | **Script ref resolution** | Phase 4 (future). Inline `script:` only for now. | `script_ref` is a source-time convenience; resolved to full text at apply-time. |
 | **Conversion default expressions** | CEL expressions against old parameter values | Reuses existing CEL engine. Pure, deterministic, validated at schema load time. |
 | **API trigger model** | Endpoint-binding (maps existing gRPC endpoints to sagas) | Platform sagas provide defaults; tenants override via `CreateTenantOverride`. |
+| **In-flight saga migration** | Drain (running sagas complete on old version) | Saga instances persist their execution plan. New events use new version immediately. |
+| **Error default classification** | FATAL (fail-safe) | Prevents infinite retries on unexpected errors. Explicit `TransientError` wrapper for retryable cases. |
+| **Script ref phase** | Phase 5 (future) | Inline `script:` is sufficient. `script_ref` adds filesystem management complexity. |
 
-## 11. Open Questions
+## 15. Open Questions
 
 1. **AI model**: Which LLM powers the compiler? Claude via MCP? Pluggable?
 2. **Multi-manifest**: Can an economy be split across multiple manifests (like microservices), or always one file?
 3. **Versioning UX**: Git-like branching for manifests? Or linear version history only?
 4. **Handler sunset enforcement**: When do conversion rules get removed? After N manifest versions? Calendar date?
+5. **Simulator scope**: Full position restatement (expensive, accurate) or valuation-only replay (fast, approximate)?
+6. **Simulator execution model**: Synchronous (wait for result) or async job with progress tracking?
+7. **Operator dashboard scope**: Platform-wide view or per-tenant? Both?
 
 ---
 
@@ -1087,6 +1370,17 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 | `buf.gen.jsonschema.yaml` | JSON Schema generation from manifest proto |
 | `api/openapi/meridian.swagger.json` | Generated OpenAPI spec (all gRPC endpoints) |
 | `api/jsonschema/` | Generated JSON Schema for manifest validation |
+| `services/mcp-server/internal/tools/simulation.go` | Existing simulation tools (CEL, valuation, saga) |
+| `shared/pkg/saga/error_classification.go` | FATAL/TRANSIENT error classification |
+| `shared/pkg/saga/saga_executor.go` | Failure handling and compensation decisions |
+| `shared/pkg/saga/step_execution.go` | Idempotent step execution with outbox |
+| `shared/platform/kafka/dlq.go` | Dead letter queue producer with metadata |
+| `shared/platform/kafka/dlq_admin.go` | DLQ inspection and replay utilities |
+| `shared/platform/observability/` | OTel tracing, Prometheus metrics, structured logging |
+| `services/reference-data/saga/override_api.go` | Platform saga override API |
+| `services/reference-data/saga/defaults/` | Platform default saga scripts |
+| `services/forecasting/` | Forecasting service (forward curves from market data) |
+| `deployments/k8s/observability/grafana-stack.yaml` | Grafana/Tempo/Loki/Prometheus stack |
 
 ### Database Tables (per-tenant schema)
 
@@ -1110,6 +1404,9 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 | `meridian_starlark_validate` | Syntax checking |
 | `meridian_cel_validate` | Expression checking |
 | `meridian_economy_structure` | Current state inspection |
+| `meridian_saga_simulate` | Saga dry-run (stubbed service calls) |
+| `meridian_valuation_simulate` | Valuation dry-run |
+| `meridian_cel_evaluate` | CEL expression evaluation |
 
 ### MCP Tools (new, proposed)
 
@@ -1118,6 +1415,7 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 | `meridian_manifest_fix` | Mutating pass (auto-convert deprecated handlers) | 0 |
 | `meridian_economy_graph` | Debug symbols (relationship query) | 1 |
 | `meridian_economy_compile` | Full compilation (business description -> manifest) | 2 |
+| `meridian_economy_simulate` | What-if impact analysis (replay with modified economy) | 4 |
 
 ---
 
