@@ -1,4 +1,5 @@
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+import { analyzeSagaOutputs } from '@/lib/visualization/star-parser'
 
 interface ManifestInstrument {
   code: string
@@ -24,6 +25,7 @@ interface ManifestSaga {
   name: string
   trigger: string
   filter?: string
+  script?: string
   [key: string]: unknown
 }
 
@@ -47,13 +49,15 @@ export interface ManifestNode {
   label: string
   data: Record<string, unknown>
   triggerMetadata?: SagaTriggerMetadata
-  dynamicTargets?: string[]
+  dynamicTargets?: { variableName: string; codeSnippet: string }[]
 }
 
 export type ManifestRelationship =
   | 'allowed_by'
   | 'converts_from'
   | 'converts_to'
+  | 'writes_to'
+  | 'uses_valuation'
 
 export interface ManifestEdge {
   id: string
@@ -154,17 +158,77 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
     }
   }
 
-  for (const saga of sagas) {
-    const { name, trigger, filter } = saga
-    const triggerMetadata = parseSagaTrigger(trigger, filter)
+  // Build lookup: instrument code -> account type codes that allow it
+  const instrumentToAccountTypes = new Map<string, string[]>()
+  for (const at of accountTypes) {
+    if (at.allowedInstruments) {
+      for (const ic of at.allowedInstruments) {
+        const list = instrumentToAccountTypes.get(ic) ?? []
+        list.push(at.code)
+        instrumentToAccountTypes.set(ic, list)
+      }
+    }
+  }
 
-    nodes.push({
-      id: `saga:${name}`,
+  for (const saga of sagas) {
+    const { name, trigger, filter, script } = saga
+    const triggerMetadata = parseSagaTrigger(trigger, filter)
+    const sagaNodeId = `saga:${name}`
+
+    const sagaNode: ManifestNode = {
+      id: sagaNodeId,
       type: 'saga',
       label: name,
       data: { ...saga },
       triggerMetadata,
-    })
+    }
+
+    if (script) {
+      const outputs = analyzeSagaOutputs(script)
+
+      // writes_to edges: saga -> account types that allow the produced instrument
+      for (const event of outputs.producedEvents) {
+        if (event.instrumentCode) {
+          const targetAccountTypes = instrumentToAccountTypes.get(event.instrumentCode) ?? []
+          for (const accountTypeCode of targetAccountTypes) {
+            edges.push({
+              id: `writes_to:${sagaNodeId}:${accountTypeCode}:${event.stepName}`,
+              source: sagaNodeId,
+              target: `account_type:${accountTypeCode}`,
+              relationship: 'writes_to',
+            })
+          }
+        }
+      }
+
+      // uses_valuation edges: saga -> matching valuation rules
+      for (const vc of outputs.valuationCalls) {
+        if (vc.fromInstrument && vc.toInstrument) {
+          for (let i = 0; i < valuationRules.length; i++) {
+            const rule = valuationRules[i]
+            if (rule.fromInstrument === vc.fromInstrument && rule.toInstrument === vc.toInstrument) {
+              const ruleId = `valuation_rule:${rule.fromInstrument}:${rule.toInstrument}:${i}`
+              edges.push({
+                id: `uses_valuation:${sagaNodeId}:${ruleId}`,
+                source: sagaNodeId,
+                target: ruleId,
+                relationship: 'uses_valuation',
+              })
+            }
+          }
+        }
+      }
+
+      // Record dynamic targets
+      if (outputs.dynamicTargets.length > 0) {
+        sagaNode.dynamicTargets = outputs.dynamicTargets.map((dt) => ({
+          variableName: dt.variableName,
+          codeSnippet: dt.codeSnippet,
+        }))
+      }
+    }
+
+    nodes.push(sagaNode)
   }
 
   return { nodes, edges }
