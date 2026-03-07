@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -97,7 +97,6 @@ function buildReactFlowElements(
   const edgeStatusMap = new Map<string, DiffStatus>()
 
   const addedIds = new Set(diff.addedNodes.map((n) => n.id))
-  const removedIds = new Set(diff.removedNodes.map((n) => n.id))
   const modifiedIds = new Set(diff.modifiedNodes.map((m) => m.after.id))
 
   // Build unified node list: after nodes + removed nodes from before
@@ -118,7 +117,6 @@ function buildReactFlowElements(
   }
 
   const addedEdgeIds = new Set(diff.addedEdges.map((e) => e.id))
-  const removedEdgeIds = new Set(diff.removedEdges.map((e) => e.id))
 
   const allEdges: ManifestEdge[] = []
   for (const edge of after.edges) {
@@ -212,12 +210,10 @@ interface ManifestDiffGraphProps {
 export function ManifestDiffGraph({ before, after, className }: ManifestDiffGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [diffSummary, setDiffSummary] = useState<ManifestDiff | null>(null)
 
   const diff = useMemo(() => computeManifestDiff(before, after), [before, after])
 
   useEffect(() => {
-    setDiffSummary(diff)
     const { allNodes, allEdges, nodeStatusMap, edgeStatusMap } = buildReactFlowElements(diff, before, after)
 
     let cancelled = false
@@ -271,26 +267,24 @@ export function ManifestDiffGraph({ before, after, className }: ManifestDiffGrap
       </TooltipProvider>
 
       {/* Diff summary */}
-      {diffSummary && (
-        <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm" data-testid="diff-summary">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Changes</span>
-          {diffSummary.addedNodes.length > 0 && (
-            <span className="text-xs text-green-600">+{diffSummary.addedNodes.length} added</span>
-          )}
-          {diffSummary.removedNodes.length > 0 && (
-            <span className="text-xs text-red-600">-{diffSummary.removedNodes.length} removed</span>
-          )}
-          {diffSummary.modifiedNodes.length > 0 && (
-            <span className="text-xs text-amber-600">~{diffSummary.modifiedNodes.length} modified</span>
-          )}
-          {diffSummary.addedEdges.length > 0 && (
-            <span className="text-xs text-green-600">+{diffSummary.addedEdges.length} edge{diffSummary.addedEdges.length !== 1 ? 's' : ''}</span>
-          )}
-          {diffSummary.removedEdges.length > 0 && (
-            <span className="text-xs text-red-600">-{diffSummary.removedEdges.length} edge{diffSummary.removedEdges.length !== 1 ? 's' : ''}</span>
-          )}
-        </div>
-      )}
+      <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm" data-testid="diff-summary">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Changes</span>
+        {diff.addedNodes.length > 0 && (
+          <span className="text-xs text-green-600">+{diff.addedNodes.length} added</span>
+        )}
+        {diff.removedNodes.length > 0 && (
+          <span className="text-xs text-red-600">-{diff.removedNodes.length} removed</span>
+        )}
+        {diff.modifiedNodes.length > 0 && (
+          <span className="text-xs text-amber-600">~{diff.modifiedNodes.length} modified</span>
+        )}
+        {diff.addedEdges.length > 0 && (
+          <span className="text-xs text-green-600">+{diff.addedEdges.length} edge{diff.addedEdges.length !== 1 ? 's' : ''}</span>
+        )}
+        {diff.removedEdges.length > 0 && (
+          <span className="text-xs text-red-600">-{diff.removedEdges.length} edge{diff.removedEdges.length !== 1 ? 's' : ''}</span>
+        )}
+      </div>
 
       {/* Legend */}
       <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
