@@ -1,4 +1,4 @@
-# The Meridian Virtual Machine: From Business Description to Running Economy
+# The Meridian Economy Runtime: From Business Description to Running Economy
 
 ## Status: DRAFT v2
 
@@ -7,7 +7,7 @@
 Meridian is a transaction integrity engine that tenants configure through manifests
 (YAML/JSON declarations), Starlark scripts (saga orchestration), and CEL expressions
 (validation/pricing). Today these are authored manually and applied via the control plane.
-This PRD formalises the system as a **Virtual Machine** and defines the layers needed to
+This PRD formalises the system as an **Economy Runtime** and defines the layers needed to
 close current gaps and unlock AI-assisted configuration.
 
 **Three new layers:**
@@ -26,20 +26,23 @@ The tagline: **"Describe your business. We build your bank."**
 
 ---
 
-## 1. The Meridian VM (What We Already Have, Formalised)
+## 1. The Economy Runtime (What We Already Have, Formalised)
 
 ### 1.1 The Mental Model
 
-A traditional VM has an instruction set, registers, memory, and I/O. Meridian maps cleanly:
+The architecture maps cleanly to compiler and runtime concepts. We use this mapping
+throughout as an explanatory framework -- not because Meridian is a traditional VM,
+but because the concepts (instruction set, ABI, type checker, linker, loader) describe
+exactly what each component does.
 
-| VM Concept | Meridian Equivalent | Implementation |
-|------------|---------------------|----------------|
+| Runtime Concept | Meridian Equivalent | Implementation |
+|-----------------|---------------------|----------------|
 | **Program** | Manifest (YAML/JSON) | `api/proto/meridian/control_plane/v1/manifest.proto` |
 | **Instruction Set** | Starlark (control flow) + CEL (expressions) | Bounded, non-Turing-complete by design |
 | **Registers** | Reference Data (instruments, account types, sagas, party types) | `services/reference-data/` tables |
 | **Memory** | Operational Data (positions, postings, balances, parties) | Position keeping, financial accounting services |
 | **Loader/Linker** | Control Plane (validate -> diff -> plan -> apply) | `services/control-plane/internal/applier/` |
-| **Runtime** | Saga Orchestrator + Event Bus + Handler Registry | Kafka topics, gRPC handler calls |
+| **Execution Engine** | Saga Orchestrator + Event Bus + Handler Registry | Kafka topics, gRPC handler calls |
 | **I/O Ports** | API triggers, webhooks, scheduled jobs, gateway instructions | AsyncAPI channels, operational/financial gateways |
 | **Type System** | Handler schemas (`handlers.yaml`), topic registry, instrument dimensions | Compile-time validation before deploy |
 | **ABI** | Handler schemas (`handlers.yaml`) | Stable interface between scripts and services |
@@ -73,7 +76,7 @@ This is the same design choice Google made for Bazel (Starlark) and Kubernetes a
 - At depth 10 (configurable), events are dropped with warning
 - Prevents infinite saga chains even when individual sagas terminate
 
-Together, these guarantee the VM is **provably finite** at every level.
+Together, these guarantee the runtime is **provably finite** at every level.
 
 ### 1.4 The Program Structure
 
@@ -147,9 +150,9 @@ embedded `.star` files.
 
 ### 1.7 Current Tooling (MCP)
 
-The VM is already operable via MCP tools:
+The runtime is already operable via MCP tools:
 
-| Tool | VM Analogy | Status |
+| Tool | Runtime Analogy | Status |
 |------|-----------|--------|
 | `meridian_manifest_validate` | Type checker | Done |
 | `meridian_manifest_plan` | Linker (dry-run) | Done |
@@ -471,7 +474,7 @@ The relationships between resources are currently **implicit**:
 - "Which instruments does valuation rule Z convert between?" -- inspect handler params
 - "What happens when event E fires?" -- manual trace through manifests
 
-This makes the system opaque. A debugger/inspector for the VM is missing.
+This makes the system opaque. A debugger/inspector for the runtime is missing.
 
 ### 3.2 Solution: Manifest Relationship Index
 
@@ -650,7 +653,7 @@ The AI compiler loop: generate -> validate -> if errors, fix and re-validate -> 
 - **Template engine** -- no Jinja/Mustache for manifests. AI generates directly.
 - **Package manager** -- no `meridian install carbon-offset`. The cookbook is reference material, not installable packages.
 
-These are v2 concerns. The VM metaphor supports them, but copy-paste (shadcn) is the right first step.
+These are v2 concerns. The runtime metaphor supports them, but copy-paste (shadcn) is the right first step.
 
 ---
 
@@ -728,7 +731,7 @@ After initial deploy, the same IDE supports:
 
 ## 6. Compiler Theory Applied to Meridian
 
-### 6.1 Lessons from VM/Compiler Design
+### 6.1 Lessons from Runtime/Compiler Design
 
 | Compiler Concept | Meridian Application |
 |------------------|---------------------|
@@ -739,7 +742,7 @@ After initial deploy, the same IDE supports:
 | **Optimisation** | Simplify redundant sagas, merge similar account types, suggest common patterns |
 | **Code generation** | Produce manifest JSON + `.star` scripts + CEL expressions |
 | **Linking** | Manifest plan -- resolve against current state, produce execution plan |
-| **Loading** | Manifest apply -- install into the VM (reference data service) |
+| **Loading** | Manifest apply -- install into the runtime (reference data service) |
 | **Debug symbols** | Relationship graph -- map from running state back to source declarations |
 | **REPL** | The IDE -- edit, validate, plan, apply in a tight loop |
 | **Standard library** | Cookbook patterns -- pre-written, tested, copy-and-modify |
@@ -1062,7 +1065,7 @@ scheduled:<schedule-name>
 | **CEL Expression** | A pure, sub-millisecond predicate for validation/pricing/filtering |
 | **The Compiler** | AI-assisted generation of manifests from business descriptions |
 | **The IDE** | Frontend wizard for conversational economy creation |
-| **The VM** | The Meridian runtime that executes manifests |
+| **The Economy Runtime** | The Meridian runtime that executes manifests |
 | **The Relationship Graph** | Materialised index of cross-resource dependencies |
 | **Typed Service Modules** | Starlark structs generated from handler schemas that validate calls at compile time |
 | **Mutating Phase** | Pre-validation pass that auto-converts deprecated handler calls |
