@@ -153,6 +153,8 @@ export function ExecutionSubgraph({ graph, focusNodeId }: ExecutionSubgraphProps
     }).catch((err) => {
       if (!cancelled) {
         console.error('[ExecutionSubgraph] layout failed:', err)
+        setNodes([])
+        setEdges([])
       }
     })
 
