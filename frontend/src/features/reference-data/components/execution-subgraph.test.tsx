@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { ExecutionSubgraph, filterSubgraph } from './execution-subgraph'
+import { ExecutionSubgraph } from './execution-subgraph'
+import { filterSubgraph } from '@/features/reference-data/lib/filter-subgraph'
 import type { ManifestGraph } from '@/features/manifests/lib/manifest-graph-model'
 
 vi.mock('@xyflow/react', () => ({

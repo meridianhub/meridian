@@ -189,7 +189,13 @@ export function AccountTypesPage() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Attribute Schema</label>
                     <pre className="rounded border bg-muted/30 p-3 text-xs font-mono overflow-x-auto">
-                      {JSON.stringify(JSON.parse(selectedDefinition.attributeSchema), null, 2)}
+                      {(() => {
+                        try {
+                          return JSON.stringify(JSON.parse(selectedDefinition.attributeSchema), null, 2)
+                        } catch {
+                          return selectedDefinition.attributeSchema
+                        }
+                      })()}
                     </pre>
                   </div>
                 )}
