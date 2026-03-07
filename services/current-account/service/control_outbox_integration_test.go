@@ -77,7 +77,6 @@ func setupControlOutboxDB(t *testing.T) (*gorm.DB, *persistence.Repository, *per
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		account_id UUID NOT NULL,
 		amount_cents BIGINT NOT NULL,
-		currency VARCHAR(3) NOT NULL,
 		instrument_code VARCHAR(32) NOT NULL DEFAULT '',
 		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
 		precision INT NOT NULL DEFAULT 2,
