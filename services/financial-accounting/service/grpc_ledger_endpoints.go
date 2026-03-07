@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -9,6 +10,7 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 )
 
 // ListFinancialBookingLogs lists booking logs with optional filtering and pagination.
@@ -184,11 +186,15 @@ func (s *FinancialAccountingService) ListLedgerPostings(
 		}
 	}
 
-	// Apply currency filter if provided
+	// Apply instrument code filter if provided (field is named "currency" for backwards compatibility)
 	if req.Currency != "" {
-		// Validate currency code format (must be 3 uppercase letters per ISO 4217)
-		if !isValidCurrencyCode(req.Currency) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid currency code: %s (must be 3 uppercase letters)", req.Currency)
+		if s.instrumentResolver != nil {
+			if _, err := s.instrumentResolver.Resolve(ctx, req.Currency); err != nil {
+				if errors.Is(err, refdata.ErrUnknownInstrument) {
+					return nil, status.Errorf(codes.InvalidArgument, "unknown instrument code: %s", req.Currency)
+				}
+				return nil, status.Errorf(codes.Unavailable, "instrument lookup failed for %s, please retry", req.Currency)
+			}
 		}
 		params.Currency = req.Currency
 	}

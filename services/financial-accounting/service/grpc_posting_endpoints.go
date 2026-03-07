@@ -540,17 +540,3 @@ func (s *FinancialAccountingService) executeUpdateLedgerPosting(
 		LedgerPosting: toProtoLedgerPosting(posting),
 	}, nil
 }
-
-// isValidCurrencyCode validates that a currency code matches ISO 4217 format.
-// Valid codes are exactly 3 uppercase letters (e.g., USD, GBP, EUR).
-func isValidCurrencyCode(code string) bool {
-	if len(code) != 3 {
-		return false
-	}
-	for _, r := range code {
-		if r < 'A' || r > 'Z' {
-			return false
-		}
-	}
-	return true
-}
