@@ -12,7 +12,7 @@ vi.mock('@/api/context', () => ({
 }))
 
 vi.mock('../components/manifest-graph', () => ({
-  ManifestGraph: ({ manifest }: { manifest: unknown }) => (
+  ManifestGraph: (_props: { manifest: unknown }) => (
     <div data-testid="manifest-graph">Graph rendered</div>
   ),
 }))
