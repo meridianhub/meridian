@@ -1388,10 +1388,12 @@ func TestNewCurrentAccount_DerivesCorrectPrecision(t *testing.T) {
 	}
 }
 
-func TestNewCurrentAccount_InvalidCurrency_StillReturnsError(t *testing.T) {
-	// NewCurrentAccount defaults to CURRENCY dimension. Unrecognized currency codes
-	// are caught by the shared Amount package during instrument construction.
-	_, err := NewCurrentAccount("ACC-001", "IDENT-001", "PARTY-001", "INVALID")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unrecognized currency code INVALID")
+func TestNewCurrentAccount_TrustsCallerProvidedInstrument(t *testing.T) {
+	// Domain trusts caller-provided instrument codes. Validation of instrument codes
+	// is the responsibility of the gRPC layer via Reference Data service lookup.
+	// Any valid dimension + code combination should succeed at the domain level.
+	account, err := NewCurrentAccount("ACC-001", "IDENT-001", "PARTY-001", "EXOTIC_CCY")
+	require.NoError(t, err)
+	assert.Equal(t, "EXOTIC_CCY", account.InstrumentCode())
+	assert.Equal(t, "CURRENCY", account.Dimension())
 }

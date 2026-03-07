@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
@@ -125,10 +126,11 @@ func NewCurrentAccountWithDimension(accountID, externalIdentifier, partyID, inst
 	now := time.Now()
 	normalizedDimension := strings.ToUpper(dimension)
 
-	zeroAmount, err := NewAmountFromInstrument(instrumentCode, normalizedDimension, precision, 0)
+	inst, err := quantity.NewInstrument(instrumentCode, 0, normalizedDimension, precision)
 	if err != nil {
 		return CurrentAccount{}, err
 	}
+	zeroAmount := sharedamount.Zero(inst)
 
 	account := CurrentAccount{
 		id:                 uuid.New(),
