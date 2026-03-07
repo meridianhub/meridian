@@ -234,7 +234,7 @@ func ToDomainAssetFromInstrumentAmount(ctx context.Context, resolver refdata.Ins
 	// Resolve dimension and precision from Reference Data
 	props, err := resolver.Resolve(ctx, protoAmount.InstrumentCode)
 	if err != nil {
-		return domain.Asset{}, fmt.Errorf("%w: failed to resolve instrument %q: %w", ErrInvalidInstrumentCode, protoAmount.InstrumentCode, err)
+		return domain.Asset{}, fmt.Errorf("failed to resolve instrument %q: %w", protoAmount.InstrumentCode, err)
 	}
 
 	// Reject negative version values (would wrap to large uint32)
