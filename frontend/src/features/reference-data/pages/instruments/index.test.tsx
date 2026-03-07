@@ -26,6 +26,9 @@ vi.mock('@/api/context', () => ({
       evaluateInstrument: mockEvaluateInstrument,
       registerInstrument: mockRegisterInstrument,
     },
+    manifestHistory: {
+      getCurrentManifest: vi.fn().mockResolvedValue({ version: null }),
+    },
   })),
 }))
 

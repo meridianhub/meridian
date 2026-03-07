@@ -15,6 +15,7 @@ import {
   type InstrumentDefinition,
 } from '@/api/gen/meridian/reference_data/v1/instrument_pb'
 import { RegisterInstrumentDialog } from './register-instrument-dialog'
+import { ExecutionContextTab } from '../../components/execution-context-tab'
 
 const DIMENSION_LABELS: Record<number, string> = {
   0: 'Unspecified',
@@ -64,6 +65,7 @@ interface CELPlaygroundResult {
 export function InstrumentsPage() {
   const clients = useApiClients()
   const [registerDialogOpen, setRegisterDialogOpen] = React.useState(false)
+  const [selectedInstrument, setSelectedInstrument] = React.useState<InstrumentDefinition | null>(null)
 
   const [validationExpression, setValidationExpression] = React.useState('amount > 0')
   const [fungibilityExpression, setFungibilityExpression] = React.useState('instrument_code')
@@ -205,6 +207,7 @@ export function InstrumentsPage() {
           columns={columns}
           pageSize={25}
           filters={filters}
+          onRowClick={(inst) => setSelectedInstrument(inst)}
         />
       </Card>
 
@@ -285,6 +288,17 @@ export function InstrumentsPage() {
           )}
         </CardContent>
       </Card>
+
+      {selectedInstrument && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Execution Context — {selectedInstrument.code}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ExecutionContextTab entityType="instrument" entityCode={selectedInstrument.code} />
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

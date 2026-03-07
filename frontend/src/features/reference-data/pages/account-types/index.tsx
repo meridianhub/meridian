@@ -6,12 +6,14 @@ import { CELEditor } from '@/features/sagas/components/cel-editor'
 import { useApiClients } from '@/api/context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { referenceKeys } from '@/lib/query-keys'
 import {
   BehaviorClass,
   type AccountTypeDefinition,
 } from '@/api/gen/meridian/reference_data/v1/account_type_pb'
 import { CreateAccountTypeDialog } from './create-account-type-dialog'
+import { ExecutionContextTab } from '../../components/execution-context-tab'
 
 const BEHAVIOR_CLASS_LABELS: Record<number, string> = {
   0: 'Unspecified',
@@ -131,62 +133,79 @@ export function AccountTypesPage() {
       </Card>
 
       {selectedDefinition && (
-        <Card data-testid="cel-policy-editor">
-          <CardHeader>
-            <CardTitle>
-              CEL Policies — {selectedDefinition.code} v{selectedDefinition.version}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Validation CEL</label>
-              <p className="text-xs text-muted-foreground">
-                Validates account operations. Available: amount, attributes, valid_from, valid_to, source.
-              </p>
-              <CELEditor
-                value={selectedDefinition.validationCel}
-                onChange={() => {}}
-                context="validation"
-                readOnly
-              />
-            </div>
+        <Tabs defaultValue="policies">
+          <TabsList>
+            <TabsTrigger value="policies">Policies</TabsTrigger>
+            <TabsTrigger value="executions">Executions</TabsTrigger>
+          </TabsList>
+          <TabsContent value="policies">
+            <Card data-testid="cel-policy-editor">
+              <CardHeader>
+                <CardTitle>
+                  CEL Policies — {selectedDefinition.code} v{selectedDefinition.version}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Validation CEL</label>
+                  <p className="text-xs text-muted-foreground">
+                    Validates account operations. Available: amount, attributes, valid_from, valid_to, source.
+                  </p>
+                  <CELEditor
+                    value={selectedDefinition.validationCel}
+                    onChange={() => {}}
+                    context="validation"
+                    readOnly
+                  />
+                </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Bucketing CEL</label>
-              <p className="text-xs text-muted-foreground">
-                Determines fungibility buckets for amount pooling.
-              </p>
-              <CELEditor
-                value={selectedDefinition.bucketingCel}
-                onChange={() => {}}
-                context="bucketKey"
-                readOnly
-              />
-            </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Bucketing CEL</label>
+                  <p className="text-xs text-muted-foreground">
+                    Determines fungibility buckets for amount pooling.
+                  </p>
+                  <CELEditor
+                    value={selectedDefinition.bucketingCel}
+                    onChange={() => {}}
+                    context="bucketKey"
+                    readOnly
+                  />
+                </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Eligibility CEL</label>
-              <p className="text-xs text-muted-foreground">
-                Determines account eligibility for operations.
-              </p>
-              <CELEditor
-                value={selectedDefinition.eligibilityCel}
-                onChange={() => {}}
-                context="eligibility"
-                readOnly
-              />
-            </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Eligibility CEL</label>
+                  <p className="text-xs text-muted-foreground">
+                    Determines account eligibility for operations.
+                  </p>
+                  <CELEditor
+                    value={selectedDefinition.eligibilityCel}
+                    onChange={() => {}}
+                    context="eligibility"
+                    readOnly
+                  />
+                </div>
 
-            {selectedDefinition.attributeSchema && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Attribute Schema</label>
-                <pre className="rounded border bg-muted/30 p-3 text-xs font-mono overflow-x-auto">
-                  {JSON.stringify(JSON.parse(selectedDefinition.attributeSchema), null, 2)}
-                </pre>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                {selectedDefinition.attributeSchema && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Attribute Schema</label>
+                    <pre className="rounded border bg-muted/30 p-3 text-xs font-mono overflow-x-auto">
+                      {(() => {
+                        try {
+                          return JSON.stringify(JSON.parse(selectedDefinition.attributeSchema), null, 2)
+                        } catch {
+                          return selectedDefinition.attributeSchema
+                        }
+                      })()}
+                    </pre>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="executions">
+            <ExecutionContextTab entityType="account_type" entityCode={selectedDefinition.code} />
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   )

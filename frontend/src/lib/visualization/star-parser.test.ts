@@ -254,7 +254,7 @@ position_keeping.initiate_log(account_id=aid)
       const result = parseStarlarkSaga(source)
 
       expect(result.name).toBe('corporate_action_cost_adjustment')
-      expect(result.trigger).toBe('event:market-information.corporate-action.v1')
+      expect(result.trigger).toBe('event:market-information.observation-recorded.v1')
 
       const stepNames = result.steps.map((s) => s.name)
       expect(stepNames).toContain('check_idempotency')
