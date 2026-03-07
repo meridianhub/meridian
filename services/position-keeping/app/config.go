@@ -20,6 +20,7 @@ type Config struct {
 	Observability     ObservabilityConfig
 	Compaction        CompactionConfig
 	AccountValidation AccountValidationConfig
+	ReferenceData     ReferenceDataConfig
 }
 
 // ServerConfig holds gRPC server configuration
@@ -139,6 +140,13 @@ type AccountValidationConfig struct {
 	ConnectionTimeout time.Duration
 }
 
+// ReferenceDataConfig holds Reference Data service connection configuration.
+type ReferenceDataConfig struct {
+	// ServiceURL is the gRPC address of the Reference Data service.
+	// Optional - if not specified, instrument resolution is unavailable.
+	ServiceURL string
+}
+
 // LoadConfig loads configuration from environment variables with defaults
 func LoadConfig() (*Config, error) {
 	config := &Config{
@@ -150,6 +158,7 @@ func LoadConfig() (*Config, error) {
 		Observability:     loadObservabilityConfig(),
 		Compaction:        loadCompactionConfig(),
 		AccountValidation: loadAccountValidationConfig(),
+		ReferenceData:     loadReferenceDataConfig(),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -251,6 +260,13 @@ func loadAccountValidationConfig() AccountValidationConfig {
 			env.GetEnvOrDefault("INTERNAL_BANK_ACCOUNT_SERVICE_URL", "")),
 		CacheTTL:          env.GetEnvAsDuration("ACCOUNT_VALIDATION_CACHE_TTL", 1*time.Minute),
 		ConnectionTimeout: env.GetEnvAsDuration("ACCOUNT_VALIDATION_CONNECTION_TIMEOUT", 5*time.Second),
+	}
+}
+
+// loadReferenceDataConfig loads Reference Data service configuration from environment variables.
+func loadReferenceDataConfig() ReferenceDataConfig {
+	return ReferenceDataConfig{
+		ServiceURL: env.GetEnvOrDefault("REFERENCE_DATA_SERVICE_URL", ""),
 	}
 }
 

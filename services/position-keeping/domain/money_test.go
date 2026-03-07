@@ -432,16 +432,25 @@ func TestNewMoneyFromInstrumentCode(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "overlength code rejected",
-			amount:  decimal.NewFromInt(100),
-			code:    "KWHR",
-			wantErr: true,
+			name:           "multi-char non-currency instrument KWHR",
+			amount:         decimal.NewFromInt(100),
+			code:           "KWHR",
+			expectedCode:   "KWHR",
+			expectedAmount: decimal.NewFromInt(100),
 		},
 		{
-			name:    "single char code rejected",
-			amount:  decimal.NewFromInt(100),
-			code:    "X",
-			wantErr: true,
+			name:           "long instrument code CARBON_CREDIT",
+			amount:         decimal.NewFromFloat(25.50),
+			code:           "CARBON_CREDIT",
+			expectedCode:   "CARBON_CREDIT",
+			expectedAmount: decimal.NewFromFloat(25.50),
+		},
+		{
+			name:           "long instrument code GPU_HOUR",
+			amount:         decimal.NewFromFloat(3.75),
+			code:           "GPU_HOUR",
+			expectedCode:   "GPU_HOUR",
+			expectedAmount: decimal.NewFromFloat(3.75),
 		},
 		{
 			name:           "zero amount with non-currency",
@@ -495,6 +504,9 @@ func TestNewMoneyFromInstrumentCode_RoundTrip(t *testing.T) {
 		{"CO2", decimal.NewFromFloat(50.00)},
 		{"GPU", decimal.NewFromFloat(3.75)},
 		{"GAS", decimal.NewFromFloat(1.25)},
+		{"CARBON_CREDIT", decimal.NewFromFloat(100.00)},
+		{"GPU_HOUR", decimal.NewFromFloat(42.50)},
+		{"TONNE_CO2E", decimal.NewFromFloat(12.34)},
 	}
 
 	for _, inst := range instruments {
