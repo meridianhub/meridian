@@ -1584,6 +1584,7 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 | **Versioning UX** | Linear version history only | Current repository stores linear versions with diff summaries and point-in-time queries. Branching adds complexity without clear use case. Git manages source-level branching; the runtime stores applied versions. |
 | **Simulator execution model** | Async job with progress tracking | Batch replay of thousands of postings cannot be synchronous. Implement as background job with progress events. Existing simulation tools (single-item) remain synchronous. |
 | **Operator dashboard scope** | Per-tenant with platform-wide aggregate view | Tenants see their own failed sagas and DLQ. Platform admins see cross-tenant aggregates and trends. Same dashboard, filtered by role. |
+| **CEL version pinning** | Pin cel-go version, add golden-file replay tests | Kubernetes issue #120821 proved cel-go upgrades can break stored expressions (cost estimation, type scoping). Meridian pins cel-go in `go.mod`, adds golden-file tests comparing evaluation results across upgrades. Simulator (Phase 4) stores evaluation results alongside replay for drift detection. |
 
 ## 18. Open Questions
 
@@ -1592,10 +1593,7 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 2. **Simulator scope**: Full position restatement (expensive, accurate) or valuation-only
    replay (fast, approximate)? May offer both as simulator modes — needs prototyping in
    Phase 4 to determine performance characteristics.
-3. **CEL version pinning for replay**: If `google/cel-go` changes float rounding or
-   standard library behaviour between versions, historical replays may drift. Should the
-   enabled CEL functions and Starlark builtins be versioned alongside the manifest? Low
-   risk (CEL-go is stable, used by K8s) but relevant for multi-year replay accuracy.
+3. ~~**CEL version pinning for replay**~~: Promoted to decision — see §17.
 
 ---
 
