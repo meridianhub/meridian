@@ -207,6 +207,11 @@ func (s *Schema) Validate() error {
 
 // Validate checks that the handler definition is well-formed.
 func (h *HandlerDef) Validate(handlerName string) error {
+	// Normalize version: unset (0) defaults to 1
+	if h.Version == 0 {
+		h.Version = 1
+	}
+
 	for fieldName, field := range h.Params {
 		if err := field.Validate(fmt.Sprintf("%s.params.%s", handlerName, fieldName)); err != nil {
 			return err
@@ -386,6 +391,12 @@ func (r *Registry) LoadFromYAML(data []byte) error {
 		for i := range handler.Conversions {
 			conv := &handler.Conversions[i]
 			if conv.FromName != "" {
+				if existing, exists := r.deprecatedNames[conv.FromName]; exists {
+					return fmt.Errorf(
+						"%w: duplicate deprecated alias %q maps to both %s and %s",
+						ErrInvalidConversionRule, conv.FromName, existing.CurrentName, name,
+					)
+				}
 				r.deprecatedNames[conv.FromName] = &DeprecatedMapping{
 					CurrentName:    name,
 					ConversionRule: conv,

@@ -468,8 +468,18 @@ func wrapDeprecatedValidationHandler(oldName string, mapping *DeprecatedMapping,
 			})
 		}
 
-		// Validate using old param names mapped to current params
-		// For deprecated name aliases, we accept the old param names
+		// Translate old kwargs through param_mapping and validate against current schema
+		translatedKwargs, translatedNames := translateDeprecatedKwargs(kwargs, mapping.ConversionRule)
+		if err := validateUnknownParams(mapping.CurrentName, translatedNames, currentDef); err != nil {
+			return nil, err
+		}
+		if err := validateRequiredParams(mapping.CurrentName, translatedNames, currentDef); err != nil {
+			return nil, err
+		}
+		if err := validateParamTypes(mapping.CurrentName, translatedKwargs, currentDef); err != nil {
+			return nil, err
+		}
+
 		return buildMockResult(mapping.CurrentName, currentDef), nil
 	})
 }
@@ -505,6 +515,41 @@ func wrapDeprecatedCurrentHandler(fullName string, handlerDef *HandlerDef, callL
 
 		return buildMockResult(fullName, handlerDef), nil
 	})
+}
+
+// translateDeprecatedKwargs translates old parameter names to new names using the conversion rule's
+// param_mapping. Parameters not in the mapping are passed through unchanged.
+// Returns the translated kwargs and their names for subsequent validation.
+func translateDeprecatedKwargs(kwargs []starlark.Tuple, conv *ConversionRule) ([]starlark.Tuple, []string) {
+	if conv == nil || len(conv.ParamMapping) == 0 {
+		return kwargs, collectParamNames(kwargs)
+	}
+
+	// Build reverse mapping: old name -> new name
+	reverseMapping := make(map[string]string, len(conv.ParamMapping))
+	for newParam, oldParam := range conv.ParamMapping {
+		reverseMapping[oldParam] = newParam
+	}
+
+	translated := make([]starlark.Tuple, 0, len(kwargs))
+	names := make([]string, 0, len(kwargs))
+
+	for _, kw := range kwargs {
+		keyVal, ok := kw[0].(starlark.String)
+		if !ok {
+			translated = append(translated, kw)
+			continue
+		}
+		oldName := string(keyVal)
+		newName := oldName
+		if mapped, exists := reverseMapping[oldName]; exists {
+			newName = mapped
+		}
+		translated = append(translated, starlark.Tuple{starlark.String(newName), kw[1]})
+		names = append(names, newName)
+	}
+
+	return translated, names
 }
 
 // sortedParamNames returns the sorted parameter names from a HandlerDef.

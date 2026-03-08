@@ -383,10 +383,13 @@ handlers:
 	assert.Empty(t, warnings)
 
 	// Deprecated handler name should also be accessible and produce a warning
+	// Pass old param names (amount -> quantity via param_mapping)
 	initiateLog, err := testModule.(*starlarkstruct.Struct).Attr("initiate_log")
 	require.NoError(t, err)
 
-	_, err = starlark.Call(thread, initiateLog, nil, nil)
+	_, err = starlark.Call(thread, initiateLog, nil, []starlark.Tuple{
+		{starlark.String("amount"), starlark.String("100.00")},
+	})
 	require.NoError(t, err)
 
 	require.Len(t, warnings, 1)
@@ -550,4 +553,132 @@ handlers:
 	// Old name works (deprecated alias)
 	_, err = pk.Attr("initiate_log")
 	require.NoError(t, err)
+}
+
+func TestHandlerEvolution_DuplicateDeprecatedAlias(t *testing.T) {
+	yamlData := `
+service: test_service
+version: "2.0"
+handlers:
+  test.handler_a:
+    description: "Handler A"
+    version: 2
+    compensation_strategy: none
+    params:
+      id:
+        type: string
+        required: true
+    conversions:
+      - from_version: 1
+        from_name: test.old_name
+  test.handler_b:
+    description: "Handler B"
+    version: 2
+    compensation_strategy: none
+    params:
+      id:
+        type: string
+        required: true
+    conversions:
+      - from_version: 1
+        from_name: test.old_name
+`
+
+	registry := NewRegistry()
+	err := registry.LoadFromYAML([]byte(yamlData))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate deprecated alias")
+	assert.Contains(t, err.Error(), "test.old_name")
+}
+
+func TestHandlerEvolution_DeprecatedAliasParamTranslation(t *testing.T) {
+	yamlData := `
+service: test_service
+version: "2.0"
+handlers:
+  test.record_entry:
+    description: "Record an entry (v2)"
+    version: 2
+    compensation_strategy: none
+    params:
+      quantity:
+        type: Decimal
+        required: true
+      instrument_code:
+        type: string
+        required: true
+    returns:
+      entry_id:
+        type: string
+    conversions:
+      - from_version: 1
+        from_name: test.initiate_log
+        param_mapping:
+          quantity: amount
+          instrument_code: currency
+`
+
+	registry := NewRegistry()
+	err := registry.LoadFromYAML([]byte(yamlData))
+	require.NoError(t, err)
+
+	var warnings []ValidationWarning
+	modules, err := BuildValidationModulesWithWarnings(registry, nil, &warnings)
+	require.NoError(t, err)
+
+	thread := &starlark.Thread{Name: "test"}
+	testModule := modules["test"].(*starlarkstruct.Struct)
+
+	initiateLog, err := testModule.Attr("initiate_log")
+	require.NoError(t, err)
+
+	// Old param names should be translated and validated
+	_, err = starlark.Call(thread, initiateLog, nil, []starlark.Tuple{
+		{starlark.String("amount"), starlark.String("100.00")},
+		{starlark.String("currency"), starlark.String("GBP")},
+	})
+	require.NoError(t, err)
+
+	// Missing required old param should fail (amount maps to required quantity)
+	warnings = nil
+	_, err = starlark.Call(thread, initiateLog, nil, []starlark.Tuple{
+		{starlark.String("currency"), starlark.String("GBP")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MISSING_REQUIRED_PARAM")
+	assert.Contains(t, err.Error(), "quantity")
+
+	// Unknown old param should fail
+	warnings = nil
+	_, err = starlark.Call(thread, initiateLog, nil, []starlark.Tuple{
+		{starlark.String("amount"), starlark.String("100.00")},
+		{starlark.String("currency"), starlark.String("GBP")},
+		{starlark.String("totally_unknown"), starlark.String("bad")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "UNKNOWN_PARAM")
+}
+
+func TestHandlerEvolution_VersionDefaultsTo1(t *testing.T) {
+	// A handler with no explicit version should default to 1,
+	// making from_version: 1 invalid (must be < current version)
+	yamlData := `
+service: test
+version: "1.0"
+handlers:
+  test.handler:
+    description: "Test"
+    compensation_strategy: none
+    params:
+      id:
+        type: string
+        required: true
+    conversions:
+      - from_version: 1
+        from_name: test.old
+`
+
+	_, err := Parse([]byte(yamlData))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "from_version (1) must be less than current version (1)")
 }
