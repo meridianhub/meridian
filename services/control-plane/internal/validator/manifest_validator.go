@@ -605,7 +605,7 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		ve := parseStarlarkError(execErr, path)
 
 		// Enrich with structured error codes from handler validation failures
-		if enrichHandlerValidationError(execErr, &ve) {
+		if v.enrichHandlerValidationError(execErr, &ve) {
 			addError(result, ve)
 			return
 		}
@@ -1479,7 +1479,7 @@ func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]
 // enrichHandlerValidationError checks if a Starlark execution error is a handler
 // validation failure and enriches the ValidationError with structured codes and suggestions.
 // Returns true if the error was a handler validation failure.
-func enrichHandlerValidationError(execErr error, ve *ValidationError) bool {
+func (v *ManifestValidator) enrichHandlerValidationError(execErr error, ve *ValidationError) bool {
 	errStr := execErr.Error()
 
 	// Check for our structured validation failure codes from ValidationFailure errors
@@ -1509,8 +1509,7 @@ func enrichHandlerValidationError(execErr error, ve *ValidationError) bool {
 		ve.Code = schema.ValidationCodeUnknownHandler
 		ve.Message = fmt.Sprintf("unknown handler %q on service %q", serviceName+"."+methodName, serviceName)
 
-		// Get known handlers for this service from the schema
-		knownHandlers := listServiceHandlers(serviceName)
+		knownHandlers := v.listServiceHandlers(serviceName)
 		if len(knownHandlers) > 0 {
 			ve.AvailableFields = knownHandlers
 			if suggestion := findClosestMatch(methodName, knownHandlers); suggestion != "" {
@@ -1545,33 +1544,19 @@ func extractStructAttrError(errStr string) (serviceName, methodName string, ok b
 }
 
 // listServiceHandlers returns the handler method names (last segment) for a given service.
-func listServiceHandlers(serviceName string) []string {
+func (v *ManifestValidator) listServiceHandlers(serviceName string) []string {
 	var methods []string
-	for _, binding := range knownServiceBindings {
-		if binding != serviceName {
-			continue
-		}
-		// Look up handlers from the schema registry prefix
-		// Since we don't have the registry here, use the known bindings pattern
-		// to extract method names from the embedded schema
-		reg, err := schema.DefaultRegistry()
-		if err != nil {
-			return nil
-		}
-		prefix := serviceName + "."
-		for _, h := range reg.ListHandlers() {
-			if strings.HasPrefix(h, prefix) {
-				method := strings.TrimPrefix(h, prefix)
-				// Only include direct children (no nested dots)
-				if !strings.Contains(method, ".") {
-					methods = append(methods, method)
-				}
+	prefix := serviceName + "."
+	for _, h := range v.schemaRegistry.ListHandlers() {
+		if strings.HasPrefix(h, prefix) {
+			method := strings.TrimPrefix(h, prefix)
+			if !strings.Contains(method, ".") {
+				methods = append(methods, method)
 			}
 		}
-		sort.Strings(methods)
-		return methods
 	}
-	return nil
+	sort.Strings(methods)
+	return methods
 }
 
 // buildFieldPath extracts a dotted field path from a protovalidate Violation.
