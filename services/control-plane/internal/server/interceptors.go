@@ -120,32 +120,37 @@ func checkManifestRBAC(ctx context.Context, fullMethod string) error {
 	return nil
 }
 
+// requiredScopeLevel maps roles to scope-specific levels, decoupled from roleLevel.
+// Only roles used in manifestRoleRequirements need entries here.
+var requiredScopeLevel = map[auth.Role]int{
+	auth.RoleAuditor:  1,
+	auth.RoleOperator: 2,
+	auth.RoleAdmin:    3,
+}
+
+// manifestScopeLevel maps manifest-specific scope strings to their access level.
+var manifestScopeLevel = map[string]int{
+	"manifest:read":  1,
+	"manifest:write": 2,
+	"manifest:admin": 3,
+}
+
 // hasSufficientScope checks whether the API key's scopes cover the required role level.
 // Scope naming convention: "manifest:read" (auditor), "manifest:write" (operator), "manifest:admin" (admin).
+// If the API key has no manifest-specific scopes, the check passes (role check handles authorization).
 func hasSufficientScope(scopes []string, requiredRole auth.Role) bool {
-	scopeLevel := map[string]int{
-		"manifest:read":  1,
-		"manifest:write": 2,
-		"manifest:admin": 3,
-	}
-
-	requiredLevel, ok := roleLevel[requiredRole]
+	requiredLevel, ok := requiredScopeLevel[requiredRole]
 	if !ok {
 		return false
 	}
 
-	for _, scope := range scopes {
-		if level, exists := scopeLevel[scope]; exists && level >= requiredLevel {
-			return true
-		}
-	}
-
-	// If no manifest-specific scopes are present, allow (role check handles it)
 	hasManifestScope := false
 	for _, scope := range scopes {
-		if _, exists := scopeLevel[scope]; exists {
+		if level, exists := manifestScopeLevel[scope]; exists {
 			hasManifestScope = true
-			break
+			if level >= requiredLevel {
+				return true
+			}
 		}
 	}
 
