@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -150,14 +151,17 @@ func TestSagaBindingCache_TTLExpiry_TriggersRefresh(t *testing.T) {
 	assert.Equal(t, "process_payment", sagaName)
 	assert.Equal(t, 1, source.refreshCount("tenant-1"))
 
-	// Wait for TTL to expire
-	time.Sleep(5 * time.Millisecond)
-
-	// Should trigger a re-fetch
-	sagaName, found = cache.Get(ctx, "tenant-1", "/v1/payments")
+	// Wait for TTL to expire, then trigger a re-fetch
+	err := await.New().
+		AtMost(1 * time.Second).
+		PollInterval(1 * time.Millisecond).
+		Until(func() bool {
+			sagaName, found = cache.Get(ctx, "tenant-1", "/v1/payments")
+			return source.refreshCount("tenant-1") >= 2
+		})
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment", sagaName)
-	assert.Equal(t, 2, source.refreshCount("tenant-1"))
 }
 
 func TestSagaBindingCache_ConcurrentAccess(t *testing.T) {

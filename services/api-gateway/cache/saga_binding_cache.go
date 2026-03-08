@@ -2,7 +2,9 @@ package cache
 
 import (
 	"context"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -27,20 +29,22 @@ type SagaBindingSource interface {
 // and automatic refresh from a SagaBindingSource on cache miss.
 //
 // Thread-safety: All methods are safe for concurrent use.
+// Invalidation safety: A per-tenant generation counter prevents in-flight refreshes
+// from overwriting entries that were invalidated after the refresh started.
 type SagaBindingCache struct {
 	mu      sync.RWMutex
 	entries map[string]*tenantBindings // tenantID -> bindings
+	gens    map[string]*atomic.Uint64  // tenantID -> invalidation generation
 	source  SagaBindingSource
 	sfGroup singleflight.Group
 	ttl     time.Duration
+	logger  *slog.Logger
 }
 
 // tenantBindings holds cached saga bindings for a single tenant.
 type tenantBindings struct {
-	// pathToSaga maps api_path -> saga_name.
 	pathToSaga map[string]string
-	// expiresAt is when this cache entry becomes stale.
-	expiresAt time.Time
+	expiresAt  time.Time
 }
 
 // SagaBindingOption configures a SagaBindingCache.
@@ -55,17 +59,37 @@ func WithSagaBindingTTL(ttl time.Duration) SagaBindingOption {
 	}
 }
 
+// WithSagaBindingLogger sets the logger for the cache.
+func WithSagaBindingLogger(logger *slog.Logger) SagaBindingOption {
+	return func(c *SagaBindingCache) {
+		c.logger = logger
+	}
+}
+
 // NewSagaBindingCache creates a new SagaBindingCache.
 func NewSagaBindingCache(source SagaBindingSource, opts ...SagaBindingOption) *SagaBindingCache {
 	c := &SagaBindingCache{
 		entries: make(map[string]*tenantBindings),
+		gens:    make(map[string]*atomic.Uint64),
 		source:  source,
 		ttl:     DefaultSagaBindingTTL,
+		logger:  slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
 	return c
+}
+
+// tenantGeneration returns the generation counter for a tenant,
+// creating one if it doesn't exist. Must be called under c.mu (read or write).
+func (c *SagaBindingCache) tenantGeneration(tenantID string) *atomic.Uint64 {
+	g, ok := c.gens[tenantID]
+	if !ok {
+		g = &atomic.Uint64{}
+		c.gens[tenantID] = g
+	}
+	return g
 }
 
 // Get returns the saga name bound to the given API path for the specified tenant.
@@ -81,7 +105,13 @@ func (c *SagaBindingCache) Get(ctx context.Context, tenantID, path string) (saga
 	c.mu.RUnlock()
 
 	// Cache miss or expired: refresh from source (deduplicated via singleflight)
-	_, _ = c.doRefresh(ctx, tenantID)
+	if _, err := c.doRefresh(ctx, tenantID); err != nil {
+		c.logger.Warn("saga binding cache refresh failed",
+			"tenant_id", tenantID,
+			"error", err,
+		)
+		return "", false
+	}
 
 	// Re-check cache after refresh
 	c.mu.RLock()
@@ -97,8 +127,12 @@ func (c *SagaBindingCache) Get(ctx context.Context, tenantID, path string) (saga
 
 // Invalidate clears cached bindings for the specified tenant.
 // The next Get call for this tenant will trigger a refresh from the source.
+// Uses a generation counter to prevent in-flight refreshes from overwriting
+// the invalidation with stale data.
 func (c *SagaBindingCache) Invalidate(_ context.Context, tenantID string) error {
 	c.mu.Lock()
+	// Bump generation so any in-flight refresh for this tenant is fenced out
+	c.tenantGeneration(tenantID).Add(1)
 	delete(c.entries, tenantID)
 	c.mu.Unlock()
 	return nil
@@ -112,17 +146,32 @@ func (c *SagaBindingCache) Refresh(ctx context.Context, tenantID string) error {
 
 // doRefresh loads bindings from the source and populates the cache.
 // Uses singleflight to deduplicate concurrent refreshes for the same tenant.
+// Uses a generation counter to prevent stale writes after invalidation.
 func (c *SagaBindingCache) doRefresh(ctx context.Context, tenantID string) (map[string]string, error) {
 	result, err, _ := c.sfGroup.Do(tenantID, func() (interface{}, error) {
+		// Re-check cache inside singleflight to avoid redundant loads
+		c.mu.RLock()
+		if entry, ok := c.entries[tenantID]; ok && time.Now().Before(entry.expiresAt) {
+			c.mu.RUnlock()
+			return entry.pathToSaga, nil
+		}
+		// Capture generation before the load (under lock to match Invalidate)
+		gen := c.tenantGeneration(tenantID).Load()
+		c.mu.RUnlock()
+
 		bindings, err := c.source.GetBindingsForTenant(ctx, tenantID)
 		if err != nil {
 			return nil, err
 		}
 
+		// Only write if generation hasn't changed (no invalidation happened during load)
 		c.mu.Lock()
-		c.entries[tenantID] = &tenantBindings{
-			pathToSaga: bindings,
-			expiresAt:  time.Now().Add(c.ttl),
+		currentGen := c.tenantGeneration(tenantID).Load()
+		if gen == currentGen {
+			c.entries[tenantID] = &tenantBindings{
+				pathToSaga: bindings,
+				expiresAt:  time.Now().Add(c.ttl),
+			}
 		}
 		c.mu.Unlock()
 

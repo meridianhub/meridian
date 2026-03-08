@@ -3,9 +3,11 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 
@@ -49,8 +51,10 @@ func (s *ManifestBindingSource) GetBindingsForTenant(ctx context.Context, tenant
 
 	var manifestRaw []byte
 	if err := s.pool.QueryRow(ctx, query).Scan(&manifestRaw); err != nil {
-		// No manifest applied yet - return empty bindings
-		return map[string]string{}, nil //nolint:nilerr // pgx.ErrNoRows is expected when no manifest exists
+		if errors.Is(err, pgx.ErrNoRows) {
+			return map[string]string{}, nil
+		}
+		return nil, fmt.Errorf("query manifest bindings: %w", err)
 	}
 
 	var manifest manifestJSON
