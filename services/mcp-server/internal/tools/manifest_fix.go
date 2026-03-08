@@ -367,7 +367,10 @@ func (s *kwargScanner) handleTopLevelIdent() {
 	}
 	ident := s.src[start:s.pos]
 
-	if s.pos < len(s.src) && s.src[s.pos] == '=' && !isPrecededByIdent(s.src, start) {
+	// Match "ident=" but not "ident==" (comparison operator)
+	if s.pos < len(s.src) && s.src[s.pos] == '=' &&
+		(s.pos+1 >= len(s.src) || s.src[s.pos+1] != '=') &&
+		!isPrecededByIdent(s.src, start) {
 		if newName, ok := s.reverseMapping[ident]; ok {
 			s.result.WriteString(newName)
 			return
