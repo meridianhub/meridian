@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Navigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,7 @@ import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { MoneyDisplay } from '@/shared/money-display'
 import { AuditTrail, EntityLink, Breadcrumbs } from '@/shared'
+import { useAccountResolver } from '@/shared/use-account-resolver'
 import { DepositDialog } from './deposit-dialog'
 import { WithdrawDialog } from './withdraw-dialog'
 import { ControlDialog } from './control-dialog'
@@ -353,13 +354,23 @@ export function AccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>()
 
   const { data: account, isLoading, isError, refetch, isFetching } = useAccountDetail(accountId)
+  const { data: resolved, isLoading: isResolving } = useAccountResolver(
+    // Only resolve when current-account returns 404 (null)
+    account === null && !isLoading ? accountId : undefined,
+  )
 
   if (isLoading) {
     return <AccountDetailSkeleton />
   }
 
-  // null = 404 from server; isError = network/server failure; undefined = query not yet resolved
+  // Current-account returned 404 — check if it's an internal account
   if (account === null) {
+    if (isResolving) {
+      return <AccountDetailSkeleton />
+    }
+    if (resolved?.type === 'internal') {
+      return <Navigate to={`/internal-accounts/${encodeURIComponent(resolved.accountId)}`} replace />
+    }
     return <AccountNotFound accountId={accountId} />
   }
 

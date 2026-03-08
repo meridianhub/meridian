@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom'
-import { isUuid } from '@/lib/utils'
 
 export type EntityType =
   | 'account'
@@ -14,10 +13,7 @@ function entityPath(type: EntityType, id: string): string {
   const encodedId = encodeURIComponent(id)
   switch (type) {
     case 'account':
-      // UUID → current account, human-readable code → internal account
-      return isUuid(id)
-        ? `/accounts/${encodedId}`
-        : `/internal-accounts/${encodedId}`
+      return `/accounts/${encodedId}`
     case 'current-account':
       return `/accounts/${encodedId}`
     case 'party':
