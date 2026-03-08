@@ -26,7 +26,7 @@ instructions: |
 
 # The Meridian Economy Runtime: From Business Description to Running Economy
 
-## Status: DRAFT v2
+## Status: READY
 
 ## Executive Summary
 
@@ -979,24 +979,22 @@ The APIs exist but there is no UI for operators to see and resolve failures:
 
 ### 7.5 In-Flight Saga Migration
 
-**Decision needed**: When a manifest is updated, what happens to sagas already executing
-on the old version?
-
-| Option | Trade-off |
-|--------|-----------|
-| **Drain** (recommended) | Running sagas complete on old version. New events trigger new version. Simple, safe, brief overlap. |
-| **Immediate switchover** | Risk of mid-execution schema mismatch. Only viable if handler ABI is backward-compatible (which conversion rules ensure). |
-| **Versioned execution** | Each saga instance records its manifest version. Most correct, highest complexity. |
-
-**Recommendation: Drain.** Running sagas complete on the version they started with. New
-saga instances use the new manifest version. The event router's `Reload()` atomically
-swaps the registry, so new events immediately use the new version while in-flight sagas
-continue with their existing state.
+**Decision: Drain.** Running sagas complete on the version they started with. New saga
+instances use the new manifest version immediately. The event router's `Reload()`
+atomically swaps the registry, so new events use the new version while in-flight sagas
+continue with their existing execution plan.
 
 This works because saga instances already persist their step results and handler params.
 A running saga doesn't re-read the manifest mid-execution — it follows its persisted
 execution plan. The overlap period is the time for the longest running saga to complete
 (typically seconds to minutes, bounded by Starlark's guaranteed termination).
+
+Alternatives considered:
+
+| Option | Why Not |
+|--------|---------|
+| **Immediate switchover** | Risk of mid-execution schema mismatch. Only viable if handler ABI is backward-compatible. |
+| **Versioned execution** | Each saga instance records its manifest version. Most correct, highest complexity. Deferred to future if drain proves insufficient. |
 
 ---
 
@@ -1060,11 +1058,109 @@ No per-tenant throttling exists today. A noisy tenant could consume disproportio
 resources. The gateway middleware pattern supports adding rate limiting — this is an
 implementation task, not an architectural change.
 
+## 10. Security Model
+
+### 10.1 Manifest Authorisation
+
+Manifest operations (validate, plan, apply) are gated by the tenant isolation layer
+but lack fine-grained role-based access control. The staff model (`UserEntity.Role`)
+defines an `operator` default role but does not enforce permissions on manifest apply.
+
+**Current state**: Any authenticated caller within a tenant context can apply manifests.
+Tenant isolation (schema-per-tenant) prevents cross-tenant access, but within a tenant,
+all staff have equal manifest privileges.
+
+**Required (Phase 0)**:
+
+| Operation | Required Role | Rationale |
+|-----------|--------------|-----------|
+| `ManifestValidate` | `viewer` | Read-only, safe to allow broadly |
+| `ManifestPlan` | `editor` | Shows diff, no side effects |
+| `ManifestApply` | `admin` | Mutates running economy |
+| `CreateTenantOverride` | `admin` | Replaces platform saga with custom script |
+
+Implementation: gRPC interceptor checks `UserEntity.Role` against required role for
+each RPC. The API key `Scopes` field (`pq.StringArray`) already supports scoped access.
+
+### 10.2 Saga Runtime Isolation
+
+Saga execution enforces tenant isolation via `PartyScope` in `RunnerInput`. All handler
+calls within a saga inherit the tenant context, and all database queries use
+`WithGormTenantTransaction(ctx, ...)` to apply schema-per-tenant scoping. No saga can
+access data from another tenant's schema.
+
+**Starlark sandbox**: Saga scripts run in Starlark's sandboxed interpreter with no
+filesystem, network, or OS access. The only external operations available are the typed
+service module calls (which enforce tenant scope) and pure CEL expressions.
+
 ---
 
-## 10. Compiler Theory Applied to Meridian
+## 11. Testing Strategy
 
-### 10.1 Lessons from Runtime/Compiler Design
+### 11.1 Per-Phase Testing
+
+| Phase | Test Type | What It Validates |
+|-------|-----------|-------------------|
+| Phase 0 | Unit + integration | Typed modules reject invalid handler calls; trigger validation catches bad paths; CEL field validation warns on typos; conversion rules rewrite deprecated calls |
+| Phase 1 | Integration | Graph extraction produces correct relationships; impact analysis traces transitive dependencies |
+| Phase 2 | Integration + golden files | Compiler generates valid manifests from business descriptions; generated manifests pass validation; golden file comparison for regression |
+| Phase 3 | E2E (Playwright) | IDE wizard produces deployable economies; editor validation fires inline; deploy flow works end-to-end |
+| Phase 3.5 | Integration | Operator dashboard surfaces failed sagas; DLQ replay works end-to-end |
+| Phase 4 | Integration + benchmark | Simulator replays historical postings accurately; impact reports match manual calculation; batch performance within acceptable bounds |
+
+### 11.2 Manifest Validation Test Matrix
+
+The manifest validator is the critical safety gate. Every validation rule requires
+both a positive test (valid manifest passes) and a negative test (invalid manifest
+is rejected with the correct error).
+
+```text
+For each validation rule:
+  1. Happy path: valid manifest passes without warnings
+  2. Rejection: invalid input rejected with structured error (location, severity, suggestion)
+  3. Boundary: edge cases (empty arrays, max lengths, special characters)
+  4. Conversion: deprecated calls auto-converted with warning (not error)
+```
+
+### 11.3 Simulator Accuracy Verification
+
+The economy simulator (Phase 4) requires verification that replay results match
+actual historical outcomes when run with unchanged rules (identity test). This
+establishes a baseline before testing modified rules.
+
+---
+
+## 12. Migration Path
+
+### 12.1 Existing Tenants
+
+Tenants deployed before typed service modules can continue operating without changes.
+The migration path is incremental:
+
+1. **Phase 0 deploy**: Existing manifests re-validated against typed modules on next
+   `ManifestApply`. If validation fails, the apply is blocked with structured errors
+   showing exactly which handler calls need updating.
+2. **Conversion rules handle most cases**: Deprecated handler calls (e.g., `initiate_log`
+   → `record_entry`) are auto-converted by the mutating validator phase. Tenants see
+   conversion warnings but their manifests still apply.
+3. **No forced migration**: Tenants are not required to update their manifests until
+   they choose to apply a new version. Running economies continue unaffected.
+
+### 12.2 Platform Saga Seeding
+
+New tenants receive platform default sagas via `SeedTenant()`, which creates
+`saga_definition` rows with `platform_ref` (pointer to `platform_saga_definition`,
+no script copy). Tenants override via `CreateTenantOverride`, which replaces the
+`platform_ref` with a custom script (similarity check < 90%, created as DRAFT).
+
+Existing tenants without seeded sagas can be seeded retroactively — `SeedTenant()`
+is idempotent (`ON CONFLICT DO NOTHING`).
+
+---
+
+## 13. Compiler Theory Applied to Meridian
+
+### 13.1 Lessons from Runtime/Compiler Design
 
 | Compiler Concept | Meridian Application |
 |------------------|---------------------|
@@ -1084,7 +1180,7 @@ implementation task, not an architectural change.
 | **Mutating pass** | Auto-convert deprecated handler calls before validation (K8s admission controller pattern) |
 | **Deprecation** | Structured handler deprecation with mechanical rewrite rules |
 
-### 10.2 What a "Meridian Program" Looks Like
+### 13.2 What a "Meridian Program" Looks Like
 
 ```yaml
 # This is a complete, self-contained Meridian program.
@@ -1166,7 +1262,7 @@ sagas:
     script_ref: "monthly_fleet_invoice.star"
 ```
 
-### 10.3 The Compilation Target
+### 13.3 The Compilation Target
 
 The compiler's job is to produce output like the above from input like:
 
@@ -1177,7 +1273,7 @@ Every field in the output maps to a manifest proto field. Every Starlark call ma
 handler in `handlers.yaml`. Every trigger maps to a topic in the registry or a provider
 connection. The type checker validates all of this.
 
-### 10.4 File Format Conventions
+### 13.4 File Format Conventions
 
 | Artifact | Format | Why |
 |----------|--------|-----|
@@ -1195,11 +1291,11 @@ machine artifacts, Proto for the type system.**
 
 ---
 
-## 11. Implementation Phases
+## 14. Implementation Phases
 
 ### Phase 0: Foundational Improvements (prerequisite for all layers)
 
-Phase 0 is sequenced as **four independent PRs** that can be developed in parallel.
+Phase 0 is sequenced as **five independent PRs** that can be developed in parallel.
 Each PR is self-contained and delivers value on its own.
 
 #### 0.1 Typed Service Modules in Validator (PR 1 -- highest priority)
@@ -1246,6 +1342,16 @@ Builds on typed service modules to support handler versioning.
 - **Test**: submit manifest with deprecated `initiate_log(amount=..., direction=...)` and verify
   auto-conversion to `record_entry(quantity=..., side=...)`
 
+#### 0.5 Manifest RBAC (PR 5 -- parallelisable)
+
+Enforces role-based access control on manifest operations.
+
+- Add gRPC interceptor checking `UserEntity.Role` against required role per RPC
+- `ManifestValidate` requires `viewer`, `ManifestPlan` requires `editor`, `ManifestApply` requires `admin`
+- `CreateTenantOverride` requires `admin`
+- API key `Scopes` field enforces scoped access for service-to-service calls
+- **Test**: call `ManifestApply` with `viewer` role and verify rejection
+
 ### Phase 1: Relationship Graph
 
 - Extract relationships from typed service module calls during validation
@@ -1278,10 +1384,12 @@ Builds on typed service modules to support handler versioning.
 
 ### Phase 4: Economy Simulator
 
+- Async job framework: submit replay request, receive job ID, poll/stream progress
 - Batch re-valuation engine (replay historical postings with modified economy rules)
 - Position restatement simulator (what-if bucketing/validation changes)
 - Scenario parametrisation for forecasting service (e.g., "demand + 10%")
 - Impact report generation (revenue, margin, counterparty profitability)
+- Identity test: unchanged rules must reproduce actual historical results (accuracy baseline)
 - Integration with compiler: "Change pricing" → generate manifest diff → simulate impact → approve
 
 ### Phase 5: Polish and Network Effects (future)
@@ -1295,7 +1403,7 @@ Builds on typed service modules to support handler versioning.
 
 ---
 
-## 12. Success Criteria
+## 15. Success Criteria
 
 1. A user can describe a business in natural language and get a deployed economy in under 5 minutes
 2. The generated manifest is human-readable and freely editable (shadcn test)
@@ -1309,10 +1417,14 @@ Builds on typed service modules to support handler versioning.
    before deploying
 9. Failed sagas are visible in an operator dashboard with one-click DLQ replay
 10. In-flight sagas drain safely when manifests are updated (no mid-execution breakage)
+11. Manifest apply requires `admin` role -- `viewer` and `editor` roles are rejected
+12. Existing tenants can re-apply manifests without modification (conversion rules
+    handle deprecated calls automatically)
+13. Economy simulator identity test passes -- unchanged rules reproduce actual historical results
 
 ---
 
-## 13. Throughput Profile
+## 16. Throughput Profile
 
 The architecture optimises for **correctness over raw throughput**. This is a deliberate
 design choice, not a limitation to fix.
@@ -1364,7 +1476,7 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 
 ---
 
-## 14. Decisions Made During Design Review
+## 17. Decisions Made During Design Review
 
 | Decision | Resolution | Rationale |
 |----------|-----------|-----------|
@@ -1375,16 +1487,19 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 | **API trigger model** | Endpoint-binding (maps existing gRPC endpoints to sagas) | Platform sagas provide defaults; tenants override via `CreateTenantOverride`. |
 | **In-flight saga migration** | Drain (running sagas complete on old version) | Saga instances persist their execution plan. New events use new version immediately. |
 | **Error default classification** | FATAL (fail-safe) | Prevents infinite retries on unexpected errors. Explicit `TransientError` wrapper for retryable cases. |
+| **AI model** | MCP server is model-agnostic; client selects the model | MCP tools are the API surface. Claude Code, ChatGPT, or custom agents call the same tools. No model coupling in the platform. |
+| **Multi-manifest** | Single self-contained manifest per tenant | Manifest proto is explicitly self-contained (no external references). Simplifies validation, diffing, and rollback. Multi-manifest composition deferred to future if needed. |
+| **Versioning UX** | Linear version history only | Current repository stores linear versions with diff summaries and point-in-time queries. Branching adds complexity without clear use case. Git manages source-level branching; the runtime stores applied versions. |
+| **Simulator execution model** | Async job with progress tracking | Batch replay of thousands of postings cannot be synchronous. Implement as background job with progress events. Existing simulation tools (single-item) remain synchronous. |
+| **Operator dashboard scope** | Per-tenant with platform-wide aggregate view | Tenants see their own failed sagas and DLQ. Platform admins see cross-tenant aggregates and trends. Same dashboard, filtered by role. |
 
-## 15. Open Questions
+## 18. Open Questions
 
-1. **AI model**: Which LLM powers the compiler? Claude via MCP? Pluggable?
-2. **Multi-manifest**: Can an economy be split across multiple manifests (like microservices), or always one file?
-3. **Versioning UX**: Git-like branching for manifests? Or linear version history only?
-4. **Handler sunset enforcement**: When do conversion rules get removed? After N manifest versions? Calendar date?
-5. **Simulator scope**: Full position restatement (expensive, accurate) or valuation-only replay (fast, approximate)?
-6. **Simulator execution model**: Synchronous (wait for result) or async job with progress tracking?
-7. **Operator dashboard scope**: Platform-wide view or per-tenant? Both?
+1. **Handler sunset enforcement**: When do conversion rules get removed? After N manifest
+   versions? Calendar date? Needs operational experience from Phase 0.4 before deciding.
+2. **Simulator scope**: Full position restatement (expensive, accurate) or valuation-only
+   replay (fast, approximate)? May offer both as simulator modes — needs prototyping in
+   Phase 4 to determine performance characteristics.
 
 ---
 
