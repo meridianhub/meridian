@@ -98,6 +98,8 @@ func (g *RelationshipGraph) Impact(nodeID string) *ImpactResult {
 
 // ExtractRelationshipGraph builds a relationship graph from a manifest and Starlark handler call logs.
 // The callLogs map is keyed by saga name, with each value being the handler calls made by that saga's script.
+// Returns a graph containing nodes (instruments, account_types, sagas, handlers) and edges
+// (denominated_in, converts, triggers_on, calls_handler, uses_instrument, reads_from, writes_to).
 func ExtractRelationshipGraph(
 	manifest *controlplanev1.Manifest,
 	callLogs map[string][]schema.HandlerCallInfo,

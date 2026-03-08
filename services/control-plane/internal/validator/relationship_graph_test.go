@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 
@@ -303,5 +304,10 @@ func assertEdgeExists(t *testing.T, g *RelationshipGraph, source, target string,
 			return
 		}
 	}
-	t.Errorf("edge %s -> %s [%s] not found in graph", source, target, rel)
+	edges := make([]string, 0, len(g.Edges))
+	for _, e := range g.Edges {
+		edges = append(edges, fmt.Sprintf("%s -> %s [%s]", e.Source, e.Target, e.Relationship))
+	}
+	sort.Strings(edges)
+	t.Errorf("edge %s -> %s [%s] not found in graph; existing edges: %v", source, target, rel, edges)
 }
