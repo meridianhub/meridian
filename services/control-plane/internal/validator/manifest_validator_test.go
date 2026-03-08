@@ -1638,3 +1638,207 @@ func TestValidatePartyTypes_MultipleErrors_ReportedAll(t *testing.T) {
 	assert.Contains(t, codes, "INVALID_JSON_SCHEMA")
 	assert.Contains(t, codes, "CEL_UNDECLARED_REFERENCE")
 }
+
+// --- Webhook trigger validation tests (Task 3) ---
+
+func TestValidate_WebhookTrigger_UnknownSource_Error(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_payment_webhook",
+		Trigger: "webhook:nonexistent.payment.succeeded",
+		Script:  "def execute(ctx):\n    return {}\n",
+	})
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "UNKNOWN_WEBHOOK_SOURCE" {
+			found = true
+			assert.Contains(t, e.Message, "nonexistent")
+			assert.Equal(t, "sagas[1].trigger", e.Path)
+			break
+		}
+	}
+	assert.True(t, found, "expected UNKNOWN_WEBHOOK_SOURCE error, got errors: %v", result.Errors)
+}
+
+func TestValidate_WebhookTrigger_ValidSource_Passes(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{
+				ConnectionId: "stripe-payments",
+				ProviderName: "Stripe",
+				ProviderType: "payment_gateway",
+				Protocol:     controlplanev1.ProviderProtocol_PROVIDER_PROTOCOL_HTTPS,
+			},
+		},
+	}
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_stripe_webhook",
+		Trigger: "webhook:stripe-payments.payment.succeeded",
+		Script:  "def execute(ctx):\n    return {}\n",
+	})
+
+	result := v.Validate(m, nil)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "UNKNOWN_WEBHOOK_SOURCE", e.Code,
+			"unexpected UNKNOWN_WEBHOOK_SOURCE error: %v", e)
+	}
+}
+
+func TestValidate_WebhookTrigger_SuggestsCloseMatch(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{
+				ConnectionId: "stripe-payments",
+				ProviderName: "Stripe",
+				ProviderType: "payment_gateway",
+				Protocol:     controlplanev1.ProviderProtocol_PROVIDER_PROTOCOL_HTTPS,
+			},
+		},
+	}
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_stripe_webhook",
+		Trigger: "webhook:stripe-payment.payment.succeeded",
+		Script:  "def execute(ctx):\n    return {}\n",
+	})
+
+	result := v.Validate(m, nil)
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "UNKNOWN_WEBHOOK_SOURCE" {
+			found = true
+			assert.Contains(t, e.Suggestion, "stripe-payments")
+			assert.Contains(t, e.AvailableFields, "stripe-payments")
+			break
+		}
+	}
+	assert.True(t, found, "expected UNKNOWN_WEBHOOK_SOURCE error with suggestion")
+}
+
+func TestValidate_WebhookTrigger_NoOperationalGateway_Error(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = nil
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_webhook",
+		Trigger: "webhook:some-provider.event.received",
+		Script:  "def execute(ctx):\n    return {}\n",
+	})
+
+	result := v.Validate(m, nil)
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "UNKNOWN_WEBHOOK_SOURCE" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected UNKNOWN_WEBHOOK_SOURCE error when no operational_gateway defined")
+}
+
+// --- Scheduled trigger uniqueness tests (Task 4) ---
+
+func TestValidate_ScheduledTrigger_DuplicateName_Error(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "billing_saga_1",
+			Trigger: "scheduled:monthly_billing",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "another_saga",
+			Trigger: "api:/v1/other",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "billing_saga_2",
+			Trigger: "scheduled:monthly_billing",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DUPLICATE_SCHEDULED_TRIGGER" {
+			found = true
+			assert.Equal(t, "sagas[2].trigger", e.Path)
+			assert.Contains(t, e.Message, "monthly_billing")
+			assert.Contains(t, e.Message, "sagas[0]")
+			break
+		}
+	}
+	assert.True(t, found, "expected DUPLICATE_SCHEDULED_TRIGGER error, got errors: %v", result.Errors)
+}
+
+func TestValidate_ScheduledTrigger_UniqueNames_Passes(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "daily_report",
+			Trigger: "scheduled:daily_report",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "monthly_billing",
+			Trigger: "scheduled:monthly_billing",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "DUPLICATE_SCHEDULED_TRIGGER", e.Code,
+			"unexpected DUPLICATE_SCHEDULED_TRIGGER error: %v", e)
+	}
+}
+
+func TestValidate_ScheduledTrigger_SameNameDifferentTriggerType_NoConflict(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "monthly_billing_scheduled",
+			Trigger: "scheduled:monthly_billing",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "monthly_billing_api",
+			Trigger: "api:/v1/monthly_billing",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "DUPLICATE_SCHEDULED_TRIGGER", e.Code,
+			"unexpected DUPLICATE_SCHEDULED_TRIGGER error: %v", e)
+	}
+}
