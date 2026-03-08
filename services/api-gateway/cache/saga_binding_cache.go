@@ -34,7 +34,7 @@ type SagaBindingSource interface {
 type SagaBindingCache struct {
 	mu      sync.RWMutex
 	entries map[string]*tenantBindings // tenantID -> bindings
-	gens    map[string]*atomic.Uint64  // tenantID -> invalidation generation
+	gens    sync.Map                   // tenantID -> *atomic.Uint64 (invalidation generation)
 	source  SagaBindingSource
 	sfGroup singleflight.Group
 	ttl     time.Duration
@@ -70,7 +70,6 @@ func WithSagaBindingLogger(logger *slog.Logger) SagaBindingOption {
 func NewSagaBindingCache(source SagaBindingSource, opts ...SagaBindingOption) *SagaBindingCache {
 	c := &SagaBindingCache{
 		entries: make(map[string]*tenantBindings),
-		gens:    make(map[string]*atomic.Uint64),
 		source:  source,
 		ttl:     DefaultSagaBindingTTL,
 		logger:  slog.Default(),
@@ -82,13 +81,16 @@ func NewSagaBindingCache(source SagaBindingSource, opts ...SagaBindingOption) *S
 }
 
 // tenantGeneration returns the generation counter for a tenant,
-// creating one if it doesn't exist. Must be called under c.mu (read or write).
+// creating one atomically if it doesn't exist. Safe for concurrent use
+// without external locking (uses sync.Map internally).
 func (c *SagaBindingCache) tenantGeneration(tenantID string) *atomic.Uint64 {
-	g, ok := c.gens[tenantID]
-	if !ok {
-		g = &atomic.Uint64{}
-		c.gens[tenantID] = g
+	if v, ok := c.gens.Load(tenantID); ok {
+		if g, ok := v.(*atomic.Uint64); ok {
+			return g
+		}
 	}
+	actual, _ := c.gens.LoadOrStore(tenantID, &atomic.Uint64{})
+	g, _ := actual.(*atomic.Uint64)
 	return g
 }
 
@@ -155,9 +157,10 @@ func (c *SagaBindingCache) doRefresh(ctx context.Context, tenantID string) (map[
 			c.mu.RUnlock()
 			return entry.pathToSaga, nil
 		}
-		// Capture generation before the load (under lock to match Invalidate)
-		gen := c.tenantGeneration(tenantID).Load()
 		c.mu.RUnlock()
+
+		// Capture generation before the load
+		gen := c.tenantGeneration(tenantID).Load()
 
 		bindings, err := c.source.GetBindingsForTenant(ctx, tenantID)
 		if err != nil {
