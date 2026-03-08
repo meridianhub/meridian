@@ -161,6 +161,21 @@ func TestManifestRBACUnaryInterceptor_UnprotectedMethodAllowed(t *testing.T) {
 	assert.Equal(t, "ok", resp)
 }
 
+func TestManifestRBACUnaryInterceptor_UnlistedControlPlaneRPCDenied(t *testing.T) {
+	interceptor := ManifestRBACUnaryInterceptor()
+	ctx := contextWithClaims([]string{"admin"}, nil)
+
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+		FullMethod: "/meridian.control_plane.v1.SomeNewService/SomeMethod",
+	}, noopUnaryHandler)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+	assert.Contains(t, st.Message(), "no RBAC rule configured")
+}
+
 func TestManifestRBACUnaryInterceptor_OperatorCanReadHistory(t *testing.T) {
 	interceptor := ManifestRBACUnaryInterceptor()
 	ctx := contextWithClaims([]string{"operator"}, nil)
@@ -256,7 +271,9 @@ func TestManifestRBACUnaryInterceptor_DescriptiveErrorMessages(t *testing.T) {
 			FullMethod: "/meridian.control_plane.v1.ApplyManifestService/ApplyManifest",
 		}, noopUnaryHandler)
 
-		st, _ := status.FromError(err)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
 		assert.Contains(t, st.Message(), "admin role required")
 	})
 
@@ -266,7 +283,9 @@ func TestManifestRBACUnaryInterceptor_DescriptiveErrorMessages(t *testing.T) {
 			FullMethod: "/meridian.control_plane.v1.ApplyManifestService/ApplyManifest",
 		}, noopUnaryHandler)
 
-		st, _ := status.FromError(err)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
 		assert.Contains(t, st.Message(), "auditor")
 	})
 }

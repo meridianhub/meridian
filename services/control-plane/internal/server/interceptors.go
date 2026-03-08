@@ -4,12 +4,16 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// controlPlanePrefix is the gRPC namespace for control-plane services.
+const controlPlanePrefix = "/meridian.control_plane.v1."
 
 // roleLevel maps roles to numeric levels for hierarchy comparison.
 // Higher numbers indicate more privileged roles.
@@ -26,6 +30,9 @@ var roleLevel = map[auth.Role]int{
 // manifestRoleRequirements maps gRPC full method names to the minimum role required.
 // Roles are hierarchical: admin > operator > auditor.
 // A user with a higher role can access methods requiring a lower role.
+//
+// IMPORTANT: All control-plane RPCs must be listed here. Unlisted control-plane
+// RPCs are denied by the fail-closed check in checkManifestRBAC.
 var manifestRoleRequirements = map[string]auth.Role{
 	// ManifestHistoryService - read-only, auditor level
 	"/meridian.control_plane.v1.ManifestHistoryService/GetCurrentManifest":   auth.RoleAuditor,
@@ -37,6 +44,19 @@ var manifestRoleRequirements = map[string]auth.Role{
 
 	// SagaExecutionService - operational, operator level
 	"/meridian.control_plane.v1.SagaExecutionService/ExecuteSaga": auth.RoleOperator,
+
+	// CausationVisualizerService - read-only debugging, auditor level
+	"/meridian.control_plane.v1.CausationVisualizerService/GetCausationTreeForPosition":    auth.RoleAuditor,
+	"/meridian.control_plane.v1.CausationVisualizerService/GetCausationTreeForTransaction": auth.RoleAuditor,
+	"/meridian.control_plane.v1.CausationVisualizerService/GetCausationTreeForEvent":       auth.RoleAuditor,
+
+	// BalanceSheetService - read-only reporting, auditor level
+	"/meridian.control_plane.v1.BalanceSheetService/GetBalanceSheet":       auth.RoleAuditor,
+	"/meridian.control_plane.v1.BalanceSheetService/GetPositionDetails":    auth.RoleAuditor,
+	"/meridian.control_plane.v1.BalanceSheetService/ExportBalanceSheetCSV": auth.RoleAuditor,
+
+	// AuthService - internal service-to-service, service level
+	"/meridian.control_plane.v1.AuthService/ValidateAPIKey": auth.RoleService,
 }
 
 // meetsMinimumRole checks whether any of the user's roles meets or exceeds
@@ -59,8 +79,9 @@ func meetsMinimumRole(userRoles []string, minimumRole auth.Role) bool {
 // ManifestRBACUnaryInterceptor returns a gRPC unary interceptor that enforces
 // role-based access control on control-plane RPCs.
 //
-// Methods not listed in manifestRoleRequirements are allowed through (e.g., health checks).
-// The interceptor expects claims to be present in the context (populated by the auth interceptor).
+// The interceptor fails closed: any control-plane RPC not explicitly listed in
+// manifestRoleRequirements is denied. Non-control-plane methods (health, reflection)
+// pass through.
 func ManifestRBACUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -92,10 +113,15 @@ func ManifestRBACStreamInterceptor() grpc.StreamServerInterceptor {
 }
 
 // checkManifestRBAC validates that the authenticated user has sufficient role
-// for the requested method.
+// for the requested method. Fails closed for unlisted control-plane RPCs.
 func checkManifestRBAC(ctx context.Context, fullMethod string) error {
 	requiredRole, protected := manifestRoleRequirements[fullMethod]
 	if !protected {
+		// Fail closed: deny unlisted control-plane RPCs
+		if strings.HasPrefix(fullMethod, controlPlanePrefix) {
+			return status.Errorf(codes.PermissionDenied,
+				"permission denied: no RBAC rule configured for %s", fullMethod)
+		}
 		return nil
 	}
 
