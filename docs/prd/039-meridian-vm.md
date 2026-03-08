@@ -1,3 +1,29 @@
+---
+name: prd-meridian-economy-runtime
+description: >
+  Formalise Meridian as a programmable Economy Runtime with typed service modules,
+  handler evolution, relationship graph, AI compiler, and conversational IDE
+triggers:
+  - Working on manifest validation, typed service modules, or handler schemas
+  - Designing AI-assisted economy configuration or manifest generation
+  - Building the compiler pipeline or IDE wizard for economy creation
+  - Working on handler versioning, conversion rules, or ABI evolution
+  - Implementing relationship graph extraction or impact analysis
+  - Discussing Starlark/CEL bounded expressiveness or termination guarantees
+  - Building economy simulation or what-if impact analysis features
+  - Working on saga error taxonomy, DLQ, or operator dashboard
+instructions: |
+  This PRD formalises the existing Meridian architecture as an Economy Runtime and
+  defines three new layers (Relationship Graph, Compiler, IDE) plus three foundational
+  improvements (Typed Service Modules, Handler Evolution, Trigger Validation).
+  Key concepts: bounded expressiveness (Starlark + CEL), schema-driven programmability,
+  K8s-style handler conversion rules with CEL default expressions, endpoint-binding API
+  triggers, drain-based in-flight saga migration, FATAL-default error classification.
+  Implementation is sequenced into Phases 0-5, with Phase 0 split into 4 independent PRs.
+  Throughput target: 5-10k TPS sustainable (correctness over raw speed).
+  Refer to handlers.yaml as the ABI, manifest.proto as the program format.
+---
+
 # The Meridian Economy Runtime: From Business Description to Running Economy
 
 ## Status: DRAFT v2

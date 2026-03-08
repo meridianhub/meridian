@@ -87,6 +87,7 @@ stateDiagram-v2
 | [Event-Triggered Saga Execution](032-event-driven-valuation-saga.md) | Fourth saga trigger type (event:) for reactive workflows via domain events |
 | [Gateway Architecture](033-gateway-architecture.md) | Unified gateway architecture consolidating API, operational, and admin gateways |
 | [Frontend Service Alignment](034-frontend-service-alignment.md) | Service-aligned frontend modules, Storybook, and runtime tenant UI customisation |
+| [Meridian Economy Runtime](039-meridian-vm.md) | Formalise Meridian as programmable Economy Runtime with typed service modules, AI compiler, and IDE |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -218,6 +219,8 @@ material.
 - [Starlark Testing Framework](010-starlark-testing-framework.md) - Auto-validate Starlark scripts at upload time
 - [Event-Triggered Saga Execution](032-event-driven-valuation-saga.md) -
   Fourth saga trigger type (`event:`) for reactive workflows via domain events
+- [Meridian Economy Runtime](039-meridian-vm.md) -
+  Formalise Meridian as programmable Economy Runtime with AI compiler and IDE
 
 ### Settlement & Reconciliation
 
