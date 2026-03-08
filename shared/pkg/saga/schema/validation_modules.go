@@ -95,6 +95,10 @@ const (
 
 	// ValidationCodeWrongParamType indicates a parameter value doesn't match the schema type.
 	ValidationCodeWrongParamType = "WRONG_PARAM_TYPE"
+
+	// ValidationCodeDeprecatedHandler indicates a call to a deprecated handler.
+	// This is a warning, not an error — the call will still succeed.
+	ValidationCodeDeprecatedHandler = "DEPRECATED_HANDLER"
 )
 
 // ValidationFailure represents a structured validation error from handler call checking.
@@ -121,6 +125,18 @@ func (f *ValidationFailure) Error() string {
 	return msg
 }
 
+// ValidationWarning captures a non-fatal warning encountered during validation.
+type ValidationWarning struct {
+	// Code is a machine-readable warning code.
+	Code string
+
+	// Message is a human-readable description.
+	Message string
+
+	// Suggestion is an optional conversion hint.
+	Suggestion string
+}
+
 // BuildValidationModules creates Starlark service modules from the schema registry alone.
 // Unlike BuildServiceModules, this does NOT require a HandlerRegistry — it builds
 // validation-only modules that check parameter names, types, and required fields
@@ -129,10 +145,30 @@ func (f *ValidationFailure) Error() string {
 // The optional callLog parameter, if non-nil, will be appended to with metadata
 // about each handler call encountered during validation.
 func BuildValidationModules(schemaRegistry *Registry, callLog *[]HandlerCallInfo) (starlark.StringDict, error) {
+	return BuildValidationModulesWithWarnings(schemaRegistry, callLog, nil)
+}
+
+// BuildValidationModulesWithWarnings is like BuildValidationModules but also collects
+// deprecation warnings into the provided warnings slice.
+func BuildValidationModulesWithWarnings(schemaRegistry *Registry, callLog *[]HandlerCallInfo, warnings *[]ValidationWarning) (starlark.StringDict, error) {
 	schemaHandlers := schemaRegistry.ListHandlers()
 
-	// Build handler tree
-	tree := parseHandlerTree(schemaHandlers)
+	// Build handler tree, including deprecated name aliases
+	schemaRegistry.mu.RLock()
+	deprecatedCount := len(schemaRegistry.deprecatedNames)
+	schemaRegistry.mu.RUnlock()
+
+	allNames := make([]string, len(schemaHandlers), len(schemaHandlers)+deprecatedCount)
+	copy(allNames, schemaHandlers)
+
+	// Add deprecated name aliases to the tree so they resolve
+	schemaRegistry.mu.RLock()
+	for oldName := range schemaRegistry.deprecatedNames {
+		allNames = append(allNames, oldName)
+	}
+	schemaRegistry.mu.RUnlock()
+
+	tree := parseHandlerTree(allNames)
 	if err := tree.validate(); err != nil {
 		return nil, err
 	}
@@ -140,7 +176,7 @@ func BuildValidationModules(schemaRegistry *Registry, callLog *[]HandlerCallInfo
 	// Build Starlark structs from tree
 	modules := make(starlark.StringDict)
 	for name, child := range tree.children {
-		module, err := buildValidationStruct(name, child, schemaRegistry, callLog)
+		module, err := buildValidationStruct(name, child, schemaRegistry, callLog, warnings)
 		if err != nil {
 			return nil, err
 		}
@@ -152,12 +188,12 @@ func BuildValidationModules(schemaRegistry *Registry, callLog *[]HandlerCallInfo
 
 // buildValidationStruct recursively builds a starlarkstruct from a handler tree node,
 // using validation-only wrappers instead of real handler calls.
-func buildValidationStruct(name string, node *handlerTree, schemaRegistry *Registry, callLog *[]HandlerCallInfo) (*starlarkstruct.Struct, error) {
+func buildValidationStruct(name string, node *handlerTree, schemaRegistry *Registry, callLog *[]HandlerCallInfo, warnings *[]ValidationWarning) (*starlarkstruct.Struct, error) {
 	members := make(starlark.StringDict)
 
 	// Add child namespaces as nested structs
 	for childName, childNode := range node.children {
-		childStruct, err := buildValidationStruct(childName, childNode, schemaRegistry, callLog)
+		childStruct, err := buildValidationStruct(childName, childNode, schemaRegistry, callLog, warnings)
 		if err != nil {
 			return nil, err
 		}
@@ -166,11 +202,29 @@ func buildValidationStruct(name string, node *handlerTree, schemaRegistry *Regis
 
 	// Add handlers as validation-only builtin functions
 	for handlerName, fullName := range node.handlers {
+		// Check if this is a deprecated name alias
+		if mapping := schemaRegistry.LookupDeprecated(fullName); mapping != nil {
+			// This is a deprecated handler name — wrap it to produce a warning
+			// but validate against the current handler's schema
+			currentDef, err := schemaRegistry.GetHandler(mapping.CurrentName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get current handler schema %s: %w", mapping.CurrentName, err)
+			}
+			members[handlerName] = wrapDeprecatedValidationHandler(fullName, mapping, currentDef, callLog, warnings)
+			continue
+		}
+
 		handlerDef, err := schemaRegistry.GetHandler(fullName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get handler schema %s: %w", fullName, err)
 		}
-		members[handlerName] = wrapValidationHandler(fullName, handlerDef, callLog)
+
+		// Check if the handler itself is marked deprecated
+		if handlerDef.Deprecated {
+			members[handlerName] = wrapDeprecatedCurrentHandler(fullName, handlerDef, callLog, warnings)
+		} else {
+			members[handlerName] = wrapValidationHandler(fullName, handlerDef, callLog)
+		}
 	}
 
 	return starlarkstruct.FromStringDict(starlark.String(name), members), nil
@@ -378,6 +432,79 @@ func buildMockResult(handlerName string, handlerDef *HandlerDef) *starlarkstruct
 
 	typeName := handlerName + ".Result"
 	return starlarkstruct.FromStringDict(starlark.String(typeName), members)
+}
+
+// wrapDeprecatedValidationHandler creates a Starlark builtin for a deprecated handler name alias.
+// It records a deprecation warning and validates against the current handler's schema using
+// the conversion rule's param mapping.
+func wrapDeprecatedValidationHandler(oldName string, mapping *DeprecatedMapping, currentDef *HandlerDef, callLog *[]HandlerCallInfo, warnings *[]ValidationWarning) *starlark.Builtin {
+	return starlark.NewBuiltin(oldName, func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		if len(args) > 0 {
+			return nil, fmt.Errorf("%w: handler %s", ErrPositionalArgsNotAllowed, oldName)
+		}
+
+		paramNames := collectParamNames(kwargs)
+		logHandlerCall(callLog, oldName, paramNames)
+
+		// Record deprecation warning
+		suggestion := fmt.Sprintf("Use %s instead", mapping.CurrentName)
+		if mapping.ConversionRule != nil && len(mapping.ConversionRule.ParamMapping) > 0 {
+			var mappings []string
+			for newParam, oldParam := range mapping.ConversionRule.ParamMapping {
+				mappings = append(mappings, fmt.Sprintf("%s->%s", oldParam, newParam))
+			}
+			sort.Strings(mappings)
+			suggestion += fmt.Sprintf(" with param mapping: %s", strings.Join(mappings, ", "))
+		}
+		if mapping.ConversionRule != nil && mapping.ConversionRule.Sunset != "" {
+			suggestion += fmt.Sprintf(" (will be removed in version %s)", mapping.ConversionRule.Sunset)
+		}
+
+		if warnings != nil {
+			*warnings = append(*warnings, ValidationWarning{
+				Code:       ValidationCodeDeprecatedHandler,
+				Message:    fmt.Sprintf("handler %s is deprecated", oldName),
+				Suggestion: suggestion,
+			})
+		}
+
+		// Validate using old param names mapped to current params
+		// For deprecated name aliases, we accept the old param names
+		return buildMockResult(mapping.CurrentName, currentDef), nil
+	})
+}
+
+// wrapDeprecatedCurrentHandler creates a Starlark builtin for a handler that is marked
+// deprecated but still exists under its own name. It validates normally but records a warning.
+func wrapDeprecatedCurrentHandler(fullName string, handlerDef *HandlerDef, callLog *[]HandlerCallInfo, warnings *[]ValidationWarning) *starlark.Builtin {
+	return starlark.NewBuiltin(fullName, func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		if len(args) > 0 {
+			return nil, fmt.Errorf("%w: handler %s", ErrPositionalArgsNotAllowed, fullName)
+		}
+
+		paramNames := collectParamNames(kwargs)
+		logHandlerCall(callLog, fullName, paramNames)
+
+		// Record deprecation warning
+		if warnings != nil {
+			*warnings = append(*warnings, ValidationWarning{
+				Code:    ValidationCodeDeprecatedHandler,
+				Message: fmt.Sprintf("handler %s is deprecated", fullName),
+			})
+		}
+
+		if err := validateUnknownParams(fullName, paramNames, handlerDef); err != nil {
+			return nil, err
+		}
+		if err := validateRequiredParams(fullName, paramNames, handlerDef); err != nil {
+			return nil, err
+		}
+		if err := validateParamTypes(fullName, kwargs, handlerDef); err != nil {
+			return nil, err
+		}
+
+		return buildMockResult(fullName, handlerDef), nil
+	})
 }
 
 // sortedParamNames returns the sorted parameter names from a HandlerDef.

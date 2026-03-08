@@ -84,6 +84,8 @@ var (
 	ErrMissingCompensationStrategy  = errors.New("handler must declare either 'compensate' or 'compensation_strategy'")
 	ErrInvalidCompensationStrategy  = errors.New("invalid compensation_strategy value")
 	ErrConflictCompensationStrategy = errors.New("handler with 'compensate' should not set 'compensation_strategy' to non-auto value")
+	ErrInvalidConversionRule        = errors.New("invalid conversion rule")
+	ErrDeprecatedHandler            = errors.New("deprecated handler")
 )
 
 // Schema represents a collection of handler definitions for a service.
@@ -119,6 +121,35 @@ type HandlerDef struct {
 	// CompensationStrategy declares how compensation is handled when no compensate handler is set.
 	// Valid values: "auto" (implicit when compensate is set), "saga_managed", "none".
 	CompensationStrategy CompensationStrategy `yaml:"compensation_strategy,omitempty"`
+
+	// Version is the handler version number. Defaults to 1 if unset.
+	Version int `yaml:"version,omitempty"`
+
+	// IsDeprecated marks this handler as deprecated. Scripts calling it will receive a warning.
+	Deprecated bool `yaml:"deprecated,omitempty"`
+
+	// Conversions defines rules for converting calls from previous handler versions.
+	Conversions []ConversionRule `yaml:"conversions,omitempty"`
+}
+
+// ConversionRule defines how to convert a call from a deprecated handler to the current version.
+type ConversionRule struct {
+	// FromVersion is the version being converted from.
+	FromVersion int `yaml:"from_version"`
+
+	// FromName is the old handler name (if renamed).
+	FromName string `yaml:"from_name,omitempty"`
+
+	// ParamMapping maps old parameter names to new parameter names.
+	// Key: new param name, Value: old param name.
+	ParamMapping map[string]string `yaml:"param_mapping,omitempty"`
+
+	// Defaults provides default values for new parameters not present in old versions.
+	// Key: param name, Value: default value expression.
+	Defaults map[string]string `yaml:"defaults,omitempty"`
+
+	// Sunset is the version at which the old handler will be removed entirely.
+	Sunset string `yaml:"sunset,omitempty"`
 }
 
 // FieldDef defines a single field (parameter or return value).
@@ -188,7 +219,22 @@ func (h *HandlerDef) Validate(handlerName string) error {
 		}
 	}
 
-	// Compensation coverage: every handler must declare either compensate or compensation_strategy
+	if err := h.validateCompensation(handlerName); err != nil {
+		return err
+	}
+
+	for i := range h.Conversions {
+		if err := h.validateConversionRule(handlerName, i); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateCompensation checks compensation coverage: every handler must declare
+// either compensate or compensation_strategy, and the values must be consistent.
+func (h *HandlerDef) validateCompensation(handlerName string) error {
 	if h.Compensate == "" && h.CompensationStrategy == "" {
 		return fmt.Errorf("%w: %s", ErrMissingCompensationStrategy, handlerName)
 	}
@@ -201,7 +247,32 @@ func (h *HandlerDef) Validate(handlerName string) error {
 	if h.Compensate != "" && h.CompensationStrategy != "" && h.CompensationStrategy != CompensationStrategyAuto {
 		return fmt.Errorf("%w: %s", ErrConflictCompensationStrategy, handlerName)
 	}
+	return nil
+}
 
+// validateConversionRule checks a single conversion rule is well-formed.
+func (h *HandlerDef) validateConversionRule(handlerName string, index int) error {
+	conv := h.Conversions[index]
+
+	if conv.FromVersion <= 0 {
+		return fmt.Errorf("%w: %s conversions[%d] from_version must be positive", ErrInvalidConversionRule, handlerName, index)
+	}
+	if h.Version > 0 && conv.FromVersion >= h.Version {
+		return fmt.Errorf("%w: %s conversions[%d] from_version (%d) must be less than current version (%d)",
+			ErrInvalidConversionRule, handlerName, index, conv.FromVersion, h.Version)
+	}
+	for newParam := range conv.ParamMapping {
+		if _, exists := h.Params[newParam]; !exists {
+			return fmt.Errorf("%w: %s conversions[%d] param_mapping references unknown parameter %q",
+				ErrInvalidConversionRule, handlerName, index, newParam)
+		}
+	}
+	for defaultParam := range conv.Defaults {
+		if _, exists := h.Params[defaultParam]; !exists {
+			return fmt.Errorf("%w: %s conversions[%d] defaults references unknown parameter %q",
+				ErrInvalidConversionRule, handlerName, index, defaultParam)
+		}
+	}
 	return nil
 }
 
@@ -272,18 +343,29 @@ func (f *FieldDef) validateEnumValue(name string, params map[string]any) error {
 	return fmt.Errorf("%w: %s got %q, allowed: %v", ErrInvalidEnumValue, name, strVal, f.Values)
 }
 
+// DeprecatedMapping records how a deprecated handler name maps to its current replacement.
+type DeprecatedMapping struct {
+	// CurrentName is the fully-qualified name of the current handler.
+	CurrentName string
+
+	// ConversionRule is the conversion rule that applies.
+	ConversionRule *ConversionRule
+}
+
 // Registry manages multiple handler schemas.
 type Registry struct {
-	mu       sync.RWMutex
-	schemas  []*Schema
-	handlers map[string]*HandlerDef
+	mu              sync.RWMutex
+	schemas         []*Schema
+	handlers        map[string]*HandlerDef
+	deprecatedNames map[string]*DeprecatedMapping // old name -> current handler mapping
 }
 
 // NewRegistry creates a new empty schema registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		schemas:  make([]*Schema, 0),
-		handlers: make(map[string]*HandlerDef),
+		schemas:         make([]*Schema, 0),
+		handlers:        make(map[string]*HandlerDef),
+		deprecatedNames: make(map[string]*DeprecatedMapping),
 	}
 }
 
@@ -300,6 +382,16 @@ func (r *Registry) LoadFromYAML(data []byte) error {
 	r.schemas = append(r.schemas, schema)
 	for name, handler := range schema.Handlers {
 		r.handlers[name] = handler
+		// Index deprecated name mappings from conversion rules
+		for i := range handler.Conversions {
+			conv := &handler.Conversions[i]
+			if conv.FromName != "" {
+				r.deprecatedNames[conv.FromName] = &DeprecatedMapping{
+					CurrentName:    name,
+					ConversionRule: conv,
+				}
+			}
+		}
 	}
 
 	return nil
@@ -337,6 +429,27 @@ func (r *Registry) HasHandler(name string) bool {
 
 	_, ok := r.handlers[name]
 	return ok
+}
+
+// LookupDeprecated checks if a handler name is deprecated and returns
+// the mapping to the current handler, or nil if the name is not deprecated.
+func (r *Registry) LookupDeprecated(name string) *DeprecatedMapping {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.deprecatedNames[name]
+}
+
+// IsDeprecated returns true if the handler exists but is marked as deprecated.
+func (r *Registry) IsDeprecated(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	handler, ok := r.handlers[name]
+	if !ok {
+		return false
+	}
+	return handler.Deprecated
 }
 
 // LoadFromFile loads a schema from a YAML file.
@@ -418,6 +531,12 @@ type LinterMetadata struct {
 
 	// HasAutoCompensation indicates the handler has a compensate: field.
 	HasAutoCompensation bool
+
+	// IsDeprecated indicates the handler is deprecated and should produce a warning.
+	IsDeprecated bool
+
+	// ReplacedBy is the current handler name if this handler has been superseded.
+	ReplacedBy string
 }
 
 // BuildLinterMetadata extracts linter metadata from the schema registry.
@@ -441,7 +560,23 @@ func (r *Registry) BuildLinterMetadata() map[string]LinterMetadata {
 		} else {
 			meta.CompensationStrategy = string(handler.CompensationStrategy)
 		}
+		if handler.Deprecated {
+			meta.IsDeprecated = true
+		}
 		metadata[name] = meta
+	}
+
+	// Also add entries for deprecated name aliases so they can be detected
+	for oldName, mapping := range r.deprecatedNames {
+		if _, exists := metadata[oldName]; !exists {
+			// Get the current handler's metadata as a base
+			if currentMeta, ok := metadata[mapping.CurrentName]; ok {
+				deprecatedMeta := currentMeta
+				deprecatedMeta.IsDeprecated = true
+				deprecatedMeta.ReplacedBy = mapping.CurrentName
+				metadata[oldName] = deprecatedMeta
+			}
+		}
 	}
 
 	return metadata

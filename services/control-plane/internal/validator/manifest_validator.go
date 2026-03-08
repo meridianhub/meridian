@@ -584,7 +584,7 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		return
 	}
 
-	predeclared, callLog, err := v.buildStarlarkPredeclared()
+	predeclared, callLog, deprecationWarnings, err := v.buildStarlarkPredeclared()
 	if err != nil {
 		addError(result, ValidationError{
 			Severity: SeverityError,
@@ -613,6 +613,19 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		addStarlarkUndefinedSuggestion(execErr, &ve)
 		addError(result, ve)
 		return
+	}
+
+	// Propagate deprecation warnings from handler evolution
+	if deprecationWarnings != nil {
+		for _, w := range *deprecationWarnings {
+			addError(result, ValidationError{
+				Severity:   SeverityWarning,
+				Path:       path,
+				Code:       w.Code,
+				Message:    w.Message,
+				Suggestion: w.Suggestion,
+			})
+		}
 	}
 
 	// Capture handler call metadata in the result
@@ -1448,14 +1461,15 @@ func (v *ManifestValidator) validateImmutability(
 // buildStarlarkPredeclared creates the predeclared dictionary for Starlark compilation.
 // It uses typed service modules from the schema registry for handler parameter validation.
 // Returns the predeclared dict, handler call log, and any error.
-func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]schema.HandlerCallInfo, error) {
+func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]schema.HandlerCallInfo, *[]schema.ValidationWarning, error) {
 	predeclared := make(starlark.StringDict)
 
-	// Build typed service modules from schema registry
+	// Build typed service modules from schema registry with deprecation warning collection
 	var callLog []schema.HandlerCallInfo
-	modules, err := schema.BuildValidationModules(v.schemaRegistry, &callLog)
+	var deprecationWarnings []schema.ValidationWarning
+	modules, err := schema.BuildValidationModulesWithWarnings(v.schemaRegistry, &callLog, &deprecationWarnings)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for name, module := range modules {
 		predeclared[name] = module
@@ -1473,7 +1487,7 @@ func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]
 			return starlark.String("0"), nil
 		})
 
-	return predeclared, &callLog, nil
+	return predeclared, &callLog, &deprecationWarnings, nil
 }
 
 // enrichHandlerValidationError checks if a Starlark execution error is a handler

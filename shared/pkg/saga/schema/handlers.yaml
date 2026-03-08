@@ -1,6 +1,28 @@
 # Platform Default Handler Schemas
 # These schemas define the type signatures for all platform-provided saga handlers.
 # Handlers are invoked from Starlark scripts via invoke_handler("handler.name", params).
+#
+# Handler Evolution:
+#   Handlers support versioning and conversion rules for backwards-compatible evolution.
+#   When a handler is renamed or its parameters change, add a `conversions` block:
+#
+#   Example:
+#     service_name.new_handler:
+#       version: 2
+#       params: { ... }
+#       conversions:
+#         - from_version: 1
+#           from_name: service_name.old_handler
+#           param_mapping:
+#             new_param: old_param      # maps old param names to new ones
+#           defaults:
+#             new_required_param: "'default_value'"
+#           sunset: "3.0"              # version when old name is removed
+#
+#   Deprecated handlers (still present but discouraged):
+#     service_name.old_handler:
+#       deprecated: true
+#       ...
 
 service: platform
 version: "1.0"
