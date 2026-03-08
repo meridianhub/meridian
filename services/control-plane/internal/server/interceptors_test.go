@@ -359,6 +359,38 @@ func TestManifestRBACUnaryInterceptor_APIKeyContextScopes(t *testing.T) {
 	})
 }
 
+func TestManifestRBACUnaryInterceptor_ServiceRoleSkipsScopeCheck(t *testing.T) {
+	interceptor := ManifestRBACUnaryInterceptor()
+
+	// Service account with manifest:read scope calling ValidateAPIKey should succeed
+	// because scope checks are skipped for RoleService RPCs.
+	ctx := contextWithClaims([]string{"service"}, []string{"manifest:read"})
+
+	resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+		FullMethod: "/meridian.control_plane.v1.AuthService/ValidateAPIKey",
+	}, noopUnaryHandler)
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp)
+}
+
+func TestManifestRBACUnaryInterceptor_UnknownManifestScopeDenied(t *testing.T) {
+	interceptor := ManifestRBACUnaryInterceptor()
+
+	// API key with typo scope "manifest:writer" should be denied (fail closed)
+	ctx := contextWithClaims([]string{"admin"}, []string{"manifest:writer"})
+
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+		FullMethod: "/meridian.control_plane.v1.ApplyManifestService/ApplyManifest",
+	}, noopUnaryHandler)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+	assert.Contains(t, st.Message(), "API key scope insufficient")
+}
+
 func TestMeetsMinimumRole(t *testing.T) {
 	tests := []struct {
 		name        string

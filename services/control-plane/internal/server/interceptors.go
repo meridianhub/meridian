@@ -132,8 +132,10 @@ func checkManifestRBAC(ctx context.Context, fullMethod string) error {
 
 	// Check API key scope enforcement.
 	// Scopes may come from Claims (JWT) or from context (API key validation).
+	// Skip scope checks for service-to-service RPCs (RoleService) since manifest
+	// scopes are not meaningful for internal service calls like ValidateAPIKey.
 	effectiveScopes := getEffectiveScopes(ctx, claims)
-	if len(effectiveScopes) > 0 {
+	if requiredRole != auth.RoleService && len(effectiveScopes) > 0 {
 		if !hasSufficientScope(effectiveScopes, requiredRole) {
 			return status.Error(codes.PermissionDenied,
 				fmt.Sprintf("API key scope insufficient: requires %s-level access", requiredRole))
@@ -189,8 +191,10 @@ func hasSufficientScope(scopes []string, requiredRole auth.Role) bool {
 
 	hasManifestScope := false
 	for _, scope := range scopes {
-		if level, exists := manifestScopeLevel[scope]; exists {
+		if strings.HasPrefix(scope, "manifest:") {
 			hasManifestScope = true
+		}
+		if level, exists := manifestScopeLevel[scope]; exists {
 			if level >= requiredLevel {
 				return true
 			}
