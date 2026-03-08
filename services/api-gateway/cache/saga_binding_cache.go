@@ -1,0 +1,138 @@
+package cache
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"golang.org/x/sync/singleflight"
+)
+
+// Default configuration for the saga binding cache.
+const (
+	DefaultSagaBindingTTL = 5 * time.Minute
+)
+
+// SagaBindingSource provides the source of truth for saga bindings.
+// Implementations query the database or manifest store to resolve
+// which saga handles each API path for a given tenant.
+type SagaBindingSource interface {
+	// GetBindingsForTenant returns a map of api_path -> saga_name
+	// for all sagas with "api:" triggers configured for the given tenant.
+	GetBindingsForTenant(ctx context.Context, tenantID string) (map[string]string, error)
+}
+
+// SagaBindingCache provides an in-memory cache mapping (tenant_id, api_path) to saga_name.
+// It supports TTL-based expiry, explicit invalidation (e.g., on manifest apply),
+// and automatic refresh from a SagaBindingSource on cache miss.
+//
+// Thread-safety: All methods are safe for concurrent use.
+type SagaBindingCache struct {
+	mu      sync.RWMutex
+	entries map[string]*tenantBindings // tenantID -> bindings
+	source  SagaBindingSource
+	sfGroup singleflight.Group
+	ttl     time.Duration
+}
+
+// tenantBindings holds cached saga bindings for a single tenant.
+type tenantBindings struct {
+	// pathToSaga maps api_path -> saga_name.
+	pathToSaga map[string]string
+	// expiresAt is when this cache entry becomes stale.
+	expiresAt time.Time
+}
+
+// SagaBindingOption configures a SagaBindingCache.
+type SagaBindingOption func(*SagaBindingCache)
+
+// WithSagaBindingTTL sets the TTL for cached saga bindings.
+func WithSagaBindingTTL(ttl time.Duration) SagaBindingOption {
+	return func(c *SagaBindingCache) {
+		if ttl > 0 {
+			c.ttl = ttl
+		}
+	}
+}
+
+// NewSagaBindingCache creates a new SagaBindingCache.
+func NewSagaBindingCache(source SagaBindingSource, opts ...SagaBindingOption) *SagaBindingCache {
+	c := &SagaBindingCache{
+		entries: make(map[string]*tenantBindings),
+		source:  source,
+		ttl:     DefaultSagaBindingTTL,
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// Get returns the saga name bound to the given API path for the specified tenant.
+// On cache miss or TTL expiry, it refreshes from the source.
+func (c *SagaBindingCache) Get(ctx context.Context, tenantID, path string) (sagaName string, found bool) {
+	// Fast path: check cache under read lock
+	c.mu.RLock()
+	if entry, ok := c.entries[tenantID]; ok && time.Now().Before(entry.expiresAt) {
+		sagaName, found = entry.pathToSaga[path]
+		c.mu.RUnlock()
+		return sagaName, found
+	}
+	c.mu.RUnlock()
+
+	// Cache miss or expired: refresh from source (deduplicated via singleflight)
+	_, _ = c.doRefresh(ctx, tenantID)
+
+	// Re-check cache after refresh
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if entry, ok := c.entries[tenantID]; ok {
+		sagaName, found = entry.pathToSaga[path]
+		return sagaName, found
+	}
+
+	return "", false
+}
+
+// Invalidate clears cached bindings for the specified tenant.
+// The next Get call for this tenant will trigger a refresh from the source.
+func (c *SagaBindingCache) Invalidate(_ context.Context, tenantID string) error {
+	c.mu.Lock()
+	delete(c.entries, tenantID)
+	c.mu.Unlock()
+	return nil
+}
+
+// Refresh forces a reload of bindings for the specified tenant from the source.
+func (c *SagaBindingCache) Refresh(ctx context.Context, tenantID string) error {
+	_, err := c.doRefresh(ctx, tenantID)
+	return err
+}
+
+// doRefresh loads bindings from the source and populates the cache.
+// Uses singleflight to deduplicate concurrent refreshes for the same tenant.
+func (c *SagaBindingCache) doRefresh(ctx context.Context, tenantID string) (map[string]string, error) {
+	result, err, _ := c.sfGroup.Do(tenantID, func() (interface{}, error) {
+		bindings, err := c.source.GetBindingsForTenant(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+
+		c.mu.Lock()
+		c.entries[tenantID] = &tenantBindings{
+			pathToSaga: bindings,
+			expiresAt:  time.Now().Add(c.ttl),
+		}
+		c.mu.Unlock()
+
+		return bindings, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	bindings, _ := result.(map[string]string)
+	return bindings, nil
+}

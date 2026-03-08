@@ -107,6 +107,32 @@ func TestNewApplyManifestHandler_RequiredDependencies(t *testing.T) {
 	}
 }
 
+func TestNewApplyManifestHandler_PostApplyHooksStored(t *testing.T) {
+	v, err := validator.New()
+	require.NoError(t, err)
+
+	d := differ.New(nil, nil)
+	p := planner.NewManifestPlanner()
+
+	called := false
+	hook := PostApplyHook(func(_ context.Context, _ string) {
+		called = true
+	})
+
+	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
+		Validator:      v,
+		Differ:         d,
+		Planner:        p,
+		PostApplyHooks: []PostApplyHook{hook},
+	})
+	require.NoError(t, err)
+	assert.Len(t, handler.postApplyHooks, 1)
+
+	// Verify the hook is callable
+	handler.postApplyHooks[0](context.Background(), "test-tenant")
+	assert.True(t, called)
+}
+
 func TestApplyManifest_NilManifest(t *testing.T) {
 	handler := newTestHandler(t)
 
