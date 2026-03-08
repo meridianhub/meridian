@@ -138,4 +138,9 @@ message ManifestVersion {
 
   // created_at is when this record was created.
   google.protobuf.Timestamp created_at = 9;
+
+  // relationship_graph is the JSON-encoded relationship graph extracted during
+  // validation. Contains nodes (instruments, account_types, sagas, handlers)
+  // and edges (denominated_in, converts, triggers_on, calls_handler, etc.).
+  optional string relationship_graph = 10;
 }

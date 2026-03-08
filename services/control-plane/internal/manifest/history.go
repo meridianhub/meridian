@@ -196,6 +196,9 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	if entity.DiffSummary != nil {
 		mv.DiffSummary = entity.DiffSummary
 	}
+	if entity.RelationshipGraph != nil {
+		mv.RelationshipGraph = entity.RelationshipGraph
+	}
 
 	return mv, nil
 }

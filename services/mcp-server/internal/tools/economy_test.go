@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -960,6 +961,71 @@ func TestEconomyGraph_ImpactAnalysis(t *testing.T) {
 	// GBP is used by SETTLEMENT (denominated_in) and KWH (converts)
 	if len(affectedNodes) < 2 {
 		t.Errorf("expected at least 2 affected nodes for instrument:GBP, got %d: %v", len(affectedNodes), affectedNodes)
+	}
+}
+
+func TestEconomyGraph_UsesStoredGraph(t *testing.T) {
+	// When a stored relationship graph exists on the manifest version,
+	// the tool should use it (including handler nodes/edges) instead of
+	// rebuilding a structural-only graph from the manifest.
+	storedGraphJSON := `{
+		"nodes": [
+			{"id": "instrument:GBP", "type": "instrument", "name": "GBP"},
+			{"id": "saga:process_settlement", "type": "saga", "name": "process_settlement"},
+			{"id": "handler:position_keeping.initiate_log", "type": "handler", "name": "position_keeping.initiate_log"}
+		],
+		"edges": [
+			{"source": "saga:process_settlement", "target": "handler:position_keeping.initiate_log", "relationship": "calls_handler"},
+			{"source": "saga:process_settlement", "target": "handler:position_keeping.initiate_log", "relationship": "uses_instrument", "is_dynamic": true}
+		]
+	}`
+
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{{
+					Id:                "test-id",
+					Version:           "1.0",
+					Manifest:          testManifest(),
+					RelationshipGraph: &storedGraphJSON,
+				}},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+
+	// Should have 3 nodes (including handler from stored graph)
+	nodeCount, _ := m["node_count"].(int)
+	if nodeCount != 3 {
+		t.Errorf("expected 3 nodes from stored graph, got %d", nodeCount)
+	}
+
+	// Marshal result to JSON to inspect node types (avoids internal type assertions)
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
+	resultStr := string(resultJSON)
+
+	// Verify handler node exists (only available from stored graph, not structural extraction)
+	if !strings.Contains(resultStr, `"handler"`) {
+		t.Error("expected handler node from stored graph, not found in result JSON")
+	}
+
+	// Verify calls_handler edge exists
+	if !strings.Contains(resultStr, `"calls_handler"`) {
+		t.Error("expected calls_handler edge from stored graph, not found in result JSON")
 	}
 }
 

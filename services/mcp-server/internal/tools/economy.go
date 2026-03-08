@@ -510,32 +510,32 @@ func sha256Hex(data []byte) string {
 }
 
 // buildEconomyGraphTool returns the meridian_economy_graph tool.
-// It extracts structural relationships from the current manifest (instruments, account_types,
-// valuation_rules, saga triggers) and optionally performs impact analysis.
+// It returns the full relationship graph (including handler call edges) stored during
+// manifest validation. Falls back to structural-only extraction if no stored graph exists.
 func buildEconomyGraphTool(historian ManifestHistorian) Tool {
 	return Tool{
 		Name:     "meridian_economy_graph",
 		Category: CategoryRead,
 		Description: "Query the relationship graph between manifest resources for impact analysis. " +
-			"Returns nodes (sagas, instruments, account_types) and edges " +
-			"(denominated_in, converts, triggers_on). " +
+			"Returns nodes (sagas, handlers, instruments, account_types) and edges " +
+			"(calls_handler, uses_instrument, reads_from, writes_to, denominated_in, converts, triggers_on). " +
 			"Use node_id to get impact analysis showing what resources would be affected by removing a node.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"node_id": map[string]interface{}{
 					"type":        "string",
-					"description": "Optional. Provide a node ID (e.g., 'instrument:GBP', 'saga:process_settlement') to get impact analysis for removing that node.",
+					"description": "Optional. Provide a node ID (e.g., 'instrument:GBP', 'handler:position_keeping.initiate_log') to get impact analysis for removing that node.",
 				},
 				"node_type": map[string]interface{}{
 					"type":        "string",
-					"description": "Optional. Filter nodes by type: saga, instrument, account_type.",
-					"enum":        []interface{}{"saga", "instrument", "account_type"},
+					"description": "Optional. Filter nodes by type.",
+					"enum":        []interface{}{"saga", "handler", "instrument", "account_type"},
 				},
 				"relationship": map[string]interface{}{
 					"type":        "string",
 					"description": "Optional. Filter edges by relationship type.",
-					"enum":        []interface{}{"denominated_in", "converts", "triggers_on"},
+					"enum":        []interface{}{"calls_handler", "uses_instrument", "reads_from", "writes_to", "denominated_in", "converts", "triggers_on"},
 				},
 			},
 		},
@@ -565,17 +565,26 @@ type graphEdge struct {
 	Source       string `json:"source"`
 	Target       string `json:"target"`
 	Relationship string `json:"relationship"`
+	IsDynamic    bool   `json:"is_dynamic,omitempty"`
 	Location     string `json:"location,omitempty"`
 }
 
-// handleEconomyGraph retrieves the current manifest and extracts structural relationships.
+// storedGraph is the deserialization target for the JSONB relationship graph stored with manifest versions.
+type storedGraph struct {
+	Nodes []graphNode `json:"nodes"`
+	Edges []graphEdge `json:"edges"`
+}
+
+// handleEconomyGraph retrieves the relationship graph from the stored manifest version.
+// Prefers the full graph (including handler edges) stored during validation.
+// Falls back to structural-only extraction if no stored graph is available.
 func handleEconomyGraph(ctx context.Context, historian ManifestHistorian, params json.RawMessage) (interface{}, error) {
 	var p economyGraphParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return mcperrors.FormatGRPCError(err), nil
 	}
 
-	// Get current manifest via historian
+	// Get current manifest version via historian
 	histResp, err := historian.ListManifestVersions(ctx, &controlplanev1.ListManifestVersionsRequest{Limit: 1})
 	if err != nil {
 		return mcperrors.FormatGRPCError(err), nil
@@ -587,8 +596,8 @@ func handleEconomyGraph(ctx context.Context, historian ManifestHistorian, params
 		}, nil
 	}
 
-	manifest := histResp.Versions[0].Manifest
-	allNodes, allEdges := extractManifestGraph(manifest)
+	version := histResp.Versions[0]
+	allNodes, allEdges := loadGraph(version)
 
 	filteredNodes := filterNodes(allNodes, p.NodeType)
 	filteredEdges := filterEdges(allEdges, p.Relationship)
@@ -605,6 +614,18 @@ func handleEconomyGraph(ctx context.Context, historian ManifestHistorian, params
 	}
 
 	return result, nil
+}
+
+// loadGraph returns the full relationship graph from the stored version if available,
+// falling back to structural-only extraction from the manifest.
+func loadGraph(version *controlplanev1.ManifestVersion) ([]graphNode, []graphEdge) {
+	if version.RelationshipGraph != nil {
+		var sg storedGraph
+		if err := json.Unmarshal([]byte(*version.RelationshipGraph), &sg); err == nil && len(sg.Nodes) > 0 {
+			return sg.Nodes, sg.Edges
+		}
+	}
+	return extractManifestGraph(version.Manifest)
 }
 
 // filterNodes returns only nodes matching the given type, or all nodes if nodeType is empty.
