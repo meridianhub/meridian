@@ -19,7 +19,7 @@ instructions: |
   Key concepts: bounded expressiveness (Starlark + CEL), schema-driven programmability,
   K8s-style handler conversion rules with CEL default expressions, endpoint-binding API
   triggers, drain-based in-flight saga migration, FATAL-default error classification.
-  Implementation is sequenced into Phases 0-5, with Phase 0 split into 4 independent PRs.
+  Implementation is sequenced into Phases 0-5, with Phase 0 split into 5 independent PRs.
   Throughput target: 5-10k TPS sustainable (correctness over raw speed).
   Refer to handlers.yaml as the ABI, manifest.proto as the program format.
 ---
@@ -1340,18 +1340,27 @@ sagas:
       def execute():
           ctx = input_data
           step(name="log_energy")
-          position_keeping.initiate_log(
+          position_keeping.record_entry(
               account_id=ctx["site_account_id"],
               instrument_code="KWH",
-              amount=Decimal(ctx["kwh_delivered"]),
-              direction="DEBIT",
+              quantity=Decimal(ctx["kwh_delivered"]),
+              side="DEBIT",
           )
 
   - name: monthly_fleet_invoice
     trigger: "scheduled:monthly_billing"
     filter: "now.day == 1"
-    # script_ref is Phase 5 (future) — today this would be inline script:
-    script_ref: "monthly_fleet_invoice.star"
+    script: |
+      def execute():
+          # Monthly fleet invoice logic (simplified)
+          ctx = input_data
+          for fleet in ctx["fleets"]:
+              step(name="invoice_" + fleet["id"])
+              payment_order.initiate(
+                  debtor_account_id=fleet["account_id"],
+                  amount=fleet["total_due"],
+                  instrument_code="GBP",
+              )
 ```
 
 ### 13.3 The Generation Target
