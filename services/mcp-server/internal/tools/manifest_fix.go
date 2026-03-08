@@ -231,10 +231,8 @@ func applyHandlerConversion(script string, oldName string, info deprecatedInfo) 
 
 		// Find the matching closing paren, tracking nesting depth
 		callBody, rest := extractCallBody(remaining)
-		// Rename params within the call body
-		for oldParam, newParam := range reverseMapping {
-			callBody = strings.ReplaceAll(callBody, oldParam+"=", newParam+"=")
-		}
+		// Rename top-level kwargs within the call body
+		callBody = renameTopLevelKwargs(callBody, reverseMapping)
 		result.WriteString(callBody)
 		remaining = rest
 	}
@@ -243,21 +241,156 @@ func applyHandlerConversion(script string, oldName string, info deprecatedInfo) 
 }
 
 // extractCallBody splits text at the matching closing paren for an already-opened call.
+// Handles strings (single/double/triple-quoted) and comments so that parens inside
+// literals do not affect depth tracking.
 // Returns (bodyIncludingCloseParen, rest). If no matching paren is found, returns (all, "").
 func extractCallBody(s string) (string, string) {
 	depth := 1
-	for i, ch := range s {
-		switch ch {
+	i := 0
+	for i < len(s) {
+		switch s[i] {
+		case '#':
+			// Skip to end of line (comment)
+			for i < len(s) && s[i] != '\n' {
+				i++
+			}
+		case '"', '\'':
+			i = skipString(s, i)
 		case '(':
 			depth++
+			i++
 		case ')':
 			depth--
 			if depth == 0 {
 				return s[:i+1], s[i+1:]
 			}
+			i++
+		default:
+			i++
 		}
 	}
 	return s, ""
+}
+
+// skipString advances past a string literal starting at position i.
+// Handles triple-quoted strings (""", ”') and single-quoted strings with escapes.
+func skipString(s string, i int) int {
+	quote := s[i]
+	// Check for triple-quoted string
+	if i+2 < len(s) && s[i+1] == quote && s[i+2] == quote {
+		triple := string([]byte{quote, quote, quote})
+		end := strings.Index(s[i+3:], triple)
+		if end >= 0 {
+			return i + 3 + end + 3
+		}
+		return len(s)
+	}
+	// Single-quoted string: advance past closing quote, handling escapes
+	i++
+	for i < len(s) {
+		if s[i] == '\\' {
+			i += 2
+			continue
+		}
+		if s[i] == quote {
+			return i + 1
+		}
+		i++
+	}
+	return len(s)
+}
+
+// kwargScanner holds state for scanning a call body and renaming top-level kwargs.
+type kwargScanner struct {
+	src            string
+	reverseMapping map[string]string
+	result         strings.Builder
+	depth          int
+	pos            int
+}
+
+// renameTopLevelKwargs renames keyword argument names at the top level of a call body.
+// Only renames "name=" patterns that appear at kwarg position, not inside nested calls,
+// strings, or as suffixes of longer identifiers.
+func renameTopLevelKwargs(callBody string, reverseMapping map[string]string) string {
+	s := &kwargScanner{src: callBody, reverseMapping: reverseMapping}
+	s.scan()
+	return s.result.String()
+}
+
+func (s *kwargScanner) scan() {
+	for s.pos < len(s.src) {
+		switch s.src[s.pos] {
+		case '#':
+			s.copyComment()
+		case '"', '\'':
+			s.copyStringLiteral()
+		case '(':
+			s.depth++
+			s.result.WriteByte('(')
+			s.pos++
+		case ')':
+			if s.depth > 0 {
+				s.depth--
+			}
+			s.result.WriteByte(')')
+			s.pos++
+		default:
+			if s.depth == 0 && isIdentStart(s.src[s.pos]) {
+				s.handleTopLevelIdent()
+			} else {
+				s.result.WriteByte(s.src[s.pos])
+				s.pos++
+			}
+		}
+	}
+}
+
+func (s *kwargScanner) copyComment() {
+	start := s.pos
+	for s.pos < len(s.src) && s.src[s.pos] != '\n' {
+		s.pos++
+	}
+	s.result.WriteString(s.src[start:s.pos])
+}
+
+func (s *kwargScanner) copyStringLiteral() {
+	start := s.pos
+	s.pos = skipString(s.src, s.pos)
+	s.result.WriteString(s.src[start:s.pos])
+}
+
+func (s *kwargScanner) handleTopLevelIdent() {
+	start := s.pos
+	for s.pos < len(s.src) && isIdentContinue(s.src[s.pos]) {
+		s.pos++
+	}
+	ident := s.src[start:s.pos]
+
+	if s.pos < len(s.src) && s.src[s.pos] == '=' && !isPrecededByIdent(s.src, start) {
+		if newName, ok := s.reverseMapping[ident]; ok {
+			s.result.WriteString(newName)
+			return
+		}
+	}
+	s.result.WriteString(ident)
+}
+
+func isIdentStart(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+
+func isIdentContinue(ch byte) bool {
+	return isIdentStart(ch) || (ch >= '0' && ch <= '9')
+}
+
+// isPrecededByIdent checks if the character immediately before pos is an identifier char.
+// This prevents matching "total_amount" when looking for "amount".
+func isPrecededByIdent(s string, pos int) bool {
+	if pos == 0 {
+		return false
+	}
+	return isIdentContinue(s[pos-1])
 }
 
 // buildConversionMessage creates a human-readable description of a handler conversion.

@@ -313,6 +313,141 @@ func TestManifestFix_ParamRenamingScopedToCallSite(t *testing.T) {
 	assert.Contains(t, script, `test.other_handler(id="abc")`)
 }
 
+func TestManifestFix_ParensInStringLiteral(t *testing.T) {
+	reg := testRegistryWithEvolution()
+	r := tools.NewRegistry()
+	tools.RegisterManifestFixTool(r, reg)
+
+	// Script has a string literal containing a closing paren.
+	// extractCallBody must not be fooled by it.
+	manifest := map[string]interface{}{
+		"version": "1.0",
+		"metadata": map[string]interface{}{
+			"name":        "Test",
+			"industry":    "energy",
+			"description": "Test manifest",
+		},
+		"sagas": []interface{}{
+			map[string]interface{}{
+				"name":    "string_paren_test",
+				"trigger": "api:/v1/test",
+				"script": `def execute(ctx):
+    test.initiate_log(amount="100.00)", currency="GBP", direction="CREDIT")
+    return {"status": "done"}
+`,
+			},
+		},
+	}
+
+	manifestJSON, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	params := json.RawMessage(`{"manifest": ` + string(manifestJSON) + `}`)
+	result, err := r.Call(context.Background(), "meridian_manifest_fix", params)
+	require.NoError(t, err)
+
+	m := result.(map[string]interface{})
+	fixedManifest := m["manifest"].(map[string]interface{})
+	sagas := fixedManifest["sagas"].([]interface{})
+	saga := sagas[0].(map[string]interface{})
+	script := saga["script"].(string)
+
+	// Handler should be converted despite the paren in string
+	assert.Contains(t, script, "test.record_entry(")
+	assert.NotContains(t, script, "test.initiate_log(")
+	// All three params should be renamed
+	assert.Contains(t, script, "quantity=")
+	assert.Contains(t, script, "instrument_code=")
+	assert.Contains(t, script, "side=")
+}
+
+func TestManifestFix_SuffixParamNotRenamed(t *testing.T) {
+	reg := testRegistryWithEvolution()
+	r := tools.NewRegistry()
+	tools.RegisterManifestFixTool(r, reg)
+
+	// "total_amount" should NOT be renamed even though "amount" is in the mapping.
+	manifest := map[string]interface{}{
+		"version": "1.0",
+		"metadata": map[string]interface{}{
+			"name":        "Test",
+			"industry":    "energy",
+			"description": "Test manifest",
+		},
+		"sagas": []interface{}{
+			map[string]interface{}{
+				"name":    "suffix_test",
+				"trigger": "api:/v1/test",
+				"script": `def execute(ctx):
+    test.initiate_log(amount="100.00", currency="GBP", direction="CREDIT", total_amount="200.00")
+`,
+			},
+		},
+	}
+
+	manifestJSON, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	params := json.RawMessage(`{"manifest": ` + string(manifestJSON) + `}`)
+	result, err := r.Call(context.Background(), "meridian_manifest_fix", params)
+	require.NoError(t, err)
+
+	m := result.(map[string]interface{})
+	fixedManifest := m["manifest"].(map[string]interface{})
+	sagas := fixedManifest["sagas"].([]interface{})
+	saga := sagas[0].(map[string]interface{})
+	script := saga["script"].(string)
+
+	// "amount" kwarg renamed to "quantity", but "total_amount" kept as-is
+	assert.Contains(t, script, "quantity=")
+	assert.Contains(t, script, "total_amount=")
+}
+
+func TestManifestFix_NestedCallParamsNotRenamed(t *testing.T) {
+	reg := testRegistryWithEvolution()
+	r := tools.NewRegistry()
+	tools.RegisterManifestFixTool(r, reg)
+
+	// The deprecated call has a nested function call with a param name
+	// that matches the mapping. Only the outer kwarg should be renamed.
+	manifest := map[string]interface{}{
+		"version": "1.0",
+		"metadata": map[string]interface{}{
+			"name":        "Test",
+			"industry":    "energy",
+			"description": "Test manifest",
+		},
+		"sagas": []interface{}{
+			map[string]interface{}{
+				"name":    "nested_test",
+				"trigger": "api:/v1/test",
+				"script": `def execute(ctx):
+    test.initiate_log(amount=compute(currency="USD"), currency="GBP", direction="CREDIT")
+`,
+			},
+		},
+	}
+
+	manifestJSON, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	params := json.RawMessage(`{"manifest": ` + string(manifestJSON) + `}`)
+	result, err := r.Call(context.Background(), "meridian_manifest_fix", params)
+	require.NoError(t, err)
+
+	m := result.(map[string]interface{})
+	fixedManifest := m["manifest"].(map[string]interface{})
+	sagas := fixedManifest["sagas"].([]interface{})
+	saga := sagas[0].(map[string]interface{})
+	script := saga["script"].(string)
+
+	// Outer "amount" renamed to "quantity", outer "currency" renamed to "instrument_code"
+	assert.Contains(t, script, "quantity=compute(")
+	assert.Contains(t, script, "instrument_code=\"GBP\"")
+	// Inner "currency" inside compute() must NOT be renamed
+	assert.Contains(t, script, `compute(currency="USD")`)
+}
+
 func TestManifestFix_ParamMappingApplied(t *testing.T) {
 	reg := testRegistryWithEvolution()
 	r := tools.NewRegistry()
