@@ -233,6 +233,26 @@ func TestBuildValidationModules_DefaultRegistry(t *testing.T) {
 	assert.True(t, ok, "financial_accounting module should exist")
 }
 
+func TestBuildValidationModules_InvalidEnumValue(t *testing.T) {
+	reg := testSchemaRegistry(t)
+	modules, err := BuildValidationModules(reg, nil)
+	require.NoError(t, err)
+
+	// direction expects DEBIT or CREDIT, give it SIDEWAYS
+	script := `
+result = test_service.do_thing(
+    account_id="123",
+    amount=Decimal("100.00"),
+    direction="SIDEWAYS",
+)
+`
+	err = execStarlark(t, modules, script)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "WRONG_PARAM_TYPE")
+	assert.Contains(t, err.Error(), "SIDEWAYS")
+	assert.Contains(t, err.Error(), "DEBIT")
+}
+
 func TestValidationFailure_ErrorInterface(t *testing.T) {
 	vf := &ValidationFailure{
 		Code:    ValidationCodeUnknownParam,

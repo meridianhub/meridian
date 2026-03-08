@@ -1480,10 +1480,9 @@ func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]
 // validation failure and enriches the ValidationError with structured codes and suggestions.
 // Returns true if the error was a handler validation failure.
 func enrichHandlerValidationError(execErr error, ve *ValidationError) bool {
-	// Unwrap the error chain to find a ValidationFailure
 	errStr := execErr.Error()
 
-	// Check for our structured validation failure codes
+	// Check for our structured validation failure codes from ValidationFailure errors
 	for _, code := range []string{
 		schema.ValidationCodeUnknownHandler,
 		schema.ValidationCodeUnknownParam,
@@ -1493,7 +1492,6 @@ func enrichHandlerValidationError(execErr error, ve *ValidationError) bool {
 		if strings.Contains(errStr, "["+code+"]") {
 			ve.Code = code
 
-			// Extract the ValidationFailure if possible
 			var vf *schema.ValidationFailure
 			if errors.As(execErr, &vf) {
 				ve.Message = vf.Message
@@ -1505,7 +1503,75 @@ func enrichHandlerValidationError(execErr error, ve *ValidationError) bool {
 		}
 	}
 
+	// Check for starlarkstruct "has no .X attribute" errors, which indicate
+	// unknown handler calls on a typed service module.
+	if serviceName, methodName, ok := extractStructAttrError(errStr); ok {
+		ve.Code = schema.ValidationCodeUnknownHandler
+		ve.Message = fmt.Sprintf("unknown handler %q on service %q", serviceName+"."+methodName, serviceName)
+
+		// Get known handlers for this service from the schema
+		knownHandlers := listServiceHandlers(serviceName)
+		if len(knownHandlers) > 0 {
+			ve.AvailableFields = knownHandlers
+			if suggestion := findClosestMatch(methodName, knownHandlers); suggestion != "" {
+				ve.Suggestion = fmt.Sprintf("Did you mean %q?", serviceName+"."+suggestion)
+			}
+		}
+
+		return true
+	}
+
 	return false
+}
+
+// structAttrErrorPattern matches starlark struct attribute errors:
+// "\"service_name\" struct has no .method_name attribute"
+var structAttrErrorPattern = regexp.MustCompile(`"(\w+)" struct has no \.(\w+)`)
+
+// extractStructAttrError extracts service and method names from a starlarkstruct
+// "has no .X attribute" error message.
+func extractStructAttrError(errStr string) (serviceName, methodName string, ok bool) {
+	matches := structAttrErrorPattern.FindStringSubmatch(errStr)
+	if len(matches) != 3 {
+		return "", "", false
+	}
+	// Only match if the struct name is a known service binding
+	for _, svc := range knownServiceBindings {
+		if matches[1] == svc {
+			return matches[1], matches[2], true
+		}
+	}
+	return "", "", false
+}
+
+// listServiceHandlers returns the handler method names (last segment) for a given service.
+func listServiceHandlers(serviceName string) []string {
+	var methods []string
+	for _, binding := range knownServiceBindings {
+		if binding != serviceName {
+			continue
+		}
+		// Look up handlers from the schema registry prefix
+		// Since we don't have the registry here, use the known bindings pattern
+		// to extract method names from the embedded schema
+		reg, err := schema.DefaultRegistry()
+		if err != nil {
+			return nil
+		}
+		prefix := serviceName + "."
+		for _, h := range reg.ListHandlers() {
+			if strings.HasPrefix(h, prefix) {
+				method := strings.TrimPrefix(h, prefix)
+				// Only include direct children (no nested dots)
+				if !strings.Contains(method, ".") {
+					methods = append(methods, method)
+				}
+			}
+		}
+		sort.Strings(methods)
+		return methods
+	}
+	return nil
 }
 
 // buildFieldPath extracts a dotted field path from a protovalidate Violation.

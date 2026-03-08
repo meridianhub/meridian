@@ -300,6 +300,27 @@ func checkStarlarkParamType(handlerName, paramName string, value starlark.Value,
 			Message: fmt.Sprintf("handler %s parameter %q expects type %s but got %s", handlerName, paramName, fieldDef.Type, value.Type()),
 		}
 	}
+
+	// For enum types, validate the value against allowed values
+	if fieldDef.Type == TypeEnum && len(fieldDef.Values) > 0 {
+		if strVal, ok := value.(starlark.String); ok {
+			valid := false
+			for _, allowed := range fieldDef.Values {
+				if string(strVal) == allowed {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return &ValidationFailure{
+					Code:            ValidationCodeWrongParamType,
+					Message:         fmt.Sprintf("handler %s parameter %q got %q, allowed values: %v", handlerName, paramName, string(strVal), fieldDef.Values),
+					AvailableValues: fieldDef.Values,
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -367,33 +388,4 @@ func sortedParamNames(handlerDef *HandlerDef) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// BuildValidationUnknownHandlerError creates a ValidationFailure for an unknown handler
-// on a known service module. This is used when a Starlark script calls a method on a
-// service struct that doesn't correspond to any handler in the schema.
-func BuildValidationUnknownHandlerError(serviceName, methodName string, knownMethods []string) *ValidationFailure {
-	fullName := serviceName + "." + methodName
-	vf := &ValidationFailure{
-		Code:            ValidationCodeUnknownHandler,
-		Message:         fmt.Sprintf("unknown handler %q", fullName),
-		AvailableValues: knownMethods,
-	}
-
-	suggestion := findClosestMatch(methodName, extractMethodNames(knownMethods))
-	if suggestion != "" {
-		vf.Suggestion = fmt.Sprintf("Did you mean %q?", serviceName+"."+suggestion)
-	}
-
-	return vf
-}
-
-// extractMethodNames extracts the last segment of dot-separated handler names.
-func extractMethodNames(fullNames []string) []string {
-	methods := make([]string, 0, len(fullNames))
-	for _, name := range fullNames {
-		parts := strings.Split(name, ".")
-		methods = append(methods, parts[len(parts)-1])
-	}
-	return methods
 }

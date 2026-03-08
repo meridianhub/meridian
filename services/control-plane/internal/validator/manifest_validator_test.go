@@ -1111,12 +1111,14 @@ func TestValidateStarlark_TypedModules_UnknownHandler_TopLevel(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e.Message, "has no .nonexistent_handler") {
+		if e.Code == "UNKNOWN_HANDLER" {
 			found = true
+			assert.Contains(t, e.Message, "nonexistent_handler")
+			assert.NotEmpty(t, e.AvailableFields, "should list available handlers")
 			break
 		}
 	}
-	assert.True(t, found, "expected error about unknown handler, got: %v", result.Errors)
+	assert.True(t, found, "expected UNKNOWN_HANDLER error, got: %v", result.Errors)
 }
 
 func TestValidateStarlark_TypedModules_UnknownParam_TopLevel(t *testing.T) {
