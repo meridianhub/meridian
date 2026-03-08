@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/services/control-plane/internal/server"
 	"github.com/meridianhub/meridian/services/control-plane/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -93,9 +94,11 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to initialize auth: %w", err)
 	}
 
-	// Create gRPC server
+	// Create gRPC server with RBAC interceptor for manifest operations
 	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
+		WithUnaryInterceptor(server.ManifestRBACUnaryInterceptor()).
+		WithStreamInterceptor(server.ManifestRBACStreamInterceptor()).
 		Build()
 
 	// Register ApplyManifestService.
