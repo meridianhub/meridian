@@ -274,12 +274,14 @@ func New(opts ...Option) (*ManifestValidator, error) {
 		opt(mv)
 	}
 
-	// Try to load OpenAPI spec if not explicitly set via options.
+	// Best-effort auto-loading from repo checkout. When the spec files are not
+	// reachable (e.g. running outside a repo checkout), the corresponding checks
+	// degrade gracefully: format and duplicate checks still run, only the
+	// endpoint-existence and field-reference checks are skipped. For deterministic
+	// behavior in tests, use WithOpenAPIPaths / WithAsyncAPISchemas.
 	if !mv.apiPathsExplicit {
 		mv.apiPathRegistry = tryLoadOpenAPIPaths()
 	}
-
-	// Try to load AsyncAPI schemas if not explicitly set via options.
 	if !mv.asyncSchemasExplicit {
 		mv.asyncAPISchemas = tryLoadAsyncAPISchemas()
 	}
@@ -1902,6 +1904,17 @@ func extractSelectField(sel *exprpb.Expr_Select, fields map[string]bool) {
 }
 
 func extractCallFields(call *exprpb.Expr_Call, fields map[string]bool) {
+	// Handle index operator: event["field_name"] is represented as _[_](event, "field_name")
+	if call.GetFunction() == "_[_]" && len(call.GetArgs()) == 2 {
+		if ident, ok := call.GetArgs()[0].ExprKind.(*exprpb.Expr_IdentExpr); ok && ident.IdentExpr.GetName() == "event" {
+			if constExpr, ok := call.GetArgs()[1].ExprKind.(*exprpb.Expr_ConstExpr); ok {
+				if sv := constExpr.ConstExpr.GetStringValue(); sv != "" {
+					fields[sv] = true
+					return
+				}
+			}
+		}
+	}
 	extractFieldsFromExpr(call.GetTarget(), fields)
 	for _, arg := range call.GetArgs() {
 		extractFieldsFromExpr(arg, fields)

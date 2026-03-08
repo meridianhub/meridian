@@ -2376,6 +2376,16 @@ func TestExtractCELFieldRefs(t *testing.T) {
 			expected: []string{"amount", "currency"},
 		},
 		{
+			name:     "bracket notation",
+			expr:     `event["amount_cents"] > 0`,
+			expected: []string{"amount_cents"},
+		},
+		{
+			name:     "mixed dot and bracket",
+			expr:     `event.currency == "GBP" && event["amount"] > 0`,
+			expected: []string{"amount", "currency"},
+		},
+		{
 			name:     "no event fields",
 			expr:     `true`,
 			expected: []string{},
