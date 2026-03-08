@@ -21,6 +21,18 @@ func contextWithClaims(roles []string, scopes []string) context.Context {
 	return context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
 }
 
+// contextWithClaimsAndContextScopes creates a context with Claims (no Claims.Scopes)
+// but with scopes injected via ScopesContextKey (as API key validation does).
+func contextWithClaimsAndContextScopes(roles []string, ctxScopes []string) context.Context {
+	claims := &auth.Claims{
+		UserID: "test-user",
+		Roles:  roles,
+	}
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+	ctx = context.WithValue(ctx, auth.ScopesContextKey, ctxScopes)
+	return ctx
+}
+
 func noopUnaryHandler(_ context.Context, _ interface{}) (interface{}, error) {
 	return "ok", nil
 }
@@ -287,6 +299,63 @@ func TestManifestRBACUnaryInterceptor_DescriptiveErrorMessages(t *testing.T) {
 		st, ok := status.FromError(err)
 		require.True(t, ok)
 		assert.Contains(t, st.Message(), "auditor")
+	})
+}
+
+func TestManifestRBACStreamInterceptor_AuditorDeniedApply(t *testing.T) {
+	interceptor := ManifestRBACStreamInterceptor()
+
+	ctx := contextWithClaims([]string{"auditor"}, nil)
+	ss := &fakeServerStream{ctx: ctx}
+
+	err := interceptor(nil, ss, &grpc.StreamServerInfo{
+		FullMethod: "/meridian.control_plane.v1.ApplyManifestService/ApplyManifest",
+	}, func(_ interface{}, _ grpc.ServerStream) error {
+		t.Fatal("handler should not be called")
+		return nil
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+}
+
+// fakeServerStream implements grpc.ServerStream for testing the stream interceptor.
+type fakeServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (f *fakeServerStream) Context() context.Context { return f.ctx }
+
+func TestManifestRBACUnaryInterceptor_APIKeyContextScopes(t *testing.T) {
+	interceptor := ManifestRBACUnaryInterceptor()
+
+	t.Run("context scopes enforce manifest restrictions", func(t *testing.T) {
+		// API key with read scope in context (not in Claims.Scopes)
+		ctx := contextWithClaimsAndContextScopes([]string{"admin"}, []string{"manifest:read"})
+
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+			FullMethod: "/meridian.control_plane.v1.ApplyManifestService/ApplyManifest",
+		}, noopUnaryHandler)
+
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.PermissionDenied, st.Code())
+		assert.Contains(t, st.Message(), "API key scope insufficient")
+	})
+
+	t.Run("context scopes allow matching access", func(t *testing.T) {
+		ctx := contextWithClaimsAndContextScopes([]string{"admin"}, []string{"manifest:admin"})
+
+		resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+			FullMethod: "/meridian.control_plane.v1.ApplyManifestService/ApplyManifest",
+		}, noopUnaryHandler)
+
+		require.NoError(t, err)
+		assert.Equal(t, "ok", resp)
 	})
 }
 

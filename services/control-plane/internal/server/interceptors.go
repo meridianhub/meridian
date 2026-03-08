@@ -130,9 +130,11 @@ func checkManifestRBAC(ctx context.Context, fullMethod string) error {
 		return status.Error(codes.Unauthenticated, "authentication required")
 	}
 
-	// Check API key scope enforcement
-	if len(claims.Scopes) > 0 {
-		if !hasSufficientScope(claims.Scopes, requiredRole) {
+	// Check API key scope enforcement.
+	// Scopes may come from Claims (JWT) or from context (API key validation).
+	effectiveScopes := getEffectiveScopes(ctx, claims)
+	if len(effectiveScopes) > 0 {
+		if !hasSufficientScope(effectiveScopes, requiredRole) {
 			return status.Error(codes.PermissionDenied,
 				fmt.Sprintf("API key scope insufficient: requires %s-level access", requiredRole))
 		}
@@ -146,12 +148,27 @@ func checkManifestRBAC(ctx context.Context, fullMethod string) error {
 	return nil
 }
 
+// getEffectiveScopes returns scopes from Claims or from context (API key validation).
+// The gateway injects API key scopes into ScopesContextKey, while JWT tokens
+// carry scopes directly in Claims.Scopes.
+func getEffectiveScopes(ctx context.Context, claims *auth.Claims) []string {
+	if len(claims.Scopes) > 0 {
+		return claims.Scopes
+	}
+	// Fall back to context-level scopes (set by API key validation middleware)
+	if ctxScopes, ok := auth.GetScopesFromContext(ctx); ok && len(ctxScopes) > 0 {
+		return ctxScopes
+	}
+	return nil
+}
+
 // requiredScopeLevel maps roles to scope-specific levels, decoupled from roleLevel.
-// Only roles used in manifestRoleRequirements need entries here.
+// All roles used in manifestRoleRequirements must have entries here.
 var requiredScopeLevel = map[auth.Role]int{
 	auth.RoleAuditor:  1,
 	auth.RoleOperator: 2,
 	auth.RoleAdmin:    3,
+	auth.RoleService:  3, // Service accounts require admin-level scope access
 }
 
 // manifestScopeLevel maps manifest-specific scope strings to their access level.
