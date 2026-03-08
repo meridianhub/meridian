@@ -31,15 +31,16 @@ const (
 
 // VersionEntity represents a row in the manifest_versions table.
 type VersionEntity struct {
-	ID           uuid.UUID   `gorm:"column:id;type:uuid;primaryKey"`
-	Version      string      `gorm:"column:version;type:varchar(50);not null"`
-	ManifestJSON string      `gorm:"column:manifest_json;type:jsonb;not null"`
-	AppliedAt    time.Time   `gorm:"column:applied_at;not null"`
-	AppliedBy    string      `gorm:"column:applied_by;type:varchar(255);not null"`
-	ApplyStatus  ApplyStatus `gorm:"column:apply_status;type:varchar(20);not null"`
-	ApplyJobID   *uuid.UUID  `gorm:"column:apply_job_id;type:uuid"`
-	DiffSummary  *string     `gorm:"column:diff_summary;type:text"`
-	CreatedAt    time.Time   `gorm:"column:created_at;not null"`
+	ID                uuid.UUID   `gorm:"column:id;type:uuid;primaryKey"`
+	Version           string      `gorm:"column:version;type:varchar(50);not null"`
+	ManifestJSON      string      `gorm:"column:manifest_json;type:jsonb;not null"`
+	AppliedAt         time.Time   `gorm:"column:applied_at;not null"`
+	AppliedBy         string      `gorm:"column:applied_by;type:varchar(255);not null"`
+	ApplyStatus       ApplyStatus `gorm:"column:apply_status;type:varchar(20);not null"`
+	ApplyJobID        *uuid.UUID  `gorm:"column:apply_job_id;type:uuid"`
+	DiffSummary       *string     `gorm:"column:diff_summary;type:text"`
+	RelationshipGraph *string     `gorm:"column:relationship_graph;type:jsonb"`
+	CreatedAt         time.Time   `gorm:"column:created_at;not null"`
 }
 
 // TableName returns the table name for GORM.
@@ -156,6 +157,38 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]VersionEnti
 	}
 
 	return entities, int(totalCount), nil
+}
+
+// GetLatestRelationshipGraph retrieves the relationship graph JSON from the most recently applied manifest version.
+func (r *Repository) GetLatestRelationshipGraph(ctx context.Context) (*string, error) {
+	var graphJSON *string
+	var found bool
+
+	err := db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		var entity VersionEntity
+		result := tx.Select("relationship_graph").
+			Where("apply_status = ? AND relationship_graph IS NOT NULL", ApplyStatusApplied).
+			Order("applied_at DESC").
+			First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			found = false
+			return nil
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		found = true
+		graphJSON = entity.RelationshipGraph
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrVersionNotFound
+	}
+	return graphJSON, nil
 }
 
 // GetPreviousApplied retrieves the applied manifest version immediately before the given timestamp.
