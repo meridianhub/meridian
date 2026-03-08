@@ -787,10 +787,200 @@ func TestEconomyTools_PartialClients_RegistersAvailable(t *testing.T) {
 	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
 
 	listed := r.List()
-	if len(listed) != 1 {
-		t.Fatalf("expected 1 registered tool, got %d", len(listed))
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 registered tools (history + graph), got %d", len(listed))
 	}
-	if listed[0].Name != "meridian_manifest_history" {
-		t.Errorf("expected meridian_manifest_history, got %q", listed[0].Name)
+	names := make(map[string]bool)
+	for _, tool := range listed {
+		names[tool.Name] = true
+	}
+	if !names["meridian_manifest_history"] {
+		t.Error("expected meridian_manifest_history to be registered")
+	}
+	if !names["meridian_economy_graph"] {
+		t.Error("expected meridian_economy_graph to be registered")
+	}
+}
+
+// --- meridian_economy_graph tests ---
+
+func testManifest() *controlplanev1.Manifest {
+	return &controlplanev1.Manifest{
+		Version: "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{
+			Name:        "Test Economy",
+			Industry:    "energy",
+			Description: "Test",
+		},
+		Instruments: []*controlplanev1.InstrumentDefinition{
+			{
+				Code: "GBP",
+				Name: "British Pound",
+				Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+				Dimensions: &controlplanev1.InstrumentDimensions{
+					Unit: "GBP", Precision: 2,
+				},
+			},
+			{
+				Code: "KWH",
+				Name: "Kilowatt Hour",
+				Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
+				Dimensions: &controlplanev1.InstrumentDimensions{
+					Unit: "kWh", Precision: 3,
+				},
+			},
+		},
+		AccountTypes: []*controlplanev1.AccountTypeDefinition{
+			{
+				Code:               "SETTLEMENT",
+				Name:               "Settlement Account",
+				NormalBalance:      controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT,
+				AllowedInstruments: []string{"GBP"},
+			},
+		},
+		ValuationRules: []*controlplanev1.ValuationRule{
+			{
+				FromInstrument: "KWH",
+				ToInstrument:   "GBP",
+				Method:         controlplanev1.ValuationMethod_VALUATION_METHOD_SPOT_RATE,
+				Source:         "nordpool",
+			},
+		},
+		Sagas: []*controlplanev1.SagaDefinition{
+			{
+				Name:    "process_settlement",
+				Trigger: "api:/v1/settlements",
+				Script:  "x = 1",
+			},
+		},
+	}
+}
+
+func TestEconomyGraph_ReturnsNodesAndEdges(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{
+					{
+						Id:       "v1",
+						Version:  "1.0",
+						Manifest: testManifest(),
+					},
+				},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map, got %T", result)
+	}
+
+	nodeCount, _ := m["node_count"].(int)
+	edgeCount, _ := m["edge_count"].(int)
+
+	if nodeCount < 4 {
+		t.Errorf("expected at least 4 nodes (2 instruments + 1 account_type + 1 saga), got %d", nodeCount)
+	}
+	if edgeCount < 3 {
+		t.Errorf("expected at least 3 edges (denominated_in + converts + triggers_on), got %d", edgeCount)
+	}
+}
+
+func TestEconomyGraph_FilterByNodeType(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{
+					{Id: "v1", Version: "1.0", Manifest: testManifest()},
+				},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{"node_type":"instrument"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+	nodeCount := m["node_count"].(int)
+	if nodeCount != 2 {
+		t.Errorf("expected 2 instrument nodes, got %d", nodeCount)
+	}
+}
+
+func TestEconomyGraph_ImpactAnalysis(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{
+					{Id: "v1", Version: "1.0", Manifest: testManifest()},
+				},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{"node_id":"instrument:GBP"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+	impact, ok := m["impact"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected impact field in response")
+	}
+
+	affectedNodes, ok := impact["affected_nodes"].([]string)
+	if !ok {
+		t.Fatal("expected affected_nodes as []string")
+	}
+
+	// GBP is used by SETTLEMENT (denominated_in) and KWH (converts)
+	if len(affectedNodes) < 2 {
+		t.Errorf("expected at least 2 affected nodes for instrument:GBP, got %d: %v", len(affectedNodes), affectedNodes)
+	}
+}
+
+func TestEconomyGraph_NoManifest(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+	if m["status"] != "no_manifest" {
+		t.Errorf("expected status 'no_manifest', got %v", m["status"])
 	}
 }
