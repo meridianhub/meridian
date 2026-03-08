@@ -261,6 +261,58 @@ func TestManifestFix_InvalidManifestJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "validation failed")
 }
 
+func TestManifestFix_ParamRenamingScopedToCallSite(t *testing.T) {
+	reg := testRegistryWithEvolution()
+	r := tools.NewRegistry()
+	tools.RegisterManifestFixTool(r, reg)
+
+	// Script has both a deprecated call AND a non-deprecated call using
+	// the same old param name "amount". Param renaming must only apply
+	// inside the deprecated call's parentheses.
+	manifest := map[string]interface{}{
+		"version": "1.0",
+		"metadata": map[string]interface{}{
+			"name":        "Test",
+			"industry":    "energy",
+			"description": "Test manifest",
+		},
+		"sagas": []interface{}{
+			map[string]interface{}{
+				"name":    "scoped_test",
+				"trigger": "api:/v1/test",
+				"script": `def execute(ctx):
+    test.initiate_log(amount="100.00", currency="GBP", direction="CREDIT")
+    test.other_handler(id="abc")
+    x = some_func(amount="200.00")
+`,
+			},
+		},
+	}
+
+	manifestJSON, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	params := json.RawMessage(`{"manifest": ` + string(manifestJSON) + `}`)
+	result, err := r.Call(context.Background(), "meridian_manifest_fix", params)
+	require.NoError(t, err)
+
+	m := result.(map[string]interface{})
+	fixedManifest := m["manifest"].(map[string]interface{})
+	sagas := fixedManifest["sagas"].([]interface{})
+	saga := sagas[0].(map[string]interface{})
+	script := saga["script"].(string)
+
+	// The deprecated call should be converted
+	assert.Contains(t, script, "test.record_entry(quantity=")
+	assert.NotContains(t, script, "test.initiate_log(")
+
+	// The non-deprecated call's "amount" param must NOT be renamed
+	assert.Contains(t, script, `some_func(amount="200.00")`)
+
+	// other_handler should be untouched
+	assert.Contains(t, script, `test.other_handler(id="abc")`)
+}
+
 func TestManifestFix_ParamMappingApplied(t *testing.T) {
 	reg := testRegistryWithEvolution()
 	r := tools.NewRegistry()

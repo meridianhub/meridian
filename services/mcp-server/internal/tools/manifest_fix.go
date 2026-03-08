@@ -197,14 +197,67 @@ func collectDeprecatedHandlers(schemaRegistry *schema.Registry) map[string]depre
 }
 
 // applyHandlerConversion replaces the deprecated handler call and its parameter names in the script.
+// Parameter renaming is scoped to each call site's argument list to avoid corrupting other calls.
 func applyHandlerConversion(script string, oldName string, info deprecatedInfo) string {
-	result := strings.ReplaceAll(script, oldName+"(", info.currentName+"(")
-	if info.rule != nil {
-		for newParam, oldParam := range info.rule.ParamMapping {
-			result = strings.ReplaceAll(result, oldParam+"=", newParam+"=")
+	oldCall := oldName + "("
+	newCall := info.currentName + "("
+	hasParamMapping := info.rule != nil && len(info.rule.ParamMapping) > 0
+
+	if !hasParamMapping {
+		return strings.ReplaceAll(script, oldCall, newCall)
+	}
+
+	// Build reverse mapping: old param name -> new param name
+	reverseMapping := make(map[string]string, len(info.rule.ParamMapping))
+	for newParam, oldParam := range info.rule.ParamMapping {
+		reverseMapping[oldParam] = newParam
+	}
+
+	// Process each occurrence of the deprecated call, replacing handler name
+	// and renaming params only within the call's parentheses.
+	var result strings.Builder
+	remaining := script
+	for {
+		idx := strings.Index(remaining, oldCall)
+		if idx < 0 {
+			result.WriteString(remaining)
+			break
+		}
+
+		// Write text before the call and the new handler name
+		result.WriteString(remaining[:idx])
+		result.WriteString(newCall)
+		remaining = remaining[idx+len(oldCall):]
+
+		// Find the matching closing paren, tracking nesting depth
+		callBody, rest := extractCallBody(remaining)
+		// Rename params within the call body
+		for oldParam, newParam := range reverseMapping {
+			callBody = strings.ReplaceAll(callBody, oldParam+"=", newParam+"=")
+		}
+		result.WriteString(callBody)
+		remaining = rest
+	}
+
+	return result.String()
+}
+
+// extractCallBody splits text at the matching closing paren for an already-opened call.
+// Returns (bodyIncludingCloseParen, rest). If no matching paren is found, returns (all, "").
+func extractCallBody(s string) (string, string) {
+	depth := 1
+	for i, ch := range s {
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return s[:i+1], s[i+1:]
+			}
 		}
 	}
-	return result
+	return s, ""
 }
 
 // buildConversionMessage creates a human-readable description of a handler conversion.
