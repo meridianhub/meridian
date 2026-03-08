@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -587,20 +588,19 @@ func handleEconomyGraph(ctx context.Context, historian ManifestHistorian, params
 	}
 
 	manifest := histResp.Versions[0].Manifest
-	nodes, edges := extractManifestGraph(manifest)
+	allNodes, allEdges := extractManifestGraph(manifest)
 
-	nodes = filterNodes(nodes, p.NodeType)
-	edges = filterEdges(edges, p.Relationship)
+	filteredNodes := filterNodes(allNodes, p.NodeType)
+	filteredEdges := filterEdges(allEdges, p.Relationship)
 
 	result := map[string]interface{}{
-		"node_count": len(nodes),
-		"edge_count": len(edges),
-		"nodes":      nodes,
-		"edges":      edges,
+		"node_count": len(filteredNodes),
+		"edge_count": len(filteredEdges),
+		"nodes":      filteredNodes,
+		"edges":      filteredEdges,
 	}
 
 	if p.NodeID != "" {
-		_, allEdges := extractManifestGraph(manifest)
 		result["impact"] = computeImpact(p.NodeID, allEdges)
 	}
 
@@ -653,6 +653,7 @@ func computeImpact(nodeID string, edges []graphEdge) map[string]interface{} {
 	for n := range affected {
 		affectedList = append(affectedList, n)
 	}
+	sort.Strings(affectedList)
 	return map[string]interface{}{
 		"node_id":        nodeID,
 		"affected_nodes": affectedList,

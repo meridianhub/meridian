@@ -3,6 +3,7 @@ package validator
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -85,6 +86,7 @@ func (g *RelationshipGraph) Impact(nodeID string) *ImpactResult {
 	for n := range affected {
 		nodes = append(nodes, n)
 	}
+	sort.Strings(nodes)
 
 	return &ImpactResult{
 		RemovedNode:   nodeID,
