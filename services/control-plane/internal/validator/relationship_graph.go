@@ -200,9 +200,9 @@ func extractHandlerCallEdges(g *RelationshipGraph, sagaID string, calls []schema
 			Location:     location,
 		})
 
-		// Analyze params for instrument and account references
+		// Analyze params for instrument and account references.
+		// All param-derived edges are dynamic (values resolved at runtime from variables).
 		for _, paramName := range call.ParamNames {
-			isDynamic := false
 			lowerParam := strings.ToLower(paramName)
 
 			if strings.Contains(lowerParam, "instrument_code") || strings.Contains(lowerParam, "instrument") {
@@ -210,7 +210,7 @@ func extractHandlerCallEdges(g *RelationshipGraph, sagaID string, calls []schema
 					Source:       sagaID,
 					Target:       handlerID,
 					Relationship: RelUsesInstrument,
-					IsDynamic:    isDynamic,
+					IsDynamic:    true,
 					Location:     location,
 				})
 			}
