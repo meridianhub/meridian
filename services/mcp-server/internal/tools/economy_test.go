@@ -28,11 +28,27 @@ func (m *mockManifestApplier) ApplyManifest(ctx context.Context, req *controlpla
 }
 
 type mockManifestHistorian struct {
-	listFn func(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error)
+	listFn    func(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error)
+	currentFn func(ctx context.Context, req *controlplanev1.GetCurrentManifestRequest) (*controlplanev1.GetCurrentManifestResponse, error)
 }
 
 func (m *mockManifestHistorian) ListManifestVersions(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
 	return m.listFn(ctx, req)
+}
+
+func (m *mockManifestHistorian) GetCurrentManifest(ctx context.Context, req *controlplanev1.GetCurrentManifestRequest) (*controlplanev1.GetCurrentManifestResponse, error) {
+	if m.currentFn != nil {
+		return m.currentFn(ctx, req)
+	}
+	// Default: derive from listFn for backwards compatibility with existing tests
+	resp, err := m.listFn(ctx, &controlplanev1.ListManifestVersionsRequest{Limit: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Versions) == 0 {
+		return &controlplanev1.GetCurrentManifestResponse{}, nil
+	}
+	return &controlplanev1.GetCurrentManifestResponse{Version: resp.Versions[0]}, nil
 }
 
 // validManifestJSON returns a minimal valid manifest JSON for testing.

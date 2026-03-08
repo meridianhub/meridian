@@ -35,6 +35,7 @@ type ManifestApplier interface {
 // ManifestHistorian is the minimal interface for querying manifest version history.
 type ManifestHistorian interface {
 	ListManifestVersions(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error)
+	GetCurrentManifest(ctx context.Context, req *controlplanev1.GetCurrentManifestRequest) (*controlplanev1.GetCurrentManifestResponse, error)
 }
 
 // EconomyDeps holds all service clients used by economy design tools.
@@ -57,8 +58,6 @@ func RegisterEconomyTools(registry *Registry, sess PlanStore, deps EconomyDeps) 
 	}
 	if deps.Historian != nil {
 		candidates = append(candidates, buildManifestHistoryTool(deps.Historian))
-	}
-	if deps.Historian != nil {
 		candidates = append(candidates, buildEconomyGraphTool(deps.Historian))
 	}
 
@@ -584,19 +583,19 @@ func handleEconomyGraph(ctx context.Context, historian ManifestHistorian, params
 		return mcperrors.FormatGRPCError(err), nil
 	}
 
-	// Get current manifest version via historian
-	histResp, err := historian.ListManifestVersions(ctx, &controlplanev1.ListManifestVersionsRequest{Limit: 1})
+	// Get current applied manifest version
+	currentResp, err := historian.GetCurrentManifest(ctx, &controlplanev1.GetCurrentManifestRequest{})
 	if err != nil {
 		return mcperrors.FormatGRPCError(err), nil
 	}
-	if len(histResp.Versions) == 0 || histResp.Versions[0].Manifest == nil {
+	if currentResp.Version == nil || currentResp.Version.Manifest == nil {
 		return map[string]interface{}{
 			"status":  "no_manifest",
 			"message": "no manifest has been applied for this tenant",
 		}, nil
 	}
 
-	version := histResp.Versions[0]
+	version := currentResp.Version
 	allNodes, allEdges := loadGraph(version)
 
 	filteredNodes := filterNodes(allNodes, p.NodeType)
