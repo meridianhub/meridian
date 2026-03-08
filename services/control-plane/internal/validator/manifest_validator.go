@@ -17,6 +17,7 @@ import (
 	"github.com/google/cel-go/cel"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/shopspring/decimal"
 	"go.starlark.net/starlark"
@@ -152,6 +153,7 @@ type ManifestValidator struct {
 	mappingCelEnv   *cel.Env
 	eventFilterEnv  *cel.Env
 	channelRegistry map[string]bool
+	schemaRegistry  *schema.Registry
 }
 
 // New creates a new ManifestValidator.
@@ -221,6 +223,12 @@ func New() (*ManifestValidator, error) {
 		channelRegistry[topic] = true
 	}
 
+	// Load schema registry for typed Starlark validation
+	schemaRegistry, err := schema.DefaultRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema registry: %w", err)
+	}
+
 	return &ManifestValidator{
 		protoValidator:  pv,
 		celEnv:          celEnv,
@@ -229,6 +237,7 @@ func New() (*ManifestValidator, error) {
 		mappingCelEnv:   mappingCelEnv,
 		eventFilterEnv:  eventFilterEnv,
 		channelRegistry: channelRegistry,
+		schemaRegistry:  schemaRegistry,
 	}, nil
 }
 
@@ -575,7 +584,17 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		return
 	}
 
-	predeclared := buildStarlarkPredeclared()
+	predeclared, callLog, err := v.buildStarlarkPredeclared()
+	if err != nil {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     path,
+			Code:     "STARLARK_MODULE_BUILD_ERROR",
+			Message:  fmt.Sprintf("failed to build typed service modules: %v", err),
+		})
+		return
+	}
+
 	thread := &starlark.Thread{
 		Name:  saga.GetName(),
 		Print: func(_ *starlark.Thread, _ string) {},
@@ -584,9 +603,20 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 	_, execErr := starlark.ExecFileOptions(fileOpts, thread, saga.GetName()+".star", script, predeclared)
 	if execErr != nil {
 		ve := parseStarlarkError(execErr, path)
+
+		// Enrich with structured error codes from handler validation failures
+		if v.enrichHandlerValidationError(execErr, &ve) {
+			addError(result, ve)
+			return
+		}
+
 		addStarlarkUndefinedSuggestion(execErr, &ve)
 		addError(result, ve)
+		return
 	}
+
+	// Capture handler call metadata in the result
+	_ = callLog // HandlerCallInfo available for future relationship graph use
 }
 
 // addStarlarkUndefinedSuggestion enriches a validation error with a "Did you mean?" suggestion
@@ -1416,13 +1446,19 @@ func (v *ManifestValidator) validateImmutability(
 }
 
 // buildStarlarkPredeclared creates the predeclared dictionary for Starlark compilation.
-// This includes service modules as simple struct values and known builtins.
-func buildStarlarkPredeclared() starlark.StringDict {
+// It uses typed service modules from the schema registry for handler parameter validation.
+// Returns the predeclared dict, handler call log, and any error.
+func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]schema.HandlerCallInfo, error) {
 	predeclared := make(starlark.StringDict)
 
-	// Add service modules as empty structs (enough for compilation checking)
-	for _, svc := range knownServiceBindings {
-		predeclared[svc] = &starlarkModule{name: svc}
+	// Build typed service modules from schema registry
+	var callLog []schema.HandlerCallInfo
+	modules, err := schema.BuildValidationModules(v.schemaRegistry, &callLog)
+	if err != nil {
+		return nil, nil, err
+	}
+	for name, module := range modules {
+		predeclared[name] = module
 	}
 
 	// Add common builtins
@@ -1437,31 +1473,90 @@ func buildStarlarkPredeclared() starlark.StringDict {
 			return starlark.String("0"), nil
 		})
 
-	return predeclared
+	return predeclared, &callLog, nil
 }
 
-// starlarkModule is a simple stub module for compilation checking.
-// It accepts any attribute access, returning another module or a no-op function.
-type starlarkModule struct {
-	name string
+// enrichHandlerValidationError checks if a Starlark execution error is a handler
+// validation failure and enriches the ValidationError with structured codes and suggestions.
+// Returns true if the error was a handler validation failure.
+func (v *ManifestValidator) enrichHandlerValidationError(execErr error, ve *ValidationError) bool {
+	errStr := execErr.Error()
+
+	// Check for our structured validation failure codes from ValidationFailure errors
+	for _, code := range []string{
+		schema.ValidationCodeUnknownHandler,
+		schema.ValidationCodeUnknownParam,
+		schema.ValidationCodeMissingRequiredParam,
+		schema.ValidationCodeWrongParamType,
+	} {
+		if strings.Contains(errStr, "["+code+"]") {
+			ve.Code = code
+
+			var vf *schema.ValidationFailure
+			if errors.As(execErr, &vf) {
+				ve.Message = vf.Message
+				ve.Suggestion = vf.Suggestion
+				ve.AvailableFields = vf.AvailableValues
+			}
+
+			return true
+		}
+	}
+
+	// Check for starlarkstruct "has no .X attribute" errors, which indicate
+	// unknown handler calls on a typed service module.
+	if serviceName, methodName, ok := extractStructAttrError(errStr); ok {
+		ve.Code = schema.ValidationCodeUnknownHandler
+		ve.Message = fmt.Sprintf("unknown handler %q", serviceName+"."+methodName)
+
+		knownHandlers := v.listServiceHandlers(serviceName)
+		if len(knownHandlers) > 0 {
+			ve.AvailableFields = knownHandlers
+			if suggestion := findClosestMatch(methodName, knownHandlers); suggestion != "" {
+				ve.Suggestion = fmt.Sprintf("Did you mean %q?", serviceName+"."+suggestion)
+			}
+		}
+
+		return true
+	}
+
+	return false
 }
 
-func (m *starlarkModule) String() string        { return m.name }
-func (m *starlarkModule) Type() string          { return "module" }
-func (m *starlarkModule) Freeze()               {}
-func (m *starlarkModule) Truth() starlark.Bool  { return true }
-func (m *starlarkModule) Hash() (uint32, error) { return 0, ErrUnhashable }
+// structAttrErrorPattern matches starlark struct attribute errors:
+// "\"service_name\" struct has no .method_name attribute"
+var structAttrErrorPattern = regexp.MustCompile(`"(\w+)" struct has no \.(\w+)`)
 
-func (m *starlarkModule) Attr(name string) (starlark.Value, error) {
-	// Return a callable for any attribute access (simulates service methods)
-	return starlark.NewBuiltin(m.name+"."+name,
-		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
-			return starlark.NewDict(0), nil
-		}), nil
+// extractStructAttrError extracts service and method names from a starlarkstruct
+// "has no .X attribute" error message.
+func extractStructAttrError(errStr string) (serviceName, methodName string, ok bool) {
+	matches := structAttrErrorPattern.FindStringSubmatch(errStr)
+	if len(matches) != 3 {
+		return "", "", false
+	}
+	// Only match if the struct name is a known service binding
+	for _, svc := range knownServiceBindings {
+		if matches[1] == svc {
+			return matches[1], matches[2], true
+		}
+	}
+	return "", "", false
 }
 
-func (m *starlarkModule) AttrNames() []string {
-	return nil
+// listServiceHandlers returns the handler method names (last segment) for a given service.
+func (v *ManifestValidator) listServiceHandlers(serviceName string) []string {
+	var methods []string
+	prefix := serviceName + "."
+	for _, h := range v.schemaRegistry.ListHandlers() {
+		if strings.HasPrefix(h, prefix) {
+			method := strings.TrimPrefix(h, prefix)
+			if !strings.Contains(method, ".") {
+				methods = append(methods, method)
+			}
+		}
+	}
+	sort.Strings(methods)
+	return methods
 }
 
 // buildFieldPath extracts a dotted field path from a protovalidate Violation.
