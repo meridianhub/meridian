@@ -2149,6 +2149,47 @@ func TestValidateAPITriggers_SkippedWhenNoSpec(t *testing.T) {
 	}
 }
 
+func TestValidateAPITriggers_FormatAndDuplicateChecksWithoutSpec(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "bad_format",
+			Trigger: "api:no-leading-slash",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "dup_1",
+			Trigger: "api:/v1/duped",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "dup_2",
+			Trigger: "api:/v1/duped",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+
+	foundFormat, foundDup, foundUnknown := false, false, false
+	for _, e := range result.Errors {
+		switch e.Code {
+		case "INVALID_API_PATH_FORMAT":
+			foundFormat = true
+		case "DUPLICATE_API_TRIGGER":
+			foundDup = true
+		case "UNKNOWN_API_ENDPOINT":
+			foundUnknown = true
+		}
+	}
+	assert.True(t, foundFormat, "format check should fire without spec")
+	assert.True(t, foundDup, "duplicate check should fire without spec")
+	assert.False(t, foundUnknown, "endpoint existence check should be skipped without spec")
+}
+
 func TestParseOpenAPIPaths(t *testing.T) {
 	spec := `{
 		"swagger": "2.0",
@@ -2378,6 +2419,51 @@ components:
 	assert.Contains(t, schemas, "test.topic.v1")
 	assert.True(t, schemas["test.topic.v1"]["field_a"])
 	assert.True(t, schemas["test.topic.v1"]["field_b"])
+}
+
+func TestParseAsyncAPIFile_MergesFieldsAcrossMessages(t *testing.T) {
+	data := []byte(`
+asyncapi: 3.0.0
+channels:
+  orders.topic.v1:
+    messages:
+      OrderCreated:
+        $ref: '#/components/messages/OrderCreated'
+      OrderUpdated:
+        $ref: '#/components/messages/OrderUpdated'
+components:
+  messages:
+    OrderCreated:
+      payload:
+        $ref: '#/components/schemas/OrderCreatedPayload'
+    OrderUpdated:
+      payload:
+        $ref: '#/components/schemas/OrderUpdatedPayload'
+  schemas:
+    OrderCreatedPayload:
+      type: object
+      properties:
+        order_id:
+          type: string
+        amount:
+          type: number
+    OrderUpdatedPayload:
+      type: object
+      properties:
+        order_id:
+          type: string
+        status:
+          type: string
+`)
+
+	schemas := make(map[string]map[string]bool)
+	parseAsyncAPIFile(data, schemas)
+
+	require.Contains(t, schemas, "orders.topic.v1")
+	fields := schemas["orders.topic.v1"]
+	assert.True(t, fields["order_id"], "order_id should be present from both messages")
+	assert.True(t, fields["amount"], "amount should be present from OrderCreated")
+	assert.True(t, fields["status"], "status should be present from OrderUpdated")
 }
 
 // ─── Task 11: Orphan Detection Tests ────────────────────────────────────────

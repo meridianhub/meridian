@@ -1220,16 +1220,9 @@ func (v *ManifestValidator) validateWebhookTriggers(
 	sort.Strings(availableIDs)
 
 	for i, saga := range manifest.GetSagas() {
-		trigger := saga.GetTrigger()
-		if !strings.HasPrefix(trigger, "webhook:") {
+		source := extractWebhookSource(saga.GetTrigger())
+		if source == "" {
 			continue
-		}
-
-		// Parse webhook:<source>.<event> — source is the first dot-separated segment.
-		remainder := strings.TrimPrefix(trigger, "webhook:")
-		source := remainder
-		if dotIdx := strings.Index(remainder, "."); dotIdx > 0 {
-			source = remainder[:dotIdx]
 		}
 
 		if !connectionIDs[source] {
@@ -1634,17 +1627,16 @@ func (v *ManifestValidator) listServiceHandlers(serviceName string) []string {
 var apiPathPattern = regexp.MustCompile(`^/`)
 
 // validateAPITriggers validates sagas with "api:" trigger prefix.
-// It checks path format, existence in the OpenAPI spec, and uniqueness.
+// It checks path format, uniqueness, and (when an OpenAPI spec is available) endpoint existence.
 func (v *ManifestValidator) validateAPITriggers(
 	manifest *controlplanev1.Manifest,
 	result *ValidationResult,
 ) {
-	if v.apiPathRegistry == nil {
-		return
-	}
-
 	seenPaths := make(map[string]int)
-	availablePaths := mapKeys(v.apiPathRegistry)
+	var availablePaths []string
+	if v.apiPathRegistry != nil {
+		availablePaths = mapKeys(v.apiPathRegistry)
+	}
 
 	for i, saga := range manifest.GetSagas() {
 		trigger := saga.GetTrigger()
@@ -1679,8 +1671,8 @@ func (v *ManifestValidator) validateAPITriggers(
 			seenPaths[path] = i
 		}
 
-		// Check existence in OpenAPI spec
-		if !v.apiPathRegistry[path] {
+		// Check existence in OpenAPI spec (only when spec is available)
+		if v.apiPathRegistry != nil && !v.apiPathRegistry[path] {
 			ve := ValidationError{
 				Severity:        SeverityError,
 				Path:            sagaPath,
@@ -1801,29 +1793,46 @@ func parseAsyncAPIFile(data []byte, schemas map[string]map[string]bool) {
 
 	for channelName, channel := range doc.Channels {
 		for _, msgRef := range channel.Messages {
-			msgName := extractRef(msgRef.Ref)
-			if msgName == "" {
+			fields := resolveMessageFields(msgRef, doc.Components)
+			if len(fields) == 0 {
 				continue
 			}
-			msg, ok := doc.Components.Messages[msgName]
-			if !ok {
-				continue
+			existing := schemas[channelName]
+			if existing == nil {
+				existing = make(map[string]bool, len(fields))
 			}
-			schemaName := extractRef(msg.Payload.Ref)
-			if schemaName == "" {
-				continue
+			for _, f := range fields {
+				existing[f] = true
 			}
-			s, ok := doc.Components.Schemas[schemaName]
-			if !ok {
-				continue
-			}
-			fields := make(map[string]bool, len(s.Properties))
-			for fieldName := range s.Properties {
-				fields[fieldName] = true
-			}
-			schemas[channelName] = fields
+			schemas[channelName] = existing
 		}
 	}
+}
+
+// resolveMessageFields follows $ref chains from a message reference to its schema
+// and returns the list of top-level property names.
+func resolveMessageFields(msgRef asyncAPIMessageRef, components asyncAPIComponents) []string {
+	msgName := extractRef(msgRef.Ref)
+	if msgName == "" {
+		return nil
+	}
+	msg, ok := components.Messages[msgName]
+	if !ok {
+		return nil
+	}
+	schemaName := extractRef(msg.Payload.Ref)
+	if schemaName == "" {
+		return nil
+	}
+	s, ok := components.Schemas[schemaName]
+	if !ok {
+		return nil
+	}
+	fields := make([]string, 0, len(s.Properties))
+	for fieldName := range s.Properties {
+		fields = append(fields, fieldName)
+	}
+	return fields
 }
 
 // extractRef extracts the last segment from a JSON/YAML $ref (e.g., "#/components/schemas/Foo" -> "Foo").
@@ -1948,6 +1957,9 @@ func (v *ManifestValidator) validateEventFilterCELFields(
 
 // dispatchInstructionRegex matches dispatch_instruction calls in Starlark scripts
 // to extract the instruction type, supporting both positional and keyword argument styles.
+// NOTE: This scans raw source text so it may match occurrences in comments or string
+// literals, producing false negatives (suppressing orphan warnings). A proper Starlark
+// AST walk would eliminate this, but the current approach is acceptable for a warning-level check.
 var dispatchInstructionRegex = regexp.MustCompile(
 	`dispatch_instruction\s*\(\s*(?:instruction_type\s*=\s*)?["']([^"']+)["']`,
 )
