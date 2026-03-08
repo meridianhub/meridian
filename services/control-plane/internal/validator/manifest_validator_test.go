@@ -651,7 +651,7 @@ func TestValidateStarlark_ServiceModuleAccess(t *testing.T) {
         amount=Decimal("100.00"),
         direction="CREDIT",
     )
-    return {"log_id": result["log_id"]}
+    return {"log_id": result.log_id}
 `
 
 	result := v.Validate(m, nil)
@@ -1096,6 +1096,130 @@ func TestValidateStarlark_EmptyScript(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
+}
+
+func TestValidateStarlark_TypedModules_UnknownHandler(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas[0].Script = `def execute(ctx):
+    result = position_keeping.nonexistent_handler(amount="100")
+    return result
+`
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e.Message, "no field or method") || strings.Contains(e.Message, "has no .nonexistent_handler") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected error about unknown handler, got: %v", result.Errors)
+}
+
+func TestValidateStarlark_TypedModules_UnknownParam(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas[0].Script = `def execute(ctx):
+    result = position_keeping.initiate_log(
+        position_id="123",
+        amont=Decimal("100.00"),
+        direction="CREDIT",
+    )
+    return result
+`
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "UNKNOWN_PARAM" {
+			found = true
+			assert.Contains(t, e.Message, "amont")
+			assert.NotEmpty(t, e.Suggestion)
+			assert.Contains(t, e.Suggestion, "amount")
+			break
+		}
+	}
+	assert.True(t, found, "expected UNKNOWN_PARAM error, got: %v", result.Errors)
+}
+
+func TestValidateStarlark_TypedModules_MissingRequiredParam(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	// Missing required 'amount' and 'direction'
+	m.Sagas[0].Script = `def execute(ctx):
+    result = position_keeping.initiate_log(
+        position_id="123",
+    )
+    return result
+`
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "MISSING_REQUIRED_PARAM" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected MISSING_REQUIRED_PARAM error, got: %v", result.Errors)
+}
+
+func TestValidateStarlark_TypedModules_WrongParamType(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	// position_id expects string, give it a list
+	m.Sagas[0].Script = `def execute(ctx):
+    result = position_keeping.initiate_log(
+        position_id=[1, 2, 3],
+        amount=Decimal("100.00"),
+        direction="CREDIT",
+    )
+    return result
+`
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "WRONG_PARAM_TYPE" {
+			found = true
+			assert.Contains(t, e.Message, "position_id")
+			break
+		}
+	}
+	assert.True(t, found, "expected WRONG_PARAM_TYPE error, got: %v", result.Errors)
+}
+
+func TestValidateStarlark_TypedModules_ValidComplexCall(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas[0].Script = `def execute(ctx):
+    log = position_keeping.initiate_log(
+        position_id="pos-001",
+        amount=Decimal("250.00"),
+        direction="DEBIT",
+        instrument_code="GBP",
+    )
+    log_id = log.log_id
+    status = log.status
+    return {"log_id": log_id, "status": status}
+`
+	result := v.Validate(m, nil)
+	assert.True(t, result.Valid, "expected valid manifest, got errors: %v", result.Errors)
 }
 
 // validPaymentRails returns a valid PaymentRails for testing.
