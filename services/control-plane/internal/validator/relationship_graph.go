@@ -147,6 +147,9 @@ func ExtractRelationshipGraph(
 		})
 	}
 
+	// Track handler nodes across all sagas to avoid duplicates
+	handlersSeen := make(map[string]bool)
+
 	// Add saga nodes and trigger edges
 	for i, saga := range manifest.GetSagas() {
 		sagaID := "saga:" + saga.GetName()
@@ -169,22 +172,26 @@ func ExtractRelationshipGraph(
 
 		// Extract handler call relationships from call logs
 		if calls, ok := callLogs[saga.GetName()]; ok {
-			extractHandlerCallEdges(g, sagaID, calls, fmt.Sprintf("sagas[%d].script", i))
+			extractHandlerCallEdges(g, sagaID, calls, fmt.Sprintf("sagas[%d].script", i), handlersSeen)
 		}
 	}
 
 	return g
 }
 
-// extractHandlerCallEdges adds edges from handler call info gathered during Starlark validation.
-func extractHandlerCallEdges(g *RelationshipGraph, sagaID string, calls []schema.HandlerCallInfo, location string) {
-	// Track unique handler nodes
-	handlersSeen := make(map[string]bool)
+// edgeKey identifies a unique edge for deduplication.
+type edgeKey struct {
+	source, target string
+	rel            RelationshipType
+}
 
+// extractHandlerCallEdges adds edges from handler call info gathered during Starlark validation.
+// handlersSeen is shared across all sagas to deduplicate handler nodes graph-wide.
+func extractHandlerCallEdges(g *RelationshipGraph, sagaID string, calls []schema.HandlerCallInfo, location string, handlersSeen map[string]bool) {
 	for _, call := range calls {
 		handlerID := "handler:" + call.HandlerName
 
-		// Add handler node if first time seen
+		// Add handler node if first time seen across all sagas
 		if !handlersSeen[handlerID] {
 			handlersSeen[handlerID] = true
 			g.Nodes = append(g.Nodes, GraphNode{
@@ -202,39 +209,55 @@ func extractHandlerCallEdges(g *RelationshipGraph, sagaID string, calls []schema
 			Location:     location,
 		})
 
-		// Analyze params for instrument and account references.
-		// All param-derived edges are dynamic (values resolved at runtime from variables).
-		for _, paramName := range call.ParamNames {
-			lowerParam := strings.ToLower(paramName)
+		// Extract param-derived edges (instrument and account references)
+		extractParamEdges(g, sagaID, handlerID, call, location)
+	}
+}
 
-			if strings.Contains(lowerParam, "instrument_code") || strings.Contains(lowerParam, "instrument") {
-				g.Edges = append(g.Edges, GraphEdge{
-					Source:       sagaID,
-					Target:       handlerID,
-					Relationship: RelUsesInstrument,
-					IsDynamic:    true,
-					Location:     location,
-				})
-			}
+// extractParamEdges analyzes handler call parameters for instrument and account references.
+// All param-derived edges are dynamic (values resolved at runtime from variables).
+// Duplicates are collapsed when multiple params match the same pattern.
+func extractParamEdges(g *RelationshipGraph, sagaID, handlerID string, call schema.HandlerCallInfo, location string) {
+	edgesSeen := make(map[edgeKey]bool)
 
-			if strings.Contains(lowerParam, "account_id") || strings.Contains(lowerParam, "account") {
-				rel := RelReadsFrom
-				// Heuristic: handlers with "initiate", "create", "update", "post" suggest writes
-				handlerLower := strings.ToLower(call.HandlerName)
-				if strings.Contains(handlerLower, "initiate") ||
-					strings.Contains(handlerLower, "create") ||
-					strings.Contains(handlerLower, "update") ||
-					strings.Contains(handlerLower, "post") {
-					rel = RelWritesTo
-				}
-				g.Edges = append(g.Edges, GraphEdge{
-					Source:       sagaID,
-					Target:       handlerID,
-					Relationship: rel,
-					IsDynamic:    true,
-					Location:     location,
-				})
-			}
+	for _, paramName := range call.ParamNames {
+		lowerParam := strings.ToLower(paramName)
+
+		if strings.Contains(lowerParam, "instrument_code") || strings.Contains(lowerParam, "instrument") {
+			addDynamicEdge(g, edgesSeen, sagaID, handlerID, RelUsesInstrument, location)
+		}
+
+		if strings.Contains(lowerParam, "account_id") || strings.Contains(lowerParam, "account") {
+			rel := accountRelationship(call.HandlerName)
+			addDynamicEdge(g, edgesSeen, sagaID, handlerID, rel, location)
 		}
 	}
+}
+
+// accountRelationship determines whether a handler represents a read or write based on its name.
+func accountRelationship(handlerName string) RelationshipType {
+	handlerLower := strings.ToLower(handlerName)
+	if strings.Contains(handlerLower, "initiate") ||
+		strings.Contains(handlerLower, "create") ||
+		strings.Contains(handlerLower, "update") ||
+		strings.Contains(handlerLower, "post") {
+		return RelWritesTo
+	}
+	return RelReadsFrom
+}
+
+// addDynamicEdge adds a dynamic edge if not already present in edgesSeen.
+func addDynamicEdge(g *RelationshipGraph, edgesSeen map[edgeKey]bool, source, target string, rel RelationshipType, location string) {
+	key := edgeKey{source, target, rel}
+	if edgesSeen[key] {
+		return
+	}
+	edgesSeen[key] = true
+	g.Edges = append(g.Edges, GraphEdge{
+		Source:       source,
+		Target:       target,
+		Relationship: rel,
+		IsDynamic:    true,
+		Location:     location,
+	})
 }

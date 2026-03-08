@@ -206,6 +206,56 @@ func TestExtractRelationshipGraph_DeduplicatesHandlerNodes(t *testing.T) {
 	assert.Equal(t, 1, handlerCount, "handler node should appear only once despite multiple calls")
 }
 
+func TestExtractRelationshipGraph_DeduplicatesHandlerNodesAcrossSagas(t *testing.T) {
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "another_saga",
+		Trigger: "api:/v1/other",
+		Script:  "x = 1",
+	})
+	callLogs := map[string][]schema.HandlerCallInfo{
+		"process_settlement": {
+			{HandlerName: "position_keeping.initiate_log", ParamNames: []string{"amount"}},
+		},
+		"another_saga": {
+			{HandlerName: "position_keeping.initiate_log", ParamNames: []string{"amount"}},
+		},
+	}
+
+	g := ExtractRelationshipGraph(m, callLogs)
+
+	handlerCount := 0
+	for _, n := range g.Nodes {
+		if n.ID == "handler:position_keeping.initiate_log" {
+			handlerCount++
+		}
+	}
+	assert.Equal(t, 1, handlerCount, "handler node should appear only once across sagas")
+}
+
+func TestExtractRelationshipGraph_CollapsesDuplicateEdgesPerCall(t *testing.T) {
+	manifest := validManifest()
+	// Handler with two account params - should only produce one writes_to edge
+	callLogs := map[string][]schema.HandlerCallInfo{
+		"process_settlement": {
+			{
+				HandlerName: "position_keeping.initiate_log",
+				ParamNames:  []string{"source_account_id", "destination_account_id"},
+			},
+		},
+	}
+
+	g := ExtractRelationshipGraph(manifest, callLogs)
+
+	writesCount := 0
+	for _, e := range g.Edges {
+		if e.Relationship == RelWritesTo {
+			writesCount++
+		}
+	}
+	assert.Equal(t, 1, writesCount, "duplicate account params should collapse into one writes_to edge")
+}
+
 func TestValidate_PopulatesGraphOnSuccess(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
