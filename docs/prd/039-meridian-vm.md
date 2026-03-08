@@ -102,6 +102,11 @@ This is the same design choice Google made for Bazel (Starlark) and Kubernetes a
 - At depth 10 (configurable), events are dropped with warning
 - Prevents infinite saga chains even when individual sagas terminate
 
+Propagation path: Kafka message header (`x-meridian-chain-depth`) → event router reads
+and checks against max → saga executor injects into gRPC metadata → service binding
+writes incremented value to outbound Kafka events. The chain depth is available in CEL
+filter expressions as `chain_depth` for sagas that need depth-aware behaviour.
+
 Together, these guarantee the runtime is **provably finite** at every level.
 
 ### 1.4 The Program Structure
@@ -436,6 +441,19 @@ provide default bindings; tenants can override them via `CreateTenantOverride`.
 - Path format: must start with `/`, valid URL path characters
 - Configuration: `buf.gen.yaml` already defines the OpenAPI generator; `api/openapi/`
   is the output directory
+
+**Gateway route sync**: The API Gateway needs to know which `(tenant_id, path)` pairs
+are bound to sagas. Since bindings change when manifests are applied, the gateway must
+watch or cache the active saga bindings from reference data. Implementation options:
+
+- **Cache with invalidation**: Gateway maintains a local `(tenant_id, path) → saga_name`
+  cache, invalidated on manifest apply via event notification
+- **Lookup on miss**: Gateway queries reference data on cache miss, caches result with TTL
+- **Hot path**: Cache hit = no DB lookup. Cache miss (new tenant, new binding) = single
+  lookup, then cached
+
+This mechanism must be part of Phase 0 (trigger validation) since API trigger validation
+is meaningless if the gateway cannot route to the bound saga at runtime.
 
 **Webhook triggers** (new):
 
@@ -1574,6 +1592,10 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 2. **Simulator scope**: Full position restatement (expensive, accurate) or valuation-only
    replay (fast, approximate)? May offer both as simulator modes — needs prototyping in
    Phase 4 to determine performance characteristics.
+3. **CEL version pinning for replay**: If `google/cel-go` changes float rounding or
+   standard library behaviour between versions, historical replays may drift. Should the
+   enabled CEL functions and Starlark builtins be versioned alongside the manifest? Low
+   risk (CEL-go is stable, used by K8s) but relevant for multi-year replay accuracy.
 
 ---
 
