@@ -1129,9 +1129,8 @@ sagas:
           position_keeping.initiate_log(
               account_id=ctx["site_account_id"],
               instrument_code="KWH",
-              quantity=Decimal(ctx["kwh_delivered"]),
-              side="DEBIT",
-              correlation_id=ctx["session_id"],
+              amount=Decimal(ctx["kwh_delivered"]),
+              direction="DEBIT",
           )
 
   - name: monthly_fleet_invoice
@@ -1218,8 +1217,8 @@ Builds on typed service modules to support handler versioning.
 - Add `deprecated` field to handler params (replace description-only deprecation)
 - Implement mutating validator phase (auto-convert deprecated calls)
 - Add `handlers.sum` hash file for ABI integrity
-- **Test**: submit manifest with v1 `initiate_log(amount=..., direction=...)` and verify
-  auto-conversion to v2 params `initiate_log(quantity=..., side=...)`
+- **Test**: submit manifest with deprecated `initiate_log(amount=..., direction=...)` and verify
+  auto-conversion to `record_entry(quantity=..., side=...)`
 
 ### Phase 1: Relationship Graph
 
