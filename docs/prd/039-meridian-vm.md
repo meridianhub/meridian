@@ -2,11 +2,11 @@
 name: prd-meridian-economy-runtime
 description: >
   Formalise Meridian as a programmable Economy Runtime with typed service modules,
-  handler evolution, relationship graph, AI compiler, and conversational IDE
+  handler evolution, relationship graph, AI generator, and conversational IDE
 triggers:
   - Working on manifest validation, typed service modules, or handler schemas
   - Designing AI-assisted economy configuration or manifest generation
-  - Building the compiler pipeline or IDE wizard for economy creation
+  - Building the generator pipeline or IDE wizard for economy creation
   - Working on handler versioning, conversion rules, or ABI evolution
   - Implementing relationship graph extraction or impact analysis
   - Discussing Starlark/CEL bounded expressiveness or termination guarantees
@@ -14,7 +14,7 @@ triggers:
   - Working on saga error taxonomy, DLQ, or operator dashboard
 instructions: |
   This PRD formalises the existing Meridian architecture as an Economy Runtime and
-  defines three new layers (Relationship Graph, Compiler, IDE) plus three foundational
+  defines three new layers (Relationship Graph, Generator, IDE) plus three foundational
   improvements (Typed Service Modules, Handler Evolution, Trigger Validation).
   Key concepts: bounded expressiveness (Starlark + CEL), schema-driven programmability,
   K8s-style handler conversion rules with CEL default expressions, endpoint-binding API
@@ -39,7 +39,7 @@ close current gaps and unlock AI-assisted configuration.
 **Three new layers:**
 
 1. **Relationship Graph** -- runtime introspection of cross-resource dependencies
-2. **Compiler** -- AI-assisted generation of manifests from business descriptions
+2. **Generator** -- AI-assisted generation of manifests from business descriptions
 3. **IDE** -- conversational wizard UI for economy creation
 
 **Three foundational improvements (identified during design review):**
@@ -48,7 +48,7 @@ close current gaps and unlock AI-assisted configuration.
 2. **Handler Evolution** -- K8s-style versioned handlers with inline conversion rules
 3. **Trigger Validation** -- cross-reference all trigger types against their respective registries
 
-The tagline: **"Describe your business. We build your bank."**
+The tagline: **"Describe your business. We build your economy."**
 
 ---
 
@@ -70,7 +70,7 @@ exactly what each component does.
 | **Loader/Linker** | Control Plane (validate -> diff -> plan -> apply) | `services/control-plane/internal/applier/` |
 | **Execution Engine** | Saga Orchestrator + Event Bus + Handler Registry | Kafka topics, gRPC handler calls |
 | **I/O Ports** | API triggers, webhooks, scheduled jobs, gateway instructions | AsyncAPI channels, operational/financial gateways |
-| **Type System** | Handler schemas (`handlers.yaml`), topic registry, instrument dimensions | Compile-time validation before deploy |
+| **Type System** | Handler schemas (`handlers.yaml`), topic registry, instrument dimensions | Validation before deploy |
 | **ABI** | Handler schemas (`handlers.yaml`) | Stable interface between scripts and services |
 
 ### 1.2 The Instruction Set Design
@@ -219,7 +219,7 @@ The runtime is already operable via MCP tools:
 
 ## 2. Foundational Improvements (Closing the Gaps)
 
-Before building the Relationship Graph, Compiler, and IDE, three foundational gaps must
+Before building the Relationship Graph, Generator, and IDE, three foundational gaps must
 be closed. These are prerequisite work that makes the higher layers reliable.
 
 ### 2.1 Typed Service Modules (Close the Validation Gap)
@@ -251,7 +251,7 @@ Wire the manifest validator to use `BuildServiceModules` (or a validation-only s
   what params, that's the same data the relationship graph needs. Extract it during
   validation.
 - **Handler Evolution**: The validator can detect deprecated handler calls and suggest conversions.
-- **Compiler Reliability**: The AI compiler's output is validated against real handler schemas, not stubs.
+- **Generator Reliability**: The AI generator's output is validated against real handler schemas, not stubs.
 
 #### Design Reference: cadence-workflow/starlark-worker
 
@@ -497,7 +497,7 @@ today; unchecked are gaps to close in Phase 0.
 - [x] CEL expression compilation and type-checking
 - [x] Starlark script syntax parsing
 - [ ] Starlark handler call validation against handlers.yaml (stub modules today)
-- [ ] Starlark handler parameter type/required validation at compile time
+- [ ] Starlark handler parameter type/required validation at manifest validation time
 - [ ] Handler deprecation detection and auto-conversion
 
 **Cross-Reference Validation:**
@@ -533,9 +533,62 @@ today; unchecked are gaps to close in Phase 0.
 
 - [x] Handler schema YAML parsing and type definitions
 - [x] Runtime parameter validation (in service_modules.go)
-- [ ] Compile-time parameter validation (in manifest validator)
+- [ ] Pre-deploy parameter validation (in manifest validator)
 - [ ] Handler version tracking and conversion rules
 - [ ] `handlers.sum` hash verification
+
+### 2.5 Validation Error Model
+
+Every validation failure returns a structured error with enough context for both
+humans and AI to resolve the issue without guessing:
+
+```json
+{
+  "errors": [
+    {
+      "code": "UNKNOWN_HANDLER",
+      "severity": "ERROR",
+      "location": "sagas[0].script:12",
+      "message": "Unknown handler: position_keeping.nonexistent_method",
+      "suggestion": "Did you mean: position_keeping.initiate_log?",
+      "available": ["initiate_log", "cancel_entry", "query_balance"]
+    }
+  ],
+  "warnings": [
+    {
+      "code": "DEPRECATED_HANDLER",
+      "severity": "WARNING",
+      "location": "sagas[1].script:8",
+      "message": "Deprecated handler: position_keeping.initiate_log → position_keeping.record_entry",
+      "auto_converted": true
+    }
+  ]
+}
+```
+
+**Error categories and expected messages:**
+
+| Category | Code | Example Message |
+|----------|------|-----------------|
+| **Structural** | `UNKNOWN_HANDLER` | Handler `X` not found. Available: [...] |
+| **Structural** | `MISSING_REQUIRED_PARAM` | Handler `X` requires param `Y` (type: Decimal) |
+| **Structural** | `WRONG_PARAM_TYPE` | Param `amount` expects Decimal, got string |
+| **Structural** | `UNKNOWN_PARAM` | Handler `X` has no param `Y`. Available: [...] |
+| **Cross-reference** | `DANGLING_INSTRUMENT_REF` | Account type `FLEET_RECEIVABLE` references instrument `XYZ` which does not exist |
+| **Cross-reference** | `INSTRUMENT_IN_USE` | Cannot remove instrument `GBP`: referenced by account types [FLEET_RECEIVABLE, CHARGING_REVENUE] and 2 sagas |
+| **Cross-reference** | `ACCOUNT_TYPE_IN_USE` | Cannot remove account type `X`: referenced by sagas [record_charging_session] |
+| **Trigger** | `UNKNOWN_EVENT_TOPIC` | Event topic `X` not found. Did you mean: `Y`? |
+| **Trigger** | `UNKNOWN_API_ENDPOINT` | API path `/v1/nonexistent` does not match any gRPC endpoint |
+| **Trigger** | `DUPLICATE_TRIGGER` | API path `/v1/deposits` already bound to saga `X` |
+| **Trigger** | `ORPHAN_PROVIDER` | Provider connection `stripe` has no instruction routes |
+| **CEL** | `UNKNOWN_EVENT_FIELD` | CEL filter references `event.typo_field` not found in AsyncAPI schema |
+| **Deprecation** | `DEPRECATED_HANDLER` | Handler `X` deprecated, auto-converted to `Y` |
+| **Deprecation** | `DEPRECATED_PARAM` | Param `amount` deprecated, auto-converted to `quantity` |
+
+**Destructive change detection**: When a manifest update removes or modifies a resource
+that other resources depend on, the validator reports the full dependency chain. Removing
+instrument `GBP` when account types and sagas reference it is an error, not a silent drop.
+The relationship graph (Phase 1) makes these cross-references exhaustive.
 
 ---
 
@@ -619,17 +672,17 @@ Surface relationships contextually in the existing frontend:
 ### 3.6 What This Unlocks
 
 - **Impact analysis**: "If I change instrument X, what breaks?" -- query the graph
-- **The compiler**: AI can inspect the graph to understand the current economy before modifying it
+- **The generator**: AI can inspect the graph to understand the current economy before modifying it
 - **The IDE**: Show relationships as the user builds, not just after deploy
 - **Handler evolution**: "These 4 sagas call the deprecated handler" -- found via graph, fixed via mutating validator
 
 ---
 
-## 4. The Compiler (Layer 2 -- AI-Assisted Generation)
+## 4. The Generator (Layer 2 -- AI-Assisted Generation)
 
 ### 4.1 Philosophy: shadcn, Not npm
 
-The compiler follows the [shadcn/ui](https://ui.shadcn.com/) philosophy:
+The generator follows the [shadcn/ui](https://ui.shadcn.com/) philosophy:
 
 - **Not a library** -- you don't `import` patterns at runtime
 - **Copy and own** -- output is your manifest, your Starlark, your CEL
@@ -638,7 +691,7 @@ The compiler follows the [shadcn/ui](https://ui.shadcn.com/) philosophy:
 
 The cookbook is context for the LLM, not a template engine. Patterns are dissolved into the output.
 
-### 4.2 Compiler Pipeline
+### 4.2 Generation Pipeline
 
 ```text
 Source (business description in natural language)
@@ -670,7 +723,7 @@ Linking (meridian_manifest_plan -- resolves against current state,
 Output (complete, self-contained program ready to load)
 ```
 
-### 4.3 Compiler Context (What the AI Needs)
+### 4.3 Generation Context (What the AI Needs)
 
 For reliable generation, the AI needs these as context:
 
@@ -686,7 +739,7 @@ For reliable generation, the AI needs these as context:
 
 ### 4.4 Generation Modes
 
-#### "Build My Bank" (Interactive Compilation)
+#### "Build My Economy" (Interactive Generation)
 
 1. User describes business
 2. AI asks clarifying questions (instruments? pricing? settlement?)
@@ -695,7 +748,7 @@ For reliable generation, the AI needs these as context:
 5. User modifies if needed
 6. Validate -> Plan -> Apply
 
-#### "I'm Feeling Lucky" (Single-Pass Compilation)
+#### "I'm Feeling Lucky" (Single-Pass Generation)
 
 1. User provides minimal description ("EV charging UK")
 2. AI makes all decisions using cookbook defaults
@@ -703,7 +756,7 @@ For reliable generation, the AI needs these as context:
 4. Shows result with "Customise" option
 5. "I'm Feeling Lucky" always stops at preview for non-empty economies (plan output shown for approval)
 
-#### "Amend" (Incremental Compilation)
+#### "Amend" (Incremental Generation)
 
 1. User has a running economy
 2. User says "add carbon credit tracking"
@@ -715,14 +768,14 @@ For reliable generation, the AI needs these as context:
 
 ### 4.5 Error Recovery
 
-The compiler's type checker (manifest validator with typed modules) produces structured errors with:
+The generator's type checker (manifest validator with typed modules) produces structured errors with:
 
 - Location paths (`sagas[0].script`, `instruments[2].code`)
 - Severity levels (error blocks apply, warning allows)
 - Suggested fixes ("Did you mean...?")
 - Available fields (for unknown handler params or event channels)
 
-The AI compiler loop: generate -> validate -> if errors, fix and re-validate -> until clean.
+The AI generation loop: generate -> validate -> if errors, fix and re-validate -> until clean.
 
 ### 4.6 What We DON'T Build (v1)
 
@@ -743,9 +796,9 @@ These are v2 concerns. The runtime metaphor supports them, but copy-paste (shadc
 - **Built-in chat UI** in the Meridian frontend -- the "I'm Feeling Lucky" moment.
   Controlled experience, optimised for first-time users.
 - **MCP tools** remain the API -- any AI client (Claude Code, ChatGPT, custom agents)
-  can compile manifests via the same tools.
+  can generate manifests via the same tools.
 
-The built-in UI uses the MCP tools under the hood. It's a frontend to the compiler, not a separate system.
+The built-in UI uses the MCP tools under the hood. It's a frontend to the generator, not a separate system.
 
 ### 5.2 Core Screens
 
@@ -759,13 +812,13 @@ The built-in UI uses the MCP tools under the hood. It's a frontend to the compil
 |  | in the UK and need to bill fleet customers    |   |
 |  | monthly...                                    |   |
 |  +----------------------------------------------+   |
-|  [Build My Bank]              [I'm Feeling Lucky]    |
+|  [Build My Economy]              [I'm Feeling Lucky]    |
 +------------------------------------------------------+
 ```
 
-#### 5.2.2 The Conversation (Build My Bank mode)
+#### 5.2.2 The Conversation (Build My Economy mode)
 
-AI asks clarifying questions with clickable options. Each answer refines the compilation target.
+AI asks clarifying questions with clickable options. Each answer refines the generation target.
 
 #### 5.2.3 The Preview (shadcn moment)
 
@@ -902,7 +955,7 @@ This is a **Phase 3-4 feature** that builds on earlier phases:
 
 - Phase 0: Typed service modules (required for accurate simulation)
 - Phase 1: Relationship graph (identifies what changes affect which accounts)
-- Phase 2: Compiler (generates modified manifests from natural language)
+- Phase 2: Generator (produces modified manifests from natural language)
 - **Phase 3-4: Economy Simulator** (replays modified economy against historical data)
 
 The existing `meridian_valuation_simulate` and forecasting infrastructure provide the
@@ -1103,7 +1156,7 @@ service module calls (which enforce tenant scope) and pure CEL expressions.
 |-------|-----------|-------------------|
 | Phase 0 | Unit + integration | Typed modules reject invalid handler calls; trigger validation catches bad paths; CEL field validation warns on typos; conversion rules rewrite deprecated calls |
 | Phase 1 | Integration | Graph extraction produces correct relationships; impact analysis traces transitive dependencies |
-| Phase 2 | Integration + golden files | Compiler generates valid manifests from business descriptions; generated manifests pass validation; golden file comparison for regression |
+| Phase 2 | Integration + golden files | Generator produces valid manifests from business descriptions; generated manifests pass validation; golden file comparison for regression |
 | Phase 3 | E2E (Playwright) | IDE wizard produces deployable economies; editor validation fires inline; deploy flow works end-to-end |
 | Phase 3.5 | Integration | Operator dashboard surfaces failed sagas; DLQ replay works end-to-end |
 | Phase 4 | Integration + benchmark | Simulator replays historical postings accurately; impact reports match manual calculation; batch performance within acceptable bounds |
@@ -1112,17 +1165,38 @@ service module calls (which enforce tenant scope) and pure CEL expressions.
 
 The manifest validator is the critical safety gate. Every validation rule requires
 both a positive test (valid manifest passes) and a negative test (invalid manifest
-is rejected with the correct error).
+is rejected with the correct structured error).
 
 ```text
 For each validation rule:
   1. Happy path: valid manifest passes without warnings
-  2. Rejection: invalid input rejected with structured error (location, severity, suggestion)
+  2. Rejection: invalid input rejected with structured error (code, location, severity, suggestion)
   3. Boundary: edge cases (empty arrays, max lengths, special characters)
   4. Conversion: deprecated calls auto-converted with warning (not error)
+  5. Error message quality: verify suggestion text and available alternatives are present
 ```
 
-### 11.3 Simulator Accuracy Verification
+### 11.3 Destructive Change Scenarios (Unhappy Path)
+
+Manifest updates that remove or modify resources must be validated against
+dependencies. Each scenario tests that the validator blocks the change with
+a clear error describing what depends on the removed resource.
+
+| Scenario | Expected Error | Code |
+|----------|---------------|------|
+| Remove instrument referenced by account type | "Cannot remove instrument `GBP`: referenced by account types [FLEET_RECEIVABLE]" | `INSTRUMENT_IN_USE` |
+| Remove account type referenced by saga | "Cannot remove account type `ENERGY_DELIVERED`: referenced by sagas [record_charging_session]" | `ACCOUNT_TYPE_IN_USE` |
+| Remove provider connection with active instruction routes | "Cannot remove provider `stripe`: 3 instruction routes depend on it" | `PROVIDER_IN_USE` |
+| Change instrument dimensions breaking existing positions | "Instrument `KWH` dimension change from ENERGY to VOLUME: 847 existing positions use ENERGY" | `DIMENSION_CHANGE_BLOCKED` |
+| Remove saga that another saga triggers via event chain | "Saga `settle_payment` produces event consumed by saga `reconcile_settlement`" | `EVENT_CHAIN_BREAK` |
+| Add handler call with wrong parameter types | "Handler `initiate_log` param `amount`: expected Decimal, got string" | `WRONG_PARAM_TYPE` |
+| Reference nonexistent event topic in trigger | "Event topic `position-keeping.typo.v1` not found. Did you mean: `position-keeping.transaction-captured.v1`?" | `UNKNOWN_EVENT_TOPIC` |
+
+**Phase dependency**: Full cross-reference validation (event chain breaks, transitive
+dependencies) requires the Relationship Graph (Phase 1). Phase 0 covers direct
+references only (instrument ↔ account type, handler ↔ params).
+
+### 11.4 Simulator Accuracy Verification
 
 The economy simulator (Phase 4) requires verification that replay results match
 actual historical outcomes when run with unchanged rules (identity test). This
@@ -1262,9 +1336,9 @@ sagas:
     script_ref: "monthly_fleet_invoice.star"
 ```
 
-### 13.3 The Compilation Target
+### 13.3 The Generation Target
 
-The compiler's job is to produce output like the above from input like:
+The generator's job is to produce output like the above from input like:
 
 > "I run an EV charging network. 50 sites in the UK. Fleet customers billed monthly.
 > Peak/off-peak pricing. Energy measured in kWh, billed in GBP. OCPP charger protocol."
@@ -1360,16 +1434,16 @@ Enforces role-based access control on manifest operations.
 - New MCP tool: `meridian_economy_graph` -- query relationships
 - Impact analysis: "what breaks if I change X?"
 
-### Phase 2: Compiler Backend
+### Phase 2: Generator Backend
 
-- Package compiler context (handler schemas, topic registry, patterns) for LLM consumption
-- New MCP tool: `meridian_economy_compile` -- takes business description, returns manifest
+- Package generation context (handler schemas, topic registry, patterns) for LLM consumption
+- New MCP tool: `meridian_economy_generate` -- takes business description, returns manifest
 - Validation loop: generate -> mutate -> validate -> fix -> re-validate
 - "Amend" mode: read current manifest + graph, generate incremental changes
 
 ### Phase 3: IDE Frontend
 
-- Conversational prompt UI ("Build My Bank" + "I'm Feeling Lucky")
+- Conversational prompt UI ("Build My Economy" + "I'm Feeling Lucky")
 - Manifest editor with syntax highlighting, inline validation, relationship preview
 - Deploy flow: validate -> plan diff -> one-click apply
 - Post-deploy dashboard with live relationship graph
@@ -1390,7 +1464,7 @@ Enforces role-based access control on manifest operations.
 - Scenario parametrisation for forecasting service (e.g., "demand + 10%")
 - Impact report generation (revenue, margin, counterparty profitability)
 - Identity test: unchanged rules must reproduce actual historical results (accuracy baseline)
-- Integration with compiler: "Change pricing" → generate manifest diff → simulate impact → approve
+- Integration with generator: "Change pricing" → generate manifest diff → simulate impact → approve
 
 ### Phase 5: Polish and Network Effects (future)
 
@@ -1563,14 +1637,14 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 
 ### MCP Tools (existing)
 
-| Tool | Compiler Stage |
-|------|---------------|
-| `meridian_cookbook_discover` | Standard library search |
-| `meridian_manifest_validate` | Type checking |
-| `meridian_manifest_plan` | Linking |
-| `meridian_manifest_apply` | Loading |
-| `meridian_starlark_validate` | Syntax checking |
-| `meridian_cel_validate` | Expression checking |
+| Tool | Runtime Stage |
+|------|--------------|
+| `meridian_cookbook_discover` | Pattern discovery |
+| `meridian_manifest_validate` | Validation |
+| `meridian_manifest_plan` | Planning (diff against current state) |
+| `meridian_manifest_apply` | Apply (install into runtime) |
+| `meridian_starlark_validate` | Script validation |
+| `meridian_cel_validate` | Expression validation |
 | `meridian_economy_structure` | Current state inspection |
 | `meridian_saga_simulate` | Saga dry-run (stubbed service calls) |
 | `meridian_valuation_simulate` | Valuation dry-run |
@@ -1578,11 +1652,11 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 
 ### MCP Tools (new, proposed)
 
-| Tool | Compiler Stage | Phase |
-|------|---------------|-------|
-| `meridian_manifest_fix` | Mutating pass (auto-convert deprecated handlers) | 0 |
-| `meridian_economy_graph` | Debug symbols (relationship query) | 1 |
-| `meridian_economy_compile` | Full compilation (business description -> manifest) | 2 |
+| Tool | Purpose | Phase |
+|------|---------|-------|
+| `meridian_manifest_fix` | Auto-convert deprecated handler calls | 0 |
+| `meridian_economy_graph` | Relationship query and impact analysis | 1 |
+| `meridian_economy_generate` | AI-assisted manifest generation from business description | 2 |
 | `meridian_economy_simulate` | What-if impact analysis (replay with modified economy) | 4 |
 
 ---
@@ -1640,11 +1714,11 @@ scheduled:<schedule-name>
 | **Instrument** | A unit of measure with dimensions (GBP, KWH, TONNE_CO2E) |
 | **Account Type** | A register category with a denomination and behaviour class |
 | **CEL Expression** | A pure, sub-millisecond predicate for validation/pricing/filtering |
-| **The Compiler** | AI-assisted generation of manifests from business descriptions |
+| **The Generator** | AI-assisted generation of manifests from business descriptions |
 | **The IDE** | Frontend wizard for conversational economy creation |
 | **The Economy Runtime** | The Meridian runtime that executes manifests |
 | **The Relationship Graph** | Materialised index of cross-resource dependencies |
-| **Typed Service Modules** | Starlark structs generated from handler schemas that validate calls at compile time |
+| **Typed Service Modules** | Starlark structs generated from handler schemas that validate calls at validation time |
 | **Mutating Phase** | Pre-validation pass that auto-converts deprecated handler calls |
 | **Chain Depth** | Counter tracking saga cascade depth, enforcing system-level termination |
 | **Conversion Rule** | Inline handler migration definition (K8s-style) for backward compatibility |

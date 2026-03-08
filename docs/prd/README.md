@@ -32,7 +32,7 @@ stateDiagram-v2
 |-----|-----------------|-------|
 | [Codebase Health Audit](012-codebase-health-audit.md) | `codebase-health-audit` | 22/22 done |
 | [Durable Execution Engine](005-durable-execution-engine.md) | `starlark-saga-orchestration` | 24/24 done |
-| [Internal Account](002-internal-account.md) | `internal-account` | 33/33 done |
+| [Internal Account](002-internal-bank-account.md) | `internal-account` | 33/33 done |
 | [Market Information Management](004-market-information-management.md) | `market-information-management` | 17/18 done, 1 cancelled |
 | [Market Data & Dynamic Pricing](016-market-data-dynamic-pricing.md) | `market-data-dynamic-pricing` | 12/12 done |
 | [Production Readiness Review](009-production-readiness-review.md) | `production-readiness` | 10/10 done |
@@ -71,7 +71,7 @@ stateDiagram-v2
 | PRD | Task Master Tag | Description |
 |-----|-----------------|-------------|
 | [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) | `account-service-wiring` | Wire withdrawal-by-ID gRPC handlers in current-account service |
-| [Internal Account - Position Keeping Client](019-internal-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-account service |
+| [Internal Account - Position Keeping Client](019-internal-bank-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-account service |
 | [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) | `party-kyc-aml` | External KYC/AML provider adapter for production party onboarding |
 
 #### Not Started
@@ -87,7 +87,14 @@ stateDiagram-v2
 | [Event-Triggered Saga Execution](032-event-driven-valuation-saga.md) | Fourth saga trigger type (event:) for reactive workflows via domain events |
 | [Gateway Architecture](033-gateway-architecture.md) | Unified gateway architecture consolidating API, operational, and admin gateways |
 | [Frontend Service Alignment](034-frontend-service-alignment.md) | Service-aligned frontend modules, Storybook, and runtime tenant UI customisation |
-| [Meridian Economy Runtime](039-meridian-vm.md) | Formalise Meridian as programmable Economy Runtime with typed service modules, AI compiler, and IDE |
+| [Economy Cookbook](035-economy-cookbook.md) | Unified pattern registry for economy patterns and UI components |
+| [Cookbook Browser](036-cookbook-browser.md) | Visual pattern and component explorer for the cookbook |
+| [Multi-Asset Purity](037-multi-asset-purity.md) | Remove hardcoded asset references, enforce instrument resolution via Reference Data |
+| [Manifest Business Model Visualization](038-manifest-business-model-visualization.md) | Interactive business model graph from live tenant manifest |
+| [Meridian Economy Runtime](039-meridian-vm.md) | Formalise Meridian as programmable Economy Runtime with typed service modules, AI generator, and IDE |
+| [Org-Scoped Accounts](022-org-scoped-accounts.md) | Multi-party resource pooling following BIAN Syndicate Pattern |
+| [Product Directory](023-product-directory.md) | BIAN-aligned AccountTypeRegistry for runtime-configurable product catalog |
+| [Operations Console UI](026-operations-console-ui.md) | Meridian operations console frontend |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -205,11 +212,15 @@ material.
 ### Core Platform
 
 - [Universal Asset System](001-universal-asset-system.md) - Multi-asset support with dimensional safety
-- [Internal Account](002-internal-account.md) - BIAN service for clearing, nostro/vostro accounts
+- [Internal Account](002-internal-bank-account.md) - BIAN service for clearing, nostro/vostro accounts
 - [Market Information Management](004-market-information-management.md) - BIAN service for market data and pricing
 - [Starlark Typed Service Clients](007-starlark-typed-service-clients.md) - Type-safe service handlers for saga orchestration
 - [Valuation Service](011-valuation-service.md) - BIAN-native multi-asset valuation engine
 - [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) - Generalize account fields for non-fiat asset classes
+- [Org-Scoped Accounts](022-org-scoped-accounts.md) - Multi-party resource pooling following BIAN Syndicate Pattern
+- [Product Directory](023-product-directory.md) - BIAN-aligned AccountTypeRegistry for runtime-configurable product catalog
+- [Multi-Asset Purity](037-multi-asset-purity.md) -
+  Remove hardcoded asset references, enforce instrument resolution via Reference Data
 
 ### Execution Engine
 
@@ -220,7 +231,7 @@ material.
 - [Event-Triggered Saga Execution](032-event-driven-valuation-saga.md) -
   Fourth saga trigger type (`event:`) for reactive workflows via domain events
 - [Meridian Economy Runtime](039-meridian-vm.md) -
-  Formalise Meridian as programmable Economy Runtime with AI compiler and IDE
+  Formalise Meridian as programmable Economy Runtime with AI generator and IDE
 
 ### Settlement & Reconciliation
 
@@ -249,6 +260,11 @@ material.
 - [MCP Server](027-mcp-server.md) - Model Context Protocol server bridging LLMs to Meridian Core
 - [Codebase Health Audit](012-codebase-health-audit.md) - Remediation for documentation, CI/CD, and code hygiene
 - [Production Readiness Review](009-production-readiness-review.md) - Audit and remediation for production gaps
+- [Operations Console UI](026-operations-console-ui.md) - Meridian operations console frontend
+- [Economy Cookbook](035-economy-cookbook.md) - Unified pattern registry for economy patterns and UI components
+- [Cookbook Browser](036-cookbook-browser.md) - Visual pattern and component explorer
+- [Manifest Business Model Visualization](038-manifest-business-model-visualization.md) -
+  Interactive business model graph from live tenant manifest
 
 ### Identity & Access Control
 
@@ -267,7 +283,7 @@ Meridian separates access control into two service domains:
 ### Service Wiring (Micro-PRDs)
 
 - [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) - Wire withdrawal-by-ID gRPC handlers
-- [Internal Account - PK Client](019-internal-account-position-keeping-client.md) -
+- [Internal Account - PK Client](019-internal-bank-account-position-keeping-client.md) -
   Wire PK gRPC client in Internal Account service
 
 ### Deployment Targets
