@@ -1507,7 +1507,7 @@ func (v *ManifestValidator) enrichHandlerValidationError(execErr error, ve *Vali
 	// unknown handler calls on a typed service module.
 	if serviceName, methodName, ok := extractStructAttrError(errStr); ok {
 		ve.Code = schema.ValidationCodeUnknownHandler
-		ve.Message = fmt.Sprintf("unknown handler %q on service %q", serviceName+"."+methodName, serviceName)
+		ve.Message = fmt.Sprintf("unknown handler %q", serviceName+"."+methodName)
 
 		knownHandlers := v.listServiceHandlers(serviceName)
 		if len(knownHandlers) > 0 {
