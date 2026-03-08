@@ -141,7 +141,13 @@ func (c *SagaBindingCache) Invalidate(_ context.Context, tenantID string) error 
 }
 
 // Refresh forces a reload of bindings for the specified tenant from the source.
+// It invalidates the cache entry first to ensure a fresh load regardless of TTL.
 func (c *SagaBindingCache) Refresh(ctx context.Context, tenantID string) error {
+	// Clear the entry so doRefresh skips the cache re-check
+	c.mu.Lock()
+	delete(c.entries, tenantID)
+	c.mu.Unlock()
+
 	_, err := c.doRefresh(ctx, tenantID)
 	return err
 }
