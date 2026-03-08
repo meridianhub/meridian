@@ -600,7 +600,7 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		Print: func(_ *starlark.Thread, _ string) {},
 	}
 
-	globals, execErr := starlark.ExecFileOptions(fileOpts, thread, saga.GetName()+".star", script, predeclared)
+	_, execErr := starlark.ExecFileOptions(fileOpts, thread, saga.GetName()+".star", script, predeclared)
 	if execErr != nil {
 		ve := parseStarlarkError(execErr, path)
 
@@ -613,25 +613,6 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		addStarlarkUndefinedSuggestion(execErr, &ve)
 		addError(result, ve)
 		return
-	}
-
-	// Call the execute function (if defined) to trigger handler parameter validation.
-	// Saga scripts define `def execute(ctx):` as their entry point.
-	if executeFn, ok := globals["execute"]; ok {
-		if callable, ok := executeFn.(starlark.Callable); ok {
-			// Pass input_data dict as the ctx argument
-			_, callErr := starlark.Call(thread, callable, starlark.Tuple{starlark.NewDict(0)}, nil)
-			if callErr != nil {
-				ve := parseStarlarkError(callErr, path)
-				if enrichHandlerValidationError(callErr, &ve) {
-					addError(result, ve)
-					return
-				}
-				addStarlarkUndefinedSuggestion(callErr, &ve)
-				addError(result, ve)
-				return
-			}
-		}
 	}
 
 	// Capture handler call metadata in the result

@@ -1098,21 +1098,20 @@ func TestValidateStarlark_EmptyScript(t *testing.T) {
 	}
 }
 
-func TestValidateStarlark_TypedModules_UnknownHandler(t *testing.T) {
+func TestValidateStarlark_TypedModules_UnknownHandler_TopLevel(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
 
 	m := validManifest()
-	m.Sagas[0].Script = `def execute(ctx):
-    result = position_keeping.nonexistent_handler(amount="100")
-    return result
+	// Top-level handler call triggers struct attribute lookup immediately
+	m.Sagas[0].Script = `result = position_keeping.nonexistent_handler(amount="100")
 `
 	result := v.Validate(m, nil)
 	assert.False(t, result.Valid)
 
 	found := false
 	for _, e := range result.Errors {
-		if strings.Contains(e.Message, "no field or method") || strings.Contains(e.Message, "has no .nonexistent_handler") {
+		if strings.Contains(e.Message, "has no .nonexistent_handler") {
 			found = true
 			break
 		}
@@ -1120,18 +1119,17 @@ func TestValidateStarlark_TypedModules_UnknownHandler(t *testing.T) {
 	assert.True(t, found, "expected error about unknown handler, got: %v", result.Errors)
 }
 
-func TestValidateStarlark_TypedModules_UnknownParam(t *testing.T) {
+func TestValidateStarlark_TypedModules_UnknownParam_TopLevel(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
 
 	m := validManifest()
-	m.Sagas[0].Script = `def execute(ctx):
-    result = position_keeping.initiate_log(
-        position_id="123",
-        amont=Decimal("100.00"),
-        direction="CREDIT",
-    )
-    return result
+	// Top-level handler call with unknown param
+	m.Sagas[0].Script = `result = position_keeping.initiate_log(
+    position_id="123",
+    amont=Decimal("100.00"),
+    direction="CREDIT",
+)
 `
 	result := v.Validate(m, nil)
 	assert.False(t, result.Valid)
@@ -1149,17 +1147,15 @@ func TestValidateStarlark_TypedModules_UnknownParam(t *testing.T) {
 	assert.True(t, found, "expected UNKNOWN_PARAM error, got: %v", result.Errors)
 }
 
-func TestValidateStarlark_TypedModules_MissingRequiredParam(t *testing.T) {
+func TestValidateStarlark_TypedModules_MissingRequiredParam_TopLevel(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
 
 	m := validManifest()
-	// Missing required 'amount' and 'direction'
-	m.Sagas[0].Script = `def execute(ctx):
-    result = position_keeping.initiate_log(
-        position_id="123",
-    )
-    return result
+	// Top-level call missing required 'amount' and 'direction'
+	m.Sagas[0].Script = `result = position_keeping.initiate_log(
+    position_id="123",
+)
 `
 	result := v.Validate(m, nil)
 	assert.False(t, result.Valid)
@@ -1174,19 +1170,17 @@ func TestValidateStarlark_TypedModules_MissingRequiredParam(t *testing.T) {
 	assert.True(t, found, "expected MISSING_REQUIRED_PARAM error, got: %v", result.Errors)
 }
 
-func TestValidateStarlark_TypedModules_WrongParamType(t *testing.T) {
+func TestValidateStarlark_TypedModules_WrongParamType_TopLevel(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
 
 	m := validManifest()
-	// position_id expects string, give it a list
-	m.Sagas[0].Script = `def execute(ctx):
-    result = position_keeping.initiate_log(
-        position_id=[1, 2, 3],
-        amount=Decimal("100.00"),
-        direction="CREDIT",
-    )
-    return result
+	// Top-level call with wrong type: position_id expects string, give it a list
+	m.Sagas[0].Script = `result = position_keeping.initiate_log(
+    position_id=[1, 2, 3],
+    amount=Decimal("100.00"),
+    direction="CREDIT",
+)
 `
 	result := v.Validate(m, nil)
 	assert.False(t, result.Valid)
@@ -1217,6 +1211,25 @@ func TestValidateStarlark_TypedModules_ValidComplexCall(t *testing.T) {
     log_id = log.log_id
     status = log.status
     return {"log_id": log_id, "status": status}
+`
+	result := v.Validate(m, nil)
+	assert.True(t, result.Valid, "expected valid manifest, got errors: %v", result.Errors)
+}
+
+func TestValidateStarlark_TypedModules_ValidHandlerInFunction(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	m := validManifest()
+	// Handler calls inside functions compile without error — the typed module
+	// ensures only real handler names are accessible on the service struct.
+	m.Sagas[0].Script = `def execute(ctx):
+    result = position_keeping.initiate_log(
+        position_id="123",
+        amount=Decimal("100.00"),
+        direction="CREDIT",
+    )
+    return {"status": "ok"}
 `
 	result := v.Validate(m, nil)
 	assert.True(t, result.Valid, "expected valid manifest, got errors: %v", result.Errors)
