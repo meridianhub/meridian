@@ -119,34 +119,59 @@ Saga scripts use the `.star` extension (the convention used by Google's referenc
 Starlark implementation, cadence-workflow/starlark-worker, and Meridian's existing
 cookbook).
 
-**Dual storage:**
+**Script storage model:**
 
-- **Inline in manifest**: Simple sagas embedded as `script:` string field
-- **By reference**: Complex sagas referenced as `script_ref:` pointing to a named script
+All sagas use **inline `script:`** in the manifest today:
 
 ```yaml
 sagas:
-  # Inline for simple sagas
   - name: simple_deposit
     trigger: "api:/v1/deposit"
     script: |
       def execute():
           position_keeping.initiate_log(...)
-
-  # Reference for complex sagas
-  - name: monthly_fleet_invoice
-    trigger: "scheduled:monthly"
-    filter: "now.day == 1"
-    script_ref: "monthly_fleet_invoice.star"
 ```
 
-At **apply time**, `script_ref` is resolved to full text and stored in the manifest
-snapshot. The immutable snapshot property is preserved -- `script_ref` is a source-time
-convenience, not a runtime indirection.
+**Platform saga seeding** (existing, well-implemented):
 
-At **runtime**, scripts are loaded from `saga_definition` table (per-tenant schema) as
-today. Platform sagas live in `platform_saga_definition` (public schema), synced from
-embedded `.star` files.
+Platform default sagas are versioned `.star` files embedded in the Go binary:
+
+```text
+services/reference-data/saga/defaults/
+├── deposit/v1.0.0.star          # Platform default deposit saga
+├── withdrawal/v1.0.0.star       # Platform default withdrawal saga
+├── stripe_payment/v1.0.0.star   # Stripe payment saga
+└── payment_execution/v1.0.0.star
+```
+
+The seeding pipeline runs at startup and tenant provisioning:
+
+1. **`PlatformSync.SyncPlatformDefaults()`** — loads embedded `.star` files into
+   `public.platform_saga_definition` (INSERT-only, version history preserved)
+2. **`Seeder.SeedTenant()`** — creates `saga_definition` rows in tenant schema with
+   `platform_ref` pointing to platform table (no script copy). Runs as post-provisioning hook.
+3. **`CreateTenantOverride`** — tenants replace `platform_ref` with custom script
+   (similarity check prevents trivial overrides, creates as DRAFT requiring activation)
+
+At **runtime**, scripts are loaded from `saga_definition` table (per-tenant schema).
+Platform sagas resolve via `platform_ref` → `platform_saga_definition` (public schema).
+Platform script updates automatically propagate to all tenants using references.
+
+**`script_ref` (Phase 5, future):**
+
+For tenant-authored sagas that are too complex for inline YAML, `script_ref` would allow
+referencing a named script:
+
+```yaml
+  - name: monthly_fleet_invoice
+    trigger: "scheduled:monthly_billing"
+    script_ref: "monthly_fleet_invoice.star"  # resolved at apply-time
+```
+
+This requires a script upload/storage mechanism (per-tenant script registry). At apply
+time, `script_ref` would be resolved to full text and stored inline in the manifest
+snapshot — the immutable snapshot property is preserved. `script_ref` is a source-time
+convenience, not a runtime indirection. Design details deferred to Phase 5.
 
 ### 1.7 Current Tooling (MCP)
 
@@ -1013,7 +1038,7 @@ implementation task, not an architectural change.
 
 ## 10. Compiler Theory Applied to Meridian
 
-### 6.1 Lessons from Runtime/Compiler Design
+### 10.1 Lessons from Runtime/Compiler Design
 
 | Compiler Concept | Meridian Application |
 |------------------|---------------------|
@@ -1033,7 +1058,7 @@ implementation task, not an architectural change.
 | **Mutating pass** | Auto-convert deprecated handler calls before validation (K8s admission controller pattern) |
 | **Deprecation** | Structured handler deprecation with mechanical rewrite rules |
 
-### 6.2 What a "Meridian Program" Looks Like
+### 10.2 What a "Meridian Program" Looks Like
 
 ```yaml
 # This is a complete, self-contained Meridian program.
@@ -1112,10 +1137,11 @@ sagas:
   - name: monthly_fleet_invoice
     trigger: "scheduled:monthly_billing"
     filter: "now.day == 1"
+    # script_ref is Phase 5 (future) — today this would be inline script:
     script_ref: "monthly_fleet_invoice.star"
 ```
 
-### 6.3 The Compilation Target
+### 10.3 The Compilation Target
 
 The compiler's job is to produce output like the above from input like:
 
@@ -1126,7 +1152,7 @@ Every field in the output maps to a manifest proto field. Every Starlark call ma
 handler in `handlers.yaml`. Every trigger maps to a topic in the registry or a provider
 connection. The type checker validates all of this.
 
-### 6.4 File Format Conventions
+### 10.4 File Format Conventions
 
 | Artifact | Format | Why |
 |----------|--------|-----|
@@ -1192,8 +1218,8 @@ Builds on typed service modules to support handler versioning.
 - Add `deprecated` field to handler params (replace description-only deprecation)
 - Implement mutating validator phase (auto-convert deprecated calls)
 - Add `handlers.sum` hash file for ABI integrity
-- **Test**: submit manifest with deprecated `initiate_log(amount=...)` and verify auto-conversion
-  to `initiate_log(quantity=...)`
+- **Test**: submit manifest with v1 `initiate_log(amount=..., direction=...)` and verify
+  auto-conversion to v2 params `initiate_log(quantity=..., side=...)`
 
 ### Phase 1: Relationship Graph
 
@@ -1319,12 +1345,11 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 |----------|-----------|-----------|
 | **Graph storage format** | Embedded in manifest version record (JSON column) | Graph is a derived artifact, rebuilt on each apply. No need for separate table. |
 | **AsyncAPI field validation depth** | Full field existence validation (not just schema-level) | Catches typos in CEL filter field names. Same pattern as topic registry validation. |
-| **Script ref resolution** | Phase 4 (future). Inline `script:` only for now. | `script_ref` is a source-time convenience; resolved to full text at apply-time. |
+| **Script ref** | Phase 5 (future). Inline `script:` only for now. | `script_ref` is a source-time convenience resolved at apply-time. Adds filesystem management complexity. |
 | **Conversion default expressions** | CEL expressions against old parameter values | Reuses existing CEL engine. Pure, deterministic, validated at schema load time. |
 | **API trigger model** | Endpoint-binding (maps existing gRPC endpoints to sagas) | Platform sagas provide defaults; tenants override via `CreateTenantOverride`. |
 | **In-flight saga migration** | Drain (running sagas complete on old version) | Saga instances persist their execution plan. New events use new version immediately. |
 | **Error default classification** | FATAL (fail-safe) | Prevents infinite retries on unexpected errors. Explicit `TransientError` wrapper for retryable cases. |
-| **Script ref phase** | Phase 5 (future) | Inline `script:` is sufficient. `script_ref` adds filesystem management complexity. |
 
 ## 15. Open Questions
 
@@ -1378,7 +1403,10 @@ These optimisations reach **20-30k TPS** without sacrificing any correctness gua
 | `shared/platform/kafka/dlq_admin.go` | DLQ inspection and replay utilities |
 | `shared/platform/observability/` | OTel tracing, Prometheus metrics, structured logging |
 | `services/reference-data/saga/override_api.go` | Platform saga override API |
-| `services/reference-data/saga/defaults/` | Platform default saga scripts |
+| `services/reference-data/saga/defaults/` | Platform default saga scripts (embedded `.star` files) |
+| `services/reference-data/saga/platform_sync.go` | Platform saga sync (embedded → DB at startup) |
+| `services/reference-data/saga/seeder.go` | Tenant saga seeding (post-provisioning hook) |
+| `frontend/src/features/sagas/pages/index.tsx` | Starlark Config page (`/starlark-config`) |
 | `services/forecasting/` | Forecasting service (forward curves from market data) |
 | `deployments/k8s/observability/grafana-stack.yaml` | Grafana/Tempo/Loki/Prometheus stack |
 
