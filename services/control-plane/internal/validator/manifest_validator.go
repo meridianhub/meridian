@@ -267,7 +267,13 @@ func (v *ManifestValidator) Validate(
 	// 9. Event trigger channel and filter validation
 	v.validateEventTriggers(manifest, result)
 
-	// 10. Immutability checks
+	// 10. Webhook trigger validation against provider connections
+	v.validateWebhookTriggers(manifest, result)
+
+	// 11. Scheduled trigger name uniqueness
+	v.validateScheduledTriggers(manifest, result)
+
+	// 12. Immutability checks
 	if previousManifest != nil {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
@@ -1095,6 +1101,81 @@ func (v *ManifestValidator) validateEventFilterCEL(
 // availableChannels returns a sorted list of all registered event channel names.
 func (v *ManifestValidator) availableChannels() []string {
 	return mapKeys(v.channelRegistry)
+}
+
+// validateWebhookTriggers checks that webhook triggers reference provider connections
+// defined in the manifest's operational_gateway.provider_connections section.
+func (v *ManifestValidator) validateWebhookTriggers(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Build lookup of available provider connection IDs.
+	connectionIDs := make(map[string]bool)
+	var availableIDs []string
+	if gw := manifest.GetOperationalGateway(); gw != nil {
+		for _, pc := range gw.GetProviderConnections() {
+			cid := pc.GetConnectionId()
+			connectionIDs[cid] = true
+			availableIDs = append(availableIDs, cid)
+		}
+	}
+	sort.Strings(availableIDs)
+
+	for i, saga := range manifest.GetSagas() {
+		trigger := saga.GetTrigger()
+		if !strings.HasPrefix(trigger, "webhook:") {
+			continue
+		}
+
+		// Parse webhook:<source>.<event> — source is the first dot-separated segment.
+		remainder := strings.TrimPrefix(trigger, "webhook:")
+		source := remainder
+		if dotIdx := strings.Index(remainder, "."); dotIdx > 0 {
+			source = remainder[:dotIdx]
+		}
+
+		if !connectionIDs[source] {
+			ve := ValidationError{
+				Severity:        SeverityError,
+				Path:            fmt.Sprintf("sagas[%d].trigger", i),
+				Code:            "UNKNOWN_WEBHOOK_SOURCE",
+				Message:         fmt.Sprintf("webhook source %q does not match any provider connection in operational_gateway.provider_connections", source),
+				AvailableFields: availableIDs,
+			}
+			if suggestion := findClosestMatch(source, availableIDs); suggestion != "" {
+				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+			}
+			addError(result, ve)
+		}
+	}
+}
+
+// validateScheduledTriggers enforces that scheduled trigger names are unique across all sagas.
+func (v *ManifestValidator) validateScheduledTriggers(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Track seen schedule names → first saga index.
+	seen := make(map[string]int)
+
+	for i, saga := range manifest.GetSagas() {
+		trigger := saga.GetTrigger()
+		if !strings.HasPrefix(trigger, "scheduled:") {
+			continue
+		}
+
+		name := strings.TrimPrefix(trigger, "scheduled:")
+		if firstIdx, exists := seen[name]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("sagas[%d].trigger", i),
+				Code:     "DUPLICATE_SCHEDULED_TRIGGER",
+				Message:  fmt.Sprintf("scheduled trigger name %q already defined at sagas[%d]", name, firstIdx),
+			})
+		} else {
+			seen[name] = i
+		}
+	}
 }
 
 // accountIDPattern matches valid Stripe Connect account IDs (acct_ followed by 16+ alphanumeric chars).
