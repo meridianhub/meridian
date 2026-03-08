@@ -159,38 +159,6 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]VersionEnti
 	return entities, int(totalCount), nil
 }
 
-// GetLatestRelationshipGraph retrieves the relationship graph JSON from the most recently applied manifest version.
-func (r *Repository) GetLatestRelationshipGraph(ctx context.Context) (*string, error) {
-	var graphJSON *string
-	var found bool
-
-	err := db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
-		var entity VersionEntity
-		result := tx.Select("relationship_graph").
-			Where("apply_status = ? AND relationship_graph IS NOT NULL", ApplyStatusApplied).
-			Order("applied_at DESC").
-			First(&entity)
-
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			found = false
-			return nil
-		}
-		if result.Error != nil {
-			return result.Error
-		}
-		found = true
-		graphJSON = entity.RelationshipGraph
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, ErrVersionNotFound
-	}
-	return graphJSON, nil
-}
-
 // GetPreviousApplied retrieves the applied manifest version immediately before the given timestamp.
 func (r *Repository) GetPreviousApplied(ctx context.Context, beforeTime time.Time) (*VersionEntity, error) {
 	var entity VersionEntity

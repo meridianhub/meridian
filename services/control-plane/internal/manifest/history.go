@@ -78,11 +78,11 @@ func (s *HistoryService) StoreManifestVersion(
 		}
 	}
 
-	// Serialize relationship graph if provided
+	// Serialize relationship graph if provided.
+	// Serialization failure is non-blocking: the graph is informational.
 	var graphJSON *string
 	if graph != nil {
-		graphBytes, graphErr := json.Marshal(graph)
-		if graphErr == nil {
+		if graphBytes, graphErr := json.Marshal(graph); graphErr == nil {
 			s := string(graphBytes)
 			graphJSON = &s
 		}
