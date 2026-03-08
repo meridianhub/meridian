@@ -142,6 +142,10 @@ type ValidationResult struct {
 
 	// Warnings contains all warning-severity findings.
 	Warnings []ValidationError `json:"warnings"`
+
+	// Graph contains the relationship graph extracted during validation.
+	// Only populated when validation succeeds (no errors).
+	Graph *RelationshipGraph `json:"graph,omitempty"`
 }
 
 // ManifestValidator validates Meridian manifests.
@@ -259,7 +263,7 @@ func (v *ManifestValidator) Validate(
 	v.validateCELExpressions(manifest, result)
 
 	// 4. Starlark script compilation
-	v.validateStarlarkScripts(manifest, result)
+	callLogs := v.validateStarlarkScripts(manifest, result)
 
 	// 5. Cross-reference validation
 	v.validateCrossReferences(manifest, result)
@@ -289,6 +293,11 @@ func (v *ManifestValidator) Validate(
 
 	// Set valid flag based on error count
 	result.Valid = len(result.Errors) == 0
+
+	// Extract relationship graph when validation succeeds
+	if result.Valid {
+		result.Graph = ExtractRelationshipGraph(manifest, callLogs)
+	}
 
 	return result
 }
@@ -547,26 +556,33 @@ func (v *ManifestValidator) validateCELExpression(
 }
 
 // validateStarlarkScripts compiles each saga's Starlark script.
+// Returns a map of saga name -> handler call info for relationship graph extraction.
 func (v *ManifestValidator) validateStarlarkScripts(
 	manifest *controlplanev1.Manifest,
 	result *ValidationResult,
-) {
+) map[string][]schema.HandlerCallInfo {
+	callLogs := make(map[string][]schema.HandlerCallInfo)
 	for i, saga := range manifest.GetSagas() {
 		script := saga.GetScript()
 		if script == "" {
 			continue
 		}
-		v.validateSingleStarlarkScript(saga, script, fmt.Sprintf("sagas[%d].script", i), result)
+		calls := v.validateSingleStarlarkScript(saga, script, fmt.Sprintf("sagas[%d].script", i), result)
+		if calls != nil {
+			callLogs[saga.GetName()] = calls
+		}
 	}
+	return callLogs
 }
 
 // validateSingleStarlarkScript compiles and validates one Starlark script.
+// Returns the handler call log for relationship graph extraction, or nil on error.
 func (v *ManifestValidator) validateSingleStarlarkScript(
 	saga *controlplanev1.SagaDefinition,
 	script string,
 	path string,
 	result *ValidationResult,
-) {
+) []schema.HandlerCallInfo {
 	if len(script) > 65536 {
 		addError(result, ValidationError{
 			Severity: SeverityError,
@@ -574,14 +590,14 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 			Code:     "STARLARK_SCRIPT_TOO_LARGE",
 			Message:  fmt.Sprintf("Starlark script exceeds maximum size of 65536 bytes (got %d)", len(script)),
 		})
-		return
+		return nil
 	}
 
 	fileOpts := &syntax.FileOptions{}
 	_, parseErr := fileOpts.Parse(saga.GetName()+".star", script, 0)
 	if parseErr != nil {
 		addError(result, parseStarlarkError(parseErr, path))
-		return
+		return nil
 	}
 
 	predeclared, callLog, err := v.buildStarlarkPredeclared()
@@ -592,7 +608,7 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 			Code:     "STARLARK_MODULE_BUILD_ERROR",
 			Message:  fmt.Sprintf("failed to build typed service modules: %v", err),
 		})
-		return
+		return nil
 	}
 
 	thread := &starlark.Thread{
@@ -607,16 +623,15 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		// Enrich with structured error codes from handler validation failures
 		if v.enrichHandlerValidationError(execErr, &ve) {
 			addError(result, ve)
-			return
+			return nil
 		}
 
 		addStarlarkUndefinedSuggestion(execErr, &ve)
 		addError(result, ve)
-		return
+		return nil
 	}
 
-	// Capture handler call metadata in the result
-	_ = callLog // HandlerCallInfo available for future relationship graph use
+	return *callLog
 }
 
 // addStarlarkUndefinedSuggestion enriches a validation error with a "Did you mean?" suggestion
