@@ -412,6 +412,12 @@ func registerServices(
 		logger.Warn("identity bootstrap failed, service startup continues", "error", err)
 	}
 
+	// Seed demo users (operator, etc.) from environment variables.
+	// No-op if env vars are not set. Idempotent on every boot.
+	if err := identitybootstrap.SeedDemoUsers(ctx, identityRepo); err != nil {
+		logger.Warn("demo user seeding failed, service startup continues", "error", err)
+	}
+
 	// Tier 1: Depend on Tier 0 via loopback
 	for _, wire := range []struct {
 		name string
