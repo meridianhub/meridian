@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Copy, Check, ExternalLink } from 'lucide-react'
 import { useTenantContext } from '@/contexts/tenant-context'
+import { buildMcpTenantUrl } from '@/api/config'
 import { McpToolsSection } from './mcp-tools-section'
 
-const MCP_SERVER_URL =
+const MCP_BASE_URL =
   import.meta.env.VITE_MCP_SERVER_URL ??
   import.meta.env.VITE_API_BASE_URL ??
   'http://localhost:8091'
@@ -85,11 +86,12 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 export function McpConfigPage() {
   const { tenantSlug } = useTenantContext()
 
-  const mcpUrl = `${MCP_SERVER_URL}/mcp`
-  const sseUrl = `${MCP_SERVER_URL}/sse`
-  const oauthUrl = `${MCP_SERVER_URL}/oauth/authorize`
-  const streamableHttpConfig = buildStreamableHttpConfig(MCP_SERVER_URL)
-  const legacySseConfig = buildLegacySseConfig(MCP_SERVER_URL)
+  const serverUrl = buildMcpTenantUrl(MCP_BASE_URL, tenantSlug)
+  const mcpUrl = `${serverUrl}/mcp`
+  const sseUrl = `${serverUrl}/sse`
+  const oauthUrl = `${serverUrl}/oauth/authorize`
+  const streamableHttpConfig = buildStreamableHttpConfig(serverUrl)
+  const legacySseConfig = buildLegacySseConfig(serverUrl)
 
   return (
     <div className="flex flex-col gap-6">

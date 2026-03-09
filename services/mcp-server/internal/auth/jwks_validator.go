@@ -71,6 +71,16 @@ func (v *JWKSBearerValidator) ValidateBearer(token string) error {
 	return nil
 }
 
+// ValidateBearerWithTenant validates the token and returns the tenant ID claim.
+// It satisfies the ClaimsBearerValidator interface for subdomain validation.
+func (v *JWKSBearerValidator) ValidateBearerWithTenant(token string) (string, error) {
+	claims, err := v.validator.ValidateToken(context.Background(), token)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidBearerToken, err)
+	}
+	return claims.TenantID, nil
+}
+
 // Close releases resources held by the underlying JWKS provider, stopping
 // the background key-refresh goroutine.
 func (v *JWKSBearerValidator) Close() error {
