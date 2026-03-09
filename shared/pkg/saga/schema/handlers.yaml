@@ -1130,6 +1130,9 @@ handlers:
       dataset_code:
         type: string
         description: "Echo of the input data set code"
+      dataset_version:
+        type: int64
+        description: "Current version of the data set schema after the operation"
       status:
         type: string
         description: "Status of the operation (CREATED or UPDATED)"
