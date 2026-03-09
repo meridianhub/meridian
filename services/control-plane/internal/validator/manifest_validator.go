@@ -180,6 +180,14 @@ func WithOpenAPIPaths(paths map[string]bool) Option {
 	}
 }
 
+// WithSchemaRegistry injects a pre-built schema registry for Starlark handler validation.
+// When not set, the validator uses an empty registry (no handler validation).
+func WithSchemaRegistry(reg *schema.Registry) Option {
+	return func(v *ManifestValidator) {
+		v.schemaRegistry = reg
+	}
+}
+
 // WithAsyncAPISchemas sets the event payload schemas for CEL field validation.
 // The map keys are topic names; values are sets of valid field names.
 // Pass nil to disable AsyncAPI field validation (skip filesystem loading).
@@ -257,12 +265,6 @@ func New(opts ...Option) (*ManifestValidator, error) {
 		channelRegistry[topic] = true
 	}
 
-	// Load schema registry for typed Starlark validation
-	schemaRegistry, err := schema.DefaultRegistry()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load schema registry: %w", err)
-	}
-
 	mv := &ManifestValidator{
 		protoValidator:  pv,
 		celEnv:          celEnv,
@@ -271,7 +273,7 @@ func New(opts ...Option) (*ManifestValidator, error) {
 		mappingCelEnv:   mappingCelEnv,
 		eventFilterEnv:  eventFilterEnv,
 		channelRegistry: channelRegistry,
-		schemaRegistry:  schemaRegistry,
+		schemaRegistry:  schema.NewRegistry(),
 	}
 
 	for _, opt := range opts {

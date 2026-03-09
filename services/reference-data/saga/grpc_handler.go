@@ -815,12 +815,7 @@ func (h *RegistryHandler) DescribeHandlers(
 ) (*sagav1.DescribeHandlersResponse, error) {
 	reg := h.schemaRegistry
 	if reg == nil {
-		var err error
-		reg, err = schema.DefaultRegistry()
-		if err != nil {
-			h.logger.Error("failed to load default handler schema registry", "error", err)
-			return nil, status.Errorf(codes.Internal, "failed to load handler schema: %v", err)
-		}
+		reg = schema.NewRegistry()
 	}
 
 	// Group handlers by service name (first component of "service.handler" name)

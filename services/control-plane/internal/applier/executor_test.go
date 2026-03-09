@@ -138,7 +138,7 @@ func TestNewManifestExecutor(t *testing.T) {
 // It validates the complete end-to-end path for a tenant with 0 local saga definitions:
 //  1. Load the embedded apply_manifest.star from platform defaults
 //  2. Register all manifest handlers (reference_data + internal_account)
-//  3. Build typed Starlark service modules from handlers.yaml schema
+//  3. Build typed Starlark service modules from proto-derived schema
 //  4. Execute the saga with a full manifest input
 //  5. Verify all 4 phases execute in order and produce correct results
 //

@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"sort"
 	"testing"
 
 	"github.com/meridianhub/meridian/shared/pkg/saga"
@@ -72,10 +71,10 @@ func buildFullHandlerRegistry(t *testing.T) *saga.HandlerRegistry {
 	return registry
 }
 
+// TestHandlerProtoAlignment validates that all registered handlers have proper
+// proto metadata and that DeriveSchema produces valid handler definitions.
 func TestHandlerProtoAlignment(t *testing.T) {
 	registry := buildFullHandlerRegistry(t)
-	yamlRegistry, err := DefaultRegistry()
-	require.NoError(t, err, "failed to load YAML registry")
 
 	allMeta := registry.AllWithMetadata()
 	require.NotEmpty(t, allMeta, "handler registry should not be empty")
@@ -114,62 +113,10 @@ func TestHandlerProtoAlignment(t *testing.T) {
 				assert.True(t, registry.Has(metadata.Compensate),
 					"handler %s: compensation handler %q not found in registry", name, metadata.Compensate)
 			}
-
-			// 5. Compare with handlers.yaml for regression safety
-			yamlHandler, yamlErr := yamlRegistry.GetHandler(name)
-			if yamlErr != nil {
-				// Handler exists in proto but not in YAML — acceptable during migration
-				t.Logf("handler %s: present in proto registry but not in handlers.yaml (new handler)", name)
-				return
-			}
-
-			// Compare with handlers.yaml — log drift for visibility during migration.
-			// Proto is the source of truth; YAML mismatches are informational, not failures.
-			for yamlParamName, yamlField := range yamlHandler.Params {
-				derivedField, exists := derived.Params[yamlParamName]
-				if !exists {
-					t.Logf("DRIFT: handler %s param %s: in YAML but not in derived schema (aliased or derived)", name, yamlParamName)
-					continue
-				}
-
-				if yamlField.Type != derivedField.Type {
-					t.Logf("DRIFT: handler %s param %s: type YAML=%s derived=%s", name, yamlParamName, yamlField.Type, derivedField.Type)
-				}
-
-				if yamlField.Type == TypeEnum && derivedField.Type == TypeEnum {
-					yamlVals := sorted(yamlField.Values)
-					derivedVals := sorted(derivedField.Values)
-					if !stringSliceEqual(yamlVals, derivedVals) {
-						t.Logf("DRIFT: handler %s param %s: enum values YAML=%v derived=%v", name, yamlParamName, yamlVals, derivedVals)
-					}
-				}
-			}
 		})
 	}
 
 	t.Logf("Total handlers: %d, annotated with proto: %d", len(allMeta), annotatedCount)
-}
-
-// TestAllYAMLHandlersHaveRegistration tracks YAML handlers that lack runtime registration.
-// During migration, some YAML handlers are aspirational (services not built yet).
-// This test logs unregistered handlers for visibility without failing.
-func TestAllYAMLHandlersHaveRegistration(t *testing.T) {
-	registry := buildFullHandlerRegistry(t)
-	yamlRegistry, err := DefaultRegistry()
-	require.NoError(t, err)
-
-	var registered, unregistered int
-	for _, name := range yamlRegistry.ListHandlers() {
-		if registry.Has(name) {
-			registered++
-		} else {
-			unregistered++
-			t.Logf("UNREGISTERED: handler %s is in handlers.yaml but not registered at runtime", name)
-		}
-	}
-
-	t.Logf("YAML handlers: %d registered, %d unregistered (aspirational)", registered, unregistered)
-	assert.Greater(t, registered, 0, "at least one YAML handler should be registered")
 }
 
 // TestCompensationChainIntegrity verifies all compensation references form valid chains.
@@ -211,13 +158,6 @@ func TestDeriveSchemaFullRegistry(t *testing.T) {
 	t.Logf("Derived schema contains %d handlers", len(derived.Handlers))
 }
 
-func sorted(vals []string) []string {
-	out := make([]string, len(vals))
-	copy(out, vals)
-	sort.Strings(out)
-	return out
-}
-
 // isProtoField returns true if the field name exists in the proto request message
 // (as opposed to being created by a ParamOverride).
 func isProtoField(meta *saga.HandlerMetadata, fieldName string) bool {
@@ -226,16 +166,4 @@ func isProtoField(meta *saga.HandlerMetadata, fieldName string) bool {
 	}
 	fd := meta.ProtoRequestType.ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name(fieldName))
 	return fd != nil
-}
-
-func stringSliceEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

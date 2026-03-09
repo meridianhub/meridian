@@ -81,7 +81,7 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 }
 
 // dispatchPaymentParams holds validated parameters for a dispatch_payment call.
-// Field names match the handlers.yaml schema for financial_gateway.dispatch_payment.
+// Field names match the handler schema for financial_gateway.dispatch_payment.
 type dispatchPaymentParams struct {
 	paymentOrderID         string
 	amountMinorUnits       int64
@@ -302,7 +302,7 @@ func dispatchPaymentHandler(c *Client) saga.Handler {
 }
 
 // dispatchRefundParams holds validated parameters for a dispatch_refund call.
-// Field names match the handlers.yaml schema for financial_gateway.dispatch_refund.
+// Field names match the handler schema for financial_gateway.dispatch_refund.
 type dispatchRefundParams struct {
 	paymentOrderID         string
 	refundAmountMinorUnits int64

@@ -3,7 +3,6 @@
 package schema
 
 import (
-	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -13,9 +12,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed handlers.yaml
-var embeddedPlatformHandlers []byte
 
 // FieldType represents the type of a handler parameter or return value.
 type FieldType string
@@ -482,16 +478,6 @@ func (r *Registry) ListSchemas() []*Schema {
 	result := make([]*Schema, len(r.schemas))
 	copy(result, r.schemas)
 	return result
-}
-
-// DefaultRegistry creates a schema registry pre-loaded with the embedded platform handlers.yaml.
-// This provides the standard handler schema for Starlark saga validation and tooling.
-func DefaultRegistry() (*Registry, error) {
-	reg := NewRegistry()
-	if err := reg.LoadFromYAML(embeddedPlatformHandlers); err != nil {
-		return nil, fmt.Errorf("failed to load platform handlers: %w", err)
-	}
-	return reg, nil
 }
 
 // LoadFromDirectory loads all YAML schema files from a directory.

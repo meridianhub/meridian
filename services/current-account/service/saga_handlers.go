@@ -76,7 +76,7 @@ func stubNotImplemented(handlerName string) saga.Handler {
 // with the given HandlerRegistry. These handlers are used by the Starlark
 // saga runtime to execute withdrawal and deposit operations.
 //
-// Handler naming convention matches handlers.yaml schema:
+// Handler naming convention matches the handler schema:
 //   - position_keeping.* for position service handlers
 //   - financial_accounting.* for financial accounting handlers
 //   - current_account.* for domain-specific handlers

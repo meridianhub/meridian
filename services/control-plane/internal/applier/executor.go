@@ -56,8 +56,8 @@ type ManifestExecutorDepsConfig struct {
 }
 
 // NewManifestExecutorFromDeps creates a ManifestExecutor with a fully wired saga runner.
-// It registers all manifest handlers from deps, loads the handlers.yaml schema,
-// builds typed Starlark service modules, and assembles the StarlarkSagaRunner.
+// It registers all manifest handlers from deps, derives the handler schema from proto
+// metadata, builds typed Starlark service modules, and assembles the StarlarkSagaRunner.
 //
 // This is the preferred factory for production use. The simpler NewManifestExecutor
 // is available for callers that pre-build their own saga runner.
