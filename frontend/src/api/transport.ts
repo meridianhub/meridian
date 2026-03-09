@@ -20,8 +20,9 @@ export function createTenantTransport(
   const useHeaderRouting =
     !onSubdomain &&
     (import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true')
+  const configuredPath = new URL(apiConfig.baseUrl).pathname.replace(/\/$/, '')
   const baseUrl = onSubdomain
-    ? window.location.origin
+    ? `${window.location.origin}${configuredPath}`
     : tenantSlug && !useHeaderRouting
       ? buildTenantBaseUrl(tenantSlug)
       : apiConfig.baseUrl

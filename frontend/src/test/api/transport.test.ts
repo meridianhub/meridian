@@ -11,6 +11,7 @@ vi.mock('@/api/config', () => ({
     useBinaryFormat: false,
   },
   buildTenantBaseUrl: vi.fn((slug: string) => `https://${slug}.api.meridian.io`),
+  isOnTenantSubdomain: vi.fn(() => false),
 }))
 
 import { createConnectTransport } from '@connectrpc/connect-web'
