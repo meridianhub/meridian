@@ -204,6 +204,9 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid posting data: %v", err)
 	}
 
+	// Set account service domain from request (caller-provided, e.g., from saga scripts)
+	posting.AccountServiceDomain = fromProtoAccountServiceDomain(req.AccountServiceDomain)
+
 	// Persist posting
 	if err := s.repository.SavePosting(ctx, posting); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to save posting: %v", err)

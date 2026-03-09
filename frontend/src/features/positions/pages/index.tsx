@@ -32,6 +32,7 @@ export interface PositionEntry {
 export interface FinancialPositionLog {
   logId: string
   accountId: string
+  accountServiceDomain?: number
   statusTracking?: {
     currentStatus: string
   }

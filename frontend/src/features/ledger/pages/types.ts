@@ -22,6 +22,7 @@ export interface LedgerPosting {
   postingDirection: string
   postingAmount: Money
   accountId: string
+  accountServiceDomain?: number
   valueDate: Timestamp | null | undefined
   postingResult: string
   createdAt: Timestamp | null | undefined

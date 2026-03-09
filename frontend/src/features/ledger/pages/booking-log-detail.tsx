@@ -85,7 +85,7 @@ const postingColumns: ColumnDef<LedgerPosting>[] = [
     accessorKey: 'accountId',
     header: 'Account',
     cell: ({ row }) => (
-      <EntityLink type="account" id={row.original.accountId} />
+      <EntityLink type={row.original.accountServiceDomain === 2 ? 'internal-account' : row.original.accountServiceDomain === 1 ? 'current-account' : 'account'} id={row.original.accountId} />
     ),
   },
   {

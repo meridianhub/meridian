@@ -220,6 +220,10 @@ message FinancialPositionLog {
 
   // version is used for optimistic concurrency control.
   int64 version = 9 [(buf.validate.field).int64.gte = 0];
+
+  // account_service_domain identifies which BIAN Service Domain manages the account.
+  // Resolved during account validation and persisted for downstream consumers (e.g., UI routing).
+  meridian.common.v1.AccountServiceDomain account_service_domain = 10;
 }
 
 // InitiateFinancialPositionLogRequest initiates a new financial position log.

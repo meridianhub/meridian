@@ -115,6 +115,7 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 			opening_balance_amount decimal(38, 18) NOT NULL DEFAULT 0,
 			opening_balance_currency character(3) NOT NULL DEFAULT 'GBP',
 			opening_balance_recorded_at timestamptz NULL,
+			account_service_domain character varying(20) NOT NULL DEFAULT '',
 			PRIMARY KEY (id)
 		)
 	`)

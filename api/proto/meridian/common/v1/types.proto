@@ -68,6 +68,19 @@ enum Currency {
   CURRENCY_AUD = 7;
 }
 
+// AccountServiceDomain identifies which BIAN Service Domain manages an account.
+// Used as a qualified reference alongside account_id to enable direct routing
+// without cross-service lookups. Follows ISO 20022 account type discriminator patterns.
+enum AccountServiceDomain {
+  // ACCOUNT_SERVICE_DOMAIN_UNSPECIFIED means the managing service is unknown.
+  // Records with this value require runtime resolution via the CompositeAccountValidator.
+  ACCOUNT_SERVICE_DOMAIN_UNSPECIFIED = 0;
+  // ACCOUNT_SERVICE_DOMAIN_CURRENT_ACCOUNT means the account is managed by the Current Account service.
+  ACCOUNT_SERVICE_DOMAIN_CURRENT_ACCOUNT = 1;
+  // ACCOUNT_SERVICE_DOMAIN_INTERNAL_ACCOUNT means the account is managed by the Internal Account service.
+  ACCOUNT_SERVICE_DOMAIN_INTERNAL_ACCOUNT = 2;
+}
+
 // MoneyAmount wraps google.type.Money with validation for financial services.
 // This allows negative amounts for balances and adjustments.
 // For strictly positive amounts (transactions, fees, limits), the value must be > 0

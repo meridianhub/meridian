@@ -8,6 +8,8 @@ import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink } from '@/shared/entity-link'
 import { MoneyDisplay } from '@/shared/money-display'
 
+import type { EntityType } from '@/shared/entity-link'
+
 interface LedgerPosting {
   id: string
   financialBookingLogId: string
@@ -15,6 +17,7 @@ interface LedgerPosting {
   amount: bigint
   currency: string
   accountId: string
+  accountEntityType: EntityType
   valueDate: { seconds: bigint | number; nanos?: number } | null | undefined
   createdAt: { seconds: bigint | number; nanos?: number } | null | undefined
   status: string
@@ -75,7 +78,7 @@ const columns: ColumnDef<LedgerPosting>[] = [
     accessorKey: 'accountId',
     header: 'Account',
     cell: ({ row }) => (
-      <EntityLink type="account" id={row.original.accountId} />
+      <EntityLink type={row.original.accountEntityType} id={row.original.accountId} />
     ),
   },
   {
@@ -147,6 +150,15 @@ export function TransactionsPage() {
       const rawUnits = money?.units
       const amount: bigint = parseUnitsAsBigInt(rawUnits)
 
+      // Map accountServiceDomain enum to EntityLink type for correct routing
+      const accountServiceDomain = p.accountServiceDomain as number | undefined
+      let accountEntityType: EntityType = 'account'
+      if (accountServiceDomain === 2) {
+        accountEntityType = 'internal-account'
+      } else if (accountServiceDomain === 1) {
+        accountEntityType = 'current-account'
+      }
+
       return {
         id: p.id ?? '',
         financialBookingLogId: p.financialBookingLogId ?? '',
@@ -154,6 +166,7 @@ export function TransactionsPage() {
         amount,
         currency,
         accountId: p.accountId ?? '',
+        accountEntityType,
         valueDate: p.valueDate ?? null,
         createdAt: p.createdAt ?? null,
         status: getStatusName(p.status),

@@ -54,6 +54,7 @@ const (
 type FinancialPositionLog struct {
 	LogID                    uuid.UUID
 	AccountID                string
+	AccountServiceDomain     string // BIAN Service Domain: "CURRENT_ACCOUNT", "INTERNAL_ACCOUNT", or ""
 	TransactionLogEntries    []*TransactionLogEntry
 	TransactionLineage       *TransactionLineage
 	AuditTrail               []*AuditTrailEntry
