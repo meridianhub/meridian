@@ -8,7 +8,11 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
+	dexconnector "github.com/dexidp/dex/connector"
+	dexserver "github.com/dexidp/dex/server"
+	"github.com/dexidp/dex/server/signer"
 	"github.com/dexidp/dex/storage"
 	"github.com/dexidp/dex/storage/memory"
 )
@@ -101,4 +105,49 @@ func (d *EmbeddedDex) Storage() storage.Storage {
 // to Dex's PasswordConnector interface.
 func (d *EmbeddedDex) Adapter() *ConnectorAdapter {
 	return d.adapter
+}
+
+// StartServer creates the Dex OIDC HTTP server, registers the Meridian
+// connector type, and sets the handler. After this call, Handler() returns
+// the Dex server's http.Handler ready for mounting.
+func (d *EmbeddedDex) StartServer(ctx context.Context, issuer string, skipApproval bool) error {
+	// Register the "meridian" connector type so Dex can resolve it from storage.
+	adapter := d.adapter
+	dexserver.ConnectorsConfig[ConnectorType] = func() dexserver.ConnectorConfig {
+		return &connectorConfigAdapter{adapter: adapter}
+	}
+
+	// Create a local signer for token signing using the in-memory storage.
+	localSigner, err := (&signer.LocalConfig{
+		KeysRotationPeriod: "6h",
+	}).Open(ctx, d.storage, 24*time.Hour, time.Now, d.logger)
+	if err != nil {
+		return fmt.Errorf("dex: creating signer: %w", err)
+	}
+
+	srv, err := dexserver.NewServer(ctx, dexserver.Config{
+		Issuer:             issuer,
+		Storage:            d.storage,
+		Logger:             d.logger,
+		Signer:             localSigner,
+		PasswordConnector:  ConnectorID,
+		SkipApprovalScreen: skipApproval,
+	})
+	if err != nil {
+		return fmt.Errorf("dex: creating server: %w", err)
+	}
+
+	d.SetHandler(srv)
+	d.logger.Info("dex: OIDC server started", "issuer", issuer)
+	return nil
+}
+
+// connectorConfigAdapter implements dexserver.ConnectorConfig, returning the
+// pre-created ConnectorAdapter when Dex calls Open during server initialization.
+type connectorConfigAdapter struct {
+	adapter *ConnectorAdapter
+}
+
+func (c *connectorConfigAdapter) Open(_ string, _ *slog.Logger) (dexconnector.Connector, error) {
+	return c.adapter, nil
 }

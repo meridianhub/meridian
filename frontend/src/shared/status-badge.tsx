@@ -26,6 +26,9 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   PROVISIONING_PENDING: 'info',
   PROVISIONING_FAILED: 'error',
   DEPROVISIONED: 'neutral',
+  // Identity statuses
+  PENDING_INVITE: 'info',
+  LOCKED: 'error',
   // Manifest apply statuses
   APPLIED: 'success',
   ROLLED_BACK: 'warning',

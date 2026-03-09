@@ -104,6 +104,11 @@ export const platformKeys = {
   health: () => [...platformKeys.all, 'health'] as const,
 
   metrics: () => [...platformKeys.all, 'metrics'] as const,
+
+  identities: () => [...platformKeys.all, 'identities'] as const,
+  identity: (identityId: string) => [...platformKeys.identities(), identityId] as const,
+  identityRoles: (identityId: string) =>
+    [...platformKeys.identity(identityId), 'roles'] as const,
 } as const
 
 export const manifestKeys = {

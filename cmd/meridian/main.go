@@ -63,6 +63,8 @@ import (
 	forecastingstarlark "github.com/meridianhub/meridian/services/forecasting/starlark"
 	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
+	identityconnector "github.com/meridianhub/meridian/services/identity/connector"
+	identitydex "github.com/meridianhub/meridian/services/identity/dex"
 	identityservice "github.com/meridianhub/meridian/services/identity/service"
 	internalaccountpersistence "github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	internalaccountservice "github.com/meridianhub/meridian/services/internal-account/service"
@@ -308,6 +310,13 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
 
 	eventRouter, extraGWOpts := wireEventStream(conns.gormDB("financial-accounting"), logger)
+
+	// Wire embedded Dex OIDC server (opt-in via DEX_ISSUER env var).
+	dexOpt, err := wireEmbeddedDex(ctx, conns.gormDB("identity"), logger)
+	if err != nil {
+		return fmt.Errorf("embedded dex: %w", err)
+	}
+	extraGWOpts = append(extraGWOpts, dexOpt)
 
 	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), logger, extraGWOpts...)
 	if err != nil {
@@ -926,6 +935,47 @@ func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	identityv1.RegisterIdentityServiceServer(server, svc)
 	logger.Info("registered identity service")
 	return nil
+}
+
+// wireEmbeddedDex creates the embedded Dex OIDC server and returns a gateway
+// ServerOption that mounts its HTTP handler at /dex/*. When DEX_ISSUER is not
+// set, returns a no-op option (Dex is opt-in).
+func wireEmbeddedDex(ctx context.Context, identityDB *gorm.DB, logger *slog.Logger) (gateway.ServerOption, error) {
+	noopOption := func(*gateway.Server) {}
+
+	issuer := os.Getenv("DEX_ISSUER")
+	if issuer == "" {
+		logger.Info("DEX_ISSUER not set, embedded Dex disabled")
+		return noopOption, nil
+	}
+
+	baseDomain := env.GetEnvOrDefault("DEX_BASE_DOMAIN", env.GetEnvOrDefault("BASE_DOMAIN", "localhost"))
+
+	// Create identity repository and connector.
+	repo := identitypersistence.NewRepository(identityDB)
+	conn, err := identityconnector.New(repo, logger)
+	if err != nil {
+		return nil, fmt.Errorf("dex connector: %w", err)
+	}
+
+	// Create embedded Dex with default demo client.
+	embedded, err := identitydex.New(ctx, identitydex.Config{
+		Issuer:    issuer,
+		Connector: conn,
+		Logger:    logger,
+		Clients:   []identitydex.ClientConfig{identitydex.DefaultDemoClient(baseDomain)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("embedded dex: %w", err)
+	}
+
+	// Start the Dex OIDC HTTP server (creates signing keys, mounts endpoints).
+	if err := embedded.StartServer(ctx, issuer, true); err != nil {
+		return nil, fmt.Errorf("dex server start: %w", err)
+	}
+
+	logger.Info("embedded Dex wired", "issuer", issuer, "base_domain", baseDomain)
+	return gateway.WithDexHandler(embedded.Handler()), nil
 }
 
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
