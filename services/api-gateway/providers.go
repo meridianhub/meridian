@@ -41,7 +41,6 @@ type ProvidersConfig struct {
 //   - AUTH_PROVIDERS_ENABLED: Enable the /api/auth/providers endpoint (default: false)
 //   - AUTH_PROVIDERS: JSON array of provider objects
 //   - DEX_ISSUER: Used to construct authUrl for OIDC providers when not explicitly set
-//   - AUTH_DEFAULT_PROVIDER: ID of the default provider (informational)
 //
 // When AUTH_PROVIDERS is not set but AUTH_PROVIDERS_ENABLED is true, a default
 // "meridian" password provider is included.
