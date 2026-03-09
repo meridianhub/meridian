@@ -66,16 +66,21 @@ type JWKSProvider struct {
 	cacheTTL   time.Duration
 	refreshTTL time.Duration
 
-	mu          sync.RWMutex
-	keys        map[string]*rsa.PublicKey
-	lastFetch   time.Time
-	stopRefresh chan struct{}
-	closeOnce   sync.Once
+	mu              sync.RWMutex
+	keys            map[string]*rsa.PublicKey
+	lastFetch       time.Time
+	stopRefresh     chan struct{}
+	closeOnce       sync.Once
+	autoRefreshOnce sync.Once
 }
 
 // NewJWKSProvider creates a new JWKS provider with the specified configuration.
-// It validates the configuration and starts automatic key refresh if RefreshTTL is set.
-func NewJWKSProvider(ctx context.Context, cfg *JWKSProviderConfig) (*JWKSProvider, error) {
+// It validates the configuration and defers the initial JWKS fetch to the first
+// GetKey call, enabling the provider to be created before the JWKS endpoint is
+// available (e.g. when the OIDC server is embedded in the same process).
+//
+// Automatic key refresh starts after the first successful fetch.
+func NewJWKSProvider(_ context.Context, cfg *JWKSProviderConfig) (*JWKSProvider, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("failed to create JWKS provider: %w", ErrJWKSURLEmpty)
 	}
@@ -103,15 +108,9 @@ func NewJWKSProvider(ctx context.Context, cfg *JWKSProviderConfig) (*JWKSProvide
 		stopRefresh: make(chan struct{}),
 	}
 
-	// Perform initial fetch
-	if err := provider.refresh(ctx); err != nil {
-		return nil, fmt.Errorf("failed to perform initial JWKS fetch: %w", err)
-	}
-
-	// Start automatic refresh if configured
-	if cfg.RefreshTTL > 0 {
-		go provider.autoRefresh(ctx)
-	}
+	// No initial fetch — keys are fetched lazily on first GetKey call.
+	// This avoids a startup race when the JWKS endpoint is served by the
+	// same process (embedded Dex OIDC).
 
 	return provider, nil
 }
@@ -136,6 +135,14 @@ func (p *JWKSProvider) GetKey(ctx context.Context, kid string) (*rsa.PublicKey, 
 			return key, nil
 		}
 		return nil, fmt.Errorf("failed to refresh JWKS: %w", err)
+	}
+
+	// Start auto-refresh goroutine after first successful fetch
+	if p.refreshTTL > 0 {
+		refreshCtx := ctx //nolint:contextcheck // auto-refresh runs independently of the triggering request
+		p.autoRefreshOnce.Do(func() {
+			go p.autoRefresh(refreshCtx)
+		})
 	}
 
 	// Try again after refresh

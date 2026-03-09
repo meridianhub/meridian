@@ -131,7 +131,7 @@ func TestNewJWKSProvider(t *testing.T) {
 		assert.Nil(t, provider)
 	})
 
-	t.Run("error when initial fetch fails", func(t *testing.T) {
+	t.Run("error surfaces on GetKey when endpoint fails", func(t *testing.T) {
 		// Create server that returns error
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -143,10 +143,15 @@ func TestNewJWKSProvider(t *testing.T) {
 			Client: http.DefaultClient,
 		}
 
+		// Provider creation succeeds (fetch is deferred)
 		provider, err := NewJWKSProvider(ctx, cfg)
+		assert.NoError(t, err)
+		assert.NotNil(t, provider)
+		defer provider.Close()
 
+		// Error surfaces on first GetKey call
+		_, err = provider.GetKey(ctx, "test-kid")
 		assert.Error(t, err)
-		assert.Nil(t, provider)
 	})
 
 	t.Run("default cache TTL when not specified", func(t *testing.T) {
