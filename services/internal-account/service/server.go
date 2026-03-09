@@ -931,8 +931,17 @@ func (s *Service) findAccountByID(ctx context.Context, accountID string) (domain
 		return account, nil
 	}
 
-	// Try to find by account code
-	account, err := s.repo.FindByCode(ctx, accountID)
+	// Try to find by business account ID (e.g. IBA-xxx)
+	account, err := s.repo.FindByAccountID(ctx, accountID)
+	if err == nil {
+		return account, nil
+	}
+	if !errors.Is(err, domain.ErrAccountNotFound) && !errors.Is(err, persistence.ErrAccountNotFound) {
+		return domain.InternalAccount{}, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	// Fall back to account code
+	account, err = s.repo.FindByCode(ctx, accountID)
 	if err != nil {
 		if errors.Is(err, domain.ErrAccountNotFound) || errors.Is(err, persistence.ErrAccountNotFound) {
 			return domain.InternalAccount{}, status.Errorf(codes.NotFound, "account not found: %s", accountID)

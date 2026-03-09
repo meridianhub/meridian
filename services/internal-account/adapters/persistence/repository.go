@@ -218,6 +218,29 @@ func (r *Repository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (domai
 	return account, nil
 }
 
+// FindByAccountID retrieves an account by its business identifier (e.g. IBA-xxx).
+func (r *Repository) FindByAccountID(ctx context.Context, accountID string) (domain.InternalAccount, error) {
+	var account domain.InternalAccount
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var entity InternalAccountEntity
+		result := tx.Where("account_id = ? AND deleted_at IS NULL", accountID).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrAccountNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+
+		account = toDomain(&entity)
+		return nil
+	})
+	if err != nil {
+		return domain.InternalAccount{}, err
+	}
+	return account, nil
+}
+
 // FindByCode retrieves an account by its unique code.
 func (r *Repository) FindByCode(ctx context.Context, accountCode string) (domain.InternalAccount, error) {
 	var account domain.InternalAccount

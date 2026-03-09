@@ -22,6 +22,10 @@ type Repository interface {
 	// Returns ErrAccountNotFound if the account does not exist.
 	FindByID(ctx context.Context, id uuid.UUID) (InternalAccount, error)
 
+	// FindByAccountID retrieves an account by its business identifier (e.g. IBA-xxx).
+	// Returns ErrAccountNotFound if the account does not exist.
+	FindByAccountID(ctx context.Context, accountID string) (InternalAccount, error)
+
 	// FindByCode retrieves an account by its unique code.
 	// Returns ErrAccountNotFound if the account does not exist.
 	FindByCode(ctx context.Context, accountCode string) (InternalAccount, error)

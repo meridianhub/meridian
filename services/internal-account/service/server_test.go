@@ -24,19 +24,22 @@ import (
 
 // mockRepository implements service.Repository for testing.
 type mockRepository struct {
-	accounts        map[uuid.UUID]domain.InternalAccount
-	accountsByCode  map[string]domain.InternalAccount
-	saveErr         error
-	findByIDErr     error
-	findByCodeErr   error
-	listErr         error
-	existsByCodeErr error
+	accounts           map[uuid.UUID]domain.InternalAccount
+	accountsByCode     map[string]domain.InternalAccount
+	accountsByAcctID   map[string]domain.InternalAccount
+	saveErr            error
+	findByIDErr        error
+	findByAccountIDErr error
+	findByCodeErr      error
+	listErr            error
+	existsByCodeErr    error
 }
 
 func newMockRepository() *mockRepository {
 	return &mockRepository{
-		accounts:       make(map[uuid.UUID]domain.InternalAccount),
-		accountsByCode: make(map[string]domain.InternalAccount),
+		accounts:         make(map[uuid.UUID]domain.InternalAccount),
+		accountsByCode:   make(map[string]domain.InternalAccount),
+		accountsByAcctID: make(map[string]domain.InternalAccount),
 	}
 }
 
@@ -46,6 +49,7 @@ func (m *mockRepository) Save(_ context.Context, account domain.InternalAccount)
 	}
 	m.accounts[account.ID()] = account
 	m.accountsByCode[account.AccountCode()] = account
+	m.accountsByAcctID[account.AccountID()] = account
 	return nil
 }
 
@@ -54,6 +58,17 @@ func (m *mockRepository) FindByID(_ context.Context, id uuid.UUID) (domain.Inter
 		return domain.InternalAccount{}, m.findByIDErr
 	}
 	account, ok := m.accounts[id]
+	if !ok {
+		return domain.InternalAccount{}, domain.ErrAccountNotFound
+	}
+	return account, nil
+}
+
+func (m *mockRepository) FindByAccountID(_ context.Context, accountID string) (domain.InternalAccount, error) {
+	if m.findByAccountIDErr != nil {
+		return domain.InternalAccount{}, m.findByAccountIDErr
+	}
+	account, ok := m.accountsByAcctID[accountID]
 	if !ok {
 		return domain.InternalAccount{}, domain.ErrAccountNotFound
 	}
