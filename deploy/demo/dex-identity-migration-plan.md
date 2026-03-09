@@ -1,104 +1,96 @@
-# Dex → Meridian Identity Connector Migration Plan
+# Dex -> Meridian Identity Connector Migration Plan
 
-## Current State (Demo)
+## Status: COMPLETED
 
-The demo environment uses Dex's built-in password database (`enablePasswordDB: true`)
-with static credentials defined in `dex.yaml`. This is intentional for the demo:
-credentials are predictable, the environment is throwaway, and it requires zero
-runtime dependency on the identity service being fully bootstrapped.
+All migration steps have been implemented and merged. Dex now runs as an embedded
+library within the Meridian unified binary, authenticating users via the Meridian
+identity connector rather than a static password database.
 
-## Target State (Production)
+## Current State (Implemented)
 
-Dex authenticates users via the **Meridian identity connector** — a Go implementation
-of `dex/connector.PasswordConnector` that validates credentials directly against the
-identity domain repository (no network hop).
-
-### Architecture
+Dex is embedded in the Meridian binary as a library (`services/identity/dex/`). The
+standalone `dex` container has been removed from `docker-compose.yml`. Authentication
+flows through the following path:
 
 ```text
-User → Dex (password grant)
-         │
-         └─ PasswordConnector.Login()
-                  │
-                  └─ services/identity/connector.Connector
-                           │
-                           ├─ tenant.RequireFromContext(ctx)   ← subdomain → tenant ID
-                           ├─ repo.FindByEmail(ctx, email)     ← identity lookup
-                           ├─ credentials.ValidatePassword()   ← bcrypt verify
-                           └─ repo.FindRoleAssignments()       ← groups → JWT claims
+User -> Caddy (/dex/*) -> API Gateway -> Embedded Dex Server
+                                            |
+                                            v
+                                   MeridianConnector (PasswordConnector)
+                                            |
+                                   +--------+--------+
+                                   |        |        |
+                                FindByEmail  Bcrypt  RoleAssignments
+                                (identity   verify  (groups -> JWT
+                                 repo)              claims)
 ```
 
-The connector is a **compile-time, in-process** integration. Dex is not a separate
-binary that calls Meridian over the network — it is embedded as a library or its
-server is initialised with a custom connector registered under the ID `"meridian"`.
+The connector is a compile-time, in-process integration. Dex is not a separate
+binary that calls Meridian over the network -- it is embedded as a library with
+a custom connector registered under the ID `"meridian"`.
 
 ### Why Not a Network Connector
 
 Dex supports 16 connector types (LDAP, OIDC, GitHub, SAML, etc.). None is a generic
-gRPC or HTTP connector. A `type: grpc` does not exist in Dex v2.x. Implementing a
-custom connector as a separate Dex plugin would require forking Dex or using the
-(experimental) gRPC connector interface — neither is appropriate for the demo.
-
-The in-process approach is superior:
+gRPC or HTTP connector. The in-process approach provides:
 
 - Zero network latency for authentication
 - No TLS configuration required
 - Single binary deployment preserved
 - Tenant context propagated via Go `context.Context`, not HTTP headers
 
-## Migration Steps
+## Migration Steps (All Completed)
 
-### 1. Wire the Connector at Startup
+### 1. Wire the Connector at Startup -- DONE
 
-In `services/identity/bootstrap/` (or wherever the Dex server is initialised),
-register the Meridian connector:
+The embedded Dex server is initialized in `services/identity/dex/` and wired into
+the unified binary at `cmd/meridian/main.go`. The `MeridianConnector` adapter bridges
+the identity domain repository to Dex's `PasswordConnector` interface.
 
-```go
-import (
-    dexserver "github.com/dexidp/dex/server"
-    "github.com/meridianhub/meridian/services/identity/connector"
-)
+### 2. Remove Standalone Dex Container -- DONE
 
-meridianConn, err := connector.New(identityRepo, logger)
-// ...
+The `dex` service was removed from `deploy/demo/docker-compose.yml`. The `dex.yaml`
+configuration file is no longer needed on the host. Dex configuration (issuer URL,
+static clients) is now driven by environment variables (`DEX_ISSUER`, `BASE_DOMAIN`).
 
-cfg := dexserver.Config{
-    PasswordConnector: meridianConn,  // replaces the built-in password DB
-    // ...
-}
-```
+### 3. Mount Dex at /dex/* in API Gateway -- DONE
 
-### 2. Update dex.yaml
+The API gateway mounts the embedded Dex handler at `/dex/*` without auth middleware.
+These endpoints must bypass authentication since they ARE the authentication entry
+point. Caddy routes `/dex/*` to `meridian:8090`.
 
-Once the connector is wired:
+### 4. Subdomain -> Tenant Resolution -- DONE
 
-```yaml
-# Remove these lines:
-enablePasswordDB: true
-staticPasswords: [...]
+The gateway resolves tenant context from the request subdomain before the Dex password
+flow reaches the connector. The connector uses `tenant.RequireFromContext(ctx)` to
+scope identity lookups to the correct tenant.
 
-# Update oauth2 section:
-oauth2:
-  passwordConnector: meridian   # matches the ID registered at startup
-  skipApprovalScreen: true
-```
+### 5. Seed Demo Users via Identity Service -- DONE
 
-### 3. Subdomain → Tenant Resolution
+Static passwords in `dex.yaml` have been replaced with users seeded through the
+identity service bootstrap. The `operator@volterra.energy` user is created at startup
+when `DEMO_OPERATOR_EMAIL` and `DEMO_OPERATOR_PASSWORD` environment variables are set.
 
-The connector uses `tenant.RequireFromContext(ctx)` to scope identity lookups.
-Ensure the gateway populates the tenant in context before the Dex password flow
-reaches the connector — typically via subdomain extraction in the HTTP middleware.
+### 6. JWT Validation Against Embedded Dex JWKS -- DONE
 
-### 4. Seed Demo Users via Identity Service
+The API gateway fetches JWKS from the embedded Dex server (`DEX_ISSUER/keys`) for
+token validation. No external JWKS endpoint is required.
 
-Replace `staticPasswords` with seeded identities created through the identity
-service bootstrap (see `services/identity/bootstrap/`). The `admin@volterra.energy`
-and `operator@volterra.energy` users should be created via the identity API with
-appropriate role assignments.
+### 7. Update Caddy Configuration -- DONE
+
+Caddy now routes `/dex/*` requests to `meridian:8090` (the unified binary) instead
+of to a standalone Dex container. The `dex.yaml` volume mount was removed.
+
+### 8. Integration Tests -- DONE
+
+End-to-end integration tests verify the full authentication flow: password grant
+through the embedded Dex server, token issuance, and JWT validation.
 
 ## Reference
 
-- Connector implementation: `services/identity/connector/connector.go`
-- Claims mapping: `services/identity/connector/claims.go`
-- Bootstrap: `services/identity/bootstrap/`
-- Dex connector interface: `github.com/dexidp/dex/connector.PasswordConnector`
+- Embedded Dex server: `services/identity/dex/`
+- Connector implementation: `services/identity/connector/`
+- Bootstrap (demo user seeding): `services/identity/bootstrap/`
+- Gateway Dex mount: `services/api-gateway/server.go` (WithDexHandler)
+- Docker Compose: `deploy/demo/docker-compose.yml`
+- Caddy config: `deploy/demo/Caddyfile`

@@ -239,7 +239,7 @@ make swagger-ui
 |---------|-----------|----------------|
 | Kafka event publishing | Disabled (no-op) | Enabled |
 | Redis idempotency store | Disabled (Postgres fallback) | Enabled |
-| Authentication | Disabled (`AUTH_MODE=disabled`) | Keycloak OIDC |
+| Authentication | Disabled (`AUTH_MODE=disabled`) | Embedded Dex OIDC |
 | Cron jobs / schedulers | Not running | Running |
 | Multi-replica | Single process | Horizontal pod autoscaling |
 | Observability (OTLP) | Disabled | Enabled |
