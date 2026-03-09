@@ -66,10 +66,11 @@ type LedgerPostingEntity struct {
 	// Default empty object for backward compatibility.
 	Attributes datatypes.JSONType[map[string]string] `gorm:"type:jsonb;default:'{}'"`
 
-	AccountID     string    `gorm:"not null;size:255;index"`
-	ValueDate     time.Time `gorm:"not null;index"`
-	PostingResult string    `gorm:"size:1000"`
-	Status        string    `gorm:"not null;size:50;index"`
+	AccountID            string    `gorm:"not null;size:255;index"`
+	AccountServiceDomain string    `gorm:"size:20;default:''"` // BIAN Service Domain: CURRENT_ACCOUNT, INTERNAL_ACCOUNT, or empty
+	ValueDate            time.Time `gorm:"not null;index"`
+	PostingResult        string    `gorm:"size:1000"`
+	Status               string    `gorm:"not null;size:50;index"`
 
 	// Correlation for event sourcing
 	CorrelationID string `gorm:"size:255;index"` // Links back to originating event

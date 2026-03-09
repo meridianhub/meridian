@@ -69,6 +69,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 		instrument_precision INTEGER DEFAULT 2,
 		attributes JSONB DEFAULT '{}',
 		account_id VARCHAR(255) NOT NULL,
+		account_service_domain VARCHAR(20) NOT NULL DEFAULT '',
 		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
 		posting_result TEXT,
 		status VARCHAR(20) NOT NULL,

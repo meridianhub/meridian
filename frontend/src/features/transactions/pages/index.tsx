@@ -8,6 +8,9 @@ import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink } from '@/shared/entity-link'
 import { MoneyDisplay } from '@/shared/money-display'
 
+import { accountEntityType } from '@/shared/account-entity-type'
+import type { EntityType } from '@/shared/entity-link'
+
 interface LedgerPosting {
   id: string
   financialBookingLogId: string
@@ -15,6 +18,7 @@ interface LedgerPosting {
   amount: bigint
   currency: string
   accountId: string
+  accountEntityType: EntityType | undefined
   valueDate: { seconds: bigint | number; nanos?: number } | null | undefined
   createdAt: { seconds: bigint | number; nanos?: number } | null | undefined
   status: string
@@ -74,9 +78,10 @@ const columns: ColumnDef<LedgerPosting>[] = [
   {
     accessorKey: 'accountId',
     header: 'Account',
-    cell: ({ row }) => (
-      <EntityLink type="account" id={row.original.accountId} />
-    ),
+    cell: ({ row }) => {
+      if (!row.original.accountEntityType) return <span className="font-mono text-xs">{row.original.accountId}</span>
+      return <EntityLink type={row.original.accountEntityType} id={row.original.accountId} />
+    },
   },
   {
     accessorKey: 'postingDirection',
@@ -154,6 +159,7 @@ export function TransactionsPage() {
         amount,
         currency,
         accountId: p.accountId ?? '',
+        accountEntityType: accountEntityType(p.accountServiceDomain as number | undefined),
         valueDate: p.valueDate ?? null,
         createdAt: p.createdAt ?? null,
         status: getStatusName(p.status),

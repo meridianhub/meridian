@@ -56,9 +56,14 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 	// This check ensures we don't create position logs for non-existent accounts.
 	// The validator uses graceful degradation: if Current Account service is unavailable,
 	// validation is skipped to avoid blocking operations during service outages.
+	var accountServiceDomain AccountServiceDomain
 	if s.accountValidationEnabled && s.accountValidator != nil {
 		if err := s.accountValidator.ValidateExists(ctx, req.AccountId); err != nil {
 			return nil, err // Returns codes.InvalidArgument if account not found
+		}
+		// Resolve which service domain manages this account (captured during validation)
+		if resolver, ok := s.accountValidator.(AccountResolver); ok {
+			accountServiceDomain = resolver.ResolveServiceDomain(ctx, req.AccountId)
 		}
 	}
 
@@ -87,6 +92,7 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create financial position log: %v", err)
 	}
+	log.AccountServiceDomain = string(accountServiceDomain)
 
 	// Build the domain event (if applicable) before persisting, then write both
 	// the position log and the outbox entry atomically in a single transaction.

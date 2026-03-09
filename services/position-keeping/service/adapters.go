@@ -74,6 +74,7 @@ func toProtoFinancialPositionLog(log *domain.FinancialPositionLog) *positionkeep
 	proto := &positionkeepingv1.FinancialPositionLog{
 		LogId:                 log.LogID.String(),
 		AccountId:             log.AccountID,
+		AccountServiceDomain:  toProtoAccountServiceDomain(log.AccountServiceDomain),
 		TransactionLogEntries: make([]*positionkeepingv1.TransactionLogEntry, 0, len(log.TransactionLogEntries)),
 		TransactionLineage:    toProtoTransactionLineage(log.TransactionLineage),
 		AuditTrail:            make([]*positionkeepingv1.AuditTrailEntry, 0, len(log.AuditTrail)),
@@ -251,6 +252,18 @@ func toProtoTransactionStatus(status domain.TransactionStatus) commonv1.Transact
 		return commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING // Amended maps to Pending
 	default:
 		return commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED
+	}
+}
+
+// toProtoAccountServiceDomain converts a domain string to the proto enum.
+func toProtoAccountServiceDomain(domain string) commonv1.AccountServiceDomain {
+	switch domain {
+	case "CURRENT_ACCOUNT":
+		return commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_CURRENT_ACCOUNT
+	case "INTERNAL_ACCOUNT":
+		return commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_INTERNAL_ACCOUNT
+	default:
+		return commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_UNSPECIFIED
 	}
 }
 

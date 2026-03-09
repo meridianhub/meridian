@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -77,7 +77,6 @@ function InternalAccountDetailSkeleton() {
 // ---------------------------------------------------------------------------
 
 function InternalAccountNotFound() {
-  const { accountId } = useParams<{ accountId: string }>()
   return (
     <div data-testid="internal-account-not-found" className="p-6">
       <Breadcrumbs items={[{ label: 'Internal Accounts', href: '/internal-accounts' }, { label: 'Not found' }]} />
@@ -86,14 +85,6 @@ function InternalAccountNotFound() {
         <p className="mt-2 text-sm text-muted-foreground">
           The internal account you are looking for does not exist or has been removed.
         </p>
-        {accountId && (
-          <p className="mt-3 text-sm">
-            Did you mean?{' '}
-            <Link to={`/accounts/${encodeURIComponent(accountId)}`} className="text-blue-600 hover:underline dark:text-blue-400">
-              View as current account
-            </Link>
-          </p>
-        )}
       </div>
     </div>
   )

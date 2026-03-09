@@ -166,6 +166,10 @@ message LedgerPosting {
     defined_only: true
     not_in: [0]
   }];
+
+  // account_service_domain identifies which BIAN Service Domain manages the account.
+  // Used by frontend consumers for correct account page routing.
+  meridian.common.v1.AccountServiceDomain account_service_domain = 10;
 }
 
 // InitiateFinancialBookingLogRequest creates a new financial booking log.
@@ -300,6 +304,12 @@ message CaptureLedgerPostingRequest {
 
   // idempotency_key ensures exactly-once processing.
   meridian.common.v1.IdempotencyKey idempotency_key = 6 [(buf.validate.field).required = true];
+
+  // account_service_domain identifies which BIAN Service Domain manages the account.
+  // Optional - when provided, stored directly. When omitted (UNSPECIFIED), the service
+  // may resolve it via account validation if configured.
+  // Server validates the enum range — out-of-range values return INVALID_ARGUMENT.
+  meridian.common.v1.AccountServiceDomain account_service_domain = 7;
 }
 
 // CaptureLedgerPostingResponse returns the created posting.

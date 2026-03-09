@@ -127,22 +127,22 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 	logQuery := `
 		INSERT INTO financial_position_log (
 			id, created_at, created_by, updated_at, updated_by,
-			log_id, account_id, version,
+			log_id, account_id, account_service_domain, version,
 			current_status, previous_status, status_updated_at, status_reason, failure_reason,
 			reconciliation_status,
 			opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
 		) VALUES (
 			gen_random_uuid(), $1, $2, $3, $4,
-			$5, $6, $7,
-			$8, $9, $10, $11, $12,
-			$13,
-			$14, $15, $16
+			$5, $6, $7, $8,
+			$9, $10, $11, $12, $13,
+			$14,
+			$15, $16, $17
 		) RETURNING id`
 
 	var dbID uuid.UUID
 	err = tx.QueryRow(ctx, logQuery,
 		log.CreatedAt, userID, log.UpdatedAt, userID,
-		log.LogID, log.AccountID, log.Version,
+		log.LogID, log.AccountID, log.AccountServiceDomain, log.Version,
 		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
 		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
 		nullStringValue(log.StatusTracking.FailureReason),
@@ -209,7 +209,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 		pgx.Identifier{"financial_position_log"},
 		[]string{
 			"id", "created_at", "created_by", "updated_at", "updated_by",
-			"log_id", "account_id", "version",
+			"log_id", "account_id", "account_service_domain", "version",
 			"current_status", "previous_status", "status_updated_at", "status_reason", "failure_reason",
 			"reconciliation_status",
 			"opening_balance_amount", "opening_balance_currency", "opening_balance_recorded_at",
@@ -219,7 +219,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 			return []any{
 				uuid.New(), // Generate new DB ID
 				log.CreatedAt, userID, log.UpdatedAt, userID,
-				log.LogID, log.AccountID, log.Version,
+				log.LogID, log.AccountID, log.AccountServiceDomain, log.Version,
 				log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
 				log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
 				nullStringValue(log.StatusTracking.FailureReason),
@@ -284,7 +284,7 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, created_at, updated_at, log_id, account_id, version,
+			SELECT id, created_at, updated_at, log_id, account_id, account_service_domain, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status,
 				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
@@ -302,7 +302,7 @@ func (r *PostgresRepository) FindByID(ctx context.Context, logID uuid.UUID) (*do
 		var openingBalanceRecordedAt sql.NullTime
 
 		err := tx.QueryRow(ctx, query, logID).Scan(
-			&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.Version,
+			&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.AccountServiceDomain, &log.Version,
 			&currentStatus, &previousStatus, &statusTracking.StatusUpdatedAt,
 			&statusTracking.StatusReason, &failureReason,
 			&reconciliationStatus,
@@ -368,7 +368,7 @@ func (r *PostgresRepository) FindByAccountID(ctx context.Context, accountID stri
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, created_at, updated_at, log_id, account_id, version,
+			SELECT id, created_at, updated_at, log_id, account_id, account_service_domain, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status,
 				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
@@ -523,22 +523,22 @@ func (r *PostgresRepository) CreateWithOutbox(ctx context.Context, log *domain.F
 	logQuery := `
 		INSERT INTO financial_position_log (
 			id, created_at, created_by, updated_at, updated_by,
-			log_id, account_id, version,
+			log_id, account_id, account_service_domain, version,
 			current_status, previous_status, status_updated_at, status_reason, failure_reason,
 			reconciliation_status,
 			opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
 		) VALUES (
 			gen_random_uuid(), $1, $2, $3, $4,
-			$5, $6, $7,
-			$8, $9, $10, $11, $12,
-			$13,
-			$14, $15, $16
+			$5, $6, $7, $8,
+			$9, $10, $11, $12, $13,
+			$14,
+			$15, $16, $17
 		) RETURNING id`
 
 	var dbID uuid.UUID
 	err = tx.QueryRow(ctx, logQuery,
 		log.CreatedAt, userID, log.UpdatedAt, userID,
-		log.LogID, log.AccountID, log.Version,
+		log.LogID, log.AccountID, log.AccountServiceDomain, log.Version,
 		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
 		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
 		nullStringValue(log.StatusTracking.FailureReason),
@@ -694,7 +694,7 @@ func (r *PostgresRepository) List(ctx context.Context, filter domain.PositionLog
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, created_at, updated_at, log_id, account_id, version,
+			SELECT id, created_at, updated_at, log_id, account_id, account_service_domain, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status,
 				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
@@ -763,7 +763,7 @@ func (r *PostgresRepository) FindPendingForReconciliation(ctx context.Context, l
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, created_at, updated_at, log_id, account_id, version,
+			SELECT id, created_at, updated_at, log_id, account_id, account_service_domain, version,
 				current_status, previous_status, status_updated_at, status_reason, failure_reason,
 				reconciliation_status,
 				opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
@@ -1359,7 +1359,7 @@ func (r *PostgresRepository) scanLogsTx(ctx context.Context, tx pgx.Tx, rows pgx
 		var openingBalanceRecordedAt sql.NullTime
 
 		err := rows.Scan(
-			&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.Version,
+			&dbID, &log.CreatedAt, &log.UpdatedAt, &log.LogID, &log.AccountID, &log.AccountServiceDomain, &log.Version,
 			&currentStatus, &previousStatus, &statusTracking.StatusUpdatedAt,
 			&statusTracking.StatusReason, &failureReason,
 			&reconciliationStatus,

@@ -7,6 +7,7 @@ import { TimeDisplay } from '@/shared/time-display'
 import { QualityLadderBadge } from '@/features/positions/components/quality-ladder-badge'
 import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink, Breadcrumbs } from '@/shared'
+import { accountEntityType } from '@/shared/account-entity-type'
 import { Skeleton } from '@/components/ui/skeleton'
 import { usePositionLogDetail } from '../hooks'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
@@ -226,7 +227,11 @@ export function PositionDetailPage() {
 
               <LabeledField label="Account ID">
                 {log?.accountId ? (
-                  <EntityLink type="account" id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
+                  accountEntityType(log.accountServiceDomain) ? (
+                    <EntityLink type={accountEntityType(log.accountServiceDomain)!} id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
+                  ) : (
+                    <span className="font-mono text-xs">{log.accountId}</span>
+                  )
                 ) : (
                   <span>—</span>
                 )}

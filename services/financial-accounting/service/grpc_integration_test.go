@@ -106,6 +106,7 @@ func setupIntegrationTest(t *testing.T) (*testServer, context.Context) {
 		instrument_precision INTEGER DEFAULT 2,
 		attributes JSONB DEFAULT '{}',
 		account_id TEXT NOT NULL,
+		account_service_domain VARCHAR(20) NOT NULL DEFAULT '',
 		value_date TIMESTAMP NOT NULL,
 		posting_result TEXT,
 		correlation_id TEXT,

@@ -15,6 +15,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// AccountServiceDomain identifies which BIAN Service Domain manages an account.
+type AccountServiceDomain string
+
+const (
+	// AccountServiceDomainUnspecified means the managing service is unknown.
+	AccountServiceDomainUnspecified AccountServiceDomain = ""
+	// AccountServiceDomainCurrentAccount means the account is managed by the Current Account service.
+	AccountServiceDomainCurrentAccount AccountServiceDomain = "CURRENT_ACCOUNT"
+	// AccountServiceDomainInternalAccount means the account is managed by the Internal Account service.
+	AccountServiceDomainInternalAccount AccountServiceDomain = "INTERNAL_ACCOUNT"
+)
+
 // AccountValidator validates that accounts exist before creating position logs.
 // This interface allows Position Keeping to validate account existence without
 // direct coupling to the Current Account implementation details.
@@ -24,6 +36,16 @@ type AccountValidator interface {
 	// Returns codes.InvalidArgument error if the account does not exist.
 	// Returns nil on service unavailability (graceful degradation).
 	ValidateExists(ctx context.Context, accountID string) error
+}
+
+// AccountResolver extends AccountValidator with the ability to resolve which
+// BIAN Service Domain manages an account.
+type AccountResolver interface {
+	AccountValidator
+	// ResolveServiceDomain returns which service domain manages the given account.
+	// Returns AccountServiceDomainUnspecified if the domain cannot be determined
+	// (e.g., during graceful degradation when services are unavailable).
+	ResolveServiceDomain(ctx context.Context, accountID string) AccountServiceDomain
 }
 
 // AccountValidatorErrors defines sentinel errors for the AccountValidator.
@@ -230,6 +252,16 @@ func (v *CurrentAccountValidator) queryCurrentAccount(ctx context.Context, accou
 	return exists, nil
 }
 
+// IsCached returns true if the account is in the cache and was found to exist.
+func (v *CurrentAccountValidator) IsCached(accountID string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
+		return entry.exists
+	}
+	return false
+}
+
 // InvalidateCache clears all cached entries. Useful for testing or when accounts are modified.
 func (v *CurrentAccountValidator) InvalidateCache() {
 	v.mu.Lock()
@@ -423,6 +455,16 @@ func (v *InternalAccountValidator) queryInternalAccount(ctx context.Context, acc
 	return exists, nil
 }
 
+// IsCached returns true if the account is in the cache and was found to exist.
+func (v *InternalAccountValidator) IsCached(accountID string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
+		return entry.exists
+	}
+	return false
+}
+
 // CompositeAccountValidator validates accounts by checking multiple services.
 // It tries each validator in order and returns success if any validator finds the account.
 // This allows Position Keeping to validate accounts from both Current Account and Internal Account.
@@ -433,6 +475,8 @@ func (v *InternalAccountValidator) queryInternalAccount(ctx context.Context, acc
 // - If found in Internal Account: success
 // - If NotFound in both: return InvalidArgument error
 // - If any service is unavailable: graceful degradation (allow operation)
+//
+// Implements AccountResolver: tracks which service found the account for downstream use.
 type CompositeAccountValidator struct {
 	currentAccountValidator  *CurrentAccountValidator
 	internalAccountValidator *InternalAccountValidator
@@ -474,12 +518,14 @@ func NewCompositeAccountValidator(cfg CompositeAccountValidatorConfig) (*Composi
 // Returns nil if the account exists in either Current Account or Internal Account.
 // Returns codes.InvalidArgument if the account is not found in any service.
 // Returns nil on service unavailability (graceful degradation).
+//
+// Side effect: caches the resolved AccountServiceDomain, retrievable via ResolveServiceDomain.
 func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountID string) error {
 	// Try Current Account first (most common case - customer accounts)
 	if v.currentAccountValidator != nil {
 		err := v.currentAccountValidator.ValidateExists(ctx, accountID)
 		if err == nil {
-			// Found in Current Account
+			// Found in Current Account (cached by CurrentAccountValidator)
 			v.logger.Debug("account found in current account service",
 				"account_id", accountID)
 			return nil
@@ -500,7 +546,7 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 	if v.internalAccountValidator != nil {
 		err := v.internalAccountValidator.ValidateExists(ctx, accountID)
 		if err == nil {
-			// Found in Internal Account
+			// Found in Internal Account (cached by InternalAccountValidator)
 			v.logger.Debug("account found in internal account service",
 				"account_id", accountID)
 			return nil
@@ -521,4 +567,17 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 	v.logger.Warn("account not found in any account service",
 		"account_id", accountID)
 	return status.Errorf(codes.InvalidArgument, "account not found: %s", accountID)
+}
+
+// ResolveServiceDomain returns the AccountServiceDomain for a previously validated account.
+// Thread-safe: queries each validator's independent TTL-based cache to determine which
+// service found the account. No shared mutable state between concurrent requests.
+func (v *CompositeAccountValidator) ResolveServiceDomain(_ context.Context, accountID string) AccountServiceDomain {
+	if v.currentAccountValidator != nil && v.currentAccountValidator.IsCached(accountID) {
+		return AccountServiceDomainCurrentAccount
+	}
+	if v.internalAccountValidator != nil && v.internalAccountValidator.IsCached(accountID) {
+		return AccountServiceDomainInternalAccount
+	}
+	return AccountServiceDomainUnspecified
 }

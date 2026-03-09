@@ -304,6 +304,7 @@ func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error)
 		InstrumentPrecision:   instrument.Precision, // Decimal places
 		Attributes:            datatypes.NewJSONType(attributes),
 		AccountID:             posting.AccountID,
+		AccountServiceDomain:  posting.AccountServiceDomain,
 		ValueDate:             posting.ValueDate,
 		PostingResult:         posting.PostingResult,
 		Status:                string(posting.Status),
@@ -372,6 +373,7 @@ func toPostingDomain(entity *LedgerPostingEntity) *domain.LedgerPosting {
 		Direction:             domain.PostingDirection(entity.PostingDirection),
 		Amount:                money,
 		AccountID:             entity.AccountID,
+		AccountServiceDomain:  entity.AccountServiceDomain,
 		ValueDate:             entity.ValueDate,
 		PostingResult:         entity.PostingResult,
 		Status:                domain.TransactionStatus(entity.Status),

@@ -175,6 +175,7 @@ func toProtoLedgerPosting(posting *domain.LedgerPosting) *financialaccountingv1.
 		PostingDirection:      toProtoPostingDirection(posting.Direction),
 		PostingAmount:         toProtoMoney(posting.Amount),
 		AccountId:             posting.AccountID,
+		AccountServiceDomain:  toProtoAccountServiceDomain(posting.AccountServiceDomain),
 		ValueDate:             timestamppb.New(posting.ValueDate),
 		PostingResult:         posting.PostingResult,
 		CreatedAt:             timestamppb.New(posting.CreatedAt),
@@ -217,4 +218,30 @@ func toProtoAccountType(accountType string) string {
 // fromProtoAccountType converts protobuf string field to domain account type string.
 func fromProtoAccountType(accountType string) string {
 	return accountType
+}
+
+// toProtoAccountServiceDomain converts domain AccountServiceDomain string to protobuf.
+func toProtoAccountServiceDomain(domain string) commonv1.AccountServiceDomain {
+	switch domain {
+	case "CURRENT_ACCOUNT":
+		return commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_CURRENT_ACCOUNT
+	case "INTERNAL_ACCOUNT":
+		return commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_INTERNAL_ACCOUNT
+	default:
+		return commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_UNSPECIFIED
+	}
+}
+
+// fromProtoAccountServiceDomain converts protobuf AccountServiceDomain to domain string.
+func fromProtoAccountServiceDomain(domain commonv1.AccountServiceDomain) string {
+	switch domain {
+	case commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_UNSPECIFIED:
+		return ""
+	case commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_CURRENT_ACCOUNT:
+		return "CURRENT_ACCOUNT"
+	case commonv1.AccountServiceDomain_ACCOUNT_SERVICE_DOMAIN_INTERNAL_ACCOUNT:
+		return "INTERNAL_ACCOUNT"
+	default:
+		return ""
+	}
 }

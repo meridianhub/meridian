@@ -32,6 +32,7 @@ type LedgerPosting struct {
 	Direction             PostingDirection
 	Amount                Money
 	AccountID             string
+	AccountServiceDomain  string // BIAN Service Domain: "CURRENT_ACCOUNT", "INTERNAL_ACCOUNT", or ""
 	ValueDate             time.Time
 	PostingResult         string
 	Status                TransactionStatus
