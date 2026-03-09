@@ -475,37 +475,63 @@ func (r *HandlerRegistry) Has(name string) bool {
 	return exists
 }
 
-// AllWithMetadata returns a snapshot map of all registered handler names to their metadata.
-// The returned metadata values are shallow copies; callers may read freely without affecting
-// the registry. For deeply nested mutable fields (slices, maps), treat as read-only.
+// AllWithMetadata returns a deep-copy snapshot of all registered handler names to their metadata.
+// Callers may freely mutate the returned values without affecting the registry.
 func (r *HandlerRegistry) AllWithMetadata() map[string]*HandlerMetadata {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	result := make(map[string]*HandlerMetadata, len(r.metadata))
 	for name, meta := range r.metadata {
-		if meta == nil {
-			result[name] = nil
-			continue
-		}
-		clone := *meta
-		if meta.ProducesInstruments != nil {
-			clone.ProducesInstruments = make([]string, len(meta.ProducesInstruments))
-			copy(clone.ProducesInstruments, meta.ProducesInstruments)
-		}
-		if meta.ParamOverrides != nil {
-			clone.ParamOverrides = make(map[string]ParamOverride, len(meta.ParamOverrides))
-			for k, v := range meta.ParamOverrides {
-				clone.ParamOverrides[k] = v
-			}
-		}
-		if meta.Conversions != nil {
-			clone.Conversions = make([]HandlerConversion, len(meta.Conversions))
-			copy(clone.Conversions, meta.Conversions)
-		}
-		result[name] = &clone
+		result[name] = cloneHandlerMetadata(meta)
 	}
 	return result
+}
+
+// cloneHandlerMetadata returns a deep copy of a HandlerMetadata, including all
+// nested slices and maps. Returns nil for nil input.
+func cloneHandlerMetadata(meta *HandlerMetadata) *HandlerMetadata {
+	if meta == nil {
+		return nil
+	}
+	clone := *meta
+	if meta.ProducesInstruments != nil {
+		clone.ProducesInstruments = make([]string, len(meta.ProducesInstruments))
+		copy(clone.ProducesInstruments, meta.ProducesInstruments)
+	}
+	if meta.ParamOverrides != nil {
+		clone.ParamOverrides = make(map[string]ParamOverride, len(meta.ParamOverrides))
+		for k, v := range meta.ParamOverrides {
+			clone.ParamOverrides[k] = v
+		}
+	}
+	if meta.Conversions != nil {
+		clone.Conversions = make([]HandlerConversion, len(meta.Conversions))
+		for i, conv := range meta.Conversions {
+			clone.Conversions[i] = cloneHandlerConversion(conv)
+		}
+	}
+	return &clone
+}
+
+// cloneHandlerConversion returns a deep copy of a HandlerConversion.
+func cloneHandlerConversion(conv HandlerConversion) HandlerConversion {
+	c := conv
+	c.ParamMapping = cloneStringMap(conv.ParamMapping)
+	c.Defaults = cloneStringMap(conv.Defaults)
+	return c
+}
+
+// cloneStringMap returns a deep copy of a string-to-string map. Returns nil for nil input.
+func cloneStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	clone := make(map[string]string, len(m))
+	for k, v := range m {
+		clone[k] = v
+	}
+	return clone
 }
 
 // List returns a sorted list of all registered handler names.
