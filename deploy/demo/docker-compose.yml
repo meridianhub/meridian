@@ -2,7 +2,8 @@
 #
 # Services:
 #   postgres    - PostgreSQL 16 (internal only, not exposed to host)
-#   meridian    - Unified binary with embedded Dex OIDC; starts after postgres is healthy
+#   dex         - Dex OIDC identity provider (sidecar, internal only)
+#   meridian    - Unified binary; starts after postgres and dex are healthy
 #   caddy       - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
 #   mcp-server  - MCP server for AI integration (internal, proxied via Caddy)
 #
@@ -39,11 +40,27 @@ services:
       start_period: 10s
     # Not exposed to host — accessed only by meridian on the internal network
 
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1-alpine
+    restart: unless-stopped
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dex.yaml:/etc/dex/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5556/dex/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    # Not exposed to host — accessed only by meridian and caddy on the internal network
+
   meridian:
     image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      dex:
         condition: service_healthy
     environment:
       # --- Application ---
@@ -58,9 +75,10 @@ services:
       # Per-service databases are created by init-databases.sql on first Postgres boot.
       DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
-      # --- Authentication (embedded Dex OIDC) ---
+      # --- Authentication (external Dex OIDC sidecar) ---
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-      DEX_ISSUER: ${DEX_ISSUER:-https://demo.meridianhub.cloud/dex}
+      JWKS_URL: ${JWKS_URL:-http://dex:5556/dex/keys}
+      DEX_URL: ${DEX_URL:-http://dex:5556/dex}
       API_KEYS: ${API_KEYS:-}
       BASE_DOMAIN: ${BASE_DOMAIN:-demo.meridianhub.cloud}
       LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}

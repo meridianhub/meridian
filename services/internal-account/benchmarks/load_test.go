@@ -217,6 +217,9 @@ func BenchmarkMixedWorkloadParallel(b *testing.B) {
 // Advisory target: >1000 ops/sec aggregate throughput.
 // CI environments may vary due to shared resources.
 func TestThroughputUnderLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping throughput test in short mode")
+	}
 	tc := setupTestContainer(t)
 	ctx := tc.ctx
 

@@ -33,7 +33,6 @@ type Server struct {
 	transcoderHandler     http.Handler
 	eventStreamHandler    *eventstream.Handler
 	rawEventStreamHandler http.Handler // used by tests and WithEventStreamHandlerHTTP
-	dexHandler            http.Handler
 	versionInfo           *VersionInfo
 }
 
@@ -80,17 +79,6 @@ func WithEventStreamHandlerHTTP(handler http.Handler) ServerOption {
 	}
 }
 
-// WithDexHandler sets the Dex OIDC handler to be mounted at /dex/*.
-// The handler is mounted with tenant resolution middleware (so that the
-// MeridianConnector can resolve the tenant from the subdomain) but WITHOUT
-// auth or tenant-authorization middleware since Dex manages its own
-// authentication flows (login forms, token issuance, etc.).
-func WithDexHandler(handler http.Handler) ServerOption {
-	return func(s *Server) {
-		s.dexHandler = handler
-	}
-}
-
 // WithVersionInfo sets the build version metadata returned by the /version endpoint.
 func WithVersionInfo(info *VersionInfo) ServerOption {
 	return func(s *Server) {
@@ -132,10 +120,6 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 // CRITICAL: Health endpoints (/health, /ready) are registered directly on the main mux
 // WITHOUT any middleware. This is required for K8s probes which do not provide
 // authentication credentials or tenant context.
-//
-// Dex endpoints (/dex/*) go through tenant resolution only (no auth or tenant-authz).
-// This allows the MeridianConnector to resolve the tenant from the subdomain for
-// credential lookups while Dex manages its own authentication flows.
 //
 // API routes go through the middleware chain in this order:
 // 1. Auth middleware (validates JWT or API key, injects identity into context)
@@ -182,18 +166,6 @@ func (s *Server) registerRoutes() {
 		apiHandler = http.HandlerFunc(s.handleAPI)
 	}
 
-	// Dex OIDC endpoints - tenant resolution only, NO auth or tenant-authz.
-	// Tenant resolution is required so that MeridianConnector.Login can call
-	// tenant.RequireFromContext(ctx) to scope credential lookups to the correct
-	// tenant. Auth and tenant-authorization are skipped because Dex manages its
-	// own authentication flows (login forms, token issuance, JWKS, etc.).
-	// Must be registered BEFORE the "/" catch-all to take precedence.
-	// No StripPrefix: Dex includes the issuer path (/dex) in its internal routing.
-	if s.dexHandler != nil {
-		dexHandler := s.wrapWithTenantOnly(s.dexHandler)
-		s.mux.Handle("/dex/", dexHandler)
-	}
-
 	// Build middleware chain: auth → tenant → tenant_authz → transcoder/proxy
 	s.mux.Handle("/", s.wrapWithAuthChain(apiHandler))
 
@@ -228,17 +200,6 @@ func (s *Server) buildEventStreamHandler() http.Handler {
 	})
 
 	return s.wrapWithAuthChain(claimsBridge)
-}
-
-// wrapWithTenantOnly wraps a handler with tenant resolution middleware only.
-// No auth or tenant-authorization is applied. This is used for Dex endpoints
-// that need tenant context for credential lookups but manage their own
-// authentication flows.
-func (s *Server) wrapWithTenantOnly(inner http.Handler) http.Handler {
-	if s.tenantResolver != nil {
-		return s.tenantResolver.Handler(inner)
-	}
-	return inner
 }
 
 // wrapWithAuthChain wraps a handler with the auth middleware chain:
