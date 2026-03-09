@@ -92,7 +92,8 @@ func TestHandlerProtoAlignment(t *testing.T) {
 			annotatedCount++
 
 			// 2. Derive schema from proto — validates derivation works
-			derived := DeriveHandlerDef(name, metadata)
+			derived, deriveErr := DeriveHandlerDef(name, metadata)
+			require.NoError(t, deriveErr, "DeriveHandlerDef failed for %s", name)
 			require.NotNil(t, derived, "DeriveHandlerDef returned nil for %s", name)
 
 			// 3. Enum params from proto reflection must have non-empty values.

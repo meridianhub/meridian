@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/meridianhub/meridian/shared/pkg/saga"
@@ -18,15 +19,21 @@ func DeriveSchema(registry *saga.HandlerRegistry) (*Schema, error) {
 	}
 
 	for name, meta := range allMeta {
-		s.Handlers[name] = DeriveHandlerDef(name, meta)
+		hd, err := DeriveHandlerDef(name, meta)
+		if err != nil {
+			return nil, fmt.Errorf("handler %s: %w", name, err)
+		}
+		s.Handlers[name] = hd
 	}
 
 	return s, nil
 }
 
 // DeriveHandlerDef builds a single HandlerDef from handler metadata.
+// Returns an error if a ParamOverride references a field not in the proto
+// without providing an explicit Type.
 // Exported for use by contract tests (Task 4).
-func DeriveHandlerDef(_ string, meta *saga.HandlerMetadata) *HandlerDef {
+func DeriveHandlerDef(_ string, meta *saga.HandlerMetadata) (*HandlerDef, error) {
 	hd := &HandlerDef{
 		Params:  make(map[string]*FieldDef),
 		Returns: make(map[string]*FieldDef),
@@ -34,7 +41,7 @@ func DeriveHandlerDef(_ string, meta *saga.HandlerMetadata) *HandlerDef {
 	}
 
 	if meta == nil {
-		return hd
+		return hd, nil
 	}
 
 	hd.Description = meta.Description
@@ -58,7 +65,9 @@ func DeriveHandlerDef(_ string, meta *saga.HandlerMetadata) *HandlerDef {
 	}
 
 	// Apply param overrides
-	applyParamOverrides(hd.Params, meta.ParamOverrides)
+	if err := applyParamOverrides(hd.Params, meta.ParamOverrides); err != nil {
+		return nil, err
+	}
 
 	// Derive returns from proto response type
 	if meta.ProtoResponseType != nil {
@@ -76,7 +85,7 @@ func DeriveHandlerDef(_ string, meta *saga.HandlerMetadata) *HandlerDef {
 		})
 	}
 
-	return hd
+	return hd, nil
 }
 
 // deriveFields populates a field map from a proto message descriptor.
@@ -139,7 +148,7 @@ func protoKindToFieldType(kind protoreflect.Kind, _ protoreflect.FieldDescriptor
 	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
 		return TypeUint32
 	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
-		return TypeInt64 // no TypeUint64, map to int64
+		return TypeString // no TypeUint64; use string to preserve full unsigned range
 	case protoreflect.BoolKind:
 		return TypeBool
 	case protoreflect.BytesKind:
@@ -223,9 +232,12 @@ func findCommonEnumPrefix(values []string) string {
 }
 
 // applyParamOverrides applies ParamOverrides to the derived params map.
-func applyParamOverrides(params map[string]*FieldDef, overrides map[string]saga.ParamOverride) {
+// Returns an error if an override references a field not in the proto
+// without providing an explicit Type — this catches naming drift between
+// proto fields and handler annotations.
+func applyParamOverrides(params map[string]*FieldDef, overrides map[string]saga.ParamOverride) error {
 	if overrides == nil {
-		return
+		return nil
 	}
 
 	for fieldName, override := range overrides {
@@ -237,8 +249,11 @@ func applyParamOverrides(params map[string]*FieldDef, overrides map[string]saga.
 
 		fd, exists := params[fieldName]
 		if !exists {
-			// Override for a field not in proto - create it
-			fd = &FieldDef{Type: TypeString}
+			// Override for a field not in proto — require explicit Type
+			if override.Type == "" {
+				return fmt.Errorf("%w: %q", ErrOverrideMissingType, fieldName)
+			}
+			fd = &FieldDef{Type: FieldType(override.Type)}
 			params[fieldName] = fd
 		}
 
@@ -258,4 +273,5 @@ func applyParamOverrides(params map[string]*FieldDef, overrides map[string]saga.
 			params[override.Alias] = fd
 		}
 	}
+	return nil
 }

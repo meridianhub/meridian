@@ -52,7 +52,7 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 						Alias:    "position_id",
 						Required: boolPtr(true),
 					},
-					"currency":           {Deprecated: "use instrument_code instead"},
+					"currency":           {Type: "string", Deprecated: "use instrument_code instead"},
 					"valuation_analysis": {Derived: true},
 				},
 			},

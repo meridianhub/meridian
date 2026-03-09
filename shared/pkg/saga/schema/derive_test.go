@@ -498,7 +498,8 @@ func TestDeriveHandlerDef_Exported(t *testing.T) {
 		Version:              1,
 	}
 
-	hd := schema.DeriveHandlerDef("test.exported", meta)
+	hd, err := schema.DeriveHandlerDef("test.exported", meta)
+	require.NoError(t, err)
 	require.NotNil(t, hd)
 	assert.Equal(t, "exported function test", hd.Description)
 }
