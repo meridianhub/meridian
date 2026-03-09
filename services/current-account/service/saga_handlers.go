@@ -140,6 +140,25 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 		{"financial_gateway.dispatch_payment", stubNotImplemented("financial_gateway.dispatch_payment")},
 		{"financial_gateway.cancel_payment", stubNotImplemented("financial_gateway.cancel_payment")},
 		{"financial_gateway.dispatch_refund", stubNotImplemented("financial_gateway.dispatch_refund")},
+
+		// Forecasting handlers (stubs - defined in schema for forecasting service)
+		{"forecasting.compute_forward_curve", stubNotImplemented("forecasting.compute_forward_curve")},
+
+		// Market Information handlers (stubs - defined in schema for market information service)
+		{"market_information.publish_observation", stubNotImplemented("market_information.publish_observation")},
+		{"market_information.query_latest", stubNotImplemented("market_information.query_latest")},
+		{"market_information.manage_dataset", stubNotImplemented("market_information.manage_dataset")},
+
+		// Reference Data handlers (stubs - defined in schema for reference data service)
+		{"reference_data.register_instrument", stubNotImplemented("reference_data.register_instrument")},
+		{"reference_data.delete_instrument", stubNotImplemented("reference_data.delete_instrument")},
+		{"reference_data.register_account_type", stubNotImplemented("reference_data.register_account_type")},
+		{"reference_data.delete_account_type", stubNotImplemented("reference_data.delete_account_type")},
+		{"reference_data.register_valuation_rule", stubNotImplemented("reference_data.register_valuation_rule")},
+		{"reference_data.register_saga_definition", stubNotImplemented("reference_data.register_saga_definition")},
+
+		// Internal Account handlers (stubs - defined in schema for internal account service)
+		{"internal_account.initiate", stubNotImplemented("internal_account.initiate")},
 	}
 
 	for _, h := range handlers {
