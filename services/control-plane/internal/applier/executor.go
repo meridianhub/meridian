@@ -71,17 +71,7 @@ func NewManifestExecutorFromDeps(cfg ManifestExecutorDepsConfig) (*ManifestExecu
 		return nil, fmt.Errorf("register manifest handlers: %w", err)
 	}
 
-	handlersYAML, err := handlersYAMLFS.ReadFile("handlers.yaml")
-	if err != nil {
-		return nil, fmt.Errorf("read handlers.yaml: %w", err)
-	}
-
-	schemaReg := schema.NewRegistry()
-	if err := schemaReg.LoadFromYAML(handlersYAML); err != nil {
-		return nil, fmt.Errorf("load handlers schema: %w", err)
-	}
-
-	serviceModules, err := schema.BuildServiceModules(registry, schemaReg)
+	serviceModules, err := schema.BuildServiceModules(registry)
 	if err != nil {
 		return nil, fmt.Errorf("build service modules: %w", err)
 	}

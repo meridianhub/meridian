@@ -209,15 +209,8 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 	err = RegisterManifestHandlers(registry, deps)
 	require.NoError(t, err)
 
-	// Step 3: Load handlers.yaml schema and build typed service modules
-	handlersYAML, err := embeddedHandlersYAML()
-	require.NoError(t, err, "handlers.yaml must be loadable")
-
-	schemaRegistry := schema.NewRegistry()
-	err = schemaRegistry.LoadFromYAML(handlersYAML)
-	require.NoError(t, err, "handlers.yaml must parse correctly")
-
-	serviceModules, err := schema.BuildServiceModules(registry, schemaRegistry)
+	// Step 3: Build typed service modules (schema derived from proto metadata on handlers)
+	serviceModules, err := schema.BuildServiceModules(registry)
 	require.NoError(t, err, "service modules must build from schema + registry")
 
 	// Step 4: Create the saga runner
@@ -334,9 +327,4 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 3, compensationCount, "must find compensation metadata for 2 instruments + 1 account type")
-}
-
-// embeddedHandlersYAML reads the handlers.yaml from the applier package.
-func embeddedHandlersYAML() ([]byte, error) {
-	return handlersYAMLFS.ReadFile("handlers.yaml")
 }

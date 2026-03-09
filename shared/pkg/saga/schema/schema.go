@@ -521,6 +521,19 @@ func (r *Registry) LoadFromDirectory(dir string) error {
 	return nil
 }
 
+// ToSchema returns a Schema snapshot from the registry's current state.
+// This enables callers that have a YAML-based Registry to use BuildServiceModulesFromSchema.
+func (r *Registry) ToSchema() *Schema {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	handlers := make(map[string]*HandlerDef, len(r.handlers))
+	for name, def := range r.handlers {
+		handlers[name] = def
+	}
+	return &Schema{Handlers: handlers}
+}
+
 // ValidateHandlerParams validates parameters for a named handler.
 // Returns ErrHandlerNotFound if the handler schema is not registered.
 func (r *Registry) ValidateHandlerParams(handlerName string, params map[string]any) error {

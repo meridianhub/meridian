@@ -126,9 +126,8 @@ func TestBuildServiceModules(t *testing.T) {
 		return map[string]any{"entity_id": "saved-456", "status": "SAVED"}, nil
 	})
 
-	// Create schema registry
-	schemaRegistry := NewRegistry()
-	err := schemaRegistry.LoadFromYAML([]byte(`
+	// Create schema from YAML
+	testSchema, err := Parse([]byte(`
 service: test
 version: "1.0"
 handlers:
@@ -169,7 +168,7 @@ handlers:
 `))
 	require.NoError(t, err)
 
-	modules, err := BuildServiceModules(registry, schemaRegistry)
+	modules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	// Should have top-level modules
@@ -206,8 +205,7 @@ func TestBuildServiceModules_NestedModules(t *testing.T) {
 		return map[string]any{"log_id": "test-123"}, nil
 	})
 
-	schemaRegistry := NewRegistry()
-	err := schemaRegistry.LoadFromYAML([]byte(`
+	testSchema, err := Parse([]byte(`
 service: current_account
 version: "1.0"
 handlers:
@@ -234,7 +232,7 @@ handlers:
 `))
 	require.NoError(t, err)
 
-	modules, err := BuildServiceModules(registry, schemaRegistry)
+	modules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	// Should have current_account at top level
@@ -481,9 +479,8 @@ func TestIntegration_StarlarkExecution(t *testing.T) {
 		}, nil
 	})
 
-	// Set up schema registry
-	schemaRegistry := NewRegistry()
-	err := schemaRegistry.LoadFromYAML([]byte(`
+	// Set up schema
+	testSchema, err := Parse([]byte(`
 service: test
 version: "1.0"
 handlers:
@@ -512,7 +509,7 @@ handlers:
 	require.NoError(t, err)
 
 	// Build service modules
-	modules, err := BuildServiceModules(registry, schemaRegistry)
+	modules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	// Create Starlark context
@@ -595,44 +592,27 @@ func TestHandlerTree_FindNode(t *testing.T) {
 	})
 }
 
-// TestBuildServiceModules_MissingHandler tests error when registry is missing a handler.
-func TestBuildServiceModules_MissingHandler(t *testing.T) {
-	// Empty handler registry
+// TestBuildServiceModules_EmptyRegistry tests that an empty registry produces empty modules.
+func TestBuildServiceModules_EmptyRegistry(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
 
-	// Schema registry with a handler
-	schemaRegistry := NewRegistry()
-	err := schemaRegistry.LoadFromYAML([]byte(`
-service: test
-version: "1.0"
-handlers:
-  test.missing:
-    description: "This handler is not in registry"
-    compensation_strategy: none
-    params: {}
-    returns: {}
-`))
+	modules, err := BuildServiceModules(registry)
 	require.NoError(t, err)
-
-	_, err = BuildServiceModules(registry, schemaRegistry)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "test.missing")
+	assert.Empty(t, modules)
 }
 
-// TestBuildServiceModules_NoSchema tests handler without schema definition.
-func TestBuildServiceModules_NoSchema(t *testing.T) {
-	// Handler registry with a handler
+// TestBuildServiceModules_DeriveFromRegistry tests that BuildServiceModules derives schema
+// from handler metadata and produces working modules.
+func TestBuildServiceModules_DeriveFromRegistry(t *testing.T) {
 	registry := saga.NewHandlerRegistry()
-	_ = registry.Register("test.orphan", func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
-		return nil, nil
+	_ = registry.Register("test.handler", func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+		return map[string]any{"status": "ok"}, nil
 	})
 
-	// Empty schema registry
-	schemaRegistry := NewRegistry()
-
-	_, err := BuildServiceModules(registry, schemaRegistry)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "test.orphan")
+	// Handler without metadata gets empty params — should still build
+	modules, err := BuildServiceModules(registry)
+	require.NoError(t, err)
+	assert.Contains(t, modules, "test")
 }
 
 // TestWrapHandler_PositionalArgsRejected tests that positional args are rejected.
@@ -912,8 +892,7 @@ func TestIntegration_NumericCoercion(t *testing.T) {
 		return map[string]any{"processed": true}, nil
 	})
 
-	schemaRegistry := NewRegistry()
-	err := schemaRegistry.LoadFromYAML([]byte(`
+	testSchema, err := Parse([]byte(`
 service: test
 version: "1.0"
 handlers:
@@ -933,7 +912,7 @@ handlers:
 `))
 	require.NoError(t, err)
 
-	modules, err := BuildServiceModules(registry, schemaRegistry)
+	modules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	starlarkCtx := &saga.StarlarkContext{
@@ -981,8 +960,7 @@ func TestIntegration_OverflowRejectedFromStarlark(t *testing.T) {
 		return map[string]any{"ok": true}, nil
 	})
 
-	schemaRegistry := NewRegistry()
-	err := schemaRegistry.LoadFromYAML([]byte(`
+	testSchema, err := Parse([]byte(`
 service: test
 version: "1.0"
 handlers:
@@ -999,7 +977,7 @@ handlers:
 `))
 	require.NoError(t, err)
 
-	modules, err := BuildServiceModules(registry, schemaRegistry)
+	modules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	starlarkCtx := &saga.StarlarkContext{
@@ -1068,9 +1046,8 @@ func TestIntegration_StarlarkSagaRunnerWithServiceModules(t *testing.T) {
 		}, nil
 	})
 
-	// Set up schema registry
-	schemaRegistry := NewRegistry()
-	err := schemaRegistry.LoadFromYAML([]byte(`
+	// Set up schema
+	testSchema, err := Parse([]byte(`
 service: test
 version: "1.0"
 handlers:
@@ -1111,7 +1088,7 @@ handlers:
 	require.NoError(t, err)
 
 	// Build service modules
-	modules, err := BuildServiceModules(registry, schemaRegistry)
+	modules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	// Create runtime and runner

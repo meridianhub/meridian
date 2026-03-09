@@ -144,8 +144,9 @@ func (t *handlerTree) validateNode(path string) error {
 	return nil
 }
 
-// BuildServiceModules creates Starlark service modules from the handler registry and schema.
-// It returns a StringDict containing all top-level service structs that can be injected
+// BuildServiceModules creates Starlark service modules from the handler registry.
+// It derives the handler schema from proto metadata on the registry using DeriveSchema,
+// then returns a StringDict containing all top-level service structs that can be injected
 // into the Starlark runtime.
 //
 // The resulting modules enable typed handler calls like:
@@ -155,34 +156,27 @@ func (t *handlerTree) validateNode(path string) error {
 // Instead of:
 //
 //	invoke_handler(handler="position_keeping.initiate_log", params={...})
-func BuildServiceModules(registry *saga.HandlerRegistry, schemaRegistry *Registry) (starlark.StringDict, error) {
-	// Get all handler names from the schema registry
-	schemaHandlers := schemaRegistry.ListHandlers()
-
-	// Get all handler names from the domain registry
-	registryHandlers := registry.List()
-
-	// Validate that all schema handlers exist in registry
-	registrySet := make(map[string]bool, len(registryHandlers))
-	for _, name := range registryHandlers {
-		registrySet[name] = true
-	}
-	for _, name := range schemaHandlers {
-		if !registrySet[name] {
-			return nil, fmt.Errorf("%w: %s", ErrHandlerMissingFromRegistry, name)
-		}
+func BuildServiceModules(registry *saga.HandlerRegistry) (starlark.StringDict, error) {
+	// Derive schema from proto metadata on the handler registry
+	derivedSchema, err := DeriveSchema(registry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive schema from handler registry: %w", err)
 	}
 
-	// Validate that all registry handlers have schemas
-	schemaSet := make(map[string]bool, len(schemaHandlers))
-	for _, name := range schemaHandlers {
-		schemaSet[name] = true
+	return BuildServiceModulesFromSchema(registry, derivedSchema)
+}
+
+// BuildServiceModulesFromSchema builds Starlark service modules from a handler registry
+// and a pre-built schema. This is the lower-level API used when the caller has a
+// pre-constructed schema (e.g., parsed from YAML for testing, or from a validation registry).
+// Production code should prefer BuildServiceModules which derives the schema automatically.
+func BuildServiceModulesFromSchema(registry *saga.HandlerRegistry, s *Schema) (starlark.StringDict, error) {
+	// Get all handler names from the schema
+	schemaHandlers := make([]string, 0, len(s.Handlers))
+	for name := range s.Handlers {
+		schemaHandlers = append(schemaHandlers, name)
 	}
-	for _, name := range registryHandlers {
-		if !schemaSet[name] {
-			return nil, fmt.Errorf("%w: %s", ErrHandlerMissingSchema, name)
-		}
-	}
+	sort.Strings(schemaHandlers)
 
 	// Build handler tree
 	tree := parseHandlerTree(schemaHandlers)
@@ -195,7 +189,7 @@ func BuildServiceModules(registry *saga.HandlerRegistry, schemaRegistry *Registr
 	// Build Starlark structs from tree
 	modules := make(starlark.StringDict)
 	for name, child := range tree.children {
-		module, err := buildServiceStruct(name, child, registry, schemaRegistry)
+		module, err := buildServiceStruct(name, child, registry, s)
 		if err != nil {
 			return nil, err
 		}
@@ -206,12 +200,12 @@ func BuildServiceModules(registry *saga.HandlerRegistry, schemaRegistry *Registr
 }
 
 // buildServiceStruct recursively builds a starlarkstruct from a handler tree node.
-func buildServiceStruct(name string, node *handlerTree, registry *saga.HandlerRegistry, schemaRegistry *Registry) (*starlarkstruct.Struct, error) {
+func buildServiceStruct(name string, node *handlerTree, registry *saga.HandlerRegistry, derivedSchema *Schema) (*starlarkstruct.Struct, error) {
 	members := make(starlark.StringDict)
 
 	// Add child namespaces as nested structs
 	for childName, childNode := range node.children {
-		childStruct, err := buildServiceStruct(childName, childNode, registry, schemaRegistry)
+		childStruct, err := buildServiceStruct(childName, childNode, registry, derivedSchema)
 		if err != nil {
 			return nil, err
 		}
@@ -225,9 +219,9 @@ func buildServiceStruct(name string, node *handlerTree, registry *saga.HandlerRe
 			return nil, fmt.Errorf("failed to get handler %s: %w", fullName, err)
 		}
 
-		handlerDef, err := schemaRegistry.GetHandler(fullName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get handler schema %s: %w", fullName, err)
+		handlerDef, ok := derivedSchema.Handlers[fullName]
+		if !ok {
+			return nil, fmt.Errorf("failed to get handler schema %s: %w", fullName, ErrHandlerNotFound)
 		}
 
 		members[handlerName] = wrapHandler(fullName, handler, handlerDef)

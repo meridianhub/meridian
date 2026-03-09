@@ -513,20 +513,8 @@ func testDepositOrchestratorWithConfig(repo *persistence.Repository, posKeeping 
 		panic(fmt.Sprintf("failed to register saga handlers: %v", err))
 	}
 
-	// Load schema registry
-	schemaRegistryPath := filepath.Join(serviceDir, "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml")
-	schemaRegistryData, err := os.ReadFile(schemaRegistryPath)
-	if err != nil {
-		panic(fmt.Sprintf("failed to read handlers schema: %v", err))
-	}
-
-	schemaRegistry := schema.NewRegistry()
-	if err := schemaRegistry.LoadFromYAML(schemaRegistryData); err != nil {
-		panic(fmt.Sprintf("failed to load schema: %v", err))
-	}
-
-	// Build service modules
-	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	// Build service modules (schema derived from proto metadata on handlers)
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry)
 	if err != nil {
 		panic(fmt.Sprintf("failed to build service modules: %v", err))
 	}
