@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"go.starlark.net/syntax"
+	"google.golang.org/protobuf/proto"
 )
 
 // LintIssueType categorizes the kind of lint issue detected.
@@ -78,6 +79,49 @@ const (
 	HandlerCategoryValuation HandlerCategory = "valuation"
 )
 
+// OverrideFieldType is a string alias for schema.FieldType, used to avoid circular imports
+// between saga and saga/schema packages. Values should match schema.FieldType constants
+// (e.g., "string", "Decimal", "uuid", "int64", "enum", etc.).
+type OverrideFieldType = string
+
+// ParamOverride defines Starlark-specific behavior overrides for a handler parameter.
+// These allow handler authors to customize how proto-derived parameters appear in Starlark.
+type ParamOverride struct {
+	// Type overrides the proto-derived type (e.g., "Decimal" for string fields
+	// that actually represent decimal values in Starlark). Use schema.FieldType values.
+	Type OverrideFieldType
+
+	// Alias provides an alternative name for the parameter in Starlark scripts.
+	Alias string
+
+	// Derived indicates the parameter is computed and should not appear in Starlark input.
+	Derived bool
+
+	// Deprecated marks the parameter as deprecated with a migration message.
+	Deprecated string
+
+	// Required overrides the proto-derived requiredness. Nil means use proto default.
+	Required *bool
+}
+
+// HandlerConversion defines how to migrate from an older handler version or name.
+type HandlerConversion struct {
+	// FromVersion is the version number being migrated from.
+	FromVersion int
+
+	// FromName is the previous handler name (for handler renames).
+	FromName string
+
+	// ParamMapping maps old parameter names to new parameter names.
+	ParamMapping map[string]string
+
+	// Defaults provides default values for new parameters not present in old versions.
+	Defaults map[string]string
+
+	// Sunset is an ISO date string after which the old version is no longer accepted.
+	Sunset string
+}
+
 // HandlerMetadata describes a step handler's characteristics.
 type HandlerMetadata struct {
 	// IsExternal indicates the handler calls external systems (non-idempotent).
@@ -101,6 +145,33 @@ type HandlerMetadata struct {
 
 	// HasAutoCompensation indicates the handler has a compensate: field.
 	HasAutoCompensation bool
+
+	// Compensate is the name of the compensation handler (from handlers.yaml compensate: field).
+	Compensate string
+
+	// ProtoRequestType is a nil instance of the handler's proto request message for reflection.
+	ProtoRequestType proto.Message
+
+	// ProtoResponseType is a nil instance of the handler's proto response message for reflection.
+	ProtoResponseType proto.Message
+
+	// Description is a human-readable description of the handler's purpose.
+	Description string
+
+	// ParamOverrides customizes Starlark-specific behavior for individual parameters.
+	// Keys are parameter names as they appear in the proto message.
+	ParamOverrides map[string]ParamOverride
+
+	// Version is the handler's schema version for evolution tracking.
+	Version int
+
+	// Conversions defines migration rules from older handler versions or names.
+	Conversions []HandlerConversion
+
+	// DeprecatedMessage, when non-empty, indicates this handler is deprecated.
+	// The value provides a migration message (e.g., "use handler_v2 instead").
+	// Empty string means the handler is not deprecated.
+	DeprecatedMessage string
 }
 
 // SemanticLinter performs AST-based semantic analysis on Starlark scripts.
