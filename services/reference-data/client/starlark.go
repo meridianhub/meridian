@@ -37,9 +37,14 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"reference_data.retrieve_instrument": {
 			handler: retrieveInstrumentHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategoryValuation,
+				Category:             saga.HandlerCategoryValuation,
+				Description:          "Retrieve an instrument definition by code and version",
+				CompensationStrategy: "none",
 				// Reference data handlers are read-only lookups, they don't produce new instruments
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*referencedatav1.RetrieveInstrumentRequest)(nil),
+				ProtoResponseType:   (*referencedatav1.RetrieveInstrumentResponse)(nil),
+				Version:             1,
 			},
 		},
 	}

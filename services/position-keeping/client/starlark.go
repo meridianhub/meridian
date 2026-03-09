@@ -37,7 +37,24 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Category: saga.HandlerCategoryIngestion,
 				// Position Keeping ingests physical measurements (meter readings) and produces
 				// Physics instruments (KWH, GAS, WATER) from external sources.
-				ProducesInstruments: []string{"KWH", "GAS", "WATER"},
+				ProducesInstruments:  []string{"KWH", "GAS", "WATER"},
+				CompensationStrategy: "auto",
+				HasAutoCompensation:  true,
+				Compensate:           "position_keeping.cancel_log",
+				Description:          "Initiate a position log entry for a DEBIT or CREDIT transaction",
+				ProtoRequestType:     (*positionkeepingv1.InitiateFinancialPositionLogRequest)(nil),
+				ProtoResponseType:    (*positionkeepingv1.InitiateFinancialPositionLogResponse)(nil),
+				Version:              1,
+				ParamOverrides: map[string]saga.ParamOverride{
+					"amount":    {Type: "Decimal"},
+					"direction": {Type: "enum"},
+					"account_id": {
+						Alias:    "position_id",
+						Required: boolPtr(true),
+					},
+					"currency":           {Type: "string", Deprecated: "use instrument_code instead"},
+					"valuation_analysis": {Derived: true},
+				},
 			},
 		},
 		"position_keeping.update_log": {
@@ -45,7 +62,19 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 			metadata: saga.HandlerMetadata{
 				Category: saga.HandlerCategoryIngestion,
 				// Updates don't produce new instruments, just modify existing logs
-				ProducesInstruments: []string{},
+				ProducesInstruments:  []string{},
+				CompensationStrategy: "none",
+				Description:          "Update an existing position log entry",
+				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
+				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
+				Version:              1,
+				ParamOverrides: map[string]saga.ParamOverride{
+					"new_entry":       {Derived: true},
+					"status_update":   {Derived: true},
+					"audit_entry":     {Derived: true},
+					"version":         {Derived: true},
+					"idempotency_key": {Derived: true},
+				},
 			},
 		},
 		"position_keeping.cancel_log": {
@@ -53,7 +82,19 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 			metadata: saga.HandlerMetadata{
 				Category: saga.HandlerCategoryIngestion,
 				// Cancellations don't produce instruments
-				ProducesInstruments: []string{},
+				ProducesInstruments:  []string{},
+				CompensationStrategy: "none",
+				Description:          "Cancel a position log entry (compensation handler)",
+				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
+				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
+				Version:              1,
+				ParamOverrides: map[string]saga.ParamOverride{
+					"new_entry":       {Derived: true},
+					"status_update":   {Derived: true},
+					"audit_entry":     {Derived: true},
+					"version":         {Derived: true},
+					"idempotency_key": {Derived: true},
+				},
 			},
 		},
 	}
@@ -224,6 +265,9 @@ func prepareClientContext(ctx *saga.StarlarkContext) context.Context {
 	// so we don't need to call it here - we just need the correlation ID in the context value
 	return clientCtx
 }
+
+// boolPtr returns a pointer to a bool value, used for ParamOverride.Required fields.
+func boolPtr(b bool) *bool { return &b }
 
 // convertDecimalToProto converts shopspring/decimal.Decimal to protobuf string representation.
 // Protobuf doesn't have a native decimal type, so we use string to preserve precision.

@@ -86,6 +86,8 @@ var (
 	ErrConflictCompensationStrategy = errors.New("handler with 'compensate' should not set 'compensation_strategy' to non-auto value")
 	ErrInvalidConversionRule        = errors.New("invalid conversion rule")
 	ErrDeprecatedHandler            = errors.New("deprecated handler")
+	ErrOverrideMissingType          = errors.New("ParamOverride for non-proto field requires explicit Type")
+	ErrOverrideAliasCollision       = errors.New("ParamOverride alias would overwrite existing field")
 )
 
 // Schema represents a collection of handler definitions for a service.

@@ -75,57 +75,97 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"financial_accounting.initiate_booking_log": {
 			handler: initiateBookingLogHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Initiate a booking log for a deposit or withdrawal transaction",
+				CompensationStrategy: "none",
 				// Financial Accounting produces Money instruments through bookkeeping
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+				ProtoRequestType:    (*financialaccountingv1.InitiateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:   (*financialaccountingv1.InitiateFinancialBookingLogResponse)(nil),
+				Version:             1,
 			},
 		},
 		"financial_accounting.update_booking_log": {
 			handler: updateBookingLogHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Update the status of an existing booking log",
+				CompensationStrategy: "none",
 				// Updates don't produce new instruments, just modify existing logs
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*financialaccountingv1.UpdateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:   (*financialaccountingv1.UpdateFinancialBookingLogResponse)(nil),
+				Version:             1,
 			},
 		},
 		"financial_accounting.capture_posting": {
 			handler: capturePostingHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:            saga.HandlerCategorySettlement,
+				Description:         "Capture a single-sided posting entry within a booking log",
+				Compensate:          "financial_accounting.compensate_posting",
+				HasAutoCompensation: true,
 				// Capturing a posting creates a Money instrument entry
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+				ProtoRequestType:    (*financialaccountingv1.CaptureLedgerPostingRequest)(nil),
+				ProtoResponseType:   (*financialaccountingv1.CaptureLedgerPostingResponse)(nil),
+				ParamOverrides: map[string]saga.ParamOverride{
+					"amount":    {Type: "Decimal"},
+					"direction": {Type: "enum"},
+				},
+				Version: 1,
 			},
 		},
 		"financial_accounting.compensate_posting": {
 			handler: compensatePostingHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Compensate (reverse) a captured posting entry",
+				CompensationStrategy: "none",
 				// Compensation doesn't produce instruments, it reverses them
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*financialaccountingv1.UpdateLedgerPostingRequest)(nil),
+				ProtoResponseType:   (*financialaccountingv1.UpdateLedgerPostingResponse)(nil),
+				Version:             1,
 			},
 		},
 		"financial_accounting.create_booking": {
 			handler: createBookingHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Create a booking log entry for audit purposes",
+				CompensationStrategy: "none",
 				// Creating a booking log produces Money instruments
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+				ProtoRequestType:    (*financialaccountingv1.InitiateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:   (*financialaccountingv1.InitiateFinancialBookingLogResponse)(nil),
+				Version:             1,
 			},
 		},
 		"financial_accounting.post_entries": {
 			handler: postEntriesHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:            saga.HandlerCategorySettlement,
+				Description:         "Post double-entry accounting entries to the ledger",
+				Compensate:          "financial_accounting.reverse_entries",
+				HasAutoCompensation: true,
 				// Posting entries creates Money instrument movements
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+				// No single proto type: this handler iterates over entries calling CaptureLedgerPosting per entry
+				Version: 1,
 			},
 		},
 		"financial_accounting.reverse_entries": {
 			handler: reverseEntriesHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
-				// Reversal produces compensating Money instruments
-				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Reverse previously posted accounting entries (compensation handler)",
+				CompensationStrategy: "none",
+				// Reversal cancels the booking log; no new instruments are produced
+				ProducesInstruments: []string{},
+				ProtoRequestType:    (*financialaccountingv1.UpdateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:   (*financialaccountingv1.UpdateFinancialBookingLogResponse)(nil),
+				Version:             1,
 			},
 		},
 	}
