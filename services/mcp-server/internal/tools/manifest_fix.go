@@ -219,6 +219,7 @@ func applyHandlerConversion(script string, oldName string, info deprecatedInfo) 
 
 	// Process each occurrence of the deprecated call, replacing handler name
 	// and renaming params only within the call's parentheses.
+	// Skip occurrences inside string literals or comments.
 	var result strings.Builder
 	remaining := script
 	for {
@@ -226,6 +227,14 @@ func applyHandlerConversion(script string, oldName string, info deprecatedInfo) 
 		if loc == nil {
 			result.WriteString(remaining)
 			break
+		}
+
+		// Check if the match is inside a string literal or comment
+		if isInsideStringOrComment(remaining, loc[0]) {
+			// Copy through the matched text without modification
+			result.WriteString(remaining[:loc[1]])
+			remaining = remaining[loc[1]:]
+			continue
 		}
 
 		// Write text before the call and the new handler name
@@ -304,6 +313,36 @@ func skipString(s string, i int) int {
 		i++
 	}
 	return len(s)
+}
+
+// isInsideStringOrComment returns true if position pos in s falls inside
+// a string literal or a line comment. It scans from the beginning of s,
+// tracking string and comment boundaries.
+func isInsideStringOrComment(s string, pos int) bool {
+	i := 0
+	for i < pos {
+		switch s[i] {
+		case '#':
+			// Line comment extends to end of line or end of string.
+			// If pos is anywhere in the comment, it's inside.
+			for i < len(s) && s[i] != '\n' {
+				if i == pos {
+					return true
+				}
+				i++
+			}
+		case '"', '\'':
+			start := i
+			i = skipString(s, i)
+			// If pos falls within the string literal range, it's inside.
+			if pos >= start && pos < i {
+				return true
+			}
+		default:
+			i++
+		}
+	}
+	return false
 }
 
 // kwargScanner holds state for scanning a call body and renaming top-level kwargs.

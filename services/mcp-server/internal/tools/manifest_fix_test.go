@@ -492,3 +492,52 @@ func TestManifestFix_ParamMappingApplied(t *testing.T) {
 	assert.NotContains(t, script, "currency=")
 	assert.NotContains(t, script, "direction=")
 }
+
+func TestManifestFix_StringAndCommentNotModified(t *testing.T) {
+	reg := testRegistryWithEvolution()
+	r := tools.NewRegistry()
+	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+
+	// Handler calls inside strings and comments must NOT be modified.
+	// Only the actual call site on the last line should be converted.
+	manifest := map[string]interface{}{
+		"version": "1.0",
+		"metadata": map[string]interface{}{
+			"name":        "Test",
+			"industry":    "energy",
+			"description": "Test manifest",
+		},
+		"sagas": []interface{}{
+			map[string]interface{}{
+				"name":    "string_comment_test",
+				"trigger": "api:/v1/test",
+				"script": `def execute(ctx):
+    log("Calling test.initiate_log()")
+    # test.initiate_log(amount="old")
+    test.initiate_log(amount="100.00", currency="GBP", direction="CREDIT")
+`,
+			},
+		},
+	}
+
+	manifestJSON, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	params := json.RawMessage(`{"manifest": ` + string(manifestJSON) + `}`)
+	result, err := r.Call(context.Background(), "meridian_manifest_fix", params)
+	require.NoError(t, err)
+
+	m := result.(map[string]interface{})
+	fixedManifest := m["manifest"].(map[string]interface{})
+	sagas := fixedManifest["sagas"].([]interface{})
+	saga := sagas[0].(map[string]interface{})
+	script := saga["script"].(string)
+
+	// String literal must be preserved exactly
+	assert.Contains(t, script, `log("Calling test.initiate_log()")`)
+	// Comment must be preserved exactly
+	assert.Contains(t, script, `# test.initiate_log(amount="old")`)
+	// Actual call site must be converted
+	assert.Contains(t, script, "test.record_entry(")
+	assert.NotContains(t, script, "\n    test.initiate_log(")
+}
