@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { useTenants } from '@/hooks/use-tenants'
 import { ApiClientProvider } from '@/api/context'
-import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
+import { ProtectedRoute, PlatformOnlyRoute, AdminOnlyRoute } from '@/components/routing'
 import { FeatureGuard } from '@/components/feature-guard'
 import { AppShell } from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -30,6 +30,7 @@ import { DashboardPage } from '@/features/dashboard'
 import { ManifestsPage } from '@/features/manifests'
 import { McpConfigPage } from '@/features/mcp-config'
 import { TransactionsPage } from '@/features/transactions'
+import { UsersListPage, UserDetailPage } from '@/features/identity'
 import { CookbookPage } from '@/features/cookbook'
 
 const CookbookPatternsPage = lazy(() =>
@@ -276,6 +277,24 @@ function AppShellLayout() {
         <Route path="/cookbook/graph" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookGraphPage /></Suspense>)} />
         <Route path="/cookbook/:name" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookDetailPage /></Suspense>)} />
         <Route path="/audit-log" element={<FeatureGuard feature="audit">{guarded(<AuditLogPage />)}</FeatureGuard>} />
+
+        {/* Admin-only routes */}
+        <Route
+          path="/users"
+          element={
+            <AdminOnlyRoute>
+              {guarded(<UsersListPage />)}
+            </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="/users/:userId"
+          element={
+            <AdminOnlyRoute>
+              {guarded(<UserDetailPage />)}
+            </AdminOnlyRoute>
+          }
+        />
 
         {/* Platform-only routes */}
         <Route

@@ -8,6 +8,7 @@ import {
   Building2,
   Activity,
   Users,
+  UserCog,
   TrendingUp,
   BookOpen,
   Code,
@@ -68,6 +69,7 @@ const TENANT_NAV_GROUPS: NavGroup[] = [
   {
     label: 'Admin',
     items: [
+      { label: 'Users', href: '/users', icon: UserCog },
       { label: 'Audit Log', href: '/audit-log', icon: ClipboardList, feature: 'audit' },
     ],
   },
