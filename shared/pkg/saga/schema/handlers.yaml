@@ -1249,12 +1249,12 @@ handlers:
     description: "Delete an account type (compensation for register)"
     compensation_strategy: none
     params:
-      account_type_code:
+      code:
         type: string
         required: true
         description: "Account type code to delete"
     returns:
-      account_type_code:
+      code:
         type: string
         description: "The deleted account type code"
       status:
