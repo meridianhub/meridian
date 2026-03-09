@@ -27,6 +27,7 @@ import (
 	"github.com/meridianhub/meridian/services/mcp-server/internal/server"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 )
 
 // wireServer registers all MCP tools, resources, and prompts onto srv.
@@ -59,6 +60,13 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 	if cookbookFS != nil {
 		cookbookLoader := tools.NewFSCookbookLoader(cookbookFS)
 		tools.RegisterCookbookDiscoverTool(toolReg, cookbookLoader)
+	}
+
+	// Manifest fix tool uses the embedded handler schema to convert deprecated calls.
+	if schemaReg, err := schema.DefaultRegistry(); err != nil {
+		logger.Warn("failed to load handler schema for manifest fix tool", "error", err)
+	} else if err := tools.RegisterManifestFixTool(toolReg, schemaReg); err != nil {
+		logger.Warn("failed to register manifest fix tool", "error", err)
 	}
 
 	// Try to connect to the Meridian backend for remote tools.
