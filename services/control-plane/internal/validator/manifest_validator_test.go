@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/cel-go/cel"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/stretchr/testify/assert"
@@ -66,7 +67,7 @@ func validManifest() *controlplanev1.Manifest {
 		Sagas: []*controlplanev1.SagaDefinition{
 			{
 				Name:    "process_settlement",
-				Trigger: "api:/v1/settlements",
+				Trigger: "api:/v1/sagas/execute",
 				Script:  "def execute(ctx):\n    return {\"status\": \"ok\"}\n",
 			},
 		},
@@ -228,7 +229,7 @@ func TestValidateDuplicate_SagaNames(t *testing.T) {
 	m := validManifest()
 	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
 		Name:    "process_settlement", // Duplicate
-		Trigger: "api:/v1/other",
+		Trigger: "api:/v1/tenants",
 		Script:  "def execute(ctx):\n    pass\n",
 	})
 
@@ -359,7 +360,7 @@ func TestValidate_NonEventTrigger_NoChannelCheck(t *testing.T) {
 
 	m := validManifest()
 	// api: trigger should not trigger channel validation even with a weird path
-	m.Sagas[0].Trigger = "api:/v1/some-handler"
+	m.Sagas[0].Trigger = "api:/v1/health"
 
 	result := v.Validate(m, nil)
 	assert.True(t, result.Valid, "expected valid manifest, got errors: %v", result.Errors)
@@ -1906,7 +1907,7 @@ func TestValidate_ScheduledTrigger_DuplicateName_Error(t *testing.T) {
 		},
 		{
 			Name:    "another_saga",
-			Trigger: "api:/v1/other",
+			Trigger: "api:/v1/tenants",
 			Script:  "def execute(ctx):\n    return {}\n",
 		},
 		{
@@ -1970,7 +1971,7 @@ func TestValidate_ScheduledTrigger_SameNameDifferentTriggerType_NoConflict(t *te
 		},
 		{
 			Name:    "monthly_billing_api",
-			Trigger: "api:/v1/monthly_billing",
+			Trigger: "api:/v1/postings",
 			Script:  "def execute(ctx):\n    return {}\n",
 		},
 	}
@@ -1979,5 +1980,722 @@ func TestValidate_ScheduledTrigger_SameNameDifferentTriggerType_NoConflict(t *te
 	for _, e := range result.Errors {
 		assert.NotEqual(t, "DUPLICATE_SCHEDULED_TRIGGER", e.Code,
 			"unexpected DUPLICATE_SCHEDULED_TRIGGER error: %v", e)
+	}
+}
+
+// ─── Task 2: API Trigger Validation Tests ───────────────────────────────────
+
+func TestValidateAPITriggers_UnknownEndpoint(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(map[string]bool{
+		"/v1/deposits":    true,
+		"/v1/withdrawals": true,
+	}))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "handle_transfers",
+			Trigger: "api:/v1/transfers",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "UNKNOWN_API_ENDPOINT" {
+			found = true
+			assert.Contains(t, e.Message, "/v1/transfers")
+			assert.NotEmpty(t, e.AvailableFields)
+			break
+		}
+	}
+	assert.True(t, found, "expected UNKNOWN_API_ENDPOINT error, got: %v", result.Errors)
+}
+
+func TestValidateAPITriggers_UnknownEndpoint_WithSuggestion(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(map[string]bool{
+		"/v1/deposits":    true,
+		"/v1/withdrawals": true,
+	}))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "handle_deposit_typo",
+			Trigger: "api:/v1/depositz",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	for _, e := range result.Errors {
+		if e.Code == "UNKNOWN_API_ENDPOINT" {
+			assert.Contains(t, e.Suggestion, "/v1/deposits")
+			return
+		}
+	}
+	t.Error("expected UNKNOWN_API_ENDPOINT error with suggestion")
+}
+
+func TestValidateAPITriggers_DuplicatePath(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(map[string]bool{
+		"/v1/deposits": true,
+	}))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "deposit_handler",
+			Trigger: "api:/v1/deposits",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "deposit_handler_v2",
+			Trigger: "api:/v1/deposits",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DUPLICATE_API_TRIGGER" {
+			found = true
+			assert.Contains(t, e.Message, "/v1/deposits")
+			break
+		}
+	}
+	assert.True(t, found, "expected DUPLICATE_API_TRIGGER error, got: %v", result.Errors)
+}
+
+func TestValidateAPITriggers_InvalidPathFormat(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(map[string]bool{
+		"/v1/deposits": true,
+	}))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "bad_path",
+			Trigger: "api:v1/deposits",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_API_PATH_FORMAT" {
+			found = true
+			assert.Contains(t, e.Message, "must start with '/'")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_API_PATH_FORMAT error, got: %v", result.Errors)
+}
+
+func TestValidateAPITriggers_ValidPath(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(map[string]bool{
+		"/v1/deposits": true,
+	}))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "deposit_handler",
+			Trigger: "api:/v1/deposits",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "UNKNOWN_API_ENDPOINT", e.Code)
+		assert.NotEqual(t, "INVALID_API_PATH_FORMAT", e.Code)
+		assert.NotEqual(t, "DUPLICATE_API_TRIGGER", e.Code)
+	}
+}
+
+func TestValidateAPITriggers_SkippedWhenNoSpec(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "any_path",
+			Trigger: "api:/v1/anything",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "UNKNOWN_API_ENDPOINT", e.Code)
+	}
+}
+
+func TestValidateAPITriggers_FormatAndDuplicateChecksWithoutSpec(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "bad_format",
+			Trigger: "api:no-leading-slash",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "dup_1",
+			Trigger: "api:/v1/duped",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+		{
+			Name:    "dup_2",
+			Trigger: "api:/v1/duped",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+
+	foundFormat, foundDup, foundUnknown := false, false, false
+	for _, e := range result.Errors {
+		switch e.Code {
+		case "INVALID_API_PATH_FORMAT":
+			foundFormat = true
+		case "DUPLICATE_API_TRIGGER":
+			foundDup = true
+		case "UNKNOWN_API_ENDPOINT":
+			foundUnknown = true
+		}
+	}
+	assert.True(t, foundFormat, "format check should fire without spec")
+	assert.True(t, foundDup, "duplicate check should fire without spec")
+	assert.False(t, foundUnknown, "endpoint existence check should be skipped without spec")
+}
+
+func TestParseOpenAPIPaths(t *testing.T) {
+	spec := `{
+		"swagger": "2.0",
+		"paths": {
+			"/v1/deposits": {},
+			"/v1/withdrawals": {},
+			"/v1/accounts/{id}": {}
+		}
+	}`
+
+	paths := parseOpenAPIPaths([]byte(spec))
+	assert.Len(t, paths, 3)
+	assert.True(t, paths["/v1/deposits"])
+	assert.True(t, paths["/v1/withdrawals"])
+	assert.True(t, paths["/v1/accounts/{id}"])
+}
+
+func TestParseOpenAPIPaths_InvalidJSON(t *testing.T) {
+	paths := parseOpenAPIPaths([]byte("not json"))
+	assert.Nil(t, paths)
+}
+
+// ─── Task 5: AsyncAPI CEL Field Validation Tests ────────────────────────────
+
+func TestValidateEventFilterCELFields_UnknownField_Warning(t *testing.T) {
+	asyncSchemas := map[string]map[string]bool{
+		"position-keeping.transaction-captured.v1": {
+			"log_id":          true,
+			"account_id":      true,
+			"transaction_id":  true,
+			"amount_cents":    true,
+			"instrument_code": true,
+			"direction":       true,
+		},
+	}
+
+	v, err := New(WithAsyncAPISchemas(asyncSchemas))
+	require.NoError(t, err)
+
+	filter := `event.typo_field == "X"`
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_captured",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	result := v.Validate(m, nil)
+	assert.True(t, result.Valid, "warnings should not block validation, errors: %v", result.Errors)
+
+	found := false
+	for _, w := range result.Warnings {
+		if w.Code == "CEL_UNKNOWN_EVENT_FIELD" {
+			found = true
+			assert.Contains(t, w.Message, "typo_field")
+			assert.NotEmpty(t, w.AvailableFields)
+			break
+		}
+	}
+	assert.True(t, found, "expected CEL_UNKNOWN_EVENT_FIELD warning, got warnings: %v", result.Warnings)
+}
+
+func TestValidateEventFilterCELFields_UnknownField_WithSuggestion(t *testing.T) {
+	asyncSchemas := map[string]map[string]bool{
+		"position-keeping.transaction-captured.v1": {
+			"amount_cents":    true,
+			"instrument_code": true,
+		},
+	}
+
+	v, err := New(WithAsyncAPISchemas(asyncSchemas))
+	require.NoError(t, err)
+
+	filter := `event.amount_cent > 0`
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_captured_typo",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	result := v.Validate(m, nil)
+
+	for _, w := range result.Warnings {
+		if w.Code == "CEL_UNKNOWN_EVENT_FIELD" {
+			assert.Contains(t, w.Suggestion, "amount_cents")
+			return
+		}
+	}
+	t.Error("expected CEL_UNKNOWN_EVENT_FIELD warning with suggestion")
+}
+
+func TestValidateEventFilterCELFields_KnownFields_NoWarning(t *testing.T) {
+	asyncSchemas := map[string]map[string]bool{
+		"position-keeping.transaction-captured.v1": {
+			"amount_cents":    true,
+			"instrument_code": true,
+			"direction":       true,
+		},
+	}
+
+	v, err := New(WithAsyncAPISchemas(asyncSchemas))
+	require.NoError(t, err)
+
+	filter := `event.amount_cents > 0 && event.direction == "CREDIT"`
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_captured_valid",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "CEL_UNKNOWN_EVENT_FIELD", w.Code,
+			"unexpected CEL_UNKNOWN_EVENT_FIELD warning: %v", w)
+	}
+}
+
+func TestValidateEventFilterCELFields_NoSchema_NoWarning(t *testing.T) {
+	asyncSchemas := map[string]map[string]bool{
+		"some.other.topic.v1": {"field_a": true},
+	}
+
+	v, err := New(WithAsyncAPISchemas(asyncSchemas))
+	require.NoError(t, err)
+
+	filter := `event.any_field > 0`
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_captured_no_schema",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "CEL_UNKNOWN_EVENT_FIELD", w.Code)
+	}
+}
+
+func TestValidateEventFilterCELFields_NilSchemas_NoWarning(t *testing.T) {
+	v, err := New(WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	filter := `event.any_field > 0`
+	m := validManifest()
+	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
+		Name:    "on_captured_nil_schemas",
+		Trigger: "event:position-keeping.transaction-captured.v1",
+		Script:  "def execute(ctx):\n    return {}\n",
+		Filter:  &filter,
+	})
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "CEL_UNKNOWN_EVENT_FIELD", w.Code)
+	}
+}
+
+func TestExtractCELFieldRefs(t *testing.T) {
+	env, err := cel.NewEnv(
+		cel.Variable("event", cel.MapType(cel.StringType, cel.DynType)),
+	)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		expr     string
+		expected []string
+	}{
+		{
+			name:     "single field",
+			expr:     `event.amount > 0`,
+			expected: []string{"amount"},
+		},
+		{
+			name:     "multiple fields",
+			expr:     `event.amount > 0 && event.currency == "GBP"`,
+			expected: []string{"amount", "currency"},
+		},
+		{
+			name:     "bracket notation",
+			expr:     `event["amount_cents"] > 0`,
+			expected: []string{"amount_cents"},
+		},
+		{
+			name:     "mixed dot and bracket",
+			expr:     `event.currency == "GBP" && event["amount"] > 0`,
+			expected: []string{"amount", "currency"},
+		},
+		{
+			name:     "no event fields",
+			expr:     `true`,
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := extractCELFieldRefs(tt.expr, env)
+			assert.Equal(t, tt.expected, fields)
+		})
+	}
+}
+
+func TestParseAsyncAPIFile(t *testing.T) {
+	data := []byte(`
+asyncapi: 3.0.0
+channels:
+  test.topic.v1:
+    messages:
+      TestEvent:
+        $ref: '#/components/messages/TestEvent'
+components:
+  messages:
+    TestEvent:
+      payload:
+        $ref: '#/components/schemas/TestEvent'
+  schemas:
+    TestEvent:
+      type: object
+      properties:
+        field_a:
+          type: string
+        field_b:
+          type: integer
+`)
+
+	schemas := make(map[string]map[string]bool)
+	parseAsyncAPIFile(data, schemas)
+
+	assert.Contains(t, schemas, "test.topic.v1")
+	assert.True(t, schemas["test.topic.v1"]["field_a"])
+	assert.True(t, schemas["test.topic.v1"]["field_b"])
+}
+
+func TestParseAsyncAPIFile_MergesFieldsAcrossMessages(t *testing.T) {
+	data := []byte(`
+asyncapi: 3.0.0
+channels:
+  orders.topic.v1:
+    messages:
+      OrderCreated:
+        $ref: '#/components/messages/OrderCreated'
+      OrderUpdated:
+        $ref: '#/components/messages/OrderUpdated'
+components:
+  messages:
+    OrderCreated:
+      payload:
+        $ref: '#/components/schemas/OrderCreatedPayload'
+    OrderUpdated:
+      payload:
+        $ref: '#/components/schemas/OrderUpdatedPayload'
+  schemas:
+    OrderCreatedPayload:
+      type: object
+      properties:
+        order_id:
+          type: string
+        amount:
+          type: number
+    OrderUpdatedPayload:
+      type: object
+      properties:
+        order_id:
+          type: string
+        status:
+          type: string
+`)
+
+	schemas := make(map[string]map[string]bool)
+	parseAsyncAPIFile(data, schemas)
+
+	require.Contains(t, schemas, "orders.topic.v1")
+	fields := schemas["orders.topic.v1"]
+	assert.True(t, fields["order_id"], "order_id should be present from both messages")
+	assert.True(t, fields["amount"], "amount should be present from OrderCreated")
+	assert.True(t, fields["status"], "status should be present from OrderUpdated")
+}
+
+// ─── Task 11: Orphan Detection Tests ────────────────────────────────────────
+
+func TestValidateOrphans_UnusedProviderConnection(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{ConnectionId: "stripe"},
+			{ConnectionId: "unused_provider"},
+		},
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
+			{InstructionType: "payment.initiate", ConnectionId: "stripe"},
+		},
+	}
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "payment_saga",
+			Trigger: "api:/v1/payments",
+			Script:  "def execute(ctx):\n    operational_gateway.dispatch_instruction(instruction_type=\"payment.initiate\", payload={})\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+
+	found := false
+	for _, w := range result.Warnings {
+		if w.Code == "ORPHAN_PROVIDER_CONNECTION" {
+			found = true
+			assert.Contains(t, w.Message, "unused_provider")
+			break
+		}
+	}
+	assert.True(t, found, "expected ORPHAN_PROVIDER_CONNECTION warning, got warnings: %v", result.Warnings)
+}
+
+func TestValidateOrphans_FallbackConnectionNotOrphan(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{ConnectionId: "primary"},
+			{ConnectionId: "fallback"},
+		},
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
+			{InstructionType: "payment.initiate", ConnectionId: "primary", FallbackConnectionId: "fallback"},
+		},
+	}
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "payment_saga",
+			Trigger: "api:/v1/payments",
+			Script:  "def execute(ctx):\n    operational_gateway.dispatch_instruction(\"payment.initiate\", payload={})\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "ORPHAN_PROVIDER_CONNECTION", w.Code,
+			"fallback connection should not be flagged as orphan: %v", w)
+	}
+}
+
+func TestValidateOrphans_WebhookSourceNotOrphan(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{ConnectionId: "stripe"},
+		},
+	}
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "webhook_handler",
+			Trigger: "webhook:stripe.payment_intent.succeeded",
+			Script:  "def execute(ctx):\n    return {}\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "ORPHAN_PROVIDER_CONNECTION", w.Code,
+			"webhook source should count as usage: %v", w)
+	}
+}
+
+func TestValidateOrphans_UnusedInstructionRoute(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{ConnectionId: "stripe"},
+		},
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
+			{InstructionType: "payment.initiate", ConnectionId: "stripe"},
+			{InstructionType: "payment.refund", ConnectionId: "stripe"},
+		},
+	}
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "payment_saga",
+			Trigger: "api:/v1/payments",
+			Script:  "def execute(ctx):\n    operational_gateway.dispatch_instruction(instruction_type=\"payment.initiate\", payload={})\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+
+	found := false
+	for _, w := range result.Warnings {
+		if w.Code == "ORPHAN_INSTRUCTION_ROUTE" {
+			found = true
+			assert.Contains(t, w.Message, "payment.refund")
+			break
+		}
+	}
+	assert.True(t, found, "expected ORPHAN_INSTRUCTION_ROUTE warning, got warnings: %v", result.Warnings)
+}
+
+func TestValidateOrphans_AllConnected_NoWarnings(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{ConnectionId: "stripe"},
+		},
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
+			{InstructionType: "payment.initiate", ConnectionId: "stripe"},
+		},
+	}
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "payment_saga",
+			Trigger: "api:/v1/payments",
+			Script:  "def execute(ctx):\n    operational_gateway.dispatch_instruction(\"payment.initiate\", payload={})\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "ORPHAN_PROVIDER_CONNECTION", w.Code, "unexpected orphan warning: %v", w)
+		assert.NotEqual(t, "ORPHAN_INSTRUCTION_ROUTE", w.Code, "unexpected orphan warning: %v", w)
+	}
+}
+
+func TestValidateOrphans_DispatchRegex_KeywordArg(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{ConnectionId: "bank"},
+		},
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
+			{InstructionType: "bank.transfer", ConnectionId: "bank"},
+		},
+	}
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "transfer_saga",
+			Trigger: "api:/v1/payments",
+			Script:  "def execute(ctx):\n    operational_gateway.dispatch_instruction(instruction_type='bank.transfer', payload={})\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "ORPHAN_INSTRUCTION_ROUTE", w.Code,
+			"keyword arg dispatch should be detected: %v", w)
+	}
+}
+
+func TestValidateOrphans_DispatchRegex_PositionalArg(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{ConnectionId: "bank"},
+		},
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
+			{InstructionType: "bank.transfer", ConnectionId: "bank"},
+		},
+	}
+	m.Sagas = []*controlplanev1.SagaDefinition{
+		{
+			Name:    "transfer_saga",
+			Trigger: "api:/v1/payments",
+			Script:  "def execute(ctx):\n    operational_gateway.dispatch_instruction(\"bank.transfer\", payload={})\n",
+		},
+	}
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "ORPHAN_INSTRUCTION_ROUTE", w.Code,
+			"positional arg dispatch should be detected: %v", w)
+	}
+}
+
+func TestValidateOrphans_NoGateway_NoWarnings(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	m := validManifest()
+	m.OperationalGateway = nil
+
+	result := v.Validate(m, nil)
+	for _, w := range result.Warnings {
+		assert.NotEqual(t, "ORPHAN_PROVIDER_CONNECTION", w.Code)
+		assert.NotEqual(t, "ORPHAN_INSTRUCTION_ROUTE", w.Code)
 	}
 }

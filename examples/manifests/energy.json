@@ -87,7 +87,7 @@
   "sagas": [
     {
       "name": "process_energy_settlement",
-      "trigger": "api:/v1/energy/settlements",
+      "trigger": "api:/v1/sagas/execute",
       "script": "def execute(ctx):\n    settlement = ctx\n    amount = Decimal(str(settlement.get('amount', '0')))\n    position_keeping.initiate_log(amount=amount, direction='DEBIT')\n"
     }
   ]
