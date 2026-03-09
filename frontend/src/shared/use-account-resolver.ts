@@ -1,7 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+
+function isNotFoundError(err: unknown): boolean {
+  return err instanceof ConnectError && (
+    err.code === Code.NotFound || err.code === Code.InvalidArgument
+  )
+}
 
 export type ResolvedAccountType = 'current' | 'internal'
 
@@ -43,8 +50,8 @@ export function useAccountResolver(
           if (response.facility) {
             return { type: 'current', accountId }
           }
-        } catch {
-          // Not found or error — continue
+        } catch (err) {
+          if (!isNotFoundError(err)) throw err
         }
       }
 
@@ -57,8 +64,8 @@ export function useAccountResolver(
           if (response.facility) {
             return { type: 'internal', accountId }
           }
-        } catch {
-          // Not found in either service
+        } catch (err) {
+          if (!isNotFoundError(err)) throw err
         }
       }
 
