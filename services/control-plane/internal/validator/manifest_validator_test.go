@@ -2733,9 +2733,8 @@ func TestValidateDestructiveChanges_RemoveAccountTypeWithNoDependents(t *testing
 	v, err := New()
 	require.NoError(t, err)
 
-	// The SETTLEMENT account type has outgoing edges (denominated_in -> instrument)
-	// but no incoming edges (nothing depends on it in the graph). Removing it should
-	// not produce a destructive error.
+	// The default saga has a simple script with no handler calls referencing accounts.
+	// Removing the account type should not produce a destructive error.
 	prev := validManifest()
 	curr := validManifest()
 	curr.AccountTypes = nil
@@ -2747,9 +2746,8 @@ func TestValidateDestructiveChanges_RemoveAccountTypeWithNoDependents(t *testing
 	}
 }
 
-func TestValidateDestructiveChanges_RemoveAccountTypeWithDependents(t *testing.T) {
-	// Test via the relationship graph Dependents method directly, since creating
-	// a saga script that produces dynamic edges requires handler call logging.
+func TestValidateDestructiveChanges_RemoveAccountTypeWithDependentsViaGraph(t *testing.T) {
+	// Test via the relationship graph Dependents method directly.
 	g := &RelationshipGraph{
 		Nodes: []GraphNode{
 			{ID: "account_type:SETTLEMENT", Type: NodeTypeAccountType, Name: "Settlement"},

@@ -1602,6 +1602,10 @@ func (v *ManifestValidator) validateDestructiveChanges(
 	}
 
 	// Check removed account types.
+	// Note: In the current graph structure, account types are only sources (denominated_in
+	// edges to instruments), not targets. Saga-to-account-type dependencies are captured
+	// via dynamic edges when call logs are provided (e.g., from a saga execution engine).
+	// Without call logs, this check relies on graph edges populated externally.
 	for _, acct := range previous.GetAccountTypes() {
 		code := acct.GetCode()
 		if currentAccountTypes[code] {
