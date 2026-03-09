@@ -252,6 +252,16 @@ func (v *CurrentAccountValidator) queryCurrentAccount(ctx context.Context, accou
 	return exists, nil
 }
 
+// IsCached returns true if the account is in the cache and was found to exist.
+func (v *CurrentAccountValidator) IsCached(accountID string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
+		return entry.exists
+	}
+	return false
+}
+
 // InvalidateCache clears all cached entries. Useful for testing or when accounts are modified.
 func (v *CurrentAccountValidator) InvalidateCache() {
 	v.mu.Lock()
@@ -445,6 +455,16 @@ func (v *InternalAccountValidator) queryInternalAccount(ctx context.Context, acc
 	return exists, nil
 }
 
+// IsCached returns true if the account is in the cache and was found to exist.
+func (v *InternalAccountValidator) IsCached(accountID string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
+		return entry.exists
+	}
+	return false
+}
+
 // CompositeAccountValidator validates accounts by checking multiple services.
 // It tries each validator in order and returns success if any validator finds the account.
 // This allows Position Keeping to validate accounts from both Current Account and Internal Account.
@@ -461,13 +481,6 @@ type CompositeAccountValidator struct {
 	currentAccountValidator  *CurrentAccountValidator
 	internalAccountValidator *InternalAccountValidator
 	logger                   *slog.Logger
-
-	// lastResolved stores the most recently resolved domain from ValidateExists.
-	// Read by ResolveServiceDomain in the same request flow.
-	// Thread-safe: protected by mutex for concurrent access.
-	resolvedMu          sync.RWMutex
-	lastResolvedAccount string
-	lastResolvedDomain  AccountServiceDomain
 }
 
 // CompositeAccountValidatorConfig holds configuration for creating a CompositeAccountValidator.
@@ -512,10 +525,9 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 	if v.currentAccountValidator != nil {
 		err := v.currentAccountValidator.ValidateExists(ctx, accountID)
 		if err == nil {
-			// Found in Current Account
+			// Found in Current Account (cached by CurrentAccountValidator)
 			v.logger.Debug("account found in current account service",
 				"account_id", accountID)
-			v.setResolvedDomain(accountID, AccountServiceDomainCurrentAccount)
 			return nil
 		}
 
@@ -534,10 +546,9 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 	if v.internalAccountValidator != nil {
 		err := v.internalAccountValidator.ValidateExists(ctx, accountID)
 		if err == nil {
-			// Found in Internal Account
+			// Found in Internal Account (cached by InternalAccountValidator)
 			v.logger.Debug("account found in internal account service",
 				"account_id", accountID)
-			v.setResolvedDomain(accountID, AccountServiceDomainInternalAccount)
 			return nil
 		}
 
@@ -559,21 +570,14 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 }
 
 // ResolveServiceDomain returns the AccountServiceDomain for a previously validated account.
-// Returns AccountServiceDomainUnspecified if the account was not validated, if the
-// domain could not be determined, or if a different account was validated since.
+// Thread-safe: queries each validator's independent TTL-based cache to determine which
+// service found the account. No shared mutable state between concurrent requests.
 func (v *CompositeAccountValidator) ResolveServiceDomain(_ context.Context, accountID string) AccountServiceDomain {
-	v.resolvedMu.RLock()
-	defer v.resolvedMu.RUnlock()
-	if v.lastResolvedAccount == accountID {
-		return v.lastResolvedDomain
+	if v.currentAccountValidator != nil && v.currentAccountValidator.IsCached(accountID) {
+		return AccountServiceDomainCurrentAccount
+	}
+	if v.internalAccountValidator != nil && v.internalAccountValidator.IsCached(accountID) {
+		return AccountServiceDomainInternalAccount
 	}
 	return AccountServiceDomainUnspecified
-}
-
-// setResolvedDomain stores the resolved service domain for the most recent validation.
-func (v *CompositeAccountValidator) setResolvedDomain(accountID string, domain AccountServiceDomain) {
-	v.resolvedMu.Lock()
-	defer v.resolvedMu.Unlock()
-	v.lastResolvedAccount = accountID
-	v.lastResolvedDomain = domain
 }
