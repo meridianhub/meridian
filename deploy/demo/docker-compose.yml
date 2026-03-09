@@ -94,6 +94,7 @@ services:
       BILLING_ENABLED: ${BILLING_ENABLED:-false}
       REDIS_ENABLED: ${REDIS_ENABLED:-false}
       KAFKA_ENABLED: ${KAFKA_ENABLED:-false}
+      SCHEMA_PROVISIONING_ENABLED: ${SCHEMA_PROVISIONING_ENABLED:-true}
 
       # --- Multi-tenancy ---
       MASTER_TENANT_ID: ${MASTER_TENANT_ID:-meridian_master}
