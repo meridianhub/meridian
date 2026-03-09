@@ -475,6 +475,18 @@ func (r *HandlerRegistry) Has(name string) bool {
 	return exists
 }
 
+// AllWithMetadata returns a map of all registered handler names to their metadata.
+func (r *HandlerRegistry) AllWithMetadata() map[string]*HandlerMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string]*HandlerMetadata, len(r.metadata))
+	for name, meta := range r.metadata {
+		result[name] = meta
+	}
+	return result
+}
+
 // List returns a sorted list of all registered handler names.
 func (r *HandlerRegistry) List() []string {
 	r.mu.RLock()

@@ -628,6 +628,73 @@ func TestHandlerRegistry_GetWithMetadata_NoMetadata(t *testing.T) {
 	assert.Nil(t, md, "handlers registered without metadata should return nil metadata")
 }
 
+// TestHandlerRegistry_AllWithMetadata tests retrieving all handlers with metadata.
+func TestHandlerRegistry_AllWithMetadata(t *testing.T) {
+	t.Run("returns empty map for empty registry", func(t *testing.T) {
+		registry := NewHandlerRegistry()
+		result := registry.AllWithMetadata()
+		assert.Empty(t, result)
+	})
+
+	t.Run("returns all registered handlers with metadata", func(t *testing.T) {
+		registry := NewHandlerRegistry()
+
+		handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
+			return nil, nil
+		}
+
+		meta1 := &HandlerMetadata{
+			Category:    HandlerCategoryIngestion,
+			Description: "Ingest meter readings",
+		}
+		meta2 := &HandlerMetadata{
+			Category:    HandlerCategorySettlement,
+			Description: "Settle positions",
+		}
+
+		require.NoError(t, registry.RegisterWithMetadata("handler.a", handler, meta1))
+		require.NoError(t, registry.RegisterWithMetadata("handler.b", handler, meta2))
+
+		result := registry.AllWithMetadata()
+		assert.Len(t, result, 2)
+		assert.Equal(t, meta1, result["handler.a"])
+		assert.Equal(t, meta2, result["handler.b"])
+	})
+
+	t.Run("returns nil metadata for handlers registered without metadata", func(t *testing.T) {
+		registry := NewHandlerRegistry()
+
+		handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
+			return nil, nil
+		}
+
+		require.NoError(t, registry.Register("handler.no-meta", handler))
+
+		result := registry.AllWithMetadata()
+		assert.Len(t, result, 1)
+		assert.Nil(t, result["handler.no-meta"])
+	})
+
+	t.Run("returns a copy that does not affect registry", func(t *testing.T) {
+		registry := NewHandlerRegistry()
+
+		handler := func(_ *StarlarkContext, _ map[string]any) (any, error) {
+			return nil, nil
+		}
+
+		meta := &HandlerMetadata{Category: HandlerCategoryValuation}
+		require.NoError(t, registry.RegisterWithMetadata("handler.x", handler, meta))
+
+		result := registry.AllWithMetadata()
+		// Mutate the returned map
+		delete(result, "handler.x")
+
+		// Registry should be unaffected
+		assert.True(t, registry.Has("handler.x"))
+		assert.Len(t, registry.AllWithMetadata(), 1)
+	})
+}
+
 // TestHandlerCategory_Values tests handler category constants.
 func TestHandlerCategory_Values(t *testing.T) {
 	assert.Equal(t, HandlerCategory("ingestion"), HandlerCategoryIngestion)
