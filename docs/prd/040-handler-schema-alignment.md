@@ -67,9 +67,14 @@ corresponding handlers.yaml update with no compiler or test to catch drift.
 
 **Missing from metadata:**
 
-- `Compensate` — the compensation handler name (currently only in handlers.yaml `compensate:` field)
-- Proto type references — which proto request/response messages this handler maps to
+- `Compensate` — the compensation handler name
+  (currently only in handlers.yaml `compensate:` field)
+- Proto type references — which proto request/response messages
+  this handler maps to
 - Description — currently only in handlers.yaml
+- `Version` / `Conversions` / `Deprecated` — handler evolution
+  rules for backward-compatible saga script migration
+  (currently only in handlers.yaml, never used in production)
 
 ## 2. Proposed Solution
 
@@ -108,6 +113,20 @@ type HandlerMetadata struct {
     // Covers cases where Starlark params don't map 1:1 to proto fields
     // (e.g., alias params, derived params, params not in proto)
     ParamOverrides map[string]ParamOverride
+
+    // New: handler evolution (was handlers.yaml version/conversions/deprecated)
+    // Version of this handler definition. Defaults to 1.
+    Version int
+
+    // Conversions defines backward-compatible mappings from old handler
+    // names/params to the current definition. When a tenant's stored
+    // Starlark script calls an old handler name with old param names,
+    // the registry rewrites the call using these rules.
+    Conversions []HandlerConversion
+
+    // Deprecated marks this handler as superseded.
+    // Scripts calling it receive a warning at validation time.
+    Deprecated bool
 }
 
 // ParamOverride allows handler authors to declare Starlark-specific
@@ -128,6 +147,30 @@ type ParamOverride struct {
     // Required overrides proto's required/optional for Starlark context.
     // Proto may mark a field optional but the saga always requires it.
     Required *bool
+}
+
+// HandlerConversion defines how to migrate calls from old handler
+// versions to the current definition. This enables stored Starlark
+// scripts to continue working after handler renames or param changes.
+type HandlerConversion struct {
+    // FromVersion is the old handler version being migrated from.
+    FromVersion int
+
+    // FromName is the old handler name (if renamed).
+    // The registry registers this as a DeprecatedMapping so old scripts
+    // resolve to the current handler transparently.
+    FromName string
+
+    // ParamMapping maps new param names to old param names.
+    // Key: current param name, Value: old param name the script uses.
+    ParamMapping map[string]string
+
+    // Defaults provides values for new required params that old scripts
+    // won't supply. Key: param name, Value: default value expression.
+    Defaults map[string]string
+
+    // Sunset is the version at which the old name/mapping is removed.
+    Sunset string
 }
 ```
 
@@ -160,6 +203,24 @@ Each `services/*/client/starlark.go` registration becomes self-describing:
             "currency":           {Deprecated: "instrument_code"},
             "valuation_analysis": {Derived: true},
         },
+        // Handler evolution (no conversions needed if never renamed)
+        Version: 1,
+    },
+},
+
+// Example with handler evolution (hypothetical rename + param change)
+"test.record_entry": {
+    handler: recordEntryHandler(client),
+    metadata: saga.HandlerMetadata{
+        Version: 2,
+        Conversions: []saga.HandlerConversion{{
+            FromVersion:  1,
+            FromName:     "test.initiate_log",
+            ParamMapping: map[string]string{"quantity": "amount"},
+            Defaults:     map[string]string{"entry_type": "'STANDARD'"},
+            Sunset:       "3.0",
+        }},
+        // ... proto types, compensation, etc.
     },
 },
 ```
@@ -276,22 +337,27 @@ may surface existing drift that needs fixing before Phase 4.
 
 ### 3.1 In Scope
 
-- Extend `saga.HandlerMetadata` with `Compensate`, `Description`, `ProtoRequestType`, `ProtoResponseType`, `ParamOverrides`
+- Extend `saga.HandlerMetadata` with `Compensate`, `Description`,
+  `ProtoRequestType`, `ProtoResponseType`, `ParamOverrides`,
+  `Version`, `Conversions`, `Deprecated`
+- Add `HandlerConversion` struct for handler evolution rules
 - Implement `DeriveSchema()` using proto reflection (`protoreflect` package)
 - Annotate all 11 handler registration files with proto type references
-- Move `compensate:` and `compensation_strategy:` from handlers.yaml to Go registrations
+- Move all handlers.yaml fields to Go registrations: `compensate`,
+  `compensation_strategy`, `version`, `conversions`, `deprecated`
 - Contract test asserting proto-handler alignment
 - Enum prefix stripping logic for Starlark-friendly enum values
 - Handle `ParamOverride` cases: aliases, derived params, deprecated params
+- Migrate `DeprecatedMapping` registry to build from `HandlerConversion`
+  metadata instead of parsing YAML
 - Delete both `handlers.yaml` files (platform + control-plane) and
   their `//go:embed` directives
 - Update `BuildServiceModules()` to use derived schema
 
 ### 3.2 Out of Scope
 
-- Saga handler RBAC (which handlers a saga can invoke) — separate concern, separate PRD
-- Handler versioning and conversion rules — preserve existing
-  `version`/`conversions` support; migration of these to Go is deferred
+- Saga handler RBAC (which handlers a saga can invoke) —
+  separate concern, separate PRD
 - Proto-to-Starlark code generation (full codegen approach) —
   the runtime reflection approach is simpler and sufficient
 - Changes to Starlark script syntax — scripts continue calling
@@ -354,10 +420,10 @@ Wrong Starlark enum values.
 Prefix stripping uses proto's common prefix convention;
 override via `ParamOverride` if needed.
 
-**handlers.yaml has `version`/`conversions` for saga evolution:**
-Can't delete handlers.yaml until these move.
-Keep `version`/`conversions` support as a separate concern;
-these are rarely used and can migrate later.
+**Handler evolution is implemented but never used in production:**
+`version`/`conversions`/`deprecated` exist in code and tests but
+no production handler has ever used them. Migration to Go metadata
+is low-risk since there are no existing conversion rules to preserve.
 
 ## 6. Inspiration: cadence-workflow/starlark-worker
 
