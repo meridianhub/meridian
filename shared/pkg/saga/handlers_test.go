@@ -682,16 +682,31 @@ func TestHandlerRegistry_AllWithMetadata(t *testing.T) {
 			return nil, nil
 		}
 
-		meta := &HandlerMetadata{Category: HandlerCategoryValuation}
+		meta := &HandlerMetadata{
+			Category:            HandlerCategoryValuation,
+			ProducesInstruments: []string{"USD", "NZD"},
+			Description:         "original",
+		}
 		require.NoError(t, registry.RegisterWithMetadata("handler.x", handler, meta))
 
 		result := registry.AllWithMetadata()
+
 		// Mutate the returned map
 		delete(result, "handler.x")
-
 		// Registry should be unaffected
 		assert.True(t, registry.Has("handler.x"))
 		assert.Len(t, registry.AllWithMetadata(), 1)
+
+		// Mutate the returned metadata fields
+		result2 := registry.AllWithMetadata()
+		result2["handler.x"].Description = "mutated"
+		result2["handler.x"].ProducesInstruments[0] = "MUTATED"
+
+		// Original registry metadata should be unaffected
+		_, origMeta, err := registry.GetWithMetadata("handler.x")
+		require.NoError(t, err)
+		assert.Equal(t, "original", origMeta.Description)
+		assert.Equal(t, "USD", origMeta.ProducesInstruments[0])
 	})
 }
 

@@ -475,14 +475,35 @@ func (r *HandlerRegistry) Has(name string) bool {
 	return exists
 }
 
-// AllWithMetadata returns a map of all registered handler names to their metadata.
+// AllWithMetadata returns a snapshot map of all registered handler names to their metadata.
+// The returned metadata values are shallow copies; callers may read freely without affecting
+// the registry. For deeply nested mutable fields (slices, maps), treat as read-only.
 func (r *HandlerRegistry) AllWithMetadata() map[string]*HandlerMetadata {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	result := make(map[string]*HandlerMetadata, len(r.metadata))
 	for name, meta := range r.metadata {
-		result[name] = meta
+		if meta == nil {
+			result[name] = nil
+			continue
+		}
+		clone := *meta
+		if meta.ProducesInstruments != nil {
+			clone.ProducesInstruments = make([]string, len(meta.ProducesInstruments))
+			copy(clone.ProducesInstruments, meta.ProducesInstruments)
+		}
+		if meta.ParamOverrides != nil {
+			clone.ParamOverrides = make(map[string]ParamOverride, len(meta.ParamOverrides))
+			for k, v := range meta.ParamOverrides {
+				clone.ParamOverrides[k] = v
+			}
+		}
+		if meta.Conversions != nil {
+			clone.Conversions = make([]HandlerConversion, len(meta.Conversions))
+			copy(clone.Conversions, meta.Conversions)
+		}
+		result[name] = &clone
 	}
 	return result
 }
