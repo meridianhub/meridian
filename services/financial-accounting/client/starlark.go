@@ -125,11 +125,7 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				ProducesInstruments: []string{},
 				ProtoRequestType:    (*financialaccountingv1.UpdateLedgerPostingRequest)(nil),
 				ProtoResponseType:   (*financialaccountingv1.UpdateLedgerPostingResponse)(nil),
-				ParamOverrides: map[string]saga.ParamOverride{
-					"amount":    {Type: "Decimal"},
-					"direction": {Type: "enum"},
-				},
-				Version: 1,
+				Version:             1,
 			},
 		},
 		"financial_accounting.create_booking": {
@@ -153,9 +149,8 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Compensate:  "financial_accounting.reverse_entries",
 				// Posting entries creates Money instrument movements
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
-				ProtoRequestType:    (*financialaccountingv1.CaptureLedgerPostingRequest)(nil),
-				ProtoResponseType:   (*financialaccountingv1.CaptureLedgerPostingResponse)(nil),
-				Version:             1,
+				// No single proto type: this handler iterates over entries calling CaptureLedgerPosting per entry
+				Version: 1,
 			},
 		},
 		"financial_accounting.reverse_entries": {
