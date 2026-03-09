@@ -46,7 +46,7 @@ func TestExtractRelationshipGraph_CompleteManifest(t *testing.T) {
 	assertEdgeExists(t, g, "instrument:KWH", "instrument:GBP", RelConverts)
 
 	// Check triggers_on edge
-	assertEdgeExists(t, g, "saga:process_settlement", "api:/v1/settlements", RelTriggersOn)
+	assertEdgeExists(t, g, "saga:process_settlement", "api:/v1/sagas/execute", RelTriggersOn)
 
 	// Check calls_handler edge
 	assertEdgeExists(t, g, "saga:process_settlement", "handler:position_keeping.initiate_log", RelCallsHandler)
