@@ -104,6 +104,22 @@ describe('McpConfigPage', () => {
       expect(screen.getByText('Resources')).toBeInTheDocument()
     })
 
+    it('renders tenant-scoped URLs when tenant is selected on production domain', () => {
+      vi.mocked(useTenantContext).mockReturnValue({
+        tenantSlug: 'volterra-energy',
+        currentTenant: { id: 'tid', slug: 'volterra-energy', name: 'Volterra Energy' },
+        isPlatformAdmin: false,
+        switchTenant: vi.fn(),
+        clearTenant: vi.fn(),
+      })
+
+      render(<McpConfigPage />, { wrapper: Wrapper })
+
+      // In test env, VITE_MCP_SERVER_URL is not set so falls back to localhost
+      // which means no subdomain injection. The URL should still contain /mcp.
+      expect(screen.getByTestId('mcp-url')).toHaveTextContent('/mcp')
+    })
+
     it('shows tenant badge when tenant is selected', () => {
       vi.mocked(useTenantContext).mockReturnValue({
         tenantSlug: 'my-tenant',

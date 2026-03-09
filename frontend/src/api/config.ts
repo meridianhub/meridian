@@ -34,6 +34,33 @@ export function isOnTenantSubdomain(): boolean {
   }
 }
 
+/**
+ * Builds the tenant-scoped MCP server base URL.
+ * In production, injects the tenant slug as a subdomain (e.g., https://acme.demo.meridianhub.cloud).
+ * For localhost, returns the MCP server URL unchanged (tenant identified via JWT).
+ */
+export function buildMcpTenantUrl(mcpBaseUrl: string, tenantSlug: string | null): string {
+  const stripped = mcpBaseUrl.replace(/\/$/, '')
+  if (!tenantSlug) {
+    return stripped
+  }
+
+  try {
+    const parsed = new URL(mcpBaseUrl)
+
+    // In local dev (localhost), tenant is identified via JWT, not subdomain
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+      return stripped
+    }
+
+    // In production, use tenant subdomain routing
+    parsed.hostname = `${tenantSlug}.${parsed.hostname}`
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return stripped
+  }
+}
+
 export function buildTenantBaseUrl(tenantSlug: string): string {
   const base = apiConfig.baseUrl
   const parsed = new URL(base)

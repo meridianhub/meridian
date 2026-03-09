@@ -242,7 +242,21 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 		}
 		bearerMW := mcpauth.NewBearerMiddleware(validator, meta)
 
-		mux.Handle("/mcp", bearerMW.Handler(streamableHandler))
+		// Subdomain-to-tenant validation: ensures the request's subdomain
+		// matches the authenticated user's tenant from the JWT.
+		baseDomain := env.GetEnvOrDefault("MCP_BASE_DOMAIN", "")
+		subdomainMW := mcpauth.NewTenantSubdomainMiddleware(baseDomain, logger)
+
+		mcpHandler := bearerMW.Handler(streamableHandler)
+
+		// If the validator supports claims extraction (JWKS mode), wrap with
+		// subdomain validation. The passthrough validator in dev mode does not
+		// implement ClaimsBearerValidator, so subdomain checks are skipped.
+		if claimsValidator, ok := validator.(mcpauth.ClaimsBearerValidator); ok {
+			mcpHandler = subdomainMW.Handler(claimsValidator, meta, mcpHandler)
+		}
+
+		mux.Handle("/mcp", mcpHandler)
 	} else {
 		mux.Handle("/mcp", streamableHandler)
 	}
