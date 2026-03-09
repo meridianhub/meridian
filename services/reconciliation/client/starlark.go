@@ -29,11 +29,12 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"reconciliation.initiate_run": {
 			handler: initiateRunHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category:          saga.HandlerCategorySettlement,
-				Description:       "Initiate a new settlement reconciliation run",
-				Compensate:        "reconciliation.cancel_run",
-				ProtoRequestType:  (*reconciliationv1.InitiateAccountReconciliationRequest)(nil),
-				ProtoResponseType: (*reconciliationv1.InitiateAccountReconciliationResponse)(nil),
+				Category:            saga.HandlerCategorySettlement,
+				Description:         "Initiate a new settlement reconciliation run",
+				Compensate:          "reconciliation.cancel_run",
+				HasAutoCompensation: true,
+				ProtoRequestType:    (*reconciliationv1.InitiateAccountReconciliationRequest)(nil),
+				ProtoResponseType:   (*reconciliationv1.InitiateAccountReconciliationResponse)(nil),
 				ParamOverrides: map[string]saga.ParamOverride{
 					"scope":           {Type: "enum"},
 					"settlement_type": {Type: "enum"},

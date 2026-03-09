@@ -39,6 +39,7 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 				Category:            saga.HandlerCategorySettlement,
 				Description:         "Dispatch a payment to an external provider via the Financial Gateway",
 				Compensate:          "financial_gateway.cancel_payment",
+				HasAutoCompensation: true,
 				ProducesInstruments: []string{},
 				ProtoRequestType:    (*financialgatewayv1.DispatchPaymentRequest)(nil),
 				ProtoResponseType:   (*financialgatewayv1.DispatchPaymentResponse)(nil),

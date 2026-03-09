@@ -42,9 +42,10 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"current_account.create_lien": {
 			handler: createLienHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category:    saga.HandlerCategorySettlement,
-				Description: "Create a lien (hold) on an account for a specified amount",
-				Compensate:  "current_account.terminate_lien",
+				Category:            saga.HandlerCategorySettlement,
+				Description:         "Create a lien (hold) on an account for a specified amount",
+				Compensate:          "current_account.terminate_lien",
+				HasAutoCompensation: true,
 				// Liens reserve funds in specific currencies (USD, EUR, etc.)
 				// ProducesInstruments represents currencies that can be blocked/reserved
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},

@@ -48,6 +48,7 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 				Category:            saga.HandlerCategorySettlement,
 				Description:         "Queue an instruction for dispatch to an external provider",
 				Compensate:          "operational_gateway.cancel_instruction",
+				HasAutoCompensation: true,
 				ProducesInstruments: []string{},
 				ProtoRequestType:    (*opgatewayv1.DispatchInstructionRequest)(nil),
 				ProtoResponseType:   (*opgatewayv1.DispatchInstructionResponse)(nil),

@@ -34,9 +34,10 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"position_keeping.initiate_log": {
 			handler: initiateLogHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category:    saga.HandlerCategoryIngestion,
-				Description: "Initiate a position log entry for a DEBIT or CREDIT transaction",
-				Compensate:  "position_keeping.cancel_log",
+				Category:            saga.HandlerCategoryIngestion,
+				Description:         "Initiate a position log entry for a DEBIT or CREDIT transaction",
+				Compensate:          "position_keeping.cancel_log",
+				HasAutoCompensation: true,
 				// Position Keeping ingests physical measurements (meter readings) and produces
 				// Physics instruments (KWH, GAS, WATER) from external sources.
 				ProducesInstruments: []string{"KWH", "GAS", "WATER"},

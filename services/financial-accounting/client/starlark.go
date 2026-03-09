@@ -101,9 +101,10 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"financial_accounting.capture_posting": {
 			handler: capturePostingHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category:    saga.HandlerCategorySettlement,
-				Description: "Capture a single-sided posting entry within a booking log",
-				Compensate:  "financial_accounting.compensate_posting",
+				Category:            saga.HandlerCategorySettlement,
+				Description:         "Capture a single-sided posting entry within a booking log",
+				Compensate:          "financial_accounting.compensate_posting",
+				HasAutoCompensation: true,
 				// Capturing a posting creates a Money instrument entry
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
 				ProtoRequestType:    (*financialaccountingv1.CaptureLedgerPostingRequest)(nil),
@@ -144,9 +145,10 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"financial_accounting.post_entries": {
 			handler: postEntriesHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category:    saga.HandlerCategorySettlement,
-				Description: "Post double-entry accounting entries to the ledger",
-				Compensate:  "financial_accounting.reverse_entries",
+				Category:            saga.HandlerCategorySettlement,
+				Description:         "Post double-entry accounting entries to the ledger",
+				Compensate:          "financial_accounting.reverse_entries",
+				HasAutoCompensation: true,
 				// Posting entries creates Money instrument movements
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
 				// No single proto type: this handler iterates over entries calling CaptureLedgerPosting per entry
