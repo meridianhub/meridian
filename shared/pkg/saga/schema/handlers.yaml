@@ -997,3 +997,381 @@ handlers:
       status:
         type: string
         description: "Status of the refund dispatch (e.g., ACCEPTED, PENDING)"
+
+  # Forecasting Service
+  forecasting.compute_forward_curve:
+    description: "Trigger forward curve computation from market data for a given strategy and instrument"
+    compensation_strategy: saga_managed
+    params:
+      strategy_name:
+        type: string
+        required: true
+        description: "Name of the forecasting strategy to execute"
+      instrument_code:
+        type: string
+        required: true
+        description: "Instrument code to compute the forward curve for (e.g., KWH, GBP)"
+      from_date:
+        type: string
+        required: true
+        description: "Start date for the forward curve period (ISO 8601 date)"
+      to_date:
+        type: string
+        required: true
+        description: "End date for the forward curve period (ISO 8601 date)"
+    returns:
+      curve_id:
+        type: string
+        description: "Generated forward curve identifier (UUID)"
+      strategy_name:
+        type: string
+        description: "Echo of the input strategy name"
+      instrument_code:
+        type: string
+        description: "Echo of the input instrument code"
+      status:
+        type: string
+        description: "Status of the computation (COMPLETED)"
+
+  # Market Information Service
+  market_information.publish_observation:
+    description: "Publish a price or rate observation to a market data set"
+    compensation_strategy: saga_managed
+    params:
+      dataset_code:
+        type: string
+        required: true
+        description: "Code of the data set to publish to"
+      dataset_version:
+        type: int64
+        required: true
+        description: "Version of the data set schema"
+      value:
+        type: Decimal
+        required: true
+        description: "Observed value (price, rate, etc.)"
+      quality_level:
+        type: enum
+        values: [ESTIMATE, COEFFICIENT, ACTUAL, REVISED]
+        required: true
+        description: "Data quality level of the observation"
+      valid_from:
+        type: string
+        required: true
+        description: "Start of the validity period (ISO 8601 timestamp)"
+      valid_to:
+        type: string
+        required: true
+        description: "End of the validity period (ISO 8601 timestamp)"
+    returns:
+      observation_id:
+        type: string
+        description: "Generated observation identifier (UUID)"
+      dataset_code:
+        type: string
+        description: "Echo of the input data set code"
+      status:
+        type: string
+        description: "Status of the observation (PUBLISHED)"
+
+  market_information.query_latest:
+    description: "Query the latest observation for a market data set"
+    compensation_strategy: none
+    params:
+      dataset_code:
+        type: string
+        required: true
+        description: "Code of the data set to query"
+      as_of:
+        type: string
+        required: false
+        description: "Point-in-time for the query (ISO 8601 timestamp, default: now)"
+    returns:
+      observation_id:
+        type: string
+        description: "Identifier of the latest observation"
+      dataset_code:
+        type: string
+        description: "Echo of the input data set code"
+      value:
+        type: Decimal
+        description: "Observed value"
+      quality_level:
+        type: string
+        description: "Quality level of the observation"
+      valid_from:
+        type: string
+        description: "Start of validity period"
+      valid_to:
+        type: string
+        description: "End of validity period"
+
+  market_information.manage_dataset:
+    description: "Create or update a market data set definition"
+    compensation_strategy: saga_managed
+    params:
+      dataset_code:
+        type: string
+        required: true
+        description: "Unique code for the data set"
+      display_name:
+        type: string
+        required: true
+        description: "Human-readable name for the data set"
+      dimension:
+        type: string
+        required: true
+        description: "Physical dimension (CURRENCY, ENERGY, etc.)"
+      unit:
+        type: string
+        required: true
+        description: "Unit of measurement (e.g., GBP, KWH, TONNE_CO2E)"
+    returns:
+      dataset_code:
+        type: string
+        description: "Echo of the input data set code"
+      dataset_version:
+        type: int64
+        description: "Current version of the data set schema after the operation"
+      status:
+        type: string
+        description: "Status of the operation (CREATED or UPDATED)"
+
+  # Reference Data Service
+  reference_data.register_instrument:
+    description: "Register a new instrument definition in Reference Data service"
+    params:
+      instrument_code:
+        type: string
+        required: true
+        description: "Unique instrument code (e.g., USD, KWH)"
+      display_name:
+        type: string
+        required: false
+        description: "Human-readable instrument name"
+      dimension:
+        type: string
+        required: false
+        description: "Physical dimension (CURRENCY, ENERGY, etc.)"
+      decimal_places:
+        type: int64
+        required: false
+        description: "Decimal precision (0-18)"
+      description:
+        type: string
+        required: false
+        description: "Instrument description"
+    returns:
+      instrument_code:
+        type: string
+        description: "The registered instrument code"
+      status:
+        type: string
+        description: "Registration status (REGISTERED)"
+    compensate: reference_data.delete_instrument
+
+  reference_data.delete_instrument:
+    description: "Delete an instrument (compensation for register)"
+    compensation_strategy: none
+    params:
+      instrument_code:
+        type: string
+        required: true
+        description: "Instrument code to delete"
+    returns:
+      instrument_code:
+        type: string
+        description: "The deleted instrument code"
+      status:
+        type: string
+        description: "Deletion status (DELETED)"
+
+  reference_data.register_account_type:
+    description: "Register a new account type definition in Reference Data service"
+    params:
+      code:
+        type: string
+        required: true
+        description: "Unique account type code (e.g., CUSTOMER_CURRENT)"
+      display_name:
+        type: string
+        required: true
+        description: "Human-readable account type name"
+      behavior_class:
+        type: enum
+        values: [CUSTOMER, CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE, INVENTORY]
+        required: true
+        description: "Accounting behavior class"
+      normal_balance:
+        type: enum
+        values: [DEBIT, CREDIT]
+        required: true
+        description: "Normal balance direction"
+      instrument_code:
+        type: string
+        required: true
+        description: "Default instrument code for this account type (e.g., GBP)"
+      description:
+        type: string
+        required: false
+        description: "Account type description"
+      default_saga_prefix:
+        type: string
+        required: false
+        description: "Saga prefix for operations on accounts of this type"
+      default_conversion_method:
+        type: string
+        required: false
+        description: "Named valuation method for conversion (resolved to UUID by handler)"
+      validation_cel:
+        type: string
+        required: false
+        description: "CEL expression for validating account operations"
+      eligibility_cel:
+        type: string
+        required: false
+        description: "CEL expression for determining account eligibility"
+      attribute_schema:
+        type: map
+        required: false
+        description: "JSON Schema defining valid attributes for this account type"
+      valuation_methods:
+        type: array
+        required: false
+        description: "List of valuation method templates (each with input_instrument and method_name)"
+    returns:
+      code:
+        type: string
+        description: "The registered account type code"
+      version:
+        type: int32
+        description: "The version of the registered account type definition"
+    compensate: reference_data.delete_account_type
+
+  reference_data.delete_account_type:
+    description: "Delete an account type (compensation for register)"
+    compensation_strategy: none
+    params:
+      code:
+        type: string
+        required: true
+        description: "Account type code to delete"
+    returns:
+      code:
+        type: string
+        description: "The deleted account type code"
+      status:
+        type: string
+        description: "Deletion status (DELETED)"
+
+  reference_data.register_valuation_rule:
+    description: "Register a valuation rule for cross-instrument conversion"
+    compensation_strategy: none
+    params:
+      from_instrument:
+        type: string
+        required: true
+        description: "Source instrument code"
+      to_instrument:
+        type: string
+        required: true
+        description: "Target instrument code"
+      rule_type:
+        type: string
+        required: false
+        description: "Rule type (FIXED_RATE, MARKET, etc.)"
+      expression:
+        type: string
+        required: false
+        description: "CEL expression for valuation computation"
+      description:
+        type: string
+        required: false
+        description: "Rule description"
+    returns:
+      from_instrument:
+        type: string
+        description: "Source instrument code"
+      to_instrument:
+        type: string
+        description: "Target instrument code"
+      status:
+        type: string
+        description: "Registration status (REGISTERED)"
+
+  reference_data.register_saga_definition:
+    description: "Register a saga definition in the saga registry"
+    compensation_strategy: none
+    params:
+      saga_name:
+        type: string
+        required: true
+        description: "Saga identifier name"
+      display_name:
+        type: string
+        required: false
+        description: "Human-readable saga name"
+      description:
+        type: string
+        required: false
+        description: "Saga description"
+      script:
+        type: string
+        required: false
+        description: "Starlark script content"
+      version:
+        type: string
+        required: false
+        description: "Saga version (semver format)"
+    returns:
+      saga_name:
+        type: string
+        description: "The registered saga name"
+      status:
+        type: string
+        description: "Registration status (REGISTERED)"
+
+  # Internal Account Service
+  internal_account.initiate:
+    description: "Initiate a new internal account"
+    compensation_strategy: none
+    params:
+      account_code:
+        type: string
+        required: true
+        description: "Business-friendly account code"
+      name:
+        type: string
+        required: true
+        description: "Human-readable account name"
+      product_type_code:
+        type: string
+        required: true
+        description: "Product type code from the Product Directory (e.g., CLEARING, NOSTRO)"
+      instrument_code:
+        type: string
+        required: true
+        description: "Instrument code (e.g., USD, KWH)"
+      description:
+        type: string
+        required: false
+        description: "Account description"
+    returns:
+      account_id:
+        type: string
+        description: "Generated account identifier"
+      account_code:
+        type: string
+        description: "Echo of account code"
+      name:
+        type: string
+        description: "Echo of account name"
+      behavior_class:
+        type: string
+        description: "Behavior class derived from product type (e.g., NOSTRO, CLEARING)"
+      status:
+        type: string
+        description: "Account status (ACTIVE)"
+      instrument_code:
+        type: string
+        description: "Echo of instrument code"
