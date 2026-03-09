@@ -23,7 +23,7 @@ func TestNew_MissingConnector(t *testing.T) {
 	assert.ErrorIs(t, err, ErrConnectorRequired)
 }
 
-func TestNew_CreatesServer(t *testing.T) {
+func TestNew_CreatesInstance(t *testing.T) {
 	stub := &stubConnector{
 		loginFn: func(_ context.Context, _ []string, _, _ string) (meridianconnector.Identity, bool, error) {
 			return meridianconnector.Identity{}, false, nil
@@ -44,8 +44,9 @@ func TestNew_CreatesServer(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	assert.NotNil(t, embedded.Handler())
+	assert.Nil(t, embedded.Handler(), "handler should be nil until SetHandler is called")
 	assert.NotNil(t, embedded.Storage())
+	assert.NotNil(t, embedded.Adapter())
 }
 
 func TestNew_RegistersClient(t *testing.T) {
@@ -55,10 +56,10 @@ func TestNew_RegistersClient(t *testing.T) {
 		},
 	}
 
-	embedded, err := New(context.Background(), Config{
-		Issuer:             "http://127.0.0.1:0/dex",
-		Connector:          stub,
-		SkipApprovalScreen: true,
+	ctx := context.Background()
+	embedded, err := New(ctx, Config{
+		Issuer:    "http://127.0.0.1:0/dex",
+		Connector: stub,
 		Clients: []ClientConfig{
 			{
 				ID:           "verify-client",
@@ -75,4 +76,44 @@ func TestNew_RegistersClient(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Verify", client.Name)
 	assert.True(t, client.Public)
+}
+
+func TestNew_ConnectorInStorage(t *testing.T) {
+	stub := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, _, _ string) (meridianconnector.Identity, bool, error) {
+			return meridianconnector.Identity{}, false, nil
+		},
+	}
+
+	ctx := context.Background()
+	embedded, err := New(ctx, Config{
+		Issuer:    "http://127.0.0.1:0/dex",
+		Connector: stub,
+	})
+	require.NoError(t, err)
+
+	// Verify connector is in storage.
+	conn, err := embedded.Storage().GetConnector(ConnectorID)
+	require.NoError(t, err)
+	assert.Equal(t, ConnectorType, conn.Type)
+}
+
+func TestEmbeddedDex_SetHandler(t *testing.T) {
+	stub := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, _, _ string) (meridianconnector.Identity, bool, error) {
+			return meridianconnector.Identity{}, false, nil
+		},
+	}
+
+	embedded, err := New(context.Background(), Config{
+		Issuer:    "http://127.0.0.1:0/dex",
+		Connector: stub,
+	})
+	require.NoError(t, err)
+
+	assert.Nil(t, embedded.Handler())
+
+	// Simulate setting a handler from the application layer.
+	embedded.SetHandler(nil) // no-op but exercises the method
+	assert.Nil(t, embedded.Handler())
 }

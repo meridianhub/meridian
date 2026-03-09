@@ -1,6 +1,7 @@
 package dex
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -55,7 +56,7 @@ func DefaultDemoClient(baseDomain string) ClientConfig {
 
 // registerClients writes clients to Dex storage idempotently. If a client
 // already exists with the same ID, the registration is skipped.
-func registerClients(s storage.Storage, clients []ClientConfig, logger *slog.Logger) error {
+func registerClients(ctx context.Context, s storage.Storage, clients []ClientConfig, logger *slog.Logger) error {
 	for _, c := range clients {
 		client := storage.Client{
 			ID:           c.ID,
@@ -65,7 +66,7 @@ func registerClients(s storage.Storage, clients []ClientConfig, logger *slog.Log
 			Name:         c.Name,
 		}
 
-		err := s.CreateClient(client)
+		err := s.CreateClient(ctx, client)
 		if err == nil {
 			logger.Info("dex: registered OIDC client",
 				"client_id", c.ID,
@@ -74,9 +75,7 @@ func registerClients(s storage.Storage, clients []ClientConfig, logger *slog.Log
 			continue
 		}
 
-		// Handle already-exists: Dex's in-memory storage returns storage.ErrAlreadyExists
-		// but the interface only guarantees a generic error, so check both.
-		if isAlreadyExistsError(err) {
+		if errors.Is(err, storage.ErrAlreadyExists) {
 			logger.Info("dex: OIDC client already registered, skipping",
 				"client_id", c.ID)
 			continue
@@ -85,19 +84,4 @@ func registerClients(s storage.Storage, clients []ClientConfig, logger *slog.Log
 		return fmt.Errorf("dex: registering client %q: %w", c.ID, err)
 	}
 	return nil
-}
-
-// isAlreadyExistsError checks whether an error indicates a duplicate resource.
-// Dex storage implementations may use different error types, so we check the
-// error message as a fallback.
-func isAlreadyExistsError(err error) bool {
-	if err == nil {
-		return false
-	}
-	// Check for the well-known sentinel from dex/storage package.
-	if errors.Is(err, storage.ErrAlreadyExists) {
-		return true
-	}
-	// Fallback: some storage backends wrap the error differently.
-	return strings.Contains(err.Error(), "already exists")
 }

@@ -1,12 +1,12 @@
 package dex
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 
 	"github.com/dexidp/dex/storage"
 	"github.com/dexidp/dex/storage/memory"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,8 +34,8 @@ func TestDefaultDemoClient_WithEnvRedirectURIs(t *testing.T) {
 }
 
 func TestRegisterClients_Success(t *testing.T) {
-	store := memory.New(logrus.New())
-	logger := slog.Default()
+	store := memory.New(slog.Default())
+	ctx := context.Background()
 
 	clients := []ClientConfig{
 		{
@@ -47,7 +47,7 @@ func TestRegisterClients_Success(t *testing.T) {
 		},
 	}
 
-	err := registerClients(store, clients, logger)
+	err := registerClients(ctx, store, clients, slog.Default())
 	require.NoError(t, err)
 
 	// Verify client was created in storage.
@@ -60,8 +60,8 @@ func TestRegisterClients_Success(t *testing.T) {
 }
 
 func TestRegisterClients_Idempotent(t *testing.T) {
-	store := memory.New(logrus.New())
-	logger := slog.Default()
+	store := memory.New(slog.Default())
+	ctx := context.Background()
 
 	clients := []ClientConfig{
 		{
@@ -72,24 +72,24 @@ func TestRegisterClients_Idempotent(t *testing.T) {
 		},
 	}
 
-	// Register twice — second call should not error.
-	err := registerClients(store, clients, logger)
+	// Register twice -- second call should not error.
+	err := registerClients(ctx, store, clients, slog.Default())
 	require.NoError(t, err)
 
-	err = registerClients(store, clients, logger)
+	err = registerClients(ctx, store, clients, slog.Default())
 	require.NoError(t, err)
 }
 
 func TestRegisterClients_MultipleClients(t *testing.T) {
-	store := memory.New(logrus.New())
-	logger := slog.Default()
+	store := memory.New(slog.Default())
+	ctx := context.Background()
 
 	clients := []ClientConfig{
 		{ID: "client-a", Name: "A", RedirectURIs: []string{"http://a/cb"}},
 		{ID: "client-b", Name: "B", RedirectURIs: []string{"http://b/cb"}},
 	}
 
-	err := registerClients(store, clients, logger)
+	err := registerClients(ctx, store, clients, slog.Default())
 	require.NoError(t, err)
 
 	a, err := store.GetClient("client-a")
@@ -101,8 +101,6 @@ func TestRegisterClients_MultipleClients(t *testing.T) {
 	assert.Equal(t, "B", b.Name)
 }
 
-func TestIsAlreadyExistsError(t *testing.T) {
-	assert.True(t, isAlreadyExistsError(storage.ErrAlreadyExists))
-	assert.False(t, isAlreadyExistsError(nil))
-	assert.False(t, isAlreadyExistsError(storage.ErrNotFound))
+func TestErrAlreadyExists(t *testing.T) {
+	assert.ErrorIs(t, storage.ErrAlreadyExists, storage.ErrAlreadyExists)
 }

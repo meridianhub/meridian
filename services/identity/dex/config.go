@@ -26,11 +26,6 @@ type Config struct {
 
 	// SkipApprovalScreen skips the Dex consent screen when true.
 	SkipApprovalScreen bool
-
-	// WebDir is the path to Dex's web assets directory containing templates,
-	// static files, and themes. If empty, it defaults to the "web" directory
-	// from the Dex module in the Go module cache.
-	WebDir string
 }
 
 // ErrIssuerRequired is returned when Config.Issuer is empty.
