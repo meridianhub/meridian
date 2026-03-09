@@ -204,6 +204,11 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid posting data: %v", err)
 	}
 
+	// Validate account service domain enum value
+	if _, ok := commonv1.AccountServiceDomain_name[int32(req.AccountServiceDomain)]; !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid account_service_domain: %d", req.AccountServiceDomain)
+	}
+
 	// Set account service domain from request (caller-provided, e.g., from saga scripts)
 	posting.AccountServiceDomain = fromProtoAccountServiceDomain(req.AccountServiceDomain)
 

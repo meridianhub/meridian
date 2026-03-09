@@ -18,7 +18,7 @@ interface LedgerPosting {
   amount: bigint
   currency: string
   accountId: string
-  accountEntityType: EntityType
+  accountEntityType: EntityType | undefined
   valueDate: { seconds: bigint | number; nanos?: number } | null | undefined
   createdAt: { seconds: bigint | number; nanos?: number } | null | undefined
   status: string
@@ -78,9 +78,10 @@ const columns: ColumnDef<LedgerPosting>[] = [
   {
     accessorKey: 'accountId',
     header: 'Account',
-    cell: ({ row }) => (
-      <EntityLink type={row.original.accountEntityType} id={row.original.accountId} />
-    ),
+    cell: ({ row }) => {
+      if (!row.original.accountEntityType) return <span className="font-mono text-xs">{row.original.accountId}</span>
+      return <EntityLink type={row.original.accountEntityType} id={row.original.accountId} />
+    },
   },
   {
     accessorKey: 'postingDirection',

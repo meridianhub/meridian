@@ -85,9 +85,11 @@ const postingColumns: ColumnDef<LedgerPosting>[] = [
   {
     accessorKey: 'accountId',
     header: 'Account',
-    cell: ({ row }) => (
-      <EntityLink type={accountEntityType(row.original.accountServiceDomain)} id={row.original.accountId} />
-    ),
+    cell: ({ row }) => {
+      const entityType = accountEntityType(row.original.accountServiceDomain)
+      if (!entityType) return <span className="font-mono text-xs">{row.original.accountId}</span>
+      return <EntityLink type={entityType} id={row.original.accountId} />
+    },
   },
   {
     accessorKey: 'valueDate',
