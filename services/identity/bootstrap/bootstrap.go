@@ -148,6 +148,153 @@ func reconcileRoles(ctx context.Context, repo domain.Repository, identity *domai
 	return nil
 }
 
+// DemoUser holds the configuration for a demo user to be seeded on boot.
+type DemoUser struct {
+	Email    string
+	Password string
+	TenantID string
+	Role     string // domain role string, e.g. "OPERATOR"
+}
+
+// loadDemoUsers reads demo user configuration from environment variables.
+// Returns an empty slice if required variables are not set.
+func loadDemoUsers() []DemoUser {
+	email := os.Getenv("DEMO_OPERATOR_EMAIL")
+	password := os.Getenv("DEMO_OPERATOR_PASSWORD")
+	if email == "" || password == "" {
+		return nil
+	}
+
+	tenantID := os.Getenv("DEMO_OPERATOR_TENANT")
+	if tenantID == "" {
+		tenantID = "volterra"
+	}
+
+	return []DemoUser{{
+		Email:    email,
+		Password: password,
+		TenantID: tenantID,
+		Role:     string(domain.RoleOperator),
+	}}
+}
+
+// SeedDemoUsers creates demo user identities from environment variables.
+// Each user is created idempotently in its configured tenant with the specified role.
+//
+// Environment variables:
+//   - DEMO_OPERATOR_EMAIL: Email address for the demo operator
+//   - DEMO_OPERATOR_PASSWORD: Password for the demo operator
+//   - DEMO_OPERATOR_TENANT: Tenant ID (default: "volterra")
+func SeedDemoUsers(ctx context.Context, repo domain.Repository) error {
+	if repo == nil {
+		return ErrNilRepository
+	}
+
+	users := loadDemoUsers()
+	if len(users) == 0 {
+		slog.InfoContext(ctx, "demo user seeding skipped: no demo users configured")
+		return nil
+	}
+
+	for _, u := range users {
+		if err := seedDemoUser(ctx, repo, u); err != nil {
+			return fmt.Errorf("seeding demo user %s: %w", u.Email, err)
+		}
+	}
+	return nil
+}
+
+// seedDemoUser creates a single demo user identity idempotently.
+func seedDemoUser(ctx context.Context, repo domain.Repository, u DemoUser) error {
+	tid, err := tenant.NewTenantID(u.TenantID)
+	if err != nil {
+		return fmt.Errorf("invalid tenant ID %q: %w", u.TenantID, err)
+	}
+	tenantCtx := tenant.WithTenant(ctx, tid)
+
+	// Check if the user already exists.
+	existing, err := repo.FindByEmail(tenantCtx, u.Email)
+	if err != nil && !errors.Is(err, domain.ErrIdentityNotFound) {
+		return fmt.Errorf("checking for existing demo user: %w", err)
+	}
+
+	if existing != nil {
+		// User already exists — reconcile the role.
+		return reconcileDemoRole(tenantCtx, repo, existing, u.Role)
+	}
+
+	// Hash the password.
+	hash, err := credentials.HashPassword(u.Password)
+	if err != nil {
+		return fmt.Errorf("hashing demo user password: %w", err)
+	}
+
+	// Build identity.
+	identity, err := domain.NewIdentity(u.Email)
+	if err != nil {
+		return fmt.Errorf("creating demo user identity: %w", err)
+	}
+	if err := identity.SetPassword(hash); err != nil {
+		return fmt.Errorf("setting demo user password: %w", err)
+	}
+	if err := identity.Activate(); err != nil {
+		return fmt.Errorf("activating demo user identity: %w", err)
+	}
+
+	now := time.Now()
+	ra := domain.ReconstructRoleAssignment(
+		uuid.New(),
+		identity.ID(),
+		identity.ID(),
+		domain.Role(u.Role),
+		nil, nil, nil,
+		now, now,
+	)
+
+	if err := repo.SaveIdentityWithRoles(tenantCtx, identity, []*domain.RoleAssignment{ra}); err != nil {
+		return fmt.Errorf("persisting demo user: %w", err)
+	}
+
+	slog.InfoContext(tenantCtx, "demo user seeded successfully",
+		"email", u.Email,
+		"tenant", u.TenantID,
+		"role", u.Role)
+	return nil
+}
+
+// reconcileDemoRole ensures the demo user has the expected role assigned.
+func reconcileDemoRole(ctx context.Context, repo domain.Repository, identity *domain.Identity, role string) error {
+	existing, err := repo.FindRoleAssignments(ctx, identity.ID())
+	if err != nil {
+		return fmt.Errorf("fetching existing role assignments: %w", err)
+	}
+
+	for _, ra := range existing {
+		if ra.IsActive() && string(ra.Role()) == role {
+			slog.InfoContext(ctx, "demo user already exists with required role, skipping",
+				"email", identity.Email(),
+				"role", role)
+			return nil
+		}
+	}
+
+	slog.InfoContext(ctx, "demo user exists but missing role, adding",
+		"email", identity.Email(),
+		"role", role)
+
+	now := time.Now()
+	ra := domain.ReconstructRoleAssignment(
+		uuid.New(),
+		identity.ID(),
+		identity.ID(),
+		domain.Role(role),
+		nil, nil, nil,
+		now, now,
+	)
+
+	return repo.SaveRoleAssignments(ctx, []*domain.RoleAssignment{ra})
+}
+
 // buildRoleAssignments constructs RoleAssignment domain objects for each role.
 // Bootstrap is a trusted system operation; ReconstructRoleAssignment is used to
 // bypass the privilege hierarchy check that would otherwise require a granting identity.
