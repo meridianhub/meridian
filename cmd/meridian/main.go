@@ -583,8 +583,20 @@ func startProvisioningWorker(ctx context.Context, platformDB *gorm.DB, logger *s
 		return nil, nil, nil
 	}
 
-	// Create provisioner with default config (reads service DB URLs from env).
+	// Create provisioner config and derive service DSNs from DATABASE_URL.
+	// DefaultConfig() falls back to cockroachdb:26257 when per-service env vars
+	// are unset. The unified binary derives all connections from a single base DSN,
+	// so we override each service's DatabaseURL to match.
 	config := tenantprovisioner.DefaultConfig()
+	baseDSN := env.GetEnvOrDefault("DATABASE_URL", "")
+	if baseDSN != "" {
+		for i := range config.Services {
+			svc := &config.Services[i]
+			if sdb, ok := migrations.ServiceDatabases[svc.Name]; ok {
+				svc.DatabaseURL = replaceDSNDatabase(baseDSN, sdb.Database)
+			}
+		}
+	}
 	prov, err := tenantprovisioner.NewPostgresProvisioner(platformDB, config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create schema provisioner: %w", err)
