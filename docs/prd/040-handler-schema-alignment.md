@@ -49,7 +49,7 @@ corresponding handlers.yaml update with no compiler or test to catch drift.
 2. **Naming inconsistency**: Proto uses `BEHAVIOR_CLASS_CUSTOMER`,
    handlers.yaml uses `CUSTOMER`, Go switch statements bridge them —
    three places to update for one change
-3. **No contract test**: Nothing verifies that the 10 `starlark.go` files,
+3. **No contract test**: Nothing verifies that the 11 handler registration files,
    1377-line handlers.yaml, and dozens of proto files stay in sync
 4. **String-typed enums**: handlers.yaml `type: enum` with `values: [...]`
    provides no link to the proto enum type it represents,
@@ -265,7 +265,7 @@ The migration from handlers.yaml to proto-derived schema should be incremental:
 
 1. **Phase 1**: Add proto type fields to `HandlerMetadata`, keep handlers.yaml as-is
 2. **Phase 2**: Add contract test that compares handlers.yaml against proto-derived schema (catches existing drift)
-3. **Phase 3**: Annotate all 10 `starlark.go` files with proto types + saga metadata
+3. **Phase 3**: Annotate all 11 handler registration files with proto types + saga metadata
 4. **Phase 4**: Switch `BuildServiceModules()` to use `DeriveSchema()` instead of `schema.Parse()`
 5. **Phase 5**: Delete handlers.yaml, remove `//go:embed handlers.yaml`
 
@@ -278,20 +278,18 @@ may surface existing drift that needs fixing before Phase 4.
 
 - Extend `saga.HandlerMetadata` with `Compensate`, `Description`, `ProtoRequestType`, `ProtoResponseType`, `ParamOverrides`
 - Implement `DeriveSchema()` using proto reflection (`protoreflect` package)
-- Annotate all 10 `services/*/client/starlark.go` files with proto type references
+- Annotate all 11 handler registration files with proto type references
 - Move `compensate:` and `compensation_strategy:` from handlers.yaml to Go registrations
 - Contract test asserting proto-handler alignment
 - Enum prefix stripping logic for Starlark-friendly enum values
 - Handle `ParamOverride` cases: aliases, derived params, deprecated params
-- Delete handlers.yaml and the `//go:embed` directive
+- Delete both `handlers.yaml` files (platform + control-plane) and
+  their `//go:embed` directives
 - Update `BuildServiceModules()` to use derived schema
 
 ### 3.2 Out of Scope
 
 - Saga handler RBAC (which handlers a saga can invoke) — separate concern, separate PRD
-- Control-plane `handlers.yaml`
-  (`services/control-plane/internal/applier/handlers.yaml`) —
-  this is for manifest apply, not saga execution; address separately
 - Handler versioning and conversion rules — preserve existing
   `version`/`conversions` support; migration of these to Go is deferred
 - Proto-to-Starlark code generation (full codegen approach) —
@@ -314,6 +312,7 @@ may surface existing drift that needs fixing before Phase 4.
 | market-information | `services/market-information/client/starlark.go` | 3 |
 | reference-data | `services/reference-data/client/starlark.go` | 5 |
 | internal-account | `services/internal-account/client/starlark.go` | 3 |
+| control-plane (manifest) | `services/control-plane/internal/applier/handlers.go` | 7 |
 
 ## 4. Non-Functional Requirements
 
@@ -376,7 +375,7 @@ than maintained as a separate YAML file.
 ## 7. Success Criteria
 
 1. handlers.yaml is deleted from the codebase
-2. All 10 `starlark.go` files carry proto type annotations
+2. All 11 handler registration files carry proto type annotations
 3. Contract test runs in CI and fails on proto-handler drift
 4. All existing Starlark scripts pass without modification
 5. `BuildServiceModules()` produces identical service modules from derived schema
@@ -387,7 +386,7 @@ than maintained as a separate YAML file.
 ```text
 Phase 1: Extend HandlerMetadata (foundation)
     └── Phase 2: Contract test comparing handlers.yaml vs proto (safety net)
-        ├── Phase 3: Annotate starlark.go files (10 services, parallelisable)
+        ├── Phase 3: Annotate handler files (11 services, parallelisable)
         └── Phase 4: Implement DeriveSchema() + switch BuildServiceModules()
             └── Phase 5: Delete handlers.yaml
 ```
