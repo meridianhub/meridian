@@ -90,7 +90,9 @@ import (
 	refregistry "github.com/meridianhub/meridian/services/reference-data/registry"
 	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
 	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
 	tenantservice "github.com/meridianhub/meridian/services/tenant/service"
+	tenantworker "github.com/meridianhub/meridian/services/tenant/worker"
 
 	// Gateway
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
@@ -103,6 +105,7 @@ import (
 	"github.com/meridianhub/meridian/services"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
@@ -213,6 +216,7 @@ func connectPgxPool(ctx context.Context, dsn string, logger *slog.Logger) (*pgxp
 	return pool, nil
 }
 
+//nolint:gocyclo // Sequential initialization steps; splitting would obscure startup order.
 func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	ctx := context.Background()
 
@@ -273,6 +277,16 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		return err
 	}
 
+	// ─── Provisioning Worker (optional) ─────────────────────────────────
+
+	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, conns.gormDB("tenant"), logger)
+	if err != nil {
+		return fmt.Errorf("provisioning worker: %w", err)
+	}
+	if provisionerCleanup != nil {
+		defer provisionerCleanup()
+	}
+
 	// ─── Start gRPC Server ───────────────────────────────────────────────
 
 	grpcAddr := fmt.Sprintf(":%d", grpcPort)
@@ -324,6 +338,12 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		return fmt.Errorf("gRPC server: %w", err)
 	case err := <-gatewayErrors:
 		return fmt.Errorf("gateway server: %w", err)
+	}
+
+	// Stop provisioning worker first (drains in-flight work)
+	if provisioningWorker != nil {
+		provisioningWorker.Stop()
+		logger.Info("provisioning worker stopped")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -550,6 +570,60 @@ func wireTenant(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	tenantv1.RegisterTenantServiceServer(server, svc)
 	logger.Info("registered tenant service")
 	return nil
+}
+
+// startProvisioningWorker initializes the tenant schema provisioning worker when
+// SCHEMA_PROVISIONING_ENABLED=true. It returns the worker (for graceful Stop)
+// and a cleanup function that closes provisioner database connections.
+// When provisioning is disabled both return values are nil.
+func startProvisioningWorker(ctx context.Context, platformDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
+	if env.GetEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false") != "true" {
+		logger.Info("provisioning worker disabled",
+			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
+		return nil, nil, nil
+	}
+
+	// Create provisioner with default config (reads service DB URLs from env).
+	config := tenantprovisioner.DefaultConfig()
+	prov, err := tenantprovisioner.NewPostgresProvisioner(platformDB, config)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create schema provisioner: %w", err)
+	}
+
+	logger.Info("schema provisioner initialized",
+		"services", len(config.Services),
+		"provisioning_timeout", config.ProvisioningTimeout)
+
+	// Build worker config from environment (mirrors standalone tenant service).
+	repo := tenantpersistence.NewRepository(platformDB)
+	w, err := tenantworker.NewProvisioningWorker(
+		repo,
+		prov,
+		tenantworker.Config{
+			PollInterval:   env.GetEnvAsDuration("PROVISIONING_WORKER_POLL_INTERVAL", 10*time.Second),
+			MaxRetries:     env.GetEnvAsInt("PROVISIONING_MAX_RETRIES", 5),
+			RetryBaseDelay: env.GetEnvAsDuration("PROVISIONING_RETRY_BASE_DELAY", 2*time.Second),
+			RetryMaxDelay:  env.GetEnvAsDuration("PROVISIONING_RETRY_MAX_DELAY", defaults.DefaultMaxRetryInterval),
+			MaxConcurrent:  env.GetEnvAsInt("PROVISIONING_MAX_CONCURRENT", 5),
+		},
+		logger,
+	)
+	if err != nil {
+		// Close provisioner connections on worker creation failure.
+		_ = prov.Close()
+		return nil, nil, fmt.Errorf("create provisioning worker: %w", err)
+	}
+
+	go w.Start(ctx)
+	logger.Info("provisioning worker started")
+
+	cleanup := func() {
+		if closeErr := prov.Close(); closeErr != nil {
+			logger.Error("failed to close provisioner connections", "error", closeErr)
+		}
+	}
+
+	return w, cleanup, nil
 }
 
 // registryAccountTypeLoader adapts accounttype.PostgresRegistry to cache.AccountTypeLoader.
