@@ -201,16 +201,15 @@ func collectDeprecatedHandlers(schemaRegistry *schema.Registry) map[string]depre
 func applyHandlerConversion(script string, oldName string, info deprecatedInfo) string {
 	oldCall := oldName + "("
 	newCall := info.currentName + "("
-	hasParamMapping := info.rule != nil && len(info.rule.ParamMapping) > 0
-
-	if !hasParamMapping {
-		return strings.ReplaceAll(script, oldCall, newCall)
-	}
-
-	// Build reverse mapping: old param name -> new param name
-	reverseMapping := make(map[string]string, len(info.rule.ParamMapping))
-	for newParam, oldParam := range info.rule.ParamMapping {
-		reverseMapping[oldParam] = newParam
+	// Build reverse mapping: old param name -> new param name.
+	// Empty when no param mapping exists — handler name is still replaced
+	// using the string/comment-aware loop below to avoid modifying literals.
+	var reverseMapping map[string]string
+	if info.rule != nil && len(info.rule.ParamMapping) > 0 {
+		reverseMapping = make(map[string]string, len(info.rule.ParamMapping))
+		for newParam, oldParam := range info.rule.ParamMapping {
+			reverseMapping[oldParam] = newParam
+		}
 	}
 
 	// Process each occurrence of the deprecated call, replacing handler name
@@ -231,8 +230,10 @@ func applyHandlerConversion(script string, oldName string, info deprecatedInfo) 
 
 		// Find the matching closing paren, tracking nesting depth
 		callBody, rest := extractCallBody(remaining)
-		// Rename top-level kwargs within the call body
-		callBody = renameTopLevelKwargs(callBody, reverseMapping)
+		// Rename top-level kwargs within the call body (only when mapping exists)
+		if len(reverseMapping) > 0 {
+			callBody = renameTopLevelKwargs(callBody, reverseMapping)
+		}
 		result.WriteString(callBody)
 		remaining = rest
 	}
