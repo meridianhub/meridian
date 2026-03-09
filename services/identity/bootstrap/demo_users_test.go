@@ -185,3 +185,28 @@ func TestSeedDemoUsers_Idempotent_ExistingUser(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, repo.saveWithRolesCalled, "should not create identity again")
 }
+
+func TestSeedDemoUsers_ReconcilesRole_ExistingUserMissingRole(t *testing.T) {
+	t.Setenv("DEMO_OPERATOR_EMAIL", "operator@volterra.energy")
+	t.Setenv("DEMO_OPERATOR_PASSWORD", "demo2026")
+	t.Setenv("DEMO_OPERATOR_TENANT", "volterra")
+
+	repo := newFakeRepo()
+
+	// Pre-seed an identity with no role assignments.
+	identity, err := domain.NewIdentity("operator@volterra.energy")
+	require.NoError(t, err)
+	require.NoError(t, identity.Activate())
+	repo.identities["operator@volterra.energy"] = identity
+
+	err = SeedDemoUsers(context.Background(), repo)
+	require.NoError(t, err)
+
+	// Should NOT have called SaveIdentityWithRoles (user already exists).
+	assert.False(t, repo.saveWithRolesCalled)
+
+	// Should have reconciled the missing role via SaveRoleAssignments.
+	roles := repo.roles[identity.ID()]
+	require.Len(t, roles, 1)
+	assert.Equal(t, domain.RoleOperator, roles[0].Role())
+}
