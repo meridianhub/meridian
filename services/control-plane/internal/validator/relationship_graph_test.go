@@ -297,6 +297,42 @@ func assertNodeExists(t *testing.T, g *RelationshipGraph, id string, nodeType No
 }
 
 // assertEdgeExists checks that an edge with the given source, target, and relationship exists.
+func TestDependents(t *testing.T) {
+	g := &RelationshipGraph{
+		Nodes: []GraphNode{
+			{ID: "instrument:GBP", Type: NodeTypeInstrument},
+			{ID: "instrument:KWH", Type: NodeTypeInstrument},
+			{ID: "account_type:SETTLEMENT", Type: NodeTypeAccountType},
+			{ID: "saga:process_payment", Type: NodeTypeSaga},
+		},
+		Edges: []GraphEdge{
+			{Source: "account_type:SETTLEMENT", Target: "instrument:GBP", Relationship: RelDenominatedIn},
+			{Source: "instrument:KWH", Target: "instrument:GBP", Relationship: RelConverts},
+			{Source: "saga:process_payment", Target: "account_type:SETTLEMENT", Relationship: RelWritesTo},
+		},
+	}
+
+	t.Run("instrument with incoming edges", func(t *testing.T) {
+		deps := g.Dependents("instrument:GBP")
+		assert.Equal(t, []string{"account_type:SETTLEMENT", "instrument:KWH"}, deps)
+	})
+
+	t.Run("account type with incoming edge", func(t *testing.T) {
+		deps := g.Dependents("account_type:SETTLEMENT")
+		assert.Equal(t, []string{"saga:process_payment"}, deps)
+	})
+
+	t.Run("saga with no incoming edges", func(t *testing.T) {
+		deps := g.Dependents("saga:process_payment")
+		assert.Empty(t, deps)
+	})
+
+	t.Run("nonexistent node", func(t *testing.T) {
+		deps := g.Dependents("instrument:EUR")
+		assert.Empty(t, deps)
+	})
+}
+
 func assertEdgeExists(t *testing.T, g *RelationshipGraph, source, target string, rel RelationshipType) {
 	t.Helper()
 	for _, e := range g.Edges {

@@ -2699,3 +2699,213 @@ func TestValidateOrphans_NoGateway_NoWarnings(t *testing.T) {
 		assert.NotEqual(t, "ORPHAN_INSTRUCTION_ROUTE", w.Code)
 	}
 }
+
+// --- Destructive change detection tests ---
+
+func TestValidateDestructiveChanges_RemoveInstrumentUsedByAccountType(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest() // Has GBP instrument used by SETTLEMENT account type
+	curr := validManifest()
+	// Remove GBP instrument (index 0), keep KWH
+	curr.Instruments = curr.Instruments[1:] // Only KWH remains
+	// Remove the account type that references GBP so cross-ref passes
+	// but the destructive check should still fire based on previous manifest
+	curr.AccountTypes = nil
+
+	result := v.Validate(curr, prev)
+	assert.False(t, result.Valid, "should be invalid when removing instrument used by account_type")
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DESTRUCTIVE_INSTRUMENT_REMOVAL" {
+			found = true
+			assert.Contains(t, e.Message, "GBP")
+			assert.Contains(t, e.Message, "account_type:SETTLEMENT")
+			break
+		}
+	}
+	assert.True(t, found, "expected DESTRUCTIVE_INSTRUMENT_REMOVAL error, got: %v", result.Errors)
+}
+
+func TestValidateDestructiveChanges_RemoveAccountTypeWithNoDependents(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	// The SETTLEMENT account type has outgoing edges (denominated_in -> instrument)
+	// but no incoming edges (nothing depends on it in the graph). Removing it should
+	// not produce a destructive error.
+	prev := validManifest()
+	curr := validManifest()
+	curr.AccountTypes = nil
+
+	result := v.Validate(curr, prev)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "DESTRUCTIVE_ACCOUNT_TYPE_REMOVAL", e.Code,
+			"account type with no dependents should not produce destructive error")
+	}
+}
+
+func TestValidateDestructiveChanges_RemoveAccountTypeWithDependents(t *testing.T) {
+	// Test via the relationship graph Dependents method directly, since creating
+	// a saga script that produces dynamic edges requires handler call logging.
+	g := &RelationshipGraph{
+		Nodes: []GraphNode{
+			{ID: "account_type:SETTLEMENT", Type: NodeTypeAccountType, Name: "Settlement"},
+			{ID: "saga:process_payment", Type: NodeTypeSaga, Name: "process_payment"},
+		},
+		Edges: []GraphEdge{
+			{
+				Source:       "saga:process_payment",
+				Target:       "account_type:SETTLEMENT",
+				Relationship: RelWritesTo,
+				IsDynamic:    true,
+			},
+		},
+	}
+
+	dependents := g.Dependents("account_type:SETTLEMENT")
+	assert.Equal(t, []string{"saga:process_payment"}, dependents,
+		"SETTLEMENT should have saga:process_payment as dependent")
+}
+
+func TestValidateDestructiveChanges_RemoveSagaWithNoSubscriptions(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest()
+	curr := validManifest()
+	curr.Sagas = nil // Remove the saga
+
+	result := v.Validate(curr, prev)
+	// Removing a saga with no active subscriptions should succeed
+	// (other validation errors may occur, but no DESTRUCTIVE_SAGA_REMOVAL)
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "DESTRUCTIVE_SAGA_REMOVAL", e.Code,
+			"should not produce DESTRUCTIVE_SAGA_REMOVAL for saga with no dependents")
+	}
+}
+
+func TestValidateDestructiveChanges_RemoveUnusedInstrument(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest()
+	// Add an unused instrument to the previous manifest
+	prev.Instruments = append(prev.Instruments, &controlplanev1.InstrumentDefinition{
+		Code: "EUR",
+		Name: "Euro",
+		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Dimensions: &controlplanev1.InstrumentDimensions{
+			Unit:      "EUR",
+			Precision: 2,
+		},
+	})
+
+	curr := validManifest() // Does not have EUR
+
+	result := v.Validate(curr, prev)
+	// Should not produce destructive error for unused instrument
+	for _, e := range result.Errors {
+		if e.Code == "DESTRUCTIVE_INSTRUMENT_REMOVAL" {
+			assert.NotContains(t, e.Message, "EUR",
+				"should not flag removal of unused instrument EUR")
+		}
+	}
+}
+
+func TestValidateDestructiveChanges_AddNewResourcesNeverTriggersWarning(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest()
+	curr := validManifest()
+	// Add new resources
+	curr.Instruments = append(curr.Instruments, &controlplanev1.InstrumentDefinition{
+		Code: "EUR",
+		Name: "Euro",
+		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Dimensions: &controlplanev1.InstrumentDimensions{
+			Unit:      "EUR",
+			Precision: 2,
+		},
+	})
+	curr.AccountTypes = append(curr.AccountTypes, &controlplanev1.AccountTypeDefinition{
+		Code:               "REVENUE",
+		Name:               "Revenue Account",
+		NormalBalance:      controlplanev1.NormalBalance_NORMAL_BALANCE_CREDIT,
+		AllowedInstruments: []string{"GBP"},
+		Policies: &controlplanev1.AccountTypePolicies{
+			Validation: "amount > 0",
+		},
+	})
+
+	result := v.Validate(curr, prev)
+	for _, e := range result.Errors {
+		assert.NotContains(t, e.Code, "DESTRUCTIVE_",
+			"adding new resources should never trigger destructive warnings")
+	}
+}
+
+func TestValidateDestructiveChanges_ForceOverrideBypassesChecks(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest()
+	curr := validManifest()
+	curr.Instruments = curr.Instruments[1:] // Remove GBP
+	curr.AccountTypes = nil                 // Remove account types
+
+	result := v.Validate(curr, prev, WithForceDestructiveChanges())
+	// With force, destructive errors become warnings
+	for _, e := range result.Errors {
+		assert.NotContains(t, e.Code, "DESTRUCTIVE_",
+			"force override should convert destructive errors to warnings")
+	}
+
+	// Verify they appear as warnings instead
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w.Code, "DESTRUCTIVE_") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "force override should produce destructive warnings, not errors")
+}
+
+func TestValidateDestructiveChanges_NilPreviousNoCheck(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	result := v.Validate(validManifest(), nil)
+	for _, e := range result.Errors {
+		assert.NotContains(t, e.Code, "DESTRUCTIVE_",
+			"nil previous manifest should never trigger destructive checks")
+	}
+}
+
+func TestValidateDestructiveChanges_RemoveInstrumentUsedByValuationRule(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest() // Has KWH->GBP valuation rule
+	curr := validManifest()
+	// Remove KWH instrument (index 1)
+	curr.Instruments = curr.Instruments[:1] // Only GBP remains
+	// Remove valuation rules that reference KWH
+	curr.ValuationRules = nil
+
+	result := v.Validate(curr, prev)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DESTRUCTIVE_INSTRUMENT_REMOVAL" && strings.Contains(e.Message, "KWH") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected DESTRUCTIVE_INSTRUMENT_REMOVAL for KWH used in valuation rule, got: %v", result.Errors)
+}

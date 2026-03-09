@@ -96,6 +96,24 @@ func (g *RelationshipGraph) Impact(nodeID string) *ImpactResult {
 	}
 }
 
+// Dependents returns nodes that depend on the given node ID (i.e., nodes that reference it
+// via incoming edges where nodeID is the target). This is distinct from Impact which considers
+// all connected edges. Dependents answers "what breaks if I remove this node?"
+func (g *RelationshipGraph) Dependents(nodeID string) []string {
+	seen := make(map[string]bool)
+	for _, edge := range g.Edges {
+		if edge.Target == nodeID && edge.Source != nodeID {
+			seen[edge.Source] = true
+		}
+	}
+	nodes := make([]string, 0, len(seen))
+	for n := range seen {
+		nodes = append(nodes, n)
+	}
+	sort.Strings(nodes)
+	return nodes
+}
+
 // ExtractRelationshipGraph builds a relationship graph from a manifest and Starlark handler call logs.
 // The callLogs map is keyed by saga name, with each value being the handler calls made by that saga's script.
 // Returns a graph containing nodes (instruments, account_types, sagas, handlers) and edges
