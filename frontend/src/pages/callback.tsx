@@ -56,6 +56,7 @@ export function CallbackPage() {
     if (!validation.valid) return
 
     const { code, verifier } = validation
+    const controller = new AbortController()
 
     // Clean up PKCE values from sessionStorage (side effect belongs here, not in useMemo)
     sessionStorage.removeItem(PKCE_STATE_KEY)
@@ -75,6 +76,7 @@ export function CallbackPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: body.toString(),
+          signal: controller.signal,
         })
 
         if (!response.ok) {
@@ -92,12 +94,14 @@ export function CallbackPage() {
 
         login(token)
         navigate('/', { replace: true })
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
         setExchangeError('Unable to reach identity provider')
       }
     }
 
     void exchangeCode()
+    return () => controller.abort()
   }, [validation, login, navigate])
 
   const error = validation.valid ? exchangeError : validation.error
