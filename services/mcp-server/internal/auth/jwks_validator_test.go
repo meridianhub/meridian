@@ -87,11 +87,19 @@ func TestNewJWKSBearerValidator_EmptyURL(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestNewJWKSBearerValidator_UnreachableURL verifies that a failed initial
-// JWKS fetch returns an error.
+// TestNewJWKSBearerValidator_UnreachableURL verifies that construction
+// succeeds (lazy loading) but validation fails when the JWKS endpoint
+// is unreachable.
 func TestNewJWKSBearerValidator_UnreachableURL(t *testing.T) {
-	_, err := auth.NewJWKSBearerValidator(context.Background(), "http://127.0.0.1:0/keys")
-	require.Error(t, err)
+	validator, err := auth.NewJWKSBearerValidator(context.Background(), "http://127.0.0.1:0/keys")
+	require.NoError(t, err, "construction should succeed with lazy key loading")
+	t.Cleanup(func() { _ = validator.Close() })
+
+	key := generateTestRSAKey(t)
+	token := signToken(t, key, "unreachable-kid")
+
+	err = validator.ValidateBearer(token)
+	require.Error(t, err, "validation should fail when JWKS endpoint is unreachable")
 }
 
 // TestJWKSBearerValidator_ValidToken verifies that a validly-signed JWT is accepted.
