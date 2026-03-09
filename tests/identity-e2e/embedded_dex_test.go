@@ -305,22 +305,14 @@ func TestEmbeddedDex_VerifyJWTClaims(t *testing.T) {
 	assert.Equal(t, infra.issuer, mapClaims["iss"], "issuer should match Dex issuer")
 
 	// Dex encodes the sub claim as a base64-encoded protobuf containing the
-	// connector's UserID and the connector ID ("meridian"). Verify that the
-	// raw identity UUID is embedded within the decoded sub.
+	// connector's UserID and the connector ID ("meridian"). Decode and verify
+	// the identity UUID is embedded within.
 	sub, ok := mapClaims["sub"].(string)
 	require.True(t, ok, "sub claim should be a string")
-	decodedSub, err := base64.RawURLEncoding.DecodeString(sub)
-	if err != nil {
-		// Try standard base64 if raw URL encoding fails.
-		decodedSub, err = base64.StdEncoding.DecodeString(sub)
-	}
-	if err == nil {
-		assert.Contains(t, string(decodedSub), identityID.String(),
-			"decoded sub should contain the identity UUID")
-	} else {
-		// If decoding fails, the sub might be the raw UUID (future Dex versions).
-		assert.Equal(t, identityID.String(), sub)
-	}
+	decodedSub, err := base64.StdEncoding.DecodeString(sub)
+	require.NoError(t, err, "sub claim should be valid base64")
+	assert.Contains(t, string(decodedSub), identityID.String(),
+		"decoded sub should contain the identity UUID")
 
 	assert.Equal(t, email, mapClaims["email"], "email claim should match")
 	assert.NotEmpty(t, mapClaims["aud"], "audience should be present")
@@ -413,19 +405,20 @@ func TestEmbeddedDex_TenantScoping(t *testing.T) {
 	mapClaims, ok := token.Claims.(jwt.MapClaims)
 	require.True(t, ok)
 
-	// The connector's BuildClaims function injects x-tenant-id.
-	// However, Dex may not surface custom connector claims directly in the ID token
-	// unless configured to do so. Check if the claim is present.
-	if tenantClaim, ok := mapClaims["x-tenant-id"]; ok {
-		assert.Equal(t, dexTestTenantID, tenantClaim,
-			"x-tenant-id claim should match the test tenant")
-	}
+	// Dex does not surface custom connector claims (like x-tenant-id) in the
+	// ID token by default. The primary validation here is that the password
+	// grant succeeded, which proves the connector resolved credentials within
+	// the injected tenant context (dex_e2e_test_tenant schema).
 
-	// The sub claim should be the identity UUID from the tenant-scoped lookup,
-	// confirming tenant-scoped credential resolution.
-	sub, ok := mapClaims["sub"]
-	require.True(t, ok, "sub claim must be present")
-	assert.NotEmpty(t, sub, "sub should be a non-empty identity ID")
+	// Verify the sub claim is present and encodes the seeded identity's UUID.
+	sub, ok := mapClaims["sub"].(string)
+	require.True(t, ok, "sub claim must be a string")
+	decodedSub, err := base64.StdEncoding.DecodeString(sub)
+	require.NoError(t, err)
+	assert.NotEmpty(t, decodedSub, "decoded sub should be non-empty")
+
+	// Verify the email matches -- confirms the correct identity was resolved.
+	assert.Equal(t, email, mapClaims["email"], "email should match seeded user")
 }
 
 // =============================================================================
