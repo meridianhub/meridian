@@ -1344,10 +1344,10 @@ handlers:
         type: string
         required: true
         description: "Human-readable account name"
-      account_type:
+      product_type_code:
         type: string
         required: true
-        description: "Account type (CLEARING, NOSTRO, etc.)"
+        description: "Product type code from the Product Directory (e.g., CLEARING, NOSTRO)"
       instrument_code:
         type: string
         required: true
@@ -1366,9 +1366,9 @@ handlers:
       name:
         type: string
         description: "Echo of account name"
-      account_type:
+      behavior_class:
         type: string
-        description: "Echo of account type"
+        description: "Behavior class derived from product type (e.g., NOSTRO, CLEARING)"
       status:
         type: string
         description: "Account status (ACTIVE)"
