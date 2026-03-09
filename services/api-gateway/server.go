@@ -33,6 +33,7 @@ type Server struct {
 	transcoderHandler     http.Handler
 	eventStreamHandler    *eventstream.Handler
 	rawEventStreamHandler http.Handler // used by tests and WithEventStreamHandlerHTTP
+	dexHandler            http.Handler
 	versionInfo           *VersionInfo
 }
 
@@ -76,6 +77,15 @@ func WithEventStreamHandler(handler *eventstream.Handler) ServerOption {
 func WithEventStreamHandlerHTTP(handler http.Handler) ServerOption {
 	return func(s *Server) {
 		s.rawEventStreamHandler = handler
+	}
+}
+
+// WithDexHandler sets the Dex OIDC handler to be mounted at /dex/*.
+// The handler is mounted WITHOUT auth or tenant middleware since Dex
+// manages its own authentication flows.
+func WithDexHandler(handler http.Handler) ServerOption {
+	return func(s *Server) {
+		s.dexHandler = handler
 	}
 }
 
@@ -164,6 +174,14 @@ func (s *Server) registerRoutes() {
 		apiHandler = NewProxyHandler(s.config.Backends)
 	default:
 		apiHandler = http.HandlerFunc(s.handleAPI)
+	}
+
+	// Dex OIDC endpoints - NO auth/tenant middleware.
+	// Dex manages its own authentication flows (login forms, token issuance, etc.).
+	// Must be registered BEFORE the "/" catch-all to take precedence.
+	// No StripPrefix: Dex includes the issuer path (/dex) in its internal routing.
+	if s.dexHandler != nil {
+		s.mux.Handle("/dex/", s.dexHandler)
 	}
 
 	// Build middleware chain: auth → tenant → tenant_authz → transcoder/proxy
