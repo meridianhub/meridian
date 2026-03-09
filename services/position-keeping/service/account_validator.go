@@ -462,10 +462,12 @@ type CompositeAccountValidator struct {
 	internalAccountValidator *InternalAccountValidator
 	logger                   *slog.Logger
 
-	// resolvedDomains caches the resolved service domain for each account ID.
-	// Populated during ValidateExists, read by ResolveServiceDomain.
-	resolvedMu      sync.RWMutex
-	resolvedDomains map[string]AccountServiceDomain
+	// lastResolved stores the most recently resolved domain from ValidateExists.
+	// Read by ResolveServiceDomain in the same request flow.
+	// Thread-safe: protected by mutex for concurrent access.
+	resolvedMu          sync.RWMutex
+	lastResolvedAccount string
+	lastResolvedDomain  AccountServiceDomain
 }
 
 // CompositeAccountValidatorConfig holds configuration for creating a CompositeAccountValidator.
@@ -496,7 +498,6 @@ func NewCompositeAccountValidator(cfg CompositeAccountValidatorConfig) (*Composi
 		currentAccountValidator:  cfg.CurrentAccountValidator,
 		internalAccountValidator: cfg.InternalAccountValidator,
 		logger:                   cfg.Logger,
-		resolvedDomains:          make(map[string]AccountServiceDomain),
 	}, nil
 }
 
@@ -558,17 +559,21 @@ func (v *CompositeAccountValidator) ValidateExists(ctx context.Context, accountI
 }
 
 // ResolveServiceDomain returns the AccountServiceDomain for a previously validated account.
-// Returns AccountServiceDomainUnspecified if the account was not validated or if the
-// domain could not be determined (e.g., graceful degradation).
+// Returns AccountServiceDomainUnspecified if the account was not validated, if the
+// domain could not be determined, or if a different account was validated since.
 func (v *CompositeAccountValidator) ResolveServiceDomain(_ context.Context, accountID string) AccountServiceDomain {
 	v.resolvedMu.RLock()
 	defer v.resolvedMu.RUnlock()
-	return v.resolvedDomains[accountID]
+	if v.lastResolvedAccount == accountID {
+		return v.lastResolvedDomain
+	}
+	return AccountServiceDomainUnspecified
 }
 
-// setResolvedDomain caches the resolved service domain for an account.
+// setResolvedDomain stores the resolved service domain for the most recent validation.
 func (v *CompositeAccountValidator) setResolvedDomain(accountID string, domain AccountServiceDomain) {
 	v.resolvedMu.Lock()
 	defer v.resolvedMu.Unlock()
-	v.resolvedDomains[accountID] = domain
+	v.lastResolvedAccount = accountID
+	v.lastResolvedDomain = domain
 }

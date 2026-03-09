@@ -8,7 +8,7 @@ import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink } from '@/shared/entity-link'
 import { MoneyDisplay } from '@/shared/money-display'
 
-import type { EntityType } from '@/shared/entity-link'
+import { accountEntityType, type EntityType } from '@/shared/entity-link'
 
 interface LedgerPosting {
   id: string
@@ -150,15 +150,6 @@ export function TransactionsPage() {
       const rawUnits = money?.units
       const amount: bigint = parseUnitsAsBigInt(rawUnits)
 
-      // Map accountServiceDomain enum to EntityLink type for correct routing
-      const accountServiceDomain = p.accountServiceDomain as number | undefined
-      let accountEntityType: EntityType = 'account'
-      if (accountServiceDomain === 2) {
-        accountEntityType = 'internal-account'
-      } else if (accountServiceDomain === 1) {
-        accountEntityType = 'current-account'
-      }
-
       return {
         id: p.id ?? '',
         financialBookingLogId: p.financialBookingLogId ?? '',
@@ -166,7 +157,7 @@ export function TransactionsPage() {
         amount,
         currency,
         accountId: p.accountId ?? '',
-        accountEntityType,
+        accountEntityType: accountEntityType(p.accountServiceDomain as number | undefined),
         valueDate: p.valueDate ?? null,
         createdAt: p.createdAt ?? null,
         status: getStatusName(p.status),

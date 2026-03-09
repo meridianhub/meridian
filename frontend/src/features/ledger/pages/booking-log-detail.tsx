@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay, EntityLink, Breadcrumbs } from '@/shared'
+import { accountEntityType } from '@/shared/entity-link'
 import { MoneyDisplay } from '@/shared/money-display'
 import {
   Table,
@@ -85,7 +86,7 @@ const postingColumns: ColumnDef<LedgerPosting>[] = [
     accessorKey: 'accountId',
     header: 'Account',
     cell: ({ row }) => (
-      <EntityLink type={row.original.accountServiceDomain === 2 ? 'internal-account' : row.original.accountServiceDomain === 1 ? 'current-account' : 'account'} id={row.original.accountId} />
+      <EntityLink type={accountEntityType(row.original.accountServiceDomain)} id={row.original.accountId} />
     ),
   },
   {
