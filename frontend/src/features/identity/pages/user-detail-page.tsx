@@ -67,6 +67,8 @@ export function UserDetailPage() {
   function openAction(type: 'suspend' | 'reactivate') {
     setActionType(type)
     setReason('')
+    suspendIdentity.reset()
+    reactivateIdentity.reset()
     setActionDialogOpen(true)
   }
 

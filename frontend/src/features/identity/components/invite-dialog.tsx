@@ -25,14 +25,16 @@ export function InviteDialog({ open, onOpenChange, currentUserRoles }: InviteDia
   const [errors, setErrors] = React.useState<{ email?: string }>({})
 
   const grantableRoles = getGrantableRoles(currentUserRoles)
+  const defaultRole = grantableRoles[0] ?? Role.OPERATOR
 
   React.useEffect(() => {
     if (!open) {
       setEmail('')
-      setRole(Role.OPERATOR)
+      setRole(defaultRole)
       setErrors({})
+      inviteUser.reset()
     }
-  }, [open])
+  }, [open, defaultRole]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function validate(): boolean {
     const newErrors: { email?: string } = {}

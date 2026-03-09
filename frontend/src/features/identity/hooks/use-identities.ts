@@ -1,29 +1,38 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
 import { platformKeys } from '@/lib/query-keys'
-import type { IdentityStatus, Role } from '@/api/gen/meridian/identity/v1/identity_pb'
+import type { Role } from '@/api/gen/meridian/identity/v1/identity_pb'
+import { IdentityStatus } from '@/api/gen/meridian/identity/v1/identity_pb'
 
 export function useIdentities() {
   const { identity } = useApiClients()
 
   return {
     queryKey: platformKeys.identities(),
-    queryFn: async (params: {
+    queryFn: async (_params: {
       pageToken?: string
       pageSize: number
       filters?: Record<string, string>
     }) => {
-      const statusFilter = params.filters?.statusFilter
-        ? (Number(params.filters.statusFilter) as IdentityStatus)
-        : undefined
+      // Backend does not yet support pagination or status filtering.
+      // Pass zeros to avoid Unimplemented error.
       const response = await identity.listIdentities({
-        pageSize: params.pageSize,
-        pageToken: params.pageToken ?? '',
-        statusFilter: statusFilter ?? 0,
+        pageSize: 0,
+        pageToken: '',
+        statusFilter: IdentityStatus.UNSPECIFIED,
       })
+
+      // Client-side status filtering until backend implements it
+      let items = response.identities ?? []
+      const statusFilterValue = _params.filters?.statusFilter
+      if (statusFilterValue) {
+        const filterNum = Number(statusFilterValue)
+        items = items.filter((i) => i.status === filterNum)
+      }
+
       return {
-        items: response.identities ?? [],
-        nextPageToken: response.nextPageToken || undefined,
+        items,
+        nextPageToken: undefined,
       }
     },
   }
