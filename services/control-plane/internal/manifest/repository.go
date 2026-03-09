@@ -31,15 +31,16 @@ const (
 
 // VersionEntity represents a row in the manifest_versions table.
 type VersionEntity struct {
-	ID           uuid.UUID   `gorm:"column:id;type:uuid;primaryKey"`
-	Version      string      `gorm:"column:version;type:varchar(50);not null"`
-	ManifestJSON string      `gorm:"column:manifest_json;type:jsonb;not null"`
-	AppliedAt    time.Time   `gorm:"column:applied_at;not null"`
-	AppliedBy    string      `gorm:"column:applied_by;type:varchar(255);not null"`
-	ApplyStatus  ApplyStatus `gorm:"column:apply_status;type:varchar(20);not null"`
-	ApplyJobID   *uuid.UUID  `gorm:"column:apply_job_id;type:uuid"`
-	DiffSummary  *string     `gorm:"column:diff_summary;type:text"`
-	CreatedAt    time.Time   `gorm:"column:created_at;not null"`
+	ID                uuid.UUID   `gorm:"column:id;type:uuid;primaryKey"`
+	Version           string      `gorm:"column:version;type:varchar(50);not null"`
+	ManifestJSON      string      `gorm:"column:manifest_json;type:jsonb;not null"`
+	AppliedAt         time.Time   `gorm:"column:applied_at;not null"`
+	AppliedBy         string      `gorm:"column:applied_by;type:varchar(255);not null"`
+	ApplyStatus       ApplyStatus `gorm:"column:apply_status;type:varchar(20);not null"`
+	ApplyJobID        *uuid.UUID  `gorm:"column:apply_job_id;type:uuid"`
+	DiffSummary       *string     `gorm:"column:diff_summary;type:text"`
+	RelationshipGraph *string     `gorm:"column:relationship_graph;type:jsonb"`
+	CreatedAt         time.Time   `gorm:"column:created_at;not null"`
 }
 
 // TableName returns the table name for GORM.

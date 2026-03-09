@@ -178,14 +178,14 @@ func (h *ApplyManifestHandler) ApplyManifest(
 		logger.Error("execution failed", "error", execResult.err)
 		response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED
 
-		// Record failed apply in history
-		h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusFailed)
+		// Record failed apply in history (no graph for failed applies)
+		h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusFailed, nil)
 		return response, nil //nolint:nilerr // error conveyed via response status, not gRPC error
 	}
 
 	// Step 5: Record history
 	logger.Info("step 5: recording manifest history")
-	snapshot := h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusApplied)
+	snapshot := h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusApplied, validationResult.graph)
 	if snapshot != nil {
 		response.Snapshot = snapshot
 	}
@@ -208,6 +208,7 @@ type validationOutput struct {
 	valid      bool
 	errors     []*controlplanev1.ValidationError
 	stepResult *controlplanev1.StepResult
+	graph      *validator.RelationshipGraph
 }
 
 // validate runs the manifest validator and returns structured results.
@@ -259,6 +260,7 @@ func (h *ApplyManifestHandler) validate(
 		valid:      result.Valid,
 		errors:     protoErrors,
 		stepResult: step,
+		graph:      result.Graph,
 	}
 }
 
@@ -418,6 +420,7 @@ func (h *ApplyManifestHandler) recordHistory(
 	appliedBy string,
 	jobID string,
 	applyStatus manifest.ApplyStatus,
+	graph *validator.RelationshipGraph,
 ) *controlplanev1.ManifestVersion {
 	if h.historyService == nil {
 		return nil
@@ -431,7 +434,7 @@ func (h *ApplyManifestHandler) recordHistory(
 		}
 	}
 
-	entity, err := h.historyService.StoreManifestVersion(ctx, mf, appliedBy, jobUUID, applyStatus)
+	entity, err := h.historyService.StoreManifestVersion(ctx, mf, appliedBy, jobUUID, applyStatus, graph)
 	if err != nil {
 		h.logger.Error("failed to record manifest history", "error", err)
 		return nil

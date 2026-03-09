@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -34,6 +35,7 @@ type ManifestApplier interface {
 // ManifestHistorian is the minimal interface for querying manifest version history.
 type ManifestHistorian interface {
 	ListManifestVersions(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error)
+	GetCurrentManifest(ctx context.Context, req *controlplanev1.GetCurrentManifestRequest) (*controlplanev1.GetCurrentManifestResponse, error)
 }
 
 // EconomyDeps holds all service clients used by economy design tools.
@@ -56,6 +58,7 @@ func RegisterEconomyTools(registry *Registry, sess PlanStore, deps EconomyDeps) 
 	}
 	if deps.Historian != nil {
 		candidates = append(candidates, buildManifestHistoryTool(deps.Historian))
+		candidates = append(candidates, buildEconomyGraphTool(deps.Historian))
 	}
 
 	for _, t := range candidates {
@@ -503,4 +506,248 @@ func canonicalManifestBytes(m *controlplanev1.Manifest) ([]byte, error) {
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// buildEconomyGraphTool returns the meridian_economy_graph tool.
+// It returns the full relationship graph (including handler call edges) stored during
+// manifest validation. Falls back to structural-only extraction if no stored graph exists.
+func buildEconomyGraphTool(historian ManifestHistorian) Tool {
+	return Tool{
+		Name:     "meridian_economy_graph",
+		Category: CategoryRead,
+		Description: "Query the relationship graph between manifest resources for impact analysis. " +
+			"Returns nodes (sagas, handlers, instruments, account_types) and edges " +
+			"(calls_handler, uses_instrument, reads_from, writes_to, denominated_in, converts, triggers_on). " +
+			"Use node_id to get impact analysis showing what resources would be affected by removing a node.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"node_id": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Provide a node ID (e.g., 'instrument:GBP', 'handler:position_keeping.initiate_log') to get impact analysis for removing that node.",
+				},
+				"node_type": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Filter nodes by type.",
+					"enum":        []interface{}{"saga", "handler", "instrument", "account_type"},
+				},
+				"relationship": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Filter edges by relationship type.",
+					"enum":        []interface{}{"calls_handler", "uses_instrument", "reads_from", "writes_to", "denominated_in", "converts", "triggers_on"},
+				},
+			},
+		},
+		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+			return handleEconomyGraph(ctx, historian, params)
+		},
+	}
+}
+
+// economyGraphParams holds parsed parameters for meridian_economy_graph.
+type economyGraphParams struct {
+	NodeID       string `json:"node_id"`
+	NodeType     string `json:"node_type"`
+	Relationship string `json:"relationship"`
+}
+
+// graphNode is the serialization format for graph nodes in tool responses.
+type graphNode struct {
+	ID       string            `json:"id"`
+	Type     string            `json:"type"`
+	Name     string            `json:"name"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// graphEdge is the serialization format for graph edges in tool responses.
+type graphEdge struct {
+	Source       string `json:"source"`
+	Target       string `json:"target"`
+	Relationship string `json:"relationship"`
+	IsDynamic    bool   `json:"is_dynamic,omitempty"`
+	Location     string `json:"location,omitempty"`
+}
+
+// storedGraph is the deserialization target for the JSONB relationship graph stored with manifest versions.
+type storedGraph struct {
+	Nodes []graphNode `json:"nodes"`
+	Edges []graphEdge `json:"edges"`
+}
+
+// handleEconomyGraph retrieves the relationship graph from the stored manifest version.
+// Prefers the full graph (including handler edges) stored during validation.
+// Falls back to structural-only extraction if no stored graph is available.
+func handleEconomyGraph(ctx context.Context, historian ManifestHistorian, params json.RawMessage) (interface{}, error) {
+	var p economyGraphParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+
+	// Get current applied manifest version
+	currentResp, err := historian.GetCurrentManifest(ctx, &controlplanev1.GetCurrentManifestRequest{})
+	if err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+	if currentResp.Version == nil || currentResp.Version.Manifest == nil {
+		return map[string]interface{}{
+			"status":  "no_manifest",
+			"message": "no manifest has been applied for this tenant",
+		}, nil
+	}
+
+	version := currentResp.Version
+	allNodes, allEdges := loadGraph(version)
+
+	filteredNodes := filterNodes(allNodes, p.NodeType)
+	filteredEdges := filterEdges(allEdges, p.Relationship)
+
+	result := map[string]interface{}{
+		"node_count": len(filteredNodes),
+		"edge_count": len(filteredEdges),
+		"nodes":      filteredNodes,
+		"edges":      filteredEdges,
+	}
+
+	if p.NodeID != "" {
+		result["impact"] = computeImpact(p.NodeID, allEdges)
+	}
+
+	return result, nil
+}
+
+// loadGraph returns the full relationship graph from the stored version if available,
+// falling back to structural-only extraction from the manifest.
+func loadGraph(version *controlplanev1.ManifestVersion) ([]graphNode, []graphEdge) {
+	if version.RelationshipGraph != nil {
+		var sg storedGraph
+		if err := json.Unmarshal([]byte(*version.RelationshipGraph), &sg); err == nil && len(sg.Nodes) > 0 {
+			return sg.Nodes, sg.Edges
+		}
+	}
+	return extractManifestGraph(version.Manifest)
+}
+
+// filterNodes returns only nodes matching the given type, or all nodes if nodeType is empty.
+func filterNodes(nodes []graphNode, nodeType string) []graphNode {
+	if nodeType == "" {
+		return nodes
+	}
+	filtered := make([]graphNode, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Type == nodeType {
+			filtered = append(filtered, n)
+		}
+	}
+	return filtered
+}
+
+// filterEdges returns only edges matching the given relationship, or all edges if rel is empty.
+func filterEdges(edges []graphEdge, rel string) []graphEdge {
+	if rel == "" {
+		return edges
+	}
+	filtered := make([]graphEdge, 0, len(edges))
+	for _, e := range edges {
+		if e.Relationship == rel {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
+
+// computeImpact calculates which nodes are affected by removing the given node.
+func computeImpact(nodeID string, edges []graphEdge) map[string]interface{} {
+	affected := make(map[string]bool)
+	edgeCount := 0
+	for _, e := range edges {
+		if e.Source == nodeID || e.Target == nodeID {
+			edgeCount++
+			if e.Source == nodeID {
+				affected[e.Target] = true
+			} else {
+				affected[e.Source] = true
+			}
+		}
+	}
+	affectedList := make([]string, 0, len(affected))
+	for n := range affected {
+		affectedList = append(affectedList, n)
+	}
+	sort.Strings(affectedList)
+	return map[string]interface{}{
+		"node_id":        nodeID,
+		"affected_nodes": affectedList,
+		"affected_edges": edgeCount,
+		"summary":        fmt.Sprintf("removing %s affects %d nodes via %d edges", nodeID, len(affectedList), edgeCount),
+	}
+}
+
+// extractManifestGraph builds nodes and edges from manifest structure.
+func extractManifestGraph(m *controlplanev1.Manifest) ([]graphNode, []graphEdge) {
+	nodeCapacity := len(m.GetInstruments()) + len(m.GetAccountTypes()) + len(m.GetSagas())
+	nodes := make([]graphNode, 0, nodeCapacity)
+	edges := make([]graphEdge, 0, nodeCapacity) // rough estimate
+
+	// Instruments
+	for _, inst := range m.GetInstruments() {
+		nodes = append(nodes, graphNode{
+			ID:   "instrument:" + inst.GetCode(),
+			Type: "instrument",
+			Name: inst.GetName(),
+			Metadata: map[string]string{
+				"code": inst.GetCode(),
+				"type": inst.GetType().String(),
+			},
+		})
+	}
+
+	// Account types + denominated_in edges
+	for _, acct := range m.GetAccountTypes() {
+		nodes = append(nodes, graphNode{
+			ID:   "account_type:" + acct.GetCode(),
+			Type: "account_type",
+			Name: acct.GetName(),
+			Metadata: map[string]string{
+				"code":           acct.GetCode(),
+				"normal_balance": acct.GetNormalBalance().String(),
+			},
+		})
+		for _, instCode := range acct.GetAllowedInstruments() {
+			edges = append(edges, graphEdge{
+				Source:       "account_type:" + acct.GetCode(),
+				Target:       "instrument:" + instCode,
+				Relationship: "denominated_in",
+			})
+		}
+	}
+
+	// Valuation rules (converts edges)
+	for _, rule := range m.GetValuationRules() {
+		edges = append(edges, graphEdge{
+			Source:       "instrument:" + rule.GetFromInstrument(),
+			Target:       "instrument:" + rule.GetToInstrument(),
+			Relationship: "converts",
+		})
+	}
+
+	// Sagas + triggers_on edges
+	for i, saga := range m.GetSagas() {
+		sagaID := "saga:" + saga.GetName()
+		nodes = append(nodes, graphNode{
+			ID:   sagaID,
+			Type: "saga",
+			Name: saga.GetName(),
+			Metadata: map[string]string{
+				"trigger": saga.GetTrigger(),
+			},
+		})
+		edges = append(edges, graphEdge{
+			Source:       sagaID,
+			Target:       saga.GetTrigger(),
+			Relationship: "triggers_on",
+			Location:     fmt.Sprintf("sagas[%d].trigger", i),
+		})
+	}
+
+	return nodes, edges
 }

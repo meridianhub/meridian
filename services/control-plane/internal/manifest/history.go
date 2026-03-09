@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/services/control-plane/internal/validator"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -39,12 +41,14 @@ func NewHistoryService(repo *Repository) (*HistoryService, error) {
 
 // StoreManifestVersion saves a manifest snapshot with audit metadata.
 // It generates a diff summary by comparing to the previous applied version.
+// If graph is non-nil, it is serialized as JSON into the relationship_graph column.
 func (s *HistoryService) StoreManifestVersion(
 	ctx context.Context,
 	manifest *controlplanev1.Manifest,
 	appliedBy string,
 	applyJobID *uuid.UUID,
 	status ApplyStatus,
+	graph *validator.RelationshipGraph,
 ) (*VersionEntity, error) {
 	if manifest == nil {
 		return nil, ErrNilManifest
@@ -74,17 +78,28 @@ func (s *HistoryService) StoreManifestVersion(
 		}
 	}
 
+	// Serialize relationship graph if provided.
+	// Serialization failure is non-blocking: the graph is informational.
+	var graphJSON *string
+	if graph != nil {
+		if graphBytes, graphErr := json.Marshal(graph); graphErr == nil {
+			s := string(graphBytes)
+			graphJSON = &s
+		}
+	}
+
 	now := time.Now().UTC()
 	entity := &VersionEntity{
-		ID:           uuid.New(),
-		Version:      manifest.Version,
-		ManifestJSON: string(jsonBytes),
-		AppliedAt:    now,
-		AppliedBy:    appliedBy,
-		ApplyStatus:  status,
-		ApplyJobID:   applyJobID,
-		DiffSummary:  diffSummary,
-		CreatedAt:    now,
+		ID:                uuid.New(),
+		Version:           manifest.Version,
+		ManifestJSON:      string(jsonBytes),
+		AppliedAt:         now,
+		AppliedBy:         appliedBy,
+		ApplyStatus:       status,
+		ApplyJobID:        applyJobID,
+		DiffSummary:       diffSummary,
+		RelationshipGraph: graphJSON,
+		CreatedAt:         now,
 	}
 
 	if err := s.repo.Store(ctx, entity); err != nil {
@@ -169,7 +184,8 @@ func (s *HistoryService) RollbackToVersion(
 	}
 
 	// Store as a new version (forward-only audit trail)
-	return s.StoreManifestVersion(ctx, manifest, appliedBy, applyJobID, ApplyStatusApplied)
+	// Rollbacks don't re-validate, so no graph is available
+	return s.StoreManifestVersion(ctx, manifest, appliedBy, applyJobID, ApplyStatusApplied, nil)
 }
 
 // EntityToProto converts a VersionEntity to its protobuf representation.
@@ -195,6 +211,9 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	}
 	if entity.DiffSummary != nil {
 		mv.DiffSummary = entity.DiffSummary
+	}
+	if entity.RelationshipGraph != nil {
+		mv.RelationshipGraph = entity.RelationshipGraph
 	}
 
 	return mv, nil

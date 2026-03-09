@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,11 +28,27 @@ func (m *mockManifestApplier) ApplyManifest(ctx context.Context, req *controlpla
 }
 
 type mockManifestHistorian struct {
-	listFn func(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error)
+	listFn    func(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error)
+	currentFn func(ctx context.Context, req *controlplanev1.GetCurrentManifestRequest) (*controlplanev1.GetCurrentManifestResponse, error)
 }
 
 func (m *mockManifestHistorian) ListManifestVersions(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
 	return m.listFn(ctx, req)
+}
+
+func (m *mockManifestHistorian) GetCurrentManifest(ctx context.Context, req *controlplanev1.GetCurrentManifestRequest) (*controlplanev1.GetCurrentManifestResponse, error) {
+	if m.currentFn != nil {
+		return m.currentFn(ctx, req)
+	}
+	// Default: derive from listFn for backwards compatibility with existing tests
+	resp, err := m.listFn(ctx, &controlplanev1.ListManifestVersionsRequest{Limit: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Versions) == 0 {
+		return &controlplanev1.GetCurrentManifestResponse{}, nil
+	}
+	return &controlplanev1.GetCurrentManifestResponse{Version: resp.Versions[0]}, nil
 }
 
 // validManifestJSON returns a minimal valid manifest JSON for testing.
@@ -787,10 +804,265 @@ func TestEconomyTools_PartialClients_RegistersAvailable(t *testing.T) {
 	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
 
 	listed := r.List()
-	if len(listed) != 1 {
-		t.Fatalf("expected 1 registered tool, got %d", len(listed))
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 registered tools (history + graph), got %d", len(listed))
 	}
-	if listed[0].Name != "meridian_manifest_history" {
-		t.Errorf("expected meridian_manifest_history, got %q", listed[0].Name)
+	names := make(map[string]bool)
+	for _, tool := range listed {
+		names[tool.Name] = true
+	}
+	if !names["meridian_manifest_history"] {
+		t.Error("expected meridian_manifest_history to be registered")
+	}
+	if !names["meridian_economy_graph"] {
+		t.Error("expected meridian_economy_graph to be registered")
+	}
+}
+
+// --- meridian_economy_graph tests ---
+
+func testManifest() *controlplanev1.Manifest {
+	return &controlplanev1.Manifest{
+		Version: "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{
+			Name:        "Test Economy",
+			Industry:    "energy",
+			Description: "Test",
+		},
+		Instruments: []*controlplanev1.InstrumentDefinition{
+			{
+				Code: "GBP",
+				Name: "British Pound",
+				Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+				Dimensions: &controlplanev1.InstrumentDimensions{
+					Unit: "GBP", Precision: 2,
+				},
+			},
+			{
+				Code: "KWH",
+				Name: "Kilowatt Hour",
+				Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
+				Dimensions: &controlplanev1.InstrumentDimensions{
+					Unit: "kWh", Precision: 3,
+				},
+			},
+		},
+		AccountTypes: []*controlplanev1.AccountTypeDefinition{
+			{
+				Code:               "SETTLEMENT",
+				Name:               "Settlement Account",
+				NormalBalance:      controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT,
+				AllowedInstruments: []string{"GBP"},
+			},
+		},
+		ValuationRules: []*controlplanev1.ValuationRule{
+			{
+				FromInstrument: "KWH",
+				ToInstrument:   "GBP",
+				Method:         controlplanev1.ValuationMethod_VALUATION_METHOD_SPOT_RATE,
+				Source:         "nordpool",
+			},
+		},
+		Sagas: []*controlplanev1.SagaDefinition{
+			{
+				Name:    "process_settlement",
+				Trigger: "api:/v1/settlements",
+				Script:  "x = 1",
+			},
+		},
+	}
+}
+
+func TestEconomyGraph_ReturnsNodesAndEdges(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{
+					{
+						Id:       "v1",
+						Version:  "1.0",
+						Manifest: testManifest(),
+					},
+				},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map, got %T", result)
+	}
+
+	nodeCount, _ := m["node_count"].(int)
+	edgeCount, _ := m["edge_count"].(int)
+
+	if nodeCount < 4 {
+		t.Errorf("expected at least 4 nodes (2 instruments + 1 account_type + 1 saga), got %d", nodeCount)
+	}
+	if edgeCount < 3 {
+		t.Errorf("expected at least 3 edges (denominated_in + converts + triggers_on), got %d", edgeCount)
+	}
+}
+
+func TestEconomyGraph_FilterByNodeType(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{
+					{Id: "v1", Version: "1.0", Manifest: testManifest()},
+				},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{"node_type":"instrument"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+	nodeCount := m["node_count"].(int)
+	if nodeCount != 2 {
+		t.Errorf("expected 2 instrument nodes, got %d", nodeCount)
+	}
+}
+
+func TestEconomyGraph_ImpactAnalysis(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{
+					{Id: "v1", Version: "1.0", Manifest: testManifest()},
+				},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{"node_id":"instrument:GBP"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+	impact, ok := m["impact"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected impact field in response")
+	}
+
+	affectedNodes, ok := impact["affected_nodes"].([]string)
+	if !ok {
+		t.Fatal("expected affected_nodes as []string")
+	}
+
+	// GBP is used by SETTLEMENT (denominated_in) and KWH (converts)
+	if len(affectedNodes) < 2 {
+		t.Errorf("expected at least 2 affected nodes for instrument:GBP, got %d: %v", len(affectedNodes), affectedNodes)
+	}
+}
+
+func TestEconomyGraph_UsesStoredGraph(t *testing.T) {
+	// When a stored relationship graph exists on the manifest version,
+	// the tool should use it (including handler nodes/edges) instead of
+	// rebuilding a structural-only graph from the manifest.
+	storedGraphJSON := `{
+		"nodes": [
+			{"id": "instrument:GBP", "type": "instrument", "name": "GBP"},
+			{"id": "saga:process_settlement", "type": "saga", "name": "process_settlement"},
+			{"id": "handler:position_keeping.initiate_log", "type": "handler", "name": "position_keeping.initiate_log"}
+		],
+		"edges": [
+			{"source": "saga:process_settlement", "target": "handler:position_keeping.initiate_log", "relationship": "calls_handler"},
+			{"source": "saga:process_settlement", "target": "handler:position_keeping.initiate_log", "relationship": "uses_instrument", "is_dynamic": true}
+		]
+	}`
+
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{
+				Versions: []*controlplanev1.ManifestVersion{{
+					Id:                "test-id",
+					Version:           "1.0",
+					Manifest:          testManifest(),
+					RelationshipGraph: &storedGraphJSON,
+				}},
+				TotalCount: 1,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+
+	// Should have 3 nodes (including handler from stored graph)
+	nodeCount, _ := m["node_count"].(int)
+	if nodeCount != 3 {
+		t.Errorf("expected 3 nodes from stored graph, got %d", nodeCount)
+	}
+
+	// Marshal result to JSON to inspect node types (avoids internal type assertions)
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
+	resultStr := string(resultJSON)
+
+	// Verify handler node exists (only available from stored graph, not structural extraction)
+	if !strings.Contains(resultStr, `"handler"`) {
+		t.Error("expected handler node from stored graph, not found in result JSON")
+	}
+
+	// Verify calls_handler edge exists
+	if !strings.Contains(resultStr, `"calls_handler"`) {
+		t.Error("expected calls_handler edge from stored graph, not found in result JSON")
+	}
+}
+
+func TestEconomyGraph_NoManifest(t *testing.T) {
+	historian := &mockManifestHistorian{
+		listFn: func(_ context.Context, _ *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error) {
+			return &controlplanev1.ListManifestVersionsResponse{}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Historian: historian})
+
+	result, err := r.Call(context.Background(), "meridian_economy_graph", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m := result.(map[string]interface{})
+	if m["status"] != "no_manifest" {
+		t.Errorf("expected status 'no_manifest', got %v", m["status"])
 	}
 }
