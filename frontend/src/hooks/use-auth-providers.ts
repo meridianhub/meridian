@@ -13,6 +13,10 @@ interface ProvidersResponse {
 
 async function fetchProviders(): Promise<AuthProvider[]> {
   const response = await fetch('/api/auth/providers')
+  if (response.status === 404) {
+    // Provider discovery API not available - password-only mode
+    return []
+  }
   if (!response.ok) {
     throw new Error(`Failed to fetch providers: ${response.status}`)
   }

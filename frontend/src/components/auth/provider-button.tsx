@@ -18,25 +18,31 @@ function ProviderIcon({ providerId }: { providerId: string }) {
 
 export function ProviderButton({ provider, onClick }: ProviderButtonProps) {
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleClick = async () => {
     setLoading(true)
+    setError(null)
     try {
       await onClick()
     } catch {
+      setError('Failed to start sign-in. Please try again.')
       setLoading(false)
     }
   }
 
   return (
-    <Button
-      variant="outline"
-      className="w-full"
-      disabled={loading}
-      onClick={() => void handleClick()}
-    >
-      <ProviderIcon providerId={provider.id} />
-      {loading ? 'Redirecting...' : `Sign in with ${provider.displayName}`}
-    </Button>
+    <div>
+      <Button
+        variant="outline"
+        className="w-full"
+        disabled={loading}
+        onClick={() => void handleClick()}
+      >
+        <ProviderIcon providerId={provider.id} />
+        {loading ? 'Redirecting...' : `Sign in with ${provider.displayName}`}
+      </Button>
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+    </div>
   )
 }

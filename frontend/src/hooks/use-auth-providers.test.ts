@@ -16,13 +16,15 @@ function createWrapper() {
 }
 
 describe('useAuthProviders', () => {
-  it('returns empty data when API returns 404', async () => {
+  it('returns empty array when API returns 404 (password-only mode)', async () => {
     // Default MSW handler returns 404
     const { result } = renderHook(() => useAuthProviders(), { wrapper: createWrapper() })
 
     await waitFor(() => {
-      expect(result.current.isError).toBe(true)
+      expect(result.current.isSuccess).toBe(true)
     })
+
+    expect(result.current.data).toEqual([])
   })
 
   it('returns providers when API succeeds', async () => {
