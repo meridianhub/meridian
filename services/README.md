@@ -443,13 +443,14 @@ See [services/operational-gateway/README.md](operational-gateway/README.md) for 
 
 ### Identity Service
 
-OIDC-based identity and authentication service for Meridian platform access.
+OIDC-based identity and authentication service with an embedded Dex OIDC server.
 
 **Responsibilities:**
 
-- Integrate with OIDC-compliant identity providers (Dex, Keycloak)
-- Validate tokens and manage JWKS endpoints
-- Configure identity connectors for external providers
+- Run an embedded Dex OIDC server within the unified binary (served at `/dex/*`)
+- Bridge Dex authentication to the identity domain via a custom `PasswordConnector`
+- Manage users, credentials, and role assignments per tenant
+- Bootstrap demo/operator users at startup
 
 See [services/identity/README.md](identity/README.md) for full documentation.
 
