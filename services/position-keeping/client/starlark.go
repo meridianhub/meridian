@@ -47,8 +47,8 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Version:              1,
 				ParamOverrides: map[string]saga.ParamOverride{
 					"amount": {Type: "Decimal"},
-					"position_id": {
-						Alias:    "account_id",
+					"account_id": {
+						Alias:    "position_id",
 						Required: boolPtr(true),
 					},
 					"currency":           {Deprecated: "use instrument_code instead"},
@@ -67,6 +67,13 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
 				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
 				Version:              1,
+				ParamOverrides: map[string]saga.ParamOverride{
+					"new_entry":       {Derived: true},
+					"status_update":   {Derived: true},
+					"audit_entry":     {Derived: true},
+					"version":         {Derived: true},
+					"idempotency_key": {Derived: true},
+				},
 			},
 		},
 		"position_keeping.cancel_log": {
@@ -80,6 +87,13 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
 				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
 				Version:              1,
+				ParamOverrides: map[string]saga.ParamOverride{
+					"new_entry":       {Derived: true},
+					"status_update":   {Derived: true},
+					"audit_entry":     {Derived: true},
+					"version":         {Derived: true},
+					"idempotency_key": {Derived: true},
+				},
 			},
 		},
 	}
