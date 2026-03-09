@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createServiceClients } from '@/api/clients'
+import { IdentityService } from '@/api/gen/meridian/identity/v1/identity_pb'
 import type { Transport } from '@connectrpc/connect'
 
 vi.mock('@connectrpc/connect', () => ({
@@ -24,7 +25,7 @@ describe('createServiceClients', () => {
     const transport = makeTransport()
     const clients = createServiceClients(transport)
 
-    expect(Object.keys(clients)).toHaveLength(19)
+    expect(Object.keys(clients)).toHaveLength(20)
   })
 
   it('creates clients for all expected services', () => {
@@ -50,13 +51,22 @@ describe('createServiceClients', () => {
     expect(clients).toHaveProperty('manifestHistory')
     expect(clients).toHaveProperty('manifestApplier')
     expect(clients).toHaveProperty('audit')
+    expect(clients).toHaveProperty('identity')
+  })
+
+  it('wires identity client to IdentityService descriptor', () => {
+    const transport = makeTransport()
+    const clients = createServiceClients(transport)
+
+    expect((clients.identity as { __service: string }).__service).toBe(IdentityService.typeName)
+    expect(createClient).toHaveBeenCalledWith(IdentityService, transport)
   })
 
   it('calls createClient for each service with the provided transport', () => {
     const transport = makeTransport()
     createServiceClients(transport)
 
-    expect(createClient).toHaveBeenCalledTimes(19)
+    expect(createClient).toHaveBeenCalledTimes(20)
     vi.mocked(createClient).mock.calls.forEach(([, t]) => {
       expect(t).toBe(transport)
     })
