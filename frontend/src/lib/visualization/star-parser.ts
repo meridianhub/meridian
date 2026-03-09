@@ -53,7 +53,8 @@ export interface EarlyExit {
 
 /**
  * Extract the producing service name from a trigger string.
- * - "event:position-keeping.transaction-captured.v1" → "position-keeping"
+ * Returns the service name in snake_case to match Starlark module names.
+ * - "event:position-keeping.transaction-captured.v1" → "position_keeping"
  * - "webhook:stripe.payment_intent.succeeded" → "stripe"
  * - "api:/v1/payments/stripe" → null (no service)
  */
@@ -62,7 +63,9 @@ export function parseTriggerService(trigger: string | null): string | null {
   if (trigger.startsWith('event:') || trigger.startsWith('webhook:')) {
     const rest = trigger.slice(trigger.indexOf(':') + 1)
     const dotIdx = rest.indexOf('.')
-    return dotIdx > 0 ? rest.slice(0, dotIdx) : rest
+    const raw = dotIdx > 0 ? rest.slice(0, dotIdx) : rest
+    // Normalize kebab-case topic prefix to snake_case Starlark module name
+    return raw.replace(/-/g, '_')
   }
   return null
 }

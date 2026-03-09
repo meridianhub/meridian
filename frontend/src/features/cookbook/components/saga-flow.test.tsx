@@ -210,7 +210,7 @@ describe('SagaFlowDiagram', () => {
 
 describe('parseTriggerService', () => {
   it('extracts service from event trigger', () => {
-    expect(parseTriggerService('event:position-keeping.transaction-captured.v1')).toBe('position-keeping')
+    expect(parseTriggerService('event:position-keeping.transaction-captured.v1')).toBe('position_keeping')
   })
 
   it('extracts service from webhook trigger', () => {
