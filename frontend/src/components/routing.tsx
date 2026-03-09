@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
+import { useTenantContext } from '@/contexts/tenant-context'
+import { apiConfig, isOnTenantSubdomain } from '@/api/config'
 
 interface ProtectedRouteProps {
   children: ReactNode
@@ -51,5 +53,59 @@ export function AdminOnlyRoute({ children }: AdminOnlyRouteProps) {
   if (!hasAdminRole) {
     return <Navigate to="/" replace />
   }
+  return <>{children}</>
+}
+
+/** Routes that live on the root domain (no tenant subdomain needed). */
+const PLATFORM_PATHS = ['/login', '/tenants', '/platform', '/users']
+
+function isPlatformPath(pathname: string): boolean {
+  return PLATFORM_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))
+}
+
+function isLocalDev(): boolean {
+  const hostname = window.location.hostname
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+}
+
+/**
+ * Redirects to the tenant subdomain when the user is on the root domain
+ * but navigating to a tenant-scoped route with a selected tenant.
+ *
+ * Platform routes (/tenants, /platform, /users, /login) stay on root.
+ * Local dev is never redirected (no subdomain support).
+ */
+export function TenantSubdomainEnforcer({ children }: { children: ReactNode }) {
+  const { pathname, search, hash } = useLocation()
+  const { tenantSlug } = useTenantContext()
+
+  // Skip in local dev — subdomains don't work on localhost
+  if (isLocalDev()) {
+    return <>{children}</>
+  }
+
+  // Already on a tenant subdomain — no redirect needed
+  if (isOnTenantSubdomain()) {
+    return <>{children}</>
+  }
+
+  // Platform routes stay on root domain
+  if (isPlatformPath(pathname)) {
+    return <>{children}</>
+  }
+
+  // Tenant-scoped route on root domain with a tenant selected → redirect
+  if (tenantSlug) {
+    const parsed = new URL(apiConfig.baseUrl)
+    const target = new URL(window.location.href)
+    target.hostname = `${tenantSlug}.${parsed.hostname}`
+    target.pathname = pathname
+    target.search = search
+    target.hash = hash
+    window.location.href = target.toString()
+    return null
+  }
+
+  // No tenant selected — show content (DevTenantAutoSelector may still be loading)
   return <>{children}</>
 }
