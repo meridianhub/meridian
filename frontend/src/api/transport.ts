@@ -5,7 +5,7 @@ import {
   createTenantInterceptor,
   type TenantSlugGetter,
 } from './interceptors/tenant-interceptor'
-import { apiConfig, buildTenantBaseUrl } from './config'
+import { apiConfig, buildTenantBaseUrl, isOnTenantSubdomain } from './config'
 
 export function createTenantTransport(
   tenantSlug: string | null,
@@ -13,13 +13,19 @@ export function createTenantTransport(
   getTenantSlug: TenantSlugGetter,
   onUnauthenticated?: () => void,
 ): Transport {
-  // In development or demo mode, keep the base URL and route via X-Tenant-Slug header
-  // (the gateway's LOCAL_DEV_MODE resolves tenants from the header).
-  // In production, use subdomain-based URL for tenant routing.
+  // If the browser is already on a tenant subdomain, API calls go to the same
+  // origin (subdomain routing). Otherwise in dev/demo mode, route via
+  // X-Tenant-Slug header (the gateway's LOCAL_DEV_MODE resolves from the header).
+  const onSubdomain = isOnTenantSubdomain()
   const useHeaderRouting =
-    import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true'
-  const baseUrl =
-    tenantSlug && !useHeaderRouting ? buildTenantBaseUrl(tenantSlug) : apiConfig.baseUrl
+    !onSubdomain &&
+    (import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true')
+  const configuredPath = new URL(apiConfig.baseUrl).pathname.replace(/\/$/, '')
+  const baseUrl = onSubdomain
+    ? `${window.location.origin}${configuredPath}`
+    : tenantSlug && !useHeaderRouting
+      ? buildTenantBaseUrl(tenantSlug)
+      : apiConfig.baseUrl
 
   return createConnectTransport({
     baseUrl,
