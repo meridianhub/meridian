@@ -77,7 +77,6 @@ function InternalAccountDetailSkeleton() {
 // ---------------------------------------------------------------------------
 
 function InternalAccountNotFound() {
-  const { accountId } = useParams<{ accountId: string }>()
   return (
     <div data-testid="internal-account-not-found" className="p-6">
       <Breadcrumbs items={[{ label: 'Internal Accounts', href: '/internal-accounts' }, { label: 'Not found' }]} />
