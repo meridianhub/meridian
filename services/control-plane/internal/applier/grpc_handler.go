@@ -37,8 +37,14 @@ type ApplyManifestHandler struct {
 	executor       *ManifestExecutor
 	historyService *manifest.HistoryService
 	versionStore   differ.ManifestVersionStore
+	postApplyHooks []PostApplyHook
 	logger         *slog.Logger
 }
+
+// PostApplyHook is called after a manifest is successfully applied.
+// The tenantID identifies the tenant whose manifest was applied.
+// Implementations must be safe for concurrent use and should not block.
+type PostApplyHook func(ctx context.Context, tenantID string)
 
 // ApplyManifestHandlerConfig contains dependencies for creating an ApplyManifestHandler.
 type ApplyManifestHandlerConfig struct {
@@ -49,6 +55,10 @@ type ApplyManifestHandlerConfig struct {
 	HistoryService *manifest.HistoryService
 	VersionStore   differ.ManifestVersionStore
 	Logger         *slog.Logger
+
+	// PostApplyHooks are called after a manifest is successfully applied.
+	// Used for cache invalidation (e.g., saga binding cache in the API gateway).
+	PostApplyHooks []PostApplyHook
 }
 
 // NewApplyManifestHandler creates a new ApplyManifestHandler with the given dependencies.
@@ -73,6 +83,7 @@ func NewApplyManifestHandler(cfg ApplyManifestHandlerConfig) (*ApplyManifestHand
 		executor:       cfg.Executor,
 		historyService: cfg.HistoryService,
 		versionStore:   cfg.VersionStore,
+		postApplyHooks: cfg.PostApplyHooks,
 		logger:         cfg.Logger.With("component", "apply_manifest_handler"),
 	}, nil
 }
@@ -200,7 +211,25 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED
 	logger.Info("manifest applied successfully", "job_id", execResult.jobID)
 
+	// Invoke post-apply hooks (e.g., cache invalidation)
+	h.runPostApplyHooks(ctx, string(tenantID), logger)
+
 	return response, nil
+}
+
+// runPostApplyHooks invokes each post-apply hook with panic recovery
+// to prevent a misbehaving hook from crashing the gRPC handler.
+func (h *ApplyManifestHandler) runPostApplyHooks(ctx context.Context, tenantID string, logger *slog.Logger) {
+	for i, hook := range h.postApplyHooks {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("post-apply hook panicked", "hook_index", i, "panic", r)
+				}
+			}()
+			hook(ctx, tenantID)
+		}()
+	}
 }
 
 // validationOutput holds the results of manifest validation.
