@@ -108,66 +108,80 @@ const flowWithEarlyExit: SagaFlow = {
   ],
 }
 
+const secondFlow: SagaFlow = {
+  name: 'settlement',
+  trigger: 'event:position-keeping.transaction-captured.v1',
+  filter: null,
+  steps: [
+    {
+      name: 'compute_value',
+      lineNumber: 3,
+      serviceCalls: [{ service: 'valuation_engine', method: 'compute', params: ['amount'] }],
+      earlyExit: null,
+    },
+  ],
+}
+
 describe('SagaFlowDiagram', () => {
   it('renders ReactFlow container', () => {
-    render(<SagaFlowDiagram flow={emptyFlow} />)
+    render(<SagaFlowDiagram flows={[emptyFlow]} />)
     expect(screen.getByTestId('react-flow')).toBeInTheDocument()
   })
 
   it('renders start and end nodes for empty flow', () => {
-    render(<SagaFlowDiagram flow={emptyFlow} />)
+    render(<SagaFlowDiagram flows={[emptyFlow]} />)
     expect(screen.getByTestId('node-start')).toBeInTheDocument()
     expect(screen.getByTestId('node-end')).toBeInTheDocument()
   })
 
   it('renders step nodes for each step', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     expect(screen.getByTestId('node-step-0')).toBeInTheDocument()
     expect(screen.getByTestId('node-step-1')).toBeInTheDocument()
   })
 
   it('displays step names', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     expect(screen.getByText('lookup_account')).toBeInTheDocument()
     expect(screen.getByText('book_position')).toBeInTheDocument()
   })
 
   it('displays saga name in start node', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     expect(screen.getByText('deposit')).toBeInTheDocument()
   })
 
   it('renders decision and exit nodes for early exit', () => {
-    render(<SagaFlowDiagram flow={flowWithEarlyExit} />)
+    render(<SagaFlowDiagram flows={[flowWithEarlyExit]} />)
     expect(screen.getByTestId('node-decision-0')).toBeInTheDocument()
     expect(screen.getByTestId('node-exit-0')).toBeInTheDocument()
   })
 
   it('renders controls', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     expect(screen.getByTestId('controls')).toBeInTheDocument()
   })
 
   it('renders services legend', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     expect(screen.getByText('reference_data')).toBeInTheDocument()
     expect(screen.getByText('position_keeping')).toBeInTheDocument()
   })
 
   it('shows correct node count', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     // start + 2 steps + end = 4 nodes
     expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '4')
   })
 
   it('shows correct edge count for simple flow', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     // start->step0, step0->step1, step1->end = 3 edges
     expect(screen.getByTestId('react-flow')).toHaveAttribute('data-edge-count', '3')
   })
 
   it('renders service legend items as clickable buttons', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     const refDataBtn = screen.getByRole('button', { name: /reference_data/ })
     expect(refDataBtn).toBeInTheDocument()
     const posKeepBtn = screen.getByRole('button', { name: /position_keeping/ })
@@ -175,7 +189,7 @@ describe('SagaFlowDiagram', () => {
   })
 
   it('toggles service highlight on legend click', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     const refDataBtn = screen.getByRole('button', { name: /reference_data/ })
 
     // Click to highlight
@@ -188,7 +202,7 @@ describe('SagaFlowDiagram', () => {
   })
 
   it('assigns distinct colors to different services', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     const refDataBtn = screen.getByRole('button', { name: /reference_data/ })
     const posKeepBtn = screen.getByRole('button', { name: /position_keeping/ })
     const refDot = refDataBtn.querySelector('span[class*="rounded-full"]')
@@ -197,20 +211,50 @@ describe('SagaFlowDiagram', () => {
   })
 
   it('includes trigger service in legend', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     // simpleFlow has trigger "event:payments.received.v1" → service "payments"
     expect(screen.getByRole('button', { name: /payments/ })).toBeInTheDocument()
   })
 
   it('shows trigger label next to trigger service in legend', () => {
-    render(<SagaFlowDiagram flow={simpleFlow} />)
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
     expect(screen.getByText('trigger')).toBeInTheDocument()
+  })
+
+  // Multi-saga tests
+  it('renders multiple sagas with prefixed node IDs', () => {
+    render(<SagaFlowDiagram flows={[simpleFlow, secondFlow]} />)
+    // First saga: s0-start, s0-step-0, s0-step-1, s0-end
+    expect(screen.getByTestId('node-s0-start')).toBeInTheDocument()
+    expect(screen.getByTestId('node-s0-step-0')).toBeInTheDocument()
+    // Second saga: s1-start, s1-step-0, s1-end
+    expect(screen.getByTestId('node-s1-start')).toBeInTheDocument()
+    expect(screen.getByTestId('node-s1-step-0')).toBeInTheDocument()
+  })
+
+  it('shows saga legend for multi-saga patterns', () => {
+    render(<SagaFlowDiagram flows={[simpleFlow, secondFlow]} />)
+    expect(screen.getByText('Sagas')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /deposit/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /settlement/ })).toBeInTheDocument()
+  })
+
+  it('does not show saga legend for single saga', () => {
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
+    expect(screen.queryByText('Sagas')).not.toBeInTheDocument()
+  })
+
+  it('merges services from all sagas into one legend', () => {
+    render(<SagaFlowDiagram flows={[simpleFlow, secondFlow]} />)
+    // Services from both: payments (trigger), reference_data, position_keeping, valuation_engine
+    expect(screen.getByRole('button', { name: /valuation_engine/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /reference_data/ })).toBeInTheDocument()
   })
 })
 
 describe('parseTriggerService', () => {
   it('extracts service from event trigger', () => {
-    expect(parseTriggerService('event:position-keeping.transaction-captured.v1')).toBe('position-keeping')
+    expect(parseTriggerService('event:position-keeping.transaction-captured.v1')).toBe('position_keeping')
   })
 
   it('extracts service from webhook trigger', () => {

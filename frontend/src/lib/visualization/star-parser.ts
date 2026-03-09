@@ -52,8 +52,28 @@ export interface EarlyExit {
 }
 
 /**
+ * Count total diagram nodes for a set of saga flows.
+ * Nodes: 1 start + steps + decisions + exits + 1 end per saga.
+ */
+export function countFlowNodes(flows: SagaFlow[]): number {
+  let count = 0
+  for (const flow of flows) {
+    count += 1 // start node
+    count += 1 // end node
+    for (const step of flow.steps) {
+      count += 1 // step node
+      if (step.earlyExit) {
+        count += 2 // decision + exit nodes
+      }
+    }
+  }
+  return count
+}
+
+/**
  * Extract the producing service name from a trigger string.
- * - "event:position-keeping.transaction-captured.v1" → "position-keeping"
+ * Returns the service name in snake_case to match Starlark module names.
+ * - "event:position-keeping.transaction-captured.v1" → "position_keeping"
  * - "webhook:stripe.payment_intent.succeeded" → "stripe"
  * - "api:/v1/payments/stripe" → null (no service)
  */
@@ -62,7 +82,9 @@ export function parseTriggerService(trigger: string | null): string | null {
   if (trigger.startsWith('event:') || trigger.startsWith('webhook:')) {
     const rest = trigger.slice(trigger.indexOf(':') + 1)
     const dotIdx = rest.indexOf('.')
-    return dotIdx > 0 ? rest.slice(0, dotIdx) : rest
+    const raw = dotIdx > 0 ? rest.slice(0, dotIdx) : rest
+    // Normalize kebab-case topic prefix to snake_case Starlark module name
+    return raw.replace(/-/g, '_')
   }
   return null
 }

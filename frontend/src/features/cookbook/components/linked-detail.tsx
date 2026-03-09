@@ -4,37 +4,42 @@ import { SagaFlowDiagram } from './saga-flow'
 import type { SagaFlow } from '../lib/star-parser'
 
 interface LinkedPatternDetailProps {
-  flow: SagaFlow
+  flows: SagaFlow[]
 }
 
-export function LinkedPatternDetail({ flow }: LinkedPatternDetailProps) {
+export function LinkedPatternDetail({ flows }: LinkedPatternDetailProps) {
   const [highlightedHandler, setHighlightedHandler] = useState<string | null>(null)
 
   const serviceNames = useMemo(() => {
     const names = new Set<string>()
-    for (const step of flow.steps) {
-      for (const call of step.serviceCalls) {
-        names.add(call.service)
+    for (const flow of flows) {
+      for (const step of flow.steps) {
+        for (const call of step.serviceCalls) {
+          names.add(call.service)
+        }
       }
     }
     return Array.from(names)
-  }, [flow])
+  }, [flows])
 
   const handleStepClick = useCallback((_stepName: string, _lineNumber: number) => {
-    const step = flow.steps.find((s) => s.name === _stepName)
-    if (step && step.serviceCalls.length > 0) {
-      const firstCall = step.serviceCalls[0]
-      setHighlightedHandler(`${firstCall.service}.${firstCall.method}`)
-    } else {
-      setHighlightedHandler(null)
+    // Find the step across all flows
+    for (const flow of flows) {
+      const step = flow.steps.find((s) => s.name === _stepName)
+      if (step && step.serviceCalls.length > 0) {
+        const firstCall = step.serviceCalls[0]
+        setHighlightedHandler(`${firstCall.service}.${firstCall.method}`)
+        return
+      }
     }
-  }, [flow])
+    setHighlightedHandler(null)
+  }, [flows])
 
   return (
     <div data-testid="linked-detail" className="flex flex-col gap-4">
       <div className="h-[400px] rounded-lg border">
         <SagaFlowDiagram
-          flow={flow}
+          flows={flows}
           onStepClick={handleStepClick}
         />
       </div>

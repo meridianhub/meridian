@@ -1,6 +1,7 @@
 export {
   parseStarlarkSaga,
   parseTriggerService,
+  countFlowNodes,
 } from '@/lib/visualization/star-parser'
 
 export type {

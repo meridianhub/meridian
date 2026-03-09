@@ -96,13 +96,13 @@ describe('LinkedPatternDetail', () => {
   })
 
   it('renders diagram and handler reference panels', () => {
-    render(<LinkedPatternDetail flow={sampleFlow} />)
+    render(<LinkedPatternDetail flows={[sampleFlow]} />)
     expect(screen.getByTestId('react-flow')).toBeInTheDocument()
     expect(screen.getByTestId('handler-reference')).toBeInTheDocument()
   })
 
   it('renders full-width layout without editor panel', () => {
-    const { container } = render(<LinkedPatternDetail flow={sampleFlow} />)
+    const { container } = render(<LinkedPatternDetail flows={[sampleFlow]} />)
     const detail = container.querySelector('[data-testid="linked-detail"]')
     expect(detail).toBeInTheDocument()
     // Should not contain starlark editor
@@ -110,7 +110,7 @@ describe('LinkedPatternDetail', () => {
   })
 
   it('highlights handler reference when step is clicked in diagram', () => {
-    render(<LinkedPatternDetail flow={sampleFlow} />)
+    render(<LinkedPatternDetail flows={[sampleFlow]} />)
 
     const stepNode = screen.getByTestId('flow-node-step-0')
     fireEvent.click(stepNode)
@@ -120,7 +120,7 @@ describe('LinkedPatternDetail', () => {
   })
 
   it('updates selected step state when diagram step is clicked', () => {
-    render(<LinkedPatternDetail flow={sampleFlow} />)
+    render(<LinkedPatternDetail flows={[sampleFlow]} />)
 
     const step1 = screen.getByTestId('flow-node-step-1')
     fireEvent.click(step1)
@@ -130,7 +130,7 @@ describe('LinkedPatternDetail', () => {
   })
 
   it('passes service names to handler reference from flow', () => {
-    render(<LinkedPatternDetail flow={sampleFlow} />)
+    render(<LinkedPatternDetail flows={[sampleFlow]} />)
 
     const handlerRef = screen.getByTestId('handler-reference')
     const services = handlerRef.dataset.services?.split(',') ?? []
@@ -147,7 +147,7 @@ describe('LinkedPatternDetail', () => {
       ],
     }
 
-    render(<LinkedPatternDetail flow={flowWithNoop} />)
+    render(<LinkedPatternDetail flows={[flowWithNoop]} />)
 
     fireEvent.click(screen.getByTestId('flow-node-step-0'))
     expect(screen.getByTestId('handler-reference').dataset.highlighted).toBe('position_keeping.initiate_log')
@@ -164,7 +164,7 @@ describe('LinkedPatternDetail', () => {
       steps: [],
     }
 
-    render(<LinkedPatternDetail flow={emptyFlow} />)
+    render(<LinkedPatternDetail flows={[emptyFlow]} />)
 
     expect(screen.getByTestId('linked-detail')).toBeInTheDocument()
   })

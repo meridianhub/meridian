@@ -93,7 +93,7 @@ export function AccountsTab({ partyId }: AccountsTabProps) {
         })
 
         for (const a of response.accounts ?? []) {
-          if (a.orgPartyId === partyId) {
+          if (a.orgPartyId === partyId || a.partyId === partyId) {
             collected.push({
               accountId: a.accountId,
               externalReference: a.externalIdentifier ?? '',
