@@ -502,6 +502,10 @@ func cloneHandlerMetadata(meta *HandlerMetadata) *HandlerMetadata {
 	if meta.ParamOverrides != nil {
 		clone.ParamOverrides = make(map[string]ParamOverride, len(meta.ParamOverrides))
 		for k, v := range meta.ParamOverrides {
+			if v.Required != nil {
+				reqCopy := *v.Required
+				v.Required = &reqCopy
+			}
 			clone.ParamOverrides[k] = v
 		}
 	}
