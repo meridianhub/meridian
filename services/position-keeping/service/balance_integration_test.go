@@ -180,6 +180,7 @@ func loadBalanceTestSchema(t *testing.T, pool *pgxpool.Pool) {
 			deleted_at timestamptz NULL,
 			log_id uuid NOT NULL,
 			account_id character varying(34) NOT NULL,
+			account_service_domain character varying(20) NOT NULL DEFAULT '',
 			version bigint NOT NULL DEFAULT 1,
 			current_status character varying(20) NOT NULL,
 			previous_status character varying(20) NULL,

@@ -168,6 +168,7 @@ func (infra *BalanceOwnershipTestInfra) createSchemas(ctx context.Context, t *te
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			log_id UUID NOT NULL UNIQUE,
 			account_id VARCHAR(34) NOT NULL,
+			account_service_domain VARCHAR(20) NOT NULL DEFAULT '',
 			current_status VARCHAR(20) NOT NULL,
 			reconciliation_status VARCHAR(20) NOT NULL,
 			opening_balance_amount NUMERIC(38,18),
