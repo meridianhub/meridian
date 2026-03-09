@@ -168,8 +168,10 @@ type HandlerMetadata struct {
 	// Conversions defines migration rules from older handler versions or names.
 	Conversions []HandlerConversion
 
-	// When true, indicates this handler is deprecated and should not be used in new sagas.
-	Deprecated bool
+	// DeprecatedMessage, when non-empty, indicates this handler is deprecated.
+	// The value provides a migration message (e.g., "use handler_v2 instead").
+	// Empty string means the handler is not deprecated.
+	DeprecatedMessage string
 }
 
 // SemanticLinter performs AST-based semantic analysis on Starlark scripts.
