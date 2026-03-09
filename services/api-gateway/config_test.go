@@ -824,6 +824,14 @@ func TestLoadAuthConfig_DexIssuerDefaults(t *testing.T) {
 			wantIssuer:  "https://auth.example.com",
 		},
 		{
+			name: "DEX_ISSUER with trailing slash — normalised",
+			env: map[string]string{
+				"DEX_ISSUER": "http://localhost:8090/dex/",
+			},
+			wantJWKSURL: "http://localhost:8090/dex/keys",
+			wantIssuer:  "http://localhost:8090/dex",
+		},
+		{
 			name: "all explicitly set — DEX_ISSUER has no effect",
 			env: map[string]string{
 				"DEX_ISSUER": "http://localhost:8090/dex",

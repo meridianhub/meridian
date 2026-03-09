@@ -247,7 +247,7 @@ func LoadAuthConfig() AuthConfig {
 // resolveAuthEndpoints determines the JWKS URL and JWT issuer, applying
 // embedded Dex defaults when DEX_ISSUER is set and explicit values are absent.
 func resolveAuthEndpoints() (jwksURL, jwtIssuer string) {
-	dexIssuer := os.Getenv("DEX_ISSUER")
+	dexIssuer := strings.TrimRight(os.Getenv("DEX_ISSUER"), "/")
 
 	jwksURL = os.Getenv("JWKS_URL")
 	if jwksURL == "" && dexIssuer != "" {
