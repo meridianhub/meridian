@@ -65,8 +65,8 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 	// Manifest fix tool uses the embedded handler schema to convert deprecated calls.
 	if schemaReg, err := schema.DefaultRegistry(); err != nil {
 		logger.Warn("failed to load handler schema for manifest fix tool", "error", err)
-	} else {
-		tools.RegisterManifestFixTool(toolReg, schemaReg)
+	} else if err := tools.RegisterManifestFixTool(toolReg, schemaReg); err != nil {
+		logger.Warn("failed to register manifest fix tool", "error", err)
 	}
 
 	// Try to connect to the Meridian backend for remote tools.

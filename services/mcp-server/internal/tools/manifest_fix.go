@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -12,11 +13,12 @@ import (
 )
 
 // RegisterManifestFixTool registers the meridian_manifest_fix tool into the provided Registry.
-func RegisterManifestFixTool(r *Registry, schemaRegistry *schema.Registry) {
+func RegisterManifestFixTool(r *Registry, schemaRegistry *schema.Registry) error {
 	tool := buildManifestFixTool(schemaRegistry)
 	if err := r.Register(tool); err != nil {
-		panic(fmt.Sprintf("failed to register manifest fix tool: %v", err))
+		return fmt.Errorf("register manifest fix tool: %w", err)
 	}
+	return nil
 }
 
 // buildManifestFixTool returns the meridian_manifest_fix Tool definition.
@@ -164,8 +166,9 @@ func fixScriptDeprecatedCalls(script string, sagaName string, schemaRegistry *sc
 
 	for _, oldName := range sortedNames {
 		info := deprecatedHandlers[oldName]
-		oldCall := oldName + "("
-		if !strings.Contains(result, oldCall) {
+		// Use regex to detect calls with optional whitespace before '('
+		callPattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(oldName) + `\s*\(`)
+		if !callPattern.MatchString(result) {
 			continue
 		}
 
@@ -199,8 +202,10 @@ func collectDeprecatedHandlers(schemaRegistry *schema.Registry) map[string]depre
 // applyHandlerConversion replaces the deprecated handler call and its parameter names in the script.
 // Parameter renaming is scoped to each call site's argument list to avoid corrupting other calls.
 func applyHandlerConversion(script string, oldName string, info deprecatedInfo) string {
-	oldCall := oldName + "("
 	newCall := info.currentName + "("
+	// Regex matches oldName (with word boundary) followed by optional whitespace and '('
+	callRe := regexp.MustCompile(`\b` + regexp.QuoteMeta(oldName) + `\s*\(`)
+
 	// Build reverse mapping: old param name -> new param name.
 	// Empty when no param mapping exists — handler name is still replaced
 	// using the string/comment-aware loop below to avoid modifying literals.
@@ -217,16 +222,16 @@ func applyHandlerConversion(script string, oldName string, info deprecatedInfo) 
 	var result strings.Builder
 	remaining := script
 	for {
-		idx := strings.Index(remaining, oldCall)
-		if idx < 0 {
+		loc := callRe.FindStringIndex(remaining)
+		if loc == nil {
 			result.WriteString(remaining)
 			break
 		}
 
 		// Write text before the call and the new handler name
-		result.WriteString(remaining[:idx])
+		result.WriteString(remaining[:loc[0]])
 		result.WriteString(newCall)
-		remaining = remaining[idx+len(oldCall):]
+		remaining = remaining[loc[1]:]
 
 		// Find the matching closing paren, tracking nesting depth
 		callBody, rest := extractCallBody(remaining)
@@ -368,9 +373,14 @@ func (s *kwargScanner) handleTopLevelIdent() {
 	}
 	ident := s.src[start:s.pos]
 
-	// Match "ident=" but not "ident==" (comparison operator)
-	if s.pos < len(s.src) && s.src[s.pos] == '=' &&
-		(s.pos+1 >= len(s.src) || s.src[s.pos+1] != '=') &&
+	// Match "ident=" or "ident =" but not "ident==" (comparison operator).
+	// Skip optional whitespace between identifier and '='.
+	eqPos := s.pos
+	for eqPos < len(s.src) && (s.src[eqPos] == ' ' || s.src[eqPos] == '\t') {
+		eqPos++
+	}
+	if eqPos < len(s.src) && s.src[eqPos] == '=' &&
+		(eqPos+1 >= len(s.src) || s.src[eqPos+1] != '=') &&
 		!isPrecededByIdent(s.src, start) {
 		if newName, ok := s.reverseMapping[ident]; ok {
 			s.result.WriteString(newName)
