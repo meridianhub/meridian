@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -40,7 +41,10 @@ type sagaJSON struct {
 // GetBindingsForTenant queries the latest applied manifest for the given tenant
 // and returns a map of api_path -> saga_name for all sagas with "api:" triggers.
 func (s *ManifestBindingSource) GetBindingsForTenant(ctx context.Context, tenantID string) (map[string]string, error) {
-	tid := tenant.TenantID(tenantID)
+	tid, err := tenant.NewTenantID(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tenant ID %q: %w", tenantID, err)
+	}
 	schemaName := pq.QuoteIdentifier(tid.SchemaName())
 
 	query := fmt.Sprintf(
@@ -62,13 +66,26 @@ func (s *ManifestBindingSource) GetBindingsForTenant(ctx context.Context, tenant
 		return nil, fmt.Errorf("unmarshal manifest JSON: %w", err)
 	}
 
+	return extractAPIBindings(manifest.Sagas, tenantID), nil
+}
+
+// extractAPIBindings extracts api_path -> saga_name mappings from saga definitions.
+// Logs a warning if multiple sagas declare the same API path.
+func extractAPIBindings(sagas []sagaJSON, tenantID string) map[string]string {
 	bindings := make(map[string]string)
-	for _, saga := range manifest.Sagas {
+	for _, saga := range sagas {
 		if strings.HasPrefix(saga.Trigger, "api:") {
 			path := strings.TrimPrefix(saga.Trigger, "api:")
+			if existing, ok := bindings[path]; ok {
+				slog.Warn("duplicate api path in manifest, later saga overwrites earlier",
+					"tenant_id", tenantID,
+					"path", path,
+					"overwritten_saga", existing,
+					"overwriting_saga", saga.Name,
+				)
+			}
 			bindings[path] = saga.Name
 		}
 	}
-
-	return bindings, nil
+	return bindings
 }

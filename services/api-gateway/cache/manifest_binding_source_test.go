@@ -69,12 +69,7 @@ func TestManifestJSON_ExtractAPIBindings(t *testing.T) {
 			err := json.Unmarshal([]byte(tt.json), &manifest)
 			require.NoError(t, err)
 
-			bindings := make(map[string]string)
-			for _, saga := range manifest.Sagas {
-				if len(saga.Trigger) > 4 && saga.Trigger[:4] == "api:" {
-					bindings[saga.Trigger[4:]] = saga.Name
-				}
-			}
+			bindings := extractAPIBindings(manifest.Sagas, "test-tenant")
 
 			assert.Equal(t, tt.expected, bindings)
 		})

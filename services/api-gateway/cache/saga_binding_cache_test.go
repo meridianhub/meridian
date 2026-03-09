@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -29,13 +30,15 @@ func TestSagaBindingCache_Get_CacheHit(t *testing.T) {
 	ctx := tenant.WithTenant(context.Background(), "tenant-1")
 
 	// First call triggers source refresh
-	sagaName, found := cache.Get(ctx, "tenant-1", "/v1/payments")
+	sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment", sagaName)
 	assert.Equal(t, 1, source.refreshCount("tenant-1"))
 
 	// Second call should use cache (no additional source call)
-	sagaName, found = cache.Get(ctx, "tenant-1", "/v1/payments")
+	sagaName, found, err = cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment", sagaName)
 	assert.Equal(t, 1, source.refreshCount("tenant-1"))
@@ -56,7 +59,8 @@ func TestSagaBindingCache_Get_CacheMiss_NoBinding(t *testing.T) {
 
 	ctx := tenant.WithTenant(context.Background(), "tenant-1")
 
-	sagaName, found := cache.Get(ctx, "tenant-1", "/v1/unknown")
+	sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/unknown")
+	require.NoError(t, err)
 	assert.False(t, found)
 	assert.Empty(t, sagaName)
 }
@@ -77,13 +81,14 @@ func TestSagaBindingCache_Invalidate_ClearsTenantBindings(t *testing.T) {
 	ctx := tenant.WithTenant(context.Background(), "tenant-1")
 
 	// Populate cache
-	sagaName, found := cache.Get(ctx, "tenant-1", "/v1/payments")
+	sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment", sagaName)
 	assert.Equal(t, 1, source.refreshCount("tenant-1"))
 
 	// Invalidate tenant
-	err := cache.Invalidate(ctx, "tenant-1")
+	err = cache.Invalidate(ctx, "tenant-1")
 	require.NoError(t, err)
 
 	// Update source to return different binding
@@ -92,7 +97,8 @@ func TestSagaBindingCache_Invalidate_ClearsTenantBindings(t *testing.T) {
 	source.mu.Unlock()
 
 	// Next Get should trigger re-fetch from source
-	sagaName, found = cache.Get(ctx, "tenant-1", "/v1/payments")
+	sagaName, found, err = cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment_v2", sagaName)
 	assert.Equal(t, 2, source.refreshCount("tenant-1"))
@@ -117,11 +123,13 @@ func TestSagaBindingCache_Refresh_PopulatesCache(t *testing.T) {
 	err := cache.Refresh(ctx, "tenant-1")
 	require.NoError(t, err)
 
-	sagaName, found := cache.Get(ctx, "tenant-1", "/v1/payments")
+	sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment", sagaName)
 
-	sagaName, found = cache.Get(ctx, "tenant-1", "/v1/settlements")
+	sagaName, found, err = cache.Get(ctx, "tenant-1", "/v1/settlements")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "settle_trade", sagaName)
 
@@ -146,20 +154,23 @@ func TestSagaBindingCache_TTLExpiry_TriggersRefresh(t *testing.T) {
 	ctx := tenant.WithTenant(context.Background(), "tenant-1")
 
 	// First call
-	sagaName, found := cache.Get(ctx, "tenant-1", "/v1/payments")
+	sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment", sagaName)
 	assert.Equal(t, 1, source.refreshCount("tenant-1"))
 
 	// Wait for TTL to expire, then trigger a re-fetch
-	err := await.New().
+	var getErr error
+	err = await.New().
 		AtMost(1 * time.Second).
 		PollInterval(1 * time.Millisecond).
 		Until(func() bool {
-			sagaName, found = cache.Get(ctx, "tenant-1", "/v1/payments")
+			sagaName, found, getErr = cache.Get(ctx, "tenant-1", "/v1/payments")
 			return source.refreshCount("tenant-1") >= 2
 		})
 	require.NoError(t, err)
+	require.NoError(t, getErr)
 	require.True(t, found)
 	assert.Equal(t, "process_payment", sagaName)
 }
@@ -184,7 +195,8 @@ func TestSagaBindingCache_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sagaName, found := cache.Get(ctx, "tenant-1", "/v1/payments")
+			sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+			assert.NoError(t, err)
 			assert.True(t, found)
 			assert.Equal(t, "process_payment", sagaName)
 		}()
@@ -214,11 +226,13 @@ func TestSagaBindingCache_MultipleTenants(t *testing.T) {
 	ctx1 := tenant.WithTenant(context.Background(), "tenant-1")
 	ctx2 := tenant.WithTenant(context.Background(), "tenant-2")
 
-	sagaName, found := cache.Get(ctx1, "tenant-1", "/v1/payments")
+	sagaName, found, err := cache.Get(ctx1, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment_v1", sagaName)
 
-	sagaName, found = cache.Get(ctx2, "tenant-2", "/v1/payments")
+	sagaName, found, err = cache.Get(ctx2, "tenant-2", "/v1/payments")
+	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "process_payment_v2", sagaName)
 }
@@ -243,22 +257,26 @@ func TestSagaBindingCache_Invalidate_OnlyAffectsSpecifiedTenant(t *testing.T) {
 	ctx2 := tenant.WithTenant(context.Background(), "tenant-2")
 
 	// Populate both tenants
-	cache.Get(ctx1, "tenant-1", "/v1/payments")
-	cache.Get(ctx2, "tenant-2", "/v1/payments")
+	_, _, err := cache.Get(ctx1, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
+	_, _, err = cache.Get(ctx2, "tenant-2", "/v1/payments")
+	require.NoError(t, err)
 
 	assert.Equal(t, 1, source.refreshCount("tenant-1"))
 	assert.Equal(t, 1, source.refreshCount("tenant-2"))
 
 	// Invalidate tenant-1 only
-	err := cache.Invalidate(ctx1, "tenant-1")
+	err = cache.Invalidate(ctx1, "tenant-1")
 	require.NoError(t, err)
 
 	// Access tenant-2 should still use cache
-	cache.Get(ctx2, "tenant-2", "/v1/payments")
+	_, _, err = cache.Get(ctx2, "tenant-2", "/v1/payments")
+	require.NoError(t, err)
 	assert.Equal(t, 1, source.refreshCount("tenant-2"))
 
 	// Access tenant-1 should trigger refresh
-	cache.Get(ctx1, "tenant-1", "/v1/payments")
+	_, _, err = cache.Get(ctx1, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	assert.Equal(t, 2, source.refreshCount("tenant-1"))
 }
 
@@ -273,9 +291,44 @@ func TestSagaBindingCache_SourceReturnsEmpty(t *testing.T) {
 
 	ctx := tenant.WithTenant(context.Background(), "tenant-1")
 
-	sagaName, found := cache.Get(ctx, "tenant-1", "/v1/payments")
+	sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
 	assert.False(t, found)
 	assert.Empty(t, sagaName)
+}
+
+func TestSagaBindingCache_NilSource_Panics(t *testing.T) {
+	t.Parallel()
+
+	assert.Panics(t, func() {
+		NewSagaBindingCache(nil)
+	})
+}
+
+func TestSagaBindingCache_Get_SourceError_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	source := &errorSagaBindingSource{
+		err: fmt.Errorf("database connection refused"),
+	}
+
+	cache := NewSagaBindingCache(source, WithSagaBindingTTL(5*time.Minute))
+
+	ctx := tenant.WithTenant(context.Background(), "tenant-1")
+
+	_, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+	assert.False(t, found)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database connection refused")
+}
+
+// errorSagaBindingSource always returns an error.
+type errorSagaBindingSource struct {
+	err error
+}
+
+func (e *errorSagaBindingSource) GetBindingsForTenant(_ context.Context, _ string) (map[string]string, error) {
+	return nil, e.err
 }
 
 // mockSagaBindingSource is a test double for SagaBindingSource.
