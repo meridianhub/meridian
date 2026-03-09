@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createServiceClients } from '@/api/clients'
+import { IdentityService } from '@/api/gen/meridian/identity/v1/identity_pb'
 import type { Transport } from '@connectrpc/connect'
 
 vi.mock('@connectrpc/connect', () => ({
@@ -51,6 +52,7 @@ describe('createServiceClients', () => {
     expect(clients).toHaveProperty('manifestApplier')
     expect(clients).toHaveProperty('audit')
     expect(clients).toHaveProperty('identity')
+    expect((clients.identity as any).__service).toBe(IdentityService.typeName)
   })
 
   it('calls createClient for each service with the provided transport', () => {
