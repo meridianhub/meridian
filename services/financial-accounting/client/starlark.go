@@ -159,8 +159,8 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Category:             saga.HandlerCategorySettlement,
 				Description:          "Reverse previously posted accounting entries (compensation handler)",
 				CompensationStrategy: "none",
-				// Reversal produces compensating Money instruments
-				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+				// Reversal cancels the booking log; no new instruments are produced
+				ProducesInstruments: []string{},
 				ProtoRequestType:    (*financialaccountingv1.UpdateFinancialBookingLogRequest)(nil),
 				ProtoResponseType:   (*financialaccountingv1.UpdateFinancialBookingLogResponse)(nil),
 				Version:             1,
