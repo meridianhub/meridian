@@ -9,7 +9,8 @@ import { StarlarkEditor } from '@/features/sagas/components/starlark-editor'
 import { ManifestViewer } from '../components/manifest-viewer'
 import { ComponentDetail } from '../components/component-detail'
 import { LinkedPatternDetail } from '../components/linked-detail'
-import { parseStarlarkSaga } from '../lib/star-parser'
+import { parseStarlarkSaga, countFlowNodes } from '../lib/star-parser'
+import type { SagaFlow } from '../lib/star-parser'
 import { useCookbook } from '../hooks/use-cookbook'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 import { usePatternFiles } from '../hooks/use-pattern-files'
@@ -27,17 +28,18 @@ function complexityColor(score: number): string {
   return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
 }
 
-function PatternInfoSection({ item }: { item: CookbookItem }) {
+function PatternInfoSection({ item, computedComplexity }: { item: CookbookItem; computedComplexity: number | null }) {
   const meta = item.meta as PatternMeta | undefined
+  const complexity = computedComplexity ?? meta?.complexity
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-semibold">{item.title}</h1>
         <Badge variant="outline">{item.type === 'registry:pattern' ? 'Pattern' : 'UI Component'}</Badge>
-        {meta?.complexity != null && (
-          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${complexityColor(meta.complexity)}`}>
-            Complexity: {meta.complexity} ({complexityLabel(meta.complexity)})
+        {complexity != null && (
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${complexityColor(complexity)}`}>
+            Complexity: {complexity} ({complexityLabel(complexity)})
           </span>
         )}
       </div>
@@ -157,18 +159,18 @@ function CompositionSection({ meta }: { meta: PatternMeta }) {
   )
 }
 
-function HandlerReferenceTab({ starlarkContent }: { starlarkContent: string | null }) {
+function HandlerReferenceTab({ flows }: { flows: SagaFlow[] }) {
   const serviceNames = useMemo(() => {
-    if (!starlarkContent) return []
-    const flow = parseStarlarkSaga(starlarkContent)
     const names = new Set<string>()
-    for (const step of flow.steps) {
-      for (const call of step.serviceCalls) {
-        names.add(call.service)
+    for (const flow of flows) {
+      for (const step of flow.steps) {
+        for (const call of step.serviceCalls) {
+          names.add(call.service)
+        }
       }
     }
     return Array.from(names)
-  }, [starlarkContent])
+  }, [flows])
 
   return (
     <HandlerReference
@@ -217,17 +219,31 @@ export function CookbookDetailPage() {
   const { items, isLoading: catalogueLoading } = useCookbook()
 
   const item = items.find((i) => i.name === name)
-  const { starlarkFiles, manifestContent, hasSagas, sagaTrigger } = usePatternFiles(item)
+  const { starlarkFiles, manifestContent, manifestSagas, hasSagas } = usePatternFiles(item)
 
-  const firstStarlarkContent = starlarkFiles.length > 0 ? starlarkFiles[0].content : null
+  // Parse ALL starlark files into flows, matching each to its manifest saga trigger
+  const sagaFlows = useMemo(() => {
+    const flows: SagaFlow[] = []
+    for (const file of starlarkFiles) {
+      const flow = parseStarlarkSaga(file.content)
+      // Match this starlark file to its manifest saga by name to get the trigger
+      const manifestSaga = manifestSagas.find((ms) => ms.name === flow.name)
+      if (manifestSaga?.trigger) {
+        flow.trigger = manifestSaga.trigger
+      }
+      if (manifestSaga?.filter) {
+        flow.filter = manifestSaga.filter
+      }
+      flows.push(flow)
+    }
+    return flows
+  }, [starlarkFiles, manifestSagas])
 
-  const sagaFlow = useMemo(() => {
-    if (!firstStarlarkContent) return null
-    const flow = parseStarlarkSaga(firstStarlarkContent)
-    // Manifest YAML is source of truth for trigger
-    flow.trigger = sagaTrigger
-    return flow
-  }, [firstStarlarkContent, sagaTrigger])
+  // Auto-compute complexity from node count
+  const computedComplexity = useMemo(() => {
+    if (sagaFlows.length === 0) return null
+    return countFlowNodes(sagaFlows)
+  }, [sagaFlows])
 
   if (catalogueLoading) {
     return <DetailSkeleton fieldCount={3} tabCount={3} showBackNav />
@@ -250,11 +266,13 @@ export function CookbookDetailPage() {
     ? { label: 'Patterns', href: '/cookbook/patterns' }
     : { label: 'UI Components', href: '/cookbook/components' }
 
+  const hasFlowSteps = sagaFlows.some((f) => f.steps.length > 0)
+
   return (
     <div className="space-y-6">
       <Breadcrumbs items={[{ label: 'Cookbook', href: '/cookbook' }, parentSection, { label: item.title }]} />
 
-      <PatternInfoSection item={item} />
+      <PatternInfoSection item={item} computedComplexity={computedComplexity} />
 
       {isPattern ? (
         <Tabs defaultValue="manifest">
@@ -282,8 +300,8 @@ export function CookbookDetailPage() {
 
           {hasSagas && (
             <TabsContent value="flow" className="mt-4">
-              {sagaFlow && sagaFlow.steps.length > 0 && firstStarlarkContent ? (
-                <LinkedPatternDetail flow={sagaFlow} />
+              {hasFlowSteps ? (
+                <LinkedPatternDetail flows={sagaFlows} />
               ) : (
                 <p className="text-sm text-muted-foreground">No saga flow detected in Starlark source.</p>
               )}
@@ -292,7 +310,7 @@ export function CookbookDetailPage() {
 
           {hasSagas && (
             <TabsContent value="handlers" className="mt-4">
-              <HandlerReferenceTab starlarkContent={firstStarlarkContent} />
+              <HandlerReferenceTab flows={sagaFlows} />
             </TabsContent>
           )}
 

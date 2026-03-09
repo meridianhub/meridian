@@ -1,4 +1,4 @@
-export { parseStarlarkSaga, parseTriggerService } from './star-parser'
+export { parseStarlarkSaga, parseTriggerService, countFlowNodes } from './star-parser'
 export type { SagaFlow, SagaFlowStep, ServiceCall, EarlyExit } from './star-parser'
 
 export { generateMermaidMarkup } from './saga-mermaid'

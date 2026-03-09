@@ -52,6 +52,25 @@ export interface EarlyExit {
 }
 
 /**
+ * Count total diagram nodes for a set of saga flows.
+ * Nodes: 1 start + steps + decisions + exits + 1 end per saga.
+ */
+export function countFlowNodes(flows: SagaFlow[]): number {
+  let count = 0
+  for (const flow of flows) {
+    count += 1 // start node
+    count += 1 // end node
+    for (const step of flow.steps) {
+      count += 1 // step node
+      if (step.earlyExit) {
+        count += 2 // decision + exit nodes
+      }
+    }
+  }
+  return count
+}
+
+/**
  * Extract the producing service name from a trigger string.
  * Returns the service name in snake_case to match Starlark module names.
  * - "event:position-keeping.transaction-captured.v1" → "position_keeping"

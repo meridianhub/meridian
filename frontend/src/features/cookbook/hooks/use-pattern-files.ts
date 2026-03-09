@@ -7,9 +7,16 @@ export interface StarlarkFile {
   content: string
 }
 
+export interface ManifestSaga {
+  name?: string
+  trigger?: string
+  filter?: string
+}
+
 export interface PatternFilesState {
   starlarkFiles: StarlarkFile[]
   manifestContent: string | null
+  manifestSagas: ManifestSaga[]
   hasSagas: boolean
   sagaTrigger: string | null
   isLoading: false
@@ -19,12 +26,6 @@ function isValidContent(content: string | undefined): content is string {
   if (!content) return false
   const trimmed = content.trimStart()
   return !trimmed.startsWith('<!DOCTYPE') && !trimmed.startsWith('<html')
-}
-
-interface ManifestSaga {
-  name?: string
-  trigger?: string
-  filter?: string
 }
 
 function parseManifestSagas(manifestContent: string | null): ManifestSaga[] {
@@ -42,7 +43,7 @@ function parseManifestSagas(manifestContent: string | null): ManifestSaga[] {
 
 export function usePatternFiles(item: CookbookItem | undefined): PatternFilesState {
   return useMemo(() => {
-    const empty: PatternFilesState = { starlarkFiles: [], manifestContent: null, hasSagas: false, sagaTrigger: null, isLoading: false }
+    const empty: PatternFilesState = { starlarkFiles: [], manifestContent: null, manifestSagas: [], hasSagas: false, sagaTrigger: null, isLoading: false }
     if (!item || item.type !== 'registry:pattern') return empty
 
     const files = item.files ?? []
@@ -62,6 +63,6 @@ export function usePatternFiles(item: CookbookItem | undefined): PatternFilesSta
     const hasSagas = starlarkFiles.length > 0 || manifestSagas.length > 0
     const sagaTrigger = manifestSagas[0]?.trigger ?? null
 
-    return { starlarkFiles, manifestContent, hasSagas, sagaTrigger, isLoading: false }
+    return { starlarkFiles, manifestContent, manifestSagas, hasSagas, sagaTrigger, isLoading: false }
   }, [item])
 }
