@@ -52,7 +52,13 @@ describe('createServiceClients', () => {
     expect(clients).toHaveProperty('manifestApplier')
     expect(clients).toHaveProperty('audit')
     expect(clients).toHaveProperty('identity')
-    expect((clients.identity as any).__service).toBe(IdentityService.typeName)
+  })
+
+  it('wires identity client to IdentityService descriptor', () => {
+    const transport = makeTransport()
+    createServiceClients(transport)
+
+    expect(createClient).toHaveBeenCalledWith(IdentityService, transport)
   })
 
   it('calls createClient for each service with the provided transport', () => {
