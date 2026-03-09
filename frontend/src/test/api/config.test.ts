@@ -31,6 +31,11 @@ describe('buildMcpTenantUrl', () => {
     const url = buildMcpTenantUrl('https://demo.meridianhub.cloud:8090', 'acme')
     expect(url).toBe('https://acme.demo.meridianhub.cloud:8090')
   })
+
+  it('returns malformed URL unchanged instead of throwing', () => {
+    const url = buildMcpTenantUrl('not-a-url', 'acme')
+    expect(url).toBe('not-a-url')
+  })
 })
 
 describe('buildTenantBaseUrl', () => {
