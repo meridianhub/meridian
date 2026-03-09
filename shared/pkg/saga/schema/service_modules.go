@@ -22,6 +22,12 @@ const starlarkContextKey = "saga.StarlarkContext"
 
 // Service module generation errors.
 var (
+	// ErrNilRegistry is returned when a nil handler registry is passed.
+	ErrNilRegistry = errors.New("handler registry is nil")
+
+	// ErrNilSchema is returned when a nil schema is passed.
+	ErrNilSchema = errors.New("schema is nil")
+
 	// ErrHandlerMissingFromRegistry is returned when a schema defines a handler
 	// that is not registered in the HandlerRegistry.
 	ErrHandlerMissingFromRegistry = errors.New("handler defined in schema but not in registry")
@@ -157,6 +163,10 @@ func (t *handlerTree) validateNode(path string) error {
 //
 //	invoke_handler(handler="position_keeping.initiate_log", params={...})
 func BuildServiceModules(registry *saga.HandlerRegistry) (starlark.StringDict, error) {
+	if registry == nil {
+		return nil, ErrNilRegistry
+	}
+
 	// Derive schema from proto metadata on the handler registry
 	derivedSchema, err := DeriveSchema(registry)
 	if err != nil {
@@ -171,6 +181,13 @@ func BuildServiceModules(registry *saga.HandlerRegistry) (starlark.StringDict, e
 // pre-constructed schema (e.g., parsed from YAML for testing, or from a validation registry).
 // Production code should prefer BuildServiceModules which derives the schema automatically.
 func BuildServiceModulesFromSchema(registry *saga.HandlerRegistry, s *Schema) (starlark.StringDict, error) {
+	if registry == nil {
+		return nil, ErrNilRegistry
+	}
+	if s == nil {
+		return nil, ErrNilSchema
+	}
+
 	// Get all handler names from the schema
 	schemaHandlers := make([]string, 0, len(s.Handlers))
 	for name := range s.Handlers {

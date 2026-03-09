@@ -562,9 +562,8 @@ func TestPlatformHandlersSchema_ExternalHandlers(t *testing.T) {
 
 	for _, handlerName := range internalHandlers {
 		h, err := reg.GetHandler(handlerName)
-		if err == nil {
-			assert.False(t, h.External, "%s should NOT be marked as external", handlerName)
-		}
+		require.NoError(t, err, "expected %s in derived registry", handlerName)
+		assert.False(t, h.External, "%s should NOT be marked as external", handlerName)
 	}
 }
 
