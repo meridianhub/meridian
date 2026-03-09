@@ -42,42 +42,73 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"current_account.create_lien": {
 			handler: createLienHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:    saga.HandlerCategorySettlement,
+				Description: "Create a lien (hold) on an account for a specified amount",
+				Compensate:  "current_account.terminate_lien",
 				// Liens reserve funds in specific currencies (USD, EUR, etc.)
 				// ProducesInstruments represents currencies that can be blocked/reserved
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
+				ProtoRequestType:    (*currentaccountv1.InitiateLienRequest)(nil),
+				ProtoResponseType:   (*currentaccountv1.InitiateLienResponse)(nil),
+				ParamOverrides: map[string]saga.ParamOverride{
+					"amount": {Type: "Decimal"},
+				},
+				Version: 1,
 			},
 		},
 		"current_account.execute_lien": {
 			handler: executeLienHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Execute (consume) a previously created lien",
+				CompensationStrategy: "none",
 				// Execute doesn't produce new instruments, just converts reservation to debit
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*currentaccountv1.ExecuteLienRequest)(nil),
+				ProtoResponseType:   (*currentaccountv1.ExecuteLienResponse)(nil),
+				Version:             1,
 			},
 		},
 		"current_account.terminate_lien": {
 			handler: terminateLienHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Terminate (release) a lien without execution (compensation handler)",
+				CompensationStrategy: "none",
 				// Termination doesn't produce instruments, just releases them
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*currentaccountv1.TerminateLienRequest)(nil),
+				ProtoResponseType:   (*currentaccountv1.TerminateLienResponse)(nil),
+				Version:             1,
 			},
 		},
 		"current_account.save": {
 			handler: saveHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Persist current account metadata for a transaction",
+				CompensationStrategy: "none",
 				// Save is persistence only, doesn't produce instruments
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*currentaccountv1.UpdateCurrentAccountRequest)(nil),
+				ProtoResponseType:   (*currentaccountv1.UpdateCurrentAccountResponse)(nil),
+				Version:             1,
 			},
 		},
 		"current_account.control": {
 			handler: controlHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Perform lifecycle control action on an account (FREEZE, UNFREEZE, CLOSE)",
+				CompensationStrategy: "saga_managed",
 				// Control actions (freeze/unfreeze/close) don't produce instruments
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*currentaccountv1.ControlCurrentAccountRequest)(nil),
+				ProtoResponseType:   (*currentaccountv1.ControlCurrentAccountResponse)(nil),
+				ParamOverrides: map[string]saga.ParamOverride{
+					"action": {Type: "enum"},
+				},
+				Version: 1,
 			},
 		},
 	}
