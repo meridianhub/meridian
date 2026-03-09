@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -57,7 +58,10 @@ func LoadProvidersConfig() ProvidersConfig {
 
 	if raw := os.Getenv("AUTH_PROVIDERS"); raw != "" {
 		var providers []AuthProvider
-		if err := json.Unmarshal([]byte(raw), &providers); err == nil {
+		if err := json.Unmarshal([]byte(raw), &providers); err != nil {
+			slog.Error("failed to parse AUTH_PROVIDERS, falling back to default provider",
+				"error", err)
+		} else {
 			// Populate authUrl for OIDC providers that don't have one set
 			for i := range providers {
 				if providers[i].Type == "oidc" && providers[i].AuthURL == "" && dexIssuer != "" {
