@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { useTenants } from '@/hooks/use-tenants'
 import { ApiClientProvider } from '@/api/context'
-import { ProtectedRoute, PlatformOnlyRoute, AdminOnlyRoute } from '@/components/routing'
+import { ProtectedRoute, PlatformOnlyRoute, AdminOnlyRoute, TenantSubdomainEnforcer } from '@/components/routing'
 import { FeatureGuard } from '@/components/feature-guard'
 import { AppShell } from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -401,7 +401,9 @@ function AuthenticatedApp() {
                 path="/*"
                 element={
                   <ProtectedRoute>
-                    <AppShellLayout />
+                    <TenantSubdomainEnforcer>
+                      <AppShellLayout />
+                    </TenantSubdomainEnforcer>
                   </ProtectedRoute>
                 }
               />
