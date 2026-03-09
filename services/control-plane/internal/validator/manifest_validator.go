@@ -366,8 +366,12 @@ func (v *ManifestValidator) Validate(
 	}
 
 	// 15. Destructive change detection
+	// Use the previous manifest's call logs for graph construction so that
+	// dependencies that existed in the previous version are correctly detected,
+	// even if a saga was modified or removed in the current manifest.
 	if previousManifest != nil {
-		v.validateDestructiveChanges(manifest, previousManifest, callLogs, cfg, result)
+		previousCallLogs := v.validateStarlarkScripts(previousManifest, &ValidationResult{})
+		v.validateDestructiveChanges(manifest, previousManifest, previousCallLogs, cfg, result)
 	}
 
 	// Set valid flag based on error count
