@@ -212,11 +212,24 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	logger.Info("manifest applied successfully", "job_id", execResult.jobID)
 
 	// Invoke post-apply hooks (e.g., cache invalidation)
-	for _, hook := range h.postApplyHooks {
-		hook(ctx, string(tenantID))
-	}
+	h.runPostApplyHooks(ctx, string(tenantID), logger)
 
 	return response, nil
+}
+
+// runPostApplyHooks invokes each post-apply hook with panic recovery
+// to prevent a misbehaving hook from crashing the gRPC handler.
+func (h *ApplyManifestHandler) runPostApplyHooks(ctx context.Context, tenantID string, logger *slog.Logger) {
+	for i, hook := range h.postApplyHooks {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("post-apply hook panicked", "hook_index", i, "panic", r)
+				}
+			}()
+			hook(ctx, tenantID)
+		}()
+	}
 }
 
 // validationOutput holds the results of manifest validation.
