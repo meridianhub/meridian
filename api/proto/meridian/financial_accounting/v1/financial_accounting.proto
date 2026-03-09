@@ -308,6 +308,7 @@ message CaptureLedgerPostingRequest {
   // account_service_domain identifies which BIAN Service Domain manages the account.
   // Optional - when provided, stored directly. When omitted (UNSPECIFIED), the service
   // may resolve it via account validation if configured.
+  // Server validates the enum range — out-of-range values return INVALID_ARGUMENT.
   meridian.common.v1.AccountServiceDomain account_service_domain = 7;
 }
 
