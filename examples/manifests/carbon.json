@@ -54,7 +54,7 @@
   "sagas": [
     {
       "name": "retire_carbon_credits",
-      "trigger": "api:/v1/carbon/retire",
+      "trigger": "api:/v1/sagas/execute",
       "script": "def execute(ctx):\n    retirement = ctx\n    amount = Decimal(str(retirement.get('tonnes', '0')))\n    position_keeping.initiate_log(amount=amount, direction='CREDIT')\n"
     }
   ]

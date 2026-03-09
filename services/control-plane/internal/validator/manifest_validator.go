@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -22,6 +24,8 @@ import (
 	"github.com/shopspring/decimal"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
+	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
+	"gopkg.in/yaml.v3"
 )
 
 // Known service bindings available on the saga context object.
@@ -150,18 +154,44 @@ type ValidationResult struct {
 
 // ManifestValidator validates Meridian manifests.
 type ManifestValidator struct {
-	protoValidator  protovalidate.Validator
-	celEnv          *cel.Env
-	bucketCelEnv    *cel.Env
-	partyTypeCelEnv *cel.Env
-	mappingCelEnv   *cel.Env
-	eventFilterEnv  *cel.Env
-	channelRegistry map[string]bool
-	schemaRegistry  *schema.Registry
+	protoValidator       protovalidate.Validator
+	celEnv               *cel.Env
+	bucketCelEnv         *cel.Env
+	partyTypeCelEnv      *cel.Env
+	mappingCelEnv        *cel.Env
+	eventFilterEnv       *cel.Env
+	channelRegistry      map[string]bool
+	schemaRegistry       *schema.Registry
+	apiPathRegistry      map[string]bool            // valid API endpoint paths from OpenAPI spec
+	asyncAPISchemas      map[string]map[string]bool // topic -> set of payload field names
+	apiPathsExplicit     bool                       // true when set via option
+	asyncSchemasExplicit bool                       // true when set via option
+}
+
+// Option configures a ManifestValidator.
+type Option func(*ManifestValidator)
+
+// WithOpenAPIPaths sets the valid API paths for API trigger validation.
+// Pass nil to disable API trigger validation (skip filesystem loading).
+func WithOpenAPIPaths(paths map[string]bool) Option {
+	return func(v *ManifestValidator) {
+		v.apiPathRegistry = paths
+		v.apiPathsExplicit = true
+	}
+}
+
+// WithAsyncAPISchemas sets the event payload schemas for CEL field validation.
+// The map keys are topic names; values are sets of valid field names.
+// Pass nil to disable AsyncAPI field validation (skip filesystem loading).
+func WithAsyncAPISchemas(schemas map[string]map[string]bool) Option {
+	return func(v *ManifestValidator) {
+		v.asyncAPISchemas = schemas
+		v.asyncSchemasExplicit = true
+	}
 }
 
 // New creates a new ManifestValidator.
-func New() (*ManifestValidator, error) {
+func New(opts ...Option) (*ManifestValidator, error) {
 	pv, err := protovalidate.New()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proto validator: %w", err)
@@ -233,7 +263,7 @@ func New() (*ManifestValidator, error) {
 		return nil, fmt.Errorf("failed to load schema registry: %w", err)
 	}
 
-	return &ManifestValidator{
+	mv := &ManifestValidator{
 		protoValidator:  pv,
 		celEnv:          celEnv,
 		bucketCelEnv:    bucketCelEnv,
@@ -242,7 +272,25 @@ func New() (*ManifestValidator, error) {
 		eventFilterEnv:  eventFilterEnv,
 		channelRegistry: channelRegistry,
 		schemaRegistry:  schemaRegistry,
-	}, nil
+	}
+
+	for _, opt := range opts {
+		opt(mv)
+	}
+
+	// Best-effort auto-loading from repo checkout. When the spec files are not
+	// reachable (e.g. running outside a repo checkout), the corresponding checks
+	// degrade gracefully: format and duplicate checks still run, only the
+	// endpoint-existence and field-reference checks are skipped. For deterministic
+	// behavior in tests, use WithOpenAPIPaths / WithAsyncAPISchemas.
+	if !mv.apiPathsExplicit {
+		mv.apiPathRegistry = tryLoadOpenAPIPaths()
+	}
+	if !mv.asyncSchemasExplicit {
+		mv.asyncAPISchemas = tryLoadAsyncAPISchemas()
+	}
+
+	return mv, nil
 }
 
 // Validate performs full validation of a manifest.
@@ -286,7 +334,13 @@ func (v *ManifestValidator) Validate(
 	// 11. Scheduled trigger name uniqueness
 	v.validateScheduledTriggers(manifest, result)
 
-	// 12. Immutability checks
+	// 12. API trigger validation against OpenAPI spec
+	v.validateAPITriggers(manifest, result)
+
+	// 13. Operational gateway orphan detection
+	v.validateOperationalGatewayOrphans(manifest, result)
+
+	// 14. Immutability checks
 	if previousManifest != nil {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
@@ -1104,6 +1158,9 @@ func (v *ManifestValidator) validateEventTrigger(
 	}
 
 	v.validateEventFilterCEL(saga.GetFilter(), path+".filter", result)
+
+	// Cross-check CEL field references against AsyncAPI schema
+	v.validateEventFilterCELFields(saga.GetFilter(), channel, path+".filter", result)
 }
 
 // validateEventFilterCEL compiles a CEL expression in the event filter environment.
@@ -1180,16 +1237,9 @@ func (v *ManifestValidator) validateWebhookTriggers(
 	sort.Strings(availableIDs)
 
 	for i, saga := range manifest.GetSagas() {
-		trigger := saga.GetTrigger()
-		if !strings.HasPrefix(trigger, "webhook:") {
+		source := extractWebhookSource(saga.GetTrigger())
+		if source == "" {
 			continue
-		}
-
-		// Parse webhook:<source>.<event> — source is the first dot-separated segment.
-		remainder := strings.TrimPrefix(trigger, "webhook:")
-		source := remainder
-		if dotIdx := strings.Index(remainder, "."); dotIdx > 0 {
-			source = remainder[:dotIdx]
 		}
 
 		if !connectionIDs[source] {
@@ -1586,6 +1636,471 @@ func (v *ManifestValidator) listServiceHandlers(serviceName string) []string {
 	}
 	sort.Strings(methods)
 	return methods
+}
+
+// ─── Task 2: API Trigger Validation Against OpenAPI Spec ────────────────────
+
+// apiPathPattern validates that API trigger paths start with '/'.
+var apiPathPattern = regexp.MustCompile(`^/`)
+
+// validateAPITriggers validates sagas with "api:" trigger prefix.
+// It checks path format, uniqueness, and (when an OpenAPI spec is available) endpoint existence.
+func (v *ManifestValidator) validateAPITriggers(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	seenPaths := make(map[string]int)
+	var availablePaths []string
+	if v.apiPathRegistry != nil {
+		availablePaths = mapKeys(v.apiPathRegistry)
+	}
+
+	for i, saga := range manifest.GetSagas() {
+		trigger := saga.GetTrigger()
+		if !strings.HasPrefix(trigger, "api:") {
+			continue
+		}
+
+		path := strings.TrimPrefix(trigger, "api:")
+		sagaPath := fmt.Sprintf("sagas[%d].trigger", i)
+
+		// Validate format: must start with '/'
+		if !apiPathPattern.MatchString(path) {
+			addError(result, ValidationError{
+				Severity:   SeverityError,
+				Path:       sagaPath,
+				Code:       "INVALID_API_PATH_FORMAT",
+				Message:    fmt.Sprintf("API trigger path %q must start with '/'", path),
+				Suggestion: "API paths should follow the format '/v1/resource'",
+			})
+			continue
+		}
+
+		// Check uniqueness
+		if prevIdx, exists := seenPaths[path]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     sagaPath,
+				Code:     "DUPLICATE_API_TRIGGER",
+				Message:  fmt.Sprintf("API path %q already bound to saga at sagas[%d]", path, prevIdx),
+			})
+		} else {
+			seenPaths[path] = i
+		}
+
+		// Check existence in OpenAPI spec (only when spec is available)
+		if v.apiPathRegistry != nil && !v.apiPathRegistry[path] {
+			ve := ValidationError{
+				Severity:        SeverityError,
+				Path:            sagaPath,
+				Code:            "UNKNOWN_API_ENDPOINT",
+				Message:         fmt.Sprintf("API path %q is not defined in the OpenAPI spec", path),
+				AvailableFields: availablePaths,
+			}
+			if suggestion := findClosestMatch(path, availablePaths); suggestion != "" {
+				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+			}
+			addError(result, ve)
+		}
+	}
+}
+
+// tryLoadOpenAPIPaths attempts to load API paths from api/openapi/meridian.swagger.json.
+// Returns nil if the file doesn't exist or can't be parsed.
+func tryLoadOpenAPIPaths() map[string]bool {
+	specPath := findRepoFile("api/openapi/meridian.swagger.json")
+	if specPath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return nil
+	}
+
+	return parseOpenAPIPaths(data)
+}
+
+// parseOpenAPIPaths extracts endpoint paths from an OpenAPI/Swagger JSON spec.
+func parseOpenAPIPaths(data []byte) map[string]bool {
+	var spec struct {
+		Paths map[string]json.RawMessage `json:"paths"`
+	}
+	if err := json.Unmarshal(data, &spec); err != nil {
+		return nil
+	}
+
+	paths := make(map[string]bool, len(spec.Paths))
+	for p := range spec.Paths {
+		paths[p] = true
+	}
+	return paths
+}
+
+// ─── Task 5: AsyncAPI CEL Field Validation ──────────────────────────────────
+
+// tryLoadAsyncAPISchemas attempts to load event payload schemas from api/asyncapi/*.yaml.
+// Returns nil if the directory doesn't exist or no files are found.
+func tryLoadAsyncAPISchemas() map[string]map[string]bool {
+	dir := findRepoFile("api/asyncapi")
+	if dir == "" {
+		return nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	schemas := make(map[string]map[string]bool)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		parseAsyncAPIFile(data, schemas)
+	}
+
+	if len(schemas) == 0 {
+		return nil
+	}
+	return schemas
+}
+
+// asyncAPIDoc represents the minimal structure of an AsyncAPI 3.0 document.
+type asyncAPIDoc struct {
+	Channels   map[string]asyncAPIChannel `yaml:"channels"`
+	Components asyncAPIComponents         `yaml:"components"`
+}
+
+type asyncAPIChannel struct {
+	Messages map[string]asyncAPIMessageRef `yaml:"messages"`
+}
+
+type asyncAPIMessageRef struct {
+	Ref string `yaml:"$ref"`
+}
+
+type asyncAPIComponents struct {
+	Messages map[string]asyncAPIMessage `yaml:"messages"`
+	Schemas  map[string]asyncAPISchema  `yaml:"schemas"`
+}
+
+type asyncAPIMessage struct {
+	Payload asyncAPIPayloadRef `yaml:"payload"`
+}
+
+type asyncAPIPayloadRef struct {
+	Ref string `yaml:"$ref"`
+}
+
+type asyncAPISchema struct {
+	Properties map[string]yaml.Node `yaml:"properties"`
+}
+
+// parseAsyncAPIFile parses an AsyncAPI YAML file and populates the schemas map.
+func parseAsyncAPIFile(data []byte, schemas map[string]map[string]bool) {
+	var doc asyncAPIDoc
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return
+	}
+
+	for channelName, channel := range doc.Channels {
+		for _, msgRef := range channel.Messages {
+			fields := resolveMessageFields(msgRef, doc.Components)
+			if len(fields) == 0 {
+				continue
+			}
+			existing := schemas[channelName]
+			if existing == nil {
+				existing = make(map[string]bool, len(fields))
+			}
+			for _, f := range fields {
+				existing[f] = true
+			}
+			schemas[channelName] = existing
+		}
+	}
+}
+
+// resolveMessageFields follows $ref chains from a message reference to its schema
+// and returns the list of top-level property names.
+func resolveMessageFields(msgRef asyncAPIMessageRef, components asyncAPIComponents) []string {
+	msgName := extractRef(msgRef.Ref)
+	if msgName == "" {
+		return nil
+	}
+	msg, ok := components.Messages[msgName]
+	if !ok {
+		return nil
+	}
+	schemaName := extractRef(msg.Payload.Ref)
+	if schemaName == "" {
+		return nil
+	}
+	s, ok := components.Schemas[schemaName]
+	if !ok {
+		return nil
+	}
+	fields := make([]string, 0, len(s.Properties))
+	for fieldName := range s.Properties {
+		fields = append(fields, fieldName)
+	}
+	return fields
+}
+
+// extractRef extracts the last segment from a JSON/YAML $ref (e.g., "#/components/schemas/Foo" -> "Foo").
+func extractRef(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	parts := strings.Split(ref, "/")
+	return parts[len(parts)-1]
+}
+
+// extractCELFieldRefs extracts field names accessed on the "event" variable from a CEL expression.
+// For example, "event.amount > 0 && event.currency == 'GBP'" returns ["amount", "currency"].
+func extractCELFieldRefs(expression string, env *cel.Env) []string {
+	celAST, issues := env.Compile(expression)
+	if issues != nil && issues.Err() != nil {
+		return nil
+	}
+
+	parsedExpr, err := cel.AstToParsedExpr(celAST)
+	if err != nil {
+		return nil
+	}
+
+	fields := make(map[string]bool)
+	extractFieldsFromExpr(parsedExpr.GetExpr(), fields)
+
+	result := make([]string, 0, len(fields))
+	for f := range fields {
+		result = append(result, f)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// extractFieldsFromExpr recursively walks a CEL proto expression to find
+// select expressions on the "event" variable (event.field_name).
+func extractFieldsFromExpr(expr *exprpb.Expr, fields map[string]bool) {
+	if expr == nil {
+		return
+	}
+
+	switch e := expr.ExprKind.(type) {
+	case *exprpb.Expr_SelectExpr:
+		extractSelectField(e.SelectExpr, fields)
+	case *exprpb.Expr_CallExpr:
+		extractCallFields(e.CallExpr, fields)
+	case *exprpb.Expr_ListExpr:
+		for _, elem := range e.ListExpr.GetElements() {
+			extractFieldsFromExpr(elem, fields)
+		}
+	case *exprpb.Expr_StructExpr:
+		for _, entry := range e.StructExpr.GetEntries() {
+			extractFieldsFromExpr(entry.GetValue(), fields)
+		}
+	case *exprpb.Expr_ComprehensionExpr:
+		extractComprehensionFields(e.ComprehensionExpr, fields)
+	}
+}
+
+func extractSelectField(sel *exprpb.Expr_Select, fields map[string]bool) {
+	if ident, ok := sel.GetOperand().ExprKind.(*exprpb.Expr_IdentExpr); ok && ident.IdentExpr.GetName() == "event" {
+		fields[sel.GetField()] = true
+	} else {
+		extractFieldsFromExpr(sel.GetOperand(), fields)
+	}
+}
+
+func extractCallFields(call *exprpb.Expr_Call, fields map[string]bool) {
+	// Handle index operator: event["field_name"] is represented as _[_](event, "field_name")
+	if call.GetFunction() == "_[_]" && len(call.GetArgs()) == 2 {
+		if ident, ok := call.GetArgs()[0].ExprKind.(*exprpb.Expr_IdentExpr); ok && ident.IdentExpr.GetName() == "event" {
+			if constExpr, ok := call.GetArgs()[1].ExprKind.(*exprpb.Expr_ConstExpr); ok {
+				if sv := constExpr.ConstExpr.GetStringValue(); sv != "" {
+					fields[sv] = true
+					return
+				}
+			}
+		}
+	}
+	extractFieldsFromExpr(call.GetTarget(), fields)
+	for _, arg := range call.GetArgs() {
+		extractFieldsFromExpr(arg, fields)
+	}
+}
+
+func extractComprehensionFields(comp *exprpb.Expr_Comprehension, fields map[string]bool) {
+	extractFieldsFromExpr(comp.GetIterRange(), fields)
+	extractFieldsFromExpr(comp.GetAccuInit(), fields)
+	extractFieldsFromExpr(comp.GetLoopCondition(), fields)
+	extractFieldsFromExpr(comp.GetLoopStep(), fields)
+	extractFieldsFromExpr(comp.GetResult(), fields)
+}
+
+// validateEventFilterCELFields cross-checks CEL expression field references against
+// the AsyncAPI schema for the given event channel. Produces warnings for unknown fields.
+func (v *ManifestValidator) validateEventFilterCELFields(
+	expression string,
+	channel string,
+	path string,
+	result *ValidationResult,
+) {
+	if v.asyncAPISchemas == nil {
+		return
+	}
+
+	schemaFields, ok := v.asyncAPISchemas[channel]
+	if !ok {
+		return
+	}
+
+	celFields := extractCELFieldRefs(expression, v.eventFilterEnv)
+	schemaFieldList := mapKeys(schemaFields)
+
+	for _, field := range celFields {
+		if !schemaFields[field] {
+			ve := ValidationError{
+				Severity:        SeverityWarning,
+				Path:            path,
+				Code:            "CEL_UNKNOWN_EVENT_FIELD",
+				Message:         fmt.Sprintf("field %q is not defined in the AsyncAPI schema for channel %q", field, channel),
+				AvailableFields: schemaFieldList,
+			}
+			if suggestion := findClosestMatch(field, schemaFieldList); suggestion != "" {
+				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+			}
+			addError(result, ve)
+		}
+	}
+}
+
+// ─── Task 11: Operational Gateway Orphan Detection ──────────────────────────
+
+// dispatchInstructionRegex matches dispatch_instruction calls in Starlark scripts
+// to extract the instruction type, supporting both positional and keyword argument styles.
+// NOTE: This scans raw source text so it may match occurrences in comments or string
+// literals, producing false negatives (suppressing orphan warnings). A proper Starlark
+// AST walk would eliminate this, but the current approach is acceptable for a warning-level check.
+var dispatchInstructionRegex = regexp.MustCompile(
+	`dispatch_instruction\s*\(\s*(?:instruction_type\s*=\s*)?["']([^"']+)["']`,
+)
+
+// validateOperationalGatewayOrphans detects unused provider connections and instruction routes.
+func (v *ManifestValidator) validateOperationalGatewayOrphans(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	gw := manifest.GetOperationalGateway()
+	if gw == nil {
+		return
+	}
+
+	v.detectOrphanProviderConnections(manifest, gw, result)
+	v.detectOrphanInstructionRoutes(manifest, gw, result)
+}
+
+// detectOrphanProviderConnections warns on provider connections not referenced by
+// any instruction route or webhook trigger.
+func (v *ManifestValidator) detectOrphanProviderConnections(
+	manifest *controlplanev1.Manifest,
+	gw *controlplanev1.OperationalGatewayConfig,
+	result *ValidationResult,
+) {
+	usedConnections := make(map[string]bool)
+	for _, route := range gw.GetInstructionRoutes() {
+		usedConnections[route.GetConnectionId()] = true
+		if fb := route.GetFallbackConnectionId(); fb != "" {
+			usedConnections[fb] = true
+		}
+	}
+
+	// Also count connections used as webhook sources in saga triggers
+	for _, saga := range manifest.GetSagas() {
+		if source := extractWebhookSource(saga.GetTrigger()); source != "" {
+			usedConnections[source] = true
+		}
+	}
+
+	for i, conn := range gw.GetProviderConnections() {
+		cid := conn.GetConnectionId()
+		if !usedConnections[cid] {
+			addError(result, ValidationError{
+				Severity: SeverityWarning,
+				Path:     fmt.Sprintf("operational_gateway.provider_connections[%d].connection_id", i),
+				Code:     "ORPHAN_PROVIDER_CONNECTION",
+				Message:  fmt.Sprintf("provider connection %q is not referenced by any instruction route or webhook trigger", cid),
+			})
+		}
+	}
+}
+
+// detectOrphanInstructionRoutes warns on instruction routes not dispatched by any saga.
+func (v *ManifestValidator) detectOrphanInstructionRoutes(
+	manifest *controlplanev1.Manifest,
+	gw *controlplanev1.OperationalGatewayConfig,
+	result *ValidationResult,
+) {
+	usedInstructionTypes := make(map[string]bool)
+	for _, saga := range manifest.GetSagas() {
+		for _, m := range dispatchInstructionRegex.FindAllStringSubmatch(saga.GetScript(), -1) {
+			usedInstructionTypes[m[1]] = true
+		}
+	}
+
+	for i, route := range gw.GetInstructionRoutes() {
+		instrType := route.GetInstructionType()
+		if !usedInstructionTypes[instrType] {
+			addError(result, ValidationError{
+				Severity: SeverityWarning,
+				Path:     fmt.Sprintf("operational_gateway.instruction_routes[%d].instruction_type", i),
+				Code:     "ORPHAN_INSTRUCTION_ROUTE",
+				Message:  fmt.Sprintf("instruction type %q is not dispatched by any saga script", instrType),
+			})
+		}
+	}
+}
+
+// extractWebhookSource extracts the provider connection source from a webhook trigger string.
+// Returns empty string for non-webhook triggers.
+func extractWebhookSource(trigger string) string {
+	if !strings.HasPrefix(trigger, "webhook:") {
+		return ""
+	}
+	remainder := strings.TrimPrefix(trigger, "webhook:")
+	if dotIdx := strings.Index(remainder, "."); dotIdx > 0 {
+		return remainder[:dotIdx]
+	}
+	return remainder
+}
+
+// ─── Shared Helpers ─────────────────────────────────────────────────────────
+
+// findRepoFile walks up from the current working directory to find a relative file path.
+// Returns the absolute path if found, empty string otherwise.
+func findRepoFile(relPath string) string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	for {
+		candidate := filepath.Join(dir, relPath)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // buildFieldPath extracts a dotted field path from a protovalidate Violation.
