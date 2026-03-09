@@ -12,7 +12,20 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/validator"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
+	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+	financialgatewayclient "github.com/meridianhub/meridian/services/financial-gateway/client"
+	internalaccountclient "github.com/meridianhub/meridian/services/internal-account/client"
+	marketinformationclient "github.com/meridianhub/meridian/services/market-information/client"
+	operationalgatewayclient "github.com/meridianhub/meridian/services/operational-gateway/client"
+	partyclient "github.com/meridianhub/meridian/services/party/client"
+	positionkeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+	reconciliationclient "github.com/meridianhub/meridian/services/reconciliation/client"
+	referencedataclient "github.com/meridianhub/meridian/services/reference-data/client"
 )
 
 func main() {
@@ -39,7 +52,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	v, err := validator.New()
+	// Build handler registry from all service client registrations and derive schema.
+	derivedSchema, err := buildDerivedSchema()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to derive handler schema: %v\n", err)
+		os.Exit(1)
+	}
+
+	v, err := validator.New(validator.WithDerivedSchema(derivedSchema))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to create validator: %v\n", err)
 		os.Exit(1)
@@ -80,6 +100,55 @@ func main() {
 	if hasFailures {
 		os.Exit(1)
 	}
+}
+
+// buildDerivedSchema registers all service handlers and derives the schema from proto metadata.
+func buildDerivedSchema() (*schema.Schema, error) {
+	registry := saga.NewHandlerRegistry()
+
+	registrations := []struct {
+		name string
+		fn   func() error
+	}{
+		{"current-account", func() error {
+			return currentaccountclient.RegisterStarlarkHandlers(registry, &currentaccountclient.Client{})
+		}},
+		{"financial-accounting", func() error {
+			return financialaccountingclient.RegisterStarlarkHandlers(registry, &financialaccountingclient.Client{})
+		}},
+		{"financial-gateway", func() error {
+			return financialgatewayclient.RegisterStarlarkHandlers(registry, &financialgatewayclient.Client{})
+		}},
+		{"internal-account", func() error {
+			return internalaccountclient.RegisterStarlarkHandlers(registry, &internalaccountclient.Client{})
+		}},
+		{"market-information", func() error {
+			return marketinformationclient.RegisterStarlarkHandlers(registry, &marketinformationclient.Client{})
+		}},
+		{"operational-gateway", func() error {
+			return operationalgatewayclient.RegisterStarlarkHandlers(registry, &operationalgatewayclient.Client{})
+		}},
+		{"party", func() error {
+			return partyclient.RegisterStarlarkHandlers(registry, &partyclient.Client{})
+		}},
+		{"position-keeping", func() error {
+			return positionkeepingclient.RegisterStarlarkHandlers(registry, &positionkeepingclient.Client{})
+		}},
+		{"reconciliation", func() error {
+			return reconciliationclient.RegisterStarlarkHandlers(registry, &reconciliationclient.Client{})
+		}},
+		{"reference-data", func() error {
+			return referencedataclient.RegisterStarlarkHandlers(registry, &referencedataclient.Client{})
+		}},
+	}
+
+	for _, r := range registrations {
+		if err := r.fn(); err != nil {
+			return nil, fmt.Errorf("register %s handlers: %w", r.name, err)
+		}
+	}
+
+	return schema.DeriveSchema(registry)
 }
 
 func validateFile(v *validator.ManifestValidator, path string) (*validator.ValidationResult, error) {

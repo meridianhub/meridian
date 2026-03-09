@@ -188,6 +188,15 @@ func WithSchemaRegistry(reg *schema.Registry) Option {
 	}
 }
 
+// WithDerivedSchema populates the validator's schema registry from a proto-derived Schema.
+// This is the preferred option for production use where handlers are registered with
+// proto type annotations.
+func WithDerivedSchema(derivedSchema *schema.Schema) Option {
+	return func(v *ManifestValidator) {
+		v.schemaRegistry = schema.NewRegistryFromSchema(derivedSchema)
+	}
+}
+
 // WithAsyncAPISchemas sets the event payload schemas for CEL field validation.
 // The map keys are topic names; values are sets of valid field names.
 // Pass nil to disable AsyncAPI field validation (skip filesystem loading).

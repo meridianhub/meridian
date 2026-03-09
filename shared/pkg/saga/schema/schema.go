@@ -520,6 +520,18 @@ func (r *Registry) ToSchema() *Schema {
 	return &Schema{Handlers: handlers}
 }
 
+// NewRegistryFromSchema creates a Registry pre-populated with handler definitions from a Schema.
+// This is the inverse of ToSchema() and enables creating a Registry from proto-derived schemas.
+func NewRegistryFromSchema(s *Schema) *Registry {
+	r := NewRegistry()
+	if s != nil {
+		for name, def := range s.Handlers {
+			r.handlers[name] = def
+		}
+	}
+	return r
+}
+
 // ValidateHandlerParams validates parameters for a named handler.
 // Returns ErrHandlerNotFound if the handler schema is not registered.
 func (r *Registry) ValidateHandlerParams(handlerName string, params map[string]any) error {
