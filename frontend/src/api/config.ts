@@ -19,6 +19,21 @@ export const apiConfig = {
   useBinaryFormat: import.meta.env.PROD && import.meta.env.VITE_E2E_MODE !== 'true',
 } as const
 
+/**
+ * Returns true if the browser is on a tenant subdomain (e.g. acme.demo.meridianhub.cloud).
+ * Detects this by checking if the hostname has more segments than the configured base URL.
+ */
+export function isOnTenantSubdomain(): boolean {
+  const base = apiConfig.baseUrl
+  try {
+    const baseParts = new URL(base).hostname.split('.')
+    const currentParts = window.location.hostname.split('.')
+    return currentParts.length > baseParts.length
+  } catch {
+    return false
+  }
+}
+
 export function buildTenantBaseUrl(tenantSlug: string): string {
   const base = apiConfig.baseUrl
   const parsed = new URL(base)

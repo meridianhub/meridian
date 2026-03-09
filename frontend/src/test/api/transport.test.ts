@@ -11,10 +11,11 @@ vi.mock('@/api/config', () => ({
     useBinaryFormat: false,
   },
   buildTenantBaseUrl: vi.fn((slug: string) => `https://${slug}.api.meridian.io`),
+  isOnTenantSubdomain: vi.fn(() => false),
 }))
 
 import { createConnectTransport } from '@connectrpc/connect-web'
-import { buildTenantBaseUrl, apiConfig } from '@/api/config'
+import { buildTenantBaseUrl, apiConfig, isOnTenantSubdomain } from '@/api/config'
 
 describe('createTenantTransport', () => {
   const getTenantSlug = vi.fn(() => null)
@@ -57,6 +58,17 @@ describe('createTenantTransport', () => {
 
     expect(createConnectTransport).toHaveBeenCalledWith(
       expect.objectContaining({ useBinaryFormat: false }),
+    )
+  })
+
+  it('uses window.location.origin when on a tenant subdomain', () => {
+    vi.mocked(isOnTenantSubdomain).mockReturnValue(true)
+    const getToken = vi.fn(() => 'token')
+    createTenantTransport('acme', getToken, getTenantSlug)
+
+    expect(buildTenantBaseUrl).not.toHaveBeenCalled()
+    expect(createConnectTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: window.location.origin }),
     )
   })
 })
