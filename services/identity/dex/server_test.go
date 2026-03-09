@@ -2,6 +2,8 @@ package dex
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	meridianconnector "github.com/meridianhub/meridian/services/identity/connector"
@@ -116,4 +118,71 @@ func TestEmbeddedDex_SetHandler(t *testing.T) {
 	// Simulate setting a handler from the application layer.
 	embedded.SetHandler(nil) // no-op but exercises the method
 	assert.Nil(t, embedded.Handler())
+}
+
+func TestStartServer_CreatesHandler(t *testing.T) {
+	stub := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, _, _ string) (meridianconnector.Identity, bool, error) {
+			return meridianconnector.Identity{}, false, nil
+		},
+	}
+
+	ctx := context.Background()
+	embedded, err := New(ctx, Config{
+		Issuer:    "http://127.0.0.1:0/dex",
+		Connector: stub,
+		Clients: []ClientConfig{
+			{
+				ID:           "test-client",
+				Public:       true,
+				RedirectURIs: []string{"http://localhost/callback"},
+				Name:         "Test",
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Nil(t, embedded.Handler(), "handler should be nil before StartServer")
+
+	err = embedded.StartServer(ctx, "http://127.0.0.1:0/dex", true)
+	require.NoError(t, err)
+
+	assert.NotNil(t, embedded.Handler(), "handler should be set after StartServer")
+}
+
+func TestStartServer_ServesOIDCDiscovery(t *testing.T) {
+	stub := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, _, _ string) (meridianconnector.Identity, bool, error) {
+			return meridianconnector.Identity{}, false, nil
+		},
+	}
+
+	ctx := context.Background()
+	embedded, err := New(ctx, Config{
+		Issuer:    "http://127.0.0.1:0/dex",
+		Connector: stub,
+		Clients: []ClientConfig{
+			{
+				ID:           "test-client",
+				Public:       true,
+				RedirectURIs: []string{"http://localhost/callback"},
+				Name:         "Test",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	err = embedded.StartServer(ctx, "http://127.0.0.1:0/dex", true)
+	require.NoError(t, err)
+
+	// Verify the handler serves OIDC discovery.
+	// Dex prepends the issuer path (/dex) to all routes, so the full path is required.
+	handler := embedded.Handler()
+	require.NotNil(t, handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/dex/.well-known/openid-configuration", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Dex returns the discovery document.
+	assert.Equal(t, http.StatusOK, rec.Code)
 }

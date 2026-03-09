@@ -835,6 +835,122 @@ func TestWithEventStreamHandler_HealthEndpointsUnaffected(t *testing.T) {
 	}
 }
 
+// TestWithDexHandler_RoutesRegistered verifies that /dex/* routes are registered
+// and bypass auth/tenant middleware when a Dex handler is provided.
+func TestWithDexHandler_RoutesRegistered(t *testing.T) {
+	dexCalled := false
+	var capturedPath string
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dexCalled = true
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("dex-response"))
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil, WithDexHandler(fakeDex))
+
+	// Dex includes the issuer path (/dex) in its internal routing,
+	// so paths are NOT stripped - they arrive at the handler as-is.
+	tests := []struct {
+		name   string
+		path   string
+		method string
+	}{
+		{
+			name:   "OIDC discovery endpoint",
+			path:   "/dex/.well-known/openid-configuration",
+			method: http.MethodGet,
+		},
+		{
+			name:   "JWKS keys endpoint",
+			path:   "/dex/keys",
+			method: http.MethodGet,
+		},
+		{
+			name:   "token endpoint",
+			path:   "/dex/token",
+			method: http.MethodPost,
+		},
+		{
+			name:   "auth endpoint",
+			path:   "/dex/auth",
+			method: http.MethodGet,
+		},
+		{
+			name:   "healthz endpoint",
+			path:   "/dex/healthz",
+			method: http.MethodGet,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dexCalled = false
+			capturedPath = ""
+
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			server.mux.ServeHTTP(rec, req)
+
+			assert.True(t, dexCalled, "Dex handler should be called for %s", tt.path)
+			assert.Equal(t, tt.path, capturedPath,
+				"path should be passed through unmodified (Dex handles /dex prefix internally)")
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, "dex-response", rec.Body.String())
+		})
+	}
+}
+
+// TestWithDexHandler_NotRegisteredWhenNil verifies that /dex/* routes are NOT
+// registered when no Dex handler is provided.
+func TestWithDexHandler_NotRegisteredWhenNil(t *testing.T) {
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/dex/.well-known/openid-configuration", nil)
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	// Without a Dex handler, /dex/* falls through to the "/" catch-all
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+// TestWithDexHandler_HealthEndpointsUnaffected verifies that adding the Dex
+// handler does not break health check endpoints.
+func TestWithDexHandler_HealthEndpointsUnaffected(t *testing.T) {
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "api.example.com",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, nil, WithDexHandler(fakeDex))
+
+	for _, endpoint := range []string{"/health", "/ready"} {
+		req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+		rec := httptest.NewRecorder()
+		server.mux.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code, "health endpoint %s must still work", endpoint)
+	}
+}
+
 // TestWithHealthChecker verifies the functional option works correctly.
 func TestWithHealthChecker(t *testing.T) {
 	config := &Config{
