@@ -19,6 +19,7 @@ import { ForecastingService } from './gen/meridian/forecasting/v1/forecasting_pb
 import { ManifestHistoryService } from './gen/meridian/control_plane/v1/manifest_history_service_pb'
 import { ApplyManifestService } from './gen/meridian/control_plane/v1/apply_manifest_service_pb'
 import { AuditService } from './gen/meridian/audit/v1/audit_service_pb'
+import { IdentityService } from './gen/meridian/identity/v1/identity_pb'
 
 export function createServiceClients(transport: Transport) {
   return {
@@ -41,6 +42,7 @@ export function createServiceClients(transport: Transport) {
     manifestHistory: createClient(ManifestHistoryService, transport),
     manifestApplier: createClient(ApplyManifestService, transport),
     audit: createClient(AuditService, transport),
+    identity: createClient(IdentityService, transport),
   }
 }
 
