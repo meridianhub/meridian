@@ -91,7 +91,7 @@ export function CallbackPage() {
         }
 
         login(token)
-        navigate('/')
+        navigate('/', { replace: true })
       } catch {
         setExchangeError('Unable to reach identity provider')
       }
@@ -109,7 +109,7 @@ export function CallbackPage() {
           <h1 className="text-2xl font-semibold">Authentication Failed</h1>
           <p className="text-sm text-destructive">{error}</p>
           <button
-            onClick={() => navigate('/login')}
+            onClick={() => navigate('/login', { replace: true })}
             className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             Return to Login
