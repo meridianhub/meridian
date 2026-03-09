@@ -132,6 +132,10 @@ type HandlerMetadata struct {
 // ParamOverride allows handler authors to declare Starlark-specific
 // parameter behaviour that can't be derived from proto alone.
 type ParamOverride struct {
+    // Type overrides the proto-derived FieldType.
+    // Required for types proto can't express (e.g., TypeDecimal).
+    Type FieldType
+
     // Alias maps this Starlark param name to a different proto field name.
     // Example: Starlark "account_id" -> proto "position_id"
     Alias string
@@ -200,6 +204,7 @@ Each `services/*/client/starlark.go` registration becomes self-describing:
         ProtoResponseType:    (*positionkeepingv1.InitiateFinancialPositionLogResponse)(nil),
         ParamOverrides: map[string]saga.ParamOverride{
             "account_id":         {Alias: "position_id"},
+            "amount":             {Type: schema.TypeDecimal},
             "currency":           {Deprecated: "instrument_code"},
             "valuation_analysis": {Derived: true},
         },
@@ -237,7 +242,7 @@ func DeriveSchema(registry *saga.HandlerRegistry) (*Schema, error) {
 
     for name, metadata := range registry.AllWithMetadata() {
         if metadata.ProtoRequestType == nil {
-            continue // Legacy handler without proto annotation
+            return nil, fmt.Errorf("handler %s: missing ProtoRequestType", name)
         }
 
         def := &HandlerDef{
@@ -275,7 +280,11 @@ Proto field type mapping:
 | `message` (nested) | `TypeMap` | |
 | `repeated` | `TypeArray` | |
 | Field with `(buf.validate.field).string.uuid = true` | `TypeUUID` | |
-| `string` named `*_decimal` or using Decimal convention | `TypeDecimal` | Convention-based |
+| `string` with `ParamOverride{Type: TypeDecimal}` | `TypeDecimal` | Explicit override required |
+
+Note: Proto has no native Decimal type. All Decimal params (e.g., `amount`)
+must be declared via `ParamOverride` with an explicit type override.
+This avoids fragile naming conventions and makes the mapping explicit.
 
 Enum value derivation strips the proto prefix to match Starlark conventions:
 
@@ -289,7 +298,7 @@ A test that validates alignment across all three layers:
 
 ```go
 func TestHandlerProtoAlignment(t *testing.T) {
-    registry := buildFullHandlerRegistry() // All 10 services
+    registry := buildFullHandlerRegistry()
 
     for name, metadata := range registry.AllWithMetadata() {
         t.Run(name, func(t *testing.T) {
@@ -300,11 +309,12 @@ func TestHandlerProtoAlignment(t *testing.T) {
             // 2. Derive schema from proto
             derived := deriveHandlerDef(metadata)
 
-            // 3. Every proto enum value must be reachable from Starlark
+            // 3. Every proto enum value must be reachable
             for paramName, paramDef := range derived.Params {
                 if paramDef.Type == TypeEnum {
                     assert.NotEmpty(t, paramDef.Values,
-                        "handler %s param %s: enum has no values", name, paramName)
+                        "handler %s param %s: enum has no values",
+                        name, paramName)
                 }
             }
 
@@ -312,8 +322,36 @@ func TestHandlerProtoAlignment(t *testing.T) {
             if metadata.Compensate != "" {
                 _, err := registry.Get(metadata.Compensate)
                 assert.NoError(t, err,
-                    "handler %s references compensation handler %s which is not registered",
+                    "handler %s compensation %s not registered",
                     name, metadata.Compensate)
+            }
+
+            // 5. Param parity: derived schema must match
+            // handlers.yaml (Phase 2 regression safety net)
+            yamlDef := yamlRegistry.GetHandler(name)
+            if yamlDef != nil {
+                for pName, pDef := range yamlDef.Params {
+                    derivedParam, ok := derived.Params[pName]
+                    assert.True(t, ok,
+                        "handler %s: param %s in YAML but not derived",
+                        name, pName)
+                    if ok {
+                        assert.Equal(t, pDef.Type, derivedParam.Type,
+                            "handler %s param %s: type mismatch",
+                            name, pName)
+                    }
+                }
+            }
+
+            // 6. Conversion targets must exist
+            for _, conv := range metadata.Conversions {
+                if conv.FromName != "" {
+                    // FromName should NOT collide with existing
+                    _, err := registry.Get(conv.FromName)
+                    assert.Error(t, err,
+                        "conversion from_name %s collides",
+                        conv.FromName)
+                }
             }
         })
     }
@@ -371,7 +409,6 @@ may surface existing drift that needs fixing before Phase 4.
 | financial-accounting | `services/financial-accounting/client/starlark.go` | 7 |
 | financial-gateway | `services/financial-gateway/client/starlark.go` | 4 |
 | current-account | `services/current-account/client/starlark.go` | 5 |
-| payment-order | `services/payment-order/client/starlark.go` | 4 |
 | reconciliation | `services/reconciliation/client/starlark.go` | 5 |
 | operational-gateway | `services/operational-gateway/client/starlark.go` | 3 |
 | party | `services/party/client/starlark.go` | 4 |
@@ -413,7 +450,7 @@ Missing params in derived schema.
 
 **Decimal type has no proto equivalent:**
 Can't derive `TypeDecimal` from proto.
-Convention: fields named `*amount*` map to Decimal; or use `ParamOverride`.
+Handled via `ParamOverride{Type: TypeDecimal}` — explicit, no naming conventions.
 
 **Enum prefix stripping is ambiguous:**
 Wrong Starlark enum values.
