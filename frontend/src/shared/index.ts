@@ -17,3 +17,6 @@ export type { BreadcrumbsProps, BreadcrumbItem } from './breadcrumbs';
 
 export { DetailSkeleton } from './detail-skeleton';
 export type { DetailSkeletonProps } from './detail-skeleton';
+
+export { useAccountResolver } from './use-account-resolver';
+export type { ResolvedAccount, ResolvedAccountType } from './use-account-resolver';
