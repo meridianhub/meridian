@@ -8,7 +8,8 @@ import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink } from '@/shared/entity-link'
 import { MoneyDisplay } from '@/shared/money-display'
 
-import { accountEntityType, type EntityType } from '@/shared/entity-link'
+import { accountEntityType } from '@/shared/account-entity-type'
+import type { EntityType } from '@/shared/entity-link'
 
 interface LedgerPosting {
   id: string

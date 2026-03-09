@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay, EntityLink, Breadcrumbs } from '@/shared'
-import { accountEntityType } from '@/shared/entity-link'
+import { accountEntityType } from '@/shared/account-entity-type'
 import { MoneyDisplay } from '@/shared/money-display'
 import {
   Table,
