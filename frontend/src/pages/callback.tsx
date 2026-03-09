@@ -58,9 +58,10 @@ export function CallbackPage() {
     const { code, verifier } = validation
     const controller = new AbortController()
 
-    // Clean up PKCE values from sessionStorage (side effect belongs here, not in useMemo)
-    sessionStorage.removeItem(PKCE_STATE_KEY)
-    sessionStorage.removeItem(PKCE_VERIFIER_KEY)
+    function cleanupPkce() {
+      sessionStorage.removeItem(PKCE_STATE_KEY)
+      sessionStorage.removeItem(PKCE_VERIFIER_KEY)
+    }
 
     const exchangeCode = async () => {
       try {
@@ -81,6 +82,8 @@ export function CallbackPage() {
 
         if (!response.ok) {
           const text = await response.text()
+          // Terminal failure - clean up PKCE since the code is spent
+          cleanupPkce()
           setExchangeError(text.includes('invalid_grant') ? 'Authorization code expired or invalid' : 'Token exchange failed')
           return
         }
@@ -88,14 +91,17 @@ export function CallbackPage() {
         const data = (await response.json()) as { id_token?: string; access_token?: string }
         const token = data.id_token ?? data.access_token
         if (!token) {
+          cleanupPkce()
           setExchangeError('No token received from identity provider')
           return
         }
 
+        cleanupPkce()
         login(token)
         navigate('/', { replace: true })
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return
+        // Transient failure (network error) - keep PKCE values for retry on refresh
         setExchangeError('Unable to reach identity provider')
       }
     }
