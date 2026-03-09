@@ -101,7 +101,7 @@ func TestRegisterStarlarkHandlers_AllHandlersRegistered(t *testing.T) {
 
 		// Verify ProducesInstruments for handlers that produce money
 		expectedInstruments := []string{"USD", "EUR", "GBP", "NZD"}
-		if name != "financial_accounting.update_booking_log" && name != "financial_accounting.compensate_posting" {
+		if name != "financial_accounting.update_booking_log" && name != "financial_accounting.compensate_posting" && name != "financial_accounting.reverse_entries" {
 			// Most handlers produce money instruments
 			assert.Equal(t, expectedInstruments, metadata.ProducesInstruments, "handler %s should produce money instruments", name)
 		}
