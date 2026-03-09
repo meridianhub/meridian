@@ -34,6 +34,7 @@ type Server struct {
 	eventStreamHandler    *eventstream.Handler
 	rawEventStreamHandler http.Handler // used by tests and WithEventStreamHandlerHTTP
 	versionInfo           *VersionInfo
+	providersConfig       ProvidersConfig
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -83,6 +84,14 @@ func WithEventStreamHandlerHTTP(handler http.Handler) ServerOption {
 func WithVersionInfo(info *VersionInfo) ServerOption {
 	return func(s *Server) {
 		s.versionInfo = info
+	}
+}
+
+// WithProvidersConfig sets the authentication provider discovery configuration.
+// When enabled, the GET /api/auth/providers endpoint is registered.
+func WithProvidersConfig(cfg ProvidersConfig) ServerOption {
+	return func(s *Server) {
+		s.providersConfig = cfg
 	}
 }
 
@@ -144,6 +153,11 @@ func (s *Server) registerRoutes() {
 
 	// Build version endpoint - NO middleware (public, like health)
 	s.mux.HandleFunc("/version", s.getOnly(s.handleVersion))
+
+	// Provider discovery endpoint - NO middleware (public, needed before login)
+	if s.providersConfig.Enabled {
+		s.mux.HandleFunc("/api/auth/providers", s.getOnly(s.handleProviders))
+	}
 
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy
