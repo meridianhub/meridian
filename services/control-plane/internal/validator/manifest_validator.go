@@ -293,12 +293,32 @@ func New(opts ...Option) (*ManifestValidator, error) {
 	return mv, nil
 }
 
+// ValidateOption configures validation behavior.
+type ValidateOption func(*validateConfig)
+
+type validateConfig struct {
+	forceDestructiveChanges bool
+}
+
+// WithForceDestructiveChanges converts destructive change errors into warnings,
+// allowing removal of in-use resources when explicitly requested.
+func WithForceDestructiveChanges() ValidateOption {
+	return func(c *validateConfig) {
+		c.forceDestructiveChanges = true
+	}
+}
+
 // Validate performs full validation of a manifest.
-// If previousManifest is non-nil, immutability checks are also performed.
+// If previousManifest is non-nil, immutability and destructive change checks are also performed.
 func (v *ManifestValidator) Validate(
 	manifest *controlplanev1.Manifest,
 	previousManifest *controlplanev1.Manifest,
+	opts ...ValidateOption,
 ) *ValidationResult {
+	cfg := &validateConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	result := &ValidationResult{Valid: true}
 
 	// 1. Structural validation (protobuf constraints)
@@ -343,6 +363,15 @@ func (v *ManifestValidator) Validate(
 	// 14. Immutability checks
 	if previousManifest != nil {
 		v.validateImmutability(manifest, previousManifest, result)
+	}
+
+	// 15. Destructive change detection
+	// Use the previous manifest's call logs for graph construction so that
+	// dependencies that existed in the previous version are correctly detected,
+	// even if a saga was modified or removed in the current manifest.
+	if previousManifest != nil {
+		previousCallLogs := v.validateStarlarkScripts(previousManifest, &ValidationResult{})
+		v.validateDestructiveChanges(manifest, previousManifest, previousCallLogs, cfg, result)
 	}
 
 	// Set valid flag based on error count
@@ -1519,6 +1548,100 @@ func (v *ManifestValidator) validateImmutability(
 					Message:  fmt.Sprintf("account type code changed from %q to %q; codes are immutable primary keys", prevCode, acct.GetCode()),
 				})
 			}
+		}
+	}
+}
+
+// validateDestructiveChanges detects removal of resources that have dependencies in the
+// previous manifest. Removing an instrument used by account types or valuation rules,
+// an account type referenced in sagas, or a saga with dependents produces an error.
+// When force is set via WithForceDestructiveChanges, these errors become warnings.
+func (v *ManifestValidator) validateDestructiveChanges(
+	current *controlplanev1.Manifest,
+	previous *controlplanev1.Manifest,
+	callLogs map[string][]schema.HandlerCallInfo,
+	cfg *validateConfig,
+	result *ValidationResult,
+) {
+	// Build the relationship graph from the previous manifest to check dependencies.
+	prevGraph := ExtractRelationshipGraph(previous, callLogs)
+
+	// Build lookup sets for current manifest resources.
+	currentInstruments := make(map[string]bool)
+	for _, inst := range current.GetInstruments() {
+		currentInstruments[inst.GetCode()] = true
+	}
+	currentAccountTypes := make(map[string]bool)
+	for _, acct := range current.GetAccountTypes() {
+		currentAccountTypes[acct.GetCode()] = true
+	}
+	currentSagas := make(map[string]bool)
+	for _, saga := range current.GetSagas() {
+		currentSagas[saga.GetName()] = true
+	}
+
+	severity := SeverityError
+	if cfg.forceDestructiveChanges {
+		severity = SeverityWarning
+	}
+
+	// Check removed instruments. Use Impact (all connected edges) because instruments
+	// can be both targets (denominated_in from account types) and sources (converts in
+	// valuation rules).
+	for _, inst := range previous.GetInstruments() {
+		code := inst.GetCode()
+		if currentInstruments[code] {
+			continue
+		}
+		nodeID := "instrument:" + code
+		impact := prevGraph.Impact(nodeID)
+		if len(impact.AffectedNodes) > 0 {
+			addError(result, ValidationError{
+				Severity: severity,
+				Path:     "instruments",
+				Code:     "DESTRUCTIVE_INSTRUMENT_REMOVAL",
+				Message:  fmt.Sprintf("cannot remove instrument %q: it is referenced by %s", code, strings.Join(impact.AffectedNodes, ", ")),
+			})
+		}
+	}
+
+	// Check removed account types.
+	// Note: In the current graph structure, account types are only sources (denominated_in
+	// edges to instruments), not targets. Saga-to-account-type dependencies are captured
+	// via dynamic edges when call logs are provided (e.g., from a saga execution engine).
+	// Without call logs, this check relies on graph edges populated externally.
+	for _, acct := range previous.GetAccountTypes() {
+		code := acct.GetCode()
+		if currentAccountTypes[code] {
+			continue
+		}
+		nodeID := "account_type:" + code
+		dependents := prevGraph.Dependents(nodeID)
+		if len(dependents) > 0 {
+			addError(result, ValidationError{
+				Severity: severity,
+				Path:     "account_types",
+				Code:     "DESTRUCTIVE_ACCOUNT_TYPE_REMOVAL",
+				Message:  fmt.Sprintf("cannot remove account type %q: it is referenced by %s", code, strings.Join(dependents, ", ")),
+			})
+		}
+	}
+
+	// Check removed sagas.
+	for _, saga := range previous.GetSagas() {
+		name := saga.GetName()
+		if currentSagas[name] {
+			continue
+		}
+		nodeID := "saga:" + name
+		dependents := prevGraph.Dependents(nodeID)
+		if len(dependents) > 0 {
+			addError(result, ValidationError{
+				Severity: severity,
+				Path:     "sagas",
+				Code:     "DESTRUCTIVE_SAGA_REMOVAL",
+				Message:  fmt.Sprintf("cannot remove saga %q: it is referenced by %s", name, strings.Join(dependents, ", ")),
+			})
 		}
 	}
 }
