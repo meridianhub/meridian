@@ -56,8 +56,9 @@ describe('createServiceClients', () => {
 
   it('wires identity client to IdentityService descriptor', () => {
     const transport = makeTransport()
-    createServiceClients(transport)
+    const clients = createServiceClients(transport)
 
+    expect((clients.identity as { __service: string }).__service).toBe(IdentityService.typeName)
     expect(createClient).toHaveBeenCalledWith(IdentityService, transport)
   })
 
