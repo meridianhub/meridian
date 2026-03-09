@@ -40,20 +40,25 @@ export function isOnTenantSubdomain(): boolean {
  * For localhost, returns the MCP server URL unchanged (tenant identified via JWT).
  */
 export function buildMcpTenantUrl(mcpBaseUrl: string, tenantSlug: string | null): string {
+  const stripped = mcpBaseUrl.replace(/\/$/, '')
   if (!tenantSlug) {
-    return mcpBaseUrl.replace(/\/$/, '')
+    return stripped
   }
 
-  const parsed = new URL(mcpBaseUrl)
+  try {
+    const parsed = new URL(mcpBaseUrl)
 
-  // In local dev (localhost), tenant is identified via JWT, not subdomain
-  if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-    return mcpBaseUrl.replace(/\/$/, '')
+    // In local dev (localhost), tenant is identified via JWT, not subdomain
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+      return stripped
+    }
+
+    // In production, use tenant subdomain routing
+    parsed.hostname = `${tenantSlug}.${parsed.hostname}`
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return stripped
   }
-
-  // In production, use tenant subdomain routing
-  parsed.hostname = `${tenantSlug}.${parsed.hostname}`
-  return parsed.toString().replace(/\/$/, '')
 }
 
 export function buildTenantBaseUrl(tenantSlug: string): string {
