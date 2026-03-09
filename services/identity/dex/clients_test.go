@@ -83,7 +83,7 @@ func TestRegisterClients_Success(t *testing.T) {
 	err := registerClients(ctx, store, clients, slog.Default())
 	require.NoError(t, err)
 
-	stored, err := store.GetClient("test-client")
+	stored, err := store.GetClient(ctx, "test-client")
 	require.NoError(t, err)
 	assert.Equal(t, "test-client", stored.ID)
 	assert.Equal(t, "test-secret", stored.Secret)
@@ -110,7 +110,7 @@ func TestRegisterClients_UpdatesExisting(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the client was updated.
-	stored, err := store.GetClient("upsert-client")
+	stored, err := store.GetClient(ctx, "upsert-client")
 	require.NoError(t, err)
 	assert.Equal(t, "New Name", stored.Name)
 	assert.Equal(t, []string{"http://new/cb"}, stored.RedirectURIs)
@@ -128,11 +128,11 @@ func TestRegisterClients_MultipleClients(t *testing.T) {
 	err := registerClients(ctx, store, clients, slog.Default())
 	require.NoError(t, err)
 
-	a, err := store.GetClient("client-a")
+	a, err := store.GetClient(ctx, "client-a")
 	require.NoError(t, err)
 	assert.Equal(t, "A", a.Name)
 
-	b, err := store.GetClient("client-b")
+	b, err := store.GetClient(ctx, "client-b")
 	require.NoError(t, err)
 	assert.Equal(t, "B", b.Name)
 }

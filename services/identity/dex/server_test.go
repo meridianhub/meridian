@@ -72,7 +72,7 @@ func TestNew_RegistersClient(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify client is in storage.
-	client, err := embedded.Storage().GetClient("verify-client")
+	client, err := embedded.Storage().GetClient(ctx, "verify-client")
 	require.NoError(t, err)
 	assert.Equal(t, "Verify", client.Name)
 	assert.True(t, client.Public)
@@ -93,7 +93,7 @@ func TestNew_ConnectorInStorage(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify connector is in storage.
-	conn, err := embedded.Storage().GetConnector(ConnectorID)
+	conn, err := embedded.Storage().GetConnector(ctx, ConnectorID)
 	require.NoError(t, err)
 	assert.Equal(t, ConnectorType, conn.Type)
 }
