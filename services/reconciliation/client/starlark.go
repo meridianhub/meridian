@@ -29,37 +29,71 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"reconciliation.initiate_run": {
 			handler: initiateRunHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:          saga.HandlerCategorySettlement,
+				Description:       "Initiate a new settlement reconciliation run",
+				Compensate:        "reconciliation.cancel_run",
+				ProtoRequestType:  (*reconciliationv1.InitiateAccountReconciliationRequest)(nil),
+				ProtoResponseType: (*reconciliationv1.InitiateAccountReconciliationResponse)(nil),
+				ParamOverrides: map[string]saga.ParamOverride{
+					"scope":           {Type: "enum"},
+					"settlement_type": {Type: "enum"},
+				},
+				Version: 1,
 			},
 		},
 		"reconciliation.execute_run": {
 			handler: executeRunHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Trigger execution of a pending settlement run",
+				CompensationStrategy: "none",
+				ProtoRequestType:     (*reconciliationv1.ExecuteAccountReconciliationRequest)(nil),
+				ProtoResponseType:    (*reconciliationv1.ExecuteAccountReconciliationResponse)(nil),
+				Version:              1,
 			},
 		},
 		"reconciliation.retrieve_run": {
 			handler: retrieveRunHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Retrieve a settlement run summary",
+				CompensationStrategy: "none",
+				ProtoRequestType:     (*reconciliationv1.RetrieveAccountReconciliationRequest)(nil),
+				ProtoResponseType:    (*reconciliationv1.RetrieveAccountReconciliationResponse)(nil),
+				Version:              1,
 			},
 		},
 		"reconciliation.cancel_run": {
 			handler: cancelRunHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Cancel a settlement run (compensation handler)",
+				CompensationStrategy: "none",
+				ProtoRequestType:     (*reconciliationv1.ControlAccountReconciliationRequest)(nil),
+				ProtoResponseType:    (*reconciliationv1.ControlAccountReconciliationResponse)(nil),
+				Version:              1,
 			},
 		},
 		"reconciliation.assert_balance": {
 			handler: assertBalanceHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Evaluate a balance assertion against current positions",
+				CompensationStrategy: "none",
+				ProtoRequestType:     (*reconciliationv1.AssertBalanceRequest)(nil),
+				ProtoResponseType:    (*reconciliationv1.AssertBalanceResponse)(nil),
+				Version:              1,
 			},
 		},
 		"reconciliation.initiate_dispute": {
 			handler: initiateDisputeHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Raise a formal dispute against a detected variance",
+				CompensationStrategy: "none",
+				ProtoRequestType:     (*reconciliationv1.InitiateDisputeRequest)(nil),
+				ProtoResponseType:    (*reconciliationv1.InitiateDisputeResponse)(nil),
+				Version:              1,
 			},
 		},
 	}
