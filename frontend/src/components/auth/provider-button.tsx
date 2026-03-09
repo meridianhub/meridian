@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { getProviderIcon } from './provider-icons'
+import { GoogleIcon, GitHubIcon, MicrosoftIcon, DefaultProviderIcon } from './provider-icons'
 import type { AuthProvider } from '@/hooks/use-auth-providers'
 
 interface ProviderButtonProps {
@@ -8,9 +8,16 @@ interface ProviderButtonProps {
   onClick: () => Promise<void>
 }
 
+function ProviderIcon({ providerId }: { providerId: string }) {
+  const normalized = providerId.toLowerCase()
+  if (normalized.includes('google')) return <GoogleIcon className="size-4" />
+  if (normalized.includes('github')) return <GitHubIcon className="size-4" />
+  if (normalized.includes('microsoft')) return <MicrosoftIcon className="size-4" />
+  return <DefaultProviderIcon className="size-4" />
+}
+
 export function ProviderButton({ provider, onClick }: ProviderButtonProps) {
   const [loading, setLoading] = useState(false)
-  const Icon = getProviderIcon(provider.id)
 
   const handleClick = async () => {
     setLoading(true)
@@ -28,7 +35,7 @@ export function ProviderButton({ provider, onClick }: ProviderButtonProps) {
       disabled={loading}
       onClick={() => void handleClick()}
     >
-      <Icon className="size-4" />
+      <ProviderIcon providerId={provider.id} />
       {loading ? 'Redirecting...' : `Sign in with ${provider.displayName}`}
     </Button>
   )

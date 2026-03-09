@@ -1,7 +1,48 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
 import { PKCE_VERIFIER_KEY, PKCE_STATE_KEY } from '@/hooks/use-oauth-flow'
+
+/**
+ * Synchronously validate the callback URL parameters and PKCE state.
+ * Returns either a validated payload for code exchange or an error message.
+ */
+function validateCallbackParams(searchParams: URLSearchParams): {
+  valid: false
+  error: string
+} | {
+  valid: true
+  code: string
+  verifier: string
+} {
+  const errorParam = searchParams.get('error')
+  const errorDescription = searchParams.get('error_description')
+  if (errorParam) {
+    return { valid: false, error: errorDescription ?? errorParam }
+  }
+
+  const code = searchParams.get('code')
+  const state = searchParams.get('state')
+  if (!code || !state) {
+    return { valid: false, error: 'Missing authorization code or state parameter' }
+  }
+
+  const storedState = sessionStorage.getItem(PKCE_STATE_KEY)
+  if (state !== storedState) {
+    return { valid: false, error: 'Invalid state parameter - possible CSRF attack' }
+  }
+
+  const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY)
+  if (!verifier) {
+    return { valid: false, error: 'Missing PKCE verifier - please try signing in again' }
+  }
+
+  // Clean up stored PKCE values
+  sessionStorage.removeItem(PKCE_STATE_KEY)
+  sessionStorage.removeItem(PKCE_VERIFIER_KEY)
+
+  return { valid: true, code, verifier }
+}
 
 /**
  * OAuth callback page that handles the authorization code exchange.
@@ -11,39 +52,14 @@ export function CallbackPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { login } = useAuth()
-  const [error, setError] = useState<string | null>(null)
+  const [exchangeError, setExchangeError] = useState<string | null>(null)
+
+  const validation = useMemo(() => validateCallbackParams(searchParams), [searchParams])
 
   useEffect(() => {
-    const code = searchParams.get('code')
-    const state = searchParams.get('state')
-    const errorParam = searchParams.get('error')
-    const errorDescription = searchParams.get('error_description')
+    if (!validation.valid) return
 
-    if (errorParam) {
-      setError(errorDescription ?? errorParam)
-      return
-    }
-
-    if (!code || !state) {
-      setError('Missing authorization code or state parameter')
-      return
-    }
-
-    const storedState = sessionStorage.getItem(PKCE_STATE_KEY)
-    if (state !== storedState) {
-      setError('Invalid state parameter - possible CSRF attack')
-      return
-    }
-
-    const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY)
-    if (!verifier) {
-      setError('Missing PKCE verifier - please try signing in again')
-      return
-    }
-
-    // Clean up stored PKCE values
-    sessionStorage.removeItem(PKCE_STATE_KEY)
-    sessionStorage.removeItem(PKCE_VERIFIER_KEY)
+    const { code, verifier } = validation
 
     const exchangeCode = async () => {
       try {
@@ -63,26 +79,28 @@ export function CallbackPage() {
 
         if (!response.ok) {
           const text = await response.text()
-          setError(text.includes('invalid_grant') ? 'Authorization code expired or invalid' : 'Token exchange failed')
+          setExchangeError(text.includes('invalid_grant') ? 'Authorization code expired or invalid' : 'Token exchange failed')
           return
         }
 
         const data = (await response.json()) as { id_token?: string; access_token?: string }
         const token = data.id_token ?? data.access_token
         if (!token) {
-          setError('No token received from identity provider')
+          setExchangeError('No token received from identity provider')
           return
         }
 
         login(token)
         navigate('/')
       } catch {
-        setError('Unable to reach identity provider')
+        setExchangeError('Unable to reach identity provider')
       }
     }
 
     void exchangeCode()
-  }, [searchParams, login, navigate])
+  }, [validation, login, navigate])
+
+  const error = validation.valid ? exchangeError : validation.error
 
   if (error) {
     return (
