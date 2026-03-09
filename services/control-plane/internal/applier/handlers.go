@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
+	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
 
@@ -34,7 +37,12 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 			handler: registerInstrumentHandler(deps),
 			metadata: saga.HandlerMetadata{
 				Category:            saga.HandlerCategorySettlement,
+				Description:         "Register a new instrument definition in Reference Data service",
+				Compensate:          "reference_data.delete_instrument",
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*referencedatav1.RegisterInstrumentRequest)(nil),
+				ProtoResponseType:   (*referencedatav1.RegisterInstrumentResponse)(nil),
+				Version:             1,
 			},
 		},
 		// Reference Data - Account type registration (idempotent: CreateDraft + Activate)
@@ -42,62 +50,94 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 			handler: registerAccountTypeHandler(deps),
 			metadata: saga.HandlerMetadata{
 				Category:            saga.HandlerCategorySettlement,
+				Description:         "Register a new account type definition in Reference Data service",
+				Compensate:          "reference_data.delete_account_type",
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*referencedatav1.CreateDraftRequest)(nil),
+				ProtoResponseType:   (*referencedatav1.ActivateAccountTypeResponse)(nil),
+				Version:             1,
 			},
 		},
 		// Reference Data - Valuation rule registration
 		"reference_data.register_valuation_rule": {
 			handler: registerValuationRuleHandler(deps),
 			metadata: saga.HandlerMetadata{
-				Category:            saga.HandlerCategorySettlement,
-				ProducesInstruments: []string{},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Register a valuation rule for cross-instrument conversion",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				Version:              1,
 			},
 		},
 		// Reference Data - Saga definition registration
 		"reference_data.register_saga_definition": {
 			handler: registerSagaDefinitionHandler(deps),
 			metadata: saga.HandlerMetadata{
-				Category:            saga.HandlerCategorySettlement,
-				ProducesInstruments: []string{},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Register a saga definition in the saga registry",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				Version:              1,
 			},
 		},
 		// Internal Account - Account initiation
 		"internal_account.initiate": {
 			handler: initiateAccountHandler(deps),
 			metadata: saga.HandlerMetadata{
-				Category:            saga.HandlerCategorySettlement,
-				ProducesInstruments: []string{},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Initiate a new internal account",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*internalaccountv1.InitiateInternalAccountRequest)(nil),
+				ProtoResponseType:    (*internalaccountv1.InitiateInternalAccountResponse)(nil),
+				Version:              1,
 			},
 		},
 		// Compensation handlers
 		"reference_data.delete_instrument": {
 			handler: deleteInstrumentHandler(deps),
 			metadata: saga.HandlerMetadata{
-				Category:            saga.HandlerCategorySettlement,
-				ProducesInstruments: []string{},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Delete an instrument (compensation for register)",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				Version:              1,
 			},
 		},
 		"reference_data.delete_account_type": {
 			handler: deleteAccountTypeHandler(deps),
 			metadata: saga.HandlerMetadata{
-				Category:            saga.HandlerCategorySettlement,
-				ProducesInstruments: []string{},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Delete an account type (compensation for register)",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				Version:              1,
 			},
 		},
 		// Operational Gateway - Provider Connection Management
 		"operational_gateway.upsert_connection": {
 			handler: upsertConnectionHandler(deps),
 			metadata: saga.HandlerMetadata{
-				Category:            saga.HandlerCategorySettlement,
-				ProducesInstruments: []string{},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Create or update a provider connection configuration",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*opgatewayv1.UpsertConnectionRequest)(nil),
+				ProtoResponseType:    (*opgatewayv1.UpsertConnectionResponse)(nil),
+				Version:              1,
 			},
 		},
 		// Operational Gateway - Instruction Route Management
 		"operational_gateway.upsert_route": {
 			handler: upsertRouteHandler(deps),
 			metadata: saga.HandlerMetadata{
-				Category:            saga.HandlerCategorySettlement,
-				ProducesInstruments: []string{},
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Create or update an instruction route configuration",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*opgatewayv1.UpsertRouteRequest)(nil),
+				ProtoResponseType:    (*opgatewayv1.UpsertRouteResponse)(nil),
+				Version:              1,
 			},
 		},
 	}
