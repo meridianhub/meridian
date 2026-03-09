@@ -2,8 +2,7 @@
 #
 # Services:
 #   postgres    - PostgreSQL 16 (internal only, not exposed to host)
-#   dex         - Lightweight OIDC identity provider (~20MB RAM)
-#   meridian    - Unified binary; starts after postgres + dex are healthy
+#   meridian    - Unified binary with embedded Dex OIDC; starts after postgres is healthy
 #   caddy       - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
 #   mcp-server  - MCP server for AI integration (internal, proxied via Caddy)
 #
@@ -15,7 +14,6 @@
 # Directory layout expected on the host:
 #   /opt/meridian/.env            - Filled-in environment file
 #   /opt/meridian/Caddyfile       - Caddy configuration
-#   /opt/meridian/dex.yaml        - Dex OIDC configuration
 #   /opt/meridian/init-databases.sql - Per-service database init (runs on first Postgres boot)
 #   /opt/meridian/frontend/       - Built frontend static files (deployed by CI)
 #   /opt/meridian/certs/          - Cloudflare Origin Certificate files
@@ -41,30 +39,11 @@ services:
       start_period: 10s
     # Not exposed to host — accessed only by meridian on the internal network
 
-  dex:
-    image: ghcr.io/dexidp/dex:v2.41.1-alpine
-    restart: unless-stopped
-    command: ["dex", "serve", "/etc/dex/config.yaml"]
-    volumes:
-      - /opt/meridian/dex.yaml:/etc/dex/config.yaml:ro
-      - dex_data:/var/dex
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5556/dex/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    # Not exposed to host — accessed by meridian on the internal network.
-    # Expose port 15556 on the host for local token acquisition during development:
-    #   ports: ["15556:5556"]
-
   meridian:
     image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
     restart: unless-stopped
     depends_on:
       postgres:
-        condition: service_healthy
-      dex:
         condition: service_healthy
     environment:
       # --- Application ---
@@ -79,16 +58,19 @@ services:
       # Per-service databases are created by init-databases.sql on first Postgres boot.
       DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
-      # --- Authentication (Dex OIDC) ---
+      # --- Authentication (embedded Dex OIDC) ---
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-      JWKS_URL: ${JWKS_URL:-http://dex:5556/dex/keys}
-      JWKS_CACHE_TTL: ${JWKS_CACHE_TTL:-}
-      JWKS_REFRESH_TTL: ${JWKS_REFRESH_TTL:-}
-      JWT_ISSUER: ${JWT_ISSUER:-}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-}
+      DEX_ISSUER: ${DEX_ISSUER:-https://demo.meridianhub.cloud/dex}
       API_KEYS: ${API_KEYS:-}
       BASE_DOMAIN: ${BASE_DOMAIN:-demo.meridianhub.cloud}
       LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}
+
+      # --- Demo users (identity bootstrap) ---
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
+      DEMO_OPERATOR_EMAIL: ${DEMO_OPERATOR_EMAIL:-}
+      DEMO_OPERATOR_PASSWORD: ${DEMO_OPERATOR_PASSWORD:-}
+      DEMO_OPERATOR_TENANT: ${DEMO_OPERATOR_TENANT:-}
 
       # --- Feature flags ---
       BILLING_ENABLED: ${BILLING_ENABLED:-false}
@@ -159,6 +141,5 @@ services:
 
 volumes:
   postgres_data:
-  dex_data:
   caddy_data:
   caddy_config:
