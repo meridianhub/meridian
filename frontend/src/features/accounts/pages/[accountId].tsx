@@ -49,14 +49,10 @@ function AccountNotFound({ accountId }: { accountId?: string }) {
       <div className="mt-8 text-center">
         <h2 className="text-xl font-semibold">Account not found</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          The account you are looking for does not exist or has been removed.
+          {accountId
+            ? `Account "${accountId}" was not found in any account service.`
+            : 'The account you are looking for does not exist or has been removed.'}
         </p>
-        {accountId && (
-          <p className="mt-3 text-sm">
-            Looking for an internal account?{' '}
-            <EntityLink type="internal-account" id={accountId} label="View internal account" />
-          </p>
-        )}
       </div>
     </div>
   )
@@ -357,6 +353,8 @@ export function AccountDetailPage() {
   const { data: resolved, isLoading: isResolving } = useAccountResolver(
     // Only resolve when current-account returns 404 (null)
     account === null && !isLoading ? accountId : undefined,
+    // Skip current-account check — useAccountDetail already tried it
+    { skipServices: ['current'] },
   )
 
   if (isLoading) {

@@ -17,38 +17,49 @@ export interface ResolvedAccount {
  * 1. Try current-account service first (most common)
  * 2. If not found, try internal-account service
  * 3. If not found in either, return null
+ *
+ * When the caller has already checked one service (e.g. AccountDetailPage already
+ * tried current-account via useAccountDetail), pass skipServices to avoid redundant calls.
  */
-export function useAccountResolver(accountId: string | undefined) {
+export function useAccountResolver(
+  accountId: string | undefined,
+  options?: { skipServices?: ResolvedAccountType[] },
+) {
   const clients = useApiClients()
   const { tenantSlug } = useTenantContext()
+  const skip = options?.skipServices ?? []
 
   return useQuery({
-    queryKey: [...tenantKeys.all(tenantSlug ?? ''), 'account-resolve', accountId],
+    queryKey: [...tenantKeys.all(tenantSlug ?? ''), 'account-resolve', accountId, skip],
     queryFn: async (): Promise<ResolvedAccount | null> => {
       if (!accountId) return null
 
-      // Try current-account first
-      try {
-        const response = await clients.currentAccount.retrieveCurrentAccount({
-          accountId,
-        })
-        if (response.facility) {
-          return { type: 'current', accountId }
+      // Try current-account
+      if (!skip.includes('current')) {
+        try {
+          const response = await clients.currentAccount.retrieveCurrentAccount({
+            accountId,
+          })
+          if (response.facility) {
+            return { type: 'current', accountId }
+          }
+        } catch {
+          // Not found or error — continue
         }
-      } catch {
-        // Not found or error — continue to internal-account
       }
 
       // Try internal-account
-      try {
-        const response = await clients.internalAccount.retrieveInternalAccount({
-          accountId,
-        })
-        if (response.facility) {
-          return { type: 'internal', accountId }
+      if (!skip.includes('internal')) {
+        try {
+          const response = await clients.internalAccount.retrieveInternalAccount({
+            accountId,
+          })
+          if (response.facility) {
+            return { type: 'internal', accountId }
+          }
+        } catch {
+          // Not found in either service
         }
-      } catch {
-        // Not found in either service
       }
 
       return null
