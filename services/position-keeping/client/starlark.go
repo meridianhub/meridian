@@ -46,7 +46,8 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				ProtoResponseType:    (*positionkeepingv1.InitiateFinancialPositionLogResponse)(nil),
 				Version:              1,
 				ParamOverrides: map[string]saga.ParamOverride{
-					"amount": {Type: "Decimal"},
+					"amount":    {Type: "Decimal"},
+					"direction": {Type: "enum"},
 					"account_id": {
 						Alias:    "position_id",
 						Required: boolPtr(true),

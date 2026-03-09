@@ -32,19 +32,34 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"party.get_default_payment_method": {
 			handler: getDefaultPaymentMethodHandler(client),
 			metadata: saga.HandlerMetadata{
-				ProducesInstruments: []string{},
+				Description:          "Retrieve the default payment method for a party",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*partyv1.GetDefaultPaymentMethodRequest)(nil),
+				ProtoResponseType:    (*partyv1.GetDefaultPaymentMethodResponse)(nil),
+				Version:              1,
 			},
 		},
 		"party.list_participants": {
 			handler: listParticipantsHandler(client),
 			metadata: saga.HandlerMetadata{
-				ProducesInstruments: []string{},
+				Description:          "List active participants for a syndicate organization",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*partyv1.ListParticipantsRequest)(nil),
+				ProtoResponseType:    (*partyv1.ListParticipantsResponse)(nil),
+				Version:              1,
 			},
 		},
 		"party.get_structuring_data": {
 			handler: getStructuringDataHandler(client),
 			metadata: saga.HandlerMetadata{
-				ProducesInstruments: []string{},
+				Description:          "Retrieve structuring metadata for a participant in a syndicate",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*partyv1.GetStructuringDataRequest)(nil),
+				ProtoResponseType:    (*partyv1.GetStructuringDataResponse)(nil),
+				Version:              1,
 			},
 		},
 	}

@@ -41,26 +41,41 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"internal_account.retrieve": {
 			handler: retrieveHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: "", // Read operations don't have a specific category
+				Category:             "", // Read operations don't have a specific category
+				Description:          "Retrieve an internal account by ID",
+				CompensationStrategy: "none",
 				// Read operations don't produce instruments
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*internalaccountv1.RetrieveInternalAccountRequest)(nil),
+				ProtoResponseType:   (*internalaccountv1.RetrieveInternalAccountResponse)(nil),
+				Version:             1,
 			},
 		},
 		"internal_account.get_balance": {
 			handler: getBalanceHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: "", // Read operations don't have a specific category
+				Category:             "", // Read operations don't have a specific category
+				Description:          "Query the current balance for an internal account",
+				CompensationStrategy: "none",
 				// Balance queries don't produce instruments
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*internalaccountv1.GetBalanceRequest)(nil),
+				ProtoResponseType:   (*internalaccountv1.GetBalanceResponse)(nil),
+				Version:             1,
 			},
 		},
 		"internal_account.initiate": {
 			handler: initiateHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategorySettlement,
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Initiate a new internal account",
+				CompensationStrategy: "none",
 				// Internal accounts don't produce new instruments - they hold existing ones
 				// The account creation itself doesn't mint instruments
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*internalaccountv1.InitiateInternalAccountRequest)(nil),
+				ProtoResponseType:   (*internalaccountv1.InitiateInternalAccountResponse)(nil),
+				Version:             1,
 			},
 		},
 	}

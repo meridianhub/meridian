@@ -35,10 +35,15 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		"market_information.get_rate": {
 			handler: getRateHandler(client),
 			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategoryValuation,
+				Category:             saga.HandlerCategoryValuation,
+				Description:          "Fetch FX rates for currency pair conversion",
+				CompensationStrategy: "none",
 				// Read-only handler - provides reference data for valuation
 				// Does not produce instruments, only queries existing rates
 				ProducesInstruments: []string{},
+				ProtoRequestType:    (*marketinformationv1.ListObservationsRequest)(nil),
+				ProtoResponseType:   (*marketinformationv1.ListObservationsResponse)(nil),
+				Version:             1,
 			},
 		},
 	}
