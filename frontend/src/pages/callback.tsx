@@ -37,10 +37,6 @@ function validateCallbackParams(searchParams: URLSearchParams): {
     return { valid: false, error: 'Missing PKCE verifier - please try signing in again' }
   }
 
-  // Clean up stored PKCE values
-  sessionStorage.removeItem(PKCE_STATE_KEY)
-  sessionStorage.removeItem(PKCE_VERIFIER_KEY)
-
   return { valid: true, code, verifier }
 }
 
@@ -60,6 +56,10 @@ export function CallbackPage() {
     if (!validation.valid) return
 
     const { code, verifier } = validation
+
+    // Clean up PKCE values from sessionStorage (side effect belongs here, not in useMemo)
+    sessionStorage.removeItem(PKCE_STATE_KEY)
+    sessionStorage.removeItem(PKCE_VERIFIER_KEY)
 
     const exchangeCode = async () => {
       try {
