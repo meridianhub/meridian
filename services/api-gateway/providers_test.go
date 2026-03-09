@@ -161,6 +161,20 @@ func TestLoadProvidersConfig_ExplicitAuthURL(t *testing.T) {
 	assert.Equal(t, "https://custom.example.com/auth", cfg.Providers[0].AuthURL)
 }
 
+func TestLoadProvidersConfig_OIDCWithoutIssuer_Filtered(t *testing.T) {
+	t.Setenv("AUTH_PROVIDERS_ENABLED", "true")
+	t.Setenv("AUTH_PROVIDERS", `[
+		{"id":"meridian","type":"password","displayName":"Email & Password"},
+		{"id":"google","type":"oidc","displayName":"Google"}
+	]`)
+	// No DEX_ISSUER set
+
+	cfg := LoadProvidersConfig()
+	// Google OIDC provider should be filtered out (no authUrl, no DEX_ISSUER)
+	require.Len(t, cfg.Providers, 1)
+	assert.Equal(t, "meridian", cfg.Providers[0].ID)
+}
+
 func TestLoadProvidersConfig_InvalidJSON_FallsBackToDefault(t *testing.T) {
 	t.Setenv("AUTH_PROVIDERS_ENABLED", "true")
 	t.Setenv("AUTH_PROVIDERS", `{invalid`)

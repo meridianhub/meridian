@@ -61,13 +61,21 @@ func LoadProvidersConfig() ProvidersConfig {
 			slog.Error("failed to parse AUTH_PROVIDERS, falling back to default provider",
 				"error", err)
 		} else {
-			// Populate authUrl for OIDC providers that don't have one set
+			// Populate authUrl for OIDC providers and filter out those
+			// that would have no usable auth URL.
+			filtered := make([]AuthProvider, 0, len(providers))
 			for i := range providers {
-				if providers[i].Type == "oidc" && providers[i].AuthURL == "" && dexIssuer != "" {
+				if providers[i].Type == "oidc" && providers[i].AuthURL == "" {
+					if dexIssuer == "" {
+						slog.Error("skipping OIDC provider without authUrl and DEX_ISSUER",
+							"provider_id", providers[i].ID)
+						continue
+					}
 					providers[i].AuthURL = dexIssuer + "/auth/" + providers[i].ID
 				}
+				filtered = append(filtered, providers[i])
 			}
-			config.Providers = providers
+			config.Providers = filtered
 		}
 	}
 
