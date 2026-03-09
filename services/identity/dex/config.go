@@ -5,6 +5,7 @@ package dex
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/meridianhub/meridian/services/identity/connector"
@@ -41,6 +42,11 @@ func (c *Config) validate() error {
 	}
 	if c.Connector == nil {
 		return ErrConnectorRequired
+	}
+	for i := range c.Clients {
+		if err := c.Clients[i].validate(); err != nil {
+			return fmt.Errorf("dex: client[%d]: %w", i, err)
+		}
 	}
 	return nil
 }

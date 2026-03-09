@@ -25,6 +25,23 @@ type ClientConfig struct {
 	Name string
 }
 
+// ErrClientIDRequired is returned when a ClientConfig has an empty ID.
+var ErrClientIDRequired = errors.New("dex: client ID is required")
+
+// ErrRedirectURIsRequired is returned when a ClientConfig has no redirect URIs.
+var ErrRedirectURIsRequired = errors.New("dex: at least one redirect URI is required")
+
+// validate checks that required ClientConfig fields are set.
+func (c *ClientConfig) validate() error {
+	if c.ID == "" {
+		return ErrClientIDRequired
+	}
+	if len(c.RedirectURIs) == 0 {
+		return ErrRedirectURIsRequired
+	}
+	return nil
+}
+
 // DefaultDemoClient returns a public OIDC client configured for the Meridian
 // demo environment. The baseDomain is used to construct the default redirect URI
 // (e.g. "https://meridian.example.com/callback").
@@ -55,9 +72,13 @@ func DefaultDemoClient(baseDomain string) ClientConfig {
 }
 
 // registerClients writes clients to Dex storage idempotently. If a client
-// already exists with the same ID, the registration is skipped.
+// already exists with the same ID, it is updated to match the provided config.
 func registerClients(ctx context.Context, s storage.Storage, clients []ClientConfig, logger *slog.Logger) error {
 	for _, c := range clients {
+		if err := c.validate(); err != nil {
+			return fmt.Errorf("dex: invalid client %q: %w", c.ID, err)
+		}
+
 		client := storage.Client{
 			ID:           c.ID,
 			Secret:       c.Secret,
@@ -76,7 +97,13 @@ func registerClients(ctx context.Context, s storage.Storage, clients []ClientCon
 		}
 
 		if errors.Is(err, storage.ErrAlreadyExists) {
-			logger.Info("dex: OIDC client already registered, skipping",
+			// Update the existing client to ensure config consistency.
+			if updateErr := s.UpdateClient(c.ID, func(_ storage.Client) (storage.Client, error) {
+				return client, nil
+			}); updateErr != nil {
+				return fmt.Errorf("dex: updating existing client %q: %w", c.ID, updateErr)
+			}
+			logger.Info("dex: updated existing OIDC client",
 				"client_id", c.ID)
 			continue
 		}

@@ -29,8 +29,41 @@ func TestDefaultDemoClient_WithEnvRedirectURIs(t *testing.T) {
 
 	assert.Contains(t, client.RedirectURIs, "https://custom.example.com/cb")
 	assert.Contains(t, client.RedirectURIs, "https://other.example.com/cb")
-	// Default URIs should still be present.
 	assert.Contains(t, client.RedirectURIs, "https://meridian.example.com/callback")
+}
+
+func TestClientConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  ClientConfig
+		wantErr error
+	}{
+		{
+			name:    "empty ID",
+			config:  ClientConfig{RedirectURIs: []string{"http://localhost/cb"}},
+			wantErr: ErrClientIDRequired,
+		},
+		{
+			name:    "no redirect URIs",
+			config:  ClientConfig{ID: "test"},
+			wantErr: ErrRedirectURIsRequired,
+		},
+		{
+			name:   "valid",
+			config: ClientConfig{ID: "test", RedirectURIs: []string{"http://localhost/cb"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.validate()
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestRegisterClients_Success(t *testing.T) {
@@ -50,7 +83,6 @@ func TestRegisterClients_Success(t *testing.T) {
 	err := registerClients(ctx, store, clients, slog.Default())
 	require.NoError(t, err)
 
-	// Verify client was created in storage.
 	stored, err := store.GetClient("test-client")
 	require.NoError(t, err)
 	assert.Equal(t, "test-client", stored.ID)
@@ -59,25 +91,29 @@ func TestRegisterClients_Success(t *testing.T) {
 	assert.False(t, stored.Public)
 }
 
-func TestRegisterClients_Idempotent(t *testing.T) {
+func TestRegisterClients_UpdatesExisting(t *testing.T) {
 	store := memory.New(slog.Default())
 	ctx := context.Background()
 
-	clients := []ClientConfig{
-		{
-			ID:           "idempotent-client",
-			Public:       true,
-			RedirectURIs: []string{"http://localhost/callback"},
-			Name:         "Idempotent",
-		},
+	// Register initial client.
+	initial := []ClientConfig{
+		{ID: "upsert-client", Name: "Old Name", RedirectURIs: []string{"http://old/cb"}},
 	}
-
-	// Register twice -- second call should not error.
-	err := registerClients(ctx, store, clients, slog.Default())
+	err := registerClients(ctx, store, initial, slog.Default())
 	require.NoError(t, err)
 
-	err = registerClients(ctx, store, clients, slog.Default())
+	// Re-register with different config.
+	updated := []ClientConfig{
+		{ID: "upsert-client", Name: "New Name", RedirectURIs: []string{"http://new/cb"}},
+	}
+	err = registerClients(ctx, store, updated, slog.Default())
 	require.NoError(t, err)
+
+	// Verify the client was updated.
+	stored, err := store.GetClient("upsert-client")
+	require.NoError(t, err)
+	assert.Equal(t, "New Name", stored.Name)
+	assert.Equal(t, []string{"http://new/cb"}, stored.RedirectURIs)
 }
 
 func TestRegisterClients_MultipleClients(t *testing.T) {
@@ -99,6 +135,18 @@ func TestRegisterClients_MultipleClients(t *testing.T) {
 	b, err := store.GetClient("client-b")
 	require.NoError(t, err)
 	assert.Equal(t, "B", b.Name)
+}
+
+func TestRegisterClients_InvalidClient(t *testing.T) {
+	store := memory.New(slog.Default())
+	ctx := context.Background()
+
+	clients := []ClientConfig{
+		{ID: "", RedirectURIs: []string{"http://bad/cb"}}, // empty ID
+	}
+
+	err := registerClients(ctx, store, clients, slog.Default())
+	assert.ErrorIs(t, err, ErrClientIDRequired)
 }
 
 func TestErrAlreadyExists(t *testing.T) {
