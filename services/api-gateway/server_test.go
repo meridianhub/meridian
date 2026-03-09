@@ -12,7 +12,11 @@ import (
 
 	"github.com/meridianhub/meridian/services/api-gateway/auth"
 	gwhealth "github.com/meridianhub/meridian/services/api-gateway/health"
+	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
+	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
+	tenantpkg "github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -968,4 +972,180 @@ func TestWithHealthChecker(t *testing.T) {
 	server := NewServer(config, logger, nil, WithHealthChecker(healthChecker))
 
 	assert.Equal(t, healthChecker, server.healthChecker)
+}
+
+// TestWithDexHandler_TenantContextPropagated verifies that Dex routes receive
+// tenant context from the tenant resolver middleware. The MeridianConnector
+// requires tenant.RequireFromContext(ctx) to succeed for credential lookups.
+func TestWithDexHandler_TenantContextPropagated(t *testing.T) {
+	var capturedTenantID string
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Extract tenant from context (set by tenant resolver middleware)
+		tid, ok := tenantpkg.FromContext(r.Context())
+		if ok {
+			capturedTenantID = string(tid)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	config := &Config{
+		Port:         8080,
+		BaseDomain:   "api.example.com",
+		DatabaseURL:  "postgres://localhost/test",
+		LocalDevMode: true,
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Create a real tenant resolver in LOCAL_DEV_MODE so we can use X-Tenant-Slug header
+	slugCache := platformgateway.NewInMemorySlugCache()
+	tenantRepo := &stubTenantRepo{
+		tenants: map[string]*tenantdomain.Tenant{
+			"volterra": {ID: "volterra", Slug: "volterra", DisplayName: "Volterra"},
+		},
+	}
+	tenantResolver, err := platformgateway.NewTenantResolverMiddleware(
+		slugCache, tenantRepo, "api.example.com", logger, true,
+	)
+	require.NoError(t, err)
+
+	server := NewServer(config, logger, tenantResolver, WithDexHandler(fakeDex))
+
+	// Request with X-Tenant-Slug header (LOCAL_DEV_MODE)
+	req := httptest.NewRequest(http.MethodPost, "/dex/token", nil)
+	req.Header.Set("X-Tenant-Slug", "volterra")
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "volterra", capturedTenantID, "tenant ID should be propagated to Dex handler")
+}
+
+// TestWithDexHandler_NoAuthRequired verifies that Dex routes do NOT require
+// authentication even when auth middleware is configured.
+func TestWithDexHandler_NoAuthRequired(t *testing.T) {
+	dexCalled := false
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		dexCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	config := &Config{
+		Port:         8080,
+		BaseDomain:   "api.example.com",
+		DatabaseURL:  "postgres://localhost/test",
+		LocalDevMode: true,
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Create a real tenant resolver
+	slugCache := platformgateway.NewInMemorySlugCache()
+	tenantRepo := &stubTenantRepo{
+		tenants: map[string]*tenantdomain.Tenant{
+			"volterra": {ID: "volterra", Slug: "volterra", DisplayName: "Volterra"},
+		},
+	}
+	tenantResolver, err := platformgateway.NewTenantResolverMiddleware(
+		slugCache, tenantRepo, "api.example.com", logger, true,
+	)
+	require.NoError(t, err)
+
+	// Create auth middleware with a rejecting JWT validator (simulates requiring auth)
+	rejectAll, err := auth.NewCombinedAuthMiddleware(auth.CombinedAuthConfig{
+		JWTValidator: &rejectingJWTValidator{},
+		Logger:       logger,
+	})
+	require.NoError(t, err)
+
+	server := NewServer(config, logger, tenantResolver,
+		WithDexHandler(fakeDex),
+		WithAuthMiddleware(rejectAll),
+	)
+
+	// Request to Dex endpoint WITHOUT any auth token
+	req := httptest.NewRequest(http.MethodGet, "/dex/keys", nil)
+	req.Header.Set("X-Tenant-Slug", "volterra")
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.True(t, dexCalled, "Dex handler should be called without auth")
+	assert.Equal(t, http.StatusOK, rec.Code, "Dex should not require authentication")
+
+	// Verify that API routes DO require auth (to confirm auth middleware is active)
+	dexCalled = false
+	apiReq := httptest.NewRequest(http.MethodGet, "/v1/some-api", nil)
+	apiReq.Header.Set("X-Tenant-Slug", "volterra")
+	apiRec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(apiRec, apiReq)
+
+	assert.False(t, dexCalled, "Dex handler should not be called for API routes")
+	assert.Equal(t, http.StatusUnauthorized, apiRec.Code, "API routes should require authentication")
+}
+
+// TestWithDexHandler_SubdomainTenantResolution verifies tenant resolution via
+// subdomain for Dex routes (non-LOCAL_DEV_MODE).
+func TestWithDexHandler_SubdomainTenantResolution(t *testing.T) {
+	var capturedTenantID string
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tid, ok := tenantpkg.FromContext(r.Context())
+		if ok {
+			capturedTenantID = string(tid)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  "demo.meridianhub.cloud",
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	slugCache := platformgateway.NewInMemorySlugCache()
+	tenantRepo := &stubTenantRepo{
+		tenants: map[string]*tenantdomain.Tenant{
+			"volterra": {ID: "volterra", Slug: "volterra", DisplayName: "Volterra"},
+		},
+	}
+	tenantResolver, err := platformgateway.NewTenantResolverMiddleware(
+		slugCache, tenantRepo, "demo.meridianhub.cloud", logger, false,
+	)
+	require.NoError(t, err)
+
+	server := NewServer(config, logger, tenantResolver, WithDexHandler(fakeDex))
+
+	// Request with subdomain-based tenant resolution
+	req := httptest.NewRequest(http.MethodPost, "/dex/token", nil)
+	req.Host = "volterra.demo.meridianhub.cloud"
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "volterra", capturedTenantID, "tenant should be resolved from subdomain")
+}
+
+// stubTenantRepo is a test stub for the tenant repository interface used by
+// TenantResolverMiddleware. It satisfies the unexported tenantRepository
+// interface via Go's structural typing.
+type stubTenantRepo struct {
+	tenants map[string]*tenantdomain.Tenant
+}
+
+func (s *stubTenantRepo) GetBySlug(_ context.Context, slug string) (*tenantdomain.Tenant, error) {
+	t, ok := s.tenants[slug]
+	if !ok {
+		return nil, tenantdomain.ErrNotFound
+	}
+	return t, nil
+}
+
+// rejectingJWTValidator always returns an error for any token. Used to verify
+// that Dex routes bypass auth while API routes are rejected.
+type rejectingJWTValidator struct{}
+
+func (r *rejectingJWTValidator) ValidateToken(_ string) (*platformauth.Claims, error) {
+	return nil, errors.New("token rejected by test validator")
 }

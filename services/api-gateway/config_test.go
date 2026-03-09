@@ -507,11 +507,12 @@ func TestConfig_Validate_AuthEnabled(t *testing.T) {
 }
 
 func TestLoadAuthConfig_Defaults(t *testing.T) {
-	// Clear all auth-related env vars
+	// Clear all auth-related env vars (including DEX_ISSUER which can set defaults)
 	authEnvVars := []string{
 		"AUTH_ENABLED", "JWKS_URL", "JWKS_CACHE_TTL", "JWKS_REFRESH_TTL",
 		"JWT_ISSUER", "JWT_AUDIENCE", "API_KEYS",
 		"API_KEY_RATE_LIMIT_PER_SECOND", "API_KEY_RATE_LIMIT_BURST",
+		"DEX_ISSUER",
 	}
 	for _, key := range authEnvVars {
 		os.Unsetenv(key)
@@ -781,6 +782,78 @@ func setEventStreamEnvVars(t *testing.T, vars map[string]string) func() {
 	}
 }
 
+// TestLoadAuthConfig_DexIssuerDefaults verifies that DEX_ISSUER sets sensible
+// defaults for JWKS_URL and JWT_ISSUER when they are not explicitly set.
+func TestLoadAuthConfig_DexIssuerDefaults(t *testing.T) {
+	tests := []struct {
+		name        string
+		env         map[string]string
+		wantJWKSURL string
+		wantIssuer  string
+	}{
+		{
+			name:        "no DEX_ISSUER, no JWKS_URL — both empty",
+			env:         map[string]string{},
+			wantJWKSURL: "",
+			wantIssuer:  "",
+		},
+		{
+			name: "DEX_ISSUER set, JWKS_URL not set — defaults to Dex keys endpoint",
+			env: map[string]string{
+				"DEX_ISSUER": "http://localhost:8090/dex",
+			},
+			wantJWKSURL: "http://localhost:8090/dex/keys",
+			wantIssuer:  "http://localhost:8090/dex",
+		},
+		{
+			name: "DEX_ISSUER set, JWKS_URL explicitly set — explicit wins",
+			env: map[string]string{
+				"DEX_ISSUER": "http://localhost:8090/dex",
+				"JWKS_URL":   "https://custom.example.com/.well-known/jwks.json",
+			},
+			wantJWKSURL: "https://custom.example.com/.well-known/jwks.json",
+			wantIssuer:  "http://localhost:8090/dex",
+		},
+		{
+			name: "DEX_ISSUER set, JWT_ISSUER explicitly set — explicit wins",
+			env: map[string]string{
+				"DEX_ISSUER": "http://localhost:8090/dex",
+				"JWT_ISSUER": "https://auth.example.com",
+			},
+			wantJWKSURL: "http://localhost:8090/dex/keys",
+			wantIssuer:  "https://auth.example.com",
+		},
+		{
+			name: "all explicitly set — DEX_ISSUER has no effect",
+			env: map[string]string{
+				"DEX_ISSUER": "http://localhost:8090/dex",
+				"JWKS_URL":   "https://custom.example.com/jwks",
+				"JWT_ISSUER": "https://auth.example.com",
+			},
+			wantJWKSURL: "https://custom.example.com/jwks",
+			wantIssuer:  "https://auth.example.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear all auth+dex env vars for isolation
+			for _, k := range []string{"DEX_ISSUER", "JWKS_URL", "JWT_ISSUER", "JWT_AUDIENCE", "AUTH_ENABLED", "API_KEYS"} {
+				t.Setenv(k, "")
+				os.Unsetenv(k)
+			}
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			config := LoadAuthConfig()
+
+			assert.Equal(t, tt.wantJWKSURL, config.JWKSURL, "JWKSURL")
+			assert.Equal(t, tt.wantIssuer, config.Issuer, "Issuer")
+		})
+	}
+}
+
 func setAuthEnvVars(t *testing.T, vars map[string]string) func() {
 	t.Helper()
 
@@ -788,6 +861,7 @@ func setAuthEnvVars(t *testing.T, vars map[string]string) func() {
 		"AUTH_ENABLED", "JWKS_URL", "JWKS_CACHE_TTL", "JWKS_REFRESH_TTL",
 		"JWT_ISSUER", "JWT_AUDIENCE", "API_KEYS",
 		"API_KEY_RATE_LIMIT_PER_SECOND", "API_KEY_RATE_LIMIT_BURST",
+		"DEX_ISSUER",
 	}
 
 	// Store original values

@@ -206,42 +206,26 @@ func LoadConfig() (*Config, error) {
 //
 // Environment variables:
 //   - AUTH_ENABLED: Enable authentication (default: false)
-//   - JWKS_URL: JWKS endpoint URL for JWT validation
+//   - JWKS_URL: JWKS endpoint URL for JWT validation (defaults to DEX_ISSUER/keys when DEX_ISSUER is set)
 //   - JWKS_CACHE_TTL: Cache duration for JWKS keys (default: 24h)
 //   - JWKS_REFRESH_TTL: Background refresh interval (default: 1h)
-//   - JWT_ISSUER: Expected JWT issuer (optional)
+//   - JWT_ISSUER: Expected JWT issuer (defaults to DEX_ISSUER when set)
 //   - JWT_AUDIENCE: Expected JWT audience (optional)
 //   - API_KEYS: Comma-separated list of "key:identity" pairs
 //   - API_KEY_RATE_LIMIT_PER_SECOND: Requests per second per key (default: 100)
 //   - API_KEY_RATE_LIMIT_BURST: Burst size for rate limiting (default: 200)
 func LoadAuthConfig() AuthConfig {
+	jwksURL, jwtIssuer := resolveAuthEndpoints()
+
 	config := AuthConfig{
 		Enabled:            env.GetEnvAsBool("AUTH_ENABLED", false),
-		JWKSURL:            os.Getenv("JWKS_URL"),
-		Issuer:             os.Getenv("JWT_ISSUER"),
+		JWKSURL:            jwksURL,
+		JWKSCacheTTL:       getEnvAsDurationOrDefault("JWKS_CACHE_TTL", 24*time.Hour),
+		JWKSRefreshTTL:     getEnvAsDurationOrDefault("JWKS_REFRESH_TTL", 1*time.Hour),
+		Issuer:             jwtIssuer,
 		Audience:           os.Getenv("JWT_AUDIENCE"),
 		RateLimitPerSecond: 100,
 		RateLimitBurst:     200,
-	}
-
-	// Parse JWKS cache TTL
-	if ttl := os.Getenv("JWKS_CACHE_TTL"); ttl != "" {
-		if d, err := time.ParseDuration(ttl); err == nil {
-			config.JWKSCacheTTL = d
-		}
-	}
-	if config.JWKSCacheTTL == 0 {
-		config.JWKSCacheTTL = 24 * time.Hour
-	}
-
-	// Parse JWKS refresh TTL
-	if ttl := os.Getenv("JWKS_REFRESH_TTL"); ttl != "" {
-		if d, err := time.ParseDuration(ttl); err == nil {
-			config.JWKSRefreshTTL = d
-		}
-	}
-	if config.JWKSRefreshTTL == 0 {
-		config.JWKSRefreshTTL = 1 * time.Hour
 	}
 
 	// Parse API keys (format: "key1:identity1,key2:identity2")
@@ -249,21 +233,47 @@ func LoadAuthConfig() AuthConfig {
 		config.APIKeys = parseAPIKeysEnv(apiKeysEnv)
 	}
 
-	// Parse rate limit per second
-	if rps := os.Getenv("API_KEY_RATE_LIMIT_PER_SECOND"); rps != "" {
-		if v := env.GetEnvAsInt("API_KEY_RATE_LIMIT_PER_SECOND", 100); v > 0 {
-			config.RateLimitPerSecond = float64(v)
-		}
+	// Parse rate limit overrides
+	if v := env.GetEnvAsInt("API_KEY_RATE_LIMIT_PER_SECOND", 0); v > 0 {
+		config.RateLimitPerSecond = float64(v)
 	}
-
-	// Parse rate limit burst
-	if burst := os.Getenv("API_KEY_RATE_LIMIT_BURST"); burst != "" {
-		if v := env.GetEnvAsInt("API_KEY_RATE_LIMIT_BURST", 200); v > 0 {
-			config.RateLimitBurst = v
-		}
+	if v := env.GetEnvAsInt("API_KEY_RATE_LIMIT_BURST", 0); v > 0 {
+		config.RateLimitBurst = v
 	}
 
 	return config
+}
+
+// resolveAuthEndpoints determines the JWKS URL and JWT issuer, applying
+// embedded Dex defaults when DEX_ISSUER is set and explicit values are absent.
+func resolveAuthEndpoints() (jwksURL, jwtIssuer string) {
+	dexIssuer := os.Getenv("DEX_ISSUER")
+
+	jwksURL = os.Getenv("JWKS_URL")
+	if jwksURL == "" && dexIssuer != "" {
+		jwksURL = dexIssuer + "/keys"
+	}
+
+	jwtIssuer = os.Getenv("JWT_ISSUER")
+	if jwtIssuer == "" && dexIssuer != "" {
+		jwtIssuer = dexIssuer
+	}
+
+	return jwksURL, jwtIssuer
+}
+
+// getEnvAsDurationOrDefault parses an environment variable as a time.Duration,
+// returning the default value if the variable is unset or unparseable.
+func getEnvAsDurationOrDefault(key string, defaultVal time.Duration) time.Duration {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return defaultVal
+	}
+	return d
 }
 
 // loadEventStreamConfig loads event streaming configuration from environment variables.
