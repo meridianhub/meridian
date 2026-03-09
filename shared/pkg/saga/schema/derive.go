@@ -269,6 +269,9 @@ func applyParamOverrides(params map[string]*FieldDef, overrides map[string]saga.
 
 		// Apply alias: rename the field
 		if override.Alias != "" {
+			if _, collision := params[override.Alias]; collision {
+				return fmt.Errorf("%w: alias %q for field %q", ErrOverrideAliasCollision, override.Alias, fieldName)
+			}
 			delete(params, fieldName)
 			params[override.Alias] = fd
 		}
