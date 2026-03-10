@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
 import { platformKeys } from '@/lib/query-keys'
+import { withToastErrorHandling } from '@/lib/error-handling'
 import type { Role } from '@/api/gen/meridian/identity/v1/identity_pb'
 import { IdentityStatus } from '@/api/gen/meridian/identity/v1/identity_pb'
 
@@ -100,6 +101,7 @@ export function useSuspendIdentity() {
       void queryClient.invalidateQueries({ queryKey: platformKeys.identity(variables.id) })
       void queryClient.invalidateQueries({ queryKey: platformKeys.identities() })
     },
+    ...withToastErrorHandling(),
   })
 }
 
@@ -119,6 +121,7 @@ export function useReactivateIdentity() {
       void queryClient.invalidateQueries({ queryKey: platformKeys.identity(variables.id) })
       void queryClient.invalidateQueries({ queryKey: platformKeys.identities() })
     },
+    ...withToastErrorHandling(),
   })
 }
 

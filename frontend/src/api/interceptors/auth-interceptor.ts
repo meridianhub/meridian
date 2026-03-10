@@ -1,4 +1,5 @@
 import { ConnectError, Code, type Interceptor } from '@connectrpc/connect'
+import { toast } from 'sonner'
 
 export type TokenGetter = () => string | null | undefined
 
@@ -14,8 +15,12 @@ export function createAuthInterceptor(
     try {
       return await next(req)
     } catch (err) {
-      if (err instanceof ConnectError && err.code === Code.Unauthenticated) {
-        onUnauthenticated?.()
+      if (err instanceof ConnectError) {
+        if (err.code === Code.Unauthenticated) {
+          onUnauthenticated?.()
+        } else if (err.code === Code.PermissionDenied) {
+          toast.error('You do not have permission to perform this action.')
+        }
       }
       throw err
     }
