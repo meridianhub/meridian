@@ -50,19 +50,17 @@ test.describe('Users list - admin access', () => {
 
   test('platform admin appears in the users list after login', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
-    // Wait for the list to settle: either a row or the empty state must appear
-    const firstRow = page.locator('table tbody tr').first()
-    const emptyState = page.getByText(/no users found/i)
-    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
+    // Wait for the list to settle: a tbody row appears for both real data and the empty state
+    await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 15_000 })
   })
 
   test('tenant users are listed in the table when backend returns data', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
     // Wait for list to settle before inspecting row count
     const firstRow = page.locator('table tbody tr').first()
-    const emptyState = page.getByText(/no users found/i)
-    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
+    await expect(firstRow).toBeVisible({ timeout: 15_000 })
 
+    const emptyState = page.getByRole('row', { name: /no users found/i })
     if (await emptyState.isVisible()) {
       // No users seeded — table renders without error
       return
@@ -79,9 +77,9 @@ test.describe('Users list - admin access', () => {
     await navigateTo(page, '/users')
     // Wait for list to settle before checking row count
     const firstRow = page.locator('table tbody tr').first()
-    const emptyState = page.getByText(/no users found/i)
-    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
+    await expect(firstRow).toBeVisible({ timeout: 15_000 })
 
+    const emptyState = page.getByRole('row', { name: /no users found/i })
     if (await emptyState.isVisible()) {
       test.skip()
       return
@@ -104,8 +102,8 @@ test.describe('User detail - suspend dialog', () => {
   async function navigateToFirstUser(page: Page): Promise<boolean> {
     await navigateTo(page, '/users')
     const firstRow = page.locator('table tbody tr').first()
-    const emptyState = page.getByText(/no users found/i)
-    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
+    await expect(firstRow).toBeVisible({ timeout: 15_000 })
+    const emptyState = page.getByRole('row', { name: /no users found/i })
     if (await emptyState.isVisible()) return false
     await firstRow.click()
     await page.waitForURL(/\/users\/[a-zA-Z0-9-]+/)
@@ -211,7 +209,7 @@ async function mockListIdentities(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/ListIdentities`, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/json',
+      contentType: 'application/connect+json',
       body: JSON.stringify({
         identities: [
           {
@@ -241,7 +239,7 @@ async function mockRetrieveIdentity(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/RetrieveIdentity`, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/json',
+      contentType: 'application/connect+json',
       body: JSON.stringify({
         identity: {
           id: 'mock-user-1',
@@ -267,7 +265,7 @@ async function mockListRoleAssignments(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/ListRoleAssignments`, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/json',
+      contentType: 'application/connect+json',
       body: JSON.stringify({ roleAssignments: [] }),
     })
   })
@@ -342,7 +340,7 @@ test.describe('Suspend API — successful suspend', () => {
       if (suspendCalled) {
         void route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: 'application/connect+json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -361,7 +359,7 @@ test.describe('Suspend API — successful suspend', () => {
       } else {
         void route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: 'application/connect+json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -384,7 +382,7 @@ test.describe('Suspend API — successful suspend', () => {
       suspendCalled = true
       void route.fulfill({
         status: 200,
-        contentType: 'application/json',
+        contentType: 'application/connect+json',
         body: JSON.stringify({
           identity: {
             id: 'mock-user-1',
