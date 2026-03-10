@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -180,6 +181,11 @@ export function UserDetailPage() {
             <DialogTitle>
               {actionType === 'suspend' ? 'Suspend User' : 'Reactivate User'}
             </DialogTitle>
+            <DialogDescription>
+              {actionType === 'suspend'
+                ? 'Provide a reason for suspending this user.'
+                : 'Provide a reason for reactivating this user.'}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">

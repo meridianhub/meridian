@@ -14,6 +14,7 @@ import { ProtectedRoute, PlatformOnlyRoute, AdminOnlyRoute, TenantSubdomainEnfor
 import { FeatureGuard } from '@/components/feature-guard'
 import { AppShell } from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { Toaster } from 'sonner'
 import { CallbackPage } from '@/pages/callback'
 import { ProviderButton } from '@/components/auth/provider-button'
 import { AuthDivider } from '@/components/auth/auth-divider'
@@ -419,6 +420,7 @@ function AuthenticatedApp() {
       <ApiClientBridge>
         {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true' || import.meta.env.VITE_DEMO_MODE === 'true') && <DevTenantAutoSelector />}
         <TooltipProvider>
+          <Toaster position="top-right" richColors closeButton />
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<LoginPage />} />

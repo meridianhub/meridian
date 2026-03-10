@@ -4,6 +4,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -64,6 +65,7 @@ export function InviteDialog({ open, onOpenChange, currentUserRoles }: InviteDia
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Invite User</DialogTitle>
+          <DialogDescription>Send an invitation to a new user with a designated role.</DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} id="invite-user-form">
           <div className="space-y-4 py-2">
