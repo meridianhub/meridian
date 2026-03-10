@@ -93,6 +93,29 @@ understand and incrementally evolve their running economy.
 
 ## Architecture
 
+### Architectural Principle: gRPC First, MCP as Client
+
+All IDE backend capabilities are implemented as **gRPC service RPCs first**.
+The MCP server is a thin client wrapper — it holds gRPC stubs and translates
+MCP tool calls into gRPC requests. The React frontend calls the same gRPC
+services via the Vanguard transcoder (HTTP/JSON -> gRPC).
+
+```text
+gRPC Service (source of truth)
+  ├── React frontend (calls gRPC via Vanguard transcoder)
+  ├── MCP server (thin wrapper, calls gRPC stubs)
+  └── Claude Code / scripts (can call gRPC directly)
+```
+
+**Implementation rule**: If a new capability is needed, define a proto RPC
+first, implement the service handler, then add the MCP tool as a thin
+client wrapper. Never put business logic in the MCP tool handler.
+
+This means all features described in this PRD — validation, plan, apply,
+economy graph, economy structure, handler metadata — are gRPC RPCs that
+happen to also be exposed as MCP tools. Claude Code can call gRPC directly
+via scripts without relying on MCP as the only integration path.
+
 ### Feature Module Structure
 
 Following the existing frontend pattern (`frontend/src/features/`):
@@ -111,7 +134,7 @@ frontend/src/features/economy/
 │   ├── use-manifest-validate.ts    # Calls ManifestValidate RPC
 │   ├── use-manifest-plan.ts        # Calls ManifestPlan RPC
 │   ├── use-manifest-apply.ts       # Calls ManifestApply RPC
-│   ├── use-economy-generate.ts     # Calls meridian_economy_generate (PRD-041)
+│   ├── use-economy-generate.ts     # Calls GeneratorService.GenerateManifest RPC (PRD-041)
 │   ├── use-economy-graph.ts        # Calls meridian_economy_graph
 │   └── use-economy-structure.ts    # Calls meridian_economy_structure
 ├── pages/
@@ -215,10 +238,11 @@ responses (from older drafts) are discarded when a newer response has arrived:
 - Parameter names (`account_id`, `instrument_code`, `quantity`)
 - Enum values (`DEBIT`, `CREDIT`, `FIAT`, `COMMODITY`)
 
-Autocomplete data sourced from `meridian_handlers_describe` MCP tool,
-called at page init and cached for the session. This is the single
-canonical source for handler metadata (no compiled schema file — aligns
-with PRD-040's elimination of standalone handler schema files).
+Autocomplete data sourced from `HandlerService.DescribeHandlers` RPC
+(exposed as `meridian_handlers_describe` MCP tool), called at page init
+and cached for the session. This is the single canonical source for
+handler metadata (no compiled schema file — aligns with PRD-040's
+elimination of standalone handler schema files).
 
 **Layout**: Split view:
 
@@ -424,16 +448,16 @@ The IDE calls existing gRPC services. The draft system requires local
 state management (pending changes stored in browser) and one new concept
 (draft manifest merging) but no new backend APIs beyond what exists:
 
-| Frontend Hook | Backend RPC | Purpose |
-|--------------|------------|---------|
-| `useManifestValidate` | `ManifestService.ValidateManifest` | Inline validation + draft graph extraction |
-| `useManifestPlan` | `ApplyManifestService.PlanManifest` | Plan diff |
-| `useManifestApply` | `ApplyManifestService.ApplyManifest` | Deploy |
-| `useEconomyGenerate` | `meridian_economy_generate` (MCP/HTTP) | AI generation |
-| `useEconomyGraph` | `EconomyService.GetEconomyGraph` | Persisted economy relationship data |
-| `useEconomyStructure` | `EconomyService.GetEconomyStructure` | Current state |
-| `useManifestHistory` | `ManifestService.GetManifestHistory` | Version timeline |
-| `useHandlersDescribe` | `meridian_handlers_describe` (MCP/HTTP) | Handler autocomplete data |
+| Frontend Hook | gRPC RPC | MCP Tool (thin wrapper) | Purpose |
+|--------------|----------|------------------------|---------|
+| `useManifestValidate` | `ManifestService.ValidateManifest` | `meridian_manifest_validate` | Inline validation + draft graph extraction |
+| `useManifestPlan` | `ApplyManifestService.PlanManifest` | `meridian_manifest_plan` | Plan diff |
+| `useManifestApply` | `ApplyManifestService.ApplyManifest` | `meridian_manifest_apply` | Deploy |
+| `useEconomyGenerate` | `GeneratorService.GenerateManifest` | `meridian_economy_generate` | AI generation (PRD-041) |
+| `useEconomyGraph` | `EconomyService.GetEconomyGraph` | `meridian_economy_graph` | Persisted economy relationship data |
+| `useEconomyStructure` | `EconomyService.GetEconomyStructure` | `meridian_economy_structure` | Current state |
+| `useManifestHistory` | `ManifestService.GetManifestHistory` | `meridian_manifest_history` | Version timeline |
+| `useHandlersDescribe` | `HandlerService.DescribeHandlers` | `meridian_handlers_describe` | Handler autocomplete data |
 
 **Draft graph**: The relationship graph for in-editor drafts comes from the
 `ManifestValidate` response, which already extracts the graph during validation.
@@ -519,7 +543,7 @@ Visual dependency map.
 The conversational creation experience. Depends on PRD-041 generator.
 
 - Economy prompt page with three paths
-- `useEconomyGenerate` hook calling generator MCP tool
+- `useEconomyGenerate` hook calling `GeneratorService.GenerateManifest` RPC
 - Generation progress display (status updates during fix loop)
 - Generated manifest loaded into editor for review
 - Route: `/economy/create`

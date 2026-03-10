@@ -80,6 +80,37 @@ calls it.
 
 ## Architecture
 
+### Architectural Principle: gRPC First, MCP as Client
+
+All generator capabilities must be implemented as **gRPC service RPCs first**.
+The MCP server is a thin client wrapper — it holds gRPC stubs and translates
+MCP tool calls into gRPC requests. This is the same pattern used by all
+existing Meridian MCP tools (see `services/mcp-server/internal/clients/`).
+
+```text
+gRPC Service (source of truth)
+  ├── React frontend (calls gRPC via Vanguard transcoder)
+  ├── MCP server (thin wrapper, calls gRPC stubs)
+  └── Claude Code / scripts (can call gRPC directly)
+```
+
+**Why this matters**:
+
+- **No MCP lock-in**: Claude Code can call gRPC directly via scripts,
+  bypassing MCP entirely. MCP is convenient but not required.
+- **Single implementation**: Business logic lives in the gRPC service, not
+  in the MCP tool handler. MCP tools are < 50 lines of parameter mapping.
+- **Frontend parity**: React and MCP are both gRPC clients — they share
+  the same proto contract, the same error codes, the same auth flow.
+- **Testability**: gRPC services have integration tests with real
+  testcontainers. MCP tools have lightweight tests that verify parameter
+  mapping only.
+
+**Implementation rule**: If a new capability is needed, define a proto RPC
+first (`api/proto/meridian/`), implement the service handler, then add the
+MCP tool as a thin client wrapper. Never put business logic in the MCP
+tool handler.
+
 ### The Generation Pipeline
 
 ```mermaid
@@ -237,9 +268,14 @@ Returns the generation result with metadata:
 }
 ```
 
-### MCP Tool Interface
+### Service Interface (gRPC + MCP)
 
-#### `meridian_economy_generate`
+The generator is implemented as gRPC RPCs on the control plane service. The
+MCP tools below are thin wrappers that map JSON parameters to proto requests.
+Clients can call the gRPC RPCs directly (e.g., via `grpcurl`, Go scripts, or
+Claude Code shell commands) without going through MCP.
+
+#### `GenerateManifest` RPC / `meridian_economy_generate` MCP tool
 
 **Category**: `CategorySimulate` (no side effects — generates but does not apply)
 
@@ -306,9 +342,9 @@ Returns the generation result with metadata:
 }
 ```
 
-#### `meridian_economy_generate_context`
+#### `GetGenerationContext` RPC / `meridian_economy_generate_context` MCP tool
 
-A companion read-only tool that returns the generation context without running
+A companion read-only RPC that returns the generation context without running
 the LLM. Useful for AI clients that want to do their own generation.
 
 **Category**: `CategoryRead`
