@@ -65,9 +65,10 @@ function PlaceholderPage({ title }: { title: string }) {
 }
 
 function isBareDomain(): boolean {
-  const hostname = window.location.hostname
+  const hostname = window.location.hostname.toLowerCase()
   if (hostname === 'localhost' || hostname === '127.0.0.1') return false
-  return getTenantSlugFromSubdomain(hostname) === null
+  const baseDomain = (import.meta.env.VITE_BASE_DOMAIN ?? 'meridianhub.cloud').toLowerCase()
+  return hostname === baseDomain
 }
 
 function LoginPage() {

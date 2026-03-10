@@ -129,6 +129,8 @@ function restoreToken(initialToken?: string): { token: string | null; claims: JW
 
   // Validate that the token's tenantId matches the current subdomain tenant.
   // This prevents session bleeding if a token is manually copied between subdomains.
+  // Invariant: JWT tenantId holds the tenant slug (same value used in subdomains).
+  // See tenant-context.tsx where claims.tenantId is used directly as tenantSlug.
   const currentSlug = getTenantSlugFromSubdomain(window.location.hostname)
   if (currentSlug && parsed.tenantId && parsed.tenantId !== currentSlug) {
     sessionStorage.removeItem(SESSION_STORAGE_KEY)
