@@ -232,8 +232,8 @@ function LoginPage() {
           </>
         )}
 
-        {/* Dev-only fake JWT buttons */}
-        {import.meta.env.DEV && (
+        {/* Dev-only fake JWT buttons (also shown in E2E mode) */}
+        {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true') && (
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground uppercase tracking-wider text-center">
               Development Login
