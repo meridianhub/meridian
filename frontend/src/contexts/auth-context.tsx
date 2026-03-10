@@ -238,8 +238,8 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
 
         const data = (await response.json()) as { accessToken: string }
         const parsed = parseJWT(data.accessToken)
-        if (!parsed) {
-          // Server returned a malformed token - treat as refresh failure without clearing auth
+        if (!parsed || isTokenExpired(parsed)) {
+          // Server returned a malformed or already-expired token - treat as refresh failure
           return false
         }
         return updateToken(data.accessToken, callGeneration)
