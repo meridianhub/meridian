@@ -215,7 +215,7 @@ test.describe('User detail - suspend dialog', () => {
  * Connect JSON protocol: ListIdentities response.
  */
 async function mockListIdentities(page: Page) {
-  await page.route(`**/meridian.identity.v1.IdentityService/ListIdentities`, (route) => {
+  await page.route(/IdentityService\/ListIdentities/, (route) => {
     void route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -245,7 +245,7 @@ async function mockListIdentities(page: Page) {
  * Mock RetrieveIdentity to return an ACTIVE user.
  */
 async function mockRetrieveIdentity(page: Page) {
-  await page.route(`**/meridian.identity.v1.IdentityService/RetrieveIdentity`, (route) => {
+  await page.route(/IdentityService\/RetrieveIdentity/, (route) => {
     void route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -271,7 +271,7 @@ async function mockRetrieveIdentity(page: Page) {
  * Mock ListRoleAssignments to return empty roles.
  */
 async function mockListRoleAssignments(page: Page) {
-  await page.route(`**/meridian.identity.v1.IdentityService/ListRoleAssignments`, (route) => {
+  await page.route(/IdentityService\/ListRoleAssignments/, (route) => {
     void route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -287,7 +287,7 @@ test.describe('Suspend API — 403 permission denied', () => {
     await mockListRoleAssignments(page)
 
     // Mock SuspendIdentity to return 403 PermissionDenied
-    await page.route(`**/meridian.identity.v1.IdentityService/SuspendIdentity`, (route) => {
+    await page.route(/IdentityService\/SuspendIdentity/, (route) => {
       void route.fulfill({
         status: 403,
         contentType: 'application/json',
@@ -345,7 +345,7 @@ test.describe('Suspend API — successful suspend', () => {
 
     // First RetrieveIdentity returns ACTIVE, post-suspend returns SUSPENDED
     let suspendCalled = false
-    await page.route(`**/meridian.identity.v1.IdentityService/RetrieveIdentity`, (route) => {
+    await page.route(/IdentityService\/RetrieveIdentity/, (route) => {
       if (suspendCalled) {
         void route.fulfill({
           status: 200,
@@ -387,7 +387,7 @@ test.describe('Suspend API — successful suspend', () => {
       }
     })
 
-    await page.route(`**/meridian.identity.v1.IdentityService/SuspendIdentity`, (route) => {
+    await page.route(/IdentityService\/SuspendIdentity/, (route) => {
       suspendCalled = true
       void route.fulfill({
         status: 200,
@@ -439,7 +439,7 @@ test.describe('Suspend API — 401 unauthenticated', () => {
     await mockListRoleAssignments(page)
 
     // Mock SuspendIdentity to return 401 Unauthenticated
-    await page.route(`**/meridian.identity.v1.IdentityService/SuspendIdentity`, (route) => {
+    await page.route(/IdentityService\/SuspendIdentity/, (route) => {
       void route.fulfill({
         status: 401,
         contentType: 'application/json',
@@ -469,7 +469,7 @@ test.describe('Suspend API — 401 unauthenticated', () => {
     await mockRetrieveIdentity(page)
     await mockListRoleAssignments(page)
 
-    await page.route(`**/meridian.identity.v1.IdentityService/SuspendIdentity`, (route) => {
+    await page.route(/IdentityService\/SuspendIdentity/, (route) => {
       void route.fulfill({
         status: 401,
         contentType: 'application/json',
