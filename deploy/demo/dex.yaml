@@ -3,27 +3,21 @@
 # Dex is a lightweight, Go-based OIDC identity provider (~20MB RAM vs ~500MB for Keycloak).
 # It serves JWKS keys and issues JWTs that the Meridian gateway validates.
 #
+# Authentication is handled by the MeridianConnector (services/identity/connector/),
+# a Go-level integration wired directly into the Dex PasswordConnector interface at
+# process startup. It validates credentials by calling the identity domain repository
+# in-process — no network hop required.
+#
+# Demo users are seeded by the identity service bootstrap (services/identity/bootstrap/)
+# from DEMO_OPERATOR_EMAIL / DEMO_OPERATOR_PASSWORD environment variables.
+#
 # Token acquisition (password grant):
 #   curl -X POST http://dex:5556/dex/token \
 #     -d "grant_type=password" \
 #     -d "client_id=meridian-service" \
 #     -d "scope=openid email profile" \
-#     -d "username=admin@volterra.energy" \
+#     -d "username=tenant:volterra/admin@volterra.energy" \
 #     -d "password=demo2026"
-#
-# Integration architecture note:
-#
-# Dex does not have a network "grpc" connector type. The Meridian identity
-# connector (services/identity/connector/) is a Go-level integration that is
-# wired directly into the Dex PasswordConnector interface at process startup
-# (services/identity/bootstrap/ or cmd/meridian/main.go). It validates
-# credentials by calling the identity domain repository in-process — no
-# network hop required.
-#
-# When the identity service is fully bootstrapped and the Dex server is
-# initialised with the MeridianConnector (replacing enablePasswordDB), the
-# staticPasswords block below can be removed. Until then, it serves as the
-# demo fallback and is kept here for reference.
 
 issuer: https://demo.meridianhub.cloud/dex
 
@@ -42,8 +36,6 @@ oauth2:
   #
   # Username format for password grant: "tenant:<slug>/<email>"
   # Example: "tenant:volterra/admin@volterra.energy"
-  #
-  # Fallback: Set to "local" to use the staticPasswords block below instead.
   passwordConnector: meridian
   skipApprovalScreen: true
 
@@ -66,18 +58,4 @@ staticClients:
       - "http://localhost:3000/callback"
     public: true
 
-enablePasswordDB: true
-
-# Demo credentials. Managed by the Meridian identity service in production.
-# To generate a new hash: htpasswd -nbBC 10 "" '<password>' | tr -d ':\n' | sed 's/$2y/$2a/'
-staticPasswords:
-  - email: "admin@volterra.energy"
-    # Password: demo2026
-    hash: "$2a$10$lIDConGp2.xX/KXg31kHoezV2HN/hDeF/aVLlAZh4LDX9q9uaj5y."
-    username: "Admin"
-    userID: "admin-volterra-001"
-  - email: "operator@volterra.energy"
-    # Password: demo2026
-    hash: "$2a$10$lIDConGp2.xX/KXg31kHoezV2HN/hDeF/aVLlAZh4LDX9q9uaj5y."
-    username: "Operator"
-    userID: "operator-volterra-001"
+enablePasswordDB: false
