@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { CreditCard, FileText, BarChart3, ArrowRight } from 'lucide-react'
+import { CreditCard, FileText, BarChart3, ArrowRight, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
@@ -200,8 +200,17 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             {activityQuery.isError ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Failed to load recent activity
+              <div className="py-8 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Unable to load recent activity.
+                </p>
+                <button
+                  onClick={() => void activityQuery.refetch()}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent hover:text-accent-foreground"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry
+                </button>
               </div>
             ) : (
               <ActivityFeed items={activityItems} isLoading={activityQuery.isLoading} />
