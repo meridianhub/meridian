@@ -91,6 +91,8 @@ var (
 	ErrProtoMethodNotFound          = errors.New("proto method not found in service")
 	ErrProtoFieldPathNotFound       = errors.New("proto field path not found in message")
 	ErrInvalidProtoRPC              = errors.New("proto_rpc must be in format 'package.Service/Method'")
+	ErrUnknownAliasSource           = errors.New("param_alias references unknown field")
+	ErrAliasCollision               = errors.New("param_alias target already exists as a field")
 )
 
 // Schema represents a collection of handler definitions for a service.
@@ -778,12 +780,17 @@ func resolveExposedFields(md protoreflect.MessageDescriptor, exposed []string, a
 		}
 	}
 
-	// Apply aliases
+	// Apply aliases with validation
 	for original, alias := range aliases {
-		if def, ok := fields[original]; ok {
-			delete(fields, original)
-			fields[alias] = def
+		def, ok := fields[original]
+		if !ok {
+			return nil, fmt.Errorf("%w: %q (alias target: %q)", ErrUnknownAliasSource, original, alias)
 		}
+		if _, collision := fields[alias]; collision && alias != original {
+			return nil, fmt.Errorf("%w: %q (from alias of %q)", ErrAliasCollision, alias, original)
+		}
+		delete(fields, original)
+		fields[alias] = def
 	}
 
 	return fields, nil
