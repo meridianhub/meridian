@@ -169,8 +169,10 @@ func (v *DryRunValidator) Validate(ctx context.Context, script string) (*Validat
 	// Calculate operation count from AST
 	result.Metrics.OperationCount = countOperations(fileNode)
 
-	// Build service modules from mock registry
-	serviceModules, err := schema.BuildServiceModules(v.mockRegistry, v.schemaRegistry)
+	// Build service modules from mock registry using the schema registry definitions.
+	// Mock handlers don't have proto metadata, so we use BuildServiceModulesFromSchema
+	// with the YAML-based schema registry to preserve parameter type validation.
+	serviceModules, err := schema.BuildServiceModulesFromSchema(v.mockRegistry, v.schemaRegistry.ToSchema())
 	if err != nil {
 		return nil, fmt.Errorf("failed to build service modules: %w", err)
 	}

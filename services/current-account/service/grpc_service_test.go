@@ -58,17 +58,8 @@ func testSagaRunner(t *testing.T) (*saga.StarlarkSagaRunner, string, string) {
 	err = RegisterCurrentAccountHandlers(handlerRegistry)
 	require.NoError(t, err, "failed to register saga handlers")
 
-	// Load schema registry from handlers.yaml
-	schemaRegistryPath := filepath.Join(serviceDir, "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml")
-	schemaRegistryData, err := os.ReadFile(schemaRegistryPath)
-	require.NoError(t, err, "failed to read handlers schema")
-
-	schemaRegistry := schema.NewRegistry()
-	err = schemaRegistry.LoadFromYAML(schemaRegistryData)
-	require.NoError(t, err, "failed to load schema")
-
-	// Build service modules
-	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	// Build service modules (schema derived from proto metadata on handlers)
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry)
 	require.NoError(t, err, "failed to build service modules")
 
 	// Create Starlark saga runner

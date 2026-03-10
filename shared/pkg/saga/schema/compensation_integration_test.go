@@ -60,8 +60,7 @@ func TestCompensation_EndToEnd_WithServiceModules(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create handler schema with compensation handlers
-	schemaRegistry := NewRegistry()
-	schemaYAML := `
+	testSchema, err := Parse([]byte(`
 service: test_service
 version: "1.0"
 handlers:
@@ -120,12 +119,11 @@ handlers:
     returns:
       status:
         type: string
-`
-	err = schemaRegistry.LoadFromYAML([]byte(schemaYAML))
+`))
 	require.NoError(t, err)
 
 	// Build service modules
-	serviceModules, err := BuildServiceModules(registry, schemaRegistry)
+	serviceModules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	// Create runtime and runner
@@ -213,8 +211,7 @@ func TestCompensation_SuccessfulSaga_NoCompensation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	schemaRegistry := NewRegistry()
-	schemaYAML := `
+	testSchema, err := Parse([]byte(`
 service: test
 version: "1.0"
 handlers:
@@ -233,11 +230,10 @@ handlers:
         type: string
         required: true
     returns: {}
-`
-	err = schemaRegistry.LoadFromYAML([]byte(schemaYAML))
+`))
 	require.NoError(t, err)
 
-	serviceModules, err := BuildServiceModules(registry, schemaRegistry)
+	serviceModules, err := BuildServiceModulesFromSchema(registry, testSchema)
 	require.NoError(t, err)
 
 	runtime, err := saga.NewRuntime(nil)

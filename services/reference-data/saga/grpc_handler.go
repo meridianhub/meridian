@@ -36,7 +36,8 @@ type RegistryHandler struct {
 // NewRegistryHandler creates a new saga registry gRPC handler.
 // The validator is optional - if nil, ValidateSagaDraft will return empty results.
 // The dryRunValidator is optional - if nil, ValidateSaga will return an error.
-// The schemaRegistry is optional - if nil, DescribeHandlers will load the platform default registry.
+// The schemaRegistry is optional - use WithSchemaRegistry or WithDerivedSchema to populate.
+// If not set, DescribeHandlers will return an empty handler list.
 func NewRegistryHandler(registry Registry, validator *ReferenceValidator, dryRunValidator *validation.DryRunValidator, logger *slog.Logger) *RegistryHandler {
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -53,6 +54,13 @@ func NewRegistryHandler(registry Registry, validator *ReferenceValidator, dryRun
 // Used to inject a pre-loaded registry instead of loading the default.
 func (h *RegistryHandler) WithSchemaRegistry(reg *schema.Registry) *RegistryHandler {
 	h.schemaRegistry = reg
+	return h
+}
+
+// WithDerivedSchema populates the schema registry from a proto-derived Schema.
+// This is the preferred method for production use.
+func (h *RegistryHandler) WithDerivedSchema(s *schema.Schema) *RegistryHandler {
+	h.schemaRegistry = schema.NewRegistryFromSchema(s)
 	return h
 }
 
@@ -815,12 +823,9 @@ func (h *RegistryHandler) DescribeHandlers(
 ) (*sagav1.DescribeHandlersResponse, error) {
 	reg := h.schemaRegistry
 	if reg == nil {
-		var err error
-		reg, err = schema.DefaultRegistry()
-		if err != nil {
-			h.logger.Error("failed to load default handler schema registry", "error", err)
-			return nil, status.Errorf(codes.Internal, "failed to load handler schema: %v", err)
-		}
+		h.logger.Warn("DescribeHandlers called without schema registry; returning empty handler list. " +
+			"Use WithSchemaRegistry or WithDerivedSchema to populate handlers.")
+		reg = schema.NewRegistry()
 	}
 
 	// Group handlers by service name (first component of "service.handler" name)

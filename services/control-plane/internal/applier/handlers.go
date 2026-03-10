@@ -1,7 +1,6 @@
 package applier
 
 import (
-	"embed"
 	"errors"
 	"fmt"
 
@@ -14,9 +13,6 @@ import (
 // ErrNoValuationMethodService is returned when default_conversion_method is provided
 // but no ValuationMethodService was configured in HandlerDependencies.
 var ErrNoValuationMethodService = errors.New("no ValuationMethodService configured")
-
-//go:embed handlers.yaml
-var handlersYAMLFS embed.FS
 
 // RegisterManifestHandlers registers all Starlark service bindings needed by
 // the apply_manifest saga. These handlers adapt Starlark parameters to the

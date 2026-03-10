@@ -342,19 +342,8 @@ func NewServiceWithExistingClients(
 		return nil, fmt.Errorf("failed to register saga handlers: %w", err)
 	}
 
-	// Load schema registry from handlers.yaml
-	schemaContent, err := loadSagaAsset(filepath.Join("shared", "pkg", "saga", "schema", "handlers.yaml"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read handlers schema: %w", err)
-	}
-	schemaRegistryData := []byte(schemaContent)
-	schemaRegistry := schema.NewRegistry()
-	if err := schemaRegistry.LoadFromYAML(schemaRegistryData); err != nil {
-		return nil, fmt.Errorf("failed to load schema: %w", err)
-	}
-
-	// Build service modules for Starlark
-	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	// Build service modules for Starlark (schema derived from proto metadata on handlers)
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build service modules: %w", err)
 	}

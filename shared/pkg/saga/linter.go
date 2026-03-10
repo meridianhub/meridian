@@ -146,7 +146,7 @@ type HandlerMetadata struct {
 	// HasAutoCompensation indicates the handler has a compensate: field.
 	HasAutoCompensation bool
 
-	// Compensate is the name of the compensation handler (from handlers.yaml compensate: field).
+	// Compensate is the name of the compensation handler (from handler schema).
 	Compensate string
 
 	// ProtoRequestType is a nil instance of the handler's proto request message for reflection.
@@ -466,7 +466,7 @@ func (v *lintVisitor) handleStepCall(e *syntax.CallExpr) {
 	if !meta.HasAutoCompensation && meta.CompensationStrategy == "" {
 		v.addIssue(LintIssueTypeMissingCompensationStrategy, int(e.Lparen.Line),
 			fmt.Sprintf("Handler %q has no compensation strategy declared", handlerName),
-			fmt.Sprintf("Add 'compensation_strategy: none' or 'compensation_strategy: saga_managed' to %s in handlers.yaml", handlerName))
+			fmt.Sprintf("Add compensation_strategy to handler metadata for %s", handlerName))
 	}
 }
 

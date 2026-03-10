@@ -26,8 +26,8 @@ var validateCmd = &cobra.Command{
 	Long: `Validates a Starlark saga script using auto-generated mock handlers.
 
 The script is executed in a sandboxed runtime with mock handlers
-generated from the handler schema (handlers.yaml). This provides
-fast local feedback before deployment.
+generated from the handler schema. This provides fast local feedback
+before deployment.
 
 Exit Codes:
   0 - Script is valid
@@ -36,14 +36,14 @@ Exit Codes:
 Examples:
   meridian-cli saga validate withdrawal.star
   meridian-cli saga validate --json payment.star
-  meridian-cli saga validate --handlers /path/to/handlers.yaml deposit.star`,
+  meridian-cli saga validate --handlers /path/to/schema.yaml deposit.star`,
 	Args: cobra.ExactArgs(1),
 	RunE: runValidate,
 }
 
 func init() {
 	validateCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output validation report as JSON")
-	validateCmd.Flags().StringVar(&handlersPath, "handlers", "", "Path to handlers.yaml (default: embedded schema)")
+	validateCmd.Flags().StringVar(&handlersPath, "handlers", "", "Path to handler schema YAML file")
 
 	sagaCmd.AddCommand(validateCmd)
 }
@@ -136,21 +136,7 @@ func loadSchemaRegistry(handlers string) (*schema.Registry, error) {
 		return reg, nil
 	}
 
-	// Try default locations relative to working directory
-	defaults := []string{
-		"shared/pkg/saga/schema/handlers.yaml",
-	}
-
-	for _, path := range defaults {
-		if _, err := os.Stat(path); err == nil {
-			if loadErr := reg.LoadFromFile(path); loadErr != nil {
-				return nil, loadErr
-			}
-			return reg, nil
-		}
-	}
-
-	// No handlers found - return empty registry (will catch undefined handler errors)
+	// No handlers path specified - return empty registry (will catch undefined handler errors)
 	return reg, nil
 }
 

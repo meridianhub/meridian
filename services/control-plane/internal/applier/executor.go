@@ -56,8 +56,8 @@ type ManifestExecutorDepsConfig struct {
 }
 
 // NewManifestExecutorFromDeps creates a ManifestExecutor with a fully wired saga runner.
-// It registers all manifest handlers from deps, loads the handlers.yaml schema,
-// builds typed Starlark service modules, and assembles the StarlarkSagaRunner.
+// It registers all manifest handlers from deps, derives the handler schema from proto
+// metadata, builds typed Starlark service modules, and assembles the StarlarkSagaRunner.
 //
 // This is the preferred factory for production use. The simpler NewManifestExecutor
 // is available for callers that pre-build their own saga runner.
@@ -71,17 +71,7 @@ func NewManifestExecutorFromDeps(cfg ManifestExecutorDepsConfig) (*ManifestExecu
 		return nil, fmt.Errorf("register manifest handlers: %w", err)
 	}
 
-	handlersYAML, err := handlersYAMLFS.ReadFile("handlers.yaml")
-	if err != nil {
-		return nil, fmt.Errorf("read handlers.yaml: %w", err)
-	}
-
-	schemaReg := schema.NewRegistry()
-	if err := schemaReg.LoadFromYAML(handlersYAML); err != nil {
-		return nil, fmt.Errorf("load handlers schema: %w", err)
-	}
-
-	serviceModules, err := schema.BuildServiceModules(registry, schemaReg)
+	serviceModules, err := schema.BuildServiceModules(registry)
 	if err != nil {
 		return nil, fmt.Errorf("build service modules: %w", err)
 	}

@@ -20,36 +20,54 @@ func writeScript(t *testing.T, name, content string) string {
 	return path
 }
 
-// handlersYAMLPath returns the path to the project's handlers.yaml.
-func handlersYAMLPath(t *testing.T) string {
+// testHandlersYAML returns a minimal handler schema YAML for CLI validation tests.
+var testHandlersYAML = `
+service: test
+version: "1.0"
+handlers:
+  position_keeping.initiate_log:
+    description: "Initiate a position log entry"
+    compensation_strategy: auto
+    compensate: position_keeping.cancel_log
+    params:
+      position_id:
+        type: string
+        required: true
+      amount:
+        type: Decimal
+        required: true
+      direction:
+        type: enum
+        values: [DEBIT, CREDIT]
+        required: true
+    returns:
+      log_id:
+        type: string
+      status:
+        type: string
+  position_keeping.cancel_log:
+    description: "Cancel a position log entry"
+    compensation_strategy: none
+    params:
+      log_id:
+        type: string
+        required: true
+    returns:
+      status:
+        type: string
+`
+
+// writeTestHandlersYAML writes the test schema to a temp file and returns the path.
+func writeTestHandlersYAML(t *testing.T) string {
 	t.Helper()
-	// Walk up from test directory to find project root
-	// Test runs from cmd/meridian-cli/cmd/ so we need to go up 3 levels
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-
-	// Try relative paths from working directory
-	candidates := []string{
-		filepath.Join(wd, "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml"),
-		filepath.Join(wd, "shared", "pkg", "saga", "schema", "handlers.yaml"),
-	}
-
-	for _, path := range candidates {
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			continue
-		}
-		if _, err := os.Stat(abs); err == nil {
-			return abs
-		}
-	}
-
-	t.Fatalf("handlers.yaml not found; tried: %v", candidates)
-	return ""
+	dir := t.TempDir()
+	path := filepath.Join(dir, "handlers.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(testHandlersYAML), 0o644))
+	return path
 }
 
 func TestRunValidateCommand_ValidScript(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	script := writeScript(t, "valid.star", `
 result = position_keeping.initiate_log(
@@ -67,7 +85,7 @@ result = position_keeping.initiate_log(
 }
 
 func TestRunValidateCommand_InvalidScript(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	script := writeScript(t, "invalid.star", `
 result = position_keeping.initiate_log(account_id="ACC-001"
@@ -82,13 +100,13 @@ result = position_keeping.initiate_log(account_id="ACC-001"
 }
 
 func TestRunValidateCommand_MissingFile(t *testing.T) {
-	_, err := runValidateLogic("/nonexistent/path/missing.star", "handlers.yaml")
+	_, err := runValidateLogic("/nonexistent/path/missing.star", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read script")
 }
 
 func TestRunValidateCommand_JSONOutput(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	script := writeScript(t, "valid.star", `
 result = position_keeping.initiate_log(
@@ -113,7 +131,7 @@ result = position_keeping.initiate_log(
 }
 
 func TestRunValidateCommand_ComplexityMetrics(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	script := writeScript(t, "multi_handler.star", `
 r1 = position_keeping.initiate_log(
@@ -136,7 +154,7 @@ r2 = position_keeping.initiate_log(
 }
 
 func TestRunValidateCommand_RelativePath(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	// Create script in the current working directory to test relative path resolution
 	wd, err := os.Getwd()
@@ -159,7 +177,7 @@ result = position_keeping.initiate_log(
 }
 
 func TestRunValidateCommand_AbsolutePath(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	script := writeScript(t, "absolute.star", `
 result = position_keeping.initiate_log(
@@ -179,7 +197,7 @@ result = position_keeping.initiate_log(
 }
 
 func TestRunValidateCommand_ErrorWithLineNumber(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	// Script with syntax error on line 3
 	script := writeScript(t, "line_error.star", `x = 1
@@ -195,7 +213,7 @@ z = (
 }
 
 func TestRunValidateCommand_UndefinedHandler(t *testing.T) {
-	handlersPath := handlersYAMLPath(t)
+	handlersPath := writeTestHandlersYAML(t)
 
 	script := writeScript(t, "undefined.star", `
 result = nonexistent_service.some_method(param="value")

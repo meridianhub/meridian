@@ -3,7 +3,6 @@
 package schema
 
 import (
-	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -13,9 +12,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed handlers.yaml
-var embeddedPlatformHandlers []byte
 
 // FieldType represents the type of a handler parameter or return value.
 type FieldType string
@@ -484,16 +480,6 @@ func (r *Registry) ListSchemas() []*Schema {
 	return result
 }
 
-// DefaultRegistry creates a schema registry pre-loaded with the embedded platform handlers.yaml.
-// This provides the standard handler schema for Starlark saga validation and tooling.
-func DefaultRegistry() (*Registry, error) {
-	reg := NewRegistry()
-	if err := reg.LoadFromYAML(embeddedPlatformHandlers); err != nil {
-		return nil, fmt.Errorf("failed to load platform handlers: %w", err)
-	}
-	return reg, nil
-}
-
 // LoadFromDirectory loads all YAML schema files from a directory.
 // Files must have .yaml or .yml extension. Subdirectories are not traversed.
 func (r *Registry) LoadFromDirectory(dir string) error {
@@ -519,6 +505,42 @@ func (r *Registry) LoadFromDirectory(dir string) error {
 	}
 
 	return nil
+}
+
+// ToSchema returns a Schema snapshot from the registry's current state.
+// This enables callers that have a YAML-based Registry to use BuildServiceModulesFromSchema.
+func (r *Registry) ToSchema() *Schema {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	handlers := make(map[string]*HandlerDef, len(r.handlers))
+	for name, def := range r.handlers {
+		handlers[name] = def
+	}
+	return &Schema{Handlers: handlers}
+}
+
+// NewRegistryFromSchema creates a Registry pre-populated with handler definitions from a Schema.
+// This is the inverse of ToSchema() and enables creating a Registry from proto-derived schemas.
+// It also rebuilds the deprecatedNames index from conversion rules that specify FromName.
+func NewRegistryFromSchema(s *Schema) *Registry {
+	r := NewRegistry()
+	if s != nil {
+		for name, def := range s.Handlers {
+			r.handlers[name] = def
+			// Rebuild deprecated name mappings from conversion rules
+			for i := range def.Conversions {
+				conv := &def.Conversions[i]
+				if conv.FromName != "" {
+					r.deprecatedNames[conv.FromName] = &DeprecatedMapping{
+						CurrentName:    name,
+						ConversionRule: conv,
+					}
+				}
+			}
+		}
+	}
+	return r
 }
 
 // ValidateHandlerParams validates parameters for a named handler.

@@ -217,9 +217,16 @@ r2 = test_service.cancel_thing(log_id="abc")
 	assert.Equal(t, "test_service.cancel_thing", callLog[1].HandlerName)
 }
 
-func TestBuildValidationModules_DefaultRegistry(t *testing.T) {
-	reg, err := DefaultRegistry()
+func TestBuildValidationModules_DerivedFromFullRegistry(t *testing.T) {
+	handlerRegistry := buildFullHandlerRegistry(t)
+	derivedSchema, err := DeriveSchema(handlerRegistry)
 	require.NoError(t, err)
+
+	// Wrap the derived schema in a Registry for BuildValidationModules
+	reg := NewRegistry()
+	for name, hd := range derivedSchema.Handlers {
+		reg.handlers[name] = hd
+	}
 
 	modules, err := BuildValidationModules(reg, nil)
 	require.NoError(t, err)

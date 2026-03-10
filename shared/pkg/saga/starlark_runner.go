@@ -339,7 +339,7 @@ func (r *StarlarkSagaRunner) buildInvokeHandlerShim(starlarkCtx *StarlarkContext
 
 		// Add compensation handler if known
 		// This is a backward-compatibility mapping for invoke_handler.
-		// Typed service modules should define compensation in handlers.yaml schema instead.
+		// Typed service modules should define compensation in handler metadata instead.
 		compensateHandler := getCompensationHandler(handlerName)
 		if compensateHandler != "" {
 			stepResult.CompensateHandler = compensateHandler
@@ -368,7 +368,7 @@ func (r *StarlarkSagaRunner) WithLogger(logger *slog.Logger) *StarlarkSagaRunner
 
 // getCompensationHandler returns the compensation handler name for a given forward handler.
 // This is a backward-compatibility mapping for invoke_handler API.
-// Typed service modules should define compensation in handlers.yaml schema instead.
+// Typed service modules should define compensation in handler metadata instead.
 func getCompensationHandler(forwardHandler string) string {
 	// Map forward handlers to their compensation handlers
 	compensationMap := map[string]string{

@@ -1,4 +1,4 @@
-// Package validation provides mock handler generation from handlers.yaml for dry-run validation.
+// Package validation provides mock handler generation from handler schemas for dry-run validation.
 package validation
 
 import (
@@ -187,7 +187,7 @@ func isUppercaseWithUnderscores(s string) bool {
 // Example usage:
 //
 //	schemaRegistry := schema.NewRegistry()
-//	schemaRegistry.LoadFromFile("handlers.yaml")
+//	schemaRegistry.LoadFromYAML(yamlBytes)
 //	mockRegistry, err := NewMockHandlerRegistry(schemaRegistry)
 //	// Use mockRegistry for dry-run saga validation
 func NewMockHandlerRegistry(schemaRegistry *schema.Registry) (*saga.HandlerRegistry, error) {

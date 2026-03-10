@@ -78,20 +78,8 @@ func testWithdrawalOrchestratorWithConfig(repo *persistence.Repository, posKeepi
 		panic("failed to register saga handlers: " + err.Error())
 	}
 
-	// Load schema registry
-	schemaRegistryPath := filepath.Join(serviceDir, "..", "..", "..", "shared", "pkg", "saga", "schema", "handlers.yaml")
-	schemaRegistryData, err := os.ReadFile(schemaRegistryPath)
-	if err != nil {
-		panic("failed to read handlers schema: " + err.Error())
-	}
-
-	schemaRegistry := schema.NewRegistry()
-	if err := schemaRegistry.LoadFromYAML(schemaRegistryData); err != nil {
-		panic("failed to load schema: " + err.Error())
-	}
-
-	// Build service modules
-	serviceModules, err := schema.BuildServiceModules(handlerRegistry, schemaRegistry)
+	// Build service modules (schema derived from proto metadata on handlers)
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry)
 	if err != nil {
 		panic("failed to build service modules: " + err.Error())
 	}
