@@ -22,6 +22,7 @@ const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_versions (
 	apply_status VARCHAR(20) NOT NULL DEFAULT 'APPLIED',
 	apply_job_id UUID,
 	diff_summary TEXT,
+	relationship_graph JSONB,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 	CONSTRAINT valid_apply_status CHECK (apply_status IN ('APPLIED', 'FAILED', 'ROLLED_BACK'))
 )`
