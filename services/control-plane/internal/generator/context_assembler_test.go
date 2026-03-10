@@ -1,6 +1,7 @@
 package generator_test
 
 import (
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -275,32 +276,5 @@ func TestAssembleContext_BrokenCookbookFS_ExposesPatternMatchError(t *testing.T)
 
 // splitWords splits a string into whitespace-delimited words, used only for test assertions.
 func splitWords(s string) []string {
-	var words []string
-	for _, f := range splitFields(s) {
-		if f != "" {
-			words = append(words, f)
-		}
-	}
-	return words
-}
-
-func splitFields(s string) []string {
-	result := []string{}
-	start := -1
-	for i, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			if start >= 0 {
-				result = append(result, s[start:i])
-				start = -1
-			}
-		} else {
-			if start < 0 {
-				start = i
-			}
-		}
-	}
-	if start >= 0 {
-		result = append(result, s[start:])
-	}
-	return result
+	return strings.Fields(s)
 }

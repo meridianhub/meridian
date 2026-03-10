@@ -158,7 +158,9 @@ func buildPrompt(
 	sb.WriteString("- Use only event topic names listed in the Available Event Topics section for saga triggers.\n")
 	sb.WriteString("- All saga scripts must be valid Starlark (no while loops, no recursion).\n")
 	sb.WriteString("- Follow the Manifest Schema Reference for field names and types.\n")
-	sb.WriteString("- Copy and adapt the Relevant Patterns where applicable.\n")
+	if len(patterns) > 0 {
+		sb.WriteString("- Copy and adapt the Relevant Patterns where applicable.\n")
+	}
 	if currentEconomyJSON != "" {
 		sb.WriteString("- Preserve existing instruments, account types, and sagas from the Current Economy unless explicitly asked to change them.\n")
 	}
