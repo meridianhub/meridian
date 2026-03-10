@@ -297,6 +297,48 @@ func TestLeafFieldName(t *testing.T) {
 	}
 }
 
+func TestResolveProtoTypes_InvalidExposedParam(t *testing.T) {
+	s := &Schema{
+		Service: "test",
+		Version: "1.0",
+		Handlers: map[string]*HandlerDef{
+			"test.bad_field": {
+				Description:          "Handler with invalid exposed param",
+				CompensationStrategy: CompensationStrategyNone,
+				ProtoRef: &ProtoReference{
+					FullMethod:    "meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLog",
+					ExposedParams: []string{"nonexistent_field"},
+				},
+			},
+		},
+	}
+
+	err := s.ResolveProtoTypes(protoregistry.GlobalFiles)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrProtoFieldPathNotFound)
+}
+
+func TestResolveProtoTypes_InvalidExposedReturn(t *testing.T) {
+	s := &Schema{
+		Service: "test",
+		Version: "1.0",
+		Handlers: map[string]*HandlerDef{
+			"test.bad_return": {
+				Description:          "Handler with invalid exposed return",
+				CompensationStrategy: CompensationStrategyNone,
+				ProtoRef: &ProtoReference{
+					FullMethod:     "meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLog",
+					ExposedReturns: []string{"nonexistent_return_field"},
+				},
+			},
+		},
+	}
+
+	err := s.ResolveProtoTypes(protoregistry.GlobalFiles)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrProtoFieldPathNotFound)
+}
+
 func TestHasProtoRef(t *testing.T) {
 	withRef := &HandlerDef{
 		ProtoRef: &ProtoReference{FullMethod: "pkg.Svc/Method"},

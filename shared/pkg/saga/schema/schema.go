@@ -720,11 +720,19 @@ func resolveHandlerProto(_ string, handler *HandlerDef, files *protoregistry.Fil
 
 	// Resolve params from request message
 	reqMsg := methodDesc.Input()
-	handler.Params = resolveExposedFields(reqMsg, ref.ExposedParams, ref.ParamAliases)
+	params, err := resolveExposedFields(reqMsg, ref.ExposedParams, ref.ParamAliases)
+	if err != nil {
+		return fmt.Errorf("params: %w", err)
+	}
+	handler.Params = params
 
 	// Resolve returns from response message
 	respMsg := methodDesc.Output()
-	handler.Returns = resolveExposedFields(respMsg, ref.ExposedReturns, nil)
+	returns, err := resolveExposedFields(respMsg, ref.ExposedReturns, nil)
+	if err != nil {
+		return fmt.Errorf("returns: %w", err)
+	}
+	handler.Returns = returns
 
 	return nil
 }
@@ -745,7 +753,8 @@ func findServiceDescriptor(files *protoregistry.Files, fqn protoreflect.FullName
 // resolveExposedFields builds a FieldDef map from a proto message descriptor,
 // filtered to only the exposed field paths. If exposed is nil/empty, all top-level
 // fields are included. Aliases are applied to param fields.
-func resolveExposedFields(md protoreflect.MessageDescriptor, exposed []string, aliases map[string]string) map[string]*FieldDef {
+// Returns ErrProtoFieldPathNotFound if any exposed path cannot be resolved.
+func resolveExposedFields(md protoreflect.MessageDescriptor, exposed []string, aliases map[string]string) (map[string]*FieldDef, error) {
 	fields := make(map[string]*FieldDef)
 
 	if len(exposed) == 0 {
@@ -761,7 +770,7 @@ func resolveExposedFields(md protoreflect.MessageDescriptor, exposed []string, a
 		for _, path := range exposed {
 			fd := resolveFieldPath(md, path)
 			if fd == nil {
-				continue // Skip unresolvable paths (validation catches this separately)
+				return nil, fmt.Errorf("%w: %q in message %s", ErrProtoFieldPathNotFound, path, md.FullName())
 			}
 			// Use the leaf field name as the key
 			leafName := leafFieldName(path)
@@ -777,7 +786,7 @@ func resolveExposedFields(md protoreflect.MessageDescriptor, exposed []string, a
 		}
 	}
 
-	return fields
+	return fields, nil
 }
 
 // resolveFieldPath resolves a dot-separated field path (e.g., "log.status_tracking.current_status")
