@@ -6,7 +6,7 @@ import type {
   StepResult,
   ValidationError,
 } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
-import { ApplyManifestStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+import type { ApplyManifestStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 
 export interface ManifestPlan {
   /** The raw response status. */
