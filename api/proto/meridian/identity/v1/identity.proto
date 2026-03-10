@@ -267,8 +267,9 @@ message UpdateIdentityRequest {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // email is the updated email address (optional).
-  // IGNORE_IF_ZERO_VALUE allows partial updates that do not modify the email field.
+  // email is accepted for validation but is immutable after creation.
+  // Sending a value different from the current email returns FAILED_PRECONDITION.
+  // IGNORE_IF_ZERO_VALUE allows partial updates that omit the email field.
   string email = 2 [
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string = {
@@ -621,10 +622,22 @@ message ReactivateIdentityResponse {
 }
 
 // IdentityService manages identity lifecycle, authentication, and role-based access control.
+//
+// Error code semantics:
+//   - UNAUTHENTICATED (HTTP 401): The request lacks valid authentication credentials.
+//     Returned when no Bearer token is provided, the token is expired, or the token
+//     is malformed. The client should re-authenticate (e.g. redirect to login).
+//   - PERMISSION_DENIED (HTTP 403): The caller is authenticated but lacks sufficient
+//     privileges for the requested operation. For example, an Operator attempting to
+//     suspend a Tenant Owner. Re-authenticating will not help; higher privileges are required.
 service IdentityService {
   // --- CRUD Operations ---
 
   // CreateIdentity creates a new identity in the system.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: The email address is invalid.
+  //   - ALREADY_EXISTS: An identity with this email already exists.
   rpc CreateIdentity(CreateIdentityRequest) returns (CreateIdentityResponse) {
     option (google.api.http) = {
       post: "/v1/identities"
@@ -641,6 +654,10 @@ service IdentityService {
   }
 
   // RetrieveIdentity retrieves an identity by its unique identifier.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: The identity ID is malformed.
+  //   - NOT_FOUND: No identity exists with the given ID.
   rpc RetrieveIdentity(RetrieveIdentityRequest) returns (RetrieveIdentityResponse) {
     option (google.api.http) = {
       get: "/v1/identities/{id}"
@@ -648,6 +665,12 @@ service IdentityService {
   }
 
   // UpdateIdentity updates mutable fields on an existing identity.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: The identity ID is malformed.
+  //   - NOT_FOUND: No identity exists with the given ID.
+  //   - ABORTED: Version conflict due to concurrent modification.
+  //   - FAILED_PRECONDITION: Attempted to change an immutable field (e.g. email).
   rpc UpdateIdentity(UpdateIdentityRequest) returns (UpdateIdentityResponse) {
     option (google.api.http) = {
       patch: "/v1/identities/{id}"
@@ -656,6 +679,9 @@ service IdentityService {
   }
 
   // ListIdentities returns a paginated list of identities with optional status filtering.
+  //
+  // Errors:
+  //   - UNIMPLEMENTED: Pagination and status filtering are not yet supported.
   rpc ListIdentities(ListIdentitiesRequest) returns (ListIdentitiesResponse) {
     option (google.api.http) = {
       get: "/v1/identities"
@@ -666,6 +692,11 @@ service IdentityService {
 
   // Authenticate verifies identity credentials and returns the authenticated identity.
   // This RPC is used by the Dex gRPC connector to validate username/password during login.
+  // This is a pre-auth endpoint; no Bearer token is required.
+  //
+  // Authentication failures are returned in the response body (authenticated=false)
+  // rather than as gRPC errors, to allow the caller to distinguish between
+  // invalid credentials, locked accounts, and inactive accounts.
   rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse) {
     option (google.api.http) = {
       post: "/v1/identities/authenticate"
@@ -681,6 +712,12 @@ service IdentityService {
 
   // SetPassword sets the initial password for an identity using an invitation token.
   // The token determines the target identity; no authenticated principal is required.
+  // This is a pre-auth endpoint; no Bearer token is required.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: The password does not meet the password policy.
+  //   - NOT_FOUND: No invitation matches the provided token hash.
+  //   - FAILED_PRECONDITION: The invitation was found but has expired or was already accepted.
   rpc SetPassword(SetPasswordRequest) returns (SetPasswordResponse) {
     option (google.api.http) = {
       post: "/v1/identities/password"
@@ -694,6 +731,12 @@ service IdentityService {
 
   // ChangePassword changes the password for the authenticated identity.
   // The target identity is derived from the authenticated principal.
+  //
+  // Errors:
+  //   - UNAUTHENTICATED: No valid Bearer token provided.
+  //   - PERMISSION_DENIED: The current password verification failed (re-authentication step).
+  //   - INVALID_ARGUMENT: The new password does not meet the password policy.
+  //   - NOT_FOUND: The authenticated identity no longer exists.
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
     option (google.api.http) = {
       put: "/v1/identities/me/password"
@@ -702,6 +745,10 @@ service IdentityService {
   }
 
   // RequestPasswordReset initiates the password reset flow by generating a reset token.
+  // This is a pre-auth endpoint; no Bearer token is required.
+  // Always returns success even if the email is not found to limit enumeration.
+  // Note: the reset_token is currently returned in-band; full anti-enumeration
+  // requires out-of-band token delivery (e.g. email), which is not yet implemented.
   rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse) {
     option (google.api.http) = {
       post: "/v1/identities/password-reset"
@@ -714,6 +761,12 @@ service IdentityService {
   }
 
   // CompletePasswordReset finalises the password reset by verifying the token and storing the new password.
+  // This is a pre-auth endpoint; no Bearer token is required.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: The new password does not meet the password policy.
+  //   - NOT_FOUND: No invitation matches the provided reset token hash.
+  //   - FAILED_PRECONDITION: The reset token was found but has expired or was already used.
   rpc CompletePasswordReset(CompletePasswordResetRequest) returns (CompletePasswordResetResponse) {
     option (google.api.http) = {
       put: "/v1/identities/password-reset"
@@ -728,6 +781,12 @@ service IdentityService {
   // --- Role Management ---
 
   // GrantRole assigns a role to an identity.
+  //
+  // Errors:
+  //   - UNAUTHENTICATED: No valid Bearer token provided.
+  //   - PERMISSION_DENIED: The caller lacks sufficient privilege to grant the requested role.
+  //   - INVALID_ARGUMENT: The identity ID is malformed or the role is invalid.
+  //   - NOT_FOUND: The target identity does not exist.
   rpc GrantRole(GrantRoleRequest) returns (GrantRoleResponse) {
     option (google.api.http) = {
       post: "/v1/identities/{identity_id}/roles"
@@ -744,6 +803,13 @@ service IdentityService {
   }
 
   // RevokeRole revokes a role assignment from an identity.
+  //
+  // Errors:
+  //   - UNAUTHENTICATED: No valid Bearer token provided.
+  //   - PERMISSION_DENIED: The caller lacks sufficient privilege to revoke the target role.
+  //   - INVALID_ARGUMENT: The identity ID or role assignment ID is malformed.
+  //   - NOT_FOUND: The role assignment does not exist.
+  //   - FAILED_PRECONDITION: The role assignment has already been revoked.
   rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse) {
     option (google.api.http) = {
       delete: "/v1/identities/{identity_id}/roles/{role_assignment_id}"
@@ -751,6 +817,9 @@ service IdentityService {
   }
 
   // ListRoleAssignments lists the role assignments for an identity.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: The identity ID is malformed.
   rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse) {
     option (google.api.http) = {
       get: "/v1/identities/{identity_id}/roles"
@@ -760,6 +829,11 @@ service IdentityService {
   // --- Invitation Management ---
 
   // InviteUser creates an invitation and a PENDING_INVITE identity for a new user.
+  //
+  // Errors:
+  //   - UNAUTHENTICATED: No valid Bearer token provided.
+  //   - INVALID_ARGUMENT: The email address is invalid.
+  //   - ALREADY_EXISTS: An identity with this email already exists.
   rpc InviteUser(InviteUserRequest) returns (InviteUserResponse) {
     option (google.api.http) = {
       post: "/v1/identities/invite"
@@ -776,6 +850,12 @@ service IdentityService {
   }
 
   // AcceptInvitation accepts a pending invitation and activates the associated identity.
+  // This is a pre-auth endpoint; no Bearer token is required.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: The password does not meet the password policy.
+  //   - NOT_FOUND: No invitation matches the provided token hash.
+  //   - FAILED_PRECONDITION: The invitation was found but has expired or was already accepted.
   rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse) {
     option (google.api.http) = {
       post: "/v1/identities/invite/accept"
@@ -790,6 +870,14 @@ service IdentityService {
   // --- Lifecycle Management ---
 
   // SuspendIdentity suspends an active identity, preventing further authentication.
+  //
+  // Errors:
+  //   - UNAUTHENTICATED: No valid Bearer token provided.
+  //   - PERMISSION_DENIED: The caller lacks sufficient privilege to suspend identities,
+  //     or the target identity holds a higher role than the caller.
+  //   - INVALID_ARGUMENT: The identity ID is malformed.
+  //   - NOT_FOUND: The target identity does not exist.
+  //   - FAILED_PRECONDITION: The identity is not in a suspendable status.
   rpc SuspendIdentity(SuspendIdentityRequest) returns (SuspendIdentityResponse) {
     option (google.api.http) = {
       post: "/v1/identities/{id}/suspend"
@@ -798,6 +886,14 @@ service IdentityService {
   }
 
   // ReactivateIdentity reactivates a suspended identity.
+  //
+  // Errors:
+  //   - UNAUTHENTICATED: No valid Bearer token provided.
+  //   - PERMISSION_DENIED: The caller lacks sufficient privilege to reactivate identities,
+  //     or the target identity holds a higher role than the caller.
+  //   - INVALID_ARGUMENT: The identity ID is malformed.
+  //   - NOT_FOUND: The target identity does not exist.
+  //   - FAILED_PRECONDITION: The identity is not in a reactivatable status.
   rpc ReactivateIdentity(ReactivateIdentityRequest) returns (ReactivateIdentityResponse) {
     option (google.api.http) = {
       post: "/v1/identities/{id}/reactivate"

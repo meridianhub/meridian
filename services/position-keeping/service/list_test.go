@@ -264,6 +264,71 @@ func TestListFinancialPositionLogs_EmptyResults(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+// TestListFinancialPositionLogs_ZeroPageSize_UsesDefault tests that zero page_size
+// uses the default (50) instead of rejecting. Proto3 int32 defaults to 0, and
+// connect-es clients may send Pagination with zero page_size.
+func TestListFinancialPositionLogs_ZeroPageSize_UsesDefault(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
+
+	// Setup mock to expect default limit of 50
+	mockRepo.On("List", ctx, domain.PositionLogFilter{
+		Limit:  50,
+		Offset: 0,
+	}).Return([]*domain.FinancialPositionLog{}, nil)
+
+	req := &positionkeepingv1.ListFinancialPositionLogsRequest{
+		Pagination: &commonv1.Pagination{
+			PageSize: 0, // Proto3 default
+		},
+	}
+
+	// Act
+	resp, err := svc.ListFinancialPositionLogs(ctx, req)
+
+	// Assert
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Empty(t, resp.Logs)
+	mockRepo.AssertExpectations(t)
+}
+
+// TestListFinancialPositionLogs_NilPagination_UsesDefault tests that nil pagination
+// uses the default page size (50).
+func TestListFinancialPositionLogs_NilPagination_UsesDefault(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
+
+	// Setup mock to expect default limit of 50
+	mockRepo.On("List", ctx, domain.PositionLogFilter{
+		Limit:  50,
+		Offset: 0,
+	}).Return([]*domain.FinancialPositionLog{}, nil)
+
+	req := &positionkeepingv1.ListFinancialPositionLogsRequest{
+		// No pagination at all
+	}
+
+	// Act
+	resp, err := svc.ListFinancialPositionLogs(ctx, req)
+
+	// Assert
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Empty(t, resp.Logs)
+	mockRepo.AssertExpectations(t)
+}
+
 // TestListFinancialPositionLogs_InvalidPagination tests invalid pagination parameters
 func TestListFinancialPositionLogs_InvalidPagination(t *testing.T) {
 	tests := []struct {
@@ -272,12 +337,6 @@ func TestListFinancialPositionLogs_InvalidPagination(t *testing.T) {
 		expectedCode  codes.Code
 		expectedError string
 	}{
-		{
-			name:          "zero page size",
-			pageSize:      0,
-			expectedCode:  codes.InvalidArgument,
-			expectedError: "page_size must be positive",
-		},
 		{
 			name:          "negative page size",
 			pageSize:      -1,

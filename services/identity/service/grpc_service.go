@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
 	"github.com/meridianhub/meridian/shared/pkg/tokens"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
@@ -117,13 +118,23 @@ func (s *Service) UpdateIdentity(ctx context.Context, req *pb.UpdateIdentityRequ
 // ListIdentities returns all identities within the tenant.
 // Pagination and status filtering are not yet implemented.
 func (s *Service) ListIdentities(ctx context.Context, req *pb.ListIdentitiesRequest) (*pb.ListIdentitiesResponse, error) {
+	tenantID, hasTenant := tenant.FromContext(ctx)
+	s.logger.DebugContext(ctx, "ListIdentities called",
+		"tenant_id", tenantID,
+		"has_tenant_context", hasTenant,
+		"page_size", req.GetPageSize(),
+		"page_token", req.GetPageToken(),
+		"status_filter", req.GetStatusFilter().String())
+
 	if req.GetPageSize() > 0 || req.GetPageToken() != "" || req.GetStatusFilter() != pb.IdentityStatus_IDENTITY_STATUS_UNSPECIFIED {
 		return nil, status.Errorf(codes.Unimplemented, "pagination and status filtering are not yet supported")
 	}
 
 	identities, err := s.repo.ListByTenant(ctx)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to list identities", "error", err)
+		s.logger.ErrorContext(ctx, "failed to list identities",
+			"tenant_id", tenantID,
+			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to list identities")
 	}
 
@@ -131,6 +142,10 @@ func (s *Service) ListIdentities(ctx context.Context, req *pb.ListIdentitiesRequ
 	for _, ident := range identities {
 		pbIdentities = append(pbIdentities, identityToProto(ident))
 	}
+
+	s.logger.DebugContext(ctx, "ListIdentities completed",
+		"tenant_id", tenantID,
+		"result_count", len(pbIdentities))
 
 	return &pb.ListIdentitiesResponse{
 		Identities: pbIdentities,

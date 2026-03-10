@@ -236,14 +236,14 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 	offset := 0
 
 	if req.Pagination != nil {
-		if req.Pagination.PageSize == 0 {
-			return nil, status.Error(codes.InvalidArgument, "page_size must be positive")
-		} else if req.Pagination.PageSize < 0 {
+		if req.Pagination.PageSize < 0 {
 			return nil, status.Error(codes.InvalidArgument, "page_size must be positive")
 		} else if req.Pagination.PageSize > 1000 {
 			return nil, status.Error(codes.InvalidArgument, "page_size exceeds maximum of 1000")
+		} else if req.Pagination.PageSize > 0 {
+			pageSize = req.Pagination.PageSize
 		}
-		pageSize = req.Pagination.PageSize
+		// PageSize == 0 uses the default (50)
 
 		// Parse page token as offset
 		if req.Pagination.PageToken != "" {
@@ -305,6 +305,12 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 	// Query repository
 	logs, err := s.repository.List(ctx, filter)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Errorf(codes.DeadlineExceeded, "request timed out: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "failed to list financial position logs: %v", err)
 	}
 

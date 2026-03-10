@@ -58,7 +58,7 @@ def execute_stripe_payment_received():
     # This represents Stripe holding funds on our behalf
     step(name="debit_stripe_nostro")
     debit_result = position_keeping.initiate_log(
-        account_id=nostro_account,
+        position_id=nostro_account,
         amount=amount,
         instrument_code=instrument_code,
         direction="DEBIT",
@@ -69,8 +69,8 @@ def execute_stripe_payment_received():
     # Step 2: Credit the customer prepaid balance
     # This increases the customer's available balance
     step(name="credit_customer_prepaid")
-    credit_result = position_keeping.initiate_log(
-        account_id=prepaid_account,
+    position_keeping.initiate_log(
+        position_id=prepaid_account,
         amount=amount,
         instrument_code=instrument_code,
         direction="CREDIT",
@@ -82,7 +82,6 @@ def execute_stripe_payment_received():
         "status": "completed",
         "tenant_id": tenant_id,
         "party_id": party_id,
-        "prepaid_log_id": credit_result["log_id"],
         "amount_cents": amount_cents,
         "instrument_code": instrument_code,
         "charge_id": charge_id,

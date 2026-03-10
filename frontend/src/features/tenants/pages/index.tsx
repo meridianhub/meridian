@@ -12,6 +12,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -141,6 +142,7 @@ function InitiateTenantDialog({ open, onOpenChange, onSuccess }: InitiateTenantD
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Initiate Tenant</DialogTitle>
+          <DialogDescription>Create a new tenant with the required details.</DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} id="initiate-tenant-form">
           <div className="space-y-4 py-2">

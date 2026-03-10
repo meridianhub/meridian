@@ -89,7 +89,7 @@ def execute_race_distribution():
 
         step(name="book_payout_" + str(distributed_count))
         position_keeping.initiate_log(
-            account_id=p.metadata.payout_account_id,
+            position_id=p.metadata.payout_account_id,
             instrument_code="GBP",
             direction="CREDIT",
             amount=payout,

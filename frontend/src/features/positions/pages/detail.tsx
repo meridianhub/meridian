@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useParams } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MoneyDisplay } from '@/shared/money-display'
@@ -182,7 +183,7 @@ function MeasurementHistory({ entries }: MeasurementHistoryProps) {
 export function PositionDetailPage() {
   const { logId } = useParams<{ logId: string }>()
 
-  const { data, isLoading, isError } = usePositionLogDetail(logId)
+  const { data, isLoading, isError, refetch } = usePositionLogDetail(logId)
 
   const log = data?.log as FinancialPositionLog | undefined
 
@@ -204,7 +205,12 @@ export function PositionDetailPage() {
 
       {isError && (
         <Card className="p-6">
-          <p className="text-sm text-destructive">Failed to load position log.</p>
+          <div className="flex flex-col items-center gap-3 text-destructive">
+            <span className="text-sm font-medium">Failed to load position log</span>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          </div>
         </Card>
       )}
 

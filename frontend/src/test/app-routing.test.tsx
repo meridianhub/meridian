@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
-import { ProtectedRoute, PlatformOnlyRoute } from '@/components/routing'
+import { ProtectedRoute, PlatformOnlyRoute, TenantSubdomainEnforcer } from '@/components/routing'
 import {
   createTestToken,
   createPlatformAdminToken,
@@ -102,6 +102,51 @@ describe('ProtectedRoute', () => {
 
     expect(screen.getByText('Login Page')).toBeInTheDocument()
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
+  })
+})
+
+describe('TenantSubdomainEnforcer', () => {
+  it('renders children on localhost (local dev bypass)', () => {
+    // On localhost, isLocalDev() returns true, the enforcer is fully bypassed
+    const token = createPlatformAdminToken()
+    render(
+      <TestWrapper initialToken={token}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <TenantSubdomainEnforcer>
+                <div>Dashboard Content</div>
+              </TenantSubdomainEnforcer>
+            }
+          />
+        </Routes>
+      </TestWrapper>,
+    )
+
+    expect(screen.getByText('Dashboard Content')).toBeInTheDocument()
+    expect(screen.queryByText('Loading tenant context...')).not.toBeInTheDocument()
+  })
+
+  it('renders children on platform paths without tenant context', () => {
+    const token = createPlatformAdminToken()
+    render(
+      <TestWrapper initialToken={token} initialPath="/tenants">
+        <Routes>
+          <Route
+            path="/tenants"
+            element={
+              <TenantSubdomainEnforcer>
+                <div>Tenants Page</div>
+              </TenantSubdomainEnforcer>
+            }
+          />
+        </Routes>
+      </TestWrapper>,
+    )
+
+    expect(screen.getByText('Tenants Page')).toBeInTheDocument()
+    expect(screen.queryByText('Loading tenant context...')).not.toBeInTheDocument()
   })
 })
 

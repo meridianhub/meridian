@@ -1,0 +1,278 @@
+# Slim Handler Schema - Proto-Referenced Format
+#
+# This file defines saga handler schemas using proto RPC references.
+# Type information (params/returns) is resolved from proto reflection at load time,
+# eliminating duplication between YAML and proto definitions.
+#
+# Format:
+#   handler_name:
+#     proto_ref:
+#       proto_rpc: "package.Service/Method"
+#       exposed_params: [field paths exposed to Starlark]
+#       exposed_returns: [field paths exposed to Starlark]
+#       param_aliases: {proto_field: starlark_name}
+#     description: "Handler purpose"
+#     compensate: "compensation_handler_name"        # or
+#     compensation_strategy: none|saga_managed       # if no compensate
+#
+# Legacy handlers without proto_ref use inline params/returns definitions.
+# Both formats are supported and can coexist in the same schema.
+
+service: meridian
+version: "2.0"
+
+handlers:
+
+  # ---------------------------------------------------------------------------
+  # Position Keeping
+  # ---------------------------------------------------------------------------
+  position_keeping.initiate_log:
+    description: "Initiate a position log entry for a DEBIT or CREDIT transaction"
+    compensate: position_keeping.cancel_log
+    proto_ref:
+      proto_rpc: "meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLog"
+      exposed_params:
+        - account_id
+      param_aliases:
+        account_id: position_id
+
+  position_keeping.update_log:
+    description: "Update an existing position log entry"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.position_keeping.v1.PositionKeepingService/UpdateFinancialPositionLog"
+      exposed_params:
+        - log_id
+
+  position_keeping.cancel_log:
+    description: "Cancel a position log entry (compensation handler)"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.position_keeping.v1.PositionKeepingService/UpdateFinancialPositionLog"
+      exposed_params:
+        - log_id
+
+  # ---------------------------------------------------------------------------
+  # Current Account
+  # ---------------------------------------------------------------------------
+  current_account.create_lien:
+    description: "Create a lien (hold) on an account for a specified amount"
+    compensate: current_account.terminate_lien
+    proto_ref:
+      proto_rpc: "meridian.current_account.v1.CurrentAccountService/InitiateLien"
+
+  current_account.execute_lien:
+    description: "Execute (consume) a previously created lien"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.current_account.v1.CurrentAccountService/ExecuteLien"
+
+  current_account.terminate_lien:
+    description: "Terminate (release) a lien without execution (compensation handler)"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.current_account.v1.CurrentAccountService/TerminateLien"
+
+  current_account.save:
+    description: "Persist current account metadata for a transaction"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.current_account.v1.CurrentAccountService/UpdateCurrentAccount"
+
+  current_account.control:
+    description: "Perform lifecycle control action on an account (FREEZE, UNFREEZE, CLOSE)"
+    compensation_strategy: saga_managed
+    proto_ref:
+      proto_rpc: "meridian.current_account.v1.CurrentAccountService/ControlCurrentAccount"
+
+  # ---------------------------------------------------------------------------
+  # Financial Accounting
+  # ---------------------------------------------------------------------------
+  financial_accounting.initiate_booking_log:
+    description: "Initiate a booking log for a deposit or withdrawal transaction"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.financial_accounting.v1.FinancialAccountingService/InitiateFinancialBookingLog"
+
+  financial_accounting.update_booking_log:
+    description: "Update the status of an existing booking log"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.financial_accounting.v1.FinancialAccountingService/UpdateFinancialBookingLog"
+
+  financial_accounting.capture_posting:
+    description: "Capture a single-sided posting entry within a booking log"
+    compensate: financial_accounting.compensate_posting
+    proto_ref:
+      proto_rpc: "meridian.financial_accounting.v1.FinancialAccountingService/CaptureLedgerPosting"
+
+  financial_accounting.compensate_posting:
+    description: "Compensate (reverse) a captured posting entry"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.financial_accounting.v1.FinancialAccountingService/UpdateLedgerPosting"
+
+  financial_accounting.create_booking:
+    description: "Create a booking log entry for audit purposes"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.financial_accounting.v1.FinancialAccountingService/InitiateFinancialBookingLog"
+
+  # post_entries is a composite handler (iterates over entries calling CaptureLedgerPosting).
+  # No single proto type; uses legacy inline format.
+  financial_accounting.post_entries:
+    description: "Post double-entry accounting entries to the ledger"
+    compensate: financial_accounting.reverse_entries
+    params: {}
+
+  financial_accounting.reverse_entries:
+    description: "Reverse previously posted accounting entries (compensation handler)"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.financial_accounting.v1.FinancialAccountingService/UpdateFinancialBookingLog"
+
+  # ---------------------------------------------------------------------------
+  # Financial Gateway
+  # ---------------------------------------------------------------------------
+  financial_gateway.dispatch_payment:
+    description: "Dispatch a payment to an external provider via the Financial Gateway"
+    compensate: financial_gateway.cancel_payment
+    external: true
+    proto_ref:
+      proto_rpc: "meridian.financial_gateway.v1.FinancialGatewayService/DispatchPayment"
+
+  financial_gateway.cancel_payment:
+    description: "Cancel a pending payment dispatch (compensation handler)"
+    compensation_strategy: none
+    external: true
+    proto_ref:
+      proto_rpc: "meridian.financial_gateway.v1.FinancialGatewayService/CancelPayment"
+
+  financial_gateway.dispatch_refund:
+    description: "Dispatch a refund for a previously processed payment"
+    compensation_strategy: none
+    external: true
+    proto_ref:
+      proto_rpc: "meridian.financial_gateway.v1.FinancialGatewayService/DispatchRefund"
+
+  # ---------------------------------------------------------------------------
+  # Operational Gateway
+  # ---------------------------------------------------------------------------
+  operational_gateway.dispatch_instruction:
+    description: "Queue an instruction for dispatch to an external provider"
+    compensate: operational_gateway.cancel_instruction
+    external: true
+    proto_ref:
+      proto_rpc: "meridian.operational_gateway.v1.OperationalGatewayService/DispatchInstruction"
+
+  operational_gateway.cancel_instruction:
+    description: "Cancel a pending instruction before dispatch (compensation handler)"
+    compensation_strategy: none
+    external: true
+    proto_ref:
+      proto_rpc: "meridian.operational_gateway.v1.OperationalGatewayService/CancelInstruction"
+
+  operational_gateway.get_instruction:
+    description: "Get instruction status and details by ID"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.operational_gateway.v1.OperationalGatewayService/GetInstruction"
+
+  # ---------------------------------------------------------------------------
+  # Reconciliation
+  # ---------------------------------------------------------------------------
+  reconciliation.initiate_run:
+    description: "Initiate a new settlement reconciliation run"
+    compensate: reconciliation.cancel_run
+    proto_ref:
+      proto_rpc: "meridian.reconciliation.v1.AccountReconciliationService/InitiateAccountReconciliation"
+
+  reconciliation.execute_run:
+    description: "Trigger execution of a pending settlement run"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.reconciliation.v1.AccountReconciliationService/ExecuteAccountReconciliation"
+
+  reconciliation.retrieve_run:
+    description: "Retrieve a settlement run summary"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.reconciliation.v1.AccountReconciliationService/RetrieveAccountReconciliation"
+
+  reconciliation.cancel_run:
+    description: "Cancel a settlement run (compensation handler)"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.reconciliation.v1.AccountReconciliationService/ControlAccountReconciliation"
+
+  reconciliation.assert_balance:
+    description: "Evaluate a balance assertion against current positions"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.reconciliation.v1.AccountReconciliationService/AssertBalance"
+
+  reconciliation.initiate_dispute:
+    description: "Raise a formal dispute against a detected variance"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.reconciliation.v1.AccountReconciliationService/InitiateDispute"
+
+  # ---------------------------------------------------------------------------
+  # Party
+  # ---------------------------------------------------------------------------
+  party.get_default_payment_method:
+    description: "Retrieve the default payment method for a party"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.party.v1.PartyService/GetDefaultPaymentMethod"
+
+  party.list_participants:
+    description: "List active participants for a syndicate organization"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.party.v1.PartyService/ListParticipants"
+
+  party.get_structuring_data:
+    description: "Retrieve structuring metadata for a participant in a syndicate"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.party.v1.PartyService/GetStructuringData"
+
+  # ---------------------------------------------------------------------------
+  # Internal Account
+  # ---------------------------------------------------------------------------
+  internal_account.initiate:
+    description: "Initiate a new internal account"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount"
+
+  internal_account.retrieve:
+    description: "Retrieve an internal account by ID"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.internal_account.v1.InternalAccountService/RetrieveInternalAccount"
+
+  internal_account.get_balance:
+    description: "Query the current balance for an internal account"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.internal_account.v1.InternalAccountService/GetBalance"
+
+  # ---------------------------------------------------------------------------
+  # Market Information
+  # ---------------------------------------------------------------------------
+  market_information.get_rate:
+    description: "Fetch FX rates for currency pair conversion"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.market_information.v1.MarketInformationService/ListObservations"
+
+  # ---------------------------------------------------------------------------
+  # Reference Data
+  # ---------------------------------------------------------------------------
+  reference_data.retrieve_instrument:
+    description: "Retrieve an instrument definition by code and version"
+    compensation_strategy: none
+    proto_ref:
+      proto_rpc: "meridian.reference_data.v1.ReferenceDataService/RetrieveInstrument"

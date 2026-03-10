@@ -246,3 +246,103 @@ func TestBootstrapPlatformAdmin_ReconcilesMissingRoles(t *testing.T) {
 	assert.Contains(t, activeRoles, "super-admin")
 	assert.Contains(t, activeRoles, "tenant-owner")
 }
+
+// --- Tests for ProvisionAdminForTenant ---
+
+// TestProvisionAdminForTenant_CreatesAdminInTenantSchema verifies that calling
+// ProvisionAdminForTenant provisions the platform admin in a non-master tenant schema.
+func TestProvisionAdminForTenant_CreatesAdminInTenantSchema(t *testing.T) {
+	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tenantTID := tenant.MustNewTenantID("acme_corp")
+	setupTenantSchema(t, db, tenantTID)
+
+	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
+	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
+
+	repo := persistence.NewRepository(db)
+	err := bootstrap.ProvisionAdminForTenant(context.Background(), repo, tenantTID)
+	require.NoError(t, err)
+
+	tenantCtx := tenant.WithTenant(context.Background(), tenantTID)
+	identity, err := repo.FindByEmail(tenantCtx, "admin@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, domain.IdentityStatusActive, identity.Status())
+
+	assignments, err := repo.FindRoleAssignments(tenantCtx, identity.ID())
+	require.NoError(t, err)
+	assert.Len(t, assignments, 3)
+}
+
+// TestProvisionAdminForTenant_Idempotent verifies that calling the function twice
+// for the same tenant does not create duplicates.
+func TestProvisionAdminForTenant_Idempotent(t *testing.T) {
+	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tenantTID := tenant.MustNewTenantID("acme_corp")
+	setupTenantSchema(t, db, tenantTID)
+
+	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
+	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
+
+	repo := persistence.NewRepository(db)
+	require.NoError(t, bootstrap.ProvisionAdminForTenant(context.Background(), repo, tenantTID))
+	require.NoError(t, bootstrap.ProvisionAdminForTenant(context.Background(), repo, tenantTID))
+
+	tenantCtx := tenant.WithTenant(context.Background(), tenantTID)
+	identities, err := repo.ListByTenant(tenantCtx)
+	require.NoError(t, err)
+	assert.Len(t, identities, 1)
+}
+
+// TestProvisionAdminForTenant_SkipsWhenEnvVarsEmpty verifies that provisioning
+// is skipped when platform admin credentials are not configured.
+func TestProvisionAdminForTenant_SkipsWhenEnvVarsEmpty(t *testing.T) {
+	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tenantTID := tenant.MustNewTenantID("acme_corp")
+	setupTenantSchema(t, db, tenantTID)
+
+	t.Setenv("PLATFORM_ADMIN_EMAIL", "")
+	t.Setenv("PLATFORM_ADMIN_PASSWORD", "")
+
+	repo := persistence.NewRepository(db)
+	require.NoError(t, bootstrap.ProvisionAdminForTenant(context.Background(), repo, tenantTID))
+
+	tenantCtx := tenant.WithTenant(context.Background(), tenantTID)
+	identities, err := repo.ListByTenant(tenantCtx)
+	require.NoError(t, err)
+	assert.Empty(t, identities)
+}
+
+// TestProvisionAdminForTenant_NilRepo verifies that a nil repository returns an error.
+func TestProvisionAdminForTenant_NilRepo(t *testing.T) {
+	tenantTID := tenant.MustNewTenantID("acme_corp")
+	err := bootstrap.ProvisionAdminForTenant(context.Background(), nil, tenantTID)
+	assert.ErrorIs(t, err, bootstrap.ErrNilRepository)
+}
+
+// TestAsPostProvisioningHook_InvokesProvisionAdmin verifies that the hook
+// returned by AsPostProvisioningHook correctly provisions the admin.
+func TestAsPostProvisioningHook_InvokesProvisionAdmin(t *testing.T) {
+	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tenantTID := tenant.MustNewTenantID("beta_corp")
+	setupTenantSchema(t, db, tenantTID)
+
+	t.Setenv("PLATFORM_ADMIN_EMAIL", "admin@example.com")
+	t.Setenv("PLATFORM_ADMIN_PASSWORD", "SecurePassword1!")
+
+	repo := persistence.NewRepository(db)
+	hook := bootstrap.AsPostProvisioningHook(repo)
+	require.NoError(t, hook(context.Background(), tenantTID))
+
+	tenantCtx := tenant.WithTenant(context.Background(), tenantTID)
+	identity, err := repo.FindByEmail(tenantCtx, "admin@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, domain.IdentityStatusActive, identity.Status())
+}

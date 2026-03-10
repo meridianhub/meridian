@@ -10,6 +10,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog'
 import { manifestKeys } from '@/lib/query-keys'
 import type { ManifestVersion } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
@@ -188,6 +189,7 @@ export function ManifestHistoryTable() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Manifest Version {selectedVersion?.version}</DialogTitle>
+            <DialogDescription>Raw manifest content for this version.</DialogDescription>
           </DialogHeader>
           <pre className="max-h-[400px] overflow-auto rounded bg-muted p-3 text-xs font-mono">
             {JSON.stringify(selectedVersion?.manifest, null, 2)}
@@ -201,6 +203,7 @@ export function ManifestHistoryTable() {
             <DialogTitle>
               Diff: Version {diffGraphs?.v1Label} vs {diffGraphs?.v2Label}
             </DialogTitle>
+            <DialogDescription>Visual comparison of manifest changes between versions.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0 h-full">
             {diffGraphs && (
