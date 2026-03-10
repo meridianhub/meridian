@@ -31,9 +31,8 @@ type ManifestValidationError struct {
 }
 
 // ValidateManifest validates a manifest against the schema and business rules.
-// Optional validator options can be passed to configure the schema registry.
-func ValidateManifest(mf *controlplanev1.Manifest, prev *controlplanev1.Manifest, opts ...validator.Option) (*ManifestValidationResult, error) {
-	v, err := validator.New(opts...)
+func ValidateManifest(mf *controlplanev1.Manifest, prev *controlplanev1.Manifest) (*ManifestValidationResult, error) {
+	v, err := validator.New()
 	if err != nil {
 		return nil, fmt.Errorf("create validator: %w", err)
 	}

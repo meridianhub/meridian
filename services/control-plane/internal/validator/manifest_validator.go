@@ -1726,12 +1726,14 @@ func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]
 		predeclared[name] = module
 	}
 
-	// For known service bindings without typed modules, add permissive stubs so
-	// scripts compile. This gracefully degrades: the script runs but handler
-	// calls are not type-checked. Typed modules from the schema take precedence.
-	for _, svc := range knownServiceBindings {
-		if _, exists := predeclared[svc]; !exists {
-			predeclared[svc] = newPermissiveServiceStub(svc)
+	// Only fall back to permissive stubs when no schema data is available at all.
+	// When a partial schema is loaded, missing services should surface as errors
+	// so coverage gaps in derived schemas are visible.
+	if len(modules) == 0 {
+		for _, svc := range knownServiceBindings {
+			if _, exists := predeclared[svc]; !exists {
+				predeclared[svc] = newPermissiveServiceStub(svc)
+			}
 		}
 	}
 
