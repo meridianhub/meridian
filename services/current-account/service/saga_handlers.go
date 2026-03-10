@@ -111,9 +111,10 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 			CompensationStrategy: "none",
 		}},
 		{"financial_accounting.capture_posting", currentAccountFinAcctCapturePosting, &saga.HandlerMetadata{
-			Category:            saga.HandlerCategorySettlement,
-			Compensate:          "financial_accounting.compensate_posting",
-			HasAutoCompensation: true,
+			Category:             saga.HandlerCategorySettlement,
+			CompensationStrategy: "auto",
+			Compensate:           "financial_accounting.compensate_posting",
+			HasAutoCompensation:  true,
 		}},
 		{"financial_accounting.update_booking_log", currentAccountFinAcctUpdateBookingLog, &saga.HandlerMetadata{
 			Category:             saga.HandlerCategorySettlement,
