@@ -53,3 +53,6 @@ func NewEmptySchemaRegistry() *schema.Registry {
 func (c *ClaudeLLMClient) Model() string {
 	return c.model
 }
+
+// YAMLToProtoManifest is the exported test hook for yamlToProtoManifest.
+var YAMLToProtoManifest = yamlToProtoManifest
