@@ -213,16 +213,16 @@ test.describe('User detail - suspend dialog', () => {
 /**
  * Mock the IdentityService to return a single ACTIVE user.
  *
- * Connect protocol unary success responses require Content-Type:
- * application/connect+json (not application/json). The Connect-ES client
- * rejects plain application/json 200 responses as parse errors.
- * Error responses (4xx/5xx) use application/json per the Connect spec.
+ * Connect protocol unary responses use Content-Type: application/json
+ * (not application/connect+json — that's for streaming only).
+ * See @connectrpc/connect content-type.ts: contentTypeUnaryJson = "application/json".
+ * Error responses also use application/json per the Connect spec.
  */
 async function mockListIdentities(page: Page) {
   await page.route(/IdentityService\/ListIdentities/, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/connect+json',
+      contentType: 'application/json',
       body: JSON.stringify({
         identities: [
           {
@@ -233,8 +233,8 @@ async function mockListIdentities(page: Page) {
             failedAttempts: 0,
             externalIdp: '',
             externalIdpSub: '',
-            createdAt: { seconds: '1699000000', nanos: 0 },
-            updatedAt: { seconds: '1700000000', nanos: 0 },
+            createdAt: '2023-11-03T12:26:40Z',
+            updatedAt: '2023-11-15T12:26:40Z',
             version: 1,
           },
         ],
@@ -252,7 +252,7 @@ async function mockRetrieveIdentity(page: Page) {
   await page.route(/IdentityService\/RetrieveIdentity/, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/connect+json',
+      contentType: 'application/json',
       body: JSON.stringify({
         identity: {
           id: 'mock-user-1',
@@ -262,8 +262,8 @@ async function mockRetrieveIdentity(page: Page) {
           failedAttempts: 0,
           externalIdp: '',
           externalIdpSub: '',
-          createdAt: { seconds: '1699000000', nanos: 0 },
-          updatedAt: { seconds: '1700000000', nanos: 0 },
+          createdAt: '2023-11-03T12:26:40Z',
+          updatedAt: '2023-11-15T12:26:40Z',
           version: 1,
         },
       }),
@@ -278,7 +278,7 @@ async function mockListRoleAssignments(page: Page) {
   await page.route(/IdentityService\/ListRoleAssignments/, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/connect+json',
+      contentType: 'application/json',
       body: JSON.stringify({ roleAssignments: [] }),
     })
   })
@@ -353,7 +353,7 @@ test.describe('Suspend API — successful suspend', () => {
       if (suspendCalled) {
         void route.fulfill({
           status: 200,
-          contentType: 'application/connect+json',
+          contentType: 'application/json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -363,8 +363,8 @@ test.describe('Suspend API — successful suspend', () => {
               failedAttempts: 0,
               externalIdp: '',
               externalIdpSub: '',
-              createdAt: { seconds: '1699000000', nanos: 0 },
-              updatedAt: { seconds: '1700000001', nanos: 0 },
+              createdAt: '2023-11-03T12:26:40Z',
+              updatedAt: '2023-11-15T12:26:41Z',
               version: 2,
             },
           }),
@@ -372,7 +372,7 @@ test.describe('Suspend API — successful suspend', () => {
       } else {
         void route.fulfill({
           status: 200,
-          contentType: 'application/connect+json',
+          contentType: 'application/json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -382,8 +382,8 @@ test.describe('Suspend API — successful suspend', () => {
               failedAttempts: 0,
               externalIdp: '',
               externalIdpSub: '',
-              createdAt: { seconds: '1699000000', nanos: 0 },
-              updatedAt: { seconds: '1700000000', nanos: 0 },
+              createdAt: '2023-11-03T12:26:40Z',
+              updatedAt: '2023-11-15T12:26:40Z',
               version: 1,
             },
           }),
@@ -395,7 +395,7 @@ test.describe('Suspend API — successful suspend', () => {
       suspendCalled = true
       void route.fulfill({
         status: 200,
-        contentType: 'application/connect+json',
+        contentType: 'application/json',
         body: JSON.stringify({
           identity: {
             id: 'mock-user-1',
@@ -405,8 +405,8 @@ test.describe('Suspend API — successful suspend', () => {
             failedAttempts: 0,
             externalIdp: '',
             externalIdpSub: '',
-            createdAt: { seconds: '1699000000', nanos: 0 },
-            updatedAt: { seconds: '1700000001', nanos: 0 },
+            createdAt: '2023-11-03T12:26:40Z',
+            updatedAt: '2023-11-15T12:26:41Z',
             version: 2,
           },
         }),
