@@ -279,7 +279,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Provisioning Worker (optional) ─────────────────────────────────
 
-	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, conns.gormDB("tenant"), logger)
+	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, conns.gormDB("tenant"), conns.gormDB("identity"), logger)
 	if err != nil {
 		return fmt.Errorf("provisioning worker: %w", err)
 	}
@@ -586,7 +586,7 @@ func wireTenant(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 // SCHEMA_PROVISIONING_ENABLED=true. It returns the worker (for graceful Stop)
 // and a cleanup function that closes provisioner database connections.
 // When provisioning is disabled both return values are nil.
-func startProvisioningWorker(ctx context.Context, platformDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
+func startProvisioningWorker(ctx context.Context, platformDB *gorm.DB, identityDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
 	if env.GetEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false") != "true" {
 		logger.Info("provisioning worker disabled",
 			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
@@ -635,6 +635,10 @@ func startProvisioningWorker(ctx context.Context, platformDB *gorm.DB, logger *s
 		_ = prov.Close()
 		return nil, nil, fmt.Errorf("create provisioning worker: %w", err)
 	}
+
+	// Register post-provisioning hooks before starting the worker.
+	identityRepo := identitypersistence.NewRepository(identityDB)
+	w.RegisterPostProvisioningHook("admin-identity", identitybootstrap.AsPostProvisioningHook(identityRepo))
 
 	go w.Start(ctx)
 	logger.Info("provisioning worker started")
