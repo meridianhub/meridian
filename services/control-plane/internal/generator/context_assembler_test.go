@@ -165,15 +165,27 @@ func TestAssembleContext_DefaultMaxPatterns(t *testing.T) {
 	reg := buildMinimalRegistry()
 
 	// MaxPatterns = 0 should default to 3.
-	result, err := generator.AssembleContext(generator.ContextAssemblerOptions{
+	// MatchPatterns may prepend base patterns from extends resolution outside the cap,
+	// but we verify that at most 3 patterns come from direct scoring by also running
+	// with explicit MaxPatterns=3 and confirming results are equivalent.
+	resultDefault, err := generator.AssembleContext(generator.ContextAssemblerOptions{
 		Description:     "EV charging UK energy settlement",
 		Industry:        "energy",
 		IncludePatterns: true,
 		MaxPatterns:     0, // should default to 3
 	}, reg, realCookbookFS())
-
 	require.NoError(t, err)
-	assert.LessOrEqual(t, len(result.MatchedPatterns), 5, "should not return more patterns than expected with default max")
+
+	resultExplicit, err := generator.AssembleContext(generator.ContextAssemblerOptions{
+		Description:     "EV charging UK energy settlement",
+		Industry:        "energy",
+		IncludePatterns: true,
+		MaxPatterns:     3,
+	}, reg, realCookbookFS())
+	require.NoError(t, err)
+
+	assert.Equal(t, len(resultDefault.MatchedPatterns), len(resultExplicit.MatchedPatterns),
+		"MaxPatterns=0 should default to 3 and produce the same result as MaxPatterns=3")
 }
 
 func TestAssembleContext_TokenEstimateReasonable(t *testing.T) {
@@ -240,6 +252,24 @@ func TestAssembleContext_NilCookbookFS_PatternsDisabled(t *testing.T) {
 	}, reg, nil)
 
 	require.NoError(t, err)
+	assert.Empty(t, result.MatchedPatterns)
+}
+
+func TestAssembleContext_BrokenCookbookFS_ExposesPatternMatchError(t *testing.T) {
+	reg := buildMinimalRegistry()
+
+	// An FS without registry.json will cause MatchPatterns to fail.
+	brokenFS := fstest.MapFS{}
+
+	result, err := generator.AssembleContext(generator.ContextAssemblerOptions{
+		Description:     "A platform",
+		IncludePatterns: true,
+	}, reg, brokenFS)
+
+	// AssembleContext should succeed (non-fatal).
+	require.NoError(t, err)
+	// Pattern match error is exposed on the result.
+	assert.Error(t, result.PatternMatchError)
 	assert.Empty(t, result.MatchedPatterns)
 }
 

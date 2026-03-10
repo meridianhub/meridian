@@ -38,6 +38,9 @@ type AssembledContext struct {
 	MatchedPatterns []PatternMatch
 	// TokenEstimate is a rough estimate of prompt token count (words * 1.3).
 	TokenEstimate int
+	// PatternMatchError is non-nil when pattern matching failed. Generation
+	// proceeds without patterns but callers can inspect or log this error.
+	PatternMatchError error
 }
 
 // AssembleContext combines handler reference, topic list, schema summary, and cookbook
@@ -56,11 +59,10 @@ func AssembleContext(opts ContextAssemblerOptions, registry *schema.Registry, co
 
 	// Match patterns. Failure is non-fatal — generation can proceed without patterns.
 	var matched []PatternMatch
+	var patternMatchErr error
 	if opts.IncludePatterns && cookbookFS != nil {
-		var matchErr error
-		matched, matchErr = MatchPatterns(cookbookFS, opts.Description, opts.Industry, opts.MaxPatterns)
-		if matchErr != nil {
-			// Non-fatal: log via the returned context but do not block generation.
+		matched, patternMatchErr = MatchPatterns(cookbookFS, opts.Description, opts.Industry, opts.MaxPatterns)
+		if patternMatchErr != nil {
 			matched = nil
 		}
 	}
@@ -79,9 +81,10 @@ func AssembleContext(opts ContextAssemblerOptions, registry *schema.Registry, co
 	prompt := buildPrompt(opts, handlerRef, topicList, schemaSummary, matched, currentEconomyJSON)
 
 	return &AssembledContext{
-		Prompt:          prompt,
-		MatchedPatterns: matched,
-		TokenEstimate:   estimateTokens(prompt),
+		Prompt:            prompt,
+		MatchedPatterns:   matched,
+		TokenEstimate:     estimateTokens(prompt),
+		PatternMatchError: patternMatchErr,
 	}, nil
 }
 
