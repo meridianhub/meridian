@@ -295,6 +295,86 @@ func reconcileDemoRole(ctx context.Context, repo domain.Repository, identity *do
 	return repo.SaveRoleAssignments(ctx, []*domain.RoleAssignment{ra})
 }
 
+// ProvisionAdminForTenant provisions the platform admin identity into a specific
+// tenant's schema. This ensures the platform admin is visible when querying
+// identities within that tenant (e.g., via ListIdentities).
+//
+// The function reads platform admin credentials from the same environment
+// variables as Run (PLATFORM_ADMIN_EMAIL, PLATFORM_ADMIN_PASSWORD).
+// If either is empty, the function is a no-op.
+//
+// Idempotency: If the admin already exists in the tenant schema, missing roles
+// are reconciled atomically.
+func ProvisionAdminForTenant(ctx context.Context, repo domain.Repository, tenantID tenant.TenantID) error {
+	if repo == nil {
+		return ErrNilRepository
+	}
+
+	email := os.Getenv("PLATFORM_ADMIN_EMAIL")
+	password := os.Getenv("PLATFORM_ADMIN_PASSWORD")
+
+	if email == "" || password == "" {
+		slog.InfoContext(ctx, "tenant admin provisioning skipped: PLATFORM_ADMIN_EMAIL or PLATFORM_ADMIN_PASSWORD not set",
+			"tenant_id", tenantID)
+		return nil
+	}
+
+	tenantCtx := tenant.WithTenant(ctx, tenantID)
+
+	// Check if admin already exists in this tenant.
+	existing, err := repo.FindByEmail(tenantCtx, email)
+	if err != nil && !errors.Is(err, domain.ErrIdentityNotFound) {
+		return fmt.Errorf("checking for existing platform admin in tenant %s: %w", tenantID, err)
+	}
+
+	if existing != nil {
+		return reconcileRoles(tenantCtx, repo, existing)
+	}
+
+	// Hash the password.
+	hash, err := credentials.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("hashing platform admin password: %w", err)
+	}
+
+	// Build domain objects.
+	identity, err := domain.NewIdentity(email)
+	if err != nil {
+		return fmt.Errorf("creating platform admin identity for tenant %s: %w", tenantID, err)
+	}
+	if err := identity.SetPassword(hash); err != nil {
+		return fmt.Errorf("setting platform admin password: %w", err)
+	}
+	if err := identity.Activate(); err != nil {
+		return fmt.Errorf("activating platform admin identity: %w", err)
+	}
+
+	roleAssignments := buildRoleAssignments(identity.ID(), platformAdminRoles)
+
+	if err := repo.SaveIdentityWithRoles(tenantCtx, identity, roleAssignments); err != nil {
+		return fmt.Errorf("provisioning platform admin in tenant %s: %w", tenantID, err)
+	}
+
+	slog.InfoContext(tenantCtx, "platform admin provisioned in tenant",
+		"tenant_id", tenantID,
+		"email", email,
+		"roles", len(platformAdminRoles))
+	return nil
+}
+
+// AsPostProvisioningHook returns a post-provisioning hook that provisions the
+// platform admin identity into newly created tenant schemas.
+//
+// Usage:
+//
+//	repo := persistence.NewRepository(db)
+//	worker.RegisterPostProvisioningHook("admin-identity", bootstrap.AsPostProvisioningHook(repo))
+func AsPostProvisioningHook(repo domain.Repository) func(ctx context.Context, tenantID tenant.TenantID) error {
+	return func(ctx context.Context, tenantID tenant.TenantID) error {
+		return ProvisionAdminForTenant(ctx, repo, tenantID)
+	}
+}
+
 // buildRoleAssignments constructs RoleAssignment domain objects for each role.
 // Bootstrap is a trusted system operation; ReconstructRoleAssignment is used to
 // bypass the privilege hierarchy check that would otherwise require a granting identity.
