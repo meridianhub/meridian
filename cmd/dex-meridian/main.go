@@ -133,8 +133,11 @@ func run(logger *slog.Logger) error {
 
 	listenAddr := envOrDefault("LISTEN_ADDR", ":5556")
 	httpServer := &http.Server{
-		Addr:    listenAddr,
-		Handler: mux,
+		Addr:         listenAddr,
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {

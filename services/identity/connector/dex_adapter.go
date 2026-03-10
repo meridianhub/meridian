@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	dexconnector "github.com/dexidp/dex/connector"
+	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -136,7 +137,9 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes,
 	// Resolve tenant slug to TenantID.
 	tenantEntity, err := d.tenantResolver.GetBySlug(ctx, slug)
 	if err != nil {
-		if errors.Is(err, tenantdomain.ErrNotFound) {
+		// Check both domain and persistence not-found errors because the
+		// TenantResolver implementation may return either depending on the layer.
+		if errors.Is(err, tenantdomain.ErrNotFound) || errors.Is(err, tenantpersistence.ErrTenantNotFound) {
 			d.logger.InfoContext(ctx, "dex adapter: tenant not found",
 				"slug", slug)
 			return dexconnector.Identity{}, false, nil
@@ -174,7 +177,7 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes,
 
 // Refresh updates the identity on token refresh. It re-resolves tenant context
 // from the ConnectorData stored during the initial login.
-func (d *DexPasswordConnector) Refresh(ctx context.Context, s dexconnector.Scopes, identity dexconnector.Identity) (dexconnector.Identity, error) {
+func (d *DexPasswordConnector) Refresh(ctx context.Context, _ dexconnector.Scopes, identity dexconnector.Identity) (dexconnector.Identity, error) {
 	// Extract tenant ID from stored connector data.
 	var cd connectorData
 	if len(identity.ConnectorData) > 0 {
@@ -195,8 +198,8 @@ func (d *DexPasswordConnector) Refresh(ctx context.Context, s dexconnector.Scope
 	ctx = tenant.WithTenant(ctx, tenantID)
 
 	// Re-resolve identity to pick up any changes (updated roles, status).
-	scopes := dexScopesToStrings(s)
-	updatedIdentity, valid, err := d.connector.Login(ctx, scopes, identity.Email, "")
+	// Uses Resolve (not Login) because refresh does not have the user's password.
+	updatedIdentity, valid, err := d.connector.Resolve(ctx, identity.Email)
 	if err != nil || !valid {
 		// On refresh, if user is no longer valid, return error to invalidate token.
 		if err == nil {

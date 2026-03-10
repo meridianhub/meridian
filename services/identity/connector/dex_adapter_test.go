@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/connector"
 	"github.com/meridianhub/meridian/services/identity/domain"
+	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
@@ -303,4 +304,101 @@ func TestDexLogin_IdentityNotFound_ReturnsFalse(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.False(t, valid)
+}
+
+// --- Login: tenant not found with persistence error ---
+
+func TestDexLogin_TenantNotFound_PersistenceError_ReturnsFalse(t *testing.T) {
+	// The real persistence repository returns persistence.ErrTenantNotFound,
+	// not tenantdomain.ErrNotFound. This test ensures both are handled.
+	adapter := newDexAdapter(t,
+		&mockRepo{identity: makeActiveIdentity(t, "a@example.com")},
+		&mockTenantResolver{err: tenantpersistence.ErrTenantNotFound},
+	)
+
+	_, valid, err := adapter.Login(
+		context.Background(),
+		dexconnector.Scopes{},
+		"tenant:unknown/alice@example.com",
+		testPassword,
+	)
+
+	require.NoError(t, err)
+	assert.False(t, valid)
+}
+
+// --- Refresh tests ---
+
+func TestDexRefresh_Success(t *testing.T) {
+	identity := makeActiveIdentity(t, "alice@example.com")
+	repo := &mockRepo{identity: identity}
+	resolver := &mockTenantResolver{
+		tenants: map[string]*tenantdomain.Tenant{
+			"volterra": makeTenant(t, "volterra", "volterra"),
+		},
+	}
+	adapter := newDexAdapter(t, repo, resolver)
+
+	// First login to get a valid identity with ConnectorData.
+	loginIdentity, valid, err := adapter.Login(
+		context.Background(),
+		dexconnector.Scopes{Groups: true},
+		"tenant:volterra/alice@example.com",
+		testPassword,
+	)
+	require.NoError(t, err)
+	require.True(t, valid)
+
+	// Refresh using the login identity.
+	refreshed, err := adapter.Refresh(
+		context.Background(),
+		dexconnector.Scopes{Groups: true},
+		loginIdentity,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, identity.ID().String(), refreshed.UserID)
+	assert.Equal(t, "alice@example.com", refreshed.Email)
+	assert.Contains(t, refreshed.Groups, "tenant:volterra")
+	assert.NotEmpty(t, refreshed.ConnectorData)
+}
+
+func TestDexRefresh_MissingConnectorData_ReturnsError(t *testing.T) {
+	adapter := newDexAdapter(t,
+		&mockRepo{identity: makeActiveIdentity(t, "a@example.com")},
+		&mockTenantResolver{},
+	)
+
+	_, err := adapter.Refresh(
+		context.Background(),
+		dexconnector.Scopes{},
+		dexconnector.Identity{Email: "alice@example.com"},
+	)
+
+	require.ErrorIs(t, err, connector.ErrMissingTenantInConnectorData)
+}
+
+func TestDexRefresh_UserNoLongerValid_ReturnsError(t *testing.T) {
+	repo := &mockRepo{} // nil identity — user not found
+	resolver := &mockTenantResolver{
+		tenants: map[string]*tenantdomain.Tenant{
+			"volterra": makeTenant(t, "volterra", "volterra"),
+		},
+	}
+	adapter := newDexAdapter(t, repo, resolver)
+
+	cd, _ := json.Marshal(struct {
+		TenantID string `json:"tenant_id"`
+	}{TenantID: "volterra"})
+
+	_, err := adapter.Refresh(
+		context.Background(),
+		dexconnector.Scopes{},
+		dexconnector.Identity{
+			Email:         "nobody@example.com",
+			ConnectorData: cd,
+		},
+	)
+
+	require.ErrorIs(t, err, connector.ErrUserNoLongerValid)
 }

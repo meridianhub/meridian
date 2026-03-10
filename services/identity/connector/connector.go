@@ -203,3 +203,67 @@ func (c *Connector) activeRoles(ctx context.Context, identity *domain.Identity) 
 	}
 	return roles, nil
 }
+
+// Resolve looks up an identity by email without password validation.
+// It returns the same Identity struct as Login but skips credential checks.
+// Used by the Dex adapter during token refresh to re-resolve user attributes
+// (roles, status) without requiring the password.
+//
+// Returns:
+//   - (identity, true, nil) if the identity exists and is active
+//   - (zero, false, nil) if the identity is not found, locked, suspended, or pending
+//   - (zero, false, err) for unexpected infrastructure errors
+func (c *Connector) Resolve(ctx context.Context, email string) (Identity, bool, error) {
+	tenantID, err := tenant.RequireFromContext(ctx)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "connector: tenant context missing during resolve",
+			"error", err)
+		return Identity{}, false, fmt.Errorf("connector: %w", err)
+	}
+
+	identity, err := c.repo.FindByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, domain.ErrIdentityNotFound) {
+			c.logger.InfoContext(ctx, "connector: identity not found during resolve",
+				"tenant_id", tenantID)
+			return Identity{}, false, nil
+		}
+		c.logger.ErrorContext(ctx, "connector: repository error during resolve",
+			"tenant_id", tenantID,
+			"email", email,
+			"error", err)
+		return Identity{}, false, fmt.Errorf("connector: resolve identity: %w", err)
+	}
+
+	// Reject non-active accounts.
+	if identity.Status() != domain.IdentityStatusActive {
+		c.logger.InfoContext(ctx, "connector: resolve rejected — account not active",
+			"tenant_id", tenantID,
+			"identity_id", identity.ID(),
+			"status", identity.Status())
+		return Identity{}, false, nil
+	}
+
+	groups, err := c.activeRoles(ctx, identity)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "connector: failed to load role assignments during resolve",
+			"identity_id", identity.ID(),
+			"error", err)
+		groups = []string{}
+	}
+
+	connIdentity := Identity{
+		UserID:        identity.ID().String(),
+		Username:      identity.Email(),
+		Email:         identity.Email(),
+		EmailVerified: true,
+		Groups:        groups,
+	}
+
+	c.logger.InfoContext(ctx, "connector: resolve successful",
+		"tenant_id", tenantID,
+		"identity_id", identity.ID(),
+		"roles", groups)
+
+	return connIdentity, true, nil
+}
