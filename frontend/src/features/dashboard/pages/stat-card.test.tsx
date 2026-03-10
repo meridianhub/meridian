@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { StatCard } from './stat-card'
 
 describe('StatCard', () => {
@@ -42,10 +43,39 @@ describe('StatCard', () => {
     expect(screen.getByText('Active accounts')).toBeInTheDocument()
   })
 
-  it('renders error state when error is true', () => {
+  it('renders error state with icon and message', () => {
     render(<StatCard title="Accounts" error />)
 
-    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.getByTestId('stat-card-error')).toBeInTheDocument()
+    expect(screen.getByText('Failed to load')).toBeInTheDocument()
+  })
+
+  it('renders retry button in error state when onRetry is provided', () => {
+    const onRetry = vi.fn()
+    render(<StatCard title="Accounts" error onRetry={onRetry} />)
+
+    expect(screen.getByRole('button', { name: /retry accounts/i })).toBeInTheDocument()
+  })
+
+  it('calls onRetry when retry button is clicked', async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+    render(<StatCard title="Accounts" error onRetry={onRetry} />)
+
+    await user.click(screen.getByRole('button', { name: /retry accounts/i }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('does not render retry button when onRetry is not provided', () => {
+    render(<StatCard title="Accounts" error />)
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('hides description when in error state', () => {
+    render(<StatCard title="Accounts" error description="Active accounts" />)
+
+    expect(screen.queryByText('Active accounts')).not.toBeInTheDocument()
   })
 
   it('renders icon when provided', () => {

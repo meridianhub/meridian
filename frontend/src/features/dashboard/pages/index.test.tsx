@@ -210,8 +210,8 @@ describe('DashboardPage', () => {
       expect(screen.getByText('7')).toBeInTheDocument()
     })
     expect(screen.getByText('3')).toBeInTheDocument()
-    // Error state shows dash
-    expect(screen.getByText('—')).toBeInTheDocument()
+    // Error state shows "Failed to load" with retry button
+    expect(screen.getByText('Failed to load')).toBeInTheDocument()
   })
 
   it('renders recent activity section', () => {
