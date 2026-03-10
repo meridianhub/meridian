@@ -55,6 +55,11 @@ var manifestRoleRequirements = map[string]auth.Role{
 	"/meridian.control_plane.v1.BalanceSheetService/GetPositionDetails":    auth.RoleAuditor,
 	"/meridian.control_plane.v1.BalanceSheetService/ExportBalanceSheetCSV": auth.RoleAuditor,
 
+	// EconomyGeneratorService - read-only context assembly, auditor level
+	// GenerateManifest is mutating (admin) but implemented in a future task.
+	"/meridian.control_plane.v1.EconomyGeneratorService/GetGenerationContext": auth.RoleAuditor,
+	"/meridian.control_plane.v1.EconomyGeneratorService/GenerateManifest":     auth.RoleAdmin,
+
 	// AuthService - internal service-to-service, service level
 	"/meridian.control_plane.v1.AuthService/ValidateAPIKey": auth.RoleService,
 }
