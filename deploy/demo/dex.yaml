@@ -54,13 +54,9 @@ staticClients:
       - "https://demo.meridianhub.cloud/callback"
       # Tenant subdomains — add one entry per onboarded tenant
       - "https://volterra.demo.meridianhub.cloud/callback"
-    public: true
-
-  # Separate client for local development. Keeps localhost redirect URIs
-  # isolated from the deployed demo client above.
-  - id: meridian-dev
-    name: Meridian (dev)
-    redirectURIs:
+      # Local development — the frontend hardcodes client_id "meridian-service"
+      # in use-oauth-flow.ts, App.tsx, and callback.tsx, so localhost callbacks
+      # must be registered on this client for PKCE auth to work locally.
       - "http://localhost:8090/callback"
       - "http://localhost:3000/callback"
     public: true
