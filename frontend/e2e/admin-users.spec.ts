@@ -39,6 +39,8 @@ test.describe('Users list - admin access', () => {
     await expect(page.getByRole('columnheader', { name: 'Email' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'MFA' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Last Login' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible()
   })
 
   test('shows status filter dropdown', async ({ platformAdminPage: page }) => {
@@ -48,47 +50,44 @@ test.describe('Users list - admin access', () => {
 
   test('platform admin appears in the users list after login', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
-    // The table must be present — either loading, empty, or populated
-    await expect(page.locator('table')).toBeVisible()
-    // If users are returned by the backend, at least one row must render
-    const rowCount = await page.locator('table tbody tr').count()
-    if (rowCount > 0) {
-      await expect(page.locator('table tbody tr').first()).toBeVisible()
-    } else {
-      // Empty state is also valid — UI renders without error
-      await expect(page.getByText('No users found').or(page.locator('table'))).toBeVisible({ timeout: 15_000 })
-    }
+    // Wait for the list to settle: either a row or the empty state must appear
+    const firstRow = page.locator('table tbody tr').first()
+    const emptyState = page.getByText(/no users found/i)
+    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
   })
 
   test('tenant users are listed in the table when backend returns data', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
-    await expect(page.locator('table')).toBeVisible()
+    // Wait for list to settle before inspecting row count
+    const firstRow = page.locator('table tbody tr').first()
+    const emptyState = page.getByText(/no users found/i)
+    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
 
-    const rowCount = await page.locator('table tbody tr').count()
-    if (rowCount === 0) {
+    if (await emptyState.isVisible()) {
       // No users seeded — table renders without error
-      await expect(page.getByText(/no users found/i).or(page.locator('table tbody'))).toBeVisible({ timeout: 15_000 })
       return
     }
 
     // At least one user row visible — verify it has an email cell
-    await expect(page.locator('table tbody tr').first()).toBeVisible()
+    await expect(firstRow).toBeVisible()
     // Email column renders a value (non-empty cell)
-    const firstEmailCell = page.locator('table tbody tr').first().locator('td').first()
+    const firstEmailCell = firstRow.locator('td').first()
     await expect(firstEmailCell).not.toBeEmpty()
   })
 
   test('row click navigates to user detail page', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
-    await expect(page.locator('table')).toBeVisible()
+    // Wait for list to settle before checking row count
+    const firstRow = page.locator('table tbody tr').first()
+    const emptyState = page.getByText(/no users found/i)
+    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
 
-    const rowCount = await page.locator('table tbody tr').count()
-    if (rowCount === 0) {
+    if (await emptyState.isVisible()) {
       test.skip()
       return
     }
 
-    await page.locator('table tbody tr').first().click()
+    await firstRow.click()
     await expect(page).toHaveURL(/\/users\/[a-zA-Z0-9-]+/)
   })
 })
@@ -99,13 +98,16 @@ test.describe('User detail - suspend dialog', () => {
   /**
    * Navigate to the first available user detail page.
    * Returns false if no users are present (caller should skip the test).
+   * Waits for the list to settle before checking for rows to avoid acting
+   * before the API response arrives.
    */
   async function navigateToFirstUser(page: Page): Promise<boolean> {
     await navigateTo(page, '/users')
-    await expect(page.locator('table')).toBeVisible()
-    const rowCount = await page.locator('table tbody tr').count()
-    if (rowCount === 0) return false
-    await page.locator('table tbody tr').first().click()
+    const firstRow = page.locator('table tbody tr').first()
+    const emptyState = page.getByText(/no users found/i)
+    await expect(firstRow.or(emptyState)).toBeVisible({ timeout: 15_000 })
+    if (await emptyState.isVisible()) return false
+    await firstRow.click()
     await page.waitForURL(/\/users\/[a-zA-Z0-9-]+/)
     return true
   }
@@ -136,8 +138,9 @@ test.describe('User detail - suspend dialog', () => {
     if (!found) { test.skip(); return }
 
     const suspendBtn = page.getByRole('button', { name: /^suspend$/i })
-    const hasSuspendBtn = await suspendBtn.isVisible()
-    if (!hasSuspendBtn) {
+    // Wait for detail page to settle before checking if suspend button is present
+    await page.waitForLoadState('networkidle').catch(() => {/* ignore timeout */})
+    if (await suspendBtn.isHidden()) {
       // User is not ACTIVE (e.g. already suspended) — skip
       test.skip()
       return
@@ -157,7 +160,8 @@ test.describe('User detail - suspend dialog', () => {
     if (!found) { test.skip(); return }
 
     const suspendBtn = page.getByRole('button', { name: /^suspend$/i })
-    if (!await suspendBtn.isVisible()) { test.skip(); return }
+    await page.waitForLoadState('networkidle').catch(() => {/* ignore timeout */})
+    if (await suspendBtn.isHidden()) { test.skip(); return }
 
     await suspendBtn.click()
 
@@ -174,7 +178,8 @@ test.describe('User detail - suspend dialog', () => {
     if (!found) { test.skip(); return }
 
     const suspendBtn = page.getByRole('button', { name: /^suspend$/i })
-    if (!await suspendBtn.isVisible()) { test.skip(); return }
+    await page.waitForLoadState('networkidle').catch(() => {/* ignore timeout */})
+    if (await suspendBtn.isHidden()) { test.skip(); return }
 
     await suspendBtn.click()
 
@@ -327,12 +332,11 @@ test.describe('Suspend API — 403 permission denied', () => {
 })
 
 test.describe('Suspend API — successful suspend', () => {
-  test('closes dialog and page stays on user detail after successful suspend', async ({ platformAdminPage: page }) => {
+  test('closes dialog and shows suspended state after successful suspend', async ({ platformAdminPage: page }) => {
     await mockListIdentities(page)
     await mockListRoleAssignments(page)
-    await mockRetrieveIdentity(page)
 
-    // First call returns ACTIVE, after suspend it returns SUSPENDED
+    // First RetrieveIdentity returns ACTIVE, post-suspend returns SUSPENDED
     let suspendCalled = false
     await page.route(`**/meridian.identity.v1.IdentityService/RetrieveIdentity`, (route) => {
       if (suspendCalled) {
@@ -412,6 +416,12 @@ test.describe('Suspend API — successful suspend', () => {
 
     // URL stays on user detail
     await expect(page).toHaveURL(/\/users\/mock-user-1/)
+
+    // Post-suspend: the page refetches and renders the SUSPENDED status badge.
+    // The Suspend button disappears (user is no longer ACTIVE).
+    await expect(page.getByRole('button', { name: /^suspend$/i })).toBeHidden({ timeout: 10_000 })
+    // The SUSPENDED status badge must be visible after the query invalidation.
+    await expect(page.getByText('SUSPENDED')).toBeVisible({ timeout: 10_000 })
   })
 })
 
@@ -443,11 +453,11 @@ test.describe('Suspend API — 401 unauthenticated', () => {
     await dialog.getByRole('button', { name: 'Suspend User' }).click()
 
     // Auth interceptor calls onUnauthenticated → logout() → token cleared →
-    // ProtectedRoute redirects to /login. The toast also fires.
+    // ProtectedRoute redirects to /login.
     await expect(page).toHaveURL('/login', { timeout: 10_000 })
   })
 
-  test('session expiry toast appears before redirect on 401', async ({ platformAdminPage: page }) => {
+  test('session expiry toast appears on 401 before redirect', async ({ platformAdminPage: page }) => {
     await mockListIdentities(page)
     await mockRetrieveIdentity(page)
     await mockListRoleAssignments(page)
@@ -472,11 +482,15 @@ test.describe('Suspend API — 401 unauthenticated', () => {
     await dialog.getByLabel('Reason').fill('Compliance review')
     await dialog.getByRole('button', { name: 'Suspend User' }).click()
 
-    // The session expiry error toast fires from withToastErrorHandling
-    // before the auth state clears and ProtectedRoute redirects.
-    // Because the redirect is fast, check URL destination.
+    // The session expiry error toast fires from withToastErrorHandling.
+    // Capture the toast before the redirect clears the DOM.
+    await expect(
+      page.getByText(/your session has expired/i),
+    ).toBeVisible({ timeout: 5_000 })
+
+    // Auth state clears and ProtectedRoute redirects to /login
     await expect(page).toHaveURL('/login', { timeout: 10_000 })
-    // Login page must render (confirms redirect completed, not a blank page)
+    // Login page renders after redirect
     await expect(page.getByRole('heading', { name: 'Meridian Operations Console' })).toBeVisible()
   })
 })
