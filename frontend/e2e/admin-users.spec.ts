@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { test, expect, navigateTo } from './fixtures'
 
 /**
@@ -99,7 +100,7 @@ test.describe('User detail - suspend dialog', () => {
    * Navigate to the first available user detail page.
    * Returns false if no users are present (caller should skip the test).
    */
-  async function navigateToFirstUser(page: import('@playwright/test').Page): Promise<boolean> {
+  async function navigateToFirstUser(page: Page): Promise<boolean> {
     await navigateTo(page, '/users')
     await expect(page.locator('table')).toBeVisible()
     const rowCount = await page.locator('table tbody tr').count()
@@ -201,7 +202,7 @@ test.describe('User detail - suspend dialog', () => {
  * Mock the IdentityService to return a single ACTIVE user.
  * Connect JSON protocol: ListIdentities response.
  */
-async function mockListIdentities(page: import('@playwright/test').Page) {
+async function mockListIdentities(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/ListIdentities`, (route) => {
     void route.fulfill({
       status: 200,
@@ -231,7 +232,7 @@ async function mockListIdentities(page: import('@playwright/test').Page) {
 /**
  * Mock RetrieveIdentity to return an ACTIVE user.
  */
-async function mockRetrieveIdentity(page: import('@playwright/test').Page) {
+async function mockRetrieveIdentity(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/RetrieveIdentity`, (route) => {
     void route.fulfill({
       status: 200,
@@ -257,7 +258,7 @@ async function mockRetrieveIdentity(page: import('@playwright/test').Page) {
 /**
  * Mock ListRoleAssignments to return empty roles.
  */
-async function mockListRoleAssignments(page: import('@playwright/test').Page) {
+async function mockListRoleAssignments(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/ListRoleAssignments`, (route) => {
     void route.fulfill({
       status: 200,
