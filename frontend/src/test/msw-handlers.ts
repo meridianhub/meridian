@@ -105,6 +105,11 @@ export const handlers = [
   http.post('/api/auth/refresh', () => {
     return HttpResponse.json({}, { status: 401 })
   }),
+
+  // Auth providers discovery endpoint - returns 404 by default (no external providers configured)
+  http.get('/api/auth/providers', () => {
+    return HttpResponse.json({}, { status: 404 })
+  }),
 ]
 
 export const server = setupServer(...handlers)

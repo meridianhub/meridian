@@ -7,11 +7,16 @@ import { PageErrorBoundary, RouteErrorBoundary } from '@/components/error-bounda
 import { AuthProvider, useAuth } from '@/contexts/auth-context'
 import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { useTenants } from '@/hooks/use-tenants'
+import { useAuthProviders, type AuthProvider as AuthProviderType } from '@/hooks/use-auth-providers'
+import { useOAuthFlow } from '@/hooks/use-oauth-flow'
 import { ApiClientProvider } from '@/api/context'
 import { ProtectedRoute, PlatformOnlyRoute, AdminOnlyRoute, TenantSubdomainEnforcer } from '@/components/routing'
 import { FeatureGuard } from '@/components/feature-guard'
 import { AppShell } from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { CallbackPage } from '@/pages/callback'
+import { ProviderButton } from '@/components/auth/provider-button'
+import { AuthDivider } from '@/components/auth/auth-divider'
 import { AccountsPage, AccountDetailPage } from '@/features/accounts'
 import { PaymentsPage, PaymentDetailPage } from '@/features/payments'
 import { LedgerPage, BookingLogDetailPage } from '@/features/ledger'
@@ -64,6 +69,10 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const { data: providers } = useAuthProviders()
+  const { startFlow } = useOAuthFlow()
+
+  const externalProviders = providers?.filter((p: AuthProviderType) => p.type === 'oidc') ?? []
 
   const handleDexLogin = useCallback(
     async (e: FormEvent) => {
@@ -180,6 +189,22 @@ function LoginPage() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
+        )}
+
+        {/* External auth provider buttons */}
+        {externalProviders.length > 0 && (
+          <>
+            {(import.meta.env.VITE_DEMO_MODE === 'true' || !import.meta.env.DEV) && <AuthDivider />}
+            <div className="space-y-2">
+              {externalProviders.map((provider: AuthProviderType) => (
+                <ProviderButton
+                  key={provider.id}
+                  provider={provider}
+                  onClick={() => startFlow(provider.id)}
+                />
+              ))}
+            </div>
+          </>
         )}
 
         {/* Dev-only fake JWT buttons */}
@@ -397,6 +422,7 @@ function AuthenticatedApp() {
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/callback" element={<CallbackPage />} />
               <Route
                 path="/*"
                 element={
