@@ -82,87 +82,112 @@ func stubNotImplemented(handlerName string) saga.Handler {
 //   - current_account.* for domain-specific handlers
 func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 	handlers := []struct {
-		name    string
-		handler saga.Handler
+		name     string
+		handler  saga.Handler
+		metadata *saga.HandlerMetadata
 	}{
 		// Position Keeping handlers (global namespace)
-		{"position_keeping.initiate_log", currentAccountPositionKeepingInitiateLog},
-		{"position_keeping.update_log", stubNotImplemented("position_keeping.update_log")},
-		{"position_keeping.cancel_log", currentAccountPositionKeepingCancelLog},
+		{"position_keeping.initiate_log", currentAccountPositionKeepingInitiateLog, &saga.HandlerMetadata{
+			Category:             saga.HandlerCategoryIngestion,
+			CompensationStrategy: "auto",
+			HasAutoCompensation:  true,
+			Compensate:           "position_keeping.cancel_log",
+		}},
+		{"position_keeping.update_log", stubNotImplemented("position_keeping.update_log"), &saga.HandlerMetadata{
+			Category:             saga.HandlerCategoryIngestion,
+			CompensationStrategy: "none",
+		}},
+		{"position_keeping.cancel_log", currentAccountPositionKeepingCancelLog, &saga.HandlerMetadata{
+			Category:             saga.HandlerCategoryIngestion,
+			CompensationStrategy: "none",
+		}},
 
 		// Financial Accounting handlers (global namespace)
-		{"financial_accounting.post_entries", stubNotImplemented("financial_accounting.post_entries")},
-		{"financial_accounting.reverse_entries", stubNotImplemented("financial_accounting.reverse_entries")},
-		{"financial_accounting.create_booking", stubNotImplemented("financial_accounting.create_booking")},
-		{"financial_accounting.initiate_booking_log", currentAccountFinAcctInitiateBookingLog},
-		{"financial_accounting.capture_posting", currentAccountFinAcctCapturePosting},
-		{"financial_accounting.update_booking_log", currentAccountFinAcctUpdateBookingLog},
-		{"financial_accounting.compensate_posting", currentAccountFinAcctCompensatePosting},
+		{"financial_accounting.post_entries", stubNotImplemented("financial_accounting.post_entries"), nil},
+		{"financial_accounting.reverse_entries", stubNotImplemented("financial_accounting.reverse_entries"), nil},
+		{"financial_accounting.create_booking", stubNotImplemented("financial_accounting.create_booking"), nil},
+		{"financial_accounting.initiate_booking_log", currentAccountFinAcctInitiateBookingLog, &saga.HandlerMetadata{
+			Category:             saga.HandlerCategorySettlement,
+			CompensationStrategy: "none",
+		}},
+		{"financial_accounting.capture_posting", currentAccountFinAcctCapturePosting, &saga.HandlerMetadata{
+			Category:            saga.HandlerCategorySettlement,
+			Compensate:          "financial_accounting.compensate_posting",
+			HasAutoCompensation: true,
+		}},
+		{"financial_accounting.update_booking_log", currentAccountFinAcctUpdateBookingLog, &saga.HandlerMetadata{
+			Category:             saga.HandlerCategorySettlement,
+			CompensationStrategy: "none",
+		}},
+		{"financial_accounting.compensate_posting", currentAccountFinAcctCompensatePosting, &saga.HandlerMetadata{
+			Category:             saga.HandlerCategorySettlement,
+			CompensationStrategy: "none",
+		}},
 
 		// Current Account domain handlers
-		{"current_account.save", currentAccountRepositorySave},
+		{"current_account.save", currentAccountRepositorySave, nil},
 
 		// Control handler (stub - implemented in client package for cross-service use)
-		{"current_account.control", stubNotImplemented("current_account.control")},
+		{"current_account.control", stubNotImplemented("current_account.control"), nil},
 
 		// Lien handlers (stubs - not yet implemented but required by schema)
-		{"current_account.create_lien", stubNotImplemented("current_account.create_lien")},
-		{"current_account.execute_lien", stubNotImplemented("current_account.execute_lien")},
-		{"current_account.terminate_lien", stubNotImplemented("current_account.terminate_lien")},
+		{"current_account.create_lien", stubNotImplemented("current_account.create_lien"), nil},
+		{"current_account.execute_lien", stubNotImplemented("current_account.execute_lien"), nil},
+		{"current_account.terminate_lien", stubNotImplemented("current_account.terminate_lien"), nil},
 
 		// Platform-wide handlers (stubs - defined in schema for other services)
-		{"notification.send", stubNotImplemented("notification.send")},
-		{"payment_order.create_lien", stubNotImplemented("payment_order.create_lien")},
-		{"payment_order.execute_lien", stubNotImplemented("payment_order.execute_lien")},
-		{"payment_order.post_ledger_entries", stubNotImplemented("payment_order.post_ledger_entries")},
-		{"payment_order.send_to_gateway", stubNotImplemented("payment_order.send_to_gateway")},
-		{"payment_order.terminate_lien", stubNotImplemented("payment_order.terminate_lien")},
-		{"repository.save", stubNotImplemented("repository.save")},
-		{"valuation_engine.valuate", stubNotImplemented("valuation_engine.valuate")},
+		{"notification.send", stubNotImplemented("notification.send"), nil},
+		{"payment_order.create_lien", stubNotImplemented("payment_order.create_lien"), nil},
+		{"payment_order.execute_lien", stubNotImplemented("payment_order.execute_lien"), nil},
+		{"payment_order.post_ledger_entries", stubNotImplemented("payment_order.post_ledger_entries"), nil},
+		{"payment_order.send_to_gateway", stubNotImplemented("payment_order.send_to_gateway"), nil},
+		{"payment_order.terminate_lien", stubNotImplemented("payment_order.terminate_lien"), nil},
+		{"repository.save", stubNotImplemented("repository.save"), nil},
+		{"valuation_engine.valuate", stubNotImplemented("valuation_engine.valuate"), nil},
 
 		// Reconciliation handlers (stubs - defined in schema for reconciliation service)
-		{"reconciliation.initiate_run", stubNotImplemented("reconciliation.initiate_run")},
-		{"reconciliation.execute_run", stubNotImplemented("reconciliation.execute_run")},
-		{"reconciliation.retrieve_run", stubNotImplemented("reconciliation.retrieve_run")},
-		{"reconciliation.cancel_run", stubNotImplemented("reconciliation.cancel_run")},
-		{"reconciliation.assert_balance", stubNotImplemented("reconciliation.assert_balance")},
-		{"reconciliation.initiate_dispute", stubNotImplemented("reconciliation.initiate_dispute")},
+		{"reconciliation.initiate_run", stubNotImplemented("reconciliation.initiate_run"), nil},
+		{"reconciliation.execute_run", stubNotImplemented("reconciliation.execute_run"), nil},
+		{"reconciliation.retrieve_run", stubNotImplemented("reconciliation.retrieve_run"), nil},
+		{"reconciliation.cancel_run", stubNotImplemented("reconciliation.cancel_run"), nil},
+		{"reconciliation.assert_balance", stubNotImplemented("reconciliation.assert_balance"), nil},
+		{"reconciliation.initiate_dispute", stubNotImplemented("reconciliation.initiate_dispute"), nil},
 
 		// Party handlers (stubs - defined in schema for party service)
-		{"party.get_default_payment_method", stubNotImplemented("party.get_default_payment_method")},
+		{"party.get_default_payment_method", stubNotImplemented("party.get_default_payment_method"), nil},
 
 		// Operational Gateway handlers (stubs - defined in schema for operational gateway service)
-		{"operational_gateway.dispatch_instruction", stubNotImplemented("operational_gateway.dispatch_instruction")},
-		{"operational_gateway.cancel_instruction", stubNotImplemented("operational_gateway.cancel_instruction")},
-		{"operational_gateway.get_instruction", stubNotImplemented("operational_gateway.get_instruction")},
+		{"operational_gateway.dispatch_instruction", stubNotImplemented("operational_gateway.dispatch_instruction"), nil},
+		{"operational_gateway.cancel_instruction", stubNotImplemented("operational_gateway.cancel_instruction"), nil},
+		{"operational_gateway.get_instruction", stubNotImplemented("operational_gateway.get_instruction"), nil},
 
 		// Financial Gateway handlers (stubs - defined in schema for financial gateway service)
-		{"financial_gateway.dispatch_payment", stubNotImplemented("financial_gateway.dispatch_payment")},
-		{"financial_gateway.cancel_payment", stubNotImplemented("financial_gateway.cancel_payment")},
-		{"financial_gateway.dispatch_refund", stubNotImplemented("financial_gateway.dispatch_refund")},
+		{"financial_gateway.dispatch_payment", stubNotImplemented("financial_gateway.dispatch_payment"), nil},
+		{"financial_gateway.cancel_payment", stubNotImplemented("financial_gateway.cancel_payment"), nil},
+		{"financial_gateway.dispatch_refund", stubNotImplemented("financial_gateway.dispatch_refund"), nil},
 
 		// Forecasting handlers (stubs - defined in schema for forecasting service)
-		{"forecasting.compute_forward_curve", stubNotImplemented("forecasting.compute_forward_curve")},
+		{"forecasting.compute_forward_curve", stubNotImplemented("forecasting.compute_forward_curve"), nil},
 
 		// Market Information handlers (stubs - defined in schema for market information service)
-		{"market_information.publish_observation", stubNotImplemented("market_information.publish_observation")},
-		{"market_information.query_latest", stubNotImplemented("market_information.query_latest")},
-		{"market_information.manage_dataset", stubNotImplemented("market_information.manage_dataset")},
+		{"market_information.publish_observation", stubNotImplemented("market_information.publish_observation"), nil},
+		{"market_information.query_latest", stubNotImplemented("market_information.query_latest"), nil},
+		{"market_information.manage_dataset", stubNotImplemented("market_information.manage_dataset"), nil},
 
 		// Reference Data handlers (stubs - defined in schema for reference data service)
-		{"reference_data.register_instrument", stubNotImplemented("reference_data.register_instrument")},
-		{"reference_data.delete_instrument", stubNotImplemented("reference_data.delete_instrument")},
-		{"reference_data.register_account_type", stubNotImplemented("reference_data.register_account_type")},
-		{"reference_data.delete_account_type", stubNotImplemented("reference_data.delete_account_type")},
-		{"reference_data.register_valuation_rule", stubNotImplemented("reference_data.register_valuation_rule")},
-		{"reference_data.register_saga_definition", stubNotImplemented("reference_data.register_saga_definition")},
+		{"reference_data.register_instrument", stubNotImplemented("reference_data.register_instrument"), nil},
+		{"reference_data.delete_instrument", stubNotImplemented("reference_data.delete_instrument"), nil},
+		{"reference_data.register_account_type", stubNotImplemented("reference_data.register_account_type"), nil},
+		{"reference_data.delete_account_type", stubNotImplemented("reference_data.delete_account_type"), nil},
+		{"reference_data.register_valuation_rule", stubNotImplemented("reference_data.register_valuation_rule"), nil},
+		{"reference_data.register_saga_definition", stubNotImplemented("reference_data.register_saga_definition"), nil},
 
 		// Internal Account handlers (stubs - defined in schema for internal account service)
-		{"internal_account.initiate", stubNotImplemented("internal_account.initiate")},
+		{"internal_account.initiate", stubNotImplemented("internal_account.initiate"), nil},
 	}
 
 	for _, h := range handlers {
-		if err := registry.Register(h.name, h.handler); err != nil {
+		if err := registry.RegisterWithMetadata(h.name, h.handler, h.metadata); err != nil {
 			return fmt.Errorf("failed to register handler %s: %w", h.name, err)
 		}
 	}
