@@ -60,10 +60,15 @@ An **Economy IDE** inside the Meridian frontend — a feature module that provid
 2. **Manifest editor**: YAML editing with syntax highlighting and inline validation
 3. **Deploy wizard**: Validate -> plan diff -> one-click apply
 4. **Relationship graph**: Visual dependency map that updates as you edit
+5. **Economy explorer**: Navigate the running economy, see where sagas and
+   triggers are attached, discover unbound events, override platform defaults
+6. **Draft changes**: Compose pending modifications (like a PR) that accumulate
+   into a new manifest version for review before deployment
 
 The IDE follows the shadcn philosophy: the user sees the actual manifest
 YAML and owns every line. The conversational prompt is an on-ramp; the
-editor is where real work happens.
+editor is where real work happens. The economy explorer is how operators
+understand and incrementally evolve their running economy.
 
 ## Goals
 
@@ -72,7 +77,11 @@ editor is where real work happens.
    handler autocomplete, cross-reference warnings as you type
 3. **Deploy with confidence** — plan diff shows exactly what will change
 4. **Understand dependencies** — relationship graph shows how resources connect
-5. **Works without the generator** — manual YAML editing is a first-class path
+5. **Explore the running economy** — navigate system elements, see attached
+   sagas/triggers, discover unbound events, override platform defaults
+6. **Draft and review changes** — compose pending modifications into a new
+   manifest version, review the aggregate diff, optionally get team approval
+7. **Works without the generator** — manual YAML editing is a first-class path
 
 ## Non-Goals
 
@@ -308,7 +317,97 @@ The graph updates when:
 - A new manifest is generated (generation response includes the graph)
 - A plan diff is displayed (highlights changed nodes)
 
-#### 7. Economy Overview
+#### 7. Economy Explorer
+
+An interactive view of the running economy that lets operators understand
+and incrementally modify their configuration. Unlike the manifest editor
+(which shows raw YAML), the explorer presents the economy as a navigable
+system.
+
+**Navigation panels**:
+
+- **Event channels**: List all known event topics (from topics registry and
+  AsyncAPI specs). For each topic, show:
+  - Which sagas trigger on this event (bound)
+  - Which events have no saga triggers (unbound — opportunity to add)
+  - The event payload schema (fields available for CEL filters)
+
+- **Sagas**: List all active sagas. For each saga, show:
+  - Trigger type and source (event, API, webhook, scheduled)
+  - Whether it runs the platform default script or a tenant override
+  - The Starlark script (read-only view with syntax highlighting)
+  - Handler calls made by the script (from relationship graph)
+  - Compensation handlers defined
+
+- **API endpoints**: List gRPC/REST endpoints (from OpenAPI spec). For each:
+  - Whether a saga is bound to this endpoint
+  - The bound saga's trigger string
+
+- **Instruments and account types**: List with usage indicators showing
+  which sagas and valuation rules reference each resource
+
+**Actions from the explorer**:
+
+Each panel supports contextual actions that feed into the draft system:
+
+- "Add saga for this event" — opens editor pre-populated with a saga
+  skeleton bound to the selected event trigger
+- "Override platform default" — creates a tenant override for a platform
+  saga (calls `CreateTenantOverride`, drafts as part of pending changes)
+- "Add trigger for this endpoint" — pre-populates a saga with the
+  selected API trigger
+
+These actions do not apply immediately. They create **draft changes** that
+accumulate in the draft manifest (see screen 8).
+
+#### 8. Draft Changes (Manifest Versioning)
+
+The manifest is an immutable artifact — each applied version is a snapshot.
+The draft system allows operators to compose multiple changes before
+creating a new version:
+
+**Draft lifecycle**:
+
+```mermaid
+graph LR
+    A[Current Manifest v3] -->|"Add saga"| B[Draft]
+    A -->|"Override default"| B
+    A -->|"Change pricing"| B
+    B -->|"Review"| C[Plan Diff]
+    C -->|"Approve"| D[New Manifest v4]
+    C -->|"Reject"| B
+```
+
+**How it works**:
+
+1. Each change from the explorer or editor is recorded as a pending
+   modification against the current manifest version
+2. The draft panel shows all pending changes as a list:
+   - "Added saga `carbon_offset_tracking` (event trigger)"
+   - "Overrode platform default for `deposit` saga"
+   - "Added instrument `TONNE_CO2E`"
+3. Individual changes can be reverted from the draft
+4. "Review Draft" merges all pending changes into a candidate manifest,
+   runs validation, and shows the aggregate plan diff
+5. The plan diff compares current version to the candidate — showing
+   everything that will change in the new version
+6. "Apply" creates the new manifest version (immutable snapshot)
+
+**Optional team review**:
+
+For teams that want approval before deployment:
+
+- Draft can be shared via a permalink (draft ID in URL)
+- A second operator can review the plan diff
+- The system records who reviewed and when (audit trail)
+- Apply requires the reviewer to be a different user than the drafter
+  (four-eye principle, configurable — can be disabled for solo operators)
+
+This is not a hard requirement for v1. The draft system works for solo
+operators (draft -> review yourself -> apply). Four-eye review is an
+enhancement that builds on the same draft infrastructure.
+
+#### 9. Economy Overview
 
 The landing page for an existing economy. Shows:
 
@@ -316,11 +415,14 @@ The landing page for an existing economy. Shows:
 - Stats: instrument count, account type count, saga count
 - Relationship graph (full view)
 - History: manifest version timeline (from `meridian_manifest_history`)
-- Actions: "Edit Economy", "View Plan History"
+- Pending draft indicator (if draft changes exist)
+- Actions: "Edit Economy", "Explore Economy", "View Draft", "View History"
 
 ### API Integration
 
-The IDE calls existing gRPC services — no new backend APIs needed:
+The IDE calls existing gRPC services. The draft system requires local
+state management (pending changes stored in browser) and one new concept
+(draft manifest merging) but no new backend APIs beyond what exists:
 
 | Frontend Hook | Backend RPC | Purpose |
 |--------------|------------|---------|
@@ -432,7 +534,40 @@ The landing page for existing economies.
 - Edit/deploy action buttons
 - Route: `/economy`
 
-### Phase 6: Editor Enhancements
+### Phase 6: Economy Explorer
+
+Navigate the running economy and discover modification opportunities.
+
+- Event channels panel: bound vs unbound events, payload schemas
+- Sagas panel: trigger info, platform default vs tenant override indicator,
+  read-only Starlark viewer
+- API endpoints panel: bound saga indicators
+- Instruments/account types panel: usage indicators
+- Contextual actions: "Add saga for event", "Override default", "Add trigger"
+- Route: `/economy/explore`
+
+### Phase 7: Draft Changes System
+
+Compose pending modifications before creating a new manifest version.
+
+- Draft state management (browser-local, persisted to localStorage)
+- Pending changes list with individual revert
+- Draft merge: combine pending changes into candidate manifest
+- Aggregate plan diff (current version vs candidate)
+- Apply creates new immutable manifest version
+- Draft permalink for sharing
+- Route: `/economy/draft`
+
+### Phase 8: Team Review (Optional Enhancement)
+
+Four-eye principle for manifest changes.
+
+- Draft review workflow: drafter submits, reviewer approves
+- Audit trail: who drafted, who reviewed, timestamps
+- Configurable: can disable four-eye for solo operators
+- Apply blocked until review recorded (when enabled)
+
+### Phase 9: Editor Enhancements
 
 Polish the editing experience.
 
@@ -482,10 +617,13 @@ Polish the editing experience.
 | Plan diff + apply | No | Uses existing `ManifestPlan`/`ManifestApply` |
 | Relationship graph | No | Uses existing `meridian_economy_graph` |
 | Economy overview | No | Uses existing `meridian_economy_structure` |
+| Economy explorer | No | Uses existing relationship graph + topics registry |
+| Draft changes | No | Pure frontend state + existing validate/plan/apply |
+| Team review | No | Extends draft system with audit fields |
 | **Conversational prompt** | **Yes** | Disabled if generator not deployed |
 | **"I'm Feeling Lucky"** | **Yes** | Disabled if generator not deployed |
 
-Phases 1-3 and 5-6 have **zero dependency** on PRD-041. Only Phase 4
+Phases 1-3, 5-8 have **zero dependency** on PRD-041. Only Phase 4
 (prompt and generation) requires the generator backend. This is why the
 two PRDs can run in parallel.
 
@@ -508,3 +646,12 @@ two PRDs can run in parallel.
 4. **Real-time validation**: Should validation run on every keystroke (debounced)
    or only on explicit "Validate" button click? (Recommendation: debounced at
    500ms for a responsive feel, with explicit button as fallback.)
+
+5. **Draft persistence**: Should drafts be stored in the browser (localStorage)
+   or on the server? Browser storage is simpler and works offline; server
+   storage enables sharing and survives browser clears. (Recommendation:
+   browser-local for v1, server-side in Phase 8 when team review is added.)
+
+6. **Four-eye enforcement**: Should the four-eye review be a hard gate
+   (cannot apply without reviewer) or soft (warning but allowed)?
+   (Recommendation: configurable per tenant. Default to soft for v1.)
