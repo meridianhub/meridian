@@ -246,10 +246,12 @@ func (c *Connector) Resolve(ctx context.Context, email string) (Identity, bool, 
 
 	groups, err := c.activeRoles(ctx, identity)
 	if err != nil {
+		// During refresh, failing to load roles is an error — returning a token
+		// with missing roles could grant incorrect permissions.
 		c.logger.ErrorContext(ctx, "connector: failed to load role assignments during resolve",
 			"identity_id", identity.ID(),
 			"error", err)
-		groups = []string{}
+		return Identity{}, false, fmt.Errorf("connector: resolve roles: %w", err)
 	}
 
 	connIdentity := Identity{

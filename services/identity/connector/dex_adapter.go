@@ -129,7 +129,6 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes,
 	slug, email, err := parseTenantUsername(username)
 	if err != nil {
 		d.logger.InfoContext(ctx, "dex adapter: invalid username format",
-			"username", username,
 			"error", err)
 		return dexconnector.Identity{}, false, nil
 	}
@@ -169,8 +168,7 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes,
 	dexIdentity := toDexIdentity(identity, tenantID)
 
 	d.logger.InfoContext(ctx, "dex adapter: login successful",
-		"tenant_id", tenantID,
-		"email", email)
+		"tenant_id", tenantID)
 
 	return dexIdentity, true, nil
 }

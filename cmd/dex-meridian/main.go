@@ -140,14 +140,19 @@ func run(logger *slog.Logger) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
+	serverErr := make(chan error, 1)
 	go func() {
 		logger.Info("dex-meridian: starting", "addr", listenAddr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("dex-meridian: HTTP server error", "error", err)
+			serverErr <- err
 		}
 	}()
 
-	<-ctx.Done()
+	select {
+	case err := <-serverErr:
+		return fmt.Errorf("dex-meridian: HTTP server error: %w", err)
+	case <-ctx.Done():
+	}
 	logger.Info("dex-meridian: shutting down")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
