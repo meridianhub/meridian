@@ -49,6 +49,15 @@ func NewEmptySchemaRegistry() *schema.Registry {
 	return schema.NewRegistry()
 }
 
+// SetBuildStatics replaces the buildStatics function on a CachedContextAssembler for testing.
+// This allows tests to count how many times static sections are actually recomputed.
+func (c *CachedContextAssembler) SetBuildStatics(fn func(registry *schema.Registry) staticComponents) {
+	c.buildStatics = fn
+}
+
+// StaticComponents is the exported type for staticComponents.
+type StaticComponents = staticComponents
+
 // Model returns the model name used by this client.
 func (c *ClaudeLLMClient) Model() string {
 	return c.model
