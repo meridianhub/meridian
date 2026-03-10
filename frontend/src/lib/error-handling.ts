@@ -203,6 +203,6 @@ export function useErrorHandler(options: HandleConnectErrorOptions = {}) {
   return useCallback(
     (error: unknown) => handleConnectError(error, options),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [options.navigateToParent],
+    [options.navigateToParent, options.showToast],
   )
 }
