@@ -189,12 +189,15 @@ The core editing experience. A YAML editor with:
 - CEL expressions within `filter:` and `validation:` fields
 - Instrument codes, handler names as distinct token types
 
-**Inline validation**: As the user types (debounced), call `ManifestValidate`:
+**Inline validation**: As the user types (debounced 500ms), call
+`ManifestValidate`. Each request carries a monotonic sequence number; stale
+responses (from older drafts) are discarded when a newer response has arrived:
 
 - Errors displayed inline at the relevant YAML line
 - Warnings displayed with lower visual weight
 - Structured error panel below the editor for full details
 - "Did you mean?" suggestions are clickable (auto-fix)
+- In-flight validation cancelled on new edit (abort controller pattern)
 
 **Handler autocomplete**: Within `script:` blocks, provide autocomplete for:
 
@@ -212,7 +215,9 @@ compiled handler schema loaded at page init.
 - Right: Relationship graph (30% width), renders the persisted economy state
   or the graph returned from the latest `ManifestValidate` response (which
   includes relationship graph extraction). In v1, the graph updates after
-  each successful validation pass, not on every keystroke
+  each successful validation pass, not on every keystroke. Validation
+  requests use a monotonic sequence counter — stale responses from older
+  drafts are discarded when a newer validation has already completed
 
 #### 3. Validation Panel
 
