@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ConnectError, Code } from '@connectrpc/connect'
-import { toast } from 'sonner'
 import { createAuthInterceptor } from './auth-interceptor'
-
-vi.mock('sonner', () => ({
-  toast: { error: vi.fn() },
-}))
 
 function createMockNext(error?: Error) {
   return vi.fn().mockImplementation(() => {
@@ -52,7 +47,7 @@ describe('createAuthInterceptor', () => {
     expect(req.header.get('Authorization')).toBeNull()
   })
 
-  it('calls onUnauthenticated on 401 (Unauthenticated) and does not toast', async () => {
+  it('calls onUnauthenticated on 401 (Unauthenticated)', async () => {
     getToken.mockReturnValue('token')
     const error = new ConnectError('unauthenticated', Code.Unauthenticated)
     const interceptor = createAuthInterceptor(getToken, onUnauthenticated)
@@ -62,10 +57,9 @@ describe('createAuthInterceptor', () => {
     await expect(interceptor(next)(req as never)).rejects.toThrow(error)
 
     expect(onUnauthenticated).toHaveBeenCalledOnce()
-    expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it('shows toast on 403 (PermissionDenied) and does not call onUnauthenticated', async () => {
+  it('rethrows 403 (PermissionDenied) without calling onUnauthenticated', async () => {
     getToken.mockReturnValue('token')
     const error = new ConnectError('forbidden', Code.PermissionDenied)
     const interceptor = createAuthInterceptor(getToken, onUnauthenticated)
@@ -75,12 +69,9 @@ describe('createAuthInterceptor', () => {
     await expect(interceptor(next)(req as never)).rejects.toThrow(error)
 
     expect(onUnauthenticated).not.toHaveBeenCalled()
-    expect(toast.error).toHaveBeenCalledWith(
-      'You do not have permission to perform this action.',
-    )
   })
 
-  it('does not call onUnauthenticated or toast for other errors', async () => {
+  it('does not call onUnauthenticated for other errors', async () => {
     getToken.mockReturnValue('token')
     const error = new ConnectError('not found', Code.NotFound)
     const interceptor = createAuthInterceptor(getToken, onUnauthenticated)
@@ -90,7 +81,6 @@ describe('createAuthInterceptor', () => {
     await expect(interceptor(next)(req as never)).rejects.toThrow(error)
 
     expect(onUnauthenticated).not.toHaveBeenCalled()
-    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('rethrows the original error in all cases', async () => {
