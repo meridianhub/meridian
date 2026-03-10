@@ -129,6 +129,9 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 		Historian: mhAdapter,
 	})
 
+	// -- Economy generator tools (generate context + generate manifest) --
+	tools.RegisterEconomyGeneratorTools(toolReg, economyGeneratorAdapter{c: mc.EconomyGenerator})
+
 	// -- Simulation tools --
 	// CELEvaluator, ManifestDiffer, ValuationSimulator, and SagaSimulator
 	// require dedicated implementations that don't exist yet. Tools with
@@ -368,4 +371,17 @@ func (a gatewayConnectionAdapter) ListConnections(ctx context.Context, req *opga
 
 func (a gatewayConnectionAdapter) GetConnection(ctx context.Context, req *opgatewayv1.GetConnectionRequest) (*opgatewayv1.GetConnectionResponse, error) {
 	return a.c.GetConnection(ctx, req)
+}
+
+// economyGeneratorAdapter satisfies tools.EconomyGeneratorClient.
+type economyGeneratorAdapter struct {
+	c controlplanev1.EconomyGeneratorServiceClient
+}
+
+func (a economyGeneratorAdapter) GenerateManifest(ctx context.Context, req *controlplanev1.GenerateManifestRequest) (*controlplanev1.GenerateManifestResponse, error) {
+	return a.c.GenerateManifest(ctx, req)
+}
+
+func (a economyGeneratorAdapter) GetGenerationContext(ctx context.Context, req *controlplanev1.GetGenerationContextRequest) (*controlplanev1.GetGenerationContextResponse, error) {
+	return a.c.GetGenerationContext(ctx, req)
 }
