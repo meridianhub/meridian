@@ -22,10 +22,11 @@ describe('queryClient', () => {
     const options = queryClient.getDefaultOptions()
     const retry = options.queries?.retry as (failureCount: number, error: Error) => boolean
     expect(typeof retry).toBe('function')
-    // Regular errors retry up to 2 times
+    // Regular errors retry up to 3 times
     expect(retry(0, new Error('network'))).toBe(true)
     expect(retry(1, new Error('network'))).toBe(true)
-    expect(retry(2, new Error('network'))).toBe(false)
+    expect(retry(2, new Error('network'))).toBe(true)
+    expect(retry(3, new Error('network'))).toBe(false)
     // Unauthenticated errors should never retry
     expect(retry(0, new ConnectError('unauth', Code.Unauthenticated))).toBe(false)
   })
