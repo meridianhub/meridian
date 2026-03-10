@@ -51,7 +51,16 @@ test.describe('Users list - admin access', () => {
   test('platform admin appears in the users list after login', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
     // Wait for the list to settle: a tbody row appears for both real data and the empty state
-    await expect(page.locator('table tbody tr').first()).toBeVisible({ timeout: 15_000 })
+    const firstRow = page.locator('table tbody tr').first()
+    await expect(firstRow).toBeVisible({ timeout: 15_000 })
+
+    // If no users seeded, the empty state row is still a valid outcome
+    const emptyState = page.getByRole('row', { name: /no users found/i })
+    if (await emptyState.isVisible()) return
+
+    // At least one real user row visible
+    const firstEmailCell = firstRow.locator('td').first()
+    await expect(firstEmailCell).not.toBeEmpty()
   })
 
   test('tenant users are listed in the table when backend returns data', async ({ platformAdminPage: page }) => {
@@ -209,7 +218,7 @@ async function mockListIdentities(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/ListIdentities`, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/connect+json',
+      contentType: 'application/json',
       body: JSON.stringify({
         identities: [
           {
@@ -239,7 +248,7 @@ async function mockRetrieveIdentity(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/RetrieveIdentity`, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/connect+json',
+      contentType: 'application/json',
       body: JSON.stringify({
         identity: {
           id: 'mock-user-1',
@@ -265,7 +274,7 @@ async function mockListRoleAssignments(page: Page) {
   await page.route(`**/meridian.identity.v1.IdentityService/ListRoleAssignments`, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/connect+json',
+      contentType: 'application/json',
       body: JSON.stringify({ roleAssignments: [] }),
     })
   })
@@ -340,7 +349,7 @@ test.describe('Suspend API — successful suspend', () => {
       if (suspendCalled) {
         void route.fulfill({
           status: 200,
-          contentType: 'application/connect+json',
+          contentType: 'application/json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -359,7 +368,7 @@ test.describe('Suspend API — successful suspend', () => {
       } else {
         void route.fulfill({
           status: 200,
-          contentType: 'application/connect+json',
+          contentType: 'application/json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -382,7 +391,7 @@ test.describe('Suspend API — successful suspend', () => {
       suspendCalled = true
       void route.fulfill({
         status: 200,
-        contentType: 'application/connect+json',
+        contentType: 'application/json',
         body: JSON.stringify({
           identity: {
             id: 'mock-user-1',
