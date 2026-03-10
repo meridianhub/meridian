@@ -97,6 +97,7 @@ func TestGoldenGeneration(t *testing.T) {
 	for _, tc := range goldenTestCases {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
 			manifestYAML := loadOrGenerateGolden(t, tc, cacheDir, apiKey)
 			assertManifestStructure(t, tc, manifestYAML)
 		})
