@@ -81,7 +81,14 @@ type economyGenerateContextParams struct {
 func handleEconomyGenerateContext(ctx context.Context, client EconomyGeneratorClient, params json.RawMessage) (interface{}, error) {
 	var p economyGenerateContextParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return mcperrors.FormatGRPCError(err), nil
+		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
+	}
+
+	if p.IncludeCurrentEconomy && p.TenantID == "" {
+		return map[string]interface{}{
+			"error":   "tenant_id is required when include_current_economy is true",
+			"message": "Provide a tenant_id to include the current economy in the context.",
+		}, nil
 	}
 
 	// include_patterns defaults to true; exclude_patterns is the inverse field in the proto.
@@ -96,7 +103,7 @@ func handleEconomyGenerateContext(ctx context.Context, client EconomyGeneratorCl
 
 	resp, err := client.GetGenerationContext(ctx, req)
 	if err != nil {
-		return mcperrors.FormatGRPCError(err), nil
+		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
 	}
 
 	result := map[string]interface{}{
@@ -211,12 +218,26 @@ type economyGenerateParams struct {
 func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, params json.RawMessage) (interface{}, error) {
 	var p economyGenerateParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return mcperrors.FormatGRPCError(err), nil
+		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
 	}
 
-	mode := controlplanev1.GenerationMode_GENERATION_MODE_CREATE
-	if p.Mode == "amend" {
+	var mode controlplanev1.GenerationMode
+	switch p.Mode {
+	case "", "create":
+		mode = controlplanev1.GenerationMode_GENERATION_MODE_CREATE
+	case "amend":
 		mode = controlplanev1.GenerationMode_GENERATION_MODE_AMEND
+		if p.TenantID == "" {
+			return map[string]interface{}{
+				"error":   "tenant_id is required when mode is 'amend'",
+				"message": "Provide a tenant_id to amend the tenant's existing manifest.",
+			}, nil
+		}
+	default:
+		return map[string]interface{}{
+			"error":   "invalid mode: " + p.Mode,
+			"message": "mode must be 'create' or 'amend'",
+		}, nil
 	}
 
 	req := &controlplanev1.GenerateManifestRequest{
@@ -236,7 +257,7 @@ func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, p
 
 	resp, err := client.GenerateManifest(ctx, req)
 	if err != nil {
-		return mcperrors.FormatGRPCError(err), nil
+		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
 	}
 
 	result := map[string]interface{}{

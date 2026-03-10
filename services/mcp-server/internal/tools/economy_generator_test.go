@@ -161,6 +161,28 @@ func TestEconomyGenerateContext_CurrentEconomyYaml_IncludedWhenPresent(t *testin
 	assert.Equal(t, "version: 1.0\n", m["current_economy_yaml"])
 }
 
+func TestEconomyGenerateContext_IncludeCurrentEconomy_WithoutTenantID_ReturnsError(t *testing.T) {
+	mock := &mockEconomyGeneratorClient{
+		contextFn: func(_ context.Context, _ *controlplanev1.GetGenerationContextRequest) (*controlplanev1.GetGenerationContextResponse, error) {
+			t.Error("should not call RPC when tenant_id is missing")
+			return nil, nil
+		},
+	}
+
+	reg := tools.NewRegistry()
+	tools.RegisterEconomyGeneratorTools(reg, mock)
+
+	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{
+		"description": "energy",
+		"include_current_economy": true
+	}`))
+	require.NoError(t, err)
+
+	m, ok := result.(map[string]interface{})
+	require.True(t, ok)
+	assert.Contains(t, m["error"], "tenant_id")
+}
+
 func TestEconomyGenerateContext_GRPCError_ReturnsFormattedError(t *testing.T) {
 	mock := &mockEconomyGeneratorClient{
 		contextFn: func(_ context.Context, _ *controlplanev1.GetGenerationContextRequest) (*controlplanev1.GetGenerationContextResponse, error) {
@@ -260,6 +282,48 @@ func TestEconomyGenerate_AmendMode_SetsCorrectProtoMode(t *testing.T) {
 
 	assert.Equal(t, controlplanev1.GenerationMode_GENERATION_MODE_AMEND, capturedReq.Mode)
 	assert.Equal(t, "tenant-xyz", capturedReq.TenantId)
+}
+
+func TestEconomyGenerate_AmendMode_WithoutTenantID_ReturnsError(t *testing.T) {
+	mock := &mockEconomyGeneratorClient{
+		generateFn: func(_ context.Context, _ *controlplanev1.GenerateManifestRequest) (*controlplanev1.GenerateManifestResponse, error) {
+			t.Error("should not call RPC when tenant_id is missing for amend")
+			return nil, nil
+		},
+	}
+
+	reg := tools.NewRegistry()
+	tools.RegisterEconomyGeneratorTools(reg, mock)
+
+	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{
+		"description": "add carbon credits",
+		"mode": "amend"
+	}`))
+	require.NoError(t, err)
+
+	m, ok := result.(map[string]interface{})
+	require.True(t, ok)
+	assert.Contains(t, m["error"], "tenant_id")
+}
+
+func TestEconomyGenerate_UnknownMode_ReturnsError(t *testing.T) {
+	mock := &mockEconomyGeneratorClient{
+		generateFn: func(_ context.Context, _ *controlplanev1.GenerateManifestRequest) (*controlplanev1.GenerateManifestResponse, error) {
+			t.Error("should not call RPC for unknown mode")
+			return nil, nil
+		},
+	}
+
+	reg := tools.NewRegistry()
+	tools.RegisterEconomyGeneratorTools(reg, mock)
+
+	// JSON schema enum validation rejects invalid mode values before the handler runs.
+	_, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{
+		"description": "test",
+		"mode": "replace"
+	}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mode")
 }
 
 func TestEconomyGenerate_DefaultMode_IsCreate(t *testing.T) {
