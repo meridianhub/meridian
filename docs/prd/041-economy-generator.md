@@ -412,10 +412,17 @@ For modifying existing economies. Adds current state awareness:
 1. Load current manifest via `meridian_economy_structure`
 2. Load relationship graph via `meridian_economy_graph`
 3. Assemble context including current state
-4. Generate **diff instructions**: what to add, modify, remove
-5. Apply diff to current manifest
-6. Validate-fix loop (with destructive change detection)
-7. Return result with impact analysis
+4. Generate a **complete replacement manifest** incorporating the requested
+   changes (the LLM outputs a full manifest, not patches or instructions)
+5. Validate-fix loop (with destructive change detection)
+6. Return result with impact analysis (diff between current and proposed)
+
+**Output format**: Amend mode produces a full replacement manifest, not JSON
+patches or diff instructions. The LLM receives the current manifest and the
+change request, then outputs a complete new manifest. The backend diffs the
+current vs proposed manifest to produce the impact analysis and detect
+destructive changes. This is simpler and more reliable than asking the LLM
+to produce structured patches.
 
 Amend mode is harder than create — the LLM must understand the existing economy
 and produce changes that don't break running operations. The relationship graph

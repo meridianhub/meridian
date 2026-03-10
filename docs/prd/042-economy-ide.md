@@ -579,13 +579,15 @@ Compose pending modifications before creating a new manifest version.
 - Draft merge: combine pending changes into candidate manifest
 - Aggregate plan diff (current version vs candidate)
 - Apply creates new immutable manifest version
-- Draft permalink for sharing
 - Route: `/economy/draft`
 
 ### Phase 8: Team Review (Optional Enhancement)
 
-Four-eye principle for manifest changes.
+Four-eye principle for manifest changes. Requires server-side draft
+storage (migrates from browser-local to server-persisted drafts).
 
+- Server-side draft persistence (replaces localStorage)
+- Draft permalink for sharing (requires server-side storage)
 - Draft review workflow: drafter submits, reviewer approves
 - Audit trail: who drafted, who reviewed, timestamps
 - Configurable: can disable four-eye for solo operators
@@ -671,10 +673,10 @@ two PRDs can run in parallel.
    or only on explicit "Validate" button click? (Recommendation: debounced at
    500ms for a responsive feel, with explicit button as fallback.)
 
-5. **Draft persistence**: Should drafts be stored in the browser (localStorage)
-   or on the server? Browser storage is simpler and works offline; server
-   storage enables sharing and survives browser clears. (Recommendation:
-   browser-local for v1, server-side in Phase 8 when team review is added.)
+5. **Draft persistence**: Phase 7 uses browser-local storage (localStorage)
+   for simplicity. Phase 8 migrates to server-side storage when team review
+   requires draft sharing via permalinks. Browser storage works offline but
+   cannot support cross-user sharing.
 
 6. **Four-eye enforcement**: Should the four-eye review be a hard gate
    (cannot apply without reviewer) or soft (warning but allowed)?
