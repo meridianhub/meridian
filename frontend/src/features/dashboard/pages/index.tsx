@@ -165,6 +165,7 @@ export function DashboardPage() {
           value={paymentsCount?.count}
           isLoading={paymentsQuery.isLoading}
           error={paymentsQuery.isError}
+          onRetry={() => void paymentsQuery.refetch()}
           showRecentQualifier={!!(paymentsCount?.isEstimate && !paymentsQuery.isLoading && !paymentsQuery.isError)}
           description="Active payment orders"
           icon={<CreditCard className="h-4 w-4" />}
@@ -175,6 +176,7 @@ export function DashboardPage() {
           value={bookingLogsCount?.count}
           isLoading={bookingLogsQuery.isLoading}
           error={bookingLogsQuery.isError}
+          onRetry={() => void bookingLogsQuery.refetch()}
           showRecentQualifier={!!(bookingLogsCount?.isEstimate && !bookingLogsQuery.isLoading && !bookingLogsQuery.isError)}
           description="Financial booking logs"
           icon={<FileText className="h-4 w-4" />}
@@ -185,6 +187,7 @@ export function DashboardPage() {
           value={ledgerPostingsCount?.count}
           isLoading={ledgerPostingsQuery.isLoading}
           error={ledgerPostingsQuery.isError}
+          onRetry={() => void ledgerPostingsQuery.refetch()}
           showRecentQualifier={!!(ledgerPostingsCount?.isEstimate && !ledgerPostingsQuery.isLoading && !ledgerPostingsQuery.isError)}
           description="Double-entry postings"
           icon={<BarChart3 className="h-4 w-4" />}
