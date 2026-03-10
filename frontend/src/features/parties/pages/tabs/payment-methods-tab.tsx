@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useForm } from 'react-hook-form'
 
 interface PaymentMethodsTabProps {
@@ -93,6 +93,7 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Add Payment Method</DialogTitle>
+              <DialogDescription>Link a payment provider method to this party.</DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit((data) => void addMutation.mutateAsync(data))} className="space-y-4">
               <div>

@@ -8,6 +8,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import { useGrantRole, useRevokeRole } from '../hooks/use-identities'
@@ -107,6 +108,7 @@ export function RoleManagement({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Grant Role</DialogTitle>
+            <DialogDescription>Select a role to grant to this user.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
