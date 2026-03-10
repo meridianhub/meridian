@@ -212,13 +212,17 @@ test.describe('User detail - suspend dialog', () => {
 
 /**
  * Mock the IdentityService to return a single ACTIVE user.
- * Connect JSON protocol: ListIdentities response.
+ *
+ * Connect protocol unary success responses require Content-Type:
+ * application/connect+json (not application/json). The Connect-ES client
+ * rejects plain application/json 200 responses as parse errors.
+ * Error responses (4xx/5xx) use application/json per the Connect spec.
  */
 async function mockListIdentities(page: Page) {
   await page.route(/IdentityService\/ListIdentities/, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/json',
+      contentType: 'application/connect+json',
       body: JSON.stringify({
         identities: [
           {
@@ -248,7 +252,7 @@ async function mockRetrieveIdentity(page: Page) {
   await page.route(/IdentityService\/RetrieveIdentity/, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/json',
+      contentType: 'application/connect+json',
       body: JSON.stringify({
         identity: {
           id: 'mock-user-1',
@@ -274,7 +278,7 @@ async function mockListRoleAssignments(page: Page) {
   await page.route(/IdentityService\/ListRoleAssignments/, (route) => {
     void route.fulfill({
       status: 200,
-      contentType: 'application/json',
+      contentType: 'application/connect+json',
       body: JSON.stringify({ roleAssignments: [] }),
     })
   })
@@ -349,7 +353,7 @@ test.describe('Suspend API — successful suspend', () => {
       if (suspendCalled) {
         void route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: 'application/connect+json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -368,7 +372,7 @@ test.describe('Suspend API — successful suspend', () => {
       } else {
         void route.fulfill({
           status: 200,
-          contentType: 'application/json',
+          contentType: 'application/connect+json',
           body: JSON.stringify({
             identity: {
               id: 'mock-user-1',
@@ -391,7 +395,7 @@ test.describe('Suspend API — successful suspend', () => {
       suspendCalled = true
       void route.fulfill({
         status: 200,
-        contentType: 'application/json',
+        contentType: 'application/connect+json',
         body: JSON.stringify({
           identity: {
             id: 'mock-user-1',
