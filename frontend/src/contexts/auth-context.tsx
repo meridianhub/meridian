@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { toast } from 'sonner'
 import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 
 export interface JWTClaims {
@@ -116,6 +117,12 @@ interface AuthProviderProps {
 
 const SESSION_STORAGE_KEY = 'meridian_access_token'
 
+/** How far before expiry (ms) to show the warning toast */
+export const SESSION_WARNING_BEFORE_EXPIRY_MS = 120_000 // 2 minutes
+
+/** Stable toast ID so we can dismiss programmatically */
+const SESSION_WARNING_TOAST_ID = 'session-expiry-warning'
+
 function restoreToken(initialToken?: string): { token: string | null; claims: JWTClaims | null } {
   // Prefer explicit initialToken over stored token
   const candidate = initialToken ?? sessionStorage.getItem(SESSION_STORAGE_KEY)
@@ -143,20 +150,32 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   const [accessToken, setAccessToken] = useState<string | null>(restored.token)
   const [claims, setClaims] = useState<JWTClaims | null>(restored.claims)
 
-  const updateToken = useCallback((token: string | null) => {
+  // Auth generation counter: incremented whenever auth is explicitly cleared
+  // (logout, 401, tenant mismatch). Any in-flight refresh that started before
+  // the last clear will see a generation mismatch and discard its result,
+  // preventing stale responses from reviving a cleared session.
+  const authGenerationRef = useRef(0)
+
+  const updateToken = useCallback((token: string | null, generation?: number): boolean => {
+    // Discard response if auth was cleared after this refresh started.
+    if (generation !== undefined && generation !== authGenerationRef.current) {
+      return false
+    }
     if (!token) {
+      authGenerationRef.current += 1
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
-      return
+      return false
     }
     const parsed = parseJWT(token)
     if (!parsed) {
       // Malformed token - clear both token and claims
+      authGenerationRef.current += 1
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
-      return
+      return false
     }
     // Validate that the token's tenantId matches the current subdomain tenant.
     // This prevents session bleeding across subdomains for all token paths
@@ -165,14 +184,16 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     // See tenant-context.tsx where claims.tenantId is used directly as tenantSlug.
     const currentSlug = getTenantSlugFromSubdomain(window.location.hostname)
     if (currentSlug && parsed.tenantId && parsed.tenantId !== currentSlug) {
+      authGenerationRef.current += 1
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
-      return
+      return false
     }
     setAccessToken(token)
     setClaims(parsed)
     sessionStorage.setItem(SESSION_STORAGE_KEY, token)
+    return true
   }, [])
 
   const login = useCallback(
@@ -186,38 +207,86 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     updateToken(null)
   }, [updateToken])
 
-  const refreshToken = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-      })
+  // In-flight promise ref: shared across the toast action and the background
+  // timer so concurrent callers (e.g. button click racing with the auto-refresh
+  // timer) reuse the same request instead of issuing two.
+  const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
 
-      if (!response.ok) {
-        // Only clear auth state on 401 Unauthorized.
-        // Transient errors (5xx, network) should not log the user out.
-        if (response.status === 401) {
-          updateToken(null)
+  const refreshToken = useCallback((): Promise<boolean> => {
+    if (refreshInFlightRef.current) return refreshInFlightRef.current
+
+    // Capture generation at call time; discard result if auth is cleared
+    // while the request is in flight (e.g., user logs out mid-refresh).
+    const callGeneration = authGenerationRef.current
+
+    const request = (async () => {
+      try {
+        const response = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        })
+
+        if (!response.ok) {
+          // Only clear auth state on 401 Unauthorized.
+          // Transient errors (5xx, network) should not log the user out.
+          if (response.status === 401) {
+            updateToken(null, callGeneration)
+          }
+          return false
         }
-        return false
-      }
 
-      const data = (await response.json()) as { accessToken: string }
-      const parsed = parseJWT(data.accessToken)
-      if (!parsed) {
-        // Server returned a malformed token - treat as refresh failure without clearing auth
+        const data = (await response.json()) as { accessToken: string }
+        const parsed = parseJWT(data.accessToken)
+        if (!parsed || isTokenExpired(parsed)) {
+          // Server returned a malformed or already-expired token - treat as refresh failure
+          return false
+        }
+        return updateToken(data.accessToken, callGeneration)
+      } catch {
+        // Network error - do not clear auth state (may be transient)
         return false
+      } finally {
+        refreshInFlightRef.current = null
       }
-      updateToken(data.accessToken)
-      return true
-    } catch {
-      // Network error - do not clear auth state (may be transient)
-      return false
-    }
+    })()
+
+    refreshInFlightRef.current = request
+    return request
   }, [updateToken])
 
-  // Check token expiry on mount and set up refresh timer
+  // Prevents duplicate toast handlers when the user clicks "Extend session"
+  // multiple times while the same in-flight request is still pending.
+  const warningActionInFlightRef = useRef(false)
+
+  // Show session expiry warning toast
+  const showSessionWarning = useCallback(() => {
+    toast.warning('Your session is about to expire.', {
+      id: SESSION_WARNING_TOAST_ID,
+      duration: Infinity,
+      action: {
+        label: 'Extend session',
+        onClick: () => {
+          if (warningActionInFlightRef.current) return
+          warningActionInFlightRef.current = true
+          void refreshToken()
+            .then((ok) => {
+              if (ok) {
+                toast.dismiss(SESSION_WARNING_TOAST_ID)
+                toast.success('Session extended.')
+              } else {
+                toast.error('Failed to extend session. Please refresh the page to log in again.')
+              }
+            })
+            .finally(() => {
+              warningActionInFlightRef.current = false
+            })
+        },
+      },
+    })
+  }, [refreshToken])
+
+  // Check token expiry on mount and set up refresh + warning timers
   useEffect(() => {
     if (!claims || !accessToken) return
     if (isTokenExpired(claims)) {
@@ -227,16 +296,32 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       return
     }
 
-    // Schedule refresh 60 seconds before expiry
     const expiresInMs = claims.exp * 1000 - Date.now()
-    const refreshInMs = Math.max(expiresInMs - 60_000, 0)
 
-    const timer = setTimeout(() => {
-      void refreshToken()
+    // Schedule warning toast ~2 minutes before expiry
+    const warningInMs = Math.max(expiresInMs - SESSION_WARNING_BEFORE_EXPIRY_MS, 0)
+    const warningTimer = setTimeout(() => {
+      showSessionWarning()
+    }, warningInMs)
+
+    // Schedule refresh 60 seconds before expiry; dismiss the warning toast
+    // only if the refresh succeeds so the CTA stays visible as a manual
+    // recovery path on transient errors.
+    const refreshInMs = Math.max(expiresInMs - 60_000, 0)
+    const refreshTimer = setTimeout(() => {
+      void refreshToken().then((ok) => {
+        if (ok) {
+          toast.dismiss(SESSION_WARNING_TOAST_ID)
+        }
+      })
     }, refreshInMs)
 
-    return () => clearTimeout(timer)
-  }, [claims, accessToken, refreshToken])
+    return () => {
+      clearTimeout(warningTimer)
+      clearTimeout(refreshTimer)
+      toast.dismiss(SESSION_WARNING_TOAST_ID)
+    }
+  }, [claims, accessToken, refreshToken, showSessionWarning])
 
   const lens = getUserLens(claims)
   const isAuthenticated = claims !== null && !isTokenExpired(claims)
