@@ -11,9 +11,14 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
 )
 
-// errUnexpectedLoopExit is returned when the validate-fix loop exits unexpectedly.
-// This is a sentinel for an unreachable code path.
-var errUnexpectedLoopExit = errors.New("validate-fix: unexpected loop exit")
+// Sentinel errors for ValidateAndFix option validation and loop guards.
+var (
+	errUnexpectedLoopExit        = errors.New("validate-fix: unexpected loop exit")
+	errNegativeMaxIterations     = errors.New("validate-fix: MaxIterations must be >= 0")
+	errValidatorRequired         = errors.New("validate-fix: validator is required")
+	errLLMClientRequiredForFixes = errors.New("validate-fix: LLM client is required when MaxIterations > 0")
+	errNilValidatorResult        = errors.New("validate-fix: nil result from validator")
+)
 
 // ManifestValidator abstracts the validation pipeline for the validate-fix loop.
 // It performs a dry-run validation returning structured errors without persisting anything.
@@ -77,6 +82,16 @@ type ValidateFixResult struct {
 //  4. If errors: enrich errors, send to LLM via LLMClient.Fix, repeat
 //  5. After MaxIterations: return with remaining errors and Valid=false
 func ValidateAndFix(ctx context.Context, manifestYAML string, opts ValidateFixOptions) (*ValidateFixResult, error) {
+	if opts.MaxIterations < 0 {
+		return nil, errNegativeMaxIterations
+	}
+	if opts.Validator == nil {
+		return nil, errValidatorRequired
+	}
+	if opts.MaxIterations > 0 && opts.LLMClient == nil {
+		return nil, errLLMClientRequiredForFixes
+	}
+
 	current := manifestYAML
 
 	for iter := 0; iter <= opts.MaxIterations; iter++ {
@@ -87,6 +102,9 @@ func ValidateAndFix(ctx context.Context, manifestYAML string, opts ValidateFixOp
 		result, err := opts.Validator.ValidateDryRun(ctx, current)
 		if err != nil {
 			return nil, fmt.Errorf("validate manifest (iteration %d): %w", iter, err)
+		}
+		if result == nil {
+			return nil, fmt.Errorf("validate manifest (iteration %d): %w", iter, errNilValidatorResult)
 		}
 
 		// Step 3: If valid, we are done
@@ -148,9 +166,8 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 	inScript := false
 	var scriptIndent int
 	var scriptLines []string
-	var scriptStartIdx int
 
-	for i, line := range lines {
+	for _, line := range lines {
 		if !inScript {
 			// Detect "script: |" or "script: |-" at any indentation level
 			trimmed := strings.TrimLeft(line, " \t")
@@ -159,7 +176,6 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 				inScript = true
 				scriptIndent = indent
 				scriptLines = nil
-				scriptStartIdx = i
 				result = append(result, line)
 				continue
 			}
@@ -179,12 +195,9 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 			script := strings.Join(scriptLines, "\n")
 			fixed := applyDeprecatedHandlerFixes(script, deprecatedHandlers)
 			fixedLines := strings.Split(fixed, "\n")
-			// Replace the script lines in result (they were already appended as empty during collection)
-			// We need to backfill: scriptLines were NOT yet appended — we deferred them
 			result = append(result, fixedLines...)
 			inScript = false
 			scriptLines = nil
-			_ = scriptStartIdx
 			result = append(result, line)
 			continue
 		}
@@ -299,35 +312,56 @@ func replaceDeprecatedHandler(script string, oldName string, info deprecatedHand
 }
 
 // findHandlerCall finds the index of oldName followed by optional whitespace and '(' in s.
-// Returns -1 if not found. Only matches at word boundaries (preceded by non-ident or start of string).
+// Returns -1 if not found. Only matches at word boundaries outside string literals and comments.
 func findHandlerCall(s, oldName string) int {
-	idx := 0
-	for {
-		pos := strings.Index(s[idx:], oldName)
-		if pos < 0 {
-			return -1
-		}
-		pos += idx
-
-		// Check word boundary before
-		if pos > 0 && isScriptIdentChar(s[pos-1]) {
-			idx = pos + 1
+	for i := 0; i < len(s); {
+		// Skip string literals and line comments to avoid false matches.
+		if next, skip := advancePastToken(s, i); skip {
+			i = next
 			continue
 		}
 
-		// Check that something follows: optional whitespace then '('
-		rest := s[pos+len(oldName):]
-		wsEnd := 0
-		for wsEnd < len(rest) && (rest[wsEnd] == ' ' || rest[wsEnd] == '\t') {
-			wsEnd++
-		}
-		if wsEnd >= len(rest) || rest[wsEnd] != '(' {
-			idx = pos + 1
-			continue
+		// Check for oldName at position i (outside string/comment).
+		if isHandlerCallAt(s, i, oldName) {
+			return i
 		}
 
-		return pos
+		i++
 	}
+	return -1
+}
+
+// advancePastToken advances past a string literal or line comment starting at i.
+// Returns (next position, true) when a token was skipped, or (i, false) otherwise.
+func advancePastToken(s string, i int) (int, bool) {
+	if s[i] == '"' || s[i] == '\'' {
+		return advancePastString(s, i), true
+	}
+	if s[i] == '#' {
+		j := i
+		for j < len(s) && s[j] != '\n' {
+			j++
+		}
+		return j, true
+	}
+	return i, false
+}
+
+// isHandlerCallAt returns true when oldName appears at position i in s followed by
+// optional whitespace and '(', at a word boundary (not preceded by an ident char).
+func isHandlerCallAt(s string, i int, oldName string) bool {
+	if !strings.HasPrefix(s[i:], oldName) {
+		return false
+	}
+	if i > 0 && isScriptIdentChar(s[i-1]) {
+		return false
+	}
+	rest := s[i+len(oldName):]
+	wsEnd := 0
+	for wsEnd < len(rest) && (rest[wsEnd] == ' ' || rest[wsEnd] == '\t') {
+		wsEnd++
+	}
+	return wsEnd < len(rest) && rest[wsEnd] == '('
 }
 
 func isScriptIdentChar(ch byte) bool {
@@ -628,9 +662,14 @@ func min3(a, b, c int) int {
 }
 
 // extractHandlerName extracts the handler name from an error path like
-// "sagas[0].script:position_keeping.initiate_log" or "sagas[0]:position_keeping.initiate_log".
+// "sagas[0].script:position_keeping.initiate_log" or "sagas[0]:position_keeping.initiate_log#amount".
 // Returns empty string when no handler name can be determined.
 func extractHandlerName(path string) string {
+	// Strip any #param suffix before extracting the handler name.
+	if hash := strings.LastIndex(path, "#"); hash >= 0 {
+		path = path[:hash]
+	}
+
 	// Look for a pattern like "service_name.handler_name" in the path
 	colon := strings.LastIndex(path, ":")
 	if colon >= 0 && colon < len(path)-1 {

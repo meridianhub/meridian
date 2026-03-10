@@ -309,3 +309,130 @@ func TestApplyMutatingPhase_NoDeprecatedHandlers(t *testing.T) {
 	result := generator.ApplyMutatingPhase(manifest, reg)
 	assert.Equal(t, manifest, result)
 }
+
+// --- ValidateAndFix input validation tests ---
+
+// TestValidateAndFix_NilValidator returns an error immediately.
+func TestValidateAndFix_NilValidator(t *testing.T) {
+	_, err := generator.ValidateAndFix(context.Background(), "x: 1", generator.ValidateFixOptions{
+		MaxIterations: 0,
+		Validator:     nil,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "validator is required")
+}
+
+// TestValidateAndFix_NegativeMaxIterations returns an error immediately.
+func TestValidateAndFix_NegativeMaxIterations(t *testing.T) {
+	_, err := generator.ValidateAndFix(context.Background(), "x: 1", generator.ValidateFixOptions{
+		MaxIterations: -1,
+		Validator:     &mockValidator{},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MaxIterations must be >= 0")
+}
+
+// TestValidateAndFix_NilLLMClientWithIterations returns an error when fixes are expected.
+func TestValidateAndFix_NilLLMClientWithIterations(t *testing.T) {
+	_, err := generator.ValidateAndFix(context.Background(), "x: 1", generator.ValidateFixOptions{
+		MaxIterations: 2,
+		Validator:     &mockValidator{},
+		LLMClient:     nil,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "LLM client is required")
+}
+
+// --- replaceDeprecatedHandler (text manipulation) tests ---
+
+// TestReplaceDeprecatedHandler_BasicRename verifies a simple handler name replacement.
+func TestReplaceDeprecatedHandler_BasicRename(t *testing.T) {
+	script := "old_handler(amount=100, direction='CREDIT')"
+	info := generator.NewDeprecatedHandlerInfo("new_handler")
+	result := generator.ReplaceDeprecatedHandler(script, "old_handler", info)
+	assert.Equal(t, "new_handler(amount=100, direction='CREDIT')", result)
+}
+
+// TestReplaceDeprecatedHandler_SkipsStringLiteral verifies that handler names inside
+// string literals are not replaced.
+func TestReplaceDeprecatedHandler_SkipsStringLiteral(t *testing.T) {
+	script := `x = "old_handler(amount=1)"` + "\nold_handler(amount=2)"
+	info := generator.NewDeprecatedHandlerInfo("new_handler")
+	result := generator.ReplaceDeprecatedHandler(script, "old_handler", info)
+	// The string literal occurrence must be preserved; only the real call is replaced.
+	assert.Contains(t, result, `"old_handler(amount=1)"`)
+	assert.Contains(t, result, "new_handler(amount=2)")
+}
+
+// TestReplaceDeprecatedHandler_SkipsLineComment verifies that handler names in comments
+// are not replaced.
+func TestReplaceDeprecatedHandler_SkipsLineComment(t *testing.T) {
+	script := "# old_handler(amount=1)\nold_handler(amount=2)"
+	info := generator.NewDeprecatedHandlerInfo("new_handler")
+	result := generator.ReplaceDeprecatedHandler(script, "old_handler", info)
+	assert.Contains(t, result, "# old_handler(amount=1)")
+	assert.Contains(t, result, "new_handler(amount=2)")
+}
+
+// TestReplaceDeprecatedHandler_WordBoundary verifies that "old_handler_extended" is not
+// matched when looking for "old_handler".
+func TestReplaceDeprecatedHandler_WordBoundary(t *testing.T) {
+	script := "old_handler_extended(amount=1)\nold_handler(amount=2)"
+	info := generator.NewDeprecatedHandlerInfo("new_handler")
+	result := generator.ReplaceDeprecatedHandler(script, "old_handler", info)
+	assert.Contains(t, result, "old_handler_extended(amount=1)")
+	assert.Contains(t, result, "new_handler(amount=2)")
+}
+
+// TestReplaceDeprecatedHandler_NoOccurrence returns script unchanged when name absent.
+func TestReplaceDeprecatedHandler_NoOccurrence(t *testing.T) {
+	script := "different_handler(amount=1)"
+	info := generator.NewDeprecatedHandlerInfo("new_handler")
+	result := generator.ReplaceDeprecatedHandler(script, "old_handler", info)
+	assert.Equal(t, script, result)
+}
+
+// --- findHandlerCall tests ---
+
+// TestFindHandlerCall_BasicMatch finds a handler call in plain text.
+func TestFindHandlerCall_BasicMatch(t *testing.T) {
+	s := "old_handler(x=1)"
+	idx := generator.FindHandlerCall(s, "old_handler")
+	assert.Equal(t, 0, idx)
+}
+
+// TestFindHandlerCall_InsideString returns -1 for occurrences inside string literals.
+func TestFindHandlerCall_InsideString(t *testing.T) {
+	s := `msg = "old_handler(x=1)"`
+	idx := generator.FindHandlerCall(s, "old_handler")
+	assert.Equal(t, -1, idx)
+}
+
+// TestFindHandlerCall_InsideComment returns -1 for occurrences in line comments.
+func TestFindHandlerCall_InsideComment(t *testing.T) {
+	s := "# old_handler(x=1)"
+	idx := generator.FindHandlerCall(s, "old_handler")
+	assert.Equal(t, -1, idx)
+}
+
+// --- extractHandlerName tests ---
+
+// TestExtractHandlerName_WithHashParam strips the #param suffix before extraction.
+func TestExtractHandlerName_WithHashParam(t *testing.T) {
+	path := "sagas[0]:position_keeping.initiate_log#amount"
+	name := generator.ExtractHandlerName(path)
+	assert.Equal(t, "position_keeping.initiate_log", name)
+}
+
+// TestExtractHandlerName_WithoutHash extracts handler from colon-delimited path.
+func TestExtractHandlerName_WithoutHash(t *testing.T) {
+	path := "sagas[0]:position_keeping.initiate_log"
+	name := generator.ExtractHandlerName(path)
+	assert.Equal(t, "position_keeping.initiate_log", name)
+}
+
+// TestExtractHandlerName_Empty returns empty for unrecognized path.
+func TestExtractHandlerName_Empty(t *testing.T) {
+	name := generator.ExtractHandlerName("sagas[0].name")
+	assert.Equal(t, "", name)
+}
