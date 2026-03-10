@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 
 export interface JWTClaims {
   userId: string
@@ -122,6 +123,14 @@ function restoreToken(initialToken?: string): { token: string | null; claims: JW
 
   const parsed = parseJWT(candidate)
   if (!parsed || isTokenExpired(parsed)) {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY)
+    return { token: null, claims: null }
+  }
+
+  // Validate that the token's tenantId matches the current subdomain tenant.
+  // This prevents session bleeding if a token is manually copied between subdomains.
+  const currentSlug = getTenantSlugFromSubdomain(window.location.hostname)
+  if (currentSlug && parsed.tenantId && parsed.tenantId !== currentSlug) {
     sessionStorage.removeItem(SESSION_STORAGE_KEY)
     return { token: null, claims: null }
   }
