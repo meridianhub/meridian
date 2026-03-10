@@ -62,3 +62,6 @@ type StaticComponents = staticComponents
 func (c *ClaudeLLMClient) Model() string {
 	return c.model
 }
+
+// YAMLToProtoManifest is the exported test hook for yamlToProtoManifest.
+var YAMLToProtoManifest = yamlToProtoManifest

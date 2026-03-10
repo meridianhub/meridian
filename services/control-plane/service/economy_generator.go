@@ -1,7 +1,6 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -12,8 +11,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-// EconomyGeneratorServiceConfig holds configuration for RegisterEconomyGeneratorService.
-type EconomyGeneratorServiceConfig struct {
+// EconomyGeneratorConfig holds configuration for RegisterEconomyGeneratorService.
+type EconomyGeneratorConfig struct {
 	// SchemaRegistry provides handler definitions for context assembly (required).
 	SchemaRegistry *schema.Registry
 
@@ -25,23 +24,32 @@ type EconomyGeneratorServiceConfig struct {
 	// May be nil if pattern matching is not required.
 	CookbookFS fs.FS
 
+	// LLMClient is used to generate and fix manifests. Required for GenerateManifest.
+	// May be nil if only GetGenerationContext is used.
+	LLMClient generator.LLMClient
+
+	// Validator validates manifest YAML in the validate-fix loop. Required for GenerateManifest.
+	// May be nil if only GetGenerationContext is used.
+	Validator generator.ManifestValidator
+
 	// Logger is the structured logger. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
 }
 
-// ErrSchemaRegistryRequired is returned when SchemaRegistry is nil during service registration.
-var ErrSchemaRegistryRequired = errors.New("economy generator service: schema registry is required")
-
 // RegisterEconomyGeneratorService creates and registers the EconomyGeneratorService on the
-// given gRPC server.
-func RegisterEconomyGeneratorService(server *grpc.Server, cfg EconomyGeneratorServiceConfig) error {
-	if cfg.SchemaRegistry == nil {
-		return ErrSchemaRegistryRequired
+// given gRPC server. Validation of required fields is delegated to generator.NewGeneratorService.
+func RegisterEconomyGeneratorService(server *grpc.Server, cfg EconomyGeneratorConfig) error {
+	opts := []generator.ServiceOption{}
+	if cfg.LLMClient != nil {
+		opts = append(opts, generator.WithLLMClient(cfg.LLMClient))
+	}
+	if cfg.Validator != nil {
+		opts = append(opts, generator.WithValidator(cfg.Validator))
 	}
 
-	svc, err := generator.NewGeneratorService(cfg.SchemaRegistry, cfg.ManifestHistory, cfg.CookbookFS, cfg.Logger)
+	svc, err := generator.NewGeneratorService(cfg.SchemaRegistry, cfg.ManifestHistory, cfg.CookbookFS, cfg.Logger, opts...)
 	if err != nil {
-		return fmt.Errorf("economy generator service: %w", err)
+		return fmt.Errorf("create economy generator service: %w", err)
 	}
 
 	controlplanev1.RegisterEconomyGeneratorServiceServer(server, svc)
