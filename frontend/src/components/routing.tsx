@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { apiConfig, isOnTenantSubdomain } from '@/api/config'
+import { Loader2 } from 'lucide-react'
 
 interface ProtectedRouteProps {
   children: ReactNode
@@ -74,15 +75,23 @@ function isLocalDev(): boolean {
  *
  * Platform routes (/tenants, /platform, /users, /login) stay on root.
  * Local dev is never redirected (no subdomain support).
+ *
+ * When the user is on the root domain viewing a tenant-scoped route but
+ * the tenant slug is not yet available (e.g. right after OIDC login before
+ * DevTenantAutoSelector resolves), a loading spinner is shown to prevent
+ * child components from rendering and firing API calls without tenant context.
  */
 export function TenantSubdomainEnforcer({ children }: { children: ReactNode }) {
   const { pathname, search, hash } = useLocation()
-  const { tenantSlug } = useTenantContext()
+  const { tenantSlug, isPlatformAdmin } = useTenantContext()
+
+  const onLocalDev = isLocalDev()
+  const onSubdomain = isOnTenantSubdomain()
+  const onPlatformPath = isPlatformPath(pathname)
 
   // Compute redirect URL only when needed: not local dev, not already on
   // subdomain, not a platform path, and a tenant is selected.
-  const needsRedirect =
-    !isLocalDev() && !isOnTenantSubdomain() && !isPlatformPath(pathname) && !!tenantSlug
+  const needsRedirect = !onLocalDev && !onSubdomain && !onPlatformPath && !!tenantSlug
 
   const redirectUrl = needsRedirect
     ? (() => {
@@ -104,6 +113,23 @@ export function TenantSubdomainEnforcer({ children }: { children: ReactNode }) {
 
   if (redirectUrl) {
     return null
+  }
+
+  // When a platform admin is on the root domain viewing a tenant-scoped route
+  // but no tenant is selected yet (e.g. waiting for DevTenantAutoSelector),
+  // show a loading state to prevent API calls without tenant context.
+  const awaitingTenant =
+    !onLocalDev && !onSubdomain && !onPlatformPath && isPlatformAdmin && !tenantSlug
+
+  if (awaitingTenant) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+          <p className="mt-2 text-sm text-muted-foreground">Loading tenant context...</p>
+        </div>
+      </div>
+    )
   }
 
   return <>{children}</>
