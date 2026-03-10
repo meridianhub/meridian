@@ -1,5 +1,6 @@
 import { Code, ConnectError } from '@connectrpc/connect'
 import { useCallback } from 'react'
+import { toast } from 'sonner'
 
 /**
  * Structured result from handling a ConnectError.
@@ -86,6 +87,8 @@ function extractFieldErrors(details: (IncomingDetail | object)[]): Record<string
 export interface HandleConnectErrorOptions {
   /** When provided, sets redirectTo to this path for NotFound errors */
   navigateToParent?: string
+  /** When true, shows a toast notification for the error */
+  showToast?: boolean
 }
 
 /**
@@ -118,6 +121,10 @@ export function handleConnectError(
   }
 
   const shouldRetry = code === Code.Unavailable
+
+  if (options.showToast) {
+    toast.error(message)
+  }
 
   return {
     message,
@@ -160,6 +167,32 @@ export function withErrorHandling(options: WithErrorHandlingOptions) {
       }
     },
   }
+}
+
+/**
+ * Convenience wrapper for mutations that should show toast errors.
+ * Shows a toast notification and optionally calls onError/onRedirect.
+ *
+ * Usage:
+ *   useMutation({
+ *     ...withToastErrorHandling()
+ *   })
+ *
+ *   useMutation({
+ *     ...withToastErrorHandling({
+ *       onError: (result) => setFieldErrors(result.fieldErrors),
+ *       onRedirect: (path) => navigate(path),
+ *     })
+ *   })
+ */
+export function withToastErrorHandling(
+  options: Partial<WithErrorHandlingOptions> = {},
+) {
+  return withErrorHandling({
+    ...options,
+    showToast: true,
+    onError: options.onError ?? (() => {}),
+  })
 }
 
 /**

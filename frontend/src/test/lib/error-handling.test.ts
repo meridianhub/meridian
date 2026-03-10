@@ -3,9 +3,17 @@ import { Code, ConnectError } from '@connectrpc/connect'
 import {
   handleConnectError,
   withErrorHandling,
+  withToastErrorHandling,
   useErrorHandler,
   type ConnectErrorResult,
 } from '@/lib/error-handling'
+import { toast } from 'sonner'
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+  },
+}))
 
 // Helper to create a ConnectError with debug details (simulating wire format)
 function makeConnectError(
@@ -353,5 +361,70 @@ describe('withErrorHandling', () => {
 describe('useErrorHandler', () => {
   it('is exported and is a function', () => {
     expect(typeof useErrorHandler).toBe('function')
+  })
+})
+
+describe('toast integration', () => {
+  beforeEach(() => {
+    vi.mocked(toast.error).mockClear()
+  })
+
+  it('does not show toast by default', () => {
+    const err = makeConnectError('test', Code.Internal)
+    handleConnectError(err)
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('shows toast when showToast option is true', () => {
+    const err = makeConnectError('test', Code.Internal)
+    handleConnectError(err, { showToast: true })
+    expect(toast.error).toHaveBeenCalledWith(
+      'An internal server error occurred. Please contact support if the problem persists.',
+    )
+  })
+
+  it('shows toast with correct message for different error codes', () => {
+    const err = makeConnectError('not found', Code.NotFound)
+    handleConnectError(err, { showToast: true })
+    expect(toast.error).toHaveBeenCalledWith('The requested resource was not found.')
+  })
+})
+
+describe('withToastErrorHandling', () => {
+  beforeEach(() => {
+    vi.mocked(toast.error).mockClear()
+  })
+
+  it('shows toast and calls onError', () => {
+    const onError = vi.fn()
+    const handler = withToastErrorHandling({ onError })
+    const err = makeConnectError('test', Code.Internal)
+
+    handler.onError(err)
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'An internal server error occurred. Please contact support if the problem persists.',
+    )
+    expect(onError).toHaveBeenCalledOnce()
+  })
+
+  it('works without onError callback', () => {
+    const handler = withToastErrorHandling()
+    const err = makeConnectError('test', Code.NotFound)
+
+    handler.onError(err)
+
+    expect(toast.error).toHaveBeenCalledWith('The requested resource was not found.')
+  })
+
+  it('calls onRedirect for Unauthenticated errors', () => {
+    const onRedirect = vi.fn()
+    const handler = withToastErrorHandling({ onRedirect })
+    const err = makeConnectError('expired', Code.Unauthenticated)
+
+    handler.onError(err)
+
+    expect(onRedirect).toHaveBeenCalledWith('/login')
+    expect(toast.error).toHaveBeenCalled()
   })
 })
