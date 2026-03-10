@@ -75,7 +75,8 @@ message GenerateManifestRequest {
   GenerationPreferences preferences = 4;
 
   // max_fix_iterations is the maximum number of times the generator will attempt to fix
-  // validation errors before returning. Must be between 0 and 5. Defaults to 3.
+  // validation errors before returning. Must be between 0 and 5. When unset (0), the
+  // server applies a default of 3 iterations.
   int32 max_fix_iterations = 5 [(buf.validate.field).int32 = {
     gte: 0
     lte: 5
@@ -131,12 +132,12 @@ message GetGenerationContextRequest {
     max_len: 10000
   }];
 
-  // include_patterns controls whether matched pattern fragments are included in the response.
-  // Defaults to true.
-  bool include_patterns = 2;
+  // exclude_patterns controls whether matched pattern fragments are omitted from the response.
+  // Defaults to false (patterns are included). Set to true to suppress pattern fragments.
+  bool exclude_patterns = 2;
 
   // include_current_economy controls whether the tenant's current manifest YAML is included.
-  // Defaults to false.
+  // Defaults to false (not included).
   bool include_current_economy = 3;
 
   // tenant_id is required when include_current_economy is true.
