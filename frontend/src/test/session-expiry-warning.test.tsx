@@ -96,10 +96,15 @@ describe('Session expiry warning', () => {
     expect(toast.warning).toHaveBeenCalled()
   })
 
-  it('dismisses warning toast when refresh timer fires', () => {
+  it('dismisses warning toast when refresh timer fires and refresh succeeds', async () => {
     // Token expires in 3 minutes
     const token = createTestToken({
       exp: Math.floor(Date.now() / 1000) + 180,
+    })
+    const newToken = createTestToken({ exp: Math.floor(Date.now() / 1000) + 3600 })
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ accessToken: newToken }),
     })
 
     render(
@@ -109,11 +114,34 @@ describe('Session expiry warning', () => {
     )
 
     // Advance to refresh time (expiresInMs - 60_000 = ~120s)
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(120_000)
+      await vi.advanceTimersByTimeAsync(0)
     })
 
     expect(toast.dismiss).toHaveBeenCalledWith('session-expiry-warning')
+  })
+
+  it('keeps warning toast visible when refresh timer fires but refresh fails', async () => {
+    // Token expires in 3 minutes
+    const token = createTestToken({
+      exp: Math.floor(Date.now() / 1000) + 180,
+    })
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 503 })
+
+    render(
+      <AuthProvider initialToken={token}>
+        <TestConsumer />
+      </AuthProvider>,
+    )
+
+    // Advance to refresh time (expiresInMs - 60_000 = ~120s)
+    await act(async () => {
+      vi.advanceTimersByTime(120_000)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(toast.dismiss).not.toHaveBeenCalledWith('session-expiry-warning')
   })
 
   it('dismisses warning toast on unmount', () => {

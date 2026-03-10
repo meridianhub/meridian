@@ -150,8 +150,19 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   const [accessToken, setAccessToken] = useState<string | null>(restored.token)
   const [claims, setClaims] = useState<JWTClaims | null>(restored.claims)
 
-  const updateToken = useCallback((token: string | null): boolean => {
+  // Auth generation counter: incremented whenever auth is explicitly cleared
+  // (logout, 401, tenant mismatch). Any in-flight refresh that started before
+  // the last clear will see a generation mismatch and discard its result,
+  // preventing stale responses from reviving a cleared session.
+  const authGenerationRef = useRef(0)
+
+  const updateToken = useCallback((token: string | null, generation?: number): boolean => {
+    // Discard response if auth was cleared after this refresh started.
+    if (generation !== undefined && generation !== authGenerationRef.current) {
+      return false
+    }
     if (!token) {
+      authGenerationRef.current += 1
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
@@ -160,6 +171,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     const parsed = parseJWT(token)
     if (!parsed) {
       // Malformed token - clear both token and claims
+      authGenerationRef.current += 1
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
@@ -172,6 +184,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     // See tenant-context.tsx where claims.tenantId is used directly as tenantSlug.
     const currentSlug = getTenantSlugFromSubdomain(window.location.hostname)
     if (currentSlug && parsed.tenantId && parsed.tenantId !== currentSlug) {
+      authGenerationRef.current += 1
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
@@ -202,6 +215,10 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   const refreshToken = useCallback((): Promise<boolean> => {
     if (refreshInFlightRef.current) return refreshInFlightRef.current
 
+    // Capture generation at call time; discard result if auth is cleared
+    // while the request is in flight (e.g., user logs out mid-refresh).
+    const callGeneration = authGenerationRef.current
+
     const request = (async () => {
       try {
         const response = await fetch('/api/auth/refresh', {
@@ -214,7 +231,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
           // Only clear auth state on 401 Unauthorized.
           // Transient errors (5xx, network) should not log the user out.
           if (response.status === 401) {
-            updateToken(null)
+            updateToken(null, callGeneration)
           }
           return false
         }
@@ -225,7 +242,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
           // Server returned a malformed token - treat as refresh failure without clearing auth
           return false
         }
-        return updateToken(data.accessToken)
+        return updateToken(data.accessToken, callGeneration)
       } catch {
         // Network error - do not clear auth state (may be transient)
         return false
@@ -287,11 +304,16 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       showSessionWarning()
     }, warningInMs)
 
-    // Schedule refresh 60 seconds before expiry
+    // Schedule refresh 60 seconds before expiry; dismiss the warning toast
+    // only if the refresh succeeds so the CTA stays visible as a manual
+    // recovery path on transient errors.
     const refreshInMs = Math.max(expiresInMs - 60_000, 0)
     const refreshTimer = setTimeout(() => {
-      toast.dismiss(SESSION_WARNING_TOAST_ID)
-      void refreshToken()
+      void refreshToken().then((ok) => {
+        if (ok) {
+          toast.dismiss(SESSION_WARNING_TOAST_ID)
+        }
+      })
     }, refreshInMs)
 
     return () => {
