@@ -72,7 +72,7 @@ def execute_cost_adjustment():
         # Get current units on this account
         step(name="get_balance_" + str(adjustment_count))
         position = position_keeping.get_balance(
-            account_id=holding.account_id,
+            position_id=holding.account_id,
         )
 
         if position.amount == 0:
@@ -84,7 +84,7 @@ def execute_cost_adjustment():
 
         step(name="book_adjustment_" + str(adjustment_count))
         position_keeping.initiate_log(
-            account_id=holding.metadata.cost_basis_account_id,
+            position_id=holding.metadata.cost_basis_account_id,
             instrument_code="GBP",
             direction="CREDIT",
             amount=adjustment,
