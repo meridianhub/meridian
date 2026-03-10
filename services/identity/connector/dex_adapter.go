@@ -1,14 +1,19 @@
 // Package connector provides the Dex integration adapter for the Meridian
 // identity connector.
 //
-// DexPasswordConnector wraps the internal Connector to implement Dex's
-// connector.PasswordConnector interface. It handles:
+// This adapter bridges the Meridian identity connector to the Dex sidecar's
+// PasswordConnector interface. When building a custom Dex binary, this
+// adapter's types map 1:1 to Dex's connector.Identity and
+// connector.PasswordConnector.
+//
+// DexPasswordConnector wraps the internal Connector to implement the
+// PasswordConnector interface. It handles:
 //
 //   - Tenant context propagation: extracts tenant slug from the username field
 //     (format "tenant:<slug>/<email>") and resolves it to a TenantID via the
 //     tenant repository before delegating to the internal connector.
-//   - Identity mapping: converts the internal connector.Identity to Dex's
-//     connector.Identity struct.
+//   - Identity mapping: converts the internal connector.Identity to a
+//     DexIdentity with tenant context in ConnectorData and Groups.
 //   - Custom claims: encodes tenant_id in ConnectorData and adds a
 //     "tenant:<tenant_id>" entry to Groups for downstream JWT enrichment.
 package connector
@@ -21,11 +26,31 @@ import (
 	"log/slog"
 	"strings"
 
-	dexconnector "github.com/dexidp/dex/connector"
 	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
+
+// Scopes mirrors Dex's connector.Scopes struct. It describes the set of
+// scopes requested by the OAuth2 client. This local definition avoids
+// importing the Dex Go module (which runs as an external sidecar).
+type Scopes struct {
+	OfflineAccess bool
+	Groups        bool
+}
+
+// DexIdentity mirrors Dex's connector.Identity struct. It represents the
+// authenticated user identity returned by the connector to Dex. This local
+// definition maps 1:1 to Dex's type without requiring a Go module dependency.
+type DexIdentity struct {
+	UserID            string
+	Username          string
+	PreferredUsername string
+	Email             string
+	EmailVerified     bool
+	Groups            []string
+	ConnectorData     []byte
+}
 
 // TenantResolver looks up a tenant by slug and returns its TenantID.
 // This is satisfied by tenantdomain.TenantRepository but defined as a
@@ -125,12 +150,12 @@ const tenantGroupPrefix = "tenant:"
 //  3. Injects the TenantID into the context
 //  4. Delegates to the internal Connector.Login
 //  5. Maps the result to a Dex connector.Identity with tenant context
-func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes, username, password string) (dexconnector.Identity, bool, error) {
+func (d *DexPasswordConnector) Login(ctx context.Context, s Scopes, username, password string) (DexIdentity, bool, error) {
 	slug, email, err := parseTenantUsername(username)
 	if err != nil {
 		d.logger.InfoContext(ctx, "dex adapter: invalid username format",
 			"error", err)
-		return dexconnector.Identity{}, false, nil
+		return DexIdentity{}, false, nil
 	}
 
 	// Resolve tenant slug to TenantID.
@@ -141,12 +166,12 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes,
 		if errors.Is(err, tenantdomain.ErrNotFound) || errors.Is(err, tenantpersistence.ErrTenantNotFound) {
 			d.logger.InfoContext(ctx, "dex adapter: tenant not found",
 				"slug", slug)
-			return dexconnector.Identity{}, false, nil
+			return DexIdentity{}, false, nil
 		}
 		d.logger.ErrorContext(ctx, "dex adapter: failed to resolve tenant",
 			"slug", slug,
 			"error", err)
-		return dexconnector.Identity{}, false, fmt.Errorf("dex adapter: resolve tenant: %w", err)
+		return DexIdentity{}, false, fmt.Errorf("dex adapter: resolve tenant: %w", err)
 	}
 
 	tenantID := tenantEntity.ID
@@ -158,10 +183,10 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes,
 	// Delegate to internal connector.
 	identity, valid, err := d.connector.Login(ctx, scopes, email, password)
 	if err != nil {
-		return dexconnector.Identity{}, false, err
+		return DexIdentity{}, false, err
 	}
 	if !valid {
-		return dexconnector.Identity{}, false, nil
+		return DexIdentity{}, false, nil
 	}
 
 	// Build Dex identity with tenant context.
@@ -175,22 +200,22 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s dexconnector.Scopes,
 
 // Refresh updates the identity on token refresh. It re-resolves tenant context
 // from the ConnectorData stored during the initial login.
-func (d *DexPasswordConnector) Refresh(ctx context.Context, _ dexconnector.Scopes, identity dexconnector.Identity) (dexconnector.Identity, error) {
+func (d *DexPasswordConnector) Refresh(ctx context.Context, _ Scopes, identity DexIdentity) (DexIdentity, error) {
 	// Extract tenant ID from stored connector data.
 	var cd connectorData
 	if len(identity.ConnectorData) > 0 {
 		if err := json.Unmarshal(identity.ConnectorData, &cd); err != nil {
-			return dexconnector.Identity{}, fmt.Errorf("dex adapter: unmarshal connector data: %w", err)
+			return DexIdentity{}, fmt.Errorf("dex adapter: unmarshal connector data: %w", err)
 		}
 	}
 
 	if cd.TenantID == "" {
-		return dexconnector.Identity{}, ErrMissingTenantInConnectorData
+		return DexIdentity{}, ErrMissingTenantInConnectorData
 	}
 
 	tenantID, err := tenant.NewTenantID(cd.TenantID)
 	if err != nil {
-		return dexconnector.Identity{}, fmt.Errorf("dex adapter: invalid tenant_id in connector data: %w", err)
+		return DexIdentity{}, fmt.Errorf("dex adapter: invalid tenant_id in connector data: %w", err)
 	}
 
 	ctx = tenant.WithTenant(ctx, tenantID)
@@ -203,7 +228,7 @@ func (d *DexPasswordConnector) Refresh(ctx context.Context, _ dexconnector.Scope
 		if err == nil {
 			err = ErrUserNoLongerValid
 		}
-		return dexconnector.Identity{}, err
+		return DexIdentity{}, err
 	}
 
 	return toDexIdentity(updatedIdentity, tenantID), nil
@@ -240,7 +265,7 @@ func parseTenantUsername(username string) (slug, email string, err error) {
 
 // toDexIdentity converts an internal connector.Identity to a Dex
 // connector.Identity, encoding tenant context in ConnectorData and Groups.
-func toDexIdentity(identity Identity, tenantID tenant.TenantID) dexconnector.Identity {
+func toDexIdentity(identity Identity, tenantID tenant.TenantID) DexIdentity {
 	// Encode tenant ID in ConnectorData for refresh token support.
 	cd := connectorData{TenantID: tenantID.String()}
 	cdBytes, _ := json.Marshal(cd) // connectorData is simple; marshal won't fail.
@@ -250,7 +275,7 @@ func toDexIdentity(identity Identity, tenantID tenant.TenantID) dexconnector.Ide
 	groups = append(groups, tenantGroupPrefix+tenantID.String())
 	groups = append(groups, identity.Groups...)
 
-	return dexconnector.Identity{
+	return DexIdentity{
 		UserID:        identity.UserID,
 		Username:      identity.Username,
 		Email:         identity.Email,
@@ -263,7 +288,7 @@ func toDexIdentity(identity Identity, tenantID tenant.TenantID) dexconnector.Ide
 // dexScopesToStrings converts Dex Scopes to a string slice for the internal
 // connector. Currently the internal connector ignores scopes, but this
 // maintains interface compatibility.
-func dexScopesToStrings(s dexconnector.Scopes) []string {
+func dexScopesToStrings(s Scopes) []string {
 	var scopes []string
 	if s.OfflineAccess {
 		scopes = append(scopes, "offline_access")

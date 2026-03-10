@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"testing"
 
-	dexconnector "github.com/dexidp/dex/connector"
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/connector"
 	"github.com/meridianhub/meridian/services/identity/domain"
@@ -100,7 +99,7 @@ func TestDexLogin_Success(t *testing.T) {
 
 	got, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{Groups: true},
+		connector.Scopes{Groups: true},
 		"tenant:volterra/alice@example.com",
 		testPassword,
 	)
@@ -143,7 +142,7 @@ func TestDexLogin_Success_PreservesRoleGroups(t *testing.T) {
 
 	got, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{Groups: true},
+		connector.Scopes{Groups: true},
 		"tenant:acme/bob@example.com",
 		testPassword,
 	)
@@ -165,7 +164,7 @@ func TestDexLogin_MissingTenantPrefix_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"alice@example.com",
 		testPassword,
 	)
@@ -182,7 +181,7 @@ func TestDexLogin_MissingSeparator_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:volterra",
 		testPassword,
 	)
@@ -199,7 +198,7 @@ func TestDexLogin_EmptySlug_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:/alice@example.com",
 		testPassword,
 	)
@@ -216,7 +215,7 @@ func TestDexLogin_EmptyEmail_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:volterra/",
 		testPassword,
 	)
@@ -235,7 +234,7 @@ func TestDexLogin_TenantNotFound_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:unknown/alice@example.com",
 		testPassword,
 	)
@@ -252,7 +251,7 @@ func TestDexLogin_TenantResolverError_ReturnsError(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:volterra/alice@example.com",
 		testPassword,
 	)
@@ -275,7 +274,7 @@ func TestDexLogin_WrongPassword_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:volterra/dave@example.com",
 		"WrongPassword999!",
 	)
@@ -297,7 +296,7 @@ func TestDexLogin_IdentityNotFound_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:volterra/nobody@example.com",
 		testPassword,
 	)
@@ -318,7 +317,7 @@ func TestDexLogin_TenantNotFound_PersistenceError_ReturnsFalse(t *testing.T) {
 
 	_, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{},
+		connector.Scopes{},
 		"tenant:unknown/alice@example.com",
 		testPassword,
 	)
@@ -342,7 +341,7 @@ func TestDexRefresh_Success(t *testing.T) {
 	// First login to get a valid identity with ConnectorData.
 	loginIdentity, valid, err := adapter.Login(
 		context.Background(),
-		dexconnector.Scopes{Groups: true},
+		connector.Scopes{Groups: true},
 		"tenant:volterra/alice@example.com",
 		testPassword,
 	)
@@ -352,7 +351,7 @@ func TestDexRefresh_Success(t *testing.T) {
 	// Refresh using the login identity.
 	refreshed, err := adapter.Refresh(
 		context.Background(),
-		dexconnector.Scopes{Groups: true},
+		connector.Scopes{Groups: true},
 		loginIdentity,
 	)
 
@@ -371,8 +370,8 @@ func TestDexRefresh_MissingConnectorData_ReturnsError(t *testing.T) {
 
 	_, err := adapter.Refresh(
 		context.Background(),
-		dexconnector.Scopes{},
-		dexconnector.Identity{Email: "alice@example.com"},
+		connector.Scopes{},
+		connector.DexIdentity{Email: "alice@example.com"},
 	)
 
 	require.ErrorIs(t, err, connector.ErrMissingTenantInConnectorData)
@@ -393,8 +392,8 @@ func TestDexRefresh_UserNoLongerValid_ReturnsError(t *testing.T) {
 
 	_, err := adapter.Refresh(
 		context.Background(),
-		dexconnector.Scopes{},
-		dexconnector.Identity{
+		connector.Scopes{},
+		connector.DexIdentity{
 			Email:         "nobody@example.com",
 			ConnectorData: cd,
 		},
