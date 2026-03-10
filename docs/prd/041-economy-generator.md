@@ -33,7 +33,8 @@ set of building blocks (instruments, account types, sagas, valuation rules). But
 creating a new economy requires deep knowledge of:
 
 - The manifest proto schema (30+ message types, nested structures)
-- Handler schemas (`handlers.yaml`) for valid Starlark service calls
+- Handler schemas (derived from proto via `DeriveSchema`, queryable via
+  `meridian_handlers_describe`) for valid Starlark service calls
 - Topic registry for event triggers
 - Cookbook patterns for industry-specific configurations
 - Cross-reference rules (instruments referenced by account types, sagas, valuation rules)
@@ -111,7 +112,7 @@ manifest. This is the critical component that determines generation quality.
 | Source | What It Provides | How It's Packaged |
 |--------|-----------------|-------------------|
 | `manifest.proto` | Field names, types, constraints, enums | Extracted schema summary (not raw proto) |
-| `handlers.yaml` | Valid handler names, parameters, types, compensation | Handler reference card |
+| `meridian_handlers_describe` | Valid handler names, parameters, types, compensation | Handler reference card (via MCP tool or `DeriveSchema(registry)` at runtime) |
 | `topics.All()` | Valid event trigger channels | Topic list with descriptions |
 | `api/asyncapi/*.yaml` | Event payload schemas | Field lists per topic |
 | `cookbook/registry.json` | Pattern metadata, composition rules | Pattern index with `provides`/`requires`/`composes_with` |
@@ -290,7 +291,18 @@ Returns the generation result with metadata:
       "description": "Maximum validate-fix loop iterations"
     }
   },
-  "required": ["description"]
+  "required": ["description"],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "mode": { "const": "amend" } },
+        "required": ["mode"]
+      },
+      "then": {
+        "required": ["tenant_id"]
+      }
+    }
+  ]
 }
 ```
 
@@ -326,7 +338,18 @@ the LLM. Useful for AI clients that want to do their own generation.
       "description": "Required if include_current_economy is true"
     }
   },
-  "required": ["description"]
+  "required": ["description"],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "include_current_economy": { "const": true } },
+        "required": ["include_current_economy"]
+      },
+      "then": {
+        "required": ["tenant_id"]
+      }
+    }
+  ]
 }
 ```
 

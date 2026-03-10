@@ -209,7 +209,10 @@ compiled handler schema loaded at page init.
 **Layout**: Split view:
 
 - Left: YAML editor (70% width)
-- Right: Relationship graph (30% width), updates on save/validate
+- Right: Relationship graph (30% width), renders the persisted economy state
+  or the graph returned from the latest `ManifestValidate` response (which
+  includes relationship graph extraction). In v1, the graph updates after
+  each successful validation pass, not on every keystroke
 
 #### 3. Validation Panel
 
@@ -240,6 +243,11 @@ Calls `ManifestPlan` and displays the structured diff:
 
 The plan diff includes the `plan_hash` required for apply. The user reviews
 the diff and clicks "Apply" to proceed.
+
+**Plan hash invalidation**: Any manifest edit after `ManifestPlan` invalidates
+the current diff and `plan_hash`. The UI must disable the Apply button and
+require the user to re-run Plan before deployment. This prevents deploying a
+manifest that differs from the reviewed diff.
 
 For new economies (no existing state), the plan shows all resources as "New."
 
@@ -285,8 +293,9 @@ a graph layout library (e.g., ELK, dagre, or React Flow).
 
 The graph updates when:
 
-- The manifest editor content changes (debounced, after validation)
-- A new manifest is generated
+- The latest `ManifestValidate` response returns a relationship graph
+  (validation extracts the graph from the draft manifest)
+- A new manifest is generated (generation response includes the graph)
 - A plan diff is displayed (highlights changed nodes)
 
 #### 7. Economy Overview
@@ -305,13 +314,19 @@ The IDE calls existing gRPC services — no new backend APIs needed:
 
 | Frontend Hook | Backend RPC | Purpose |
 |--------------|------------|---------|
-| `useManifestValidate` | `ManifestService.ValidateManifest` | Inline validation |
+| `useManifestValidate` | `ManifestService.ValidateManifest` | Inline validation + draft graph extraction |
 | `useManifestPlan` | `ApplyManifestService.PlanManifest` | Plan diff |
 | `useManifestApply` | `ApplyManifestService.ApplyManifest` | Deploy |
 | `useEconomyGenerate` | `meridian_economy_generate` (MCP/HTTP) | AI generation |
-| `useEconomyGraph` | `EconomyService.GetEconomyGraph` | Relationship data |
+| `useEconomyGraph` | `EconomyService.GetEconomyGraph` | Persisted economy relationship data |
 | `useEconomyStructure` | `EconomyService.GetEconomyStructure` | Current state |
 | `useManifestHistory` | `ManifestService.GetManifestHistory` | Version timeline |
+
+**Draft graph**: The relationship graph for in-editor drafts comes from the
+`ManifestValidate` response, which already extracts the graph during validation.
+No separate graph-from-draft endpoint is needed — the validate call serves
+double duty. `EconomyService.GetEconomyGraph` is used for the persisted
+economy state on the overview page.
 
 **Generator integration**: The `useEconomyGenerate` hook calls the generator
 tool from PRD-041. If the generator is not deployed, the hook returns a
