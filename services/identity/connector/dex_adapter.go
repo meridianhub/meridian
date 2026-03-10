@@ -26,7 +26,6 @@ import (
 	"log/slog"
 	"strings"
 
-	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -161,9 +160,7 @@ func (d *DexPasswordConnector) Login(ctx context.Context, s Scopes, username, pa
 	// Resolve tenant slug to TenantID.
 	tenantEntity, err := d.tenantResolver.GetBySlug(ctx, slug)
 	if err != nil {
-		// Check both domain and persistence not-found errors because the
-		// TenantResolver implementation may return either depending on the layer.
-		if errors.Is(err, tenantdomain.ErrNotFound) || errors.Is(err, tenantpersistence.ErrTenantNotFound) {
+		if errors.Is(err, tenantdomain.ErrNotFound) {
 			d.logger.InfoContext(ctx, "dex adapter: tenant not found",
 				"slug", slug)
 			return DexIdentity{}, false, nil

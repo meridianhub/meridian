@@ -41,19 +41,17 @@ services:
     # Not exposed to host — accessed only by meridian on the internal network
 
   dex:
-    # Custom Dex binary with Meridian identity connector pre-registered.
-    # Falls back to stock Dex image when MERIDIAN_DATABASE_URL is not set.
-    image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
-    entrypoint: ["/dex-meridian"]
+    image: ghcr.io/dexidp/dex:v2.41.1-alpine
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      MERIDIAN_DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
-    # Note: distroless image has no shell/wget — health is checked via
-    # Caddy retry and service_started dependency. The dex-meridian binary
-    # exposes /healthz on port 5556 for orchestrators that support HTTP checks.
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dex.yaml:/etc/dex/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5556/dex/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     # Not exposed to host — accessed only by meridian and caddy on the internal network
 
   meridian:
@@ -63,7 +61,7 @@ services:
       postgres:
         condition: service_healthy
       dex:
-        condition: service_started
+        condition: service_healthy
     environment:
       # --- Application ---
       ENVIRONMENT: ${ENVIRONMENT:-demo}
