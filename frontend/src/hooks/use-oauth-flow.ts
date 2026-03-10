@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { generateCodeVerifier, generateCodeChallenge, generateState } from '@/lib/pkce'
+import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 
 const PKCE_VERIFIER_KEY = 'meridian_pkce_verifier'
 const PKCE_STATE_KEY = 'meridian_pkce_state'
@@ -27,6 +28,12 @@ export function useOAuthFlow() {
       state,
       connector_id: connectorId,
     })
+
+    // Pass the tenant slug as a login_hint so Dex can scope the authentication
+    const tenantSlug = getTenantSlugFromSubdomain(window.location.hostname)
+    if (tenantSlug) {
+      params.set('login_hint', `tenant:${tenantSlug}`)
+    }
 
     window.location.href = `/dex/auth?${params.toString()}`
   }, [])
