@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { toast } from 'sonner'
 
 export interface JWTClaims {
   userId: string
@@ -115,6 +116,12 @@ interface AuthProviderProps {
 
 const SESSION_STORAGE_KEY = 'meridian_access_token'
 
+/** How far before expiry (ms) to show the warning toast */
+export const SESSION_WARNING_BEFORE_EXPIRY_MS = 120_000 // 2 minutes
+
+/** Stable toast ID so we can dismiss programmatically */
+const SESSION_WARNING_TOAST_ID = 'session-expiry-warning'
+
 function restoreToken(initialToken?: string): { token: string | null; claims: JWTClaims | null } {
   // Prefer explicit initialToken over stored token
   const candidate = initialToken ?? sessionStorage.getItem(SESSION_STORAGE_KEY)
@@ -197,7 +204,34 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     }
   }, [updateToken])
 
-  // Check token expiry on mount and set up refresh timer
+  // Ref to track whether a manual refresh from the warning toast is in flight
+  const refreshingRef = useRef(false)
+
+  // Show session expiry warning toast
+  const showSessionWarning = useCallback(() => {
+    toast.warning('Your session is about to expire.', {
+      id: SESSION_WARNING_TOAST_ID,
+      duration: Infinity,
+      action: {
+        label: 'Extend session',
+        onClick: () => {
+          if (refreshingRef.current) return
+          refreshingRef.current = true
+          void refreshToken().then((ok) => {
+            refreshingRef.current = false
+            if (ok) {
+              toast.dismiss(SESSION_WARNING_TOAST_ID)
+              toast.success('Session extended.')
+            } else {
+              toast.error('Failed to extend session. You will be redirected to login.')
+            }
+          })
+        },
+      },
+    })
+  }, [refreshToken])
+
+  // Check token expiry on mount and set up refresh + warning timers
   useEffect(() => {
     if (!claims || !accessToken) return
     if (isTokenExpired(claims)) {
@@ -207,16 +241,27 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       return
     }
 
-    // Schedule refresh 60 seconds before expiry
     const expiresInMs = claims.exp * 1000 - Date.now()
-    const refreshInMs = Math.max(expiresInMs - 60_000, 0)
 
-    const timer = setTimeout(() => {
+    // Schedule warning toast ~2 minutes before expiry
+    const warningInMs = Math.max(expiresInMs - SESSION_WARNING_BEFORE_EXPIRY_MS, 0)
+    const warningTimer = setTimeout(() => {
+      showSessionWarning()
+    }, warningInMs)
+
+    // Schedule refresh 60 seconds before expiry
+    const refreshInMs = Math.max(expiresInMs - 60_000, 0)
+    const refreshTimer = setTimeout(() => {
+      toast.dismiss(SESSION_WARNING_TOAST_ID)
       void refreshToken()
     }, refreshInMs)
 
-    return () => clearTimeout(timer)
-  }, [claims, accessToken, refreshToken])
+    return () => {
+      clearTimeout(warningTimer)
+      clearTimeout(refreshTimer)
+      toast.dismiss(SESSION_WARNING_TOAST_ID)
+    }
+  }, [claims, accessToken, refreshToken, showSessionWarning])
 
   const lens = getUserLens(claims)
   const isAuthenticated = claims !== null && !isTokenExpired(claims)
