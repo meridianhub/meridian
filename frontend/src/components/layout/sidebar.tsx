@@ -21,6 +21,7 @@ import {
   FileJson,
   Bot,
   Library,
+  Boxes,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTenantFeatures } from '@/hooks/use-tenant-features'
@@ -61,6 +62,7 @@ const TENANT_NAV_GROUPS: NavGroup[] = [
       { label: 'Forecasting', href: '/forecasting', icon: BarChart3, feature: 'forecasting' },
       { label: 'Reference Data', href: '/reference-data', icon: Database, feature: 'reference-data' },
       { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map, feature: 'mappings' },
+      { label: 'Economy', href: '/economy', icon: Boxes, feature: 'economy' },
       { label: 'Manifests', href: '/manifests', icon: FileJson, feature: 'manifests' },
       { label: 'MCP Config', href: '/mcp-config', icon: Bot, feature: 'mcp-config' },
       { label: 'Cookbook', href: '/cookbook', icon: Library },

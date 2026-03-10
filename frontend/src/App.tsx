@@ -39,6 +39,7 @@ import { McpConfigPage } from '@/features/mcp-config'
 import { TransactionsPage } from '@/features/transactions'
 import { UsersListPage, UserDetailPage } from '@/features/identity'
 import { CookbookPage } from '@/features/cookbook'
+import { EconomyOverviewPage, EconomyCreatePage, EconomyEditPage, EconomyExplorePage, EconomyDraftPage } from '@/features/economy'
 
 const CookbookPatternsPage = lazy(() =>
   import('@/features/cookbook/pages/patterns').then((m) => ({ default: m.CookbookPatternsPage })),
@@ -319,6 +320,11 @@ function AppShellLayout() {
         <Route path="/reference-data/nodes" element={<FeatureGuard feature="reference-data">{guarded(<NodesPage />)}</FeatureGuard>} />
         <Route path="/gateway-mappings" element={<FeatureGuard feature="mappings">{guarded(<MappingsPage />)}</FeatureGuard>} />
         <Route path="/gateway-mappings/:mappingId" element={<FeatureGuard feature="mappings">{guarded(<MappingDetailPage />)}</FeatureGuard>} />
+        <Route path="/economy" element={<FeatureGuard feature="economy">{guarded(<EconomyOverviewPage />)}</FeatureGuard>} />
+        <Route path="/economy/create" element={<FeatureGuard feature="economy">{guarded(<EconomyCreatePage />)}</FeatureGuard>} />
+        <Route path="/economy/edit" element={<FeatureGuard feature="economy">{guarded(<EconomyEditPage />)}</FeatureGuard>} />
+        <Route path="/economy/explore" element={<FeatureGuard feature="economy">{guarded(<EconomyExplorePage />)}</FeatureGuard>} />
+        <Route path="/economy/draft" element={<FeatureGuard feature="economy">{guarded(<EconomyDraftPage />)}</FeatureGuard>} />
         <Route path="/manifests" element={<FeatureGuard feature="manifests">{guarded(<ManifestsPage />)}</FeatureGuard>} />
         <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config">{guarded(<McpConfigPage />)}</FeatureGuard>} />
         <Route path="/cookbook" element={guarded(<CookbookPage />)} />
