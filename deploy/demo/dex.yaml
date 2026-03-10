@@ -45,11 +45,18 @@ oauth2:
 staticClients:
   - id: meridian-service
     name: Meridian
+    # Dex requires exact redirect URI matching per the OAuth 2.0 / OIDC spec
+    # (no wildcard or pattern support). Each tenant subdomain must be listed
+    # explicitly. When onboarding a new tenant, add its callback URL here and
+    # restart Dex.
     redirectURIs:
+      # Platform root
       - "https://demo.meridianhub.cloud/callback"
-      # Subdomain-based tenants — e.g. volterra.demo.meridianhub.cloud
+      # Tenant subdomains — add one entry per onboarded tenant
       - "https://volterra.demo.meridianhub.cloud/callback"
+      # Local development
       - "http://localhost:8090/callback"
+      - "http://localhost:3000/callback"
     public: true
 
 enablePasswordDB: true
