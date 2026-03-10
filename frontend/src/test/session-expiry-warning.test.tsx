@@ -184,7 +184,7 @@ describe('Session expiry warning', () => {
 
       await act(async () => {
         onClick()
-        await vi.runAllTimersAsync()
+        await vi.advanceTimersByTimeAsync(0)
       })
 
       expect(toast.dismiss).toHaveBeenCalledWith('session-expiry-warning')

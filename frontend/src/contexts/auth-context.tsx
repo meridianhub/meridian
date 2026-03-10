@@ -150,12 +150,12 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
   const [accessToken, setAccessToken] = useState<string | null>(restored.token)
   const [claims, setClaims] = useState<JWTClaims | null>(restored.claims)
 
-  const updateToken = useCallback((token: string | null) => {
+  const updateToken = useCallback((token: string | null): boolean => {
     if (!token) {
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
-      return
+      return false
     }
     const parsed = parseJWT(token)
     if (!parsed) {
@@ -163,7 +163,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
-      return
+      return false
     }
     // Validate that the token's tenantId matches the current subdomain tenant.
     // This prevents session bleeding across subdomains for all token paths
@@ -175,11 +175,12 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
-      return
+      return false
     }
     setAccessToken(token)
     setClaims(parsed)
     sessionStorage.setItem(SESSION_STORAGE_KEY, token)
+    return true
   }, [])
 
   const login = useCallback(
@@ -224,8 +225,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
           // Server returned a malformed token - treat as refresh failure without clearing auth
           return false
         }
-        updateToken(data.accessToken)
-        return true
+        return updateToken(data.accessToken)
       } catch {
         // Network error - do not clear auth state (may be transient)
         return false
@@ -238,6 +238,10 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     return request
   }, [updateToken])
 
+  // Prevents duplicate toast handlers when the user clicks "Extend session"
+  // multiple times while the same in-flight request is still pending.
+  const warningActionInFlightRef = useRef(false)
+
   // Show session expiry warning toast
   const showSessionWarning = useCallback(() => {
     toast.warning('Your session is about to expire.', {
@@ -246,14 +250,20 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       action: {
         label: 'Extend session',
         onClick: () => {
-          void refreshToken().then((ok) => {
-            if (ok) {
-              toast.dismiss(SESSION_WARNING_TOAST_ID)
-              toast.success('Session extended.')
-            } else {
-              toast.error('Failed to extend session. Please refresh the page to log in again.')
-            }
-          })
+          if (warningActionInFlightRef.current) return
+          warningActionInFlightRef.current = true
+          void refreshToken()
+            .then((ok) => {
+              if (ok) {
+                toast.dismiss(SESSION_WARNING_TOAST_ID)
+                toast.success('Session extended.')
+              } else {
+                toast.error('Failed to extend session. Please refresh the page to log in again.')
+              }
+            })
+            .finally(() => {
+              warningActionInFlightRef.current = false
+            })
         },
       },
     })
