@@ -10,10 +10,11 @@ import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
 import { createPlatformAdminToken } from './jwt-helpers'
 import { createTestQueryClient } from './test-utils'
+import type * as ApiConfig from '@/api/config'
 
 // Mock isOnTenantSubdomain to return false (simulating root domain)
 vi.mock('@/api/config', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/config')>()
+  const actual = await importOriginal<typeof ApiConfig>()
   return {
     ...actual,
     isOnTenantSubdomain: vi.fn(() => false),
