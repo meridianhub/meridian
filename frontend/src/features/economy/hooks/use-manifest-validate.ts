@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { create } from '@bufbuild/protobuf'
 import { useApiClients } from '@/api/context'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import type {
   ApplyManifestResponse,
   ValidationError,
 } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
-import { ApplyManifestStatus, StepResultStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+import {
+  ApplyManifestStatus,
+  StepResultStatus,
+  ValidationErrorSchema,
+} from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 
 export interface ValidationResult {
   errors: ValidationError[]
@@ -13,20 +18,14 @@ export interface ValidationResult {
   sequenceNumber: number
 }
 
-// Constructs a client-side ValidationError for cases where the server returns
-// no structured errors (e.g., network failures, step-level failures without
-// validation details). The cast is required because protobuf-es Message types
-// include internal fields ($typeName, $unknown) that cannot be set via create().
 function createValidationError(code: string, message: string): ValidationError {
-  return {
+  return create(ValidationErrorSchema, {
     severity: 'ERROR',
     path: '',
     code,
     message,
     suggestion: '',
-    $typeName: 'meridian.control_plane.v1.ValidationError',
-    $unknown: undefined,
-  } as unknown as ValidationError
+  })
 }
 
 export function useManifestValidate() {
@@ -120,7 +119,7 @@ export function useManifestValidate() {
             })
           })
           .finally(() => {
-            if (seq >= latestCompletedRef.current) {
+            if (seq >= sequenceRef.current) {
               setIsValidating(false)
             }
           })
