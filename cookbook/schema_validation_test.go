@@ -119,6 +119,7 @@ func openMockValue(contextName, name string) (starlark.Value, error) {
 		"quantity":    true,
 		"units":       true,
 		"unit_amount": true,
+		"value":       true, // market_data.get_observation().value used as Decimal input
 	}
 	if numericFields[name] {
 		return starlark.Float(0), nil
@@ -301,16 +302,48 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 	}
 
 	// For namespaces that ARE in the schema but the cookbook calls methods not
-	// yet registered (e.g. position_keeping.query_logs, reference_data.get_account),
-	// wrap them with a fallback that delegates to the open mock for unknown attrs.
+	// yet registered, wrap with a hybrid module. The hybrid uses an explicit
+	// allowlist so that misspelled registered handler names still fail validation
+	// while known aspirational/experimental handlers pass through.
+	//
+	// To add a handler to the allowlist, register it in the service client's
+	// RegisterStarlarkHandlers (preferred) or add it here with a comment
+	// explaining why it's not yet registered.
+	openFallbackHandlers := map[string]map[string]struct{}{
+		"current_account": {
+			// Not yet exposed as Starlark handlers; used in saas-billing patterns
+			"evaluate_asset_valuation": {},
+			"execute_withdrawal":       {},
+		},
+		"party": {
+			// Simple party lookup; not yet registered
+			"get": {},
+		},
+		"position_keeping": {
+			// Balance and list queries; not yet registered
+			"get_balance":      {},
+			"list_accounts":    {},
+			"query_accounts":   {},
+			"query_logs":       {},
+			"retrieve_balance": {},
+		},
+		"reference_data": {
+			// Reference data lookups; not yet registered
+			"get_account":      {},
+			"get_account_type": {},
+			"query":            {},
+		},
+	}
+
 	for _, ns := range allCookbookNamespaces {
 		if strictModule, ok := predeclared[ns]; ok {
 			if _, isOpenModule := strictModule.(*openServiceModule); !isOpenModule {
-				// Wrap with a hybrid module: strict for known handlers, open for unknown
+				// Wrap with a hybrid module: strict for known handlers, open for explicit allowlist
 				predeclared[ns] = &hybridServiceModule{
-					name:   ns,
-					strict: strictModule,
-					open:   &openServiceModule{name: ns},
+					name:         ns,
+					strict:       strictModule,
+					open:         &openServiceModule{name: ns},
+					openHandlers: openFallbackHandlers[ns],
 				}
 			}
 		}
@@ -332,22 +365,30 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 	// Decimal(s) returns a Float so that arithmetic operations (/, *, +, -)
 	// work correctly in scripts. Scripts pass Decimal results to handlers as
 	// the "amount" parameter which accepts string|int|float (TypeDecimal).
+	// Invalid inputs return an error so that broken cookbook scripts fail validation.
 	predeclared["Decimal"] = starlark.NewBuiltin("Decimal", func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
-		if len(args) == 1 {
-			switch v := args[0].(type) {
-			case starlark.Float:
-				return v, nil
-			case starlark.Int:
-				i64, _ := v.Int64()
-				return starlark.Float(float64(i64)), nil
-			case starlark.String:
-				// Parse the string as a float for arithmetic support
-				var f float64
-				_, _ = fmt.Sscanf(string(v), "%f", &f)
-				return starlark.Float(f), nil
-			}
+		if len(args) != 1 {
+			return nil, fmt.Errorf("Decimal: expected exactly 1 argument, got %d", len(args))
 		}
-		return starlark.Float(0), nil
+		switch v := args[0].(type) {
+		case starlark.Float:
+			return v, nil
+		case starlark.Int:
+			i64, ok := v.Int64()
+			if !ok {
+				return nil, fmt.Errorf("Decimal: integer too large to convert")
+			}
+			return starlark.Float(float64(i64)), nil
+		case starlark.String:
+			var f float64
+			n, err := fmt.Sscanf(string(v), "%f", &f)
+			if err != nil || n != 1 {
+				return nil, fmt.Errorf("Decimal: cannot parse %q as a number", string(v))
+			}
+			return starlark.Float(f), nil
+		default:
+			return nil, fmt.Errorf("Decimal: unsupported type %s", args[0].Type())
+		}
 	})
 
 	// input_data provides a mock dict with all keys used across cookbook scripts.
@@ -411,13 +452,16 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 }
 
 // hybridServiceModule delegates to the strict schema-validated module for
-// known handlers, and falls back to the open mock for unknown attribute access.
-// This enables schema validation for registered handlers while allowing
-// cookbook scripts to call not-yet-registered handlers without errors.
+// known handlers, and falls back to the open mock for handlers in openHandlers.
+// This enables strict schema validation for registered handlers while allowing
+// cookbook scripts to call a known set of not-yet-registered handlers without
+// errors. Any handler name that is neither registered nor in openHandlers will
+// fail validation (e.g. misspelled handler names).
 type hybridServiceModule struct {
-	name   string
-	strict starlark.Value
-	open   *openServiceModule
+	name         string
+	strict       starlark.Value
+	open         *openServiceModule
+	openHandlers map[string]struct{} // explicit allowlist of unregistered handler names
 }
 
 func (h *hybridServiceModule) String() string       { return h.name }
@@ -428,7 +472,11 @@ func (h *hybridServiceModule) Hash() (uint32, error) {
 	return 0, fmt.Errorf("unhashable: hybrid_service_module")
 }
 
-// Attr tries the strict module first; if the attribute is not found, falls back to the open module.
+// Attr tries the strict module first (schema-validated handlers).
+// If the handler is not found in the strict module, it is only allowed to
+// fall back to the open mock if explicitly listed in openHandlers.
+// Unknown handler names that are neither registered nor in the allowlist
+// return an error so that misspelled handler names fail validation.
 func (h *hybridServiceModule) Attr(name string) (starlark.Value, error) {
 	// Try strict module first (schema-validated handlers)
 	if hasAttr, ok := h.strict.(starlark.HasAttrs); ok {
@@ -437,8 +485,11 @@ func (h *hybridServiceModule) Attr(name string) (starlark.Value, error) {
 			return val, nil
 		}
 	}
-	// Fall back to open mock for unregistered handlers
-	return h.open.Attr(name)
+	// Fall back to open mock only for handlers in the explicit allowlist
+	if _, allowed := h.openHandlers[name]; allowed {
+		return h.open.Attr(name)
+	}
+	return nil, fmt.Errorf("%s.%s: handler not registered and not in open fallback allowlist (possible misspelling?)", h.name, name)
 }
 
 // AttrNames returns the names from the strict module only.
