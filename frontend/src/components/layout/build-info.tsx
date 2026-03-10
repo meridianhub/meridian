@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { apiConfig } from '@/api/config'
 
 interface VersionInfo {
   version: string
@@ -11,7 +10,7 @@ export function BuildInfo() {
   const [info, setInfo] = useState<VersionInfo | null>(null)
 
   useEffect(() => {
-    fetch(`${apiConfig.baseUrl}/version`)
+    fetch('/version')
       .then((res) => (res.ok ? res.json() : Promise.reject(res)))
       .then((data: VersionInfo) => setInfo(data))
       .catch(() => {
