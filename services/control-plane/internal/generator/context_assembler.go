@@ -17,6 +17,9 @@ var ErrBlankDescription = errors.New("description is required")
 // ErrMissingCurrentManifest is returned when IncludeCurrentEconomy is true but CurrentManifest is nil.
 var ErrMissingCurrentManifest = errors.New("CurrentManifest is required when IncludeCurrentEconomy is true")
 
+// ErrMissingRegistry is returned when AssembleContext is called with a nil schema registry.
+var ErrMissingRegistry = errors.New("registry is required")
+
 // ContextAssemblerOptions configures the context assembly process.
 type ContextAssemblerOptions struct {
 	// Description is the tenant's business description (required).
@@ -57,6 +60,9 @@ func AssembleContext(opts ContextAssemblerOptions, registry *schema.Registry, co
 	// Validate required fields.
 	if strings.TrimSpace(opts.Description) == "" {
 		return nil, ErrBlankDescription
+	}
+	if registry == nil {
+		return nil, ErrMissingRegistry
 	}
 	if opts.IncludeCurrentEconomy && opts.CurrentManifest == nil {
 		return nil, ErrMissingCurrentManifest
@@ -130,42 +136,66 @@ func buildPrompt(
 	// Available Event Topics
 	sb.WriteString(topicList)
 
-	// Relevant Patterns
-	if len(patterns) > 0 {
-		sb.WriteString("## Relevant Patterns (copy and adapt)\n\n")
-		for _, p := range patterns {
-			fmt.Fprintf(&sb, "### Pattern: %s\n\n", p.Title)
-			if p.ManifestFragment != "" {
-				sb.WriteString("**Manifest Fragment:**\n\n```yaml\n")
-				sb.WriteString(p.ManifestFragment)
-				sb.WriteString("```\n\n")
+	writePatternsSection(&sb, patterns)
+	writeCurrentEconomySection(&sb, currentEconomyJSON)
+	writeRelationshipGraphSection(&sb, opts.RelationshipGraph)
+	writeInstructionsSection(&sb, patterns, currentEconomyJSON)
+
+	return sb.String()
+}
+
+// writePatternsSection writes the Relevant Patterns section to sb, or nothing if empty.
+func writePatternsSection(sb *strings.Builder, patterns []PatternMatch) {
+	if len(patterns) == 0 {
+		return
+	}
+	sb.WriteString("## Relevant Patterns (copy and adapt)\n\n")
+	for _, p := range patterns {
+		fmt.Fprintf(sb, "### Pattern: %s\n\n", p.Title)
+		if p.ManifestFragment != "" {
+			sb.WriteString("**Manifest Fragment:**\n\n```yaml\n")
+			sb.WriteString(p.ManifestFragment)
+			if !strings.HasSuffix(p.ManifestFragment, "\n") {
+				sb.WriteString("\n")
 			}
-			if p.SagaScript != "" {
-				sb.WriteString("**Saga Script:**\n\n```python\n")
-				sb.WriteString(p.SagaScript)
-				sb.WriteString("```\n\n")
+			sb.WriteString("```\n\n")
+		}
+		if p.SagaScript != "" {
+			sb.WriteString("**Saga Script:**\n\n```python\n")
+			sb.WriteString(p.SagaScript)
+			if !strings.HasSuffix(p.SagaScript, "\n") {
+				sb.WriteString("\n")
 			}
+			sb.WriteString("```\n\n")
 		}
 	}
+}
 
-	// Current Economy (amend mode only)
-	if currentEconomyJSON != "" {
-		sb.WriteString("## Current Economy\n\n")
-		sb.WriteString("The following is the tenant's existing manifest. Amend it according to the business description above.\n\n")
-		sb.WriteString("```json\n")
-		sb.WriteString(currentEconomyJSON)
-		sb.WriteString("\n```\n\n")
+// writeCurrentEconomySection writes the Current Economy section to sb, or nothing if empty.
+func writeCurrentEconomySection(sb *strings.Builder, currentEconomyJSON string) {
+	if currentEconomyJSON == "" {
+		return
 	}
+	sb.WriteString("## Current Economy\n\n")
+	sb.WriteString("The following is the tenant's existing manifest. Amend it according to the business description above.\n\n")
+	sb.WriteString("```json\n")
+	sb.WriteString(currentEconomyJSON)
+	sb.WriteString("\n```\n\n")
+}
 
-	// Relationship Graph (optional)
-	if opts.RelationshipGraph != "" {
-		sb.WriteString("## Economy Relationship Graph\n\n")
-		sb.WriteString("```json\n")
-		sb.WriteString(opts.RelationshipGraph)
-		sb.WriteString("\n```\n\n")
+// writeRelationshipGraphSection writes the Economy Relationship Graph section to sb, or nothing if empty.
+func writeRelationshipGraphSection(sb *strings.Builder, graph string) {
+	if graph == "" {
+		return
 	}
+	sb.WriteString("## Economy Relationship Graph\n\n")
+	sb.WriteString("```json\n")
+	sb.WriteString(graph)
+	sb.WriteString("\n```\n\n")
+}
 
-	// Instructions
+// writeInstructionsSection writes the Instructions section to sb.
+func writeInstructionsSection(sb *strings.Builder, patterns []PatternMatch, currentEconomyJSON string) {
 	sb.WriteString("## Instructions\n\n")
 	sb.WriteString("Generate a complete Meridian manifest YAML that implements the business description above.\n\n")
 	sb.WriteString("Rules:\n")
@@ -180,8 +210,6 @@ func buildPrompt(
 		sb.WriteString("- Preserve existing instruments, account types, and sagas from the Current Economy unless explicitly asked to change them.\n")
 	}
 	sb.WriteString("- Output only the YAML manifest. Do not include explanations or markdown fencing.\n")
-
-	return sb.String()
 }
 
 // estimateTokens returns a rough token estimate for the prompt.

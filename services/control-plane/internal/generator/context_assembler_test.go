@@ -257,6 +257,16 @@ func TestAssembleContext_BlankDescription_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestAssembleContext_NilRegistry_ReturnsError(t *testing.T) {
+	_, err := generator.AssembleContext(generator.ContextAssemblerOptions{
+		Description:     "A platform",
+		IncludePatterns: false,
+	}, nil, emptyFS())
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, generator.ErrMissingRegistry)
+}
+
 func TestAssembleContext_NilCookbookFS_PatternsDisabled(t *testing.T) {
 	reg := buildMinimalRegistry()
 
