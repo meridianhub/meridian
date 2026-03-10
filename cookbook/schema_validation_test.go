@@ -529,9 +529,6 @@ func TestCookbookSagaScripts_SchemaValidation(t *testing.T) {
 
 	schemaReg := schema.NewRegistryFromSchema(derivedSchema)
 
-	// Build predeclared environment once (shared across all script executions).
-	predeclared := buildCookbookPredeclared(t, schemaReg)
-
 	patternsDir := cookbookSchemaValidationDir(t)
 
 	// Walk all .star files under patterns/
@@ -562,6 +559,11 @@ func TestCookbookSagaScripts_SchemaValidation(t *testing.T) {
 				t.Skipf("skipped by schema-validation: skip directive")
 				return
 			}
+
+			// Build a fresh predeclared environment per subtest to prevent
+			// mutable Starlark dicts (input_data, instrument_amount) from
+			// leaking state between scripts.
+			predeclared := buildCookbookPredeclared(t, schemaReg)
 
 			thread := &starlark.Thread{Name: relPath}
 			_, execErr := starlark.ExecFileOptions(fileOpts, thread, filepath.Base(path), content, predeclared)
