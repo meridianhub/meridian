@@ -233,6 +233,9 @@ func WithOpenAPIPaths(paths map[string]bool) Option {
 // production to enable typed parameter validation.
 func WithSchemaRegistry(reg *schema.Registry) Option {
 	return func(v *ManifestValidator) {
+		if reg == nil {
+			return // keep default empty registry
+		}
 		v.schemaRegistry = reg
 	}
 }
