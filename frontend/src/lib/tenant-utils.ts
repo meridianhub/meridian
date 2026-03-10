@@ -23,14 +23,15 @@ export function getTenantSlugFromSubdomain(hostname: string): string | null {
     return null
   }
 
-  const baseDomain = import.meta.env.VITE_BASE_DOMAIN ?? 'meridianhub.cloud'
+  const normalizedHostname = hostname.toLowerCase()
+  const baseDomain = (import.meta.env.VITE_BASE_DOMAIN ?? 'meridianhub.cloud').toLowerCase()
 
   // Hostname must end with the base domain and have at least one extra segment
-  if (!hostname.endsWith(`.${baseDomain}`)) {
+  if (!normalizedHostname.endsWith(`.${baseDomain}`)) {
     return null
   }
 
-  const slug = hostname.slice(0, hostname.length - baseDomain.length - 1)
+  const slug = normalizedHostname.slice(0, normalizedHostname.length - baseDomain.length - 1)
 
   // Slug must be non-empty and a single segment (no nested subdomains)
   if (!slug || slug.includes('.')) {
