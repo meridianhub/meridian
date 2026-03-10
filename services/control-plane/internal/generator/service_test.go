@@ -249,18 +249,268 @@ func TestGetGenerationContext_IncludeCurrentEconomy_ReturnsYAML(t *testing.T) {
 
 // --- GenerateManifest tests ---
 
-func TestGenerateManifest_AmendModeReturnsUnimplemented(t *testing.T) {
-	svc := buildService(t, &mockGenerateLLMClient{}, &mockValidatorAlwaysValid{})
+// --- Amend mode tests ---
+
+func TestGenerateManifest_AmendMode_NoHistorian_ReturnsFailedPrecondition(t *testing.T) {
+	// Service created without manifestHistory.
+	svc := buildService(t, &mockGenerateLLMClient{generateResponse: minimalValidYAML}, &mockValidatorAlwaysValid{})
 
 	_, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
-		Description: "a fintech",
+		Description: "add carbon credits",
 		Mode:        controlplanev1.GenerationMode_GENERATION_MODE_AMEND,
 		TenantId:    "tenant-1",
 	})
 	require.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
-	assert.Equal(t, codes.Unimplemented, st.Code())
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Contains(t, st.Message(), "manifest history is not available")
+}
+
+func TestGenerateManifest_AmendMode_HistorianError_ReturnsInternal(t *testing.T) {
+	historian := &mockManifestHistorian{err: errors.New("db unavailable")}
+	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
+	val := &mockValidatorAlwaysValid{}
+
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), historian, emptyFS(), nil,
+		generator.WithLLMClient(llm),
+		generator.WithValidator(val),
+	)
+	require.NoError(t, err)
+
+	_, err = svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description: "add carbon credits",
+		Mode:        controlplanev1.GenerationMode_GENERATION_MODE_AMEND,
+		TenantId:    "tenant-1",
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+}
+
+func TestGenerateManifest_AmendMode_LoadsCurrentManifest(t *testing.T) {
+	// Original manifest has GBP instrument.
+	manifest := &controlplanev1.Manifest{
+		Version:  "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{Name: "test-economy"},
+		Instruments: []*controlplanev1.InstrumentDefinition{
+			{Code: "GBP", Name: "British Pound"},
+		},
+		AccountTypes: []*controlplanev1.AccountTypeDefinition{
+			{Code: "CURRENT", Name: "Current Account", AllowedInstruments: []string{"GBP"}},
+		},
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "simple_transfer", Trigger: "api:/v1/transfers", Script: "result = {}"},
+		},
+	}
+	historian := &mockManifestHistorian{manifest: manifest}
+
+	// LLM returns amended manifest with additional CARBON_CREDIT instrument.
+	amendedYAML := `
+instruments:
+  - code: GBP
+    name: British Pound
+    asset_class: CURRENCY
+  - code: CARBON_CREDIT
+    name: Carbon Credit
+    asset_class: COMMODITY
+account_types:
+  - code: CURRENT
+    name: Current Account
+    allowed_instruments:
+      - GBP
+  - code: CARBON_INVENTORY
+    name: Carbon Inventory Account
+    allowed_instruments:
+      - CARBON_CREDIT
+sagas:
+  - name: simple_transfer
+    trigger:
+      topic: payment_order.created
+    script: |
+      result = {}
+  - name: carbon_offset_flow
+    trigger:
+      topic: carbon.offset.created
+    script: |
+      result = {}
+`
+	llm := &mockGenerateLLMClient{generateResponse: amendedYAML}
+	val := &mockValidatorAlwaysValid{}
+
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), historian, emptyFS(), nil,
+		generator.WithLLMClient(llm),
+		generator.WithValidator(val),
+	)
+	require.NoError(t, err)
+
+	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description: "Add carbon credit tracking to existing economy",
+		Mode:        controlplanev1.GenerationMode_GENERATION_MODE_AMEND,
+		TenantId:    "tenant-1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.True(t, resp.Valid)
+	assert.Equal(t, amendedYAML, resp.ManifestYaml)
+
+	// Metadata should reflect the amended manifest contents.
+	meta := resp.GenerationMetadata
+	require.NotNil(t, meta)
+	assert.Contains(t, meta.InstrumentsCreated, "GBP")
+	assert.Contains(t, meta.InstrumentsCreated, "CARBON_CREDIT")
+	assert.Contains(t, meta.SagasCreated, "carbon_offset_flow")
+
+	// Decisions should record the impact analysis.
+	assert.NotEmpty(t, meta.Decisions)
+}
+
+func TestGenerateManifest_AmendMode_PreservesExistingResources(t *testing.T) {
+	// Original has GBP + CURRENT + simple_transfer.
+	manifest := &controlplanev1.Manifest{
+		Version:  "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{Name: "test"},
+		Instruments: []*controlplanev1.InstrumentDefinition{
+			{Code: "GBP", Name: "British Pound"},
+		},
+		AccountTypes: []*controlplanev1.AccountTypeDefinition{
+			{Code: "CURRENT", Name: "Current Account"},
+		},
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "simple_transfer", Trigger: "api:/v1/transfers", Script: "result = {}"},
+		},
+	}
+	historian := &mockManifestHistorian{manifest: manifest}
+
+	// LLM preserves all originals and adds EUR.
+	amendedYAML := `
+instruments:
+  - code: GBP
+    name: British Pound
+    asset_class: CURRENCY
+  - code: EUR
+    name: Euro
+    asset_class: CURRENCY
+account_types:
+  - code: CURRENT
+    name: Current Account
+    allowed_instruments:
+      - GBP
+      - EUR
+sagas:
+  - name: simple_transfer
+    trigger:
+      topic: payment_order.created
+    script: |
+      result = {}
+`
+	llm := &mockGenerateLLMClient{generateResponse: amendedYAML}
+	val := &mockValidatorAlwaysValid{}
+
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), historian, emptyFS(), nil,
+		generator.WithLLMClient(llm),
+		generator.WithValidator(val),
+	)
+	require.NoError(t, err)
+
+	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description: "Add EUR support",
+		Mode:        controlplanev1.GenerationMode_GENERATION_MODE_AMEND,
+		TenantId:    "tenant-1",
+	})
+	require.NoError(t, err)
+
+	meta := resp.GenerationMetadata
+	require.NotNil(t, meta)
+
+	// EUR should be reported as added.
+	hasAdded := false
+	for _, d := range meta.Decisions {
+		if d == "Added instrument:EUR" {
+			hasAdded = true
+		}
+	}
+	assert.True(t, hasAdded, "expected 'Added instrument:EUR' in decisions, got: %v", meta.Decisions)
+
+	// No removal warnings.
+	for _, w := range resp.ValidationWarnings {
+		assert.NotEqual(t, "AMEND_RESOURCE_REMOVED", w.Code, "unexpected removal warning: %s", w.Path)
+	}
+}
+
+func TestGenerateManifest_AmendMode_DestructiveChangeDetection(t *testing.T) {
+	// Original has GBP + USD, CURRENT + SAVINGS, simple_transfer.
+	manifest := &controlplanev1.Manifest{
+		Version:  "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{Name: "test"},
+		Instruments: []*controlplanev1.InstrumentDefinition{
+			{Code: "GBP", Name: "British Pound"},
+			{Code: "USD", Name: "US Dollar"},
+		},
+		AccountTypes: []*controlplanev1.AccountTypeDefinition{
+			{Code: "CURRENT", Name: "Current Account"},
+			{Code: "SAVINGS", Name: "Savings Account"},
+		},
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "simple_transfer", Trigger: "api:/v1/transfers", Script: "result = {}"},
+		},
+	}
+	historian := &mockManifestHistorian{manifest: manifest}
+
+	// LLM returns manifest with USD removed (destructive change).
+	amendedYAML := `
+instruments:
+  - code: GBP
+    name: British Pound
+    asset_class: CURRENCY
+account_types:
+  - code: CURRENT
+    name: Current Account
+    allowed_instruments:
+      - GBP
+sagas:
+  - name: simple_transfer
+    trigger:
+      topic: payment_order.created
+    script: |
+      result = {}
+`
+	llm := &mockGenerateLLMClient{generateResponse: amendedYAML}
+	val := &mockValidatorAlwaysValid{}
+
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), historian, emptyFS(), nil,
+		generator.WithLLMClient(llm),
+		generator.WithValidator(val),
+	)
+	require.NoError(t, err)
+
+	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description: "Simplify to GBP only",
+		Mode:        controlplanev1.GenerationMode_GENERATION_MODE_AMEND,
+		TenantId:    "tenant-1",
+	})
+	require.NoError(t, err)
+
+	// Should flag removal of USD and SAVINGS as warnings.
+	removedCodes := map[string]bool{}
+	for _, w := range resp.ValidationWarnings {
+		if w.Code == "AMEND_RESOURCE_REMOVED" {
+			removedCodes[w.Path] = true
+		}
+	}
+	assert.True(t, removedCodes["instrument:USD"], "expected removal warning for instrument:USD")
+	assert.True(t, removedCodes["account_type:SAVINGS"], "expected removal warning for account_type:SAVINGS")
+
+	// Decisions should also mention removals.
+	hasRemovalDecision := false
+	for _, d := range resp.GenerationMetadata.Decisions {
+		if d == "Warning: Removed instrument:USD (was present in original manifest)" {
+			hasRemovalDecision = true
+		}
+	}
+	assert.True(t, hasRemovalDecision, "expected removal decision for USD, got: %v", resp.GenerationMetadata.Decisions)
 }
 
 func TestGenerateManifest_EmptyDescriptionReturnsInvalidArgument(t *testing.T) {
