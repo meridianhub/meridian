@@ -54,7 +54,13 @@ staticClients:
       - "https://demo.meridianhub.cloud/callback"
       # Tenant subdomains — add one entry per onboarded tenant
       - "https://volterra.demo.meridianhub.cloud/callback"
-      # Local development
+    public: true
+
+  # Separate client for local development. Keeps localhost redirect URIs
+  # isolated from the deployed demo client above.
+  - id: meridian-dev
+    name: Meridian (dev)
+    redirectURIs:
       - "http://localhost:8090/callback"
       - "http://localhost:3000/callback"
     public: true
