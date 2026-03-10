@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
 import { useTenantContext } from '@/contexts/tenant-context'
@@ -79,33 +79,32 @@ export function TenantSubdomainEnforcer({ children }: { children: ReactNode }) {
   const { pathname, search, hash } = useLocation()
   const { tenantSlug } = useTenantContext()
 
-  // Skip in local dev — subdomains don't work on localhost
-  if (isLocalDev()) {
-    return <>{children}</>
-  }
+  // Compute redirect URL only when needed: not local dev, not already on
+  // subdomain, not a platform path, and a tenant is selected.
+  const needsRedirect =
+    !isLocalDev() && !isOnTenantSubdomain() && !isPlatformPath(pathname) && !!tenantSlug
 
-  // Already on a tenant subdomain — no redirect needed
-  if (isOnTenantSubdomain()) {
-    return <>{children}</>
-  }
+  const redirectUrl = needsRedirect
+    ? (() => {
+        const parsed = new URL(apiConfig.baseUrl)
+        const target = new URL(window.location.href)
+        target.hostname = `${tenantSlug}.${parsed.hostname}`
+        target.pathname = pathname
+        target.search = search
+        target.hash = hash
+        return target.toString()
+      })()
+    : null
 
-  // Platform routes stay on root domain
-  if (isPlatformPath(pathname)) {
-    return <>{children}</>
-  }
+  useEffect(() => {
+    if (redirectUrl) {
+      window.location.assign(redirectUrl)
+    }
+  }, [redirectUrl])
 
-  // Tenant-scoped route on root domain with a tenant selected → redirect
-  if (tenantSlug) {
-    const parsed = new URL(apiConfig.baseUrl)
-    const target = new URL(window.location.href)
-    target.hostname = `${tenantSlug}.${parsed.hostname}`
-    target.pathname = pathname
-    target.search = search
-    target.hash = hash
-    window.location.href = target.toString()
+  if (redirectUrl) {
     return null
   }
 
-  // No tenant selected — show content (DevTenantAutoSelector may still be loading)
   return <>{children}</>
 }

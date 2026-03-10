@@ -38,7 +38,7 @@ vi.mock('../hooks/use-cookbook', () => ({
   useCookbook: () => mockUseCookbook(),
 }))
 
-const mockUsePatternFiles = vi.fn<() => { starlarkFiles: Array<{ name: string; content: string }>; manifestContent: string | null; hasSagas: boolean; isLoading: false }>()
+const mockUsePatternFiles = vi.fn<() => { starlarkFiles: Array<{ name: string; content: string }>; manifestContent: string | null; manifestSagas: Array<{ name: string; trigger?: string; filter?: string }>; hasSagas: boolean; isLoading: false }>()
 vi.mock('../hooks/use-pattern-files', () => ({
   usePatternFiles: () => mockUsePatternFiles(),
 }))
@@ -82,7 +82,7 @@ describe('CookbookDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseCookbook.mockReturnValue({ items: [patternItem, uiItem], isLoading: false })
-    mockUsePatternFiles.mockReturnValue({ starlarkFiles: [], manifestContent: null, hasSagas: false, isLoading: false as const })
+    mockUsePatternFiles.mockReturnValue({ starlarkFiles: [], manifestContent: null, manifestSagas: [], hasSagas: false, isLoading: false as const })
   })
 
   it('shows loading skeleton while catalogue is loading', () => {
@@ -141,6 +141,7 @@ describe('CookbookDetailPage', () => {
     mockUsePatternFiles.mockReturnValue({
       starlarkFiles: [{ name: 'saga.star', content: 'def execute(): pass' }],
       manifestContent: 'name: test',
+      manifestSagas: [],
       hasSagas: true,
       isLoading: false as const,
     })
@@ -177,6 +178,7 @@ describe('CookbookDetailPage', () => {
     mockUsePatternFiles.mockReturnValue({
       starlarkFiles: [],
       manifestContent: 'name: test\ntype: registry:pattern',
+      manifestSagas: [],
       hasSagas: false,
       isLoading: false as const,
     })
