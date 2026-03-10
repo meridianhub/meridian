@@ -145,8 +145,8 @@ test.describe('User detail - suspend dialog', () => {
     if (!found) { test.skip(); return }
 
     const suspendBtn = page.getByRole('button', { name: /^suspend$/i })
-    // Wait for the detail page to finish loading (skeleton disappears)
-    await expect(page.getByTestId('detail-skeleton')).toBeHidden({ timeout: 15_000 }).catch(() => {})
+    // Wait for the Identity Details card to appear (confirms detail page is loaded)
+    await expect(page.getByText('Identity Details')).toBeVisible({ timeout: 15_000 })
     if (await suspendBtn.isHidden()) {
       // User is not ACTIVE (e.g. already suspended) — skip
       test.skip()
@@ -167,7 +167,8 @@ test.describe('User detail - suspend dialog', () => {
     if (!found) { test.skip(); return }
 
     const suspendBtn = page.getByRole('button', { name: /^suspend$/i })
-    await page.waitForLoadState('networkidle').catch(() => {/* ignore timeout */})
+    // Wait for the Identity Details card — confirms the detail page has fully loaded
+    await expect(page.getByText('Identity Details')).toBeVisible({ timeout: 15_000 })
     if (await suspendBtn.isHidden()) { test.skip(); return }
 
     await suspendBtn.click()
@@ -185,7 +186,8 @@ test.describe('User detail - suspend dialog', () => {
     if (!found) { test.skip(); return }
 
     const suspendBtn = page.getByRole('button', { name: /^suspend$/i })
-    await page.waitForLoadState('networkidle').catch(() => {/* ignore timeout */})
+    // Wait for the Identity Details card — confirms the detail page has fully loaded
+    await expect(page.getByText('Identity Details')).toBeVisible({ timeout: 15_000 })
     if (await suspendBtn.isHidden()) { test.skip(); return }
 
     await suspendBtn.click()
