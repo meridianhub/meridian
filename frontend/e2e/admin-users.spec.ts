@@ -145,8 +145,8 @@ test.describe('User detail - suspend dialog', () => {
     if (!found) { test.skip(); return }
 
     const suspendBtn = page.getByRole('button', { name: /^suspend$/i })
-    // Wait for detail page to settle before checking if suspend button is present
-    await page.waitForLoadState('networkidle').catch(() => {/* ignore timeout */})
+    // Wait for the detail page to finish loading (skeleton disappears)
+    await expect(page.getByTestId('detail-skeleton')).toBeHidden({ timeout: 15_000 }).catch(() => {})
     if (await suspendBtn.isHidden()) {
       // User is not ACTIVE (e.g. already suspended) — skip
       test.skip()
