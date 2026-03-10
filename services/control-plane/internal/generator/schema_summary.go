@@ -40,9 +40,12 @@ func writeMessageSummary(sb *strings.Builder, md protoreflect.MessageDescriptor,
 			requiredStr = " *(required)*"
 		}
 
-		if fd.IsList() {
+		switch {
+		case fd.IsMap():
+			fmt.Fprintf(sb, "%s- `%s`: map%s\n", indent, fieldName, requiredStr)
+		case fd.IsList():
 			fmt.Fprintf(sb, "%s- `%s`: repeated %s%s\n", indent, fieldName, typeSummary, requiredStr)
-		} else {
+		default:
 			fmt.Fprintf(sb, "%s- `%s`: %s%s\n", indent, fieldName, typeSummary, requiredStr)
 		}
 
@@ -126,11 +129,11 @@ func wellKnownTypeName(fd protoreflect.FieldDescriptor) string {
 }
 
 // isRequiredField checks if a field is marked required via buf validate annotations.
-// Since we can't easily read buf validate options at runtime without the extension descriptors,
-// we use a heuristic: message fields with non-nil defaults that appear in the proto are likely required.
-// For accuracy, we check the field name against known required fields in the Manifest.
+// Since buf validate options cannot be read at runtime without the extension descriptors,
+// this uses a hardcoded list derived from api/proto/meridian/control_plane/v1/manifest.proto.
+// Update this list when required fields change in the proto.
 func isRequiredField(fd protoreflect.FieldDescriptor) bool {
-	// Fields marked as required in the Manifest proto via buf validate
+	// Source of truth: buf.validate.field.required = true in manifest.proto
 	knownRequired := map[string]bool{
 		"version":  true,
 		"metadata": true,
