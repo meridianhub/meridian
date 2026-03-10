@@ -259,7 +259,7 @@ func buildSchemaHandlerRegistry(t *testing.T) *saga.HandlerRegistry {
 //   - Schema-validated modules for all registered handlers (strict validation)
 //   - Open mock modules for service namespaces with unregistered handlers
 //   - Standard cookbook builtins: saga, step, Decimal, input_data
-func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry, _ map[string]bool) starlark.StringDict {
+func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark.StringDict {
 	t.Helper()
 
 	// Build strict validation modules from the schema registry.
@@ -478,17 +478,8 @@ func TestCookbookSagaScripts_SchemaValidation(t *testing.T) {
 
 	schemaReg := schema.NewRegistryFromSchema(derivedSchema)
 
-	// Track which namespaces have at least one registered handler.
-	registeredNamespaces := make(map[string]bool)
-	for name := range derivedSchema.Handlers {
-		parts := strings.SplitN(name, ".", 2)
-		if len(parts) >= 1 {
-			registeredNamespaces[parts[0]] = true
-		}
-	}
-
 	// Build predeclared environment once (shared across all script executions).
-	predeclared := buildCookbookPredeclared(t, schemaReg, registeredNamespaces)
+	predeclared := buildCookbookPredeclared(t, schemaReg)
 
 	patternsDir := cookbookSchemaValidationDir(t)
 
