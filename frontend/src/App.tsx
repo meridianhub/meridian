@@ -9,6 +9,7 @@ import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { useTenants } from '@/hooks/use-tenants'
 import { useAuthProviders, type AuthProvider as AuthProviderType } from '@/hooks/use-auth-providers'
 import { useOAuthFlow } from '@/hooks/use-oauth-flow'
+import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 import { ApiClientProvider } from '@/api/context'
 import { ProtectedRoute, PlatformOnlyRoute, AdminOnlyRoute, TenantSubdomainEnforcer } from '@/components/routing'
 import { FeatureGuard } from '@/components/feature-guard'
@@ -63,6 +64,12 @@ function PlaceholderPage({ title }: { title: string }) {
   )
 }
 
+function isBareDomain(): boolean {
+  const hostname = window.location.hostname
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return false
+  return getTenantSlugFromSubdomain(hostname) === null
+}
+
 function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -73,6 +80,7 @@ function LoginPage() {
   const { data: providers } = useAuthProviders()
   const { startFlow } = useOAuthFlow()
 
+  const onBareDomain = isBareDomain()
   const externalProviders = providers?.filter((p: AuthProviderType) => p.type === 'oidc') ?? []
 
   const handleDexLogin = useCallback(
@@ -140,6 +148,24 @@ function LoginPage() {
     },
     [login, navigate],
   )
+
+  // On bare domain (no tenant subdomain) in production, show guidance
+  if (onBareDomain && !import.meta.env.DEV) {
+    const baseDomain = import.meta.env.VITE_BASE_DOMAIN ?? 'meridianhub.cloud'
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="w-full max-w-sm space-y-6 px-4 text-center">
+          <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
+          <p className="mt-2 text-muted-foreground">
+            Please access your organization&apos;s login page at:
+          </p>
+          <p className="font-mono text-sm text-muted-foreground">
+            https://your-org.{baseDomain}
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center">
