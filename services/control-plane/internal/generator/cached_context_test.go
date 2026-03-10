@@ -2,6 +2,7 @@ package generator_test
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,107 +10,110 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/meridianhub/meridian/services/control-plane/internal/generator"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 )
 
-func TestCachedContextAssembler_PopulatesOnFirstCall(t *testing.T) {
-	reg := buildMinimalRegistry()
-	assembler := generator.NewCachedContextAssembler(reg, emptyFS(), time.Minute)
+// countingBuildStatics returns a buildStatics function that increments a counter each
+// time it is called. The counter lets tests verify cache hit vs. cache miss behavior.
+func countingBuildStatics(counter *atomic.Int64) func(*schema.Registry) generator.StaticComponents {
+	return func(_ *schema.Registry) generator.StaticComponents {
+		counter.Add(1)
+		return generator.StaticComponents{} // content is irrelevant for cache behavior tests
+	}
+}
 
-	result, err := assembler.AssembleContext(generator.ContextAssemblerOptions{
+func newCountingAssembler(t *testing.T, interval time.Duration) (*generator.CachedContextAssembler, *atomic.Int64) {
+	t.Helper()
+	reg := buildMinimalRegistry()
+	assembler := generator.NewCachedContextAssembler(reg, emptyFS(), interval)
+	var counter atomic.Int64
+	assembler.SetBuildStatics(countingBuildStatics(&counter))
+	return assembler, &counter
+}
+
+func TestCachedContextAssembler_PopulatesOnFirstCall(t *testing.T) {
+	assembler, counter := newCountingAssembler(t, time.Hour)
+
+	_, err := assembler.AssembleContext(generator.ContextAssemblerOptions{
 		Description:     "A carbon credit trading platform",
 		IncludePatterns: false,
 	})
 
 	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.NotEmpty(t, result.Prompt)
-	assert.Contains(t, result.Prompt, "## Handler Reference Card")
-	assert.Contains(t, result.Prompt, "## Available Event Topics")
-	assert.Contains(t, result.Prompt, "## Manifest Schema Summary")
+	assert.Equal(t, int64(1), counter.Load(), "buildStatics should be called exactly once on first call")
 }
 
 func TestCachedContextAssembler_ReturnsCachedValuesWithinInterval(t *testing.T) {
-	reg := buildMinimalRegistry()
-	// Use a long refresh interval so it won't expire during the test.
-	assembler := generator.NewCachedContextAssembler(reg, emptyFS(), time.Hour)
+	assembler, counter := newCountingAssembler(t, time.Hour)
 
 	opts := generator.ContextAssemblerOptions{
 		Description:     "An energy trading platform",
 		IncludePatterns: false,
 	}
 
-	first, err := assembler.AssembleContext(opts)
+	_, err := assembler.AssembleContext(opts)
 	require.NoError(t, err)
 
-	second, err := assembler.AssembleContext(opts)
+	_, err = assembler.AssembleContext(opts)
 	require.NoError(t, err)
 
-	// Both calls should produce identical static content.
-	assert.Equal(t, first.Prompt, second.Prompt)
+	_, err = assembler.AssembleContext(opts)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), counter.Load(), "buildStatics should only be called once within the refresh interval")
 }
 
 func TestCachedContextAssembler_RefreshesAfterIntervalExpires(t *testing.T) {
-	reg := buildMinimalRegistry()
-	// Use a very short interval, then invalidate to simulate expiry.
-	assembler := generator.NewCachedContextAssembler(reg, emptyFS(), time.Hour)
+	assembler, counter := newCountingAssembler(t, time.Hour)
 
 	opts := generator.ContextAssemblerOptions{
 		Description:     "A payment processing platform",
 		IncludePatterns: false,
 	}
 
-	first, err := assembler.AssembleContext(opts)
+	_, err := assembler.AssembleContext(opts)
 	require.NoError(t, err)
+	assert.Equal(t, int64(1), counter.Load())
 
-	// Invalidate the cache to force a refresh on the next call.
+	// Force cache expiry.
 	assembler.Invalidate()
 
-	second, err := assembler.AssembleContext(opts)
+	_, err = assembler.AssembleContext(opts)
 	require.NoError(t, err)
 
-	// After invalidation the static content is rebuilt — content should still match
-	// since the registry hasn't changed, confirming that the refresh path executes
-	// without error and produces a valid prompt.
-	assert.Equal(t, first.Prompt, second.Prompt)
+	assert.Equal(t, int64(2), counter.Load(), "buildStatics should be called again after Invalidate")
 }
 
 func TestCachedContextAssembler_ConcurrentAccess(t *testing.T) {
-	reg := buildMinimalRegistry()
-	assembler := generator.NewCachedContextAssembler(reg, emptyFS(), time.Minute)
+	assembler, counter := newCountingAssembler(t, time.Hour)
 
-	const goroutines = 20
-	results := make([]*generator.AssembledContext, goroutines)
-	errors := make([]error, goroutines)
-
+	const goroutines = 50
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for i := range goroutines {
-		go func(idx int) {
+	for range goroutines {
+		go func() {
 			defer wg.Done()
-			results[idx], errors[idx] = assembler.AssembleContext(generator.ContextAssemblerOptions{
+			_, _ = assembler.AssembleContext(generator.ContextAssemblerOptions{
 				Description:     "A concurrent test platform",
 				IncludePatterns: false,
 			})
-		}(i)
+		}()
 	}
 
 	wg.Wait()
 
-	for i, err := range errors {
-		require.NoError(t, err, "goroutine %d returned error", i)
-		require.NotNil(t, results[i])
-		assert.NotEmpty(t, results[i].Prompt)
-	}
-
-	// All goroutines should produce identical static content.
-	for i := 1; i < goroutines; i++ {
-		assert.Equal(t, results[0].Prompt, results[i].Prompt,
-			"goroutine %d produced different result", i)
-	}
+	// With double-checked locking, at most a small number of concurrent goroutines
+	// may race past the read lock before the write lock is taken. In practice with
+	// a 1-hour interval only one refresh should occur, but allow a small buffer for
+	// concurrent first-call races.
+	assert.LessOrEqual(t, counter.Load(), int64(5),
+		"buildStatics should be called very few times under concurrent access (expected ~1)")
+	assert.GreaterOrEqual(t, counter.Load(), int64(1), "buildStatics must be called at least once")
 }
 
 func TestCachedContextAssembler_PatternMatchingRemainsUncached(t *testing.T) {
+	// Use a real assembler with actual buildStatics so pattern matching runs.
 	reg := buildMinimalRegistry()
 	assembler := generator.NewCachedContextAssembler(reg, realCookbookFS(), time.Hour)
 
@@ -121,17 +125,20 @@ func TestCachedContextAssembler_PatternMatchingRemainsUncached(t *testing.T) {
 		MaxPatterns:     3,
 	})
 	require.NoError(t, err)
+	assert.NotEmpty(t, energyResult.MatchedPatterns, "energy description should match patterns")
 
-	// Second call: unrelated description should produce no/different patterns.
+	// Second call: same assembler (cache warm) but no patterns requested.
 	genericResult, err := assembler.AssembleContext(generator.ContextAssemblerOptions{
-		Description:     "Generic fintech platform with no patterns",
+		Description:     "EV charging UK energy settlement",
+		Industry:        "energy",
 		IncludePatterns: false,
 	})
 	require.NoError(t, err)
+	assert.Empty(t, genericResult.MatchedPatterns, "pattern matching should be skipped when IncludePatterns=false")
 
-	// Pattern-specific content should differ between calls.
+	// The prompts should differ only in pattern content, proving pattern matching is per-request.
 	assert.NotEqual(t, energyResult.Prompt, genericResult.Prompt,
-		"different descriptions should produce different prompts")
+		"with/without patterns should produce different prompts even when static cache is shared")
 }
 
 func TestCachedContextAssembler_DefaultRefreshInterval(t *testing.T) {
@@ -146,6 +153,18 @@ func TestCachedContextAssembler_DefaultRefreshInterval(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, result.Prompt)
+}
+
+func TestCachedContextAssembler_NilRegistry_ReturnsError(t *testing.T) {
+	assembler := generator.NewCachedContextAssembler(nil, emptyFS(), time.Hour)
+
+	_, err := assembler.AssembleContext(generator.ContextAssemblerOptions{
+		Description:     "A platform",
+		IncludePatterns: false,
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, generator.ErrMissingRegistry)
 }
 
 func TestCachedContextAssembler_ProducesEquivalentOutputToAssembleContext(t *testing.T) {
