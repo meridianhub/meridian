@@ -1,7 +1,6 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -11,18 +10,6 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"google.golang.org/grpc"
 )
-
-// ErrGeneratorSchemaRegistryRequired is returned when SchemaRegistry is nil.
-var ErrGeneratorSchemaRegistryRequired = errors.New("economy generator service: schema registry is required")
-
-// ErrGeneratorCookbookFSRequired is returned when CookbookFS is nil.
-var ErrGeneratorCookbookFSRequired = errors.New("economy generator service: cookbook FS is required")
-
-// ErrGeneratorLLMClientRequired is returned when LLMClient is nil.
-var ErrGeneratorLLMClientRequired = errors.New("economy generator service: LLM client is required")
-
-// ErrGeneratorValidatorRequired is returned when Validator is nil.
-var ErrGeneratorValidatorRequired = errors.New("economy generator service: validator is required")
 
 // EconomyGeneratorConfig holds configuration for the EconomyGeneratorService.
 type EconomyGeneratorConfig struct {
@@ -46,21 +33,8 @@ type EconomyGeneratorConfig struct {
 }
 
 // RegisterEconomyGeneratorService creates and registers the EconomyGeneratorService
-// on the given gRPC server.
+// on the given gRPC server. Validation of required fields is delegated to NewService.
 func RegisterEconomyGeneratorService(server *grpc.Server, cfg EconomyGeneratorConfig) error {
-	if cfg.SchemaRegistry == nil {
-		return ErrGeneratorSchemaRegistryRequired
-	}
-	if cfg.CookbookFS == nil {
-		return ErrGeneratorCookbookFSRequired
-	}
-	if cfg.LLMClient == nil {
-		return ErrGeneratorLLMClientRequired
-	}
-	if cfg.Validator == nil {
-		return ErrGeneratorValidatorRequired
-	}
-
 	svc, err := generator.NewService(generator.Config{
 		SchemaRegistry: cfg.SchemaRegistry,
 		CookbookFS:     cfg.CookbookFS,
