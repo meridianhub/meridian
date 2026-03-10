@@ -5,7 +5,7 @@ import type {
   ApplyManifestResponse,
   ValidationError,
 } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
-import { ApplyManifestStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+import { ApplyManifestStatus, StepResultStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 
 export interface ValidationResult {
   errors: ValidationError[]
@@ -68,7 +68,7 @@ export function useManifestValidate() {
               // The status indicates failure but no structured errors came back;
               // surface step-level messages as errors.
               for (const step of response.stepResults) {
-                if (step.status !== 1 && step.message) {
+                if (step.status !== StepResultStatus.SUCCESS && step.message) {
                   errors.push({
                     severity: 'ERROR',
                     path: '',
