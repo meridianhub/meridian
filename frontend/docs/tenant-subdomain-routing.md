@@ -115,7 +115,7 @@ determines the base URL:
 | Condition | Base URL | Tenant identification |
 |-----------|----------|----------------------|
 | On tenant subdomain | `window.location.origin` | Subdomain (gateway extracts slug from Host) |
-| Local dev / demo mode | `VITE_API_BASE_URL` | `X-Tenant-Slug` header |
+| Local dev (`LOCAL_DEV_MODE=true`) | `VITE_API_BASE_URL` | `X-Tenant-Slug` header |
 | Production, no subdomain | `{slug}.{baseDomain}` | Subdomain |
 
 <!-- markdownlint-enable MD013 -->
