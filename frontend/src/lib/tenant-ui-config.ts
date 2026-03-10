@@ -20,6 +20,7 @@ export const ALL_FEATURES = [
   "mappings",
   "audit",
   "mcp-config",
+  "economy",
 ] as const
 
 export type FeatureId = (typeof ALL_FEATURES)[number]
