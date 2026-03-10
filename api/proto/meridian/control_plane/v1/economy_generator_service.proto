@@ -59,6 +59,12 @@ message GenerationPreferences {
 
 // GenerateManifestRequest contains the description and options for manifest generation.
 message GenerateManifestRequest {
+  option (buf.validate.message).cel = {
+    id: "generate_manifest_request.tenant_id_required_for_amend"
+    message: "tenant_id is required when mode is GENERATION_MODE_AMEND"
+    expression: "this.mode != 2 || this.tenant_id != ''"
+  };
+
   // description is a natural language description of the economy to generate.
   string description = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -66,6 +72,7 @@ message GenerateManifestRequest {
   }];
 
   // mode controls whether to create a new manifest or amend an existing one.
+  // When unset (GENERATION_MODE_UNSPECIFIED), the server defaults to GENERATION_MODE_CREATE.
   GenerationMode mode = 2;
 
   // tenant_id is required when mode is GENERATION_MODE_AMEND to load the current manifest.
@@ -126,6 +133,12 @@ message GenerateManifestResponse {
 
 // GetGenerationContextRequest specifies what context to retrieve for the given description.
 message GetGenerationContextRequest {
+  option (buf.validate.message).cel = {
+    id: "get_generation_context_request.tenant_id_required_for_current_economy"
+    message: "tenant_id is required when include_current_economy is true"
+    expression: "!this.include_current_economy || this.tenant_id != ''"
+  };
+
   // description is the natural language description to retrieve context for.
   string description = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -171,7 +184,8 @@ message GetGenerationContextResponse {
   // formatted for use as an AI prompt context.
   string handler_reference_card = 1;
 
-  // topic_list is the list of Kafka topics available for saga event subscriptions.
+  // topic_list is a pre-formatted text summary of Kafka topics available for saga event
+  // subscriptions, formatted for use as AI prompt context (not a structured list).
   string topic_list = 2;
 
   // manifest_schema_summary is a summary of the manifest schema for AI prompt context.
