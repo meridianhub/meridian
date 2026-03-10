@@ -14,9 +14,10 @@ type AmendImpact struct {
 	// Format: "type:code" (e.g., "instrument:CARBON_CREDIT", "saga:carbon_offset_flow").
 	Added []string
 
-	// Modified lists resources present in both but with differences.
-	// Format: "type:code" (e.g., "account_type:TRADING_ACCOUNT").
-	Modified []string
+	// Retained lists resources present in both manifests (by code/name identity).
+	// These are not included in decisions to avoid noise — only structural changes
+	// (additions and removals) are reported.
+	Retained []string
 
 	// Removed lists resources present in the original but absent from the amended manifest.
 	// These are flagged as warnings since the user may not have intended to remove them.
@@ -27,13 +28,10 @@ type AmendImpact struct {
 // ToDecisions converts the impact analysis into human-readable decision strings
 // suitable for inclusion in GenerationMetadata.decisions.
 func (a *AmendImpact) ToDecisions() []string {
-	decisions := make([]string, 0, len(a.Added)+len(a.Modified)+len(a.Removed))
+	decisions := make([]string, 0, len(a.Added)+len(a.Removed))
 
 	for _, r := range a.Added {
 		decisions = append(decisions, fmt.Sprintf("Added %s", r))
-	}
-	for _, r := range a.Modified {
-		decisions = append(decisions, fmt.Sprintf("Modified %s", r))
 	}
 	for _, r := range a.Removed {
 		decisions = append(decisions, fmt.Sprintf("Warning: Removed %s (was present in original manifest)", r))
@@ -81,7 +79,7 @@ func ComputeAmendImpact(originalYAML, amendedYAML string) AmendImpact {
 	)
 
 	sort.Strings(impact.Added)
-	sort.Strings(impact.Modified)
+	sort.Strings(impact.Retained)
 	sort.Strings(impact.Removed)
 
 	return impact
@@ -101,14 +99,13 @@ func extractCodes(items []map[string]interface{}, key string) map[string]bool {
 // diffResources compares two sets of resource identifiers and populates the impact.
 // Resources in amended but not original are Added.
 // Resources in original but not amended are Removed.
-// Resources in both are considered potentially Modified (conservative — we don't deep-diff content).
+// Resources present in both are recorded as Retained (unchanged by identity).
+// Deep content comparison is not performed — Retained means the resource code/name
+// still exists, not that its fields are identical.
 func diffResources(original, amended map[string]bool, resourceType string, impact *AmendImpact) {
 	for code := range amended {
 		if original[code] {
-			// Present in both — conservatively mark as modified.
-			// A true deep diff would compare full content, but for impact reporting
-			// we flag anything that existed before and still exists.
-			impact.Modified = append(impact.Modified, fmt.Sprintf("%s:%s", resourceType, code))
+			impact.Retained = append(impact.Retained, fmt.Sprintf("%s:%s", resourceType, code))
 		} else {
 			impact.Added = append(impact.Added, fmt.Sprintf("%s:%s", resourceType, code))
 		}

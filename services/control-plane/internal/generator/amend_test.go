@@ -26,9 +26,9 @@ sagas:
 	assert.Empty(t, impact.Added)
 	assert.Empty(t, impact.Removed)
 	// All existing resources are marked as modified (conservative approach).
-	assert.Contains(t, impact.Modified, "instrument:GBP")
-	assert.Contains(t, impact.Modified, "account_type:CURRENT")
-	assert.Contains(t, impact.Modified, "saga:simple_transfer")
+	assert.Contains(t, impact.Retained, "instrument:GBP")
+	assert.Contains(t, impact.Retained, "account_type:CURRENT")
+	assert.Contains(t, impact.Retained, "saga:simple_transfer")
 }
 
 func TestComputeAmendImpact_AddedResources(t *testing.T) {
@@ -47,7 +47,7 @@ instruments:
 	impact := generator.ComputeAmendImpact(original, amended)
 
 	assert.Contains(t, impact.Added, "instrument:EUR")
-	assert.Contains(t, impact.Modified, "instrument:GBP")
+	assert.Contains(t, impact.Retained, "instrument:GBP")
 	assert.Empty(t, impact.Removed)
 }
 
@@ -100,28 +100,31 @@ sagas:
 	assert.Contains(t, impact.Added, "instrument:EUR")
 	assert.Contains(t, impact.Added, "saga:carbon_offset_flow")
 	assert.Contains(t, impact.Removed, "instrument:USD")
-	assert.Contains(t, impact.Modified, "instrument:GBP")
-	assert.Contains(t, impact.Modified, "saga:payment_flow")
+	assert.Contains(t, impact.Retained, "instrument:GBP")
+	assert.Contains(t, impact.Retained, "saga:payment_flow")
 }
 
 func TestComputeAmendImpact_InvalidYAML_ReturnsEmpty(t *testing.T) {
 	impact := generator.ComputeAmendImpact("not: [valid yaml", "instruments:\n  - code: GBP")
 	assert.Empty(t, impact.Added)
-	assert.Empty(t, impact.Modified)
+	assert.Empty(t, impact.Retained)
 	assert.Empty(t, impact.Removed)
 }
 
 func TestAmendImpact_ToDecisions(t *testing.T) {
 	impact := generator.AmendImpact{
 		Added:    []string{"instrument:EUR"},
-		Modified: []string{"instrument:GBP"},
+		Retained: []string{"instrument:GBP"},
 		Removed:  []string{"instrument:USD"},
 	}
 
 	decisions := impact.ToDecisions()
 	assert.Contains(t, decisions, "Added instrument:EUR")
-	assert.Contains(t, decisions, "Modified instrument:GBP")
 	assert.Contains(t, decisions, "Warning: Removed instrument:USD (was present in original manifest)")
+	// Retained resources are not included in decisions to avoid noise.
+	for _, d := range decisions {
+		assert.NotContains(t, d, "GBP", "retained resources should not appear in decisions")
+	}
 }
 
 func TestAmendImpact_ToDecisions_Empty(t *testing.T) {
