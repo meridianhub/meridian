@@ -9,6 +9,7 @@ import { TenantProvider, useTenantContext } from '@/contexts/tenant-context'
 import { useTenants } from '@/hooks/use-tenants'
 import { useAuthProviders, type AuthProvider as AuthProviderType } from '@/hooks/use-auth-providers'
 import { useOAuthFlow } from '@/hooks/use-oauth-flow'
+import { isBaseDomain } from '@/lib/tenant-utils'
 import { ApiClientProvider } from '@/api/context'
 import { ProtectedRoute, PlatformOnlyRoute, AdminOnlyRoute, TenantSubdomainEnforcer } from '@/components/routing'
 import { FeatureGuard } from '@/components/feature-guard'
@@ -64,10 +65,7 @@ function PlaceholderPage({ title }: { title: string }) {
 }
 
 function isBareDomain(): boolean {
-  const hostname = window.location.hostname.toLowerCase()
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return false
-  const baseDomain = (import.meta.env.VITE_BASE_DOMAIN ?? 'meridianhub.cloud').toLowerCase()
-  return hostname === baseDomain
+  return isBaseDomain(window.location.hostname)
 }
 
 function LoginPage() {

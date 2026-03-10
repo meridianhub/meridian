@@ -6,6 +6,17 @@
  *
  * Returns null for localhost, bare domain, or when no subdomain is present.
  */
+/**
+ * Returns true if the hostname is exactly the configured base domain
+ * (e.g., "meridianhub.cloud" or "demo.meridianhub.cloud").
+ * Returns false for localhost, tenant subdomains, and unrelated domains.
+ */
+export function isBaseDomain(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return false
+  const baseDomain = (import.meta.env.VITE_BASE_DOMAIN ?? 'meridianhub.cloud').toLowerCase()
+  return hostname.toLowerCase() === baseDomain
+}
+
 export function getTenantSlugFromSubdomain(hostname: string): string | null {
   // No subdomain support on localhost
   if (hostname === 'localhost' || hostname === '127.0.0.1') {

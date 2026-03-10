@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { getTenantSlugFromSubdomain } from '../tenant-utils'
+import { getTenantSlugFromSubdomain, isBaseDomain } from '../tenant-utils'
 
 // VITE_BASE_DOMAIN defaults to 'meridianhub.cloud' when not set
 describe('getTenantSlugFromSubdomain', () => {
@@ -37,6 +37,35 @@ describe('getTenantSlugFromSubdomain', () => {
   it('returns null for bare demo domain', () => {
     vi.stubEnv('VITE_BASE_DOMAIN', 'demo.meridianhub.cloud')
     expect(getTenantSlugFromSubdomain('demo.meridianhub.cloud')).toBeNull()
+    vi.unstubAllEnvs()
+  })
+})
+
+describe('isBaseDomain', () => {
+  it('returns true for exact base domain match', () => {
+    expect(isBaseDomain('meridianhub.cloud')).toBe(true)
+  })
+
+  it('returns true case-insensitively', () => {
+    expect(isBaseDomain('MeridianHub.Cloud')).toBe(true)
+  })
+
+  it('returns false for tenant subdomain', () => {
+    expect(isBaseDomain('acme.meridianhub.cloud')).toBe(false)
+  })
+
+  it('returns false for localhost', () => {
+    expect(isBaseDomain('localhost')).toBe(false)
+  })
+
+  it('returns false for unrelated domain', () => {
+    expect(isBaseDomain('example.com')).toBe(false)
+  })
+
+  it('returns true for custom base domain', () => {
+    vi.stubEnv('VITE_BASE_DOMAIN', 'demo.meridianhub.cloud')
+    expect(isBaseDomain('demo.meridianhub.cloud')).toBe(true)
+    expect(isBaseDomain('acme.demo.meridianhub.cloud')).toBe(false)
     vi.unstubAllEnvs()
   })
 })
