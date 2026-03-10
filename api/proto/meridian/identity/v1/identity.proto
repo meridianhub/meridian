@@ -267,8 +267,9 @@ message UpdateIdentityRequest {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // email is the updated email address (optional).
-  // IGNORE_IF_ZERO_VALUE allows partial updates that do not modify the email field.
+  // email is accepted for validation but is immutable after creation.
+  // Sending a value different from the current email returns FAILED_PRECONDITION.
+  // IGNORE_IF_ZERO_VALUE allows partial updates that omit the email field.
   string email = 2 [
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string = {
@@ -715,8 +716,8 @@ service IdentityService {
   //
   // Errors:
   //   - INVALID_ARGUMENT: The password does not meet the password policy.
-  //   - NOT_FOUND: The invitation token is invalid or expired.
-  //   - FAILED_PRECONDITION: The invitation has expired or already been accepted.
+  //   - NOT_FOUND: No invitation matches the provided token hash.
+  //   - FAILED_PRECONDITION: The invitation was found but has expired or was already accepted.
   rpc SetPassword(SetPasswordRequest) returns (SetPasswordResponse) {
     option (google.api.http) = {
       post: "/v1/identities/password"
@@ -733,7 +734,7 @@ service IdentityService {
   //
   // Errors:
   //   - UNAUTHENTICATED: No valid Bearer token provided.
-  //   - PERMISSION_DENIED: The current password is incorrect.
+  //   - PERMISSION_DENIED: The current password verification failed (re-authentication step).
   //   - INVALID_ARGUMENT: The new password does not meet the password policy.
   //   - NOT_FOUND: The authenticated identity no longer exists.
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
@@ -745,7 +746,9 @@ service IdentityService {
 
   // RequestPasswordReset initiates the password reset flow by generating a reset token.
   // This is a pre-auth endpoint; no Bearer token is required.
-  // Always returns success even if the email is not found (prevents email enumeration).
+  // Always returns success even if the email is not found to limit enumeration.
+  // Note: the reset_token is currently returned in-band; full anti-enumeration
+  // requires out-of-band token delivery (e.g. email), which is not yet implemented.
   rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse) {
     option (google.api.http) = {
       post: "/v1/identities/password-reset"
@@ -762,8 +765,8 @@ service IdentityService {
   //
   // Errors:
   //   - INVALID_ARGUMENT: The new password does not meet the password policy.
-  //   - NOT_FOUND: The reset token is invalid.
-  //   - FAILED_PRECONDITION: The reset token has expired or already been used.
+  //   - NOT_FOUND: No invitation matches the provided reset token hash.
+  //   - FAILED_PRECONDITION: The reset token was found but has expired or was already used.
   rpc CompletePasswordReset(CompletePasswordResetRequest) returns (CompletePasswordResetResponse) {
     option (google.api.http) = {
       put: "/v1/identities/password-reset"
@@ -851,8 +854,8 @@ service IdentityService {
   //
   // Errors:
   //   - INVALID_ARGUMENT: The password does not meet the password policy.
-  //   - NOT_FOUND: The invitation token is invalid.
-  //   - FAILED_PRECONDITION: The invitation has expired or already been accepted.
+  //   - NOT_FOUND: No invitation matches the provided token hash.
+  //   - FAILED_PRECONDITION: The invitation was found but has expired or was already accepted.
   rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse) {
     option (google.api.http) = {
       post: "/v1/identities/invite/accept"
