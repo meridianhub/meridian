@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApiClients } from '@/api/context'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import type {
@@ -13,6 +13,18 @@ export interface ValidationResult {
   sequenceNumber: number
 }
 
+function createValidationError(code: string, message: string): ValidationError {
+  return {
+    severity: 'ERROR',
+    path: '',
+    code,
+    message,
+    suggestion: '',
+    $typeName: 'meridian.control_plane.v1.ValidationError',
+    $unknown: undefined,
+  } as unknown as ValidationError
+}
+
 export function useManifestValidate() {
   const { manifestApplier } = useApiClients()
   const [isValidating, setIsValidating] = useState(false)
@@ -22,6 +34,17 @@ export function useManifestValidate() {
   const latestCompletedRef = useRef(0)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
 
   const validate = useCallback(
     (manifest: Manifest) => {
@@ -69,15 +92,7 @@ export function useManifestValidate() {
               // surface step-level messages as errors.
               for (const step of response.stepResults) {
                 if (step.status !== StepResultStatus.SUCCESS && step.message) {
-                  errors.push({
-                    severity: 'ERROR',
-                    path: '',
-                    code: step.stepName,
-                    message: step.message,
-                    suggestion: '',
-                    $typeName: 'meridian.control_plane.v1.ValidationError',
-                    $unknown: undefined as never,
-                  } as unknown as ValidationError)
+                  errors.push(createValidationError(step.stepName, step.message))
                 }
               }
             }
@@ -91,16 +106,10 @@ export function useManifestValidate() {
             latestCompletedRef.current = seq
             setResult({
               errors: [
-                {
-                  severity: 'ERROR',
-                  path: '',
-                  code: 'NETWORK_ERROR',
-                  message:
-                    err instanceof Error ? err.message : 'Validation request failed',
-                  suggestion: '',
-                  $typeName: 'meridian.control_plane.v1.ValidationError',
-                  $unknown: undefined as never,
-                } as unknown as ValidationError,
+                createValidationError(
+                  'NETWORK_ERROR',
+                  err instanceof Error ? err.message : 'Validation request failed',
+                ),
               ],
               warnings: [],
               sequenceNumber: seq,

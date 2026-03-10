@@ -9,7 +9,9 @@ export { EconomyDraftPage } from './pages/economy-draft-page'
 
 // Hooks
 export { useManifestValidate } from './hooks/use-manifest-validate'
+export type { ValidationResult } from './hooks/use-manifest-validate'
 export { useManifestPlan } from './hooks/use-manifest-plan'
+export type { ManifestPlan } from './hooks/use-manifest-plan'
 
 // Components
 export { EditorGraphPanel } from './components/editor-graph-panel'
