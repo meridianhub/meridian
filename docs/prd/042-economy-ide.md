@@ -206,8 +206,10 @@ responses (from older drafts) are discarded when a newer response has arrived:
 - Parameter names (`account_id`, `instrument_code`, `quantity`)
 - Enum values (`DEBIT`, `CREDIT`, `FIAT`, `COMMODITY`)
 
-Autocomplete data sourced from `meridian_handlers_describe` MCP tool or a
-compiled handler schema loaded at page init.
+Autocomplete data sourced from `meridian_handlers_describe` MCP tool,
+called at page init and cached for the session. This is the single
+canonical source for handler metadata (no compiled schema file — aligns
+with PRD-040's elimination of standalone handler schema files).
 
 **Layout**: Split view:
 
@@ -217,7 +219,10 @@ compiled handler schema loaded at page init.
   includes relationship graph extraction). In v1, the graph updates after
   each successful validation pass, not on every keystroke. Validation
   requests use a monotonic sequence counter — stale responses from older
-  drafts are discarded when a newer validation has already completed
+  drafts are discarded when a newer validation has already completed.
+  When validation fails, the graph panel shows a "stale" indicator over the
+  last valid graph and disables interaction until the next successful
+  validation. This prevents users from reasoning about an outdated graph
 
 #### 3. Validation Panel
 
@@ -326,6 +331,7 @@ The IDE calls existing gRPC services — no new backend APIs needed:
 | `useEconomyGraph` | `EconomyService.GetEconomyGraph` | Persisted economy relationship data |
 | `useEconomyStructure` | `EconomyService.GetEconomyStructure` | Current state |
 | `useManifestHistory` | `ManifestService.GetManifestHistory` | Version timeline |
+| `useHandlersDescribe` | `meridian_handlers_describe` (MCP/HTTP) | Handler autocomplete data |
 
 **Draft graph**: The relationship graph for in-editor drafts comes from the
 `ManifestValidate` response, which already extracts the graph during validation.
