@@ -50,6 +50,8 @@ type MeridianClients struct {
 	ProviderConnection opgatewayv1.ProviderConnectionServiceClient
 	// Health allows the MCP server to check gateway liveness.
 	Health grpc_health_v1.HealthClient
+	// EconomyGenerator generates tenant manifests from natural language descriptions.
+	EconomyGenerator controlplanev1.EconomyGeneratorServiceClient
 
 	// conn is the underlying connection; callers must call Close when done.
 	conn *grpc.ClientConn
@@ -95,6 +97,7 @@ func New(cfg *auth.Config) (*MeridianClients, error) {
 		OperationalGateway: opgatewayv1.NewOperationalGatewayServiceClient(conn),
 		ProviderConnection: opgatewayv1.NewProviderConnectionServiceClient(conn),
 		Health:             grpc_health_v1.NewHealthClient(conn),
+		EconomyGenerator:   controlplanev1.NewEconomyGeneratorServiceClient(conn),
 		conn:               conn,
 	}, nil
 }
