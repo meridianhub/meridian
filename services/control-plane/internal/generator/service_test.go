@@ -6,11 +6,11 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/meridianhub/meridian/services/control-plane/internal/generator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/services/control-plane/internal/generator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -64,6 +64,16 @@ func (m *mockValidatorSequence) ValidateDryRun(_ context.Context, _ string) (*ge
 	return r, nil
 }
 
+// mockManifestHistorian is a test double for ManifestHistorian.
+type mockManifestHistorian struct {
+	manifest *controlplanev1.Manifest
+	err      error
+}
+
+func (m *mockManifestHistorian) GetCurrentManifest(_ context.Context) (*controlplanev1.Manifest, error) {
+	return m.manifest, m.err
+}
+
 // --- helpers ---
 
 // minimalValidYAML is a well-formed manifest YAML for testing.
@@ -85,60 +95,164 @@ sagas:
       result = {}
 `
 
-// buildServiceConfig returns a GeneratorServiceConfig wired with the provided mocks.
-func buildServiceConfig(llm generator.LLMClient, val generator.ManifestValidator) generator.Config {
-	return generator.Config{
-		SchemaRegistry: buildMinimalRegistry(),
-		CookbookFS:     emptyFS(),
-		LLMClient:      llm,
-		Validator:      val,
+// buildService creates a Service with the given LLM client and validator using functional options.
+func buildService(t *testing.T, llm generator.LLMClient, val generator.ManifestValidator) *generator.Service {
+	t.Helper()
+	opts := []generator.ServiceOption{}
+	if llm != nil {
+		opts = append(opts, generator.WithLLMClient(llm))
 	}
-}
-
-// --- Constructor tests ---
-
-func TestNewGeneratorService_RequiresSchemaRegistry(t *testing.T) {
-	cfg := buildServiceConfig(&mockGenerateLLMClient{}, &mockValidatorAlwaysValid{})
-	cfg.SchemaRegistry = nil
-	_, err := generator.NewService(cfg)
-	require.ErrorIs(t, err, generator.ErrSchemaRegistryRequired)
-}
-
-func TestNewGeneratorService_RequiresCookbookFS(t *testing.T) {
-	cfg := buildServiceConfig(&mockGenerateLLMClient{}, &mockValidatorAlwaysValid{})
-	cfg.CookbookFS = nil
-	_, err := generator.NewService(cfg)
-	require.ErrorIs(t, err, generator.ErrCookbookFSRequired)
-}
-
-func TestNewGeneratorService_RequiresLLMClient(t *testing.T) {
-	cfg := buildServiceConfig(nil, &mockValidatorAlwaysValid{})
-	_, err := generator.NewService(cfg)
-	require.ErrorIs(t, err, generator.ErrLLMClientRequired)
-}
-
-func TestNewGeneratorService_RequiresValidator(t *testing.T) {
-	cfg := buildServiceConfig(&mockGenerateLLMClient{}, nil)
-	_, err := generator.NewService(cfg)
-	require.ErrorIs(t, err, generator.ErrValidatorRequired)
-}
-
-func TestNewGeneratorService_AcceptsNilManifestClient(t *testing.T) {
-	cfg := buildServiceConfig(&mockGenerateLLMClient{generateResponse: minimalValidYAML}, &mockValidatorAlwaysValid{})
-	cfg.ManifestClient = nil
-	svc, err := generator.NewService(cfg)
+	if val != nil {
+		opts = append(opts, generator.WithValidator(val))
+	}
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), nil, emptyFS(), nil, opts...)
 	require.NoError(t, err)
-	require.NotNil(t, svc)
+	return svc
+}
+
+// --- Constructor tests (NewGeneratorService) ---
+
+func TestNewGeneratorService_NilRegistry_ReturnsError(t *testing.T) {
+	_, err := generator.NewGeneratorService(nil, nil, nil, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, generator.ErrNilSchemaRegistry)
+}
+
+func TestNewGeneratorService_ValidRegistry_ReturnsService(t *testing.T) {
+	reg := buildMinimalRegistry()
+	svc, err := generator.NewGeneratorService(reg, nil, nil, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, svc)
+}
+
+func TestNewGeneratorService_NilLLMAndValidator_ReturnsService(t *testing.T) {
+	// llmClient and validator may be nil when only GetGenerationContext is used.
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), nil, emptyFS(), nil)
+	require.NoError(t, err)
+	assert.NotNil(t, svc)
+}
+
+// --- GetGenerationContext tests ---
+
+func TestGetGenerationContext_MissingDescription_ReturnsError(t *testing.T) {
+	reg := buildMinimalRegistry()
+	svc, err := generator.NewGeneratorService(reg, nil, emptyFS(), nil)
+	require.NoError(t, err)
+
+	_, err = svc.GetGenerationContext(context.Background(), &controlplanev1.GetGenerationContextRequest{
+		Description: "",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "description is required")
+}
+
+func TestGetGenerationContext_BasicRequest_ReturnsContext(t *testing.T) {
+	reg := buildMinimalRegistry()
+
+	svc, err := generator.NewGeneratorService(reg, nil, emptyFS(), nil)
+	require.NoError(t, err)
+
+	resp, err := svc.GetGenerationContext(context.Background(), &controlplanev1.GetGenerationContextRequest{
+		Description: "An energy trading platform that manages electricity contracts",
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetHandlerReferenceCard())
+	assert.NotEmpty(t, resp.GetTopicList())
+	assert.NotEmpty(t, resp.GetManifestSchemaSummary())
+	assert.Empty(t, resp.GetCurrentEconomyYaml())
+}
+
+func TestGetGenerationContext_ExcludePatterns_ReturnsNoPatterns(t *testing.T) {
+	reg := buildMinimalRegistry()
+	cookbookFS := cookbookWithOnePattern()
+
+	svc, err := generator.NewGeneratorService(reg, nil, cookbookFS, nil)
+	require.NoError(t, err)
+
+	resp, err := svc.GetGenerationContext(context.Background(), &controlplanev1.GetGenerationContextRequest{
+		Description:     "energy trading",
+		ExcludePatterns: true,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.GetMatchedPatterns())
+}
+
+func TestGetGenerationContext_IncludePatterns_ReturnsMatchedPatterns(t *testing.T) {
+	reg := buildMinimalRegistry()
+	cookbookFS := cookbookWithOnePattern()
+
+	svc, err := generator.NewGeneratorService(reg, nil, cookbookFS, nil)
+	require.NoError(t, err)
+
+	resp, err := svc.GetGenerationContext(context.Background(), &controlplanev1.GetGenerationContextRequest{
+		Description:     "energy trading platform",
+		ExcludePatterns: false,
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetMatchedPatterns())
+	p := resp.GetMatchedPatterns()[0]
+	assert.NotEmpty(t, p.GetName())
+	assert.NotEmpty(t, p.GetTitle())
+}
+
+func TestGetGenerationContext_IncludeCurrentEconomy_NoHistorian_ReturnsError(t *testing.T) {
+	reg := buildMinimalRegistry()
+	svc, err := generator.NewGeneratorService(reg, nil, emptyFS(), nil)
+	require.NoError(t, err)
+
+	_, err = svc.GetGenerationContext(context.Background(), &controlplanev1.GetGenerationContextRequest{
+		Description:           "energy trading",
+		IncludeCurrentEconomy: true,
+		TenantId:              "tenant-1",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "manifest history is not available")
+}
+
+func TestGetGenerationContext_IncludeCurrentEconomy_HistorianError_ReturnsError(t *testing.T) {
+	reg := buildMinimalRegistry()
+	historian := &mockManifestHistorian{err: errors.New("db down")}
+
+	svc, err := generator.NewGeneratorService(reg, historian, emptyFS(), nil)
+	require.NoError(t, err)
+
+	_, err = svc.GetGenerationContext(context.Background(), &controlplanev1.GetGenerationContextRequest{
+		Description:           "energy trading",
+		IncludeCurrentEconomy: true,
+		TenantId:              "tenant-1",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load current manifest")
+}
+
+func TestGetGenerationContext_IncludeCurrentEconomy_ReturnsYAML(t *testing.T) {
+	reg := buildMinimalRegistry()
+	manifest := &controlplanev1.Manifest{
+		Version: "1.0.0",
+		Metadata: &controlplanev1.ManifestMetadata{
+			Name: "test-economy",
+		},
+	}
+	historian := &mockManifestHistorian{manifest: manifest}
+
+	svc, err := generator.NewGeneratorService(reg, historian, emptyFS(), nil)
+	require.NoError(t, err)
+
+	resp, err := svc.GetGenerationContext(context.Background(), &controlplanev1.GetGenerationContextRequest{
+		Description:           "energy trading",
+		IncludeCurrentEconomy: true,
+		TenantId:              "tenant-1",
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.GetCurrentEconomyYaml())
 }
 
 // --- GenerateManifest tests ---
 
 func TestGenerateManifest_AmendModeReturnsUnimplemented(t *testing.T) {
-	cfg := buildServiceConfig(&mockGenerateLLMClient{}, &mockValidatorAlwaysValid{})
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, &mockGenerateLLMClient{}, &mockValidatorAlwaysValid{})
 
-	_, err = svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+	_, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "a fintech",
 		Mode:        controlplanev1.GenerationMode_GENERATION_MODE_AMEND,
 		TenantId:    "tenant-1",
@@ -150,11 +264,9 @@ func TestGenerateManifest_AmendModeReturnsUnimplemented(t *testing.T) {
 }
 
 func TestGenerateManifest_EmptyDescriptionReturnsInvalidArgument(t *testing.T) {
-	cfg := buildServiceConfig(&mockGenerateLLMClient{}, &mockValidatorAlwaysValid{})
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, &mockGenerateLLMClient{}, &mockValidatorAlwaysValid{})
 
-	_, err = svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+	_, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "",
 	})
 	require.Error(t, err)
@@ -163,12 +275,40 @@ func TestGenerateManifest_EmptyDescriptionReturnsInvalidArgument(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 }
 
+func TestGenerateManifest_NilLLMClient_ReturnsFailedPrecondition(t *testing.T) {
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), nil, emptyFS(), nil,
+		generator.WithValidator(&mockValidatorAlwaysValid{}),
+	)
+	require.NoError(t, err)
+
+	_, err = svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description: "A bank",
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+}
+
+func TestGenerateManifest_NilValidator_ReturnsFailedPrecondition(t *testing.T) {
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), nil, emptyFS(), nil,
+		generator.WithLLMClient(&mockGenerateLLMClient{}),
+	)
+	require.NoError(t, err)
+
+	_, err = svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description: "A bank",
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+}
+
 func TestGenerateManifest_CreateMode_ValidOnFirstPass(t *testing.T) {
 	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
 	val := &mockValidatorAlwaysValid{}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "A simple bank account service",
@@ -187,9 +327,7 @@ func TestGenerateManifest_CreateMode_ValidOnFirstPass(t *testing.T) {
 func TestGenerateManifest_CreateMode_MetadataExtracted(t *testing.T) {
 	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
 	val := &mockValidatorAlwaysValid{}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "A bank",
@@ -220,9 +358,7 @@ func TestGenerateManifest_CreateMode_FixIterationsRespected(t *testing.T) {
 		generateResponse: minimalValidYAML,
 		fixResponse:      minimalValidYAML,
 	}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description:      "A bank",
@@ -249,9 +385,7 @@ func TestGenerateManifest_CreateMode_MaxFixIterationsExhausted(t *testing.T) {
 		generateResponse: minimalValidYAML,
 		fixResponse:      minimalValidYAML,
 	}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description:      "A bank",
@@ -269,9 +403,7 @@ func TestGenerateManifest_CreateMode_DefaultMaxIterationsApplied(t *testing.T) {
 	// Validator always valid immediately — just checking no error on max_fix_iterations=0.
 	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
 	val := &mockValidatorAlwaysValid{}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	// max_fix_iterations is 0 → server applies default (3).
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
@@ -285,11 +417,9 @@ func TestGenerateManifest_CreateMode_DefaultMaxIterationsApplied(t *testing.T) {
 func TestGenerateManifest_CreateMode_LLMGenerateError(t *testing.T) {
 	llm := &mockGenerateLLMClient{generateErr: errors.New("API unavailable")}
 	val := &mockValidatorAlwaysValid{}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
-	_, err = svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+	_, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "A bank",
 	})
 	require.Error(t, err)
@@ -310,9 +440,7 @@ func TestGenerateManifest_CreateMode_ValidationWarningsIncluded(t *testing.T) {
 		},
 	}
 	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "A bank",
@@ -327,9 +455,7 @@ func TestGenerateManifest_CreateMode_ValidationWarningsIncluded(t *testing.T) {
 func TestGenerateManifest_CreateMode_UnspecifiedModeTreatedAsCreate(t *testing.T) {
 	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
 	val := &mockValidatorAlwaysValid{}
-	cfg := buildServiceConfig(llm, val)
-	svc, err := generator.NewService(cfg)
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	// GENERATION_MODE_UNSPECIFIED should be treated as CREATE.
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
@@ -340,14 +466,13 @@ func TestGenerateManifest_CreateMode_UnspecifiedModeTreatedAsCreate(t *testing.T
 	assert.True(t, resp.Valid)
 }
 
-// --- yamlToProtoManifest / metadata extraction tests ---
+// --- Metadata extraction tests ---
 
 func TestExtractManifestMetadata_InstrumentsAccountTypesSagas(t *testing.T) {
-	svc, err := generator.NewService(buildServiceConfig(
+	svc := buildService(t,
 		&mockGenerateLLMClient{generateResponse: minimalValidYAML},
 		&mockValidatorAlwaysValid{},
-	))
-	require.NoError(t, err)
+	)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "Test economy",
@@ -368,8 +493,7 @@ sagas: []
 `
 	llm := &mockGenerateLLMClient{generateResponse: emptyYAML}
 	val := &mockValidatorAlwaysValid{}
-	svc, err := generator.NewService(buildServiceConfig(llm, val))
-	require.NoError(t, err)
+	svc := buildService(t, llm, val)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "empty",
@@ -412,7 +536,6 @@ func TestNewManifestValidatorAdapter_PropagatesError(t *testing.T) {
 // --- cookbookFS with patterns tests ---
 
 func TestGenerateManifest_PatternNamesPopulated(t *testing.T) {
-	// Build a cookbook FS with one simple pattern.
 	cookFS := fstest.MapFS{
 		"registry.json": &fstest.MapFile{Data: []byte(`{
 			"items":[{"name":"energy-settlement","title":"Energy Settlement","tags":["energy","settlement"]}]
@@ -435,22 +558,44 @@ func TestGenerateManifest_PatternNamesPopulated(t *testing.T) {
 
 	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
 	val := &mockValidatorAlwaysValid{}
-	cfg := generator.Config{
-		SchemaRegistry: buildMinimalRegistry(),
-		CookbookFS:     cookFS,
-		LLMClient:      llm,
-		Validator:      val,
-	}
-	svc, err := generator.NewService(cfg)
+	svc, err := generator.NewGeneratorService(buildMinimalRegistry(), nil, cookFS, nil,
+		generator.WithLLMClient(llm),
+		generator.WithValidator(val),
+	)
 	require.NoError(t, err)
 
 	resp, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
 		Description: "Energy grid settlement system for kilowatt-hour tracking",
 	})
 	require.NoError(t, err)
-	// Generation metadata is always populated.
 	assert.NotNil(t, resp.GenerationMetadata)
-	// The patterns_used field is populated from matched patterns (may be empty if scorer
-	// does not find a match above threshold — that's acceptable).
 	assert.True(t, resp.Valid)
+}
+
+// cookbookWithOnePattern returns a minimal cookbook FS with one energy-related pattern.
+func cookbookWithOnePattern() fstest.MapFS {
+	return fstest.MapFS{
+		"registry.json": &fstest.MapFile{Data: []byte(`{
+			"items": [
+				{"name": "energy-settlement", "type": "registry:pattern", "title": "Energy Settlement"}
+			]
+		}`)},
+		"patterns/energy-settlement/pattern.json": &fstest.MapFile{Data: []byte(`{
+			"name": "energy-settlement",
+			"type": "registry:pattern",
+			"title": "Energy Settlement",
+			"description": "Settles energy trades between counterparties",
+			"meta": {
+				"industries": ["energy"],
+				"provides": {
+					"instruments": ["kWh"],
+					"sagas": ["settle_energy_trade"]
+				}
+			}
+		}`)},
+		"patterns/energy-settlement/manifest-fragment.yaml": &fstest.MapFile{Data: []byte(`instruments:
+  - code: kWh
+    name: Kilowatt Hour
+`)},
+	}
 }

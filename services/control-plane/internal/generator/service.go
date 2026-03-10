@@ -3,7 +3,6 @@ package generator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -19,70 +18,139 @@ import (
 // defaultMaxFixIterations is applied when the request leaves max_fix_iterations at 0.
 const defaultMaxFixIterations = 3
 
-// ManifestHistorian retrieves current manifest state for amend mode.
-// Implemented by an adapter wrapping the manifest history service.
+// ManifestHistorian provides access to the current applied manifest for a tenant.
 type ManifestHistorian interface {
-	// GetCurrentManifest retrieves the latest applied manifest for the given tenant.
-	// Returns the manifest proto and any error. Used in amend mode (task 12).
-	GetCurrentManifest(ctx context.Context, tenantID string) (*controlplanev1.Manifest, error)
+	GetCurrentManifest(ctx context.Context) (*controlplanev1.Manifest, error)
 }
 
-// Sentinel errors for Service construction.
-var (
-	ErrSchemaRegistryRequired = errors.New("generator service: schema registry is required")
-	ErrCookbookFSRequired     = errors.New("generator service: cookbook FS is required")
-	ErrLLMClientRequired      = errors.New("generator service: LLM client is required")
-	ErrValidatorRequired      = errors.New("generator service: validator is required")
-)
-
-// Service implements the EconomyService gRPC interface.
-// It assembles a generation context, calls the LLM, and runs the validate-fix loop.
+// Service implements the EconomyGeneratorServiceServer gRPC interface.
 type Service struct {
 	controlplanev1.UnimplementedEconomyGeneratorServiceServer
 
-	schemaRegistry *schema.Registry
-	manifestClient ManifestHistorian
-	cookbookFS     fs.FS
-	llmClient      LLMClient
-	validator      ManifestValidator
-	logger         *slog.Logger
+	schemaRegistry  *schema.Registry
+	manifestHistory ManifestHistorian
+	cookbookFS      fs.FS
+	llmClient       LLMClient
+	validator       ManifestValidator
+	logger          *slog.Logger
 }
 
-// Config contains dependencies for creating a Service.
-type Config struct {
-	SchemaRegistry *schema.Registry
-	ManifestClient ManifestHistorian
-	CookbookFS     fs.FS
-	LLMClient      LLMClient
-	Validator      ManifestValidator
-	Logger         *slog.Logger
+// ErrNilSchemaRegistry is returned when a nil schema registry is provided.
+var ErrNilSchemaRegistry = fmt.Errorf("schema registry is required")
+
+// NewGeneratorService creates a new Service.
+// manifestHistory may be nil if include_current_economy is never used.
+// llmClient and validator are required for GenerateManifest; they may be nil if only
+// GetGenerationContext is used.
+func NewGeneratorService(
+	registry *schema.Registry,
+	manifestHistory ManifestHistorian,
+	cookbookFS fs.FS,
+	logger *slog.Logger,
+	opts ...ServiceOption,
+) (*Service, error) {
+	if registry == nil {
+		return nil, ErrNilSchemaRegistry
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	svc := &Service{
+		schemaRegistry:  registry,
+		manifestHistory: manifestHistory,
+		cookbookFS:      cookbookFS,
+		logger:          logger.With("component", "generator_service"),
+	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc, nil
 }
 
-// NewService creates a new Service with the given dependencies.
-// ManifestClient is optional — it is only required for amend mode (task 12).
-func NewService(cfg Config) (*Service, error) {
-	if cfg.SchemaRegistry == nil {
-		return nil, ErrSchemaRegistryRequired
+// ServiceOption configures optional fields on a Service.
+type ServiceOption func(*Service)
+
+// WithLLMClient sets the LLM client for manifest generation.
+func WithLLMClient(client LLMClient) ServiceOption {
+	return func(s *Service) {
+		s.llmClient = client
 	}
-	if cfg.CookbookFS == nil {
-		return nil, ErrCookbookFSRequired
+}
+
+// WithValidator sets the manifest validator for the validate-fix loop.
+func WithValidator(v ManifestValidator) ServiceOption {
+	return func(s *Service) {
+		s.validator = v
 	}
-	if cfg.LLMClient == nil {
-		return nil, ErrLLMClientRequired
+}
+
+// GetGenerationContext returns the context that would be used for generating a manifest
+// from the given description, without performing the actual generation.
+func (s *Service) GetGenerationContext(
+	ctx context.Context,
+	req *controlplanev1.GetGenerationContextRequest,
+) (*controlplanev1.GetGenerationContextResponse, error) {
+	if req.GetDescription() == "" {
+		return nil, status.Error(codes.InvalidArgument, "description is required")
 	}
-	if cfg.Validator == nil {
-		return nil, ErrValidatorRequired
+
+	opts := ContextAssemblerOptions{
+		Description:           req.GetDescription(),
+		IncludePatterns:       !req.GetExcludePatterns(),
+		MaxPatterns:           3,
+		IncludeCurrentEconomy: req.GetIncludeCurrentEconomy(),
 	}
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
+
+	var currentManifest *controlplanev1.Manifest
+	var currentEconomyYAML string
+
+	if req.GetIncludeCurrentEconomy() {
+		if s.manifestHistory == nil {
+			return nil, status.Error(codes.FailedPrecondition, "manifest history is not available")
+		}
+
+		manifest, err := s.manifestHistory.GetCurrentManifest(ctx)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to get current manifest", "error", err)
+			return nil, status.Error(codes.Internal, "failed to load current manifest")
+		}
+
+		currentManifest = manifest
+		opts.CurrentManifest = currentManifest
+
+		// Serialize manifest for the response field.
+		marshaler := protojson.MarshalOptions{Multiline: true, Indent: "  ", EmitUnpopulated: false}
+		data, err := marshaler.Marshal(currentManifest)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to serialize current manifest", "error", err)
+			return nil, status.Error(codes.Internal, "failed to serialize current manifest")
+		}
+		currentEconomyYAML = string(data)
 	}
-	return &Service{
-		schemaRegistry: cfg.SchemaRegistry,
-		manifestClient: cfg.ManifestClient,
-		cookbookFS:     cfg.CookbookFS,
-		llmClient:      cfg.LLMClient,
-		validator:      cfg.Validator,
-		logger:         cfg.Logger,
+
+	assembled, err := AssembleContext(opts, s.schemaRegistry, s.cookbookFS)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to assemble context", "error", err)
+		return nil, status.Error(codes.Internal, "failed to assemble generation context")
+	}
+
+	matchedPatterns := make([]*controlplanev1.PatternContext, 0, len(assembled.MatchedPatterns))
+	for _, p := range assembled.MatchedPatterns {
+		matchedPatterns = append(matchedPatterns, &controlplanev1.PatternContext{
+			Name:             p.Name,
+			Title:            p.Title,
+			Score:            p.Score,
+			ManifestFragment: p.ManifestFragment,
+			SagaScript:       p.SagaScript,
+		})
+	}
+
+	return &controlplanev1.GetGenerationContextResponse{
+		HandlerReferenceCard:  BuildHandlerReferenceCard(s.schemaRegistry),
+		TopicList:             BuildTopicList(),
+		ManifestSchemaSummary: BuildManifestSchemaSummary(),
+		MatchedPatterns:       matchedPatterns,
+		CurrentEconomyYaml:    currentEconomyYAML,
 	}, nil
 }
 
@@ -97,9 +165,15 @@ func (s *Service) GenerateManifest(
 		return nil, status.Error(codes.Unimplemented, "GENERATION_MODE_AMEND is not yet implemented")
 	}
 
-	// Validate request.
 	if req.GetDescription() == "" {
 		return nil, status.Error(codes.InvalidArgument, "description is required")
+	}
+
+	if s.llmClient == nil {
+		return nil, status.Error(codes.FailedPrecondition, "LLM client is not configured")
+	}
+	if s.validator == nil {
+		return nil, status.Error(codes.FailedPrecondition, "manifest validator is not configured")
 	}
 
 	// Determine max fix iterations.
@@ -197,9 +271,8 @@ func toProtoValidationErrors(errs []ValidationError) []*controlplanev1.Validatio
 	return out
 }
 
-// manifestYAML is a minimal struct for extracting top-level manifest keys from YAML.
-// We use interface{} values to avoid having to mirror the full proto structure.
-type manifestYAML struct {
+// manifestYAMLDoc is a minimal struct for extracting top-level manifest keys from YAML.
+type manifestYAMLDoc struct {
 	Instruments  []map[string]interface{} `yaml:"instruments"`
 	AccountTypes []map[string]interface{} `yaml:"account_types"`
 	Sagas        []map[string]interface{} `yaml:"sagas"`
@@ -207,7 +280,7 @@ type manifestYAML struct {
 
 // extractManifestMetadata parses the manifest YAML to extract created resource names.
 func extractManifestMetadata(manifestYAMLStr string) (*controlplanev1.GenerationMetadata, error) {
-	var doc manifestYAML
+	var doc manifestYAMLDoc
 	if err := yaml.Unmarshal([]byte(manifestYAMLStr), &doc); err != nil {
 		return nil, fmt.Errorf("parse manifest YAML: %w", err)
 	}
@@ -236,8 +309,7 @@ func extractManifestMetadata(manifestYAMLStr string) (*controlplanev1.Generation
 }
 
 // manifestValidatorAdapter implements generator.ManifestValidator by wrapping
-// a function that validates manifest YAML. This allows the generator service to
-// inject any validation implementation without a circular dependency.
+// a function that validates manifest YAML.
 type manifestValidatorAdapter struct {
 	validateFn func(ctx context.Context, manifestYAML string) (*ValidationResult, error)
 }
@@ -248,10 +320,7 @@ func (a *manifestValidatorAdapter) ValidateDryRun(ctx context.Context, manifestY
 }
 
 // NewManifestValidatorAdapter creates a ManifestValidator from a function that converts
-// YAML to a proto Manifest and validates it. The provided validateFn should parse the
-// YAML, call the real validator, and return structured results.
-//
-// Typical use: wrap a *validator.ManifestValidator by converting YAML → JSON → proto.
+// YAML to a proto Manifest and validates it.
 func NewManifestValidatorAdapter(
 	validateFn func(ctx context.Context, manifestYAML string) (*ValidationResult, error),
 ) ManifestValidator {
@@ -259,25 +328,19 @@ func NewManifestValidatorAdapter(
 }
 
 // yamlToProtoManifest converts a YAML manifest string to a controlplanev1.Manifest proto.
-// It first marshals YAML to a generic Go map, then re-encodes to JSON, then uses
-// protojson to unmarshal into the proto type.
 func yamlToProtoManifest(manifestYAML string) (*controlplanev1.Manifest, error) {
-	// Parse YAML into a generic map.
 	var raw interface{}
 	if err := yaml.Unmarshal([]byte(manifestYAML), &raw); err != nil {
 		return nil, fmt.Errorf("parse manifest YAML: %w", err)
 	}
 
-	// Convert YAML-decoded value to JSON-compatible representation.
 	jsonCompatible := convertYAMLToJSONCompatible(raw)
 
-	// Marshal to JSON.
 	jsonBytes, err := json.Marshal(jsonCompatible)
 	if err != nil {
 		return nil, fmt.Errorf("re-encode manifest to JSON: %w", err)
 	}
 
-	// Unmarshal JSON into proto.
 	m := &controlplanev1.Manifest{}
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 	if err := opts.Unmarshal(jsonBytes, m); err != nil {
@@ -287,10 +350,7 @@ func yamlToProtoManifest(manifestYAML string) (*controlplanev1.Manifest, error) 
 }
 
 // convertYAMLToJSONCompatible recursively converts yaml.v3-decoded values to
-// JSON-compatible Go types. yaml.v3 uses map[string]interface{} for mappings and
-// []interface{} for sequences, which are already JSON-compatible. However, map keys
-// decoded from YAML may occasionally be non-string types (e.g., int) which JSON
-// cannot marshal. This function normalises those to strings.
+// JSON-compatible Go types.
 func convertYAMLToJSONCompatible(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:

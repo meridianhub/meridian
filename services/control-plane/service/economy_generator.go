@@ -11,40 +11,45 @@ import (
 	"google.golang.org/grpc"
 )
 
-// EconomyGeneratorConfig holds configuration for the EconomyGeneratorService.
+// EconomyGeneratorConfig holds configuration for RegisterEconomyGeneratorService.
 type EconomyGeneratorConfig struct {
-	// SchemaRegistry provides handler metadata for prompt assembly and error enrichment (required).
+	// SchemaRegistry provides handler definitions for context assembly (required).
 	SchemaRegistry *schema.Registry
 
-	// CookbookFS is the filesystem containing cookbook patterns (required).
+	// ManifestHistory provides access to the current applied manifest for include_current_economy
+	// requests. May be nil if that feature is not needed.
+	ManifestHistory generator.ManifestHistorian
+
+	// CookbookFS provides the cookbook pattern files for pattern matching.
+	// May be nil if pattern matching is not required.
 	CookbookFS fs.FS
 
-	// LLMClient is used to generate and fix manifests (required).
+	// LLMClient is used to generate and fix manifests. Required for GenerateManifest.
+	// May be nil if only GetGenerationContext is used.
 	LLMClient generator.LLMClient
 
-	// Validator validates manifest YAML in the validate-fix loop (required).
+	// Validator validates manifest YAML in the validate-fix loop. Required for GenerateManifest.
+	// May be nil if only GetGenerationContext is used.
 	Validator generator.ManifestValidator
-
-	// ManifestClient retrieves current tenant manifests for amend mode (optional).
-	ManifestClient generator.ManifestHistorian
 
 	// Logger is the structured logger. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
 }
 
-// RegisterEconomyGeneratorService creates and registers the EconomyGeneratorService
-// on the given gRPC server. Validation of required fields is delegated to NewService.
+// RegisterEconomyGeneratorService creates and registers the EconomyGeneratorService on the
+// given gRPC server. Validation of required fields is delegated to generator.NewGeneratorService.
 func RegisterEconomyGeneratorService(server *grpc.Server, cfg EconomyGeneratorConfig) error {
-	svc, err := generator.NewService(generator.Config{
-		SchemaRegistry: cfg.SchemaRegistry,
-		CookbookFS:     cfg.CookbookFS,
-		LLMClient:      cfg.LLMClient,
-		Validator:      cfg.Validator,
-		ManifestClient: cfg.ManifestClient,
-		Logger:         cfg.Logger,
-	})
+	opts := []generator.ServiceOption{}
+	if cfg.LLMClient != nil {
+		opts = append(opts, generator.WithLLMClient(cfg.LLMClient))
+	}
+	if cfg.Validator != nil {
+		opts = append(opts, generator.WithValidator(cfg.Validator))
+	}
+
+	svc, err := generator.NewGeneratorService(cfg.SchemaRegistry, cfg.ManifestHistory, cfg.CookbookFS, cfg.Logger, opts...)
 	if err != nil {
-		return fmt.Errorf("create generator service: %w", err)
+		return fmt.Errorf("create economy generator service: %w", err)
 	}
 
 	controlplanev1.RegisterEconomyGeneratorServiceServer(server, svc)
