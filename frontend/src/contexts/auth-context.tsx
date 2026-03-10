@@ -193,39 +193,50 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     updateToken(null)
   }, [updateToken])
 
-  const refreshToken = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-      })
+  // In-flight promise ref: shared across the toast action and the background
+  // timer so concurrent callers (e.g. button click racing with the auto-refresh
+  // timer) reuse the same request instead of issuing two.
+  const refreshInFlightRef = useRef<Promise<boolean> | null>(null)
 
-      if (!response.ok) {
-        // Only clear auth state on 401 Unauthorized.
-        // Transient errors (5xx, network) should not log the user out.
-        if (response.status === 401) {
-          updateToken(null)
+  const refreshToken = useCallback((): Promise<boolean> => {
+    if (refreshInFlightRef.current) return refreshInFlightRef.current
+
+    const request = (async () => {
+      try {
+        const response = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        })
+
+        if (!response.ok) {
+          // Only clear auth state on 401 Unauthorized.
+          // Transient errors (5xx, network) should not log the user out.
+          if (response.status === 401) {
+            updateToken(null)
+          }
+          return false
         }
-        return false
-      }
 
-      const data = (await response.json()) as { accessToken: string }
-      const parsed = parseJWT(data.accessToken)
-      if (!parsed) {
-        // Server returned a malformed token - treat as refresh failure without clearing auth
+        const data = (await response.json()) as { accessToken: string }
+        const parsed = parseJWT(data.accessToken)
+        if (!parsed) {
+          // Server returned a malformed token - treat as refresh failure without clearing auth
+          return false
+        }
+        updateToken(data.accessToken)
+        return true
+      } catch {
+        // Network error - do not clear auth state (may be transient)
         return false
+      } finally {
+        refreshInFlightRef.current = null
       }
-      updateToken(data.accessToken)
-      return true
-    } catch {
-      // Network error - do not clear auth state (may be transient)
-      return false
-    }
+    })()
+
+    refreshInFlightRef.current = request
+    return request
   }, [updateToken])
-
-  // Ref to track whether a manual refresh from the warning toast is in flight
-  const refreshingRef = useRef(false)
 
   // Show session expiry warning toast
   const showSessionWarning = useCallback(() => {
@@ -235,10 +246,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       action: {
         label: 'Extend session',
         onClick: () => {
-          if (refreshingRef.current) return
-          refreshingRef.current = true
           void refreshToken().then((ok) => {
-            refreshingRef.current = false
             if (ok) {
               toast.dismiss(SESSION_WARNING_TOAST_ID)
               toast.success('Session extended.')

@@ -210,7 +210,7 @@ describe('Session expiry warning', () => {
       expect(toast.success).not.toHaveBeenCalled()
     })
 
-    it('does not issue a second refresh if one is already in flight', async () => {
+    it('does not issue a second refresh if one is already in flight (button guard)', async () => {
       // Never resolves — simulates an in-flight request
       mockFetch.mockReturnValue(new Promise(() => {}))
 
@@ -222,6 +222,43 @@ describe('Session expiry warning', () => {
       })
 
       // Only one fetch should have been made
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('deduplicates when background timer fires while button refresh is in flight', async () => {
+      // Never resolves — keeps in-flight promise alive
+      mockFetch.mockReturnValue(new Promise(() => {}))
+
+      // Token expires in 90s — warning fires at t=0, timer fires at t=30s
+      const token = createTestToken({
+        exp: Math.floor(Date.now() / 1000) + 90,
+      })
+
+      render(
+        <AuthProvider initialToken={token}>
+          <TestConsumer />
+        </AuthProvider>,
+      )
+
+      // Trigger warning immediately
+      act(() => {
+        vi.advanceTimersByTime(0)
+      })
+
+      // Extract and invoke the button onClick (starts in-flight request)
+      const call = vi.mocked(toast.warning).mock.calls[0]
+      const options = call[1] as { action: { onClick: () => void } }
+      act(() => {
+        options.action.onClick()
+      })
+
+      // Advance to when the background refresh timer fires
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+
+      // Both the button and the timer share the same in-flight promise:
+      // only one fetch should have been issued
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
   })
