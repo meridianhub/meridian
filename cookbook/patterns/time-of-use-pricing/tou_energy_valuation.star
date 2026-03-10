@@ -62,7 +62,7 @@ def execute_tou_valuation():
     existing = position_keeping.query_logs(
         correlation_id=correlation_id,
         instrument_code="GBP",
-        account_id=billing_account_id,
+        position_id=billing_account_id,
     )
 
     if existing.count > 0:
@@ -90,7 +90,7 @@ def execute_tou_valuation():
     # Book GBP charge on customer billing account
     step(name="book_charge")
     position_keeping.initiate_log(
-        account_id=billing_account_id,
+        position_id=billing_account_id,
         instrument_code="GBP",
         direction="DEBIT",
         amount=charge.amount,

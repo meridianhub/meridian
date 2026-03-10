@@ -56,7 +56,7 @@ def execute_valuation_on_capture():
     existing = position_keeping.query_logs(
         correlation_id=correlation_id,
         instrument_code="GBP",
-        account_id=settlement_account_id,
+        position_id=settlement_account_id,
     )
 
     if existing.count > 0:
@@ -80,7 +80,7 @@ def execute_valuation_on_capture():
     # Book GBP settlement posting — direction mirrors the source position.
     step(name="book_settlement")
     position_keeping.initiate_log(
-        account_id=settlement_account_id,
+        position_id=settlement_account_id,
         instrument_code="GBP",
         direction=direction,
         amount=valuation.amount,

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { toast } from 'sonner'
+import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 
 export interface JWTClaims {
   userId: string
@@ -133,6 +134,13 @@ function restoreToken(initialToken?: string): { token: string | null; claims: JW
     return { token: null, claims: null }
   }
 
+  // Validate tenant match on restore (updateToken handles login/refresh paths)
+  const currentSlug = getTenantSlugFromSubdomain(window.location.hostname)
+  if (currentSlug && parsed.tenantId && parsed.tenantId !== currentSlug) {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY)
+    return { token: null, claims: null }
+  }
+
   sessionStorage.setItem(SESSION_STORAGE_KEY, candidate)
   return { token: candidate, claims: parsed }
 }
@@ -152,6 +160,18 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     const parsed = parseJWT(token)
     if (!parsed) {
       // Malformed token - clear both token and claims
+      setAccessToken(null)
+      setClaims(null)
+      sessionStorage.removeItem(SESSION_STORAGE_KEY)
+      return
+    }
+    // Validate that the token's tenantId matches the current subdomain tenant.
+    // This prevents session bleeding across subdomains for all token paths
+    // (restore, login, refresh).
+    // Invariant: JWT tenantId holds the tenant slug (same value used in subdomains).
+    // See tenant-context.tsx where claims.tenantId is used directly as tenantSlug.
+    const currentSlug = getTenantSlugFromSubdomain(window.location.hostname)
+    if (currentSlug && parsed.tenantId && parsed.tenantId !== currentSlug) {
       setAccessToken(null)
       setClaims(null)
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
@@ -223,7 +243,7 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
               toast.dismiss(SESSION_WARNING_TOAST_ID)
               toast.success('Session extended.')
             } else {
-              toast.error('Failed to extend session. You will be redirected to login.')
+              toast.error('Failed to extend session. Please refresh the page to log in again.')
             }
           })
         },

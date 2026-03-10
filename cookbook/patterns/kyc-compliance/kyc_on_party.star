@@ -114,7 +114,7 @@ def execute_kyc_on_party():
     # Description is PII-free; reference=party_id is the linkage for downstream queries.
     step(name="book_kyc_marker")
     position_keeping.initiate_log(
-        account_id=compliance_account_id,
+        position_id=compliance_account_id,
         instrument_code="GBP",
         direction="DEBIT",
         amount=Decimal("0"),

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { toast } from 'sonner'
 import { AuthProvider, SESSION_WARNING_BEFORE_EXPIRY_MS } from '@/contexts/auth-context'
@@ -13,6 +13,17 @@ vi.mock('sonner', () => ({
   }),
 }))
 
+const mockFetch = vi.fn()
+const originalFetch = global.fetch
+
+beforeAll(() => {
+  global.fetch = mockFetch
+})
+
+afterAll(() => {
+  global.fetch = originalFetch
+})
+
 function TestConsumer() {
   return <div>authenticated</div>
 }
@@ -22,6 +33,7 @@ describe('Session expiry warning', () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     sessionStorage.clear()
+    mockFetch.mockReset()
   })
 
   afterEach(() => {
@@ -134,5 +146,83 @@ describe('Session expiry warning', () => {
 
   it('exports SESSION_WARNING_BEFORE_EXPIRY_MS as 120 seconds', () => {
     expect(SESSION_WARNING_BEFORE_EXPIRY_MS).toBe(120_000)
+  })
+
+  describe('onClick handler on "Extend session" action', () => {
+    function renderAndTriggerWarning() {
+      // Token expires in 90 seconds — warning fires immediately
+      const token = createTestToken({
+        exp: Math.floor(Date.now() / 1000) + 90,
+      })
+
+      render(
+        <AuthProvider initialToken={token}>
+          <TestConsumer />
+        </AuthProvider>,
+      )
+
+      act(() => {
+        vi.advanceTimersByTime(0)
+      })
+
+      expect(toast.warning).toHaveBeenCalled()
+
+      // Extract the onClick from the action passed to toast.warning
+      const call = vi.mocked(toast.warning).mock.calls[0]
+      const options = call[1] as { action: { onClick: () => void } }
+      return options.action.onClick
+    }
+
+    it('dismisses warning and shows success toast when refresh succeeds', async () => {
+      const newToken = createTestToken({ exp: Math.floor(Date.now() / 1000) + 3600 })
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accessToken: newToken }),
+      })
+
+      const onClick = renderAndTriggerWarning()
+
+      await act(async () => {
+        onClick()
+        await vi.runAllTimersAsync()
+      })
+
+      expect(toast.dismiss).toHaveBeenCalledWith('session-expiry-warning')
+      expect(toast.success).toHaveBeenCalledWith('Session extended.')
+      expect(toast.error).not.toHaveBeenCalled()
+    })
+
+    it('shows error toast without redirect message when refresh fails', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 503 })
+
+      const onClick = renderAndTriggerWarning()
+
+      await act(async () => {
+        onClick()
+        // Only flush microtasks — do not advance timers so background refresh
+        // timer does not fire and confound the assertions.
+        await Promise.resolve()
+      })
+
+      expect(toast.error).toHaveBeenCalledWith(
+        'Failed to extend session. Please refresh the page to log in again.',
+      )
+      expect(toast.success).not.toHaveBeenCalled()
+    })
+
+    it('does not issue a second refresh if one is already in flight', async () => {
+      // Never resolves — simulates an in-flight request
+      mockFetch.mockReturnValue(new Promise(() => {}))
+
+      const onClick = renderAndTriggerWarning()
+
+      act(() => {
+        onClick() // first call — starts the in-flight request
+        onClick() // second call — should be a no-op
+      })
+
+      // Only one fetch should have been made
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
   })
 })
