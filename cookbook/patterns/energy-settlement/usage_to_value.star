@@ -67,14 +67,14 @@ def execute_usage_to_value():
     retail_logs = position_keeping.query_logs(
         correlation_id=correlation_id,
         instrument_code="GBP",
-        account_id=billing_account_id,
+        position_id=billing_account_id,
     )
 
     step(name="check_wholesale_idempotency")
     wholesale_logs = position_keeping.query_logs(
         correlation_id=correlation_id,
         instrument_code="GBP",
-        account_id=counterparty_account_id,
+        position_id=counterparty_account_id,
     )
 
     if retail_logs.count > 0 and wholesale_logs.count > 0:
@@ -125,7 +125,7 @@ def execute_usage_to_value():
     # Book both legs only after both valuations succeed.
     step(name="book_retail_position")
     position_keeping.initiate_log(
-        account_id=billing_account_id,
+        position_id=billing_account_id,
         instrument_code="GBP",
         direction="DEBIT",
         amount=retail.amount,
@@ -134,7 +134,7 @@ def execute_usage_to_value():
 
     step(name="book_wholesale_position")
     position_keeping.initiate_log(
-        account_id=counterparty_account_id,
+        position_id=counterparty_account_id,
         instrument_code="GBP",
         direction="CREDIT",
         amount=wholesale.amount,

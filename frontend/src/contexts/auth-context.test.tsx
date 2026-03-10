@@ -594,4 +594,114 @@ describe('AuthProvider', () => {
 
     expect(screen.getByTestId('auth').textContent).toBe('false')
   })
+
+  it('rejects stored token when tenantId mismatches subdomain (session bleeding prevention)', async () => {
+    // Store a token for tenant "acme"
+    const token = createTenantUserToken('acme')
+    sessionStorage.setItem('meridian_access_token', token)
+
+    // Simulate being on a different tenant's subdomain
+    const originalHostname = window.location.hostname
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, hostname: 'other.meridianhub.cloud' },
+      writable: true,
+    })
+
+    const TestComponent = () => {
+      const { isAuthenticated } = useAuth()
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(sessionStorage.getItem('meridian_access_token')).toBeNull()
+
+    // Restore hostname
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, hostname: originalHostname },
+      writable: true,
+    })
+  })
+
+  it('accepts stored token when tenantId matches subdomain', async () => {
+    const token = createTenantUserToken('acme')
+    sessionStorage.setItem('meridian_access_token', token)
+
+    const originalHostname = window.location.hostname
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, hostname: 'acme.meridianhub.cloud' },
+      writable: true,
+    })
+
+    const TestComponent = () => {
+      const { isAuthenticated, claims } = useAuth()
+      return (
+        <div>
+          <span data-testid="auth">{String(isAuthenticated)}</span>
+          <span data-testid="tenantId">{claims?.tenantId ?? 'none'}</span>
+        </div>
+      )
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('true')
+    expect(screen.getByTestId('tenantId').textContent).toBe('acme')
+
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, hostname: originalHostname },
+      writable: true,
+    })
+  })
+
+  it('rejects login token when tenantId mismatches subdomain', async () => {
+    const originalHostname = window.location.hostname
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, hostname: 'other.meridianhub.cloud' },
+      writable: true,
+    })
+
+    let loginFn: ((token: string) => void) | null = null
+
+    const TestComponent = () => {
+      const { isAuthenticated, login } = useAuth()
+      loginFn = login
+      return <span data-testid="auth">{String(isAuthenticated)}</span>
+    }
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      )
+    })
+
+    // Try to login with a token for tenant "acme" while on "other" subdomain
+    const token = createTenantUserToken('acme')
+    await act(async () => {
+      loginFn!(token)
+    })
+
+    expect(screen.getByTestId('auth').textContent).toBe('false')
+    expect(sessionStorage.getItem('meridian_access_token')).toBeNull()
+
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, hostname: originalHostname },
+      writable: true,
+    })
+  })
 })
