@@ -13,6 +13,10 @@ export interface ValidationResult {
   sequenceNumber: number
 }
 
+// Constructs a client-side ValidationError for cases where the server returns
+// no structured errors (e.g., network failures, step-level failures without
+// validation details). The cast is required because protobuf-es Message types
+// include internal fields ($typeName, $unknown) that cannot be set via create().
 function createValidationError(code: string, message: string): ValidationError {
   return {
     severity: 'ERROR',
