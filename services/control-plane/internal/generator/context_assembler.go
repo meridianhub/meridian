@@ -57,6 +57,24 @@ type AssembledContext struct {
 // patterns into a complete LLM generation prompt. Pattern matching failures are non-fatal
 // and result in an empty pattern list rather than an error.
 func AssembleContext(opts ContextAssemblerOptions, registry *schema.Registry, cookbookFS fs.FS) (*AssembledContext, error) {
+	if registry == nil {
+		return nil, ErrMissingRegistry
+	}
+	handlerRef := BuildHandlerReferenceCard(registry)
+	topicList := BuildTopicList()
+	schemaSummary := BuildManifestSchemaSummary()
+	return assembleContextWithStatics(opts, handlerRef, topicList, schemaSummary, registry, cookbookFS)
+}
+
+// assembleContextWithStatics is the inner implementation of context assembly. It accepts
+// pre-computed static components so that callers (e.g. CachedContextAssembler) can supply
+// cached values instead of recomputing them on every call.
+func assembleContextWithStatics(
+	opts ContextAssemblerOptions,
+	handlerRef, topicList, schemaSummary string,
+	registry *schema.Registry,
+	cookbookFS fs.FS,
+) (*AssembledContext, error) {
 	// Validate required fields.
 	if strings.TrimSpace(opts.Description) == "" {
 		return nil, ErrBlankDescription
@@ -72,11 +90,6 @@ func AssembleContext(opts ContextAssemblerOptions, registry *schema.Registry, co
 	if opts.MaxPatterns <= 0 {
 		opts.MaxPatterns = 3
 	}
-
-	// Build static sections from registry and schema.
-	handlerRef := BuildHandlerReferenceCard(registry)
-	topicList := BuildTopicList()
-	schemaSummary := BuildManifestSchemaSummary()
 
 	// Match patterns. Failure is non-fatal — generation can proceed without patterns.
 	var matched []PatternMatch
