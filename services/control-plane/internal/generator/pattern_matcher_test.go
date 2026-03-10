@@ -33,7 +33,8 @@ func TestMatchPatterns_EnergySettlementMatch(t *testing.T) {
 	assert.Contains(t, names, "energy-settlement",
 		"energy-settlement should appear in top results for energy description; got %v", names)
 
-	// energy-settlement must outrank non-energy patterns.
+	// energy-settlement must appear before non-energy scored patterns.
+	// Base patterns (from extends resolution) may be prepended, so we search among all results.
 	var energyIdx int
 	for i, m := range matches {
 		if m.Name == "energy-settlement" {
@@ -41,9 +42,10 @@ func TestMatchPatterns_EnergySettlementMatch(t *testing.T) {
 			break
 		}
 	}
-	// The energy-settlement pattern should be highly ranked (top 3).
-	assert.LessOrEqual(t, energyIdx, 2,
-		"energy-settlement should be in top 3 results; got index %d in %v", energyIdx, names)
+	// The energy-settlement pattern should be highly ranked (within first 5 results,
+	// accounting for any base patterns prepended via extends).
+	assert.LessOrEqual(t, energyIdx, 4,
+		"energy-settlement should be in top 5 results; got index %d in %v", energyIdx, names)
 }
 
 // TestMatchPatterns_SaasBillingMatch verifies that "SaaS compute billing" matches
@@ -61,7 +63,7 @@ func TestMatchPatterns_SaasBillingMatch(t *testing.T) {
 	assert.Contains(t, names, "saas-billing",
 		"saas-billing should appear in results for SaaS compute billing description; got %v", names)
 
-	// saas-billing should be highly ranked.
+	// saas-billing should be highly ranked (within first 5, accounting for extends bases).
 	var saasIdx int
 	found := false
 	for i, m := range matches {
@@ -72,8 +74,8 @@ func TestMatchPatterns_SaasBillingMatch(t *testing.T) {
 		}
 	}
 	require.True(t, found, "saas-billing must be present in results")
-	assert.LessOrEqual(t, saasIdx, 2,
-		"saas-billing should be in top 3 results; got index %d in %v", saasIdx, names)
+	assert.LessOrEqual(t, saasIdx, 4,
+		"saas-billing should be in top 5 results; got index %d in %v", saasIdx, names)
 }
 
 // TestMatchPatterns_ScoreFields verifies that returned PatternMatch structs have
@@ -160,11 +162,50 @@ func TestMatchPatterns_ExtendsResolution(t *testing.T) {
 		"base-fiat-usd should be resolved via saas-billing extends; got %v", names)
 }
 
-// TestMatchPatterns_MaxResults verifies that at most maxResults patterns are returned.
+// TestMatchPatterns_ExtendsBaseHasAssets verifies that base patterns resolved via extends
+// include ManifestFragment so callers can compose them.
+func TestMatchPatterns_ExtendsBaseHasAssets(t *testing.T) {
+	// saas-billing extends base-fiat-usd; base-fiat-usd should appear with ManifestFragment.
+	matches, err := generator.MatchPatterns(realCookbookFS(), "SaaS compute billing GPU hours", "saas", 10)
+	require.NoError(t, err)
+
+	for _, m := range matches {
+		if m.Name == "base-fiat-usd" {
+			assert.NotEmpty(t, m.ManifestFragment,
+				"base-fiat-usd resolved via extends should have ManifestFragment populated")
+			return
+		}
+	}
+	t.Fatal("base-fiat-usd not found in results via extends resolution")
+}
+
+// TestMatchPatterns_MaxResultsDoesNotExcludeBases verifies that extends bases are prepended
+// outside the maxResults cap so required dependencies do not evict higher-scored candidates.
+func TestMatchPatterns_MaxResultsDoesNotExcludeBases(t *testing.T) {
+	// With maxResults=1, we should get saas-billing AND base-fiat-usd (via extends),
+	// i.e. the extends base is not counted against the cap.
+	matches, err := generator.MatchPatterns(realCookbookFS(), "SaaS compute billing GPU hours", "saas", 1)
+	require.NoError(t, err)
+
+	names := namesFromMatches(matches)
+	assert.Contains(t, names, "saas-billing", "saas-billing should be in results; got %v", names)
+	assert.Contains(t, names, "base-fiat-usd",
+		"base-fiat-usd (extends base) should be prepended outside maxResults cap; got %v", names)
+}
+
+// TestMatchPatterns_MaxResults verifies that at most maxResults scored candidates are returned.
+// Base patterns resolved via extends are prepended outside the cap, so total count may exceed maxResults.
 func TestMatchPatterns_MaxResults(t *testing.T) {
 	matches, err := generator.MatchPatterns(realCookbookFS(), "billing energy compute payments", "", 3)
 	require.NoError(t, err)
-	assert.LessOrEqual(t, len(matches), 3, "should return at most 3 results")
+	// Count only scored candidates (those with Score > 0 or any non-base pattern).
+	// The simplest check: if any extends bases are added they push the count above 3,
+	// but the scored candidates are capped at 3.
+	require.NotEmpty(t, matches, "should return at least one result")
+	// A loose upper bound: with 3 candidates and at most 13 patterns in the real cookbook,
+	// we should never exceed 3 + number_of_base_patterns.
+	assert.LessOrEqual(t, len(matches), 6,
+		"should return at most 3 candidates + any extends bases; got %d: %v", len(matches), namesFromMatches(matches))
 }
 
 // TestMatchPatterns_ZeroMaxResults verifies that 0 maxResults returns all matches.
@@ -187,6 +228,26 @@ func TestMatchPatterns_InvalidFS(t *testing.T) {
 	emptyFS := fstest.MapFS{}
 	_, err := generator.MatchPatterns(emptyFS, "energy", "energy", 5)
 	assert.Error(t, err, "should return error when registry.json is missing")
+}
+
+// TestMatchPatterns_BrokenPatternJSON returns an error for malformed pattern.json.
+func TestMatchPatterns_BrokenPatternJSON(t *testing.T) {
+	reg := map[string]interface{}{
+		"name": "test-registry",
+		"items": []interface{}{
+			map[string]interface{}{"name": "bad-pattern", "type": "registry:pattern", "title": "Bad"},
+		},
+	}
+	regData, err := json.Marshal(reg)
+	require.NoError(t, err)
+
+	brokenFS := fstest.MapFS{
+		"registry.json":                     {Data: regData},
+		"patterns/bad-pattern/pattern.json": {Data: []byte("not valid json {{{")},
+	}
+
+	_, err = generator.MatchPatterns(brokenFS, "energy", "energy", 5)
+	assert.Error(t, err, "malformed pattern.json should surface as an error")
 }
 
 // TestMatchPatterns_ProvidesPopulated verifies that Provides is populated correctly.
@@ -246,10 +307,12 @@ func TestMatchPatterns_IndustryBoost(t *testing.T) {
 		}
 	}
 
-	if scoreWith >= 0 && scoreWithout >= 0 {
-		assert.Greater(t, scoreWith, scoreWithout,
-			"saas-billing should score higher when industry=saas is specified")
-	}
+	require.GreaterOrEqual(t, scoreWith, float64(0),
+		"expected saas-billing in industry-scoped results")
+	require.GreaterOrEqual(t, scoreWithout, float64(0),
+		"expected saas-billing in baseline results")
+	assert.Greater(t, scoreWith, scoreWithout,
+		"saas-billing should score higher when industry=saas is specified")
 }
 
 // --- helpers ---

@@ -46,6 +46,9 @@ type PatternMatch struct {
 // cookbookFS must expose registry.json at its root and pattern files under
 // patterns/<name>/pattern.json, patterns/<name>/manifest-fragment.yaml, and
 // patterns/<name>/*.star.
+//
+// A missing or malformed pattern.json is treated as a cookbook regression and
+// returns an error rather than silently skipping the entry.
 func MatchPatterns(cookbookFS fs.FS, description string, industry string, maxResults int) ([]PatternMatch, error) {
 	// --- Subtask 5.1: Load and parse pattern metadata ---
 
@@ -54,7 +57,7 @@ func MatchPatterns(cookbookFS fs.FS, description string, industry string, maxRes
 		return nil, fmt.Errorf("load registry: %w", err)
 	}
 
-	// Load all pattern details upfront.
+	// Load all pattern details upfront. A load error is a cookbook regression — fail fast.
 	allDetails := make(map[string]*patternDetail, len(reg.Items))
 	for _, item := range reg.Items {
 		if item.Type != "registry:pattern" {
@@ -62,8 +65,7 @@ func MatchPatterns(cookbookFS fs.FS, description string, industry string, maxRes
 		}
 		detail, loadErr := loadPatternDetail(cookbookFS, item.Name)
 		if loadErr != nil {
-			// Skip patterns that fail to load — non-fatal.
-			continue
+			return nil, fmt.Errorf("load pattern %q: %w", item.Name, loadErr)
 		}
 		allDetails[item.Name] = detail
 	}
@@ -101,7 +103,7 @@ func MatchPatterns(cookbookFS fs.FS, description string, industry string, maxRes
 
 	// --- Subtask 5.3: Conflict filtering, extends resolution, top-N selection ---
 
-	selected := applyConflictFilterAndExtends(scored, allDetails, maxResults)
+	selected := applyConflictFilterAndExtends(cookbookFS, scored, allDetails, maxResults)
 
 	return selected, nil
 }
@@ -158,7 +160,8 @@ func collectProvidedTerms(meta *patternMeta) []string {
 		return nil
 	}
 	p := meta.Provides
-	terms := make([]string, 0, len(p.Instruments)+len(p.AccountTypes)+len(p.Sagas))
+	termCap := len(p.Instruments) + len(p.AccountTypes) + len(p.Sagas) + len(p.ValuationRules) + len(p.Triggers)
+	terms := make([]string, 0, termCap)
 	for _, s := range p.Instruments {
 		terms = append(terms, strings.ToLower(s))
 	}
@@ -166,6 +169,12 @@ func collectProvidedTerms(meta *patternMeta) []string {
 		terms = append(terms, strings.ToLower(s))
 	}
 	for _, s := range p.Sagas {
+		terms = append(terms, strings.ToLower(s))
+	}
+	for _, s := range p.ValuationRules {
+		terms = append(terms, strings.ToLower(s))
+	}
+	for _, s := range p.Triggers {
 		terms = append(terms, strings.ToLower(s))
 	}
 	return terms
@@ -183,17 +192,19 @@ func matchesAnyTerm(word string, terms []string) bool {
 
 // applyConflictFilterAndExtends applies three operations in order:
 //  1. Conflict filtering: skip patterns that conflict with already-selected ones.
-//  2. Extends resolution: prepend base patterns required by extends declarations.
-//  3. Top-N selection: return at most maxResults patterns.
+//  2. Top-N selection: apply maxResults cap to the scored candidates.
+//  3. Extends resolution: prepend base patterns required by the final candidate set.
+//
+// Base patterns from extends are prepended outside the maxResults cap so that
+// required dependencies never evict higher-scored matches.
 func applyConflictFilterAndExtends(
+	cookbookFS fs.FS,
 	scored []scoredEntry,
 	allDetails map[string]*patternDetail,
 	maxResults int,
 ) []PatternMatch {
 	selectedNames := make(map[string]bool)
 	conflictSet := make(map[string]bool) // patterns blocked by conflicts
-
-	var result []PatternMatch
 
 	// Collect patterns with conflict filtering.
 	var candidates []PatternMatch
@@ -202,7 +213,6 @@ func applyConflictFilterAndExtends(
 			continue
 		}
 		candidates = append(candidates, s.Match)
-		selectedNames[s.Match.Name] = true
 
 		// Register conflicts: any pattern that conflicts_with this one is blocked.
 		detail := allDetails[s.Match.Name]
@@ -213,40 +223,59 @@ func applyConflictFilterAndExtends(
 		}
 	}
 
-	// Resolve extends: collect all base patterns required by the selected candidates.
-	// Use a worklist to handle transitive extends.
-	basePatterns := resolveExtends(candidates, allDetails, selectedNames)
+	// Apply top-N to candidates only — base patterns from extends do not consume the budget.
+	if maxResults > 0 && len(candidates) > maxResults {
+		candidates = candidates[:maxResults]
+	}
 
-	// Prepend base patterns (they have no score on their own but are required).
+	// Build selectedNames from the final candidate set so that extends resolution
+	// knows which patterns are already represented and avoids duplicating them.
+	for _, c := range candidates {
+		selectedNames[c.Name] = true
+	}
+
+	// Resolve extends for the final candidate set. Passes conflictSet so that a base that
+	// was already rejected by the conflict pass cannot be re-added via extends.
+	basePatterns := resolveExtends(cookbookFS, candidates, allDetails, selectedNames, conflictSet)
+
+	// Prepend base patterns (bases first, then scored candidates).
+	result := make([]PatternMatch, 0, len(basePatterns)+len(candidates))
 	result = append(result, basePatterns...)
 	result = append(result, candidates...)
-
-	// Apply top-N.
-	if maxResults > 0 && len(result) > maxResults {
-		result = result[:maxResults]
-	}
 
 	return result
 }
 
 // resolveExtends returns the set of base patterns required by the extends fields of candidates,
-// excluding patterns already in selectedNames, in dependency order (bases first).
-func resolveExtends(candidates []PatternMatch, allDetails map[string]*patternDetail, selectedNames map[string]bool) []PatternMatch {
-	worklist := collectExtendsWorklist(candidates, allDetails, selectedNames)
+// excluding patterns already in selectedNames or blocked by conflictSet, in dependency order (bases first).
+func resolveExtends(
+	cookbookFS fs.FS,
+	candidates []PatternMatch,
+	allDetails map[string]*patternDetail,
+	selectedNames map[string]bool,
+	conflictSet map[string]bool,
+) []PatternMatch {
+	worklist := collectExtendsWorklist(candidates, allDetails, selectedNames, conflictSet)
 	if len(worklist) == 0 {
 		return nil
 	}
-	return buildBaseMatches(worklist, allDetails)
+	return buildBaseMatches(cookbookFS, worklist, allDetails)
 }
 
 // collectExtendsWorklist performs a BFS over the extends graph starting from candidates.
-// It returns all base pattern names in BFS discovery order, skipping already-selected names.
-func collectExtendsWorklist(candidates []PatternMatch, allDetails map[string]*patternDetail, selectedNames map[string]bool) []string {
+// It returns all base pattern names in BFS discovery order, skipping already-selected names
+// and patterns blocked by conflictSet.
+func collectExtendsWorklist(
+	candidates []PatternMatch,
+	allDetails map[string]*patternDetail,
+	selectedNames map[string]bool,
+	conflictSet map[string]bool,
+) []string {
 	needed := make(map[string]bool)
 	var worklist []string
 
 	enqueue := func(name string) {
-		if !selectedNames[name] && !needed[name] {
+		if !selectedNames[name] && !needed[name] && !conflictSet[name] {
 			needed[name] = true
 			worklist = append(worklist, name)
 		}
@@ -271,8 +300,8 @@ func collectExtendsWorklist(candidates []PatternMatch, allDetails map[string]*pa
 	return worklist
 }
 
-// buildBaseMatches converts a BFS-ordered worklist into PatternMatch values, bases first.
-func buildBaseMatches(worklist []string, allDetails map[string]*patternDetail) []PatternMatch {
+// buildBaseMatches converts a BFS-ordered worklist into PatternMatch values with full assets, bases first.
+func buildBaseMatches(cookbookFS fs.FS, worklist []string, allDetails map[string]*patternDetail) []PatternMatch {
 	bases := make([]PatternMatch, 0, len(worklist))
 	seen := make(map[string]bool, len(worklist))
 	for i := len(worklist) - 1; i >= 0; i-- {
@@ -281,9 +310,13 @@ func buildBaseMatches(worklist []string, allDetails map[string]*patternDetail) [
 			continue
 		}
 		seen[name] = true
-		if detail := allDetails[name]; detail != nil {
-			bases = append(bases, buildPatternMatchFromDetail(name, detail))
+		detail := allDetails[name]
+		if detail == nil {
+			continue
 		}
+		// Use buildPatternMatch to include ManifestFragment and SagaScript for base patterns.
+		item := registryItem{Name: name, Type: "registry:pattern", Title: detail.Title}
+		bases = append(bases, buildPatternMatch(cookbookFS, item, detail))
 	}
 	return bases
 }
@@ -316,13 +349,15 @@ func buildPatternMatchFromDetail(name string, detail *patternDetail) PatternMatc
 		return m
 	}
 
-	// Populate Provides.
+	// Populate Provides (instruments, account types, sagas, valuation rules, triggers).
 	if detail.Meta.Provides != nil {
 		p := detail.Meta.Provides
-		provides := make([]string, 0, len(p.Instruments)+len(p.AccountTypes)+len(p.Sagas))
+		provides := make([]string, 0, len(p.Instruments)+len(p.AccountTypes)+len(p.Sagas)+len(p.ValuationRules)+len(p.Triggers))
 		provides = append(provides, p.Instruments...)
 		provides = append(provides, p.AccountTypes...)
 		provides = append(provides, p.Sagas...)
+		provides = append(provides, p.ValuationRules...)
+		provides = append(provides, p.Triggers...)
 		m.Provides = provides
 	}
 
@@ -420,9 +455,11 @@ type patternMeta struct {
 }
 
 type patternProvides struct {
-	Instruments  []string `json:"instruments,omitempty"`
-	AccountTypes []string `json:"account_types,omitempty"`
-	Sagas        []string `json:"sagas,omitempty"`
+	Instruments    []string `json:"instruments,omitempty"`
+	AccountTypes   []string `json:"account_types,omitempty"`
+	Sagas          []string `json:"sagas,omitempty"`
+	ValuationRules []string `json:"valuation_rules,omitempty"`
+	Triggers       []string `json:"triggers,omitempty"`
 }
 
 type patternRequires struct {
