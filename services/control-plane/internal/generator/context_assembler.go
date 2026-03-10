@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -9,6 +10,12 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+// ErrBlankDescription is returned when AssembleContext is called with an empty description.
+var ErrBlankDescription = errors.New("description is required")
+
+// ErrMissingCurrentManifest is returned when IncludeCurrentEconomy is true but CurrentManifest is nil.
+var ErrMissingCurrentManifest = errors.New("CurrentManifest is required when IncludeCurrentEconomy is true")
 
 // ContextAssemblerOptions configures the context assembly process.
 type ContextAssemblerOptions struct {
@@ -47,6 +54,14 @@ type AssembledContext struct {
 // patterns into a complete LLM generation prompt. Pattern matching failures are non-fatal
 // and result in an empty pattern list rather than an error.
 func AssembleContext(opts ContextAssemblerOptions, registry *schema.Registry, cookbookFS fs.FS) (*AssembledContext, error) {
+	// Validate required fields.
+	if strings.TrimSpace(opts.Description) == "" {
+		return nil, ErrBlankDescription
+	}
+	if opts.IncludeCurrentEconomy && opts.CurrentManifest == nil {
+		return nil, ErrMissingCurrentManifest
+	}
+
 	// Apply defaults.
 	if opts.MaxPatterns <= 0 {
 		opts.MaxPatterns = 3

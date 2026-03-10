@@ -134,18 +134,19 @@ func TestAssembleContext_AmendMode_IncludesCurrentManifest(t *testing.T) {
 	assert.Contains(t, result.Prompt, "test-economy")
 }
 
-func TestAssembleContext_AmendMode_NilManifest_NoCurrentEconomySection(t *testing.T) {
+func TestAssembleContext_AmendMode_NilManifest_ReturnsError(t *testing.T) {
 	reg := buildMinimalRegistry()
 
-	result, err := generator.AssembleContext(generator.ContextAssemblerOptions{
+	// IncludeCurrentEconomy=true with nil CurrentManifest is a caller error.
+	_, err := generator.AssembleContext(generator.ContextAssemblerOptions{
 		Description:           "A payment platform",
 		IncludePatterns:       false,
 		IncludeCurrentEconomy: true,
 		CurrentManifest:       nil,
 	}, reg, emptyFS())
 
-	require.NoError(t, err)
-	assert.NotContains(t, result.Prompt, "## Current Economy")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, generator.ErrMissingCurrentManifest)
 }
 
 func TestAssembleContext_WithRelationshipGraph_IncludesGraphSection(t *testing.T) {
@@ -241,6 +242,19 @@ func TestAssembleContext_AmendMode_InstructionsIncludePreservation(t *testing.T)
 
 	require.NoError(t, err)
 	assert.Contains(t, result.Prompt, "Preserve existing")
+}
+
+func TestAssembleContext_BlankDescription_ReturnsError(t *testing.T) {
+	reg := buildMinimalRegistry()
+
+	for _, desc := range []string{"", "   ", "\t\n"} {
+		_, err := generator.AssembleContext(generator.ContextAssemblerOptions{
+			Description:     desc,
+			IncludePatterns: false,
+		}, reg, emptyFS())
+		require.Error(t, err, "expected error for blank description %q", desc)
+		assert.ErrorIs(t, err, generator.ErrBlankDescription)
+	}
 }
 
 func TestAssembleContext_NilCookbookFS_PatternsDisabled(t *testing.T) {
