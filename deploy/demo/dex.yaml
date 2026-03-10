@@ -16,8 +16,8 @@
 #     -d "grant_type=password" \
 #     -d "client_id=meridian-service" \
 #     -d "scope=openid email profile" \
-#     -d "username=tenant:volterra/admin@volterra.energy" \
-#     -d "password=demo2026"
+#     -d "username=tenant:<slug>/${DEMO_OPERATOR_EMAIL}" \
+#     -d "password=${DEMO_OPERATOR_PASSWORD}"
 
 issuer: https://demo.meridianhub.cloud/dex
 
@@ -30,6 +30,12 @@ web:
   http: 0.0.0.0:5556
 
 oauth2:
+  # Dex v2.41.1 defaults do not include "password" in grantTypes. List it
+  # explicitly so the Resource Owner Password grant works with the connector.
+  grantTypes:
+    - authorization_code
+    - refresh_token
+    - password
   # "meridian" routes password grants through the Meridian identity connector.
   # The connector validates credentials against the identity domain repository
   # and resolves tenant context from the username field.
