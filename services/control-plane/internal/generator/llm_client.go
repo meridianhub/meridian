@@ -21,7 +21,8 @@ var (
 
 const (
 	// DefaultModel is the default Claude model used for manifest generation.
-	DefaultModel = "claude-opus-4-5"
+	// The full versioned model ID is required by the Anthropic API.
+	DefaultModel = "claude-opus-4-5-20251101"
 
 	// defaultMaxTokens is the maximum tokens for a generation response.
 	// Manifests can be large, so we set a generous limit.
@@ -64,8 +65,9 @@ type ValidationError struct {
 	// Suggestion is a "Did you mean...?" hint for typos.
 	Suggestion string
 
-	// Available lists valid values when an unknown value is referenced.
-	Available []string
+	// AvailableFields lists valid field names when an unknown field is referenced.
+	// This mirrors validator.ValidationError.AvailableFields for a straight copy.
+	AvailableFields []string
 }
 
 // LLMClient abstracts LLM interactions for manifest generation.
@@ -207,8 +209,8 @@ func buildFixPrompt(manifest string, errors []ValidationError) string {
 		if e.Suggestion != "" {
 			b.WriteString(fmt.Sprintf("   - Suggestion: %s\n", e.Suggestion))
 		}
-		if len(e.Available) > 0 {
-			b.WriteString(fmt.Sprintf("   - Available values: %s\n", strings.Join(e.Available, ", ")))
+		if len(e.AvailableFields) > 0 {
+			b.WriteString(fmt.Sprintf("   - Available values: %s\n", strings.Join(e.AvailableFields, ", ")))
 		}
 	}
 

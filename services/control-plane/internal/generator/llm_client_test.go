@@ -58,11 +58,11 @@ func TestBuildFixPrompt_IncludesAllErrorFields(t *testing.T) {
 	manifest := "instruments:\n  - code: INVALID"
 	errors := []generator.ValidationError{
 		{
-			Code:       "DUPLICATE_CODE",
-			Path:       "instruments[0].code",
-			Message:    "duplicate instrument code \"INVALID\"",
-			Suggestion: "use a unique code",
-			Available:  []string{"GBP", "USD", "EUR"},
+			Code:            "DUPLICATE_CODE",
+			Path:            "instruments[0].code",
+			Message:         "duplicate instrument code \"INVALID\"",
+			Suggestion:      "use a unique code",
+			AvailableFields: []string{"GBP", "USD", "EUR"},
 		},
 		{
 			Code:    "PROTO_VALIDATION",
