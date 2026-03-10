@@ -1,0 +1,182 @@
+syntax = "proto3";
+
+package meridian.control_plane.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "meridian/control_plane/v1/apply_manifest_service.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
+
+// EconomyGeneratorService generates tenant manifests from natural language descriptions
+// using AI assistance. It supports both creating new economies and amending existing ones.
+service EconomyGeneratorService {
+  // GenerateManifest takes a natural language description and produces a valid tenant manifest.
+  // The service uses AI to translate the description into a structured manifest, validates it,
+  // and iterates to fix any validation errors up to max_fix_iterations times.
+  rpc GenerateManifest(GenerateManifestRequest) returns (GenerateManifestResponse) {
+    option (google.api.http) = {
+      post: "/v1/economy/generate"
+      body: "*"
+    };
+  }
+
+  // GetGenerationContext returns the context that would be used for generating a manifest
+  // from the given description, without performing the actual generation. Useful for
+  // understanding what patterns and handlers are relevant to a description.
+  rpc GetGenerationContext(GetGenerationContextRequest) returns (GetGenerationContextResponse) {
+    option (google.api.http) = {
+      post: "/v1/economy/generation-context"
+      body: "*"
+    };
+  }
+}
+
+// GenerationMode controls whether the service creates a new economy or amends an existing one.
+enum GenerationMode {
+  // GENERATION_MODE_UNSPECIFIED is the default zero value.
+  GENERATION_MODE_UNSPECIFIED = 0;
+
+  // GENERATION_MODE_CREATE generates a fresh manifest from the description.
+  GENERATION_MODE_CREATE = 1;
+
+  // GENERATION_MODE_AMEND starts from the tenant's current manifest and incorporates
+  // the description as a set of changes to apply on top of it.
+  GENERATION_MODE_AMEND = 2;
+}
+
+// GenerationPreferences provides hints to the generator about the desired output.
+message GenerationPreferences {
+  // industry is a hint about the tenant's industry (e.g., "energy", "fintech", "healthcare").
+  string industry = 1;
+
+  // instruments lists the asset types the tenant works with (e.g., "GBP", "kWh", "TONNE_CO2E").
+  repeated string instruments = 2;
+
+  // patterns lists specific saga or workflow patterns to include (e.g., "payment", "settlement").
+  repeated string patterns = 3;
+}
+
+// GenerateManifestRequest contains the description and options for manifest generation.
+message GenerateManifestRequest {
+  // description is a natural language description of the economy to generate.
+  string description = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 10000
+  }];
+
+  // mode controls whether to create a new manifest or amend an existing one.
+  GenerationMode mode = 2;
+
+  // tenant_id is required when mode is GENERATION_MODE_AMEND to load the current manifest.
+  string tenant_id = 3;
+
+  // preferences provides optional hints to guide the generation.
+  GenerationPreferences preferences = 4;
+
+  // max_fix_iterations is the maximum number of times the generator will attempt to fix
+  // validation errors before returning. Must be between 0 and 5. Defaults to 3.
+  int32 max_fix_iterations = 5 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 5
+  }];
+}
+
+// GenerationMetadata captures details about the generation process for observability.
+message GenerationMetadata {
+  // patterns_used lists the pattern names that were incorporated into the manifest.
+  repeated string patterns_used = 1;
+
+  // instruments_created lists the instrument codes defined in the generated manifest.
+  repeated string instruments_created = 2;
+
+  // account_types_created lists the account type codes defined in the generated manifest.
+  repeated string account_types_created = 3;
+
+  // sagas_created lists the saga names defined in the generated manifest.
+  repeated string sagas_created = 4;
+
+  // fix_iterations is the number of validation-fix cycles performed during generation.
+  int32 fix_iterations = 5;
+
+  // decisions captures key choices the generator made and why (e.g., why a particular
+  // pattern was selected, or how an ambiguous requirement was resolved).
+  repeated string decisions = 6;
+}
+
+// GenerateManifestResponse contains the generated manifest and metadata about the generation.
+message GenerateManifestResponse {
+  // manifest_yaml is the generated manifest in YAML format.
+  string manifest_yaml = 1;
+
+  // valid indicates whether the generated manifest passed all validation checks.
+  bool valid = 2;
+
+  // validation_errors contains any validation errors that prevented a valid manifest.
+  // Present when valid is false.
+  repeated ValidationError validation_errors = 3;
+
+  // validation_warnings contains non-blocking validation findings.
+  repeated ValidationError validation_warnings = 4;
+
+  // generation_metadata contains observability details about how the manifest was generated.
+  GenerationMetadata generation_metadata = 5;
+}
+
+// GetGenerationContextRequest specifies what context to retrieve for the given description.
+message GetGenerationContextRequest {
+  // description is the natural language description to retrieve context for.
+  string description = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 10000
+  }];
+
+  // include_patterns controls whether matched pattern fragments are included in the response.
+  // Defaults to true.
+  bool include_patterns = 2;
+
+  // include_current_economy controls whether the tenant's current manifest YAML is included.
+  // Defaults to false.
+  bool include_current_economy = 3;
+
+  // tenant_id is required when include_current_economy is true.
+  string tenant_id = 4;
+}
+
+// PatternContext holds a matched pattern and its relevance score.
+message PatternContext {
+  // name is the machine-readable pattern identifier (e.g., "energy_settlement").
+  string name = 1;
+
+  // title is the human-readable pattern title.
+  string title = 2;
+
+  // score is the relevance score for this pattern against the description (0.0 to 1.0).
+  double score = 3;
+
+  // manifest_fragment is the YAML snippet that this pattern contributes to the manifest.
+  string manifest_fragment = 4;
+
+  // saga_script is the Starlark saga script associated with this pattern, if any.
+  string saga_script = 5;
+}
+
+// GetGenerationContextResponse contains the context that would be used during generation.
+message GetGenerationContextResponse {
+  // handler_reference_card is a concise summary of available handler signatures
+  // formatted for use as an AI prompt context.
+  string handler_reference_card = 1;
+
+  // topic_list is the list of Kafka topics available for saga event subscriptions.
+  string topic_list = 2;
+
+  // manifest_schema_summary is a summary of the manifest schema for AI prompt context.
+  string manifest_schema_summary = 3;
+
+  // matched_patterns contains the top-scoring patterns matched against the description.
+  repeated PatternContext matched_patterns = 4;
+
+  // current_economy_yaml is the tenant's current manifest in YAML format.
+  // Empty if include_current_economy was false in the request.
+  string current_economy_yaml = 5;
+}
