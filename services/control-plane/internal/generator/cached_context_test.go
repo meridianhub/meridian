@@ -117,7 +117,10 @@ func TestCachedContextAssembler_PatternMatchingRemainsUncached(t *testing.T) {
 	reg := buildMinimalRegistry()
 	assembler := generator.NewCachedContextAssembler(reg, realCookbookFS(), time.Hour)
 
-	// First call: energy description should match energy patterns.
+	// Both calls use IncludePatterns: true so pattern matching runs in each.
+	// The difference is the description/industry hint — energy vs. generic.
+	// If MatchedPatterns were being cached and reused, the second call would
+	// incorrectly return energy patterns for a generic description.
 	energyResult, err := assembler.AssembleContext(generator.ContextAssemblerOptions{
 		Description:     "EV charging UK energy settlement",
 		Industry:        "energy",
@@ -126,19 +129,18 @@ func TestCachedContextAssembler_PatternMatchingRemainsUncached(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, energyResult.MatchedPatterns, "energy description should match patterns")
+	assert.Contains(t, energyResult.Prompt, "## Relevant Patterns")
 
-	// Second call: same assembler (cache warm) but no patterns requested.
 	genericResult, err := assembler.AssembleContext(generator.ContextAssemblerOptions{
-		Description:     "EV charging UK energy settlement",
-		Industry:        "energy",
-		IncludePatterns: false,
+		Description:     "A generic fintech platform with no industry patterns",
+		IncludePatterns: true,
+		MaxPatterns:     3,
 	})
 	require.NoError(t, err)
-	assert.Empty(t, genericResult.MatchedPatterns, "pattern matching should be skipped when IncludePatterns=false")
 
-	// The prompts should differ only in pattern content, proving pattern matching is per-request.
-	assert.NotEqual(t, energyResult.Prompt, genericResult.Prompt,
-		"with/without patterns should produce different prompts even when static cache is shared")
+	// Pattern sets must differ: energy patterns should not appear for a generic description.
+	assert.NotEqual(t, energyResult.MatchedPatterns, genericResult.MatchedPatterns,
+		"MatchedPatterns must be computed per-request, not reused from cache")
 }
 
 func TestCachedContextAssembler_DefaultRefreshInterval(t *testing.T) {
