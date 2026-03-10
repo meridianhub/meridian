@@ -25,7 +25,7 @@ def execute_record_gpu_usage():
     # Record usage in metering account
     step(name="record_usage")
     position_keeping.initiate_log(
-        account_id=ctx["usage_account"],
+        position_id=ctx["usage_account"],
         amount=Decimal(str(ctx["gpu_hours"])),
         instrument_code="GPU_HOUR",
         direction="DEBIT",

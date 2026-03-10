@@ -30,7 +30,7 @@ def execute_generate_monthly_invoice():
         for instrument in ["GPU_HOUR", "API_CALL", "STORAGE_GB"]:
             step(name="retrieve_balance_" + instrument)
             balance = position_keeping.retrieve_balance(
-                account_id=account.account_id,
+                position_id=account.account_id,
                 instrument_code=instrument,
             )
 
@@ -38,7 +38,7 @@ def execute_generate_monthly_invoice():
                 # Value usage in USD
                 step(name="valuate_" + instrument)
                 valuation = current_account.evaluate_asset_valuation(
-                    account_id=account.billing_account_id,
+                    position_id=account.billing_account_id,
                     instrument_code=instrument,
                     amount=balance.amount,
                 )
@@ -46,7 +46,7 @@ def execute_generate_monthly_invoice():
                 # Charge billing account
                 step(name="charge_" + instrument)
                 current_account.execute_withdrawal(
-                    account_id=account.billing_account_id,
+                    position_id=account.billing_account_id,
                     amount=valuation.output.amount,
                     instrument_code="USD",
                     reference="invoice:" + billing_period + ":" + instrument,
