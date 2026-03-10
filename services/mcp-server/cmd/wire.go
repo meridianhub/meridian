@@ -63,7 +63,10 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 	}
 
 	// Manifest fix tool uses handler schema to convert deprecated calls.
-	// Schema registry is empty until a Meridian backend connection provides handler metadata.
+	// TODO: The schema registry is empty here, so manifest fix cannot resolve deprecated
+	// handler names. Once the gRPC backend connects, the registry should be populated
+	// from DescribeHandlers or the proto-derived schema. For now, the tool will
+	// report "no deprecated handlers found" rather than silently producing wrong results.
 	schemaReg := schema.NewRegistry()
 	if err := tools.RegisterManifestFixTool(toolReg, schemaReg); err != nil {
 		logger.Warn("failed to register manifest fix tool", "error", err)

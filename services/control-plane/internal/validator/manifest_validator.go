@@ -80,6 +80,52 @@ var knownStarlarkBuiltins = []string{
 // ErrUnhashable is returned when hashing a starlark module is attempted.
 var ErrUnhashable = errors.New("unhashable: module")
 
+// permissiveServiceStub is a Starlark value that accepts any attribute access and
+// returns a permissive callable. Used as a fallback when no schema registry is
+// configured, so scripts compile without typed handler validation.
+type permissiveServiceStub struct {
+	name string
+}
+
+var _ starlark.HasAttrs = (*permissiveServiceStub)(nil)
+
+func newPermissiveServiceStub(name string) *permissiveServiceStub {
+	return &permissiveServiceStub{name: name}
+}
+
+func (s *permissiveServiceStub) String() string        { return fmt.Sprintf("<service %s>", s.name) }
+func (s *permissiveServiceStub) Type() string          { return "service" }
+func (s *permissiveServiceStub) Freeze()               {}
+func (s *permissiveServiceStub) Truth() starlark.Bool  { return starlark.True }
+func (s *permissiveServiceStub) Hash() (uint32, error) { return 0, ErrUnhashable }
+func (s *permissiveServiceStub) AttrNames() []string   { return nil }
+
+func (s *permissiveServiceStub) Attr(name string) (starlark.Value, error) {
+	// Return a permissive builtin that accepts any kwargs and returns a permissive result
+	fullName := s.name + "." + name
+	return starlark.NewBuiltin(fullName, func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+		return &permissiveResult{}, nil
+	}), nil
+}
+
+// permissiveResult is returned by permissive handler stubs. It accepts any
+// attribute access, returning an empty string for each, so that scripts can
+// reference result fields (e.g. result.log_id) without errors.
+type permissiveResult struct{}
+
+var _ starlark.HasAttrs = (*permissiveResult)(nil)
+
+func (r *permissiveResult) String() string        { return "<result>" }
+func (r *permissiveResult) Type() string          { return "result" }
+func (r *permissiveResult) Freeze()               {}
+func (r *permissiveResult) Truth() starlark.Bool  { return starlark.True }
+func (r *permissiveResult) Hash() (uint32, error) { return 0, ErrUnhashable }
+func (r *permissiveResult) AttrNames() []string   { return nil }
+
+func (r *permissiveResult) Attr(_ string) (starlark.Value, error) {
+	return starlark.String(""), nil
+}
+
 // CEL Balance type fields available in account type policy expressions.
 var celBalanceFields = []string{
 	"quantity",
@@ -181,7 +227,10 @@ func WithOpenAPIPaths(paths map[string]bool) Option {
 }
 
 // WithSchemaRegistry injects a pre-built schema registry for Starlark handler validation.
-// When not set, the validator uses an empty registry (no handler validation).
+// When not set, the validator defaults to an empty registry: Starlark scripts still compile
+// but handler calls (e.g. position_keeping.initiate_log) are treated as undefined names
+// rather than being validated against typed service modules. Use WithDerivedSchema for
+// production to enable typed parameter validation.
 func WithSchemaRegistry(reg *schema.Registry) Option {
 	return func(v *ManifestValidator) {
 		v.schemaRegistry = reg
@@ -1659,6 +1708,9 @@ func (v *ManifestValidator) validateDestructiveChanges(
 
 // buildStarlarkPredeclared creates the predeclared dictionary for Starlark compilation.
 // It uses typed service modules from the schema registry for handler parameter validation.
+// When the schema registry has no handlers for a known service, a permissive stub module
+// is added so scripts compile without typed validation rather than failing with
+// "undefined" errors.
 // Returns the predeclared dict, handler call log, and any error.
 func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]schema.HandlerCallInfo, *[]schema.ValidationWarning, error) {
 	predeclared := make(starlark.StringDict)
@@ -1672,6 +1724,15 @@ func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]
 	}
 	for name, module := range modules {
 		predeclared[name] = module
+	}
+
+	// For known service bindings without typed modules, add permissive stubs so
+	// scripts compile. This gracefully degrades: the script runs but handler
+	// calls are not type-checked. Typed modules from the schema take precedence.
+	for _, svc := range knownServiceBindings {
+		if _, exists := predeclared[svc]; !exists {
+			predeclared[svc] = newPermissiveServiceStub(svc)
+		}
 	}
 
 	// Add common builtins

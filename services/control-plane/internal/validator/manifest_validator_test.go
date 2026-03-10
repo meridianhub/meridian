@@ -7,10 +7,34 @@ import (
 	"github.com/google/cel-go/cel"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// testSchemaForStarlark returns a Schema with the position_keeping service and
+// initiate_log handler, providing the typed modules needed for Starlark validation tests.
+func testSchemaForStarlark() *schema.Schema {
+	return &schema.Schema{
+		Service: "position_keeping",
+		Handlers: map[string]*schema.HandlerDef{
+			"position_keeping.initiate_log": {
+				Params: map[string]*schema.FieldDef{
+					"position_id":     {Type: schema.TypeString, Required: true},
+					"amount":          {Type: schema.TypeDecimal, Required: true},
+					"direction":       {Type: schema.TypeEnum, Required: true, Values: []string{"CREDIT", "DEBIT"}},
+					"instrument_code": {Type: schema.TypeString},
+				},
+				Returns: map[string]*schema.FieldDef{
+					"log_id": {Type: schema.TypeString},
+					"status": {Type: schema.TypeString},
+				},
+				CompensationStrategy: schema.CompensationStrategyNone,
+			},
+		},
+	}
+}
 
 // validManifest returns a fully-populated valid manifest for testing.
 func validManifest() *controlplanev1.Manifest {
@@ -640,7 +664,7 @@ func TestValidateStarlark_UndefinedName_WithSuggestion(t *testing.T) {
 }
 
 func TestValidateStarlark_ServiceModuleAccess(t *testing.T) {
-	v, err := New()
+	v, err := New(WithDerivedSchema(testSchemaForStarlark()))
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -1100,7 +1124,7 @@ func TestValidateStarlark_EmptyScript(t *testing.T) {
 }
 
 func TestValidateStarlark_TypedModules_UnknownHandler_TopLevel(t *testing.T) {
-	v, err := New()
+	v, err := New(WithDerivedSchema(testSchemaForStarlark()))
 	require.NoError(t, err)
 
 	m := validManifest()
@@ -1123,7 +1147,7 @@ func TestValidateStarlark_TypedModules_UnknownHandler_TopLevel(t *testing.T) {
 }
 
 func TestValidateStarlark_TypedModules_UnknownParam_TopLevel(t *testing.T) {
-	v, err := New()
+	v, err := New(WithDerivedSchema(testSchemaForStarlark()))
 	require.NoError(t, err)
 
 	m := validManifest()
@@ -1151,7 +1175,7 @@ func TestValidateStarlark_TypedModules_UnknownParam_TopLevel(t *testing.T) {
 }
 
 func TestValidateStarlark_TypedModules_MissingRequiredParam_TopLevel(t *testing.T) {
-	v, err := New()
+	v, err := New(WithDerivedSchema(testSchemaForStarlark()))
 	require.NoError(t, err)
 
 	m := validManifest()
@@ -1174,7 +1198,7 @@ func TestValidateStarlark_TypedModules_MissingRequiredParam_TopLevel(t *testing.
 }
 
 func TestValidateStarlark_TypedModules_WrongParamType_TopLevel(t *testing.T) {
-	v, err := New()
+	v, err := New(WithDerivedSchema(testSchemaForStarlark()))
 	require.NoError(t, err)
 
 	m := validManifest()
@@ -1200,7 +1224,7 @@ func TestValidateStarlark_TypedModules_WrongParamType_TopLevel(t *testing.T) {
 }
 
 func TestValidateStarlark_TypedModules_ValidComplexCall(t *testing.T) {
-	v, err := New()
+	v, err := New(WithDerivedSchema(testSchemaForStarlark()))
 	require.NoError(t, err)
 
 	m := validManifest()
@@ -1220,7 +1244,7 @@ func TestValidateStarlark_TypedModules_ValidComplexCall(t *testing.T) {
 }
 
 func TestValidateStarlark_TypedModules_ValidHandlerInFunction(t *testing.T) {
-	v, err := New()
+	v, err := New(WithDerivedSchema(testSchemaForStarlark()))
 	require.NoError(t, err)
 
 	m := validManifest()

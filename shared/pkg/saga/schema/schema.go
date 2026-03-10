@@ -522,11 +522,22 @@ func (r *Registry) ToSchema() *Schema {
 
 // NewRegistryFromSchema creates a Registry pre-populated with handler definitions from a Schema.
 // This is the inverse of ToSchema() and enables creating a Registry from proto-derived schemas.
+// It also rebuilds the deprecatedNames index from conversion rules that specify FromName.
 func NewRegistryFromSchema(s *Schema) *Registry {
 	r := NewRegistry()
 	if s != nil {
 		for name, def := range s.Handlers {
 			r.handlers[name] = def
+			// Rebuild deprecated name mappings from conversion rules
+			for i := range def.Conversions {
+				conv := &def.Conversions[i]
+				if conv.FromName != "" {
+					r.deprecatedNames[conv.FromName] = &DeprecatedMapping{
+						CurrentName:    name,
+						ConversionRule: conv,
+					}
+				}
+			}
 		}
 	}
 	return r

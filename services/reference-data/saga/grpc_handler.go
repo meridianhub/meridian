@@ -823,6 +823,8 @@ func (h *RegistryHandler) DescribeHandlers(
 ) (*sagav1.DescribeHandlersResponse, error) {
 	reg := h.schemaRegistry
 	if reg == nil {
+		h.logger.Warn("DescribeHandlers called without schema registry; returning empty handler list. " +
+			"Use WithSchemaRegistry or WithDerivedSchema to populate handlers.")
 		reg = schema.NewRegistry()
 	}
 
