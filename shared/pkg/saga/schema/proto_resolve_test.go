@@ -371,20 +371,16 @@ func TestResolveProtoTypes_AliasCollision(t *testing.T) {
 				CompensationStrategy: CompensationStrategyNone,
 				ProtoRef: &ProtoReference{
 					FullMethod: "meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLog",
-					// Both fields are present, then alias one to the other's name
-					ParamAliases: map[string]string{"account_id": "log_id"},
+					// Alias account_id to initial_entry which already exists in the request message
+					ParamAliases: map[string]string{"account_id": "initial_entry"},
 				},
 			},
 		},
 	}
 
 	err := s.ResolveProtoTypes(protoregistry.GlobalFiles)
-	// This should fail because log_id already exists in the request message
-	// (if it does - otherwise it just renames cleanly)
-	// Let's check if this error occurs
-	if err != nil {
-		assert.ErrorIs(t, err, ErrAliasCollision)
-	}
+	require.Error(t, err, "aliasing to an existing field name should fail")
+	assert.ErrorIs(t, err, ErrAliasCollision)
 }
 
 func TestHasProtoRef(t *testing.T) {

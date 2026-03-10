@@ -93,6 +93,7 @@ var (
 	ErrInvalidProtoRPC              = errors.New("proto_rpc must be in format 'package.Service/Method'")
 	ErrUnknownAliasSource           = errors.New("param_alias references unknown field")
 	ErrAliasCollision               = errors.New("param_alias target already exists as a field")
+	ErrDuplicateLeafName            = errors.New("duplicate leaf field name from exposed paths")
 )
 
 // Schema represents a collection of handler definitions for a service.
@@ -776,6 +777,9 @@ func resolveExposedFields(md protoreflect.MessageDescriptor, exposed []string, a
 			}
 			// Use the leaf field name as the key
 			leafName := leafFieldName(path)
+			if _, dup := fields[leafName]; dup {
+				return nil, fmt.Errorf("%w: %q from path %q in message %s", ErrDuplicateLeafName, leafName, path, md.FullName())
+			}
 			fields[leafName] = deriveFieldDef(fd)
 		}
 	}
