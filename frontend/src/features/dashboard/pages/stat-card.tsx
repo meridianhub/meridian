@@ -76,7 +76,7 @@ export function StatCard({
     </>
   )
 
-  if (href) {
+  if (href && !(error && onRetry)) {
     return (
       <Link to={href} className="block">
         <Card
