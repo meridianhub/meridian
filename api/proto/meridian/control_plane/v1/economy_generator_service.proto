@@ -153,7 +153,10 @@ message PatternContext {
   string title = 2;
 
   // score is the relevance score for this pattern against the description (0.0 to 1.0).
-  double score = 3;
+  double score = 3 [(buf.validate.field).double = {
+    gte: 0.0
+    lte: 1.0
+  }];
 
   // manifest_fragment is the YAML snippet that this pattern contributes to the manifest.
   string manifest_fragment = 4;
