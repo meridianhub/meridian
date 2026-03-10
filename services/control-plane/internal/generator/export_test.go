@@ -27,8 +27,19 @@ func NewDeprecatedHandlerInfo(currentName string) deprecatedHandlerInfo {
 	return deprecatedHandlerInfo{currentName: currentName}
 }
 
+// NewDeprecatedHandlerInfoWithDefaults creates a deprecatedHandlerInfo with a ConversionRule for tests.
+func NewDeprecatedHandlerInfoWithDefaults(currentName string, defaults map[string]string) deprecatedHandlerInfo {
+	return deprecatedHandlerInfo{
+		currentName: currentName,
+		rule:        &schema.ConversionRule{Defaults: defaults},
+	}
+}
+
 // FindHandlerCall is the exported test hook for findHandlerCall.
 var FindHandlerCall = findHandlerCall
+
+// InjectMissingDefaults is the exported test hook for injectMissingDefaults.
+var InjectMissingDefaults = injectMissingDefaults
 
 // ExtractHandlerName is the exported test hook for extractHandlerName.
 var ExtractHandlerName = extractHandlerName

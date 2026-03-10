@@ -3,6 +3,7 @@ package generator_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/meridianhub/meridian/services/control-plane/internal/generator"
@@ -435,4 +436,47 @@ func TestExtractHandlerName_WithoutHash(t *testing.T) {
 func TestExtractHandlerName_Empty(t *testing.T) {
 	name := generator.ExtractHandlerName("sagas[0].name")
 	assert.Equal(t, "", name)
+}
+
+// --- injectMissingDefaults tests ---
+
+// TestInjectMissingDefaults_InjectsAbsentArg adds a missing default kwarg.
+func TestInjectMissingDefaults_InjectsAbsentArg(t *testing.T) {
+	// callBody is the content inside the parens including the closing paren.
+	callBody := "amount=100)"
+	defaults := map[string]string{"direction": `"CREDIT"`}
+	result := generator.InjectMissingDefaults(callBody, defaults)
+	assert.Contains(t, result, `direction="CREDIT"`)
+	assert.Contains(t, result, "amount=100")
+}
+
+// TestInjectMissingDefaults_SkipsPresentArg does not duplicate a kwarg already present.
+func TestInjectMissingDefaults_SkipsPresentArg(t *testing.T) {
+	callBody := `amount=100, direction="DEBIT")`
+	defaults := map[string]string{"direction": `"CREDIT"`}
+	result := generator.InjectMissingDefaults(callBody, defaults)
+	// direction is already present — should not appear twice
+	assert.Equal(t, 1, strings.Count(result, "direction="))
+	// Value should remain the caller's value, not the default
+	assert.Contains(t, result, `direction="DEBIT"`)
+}
+
+// TestInjectMissingDefaults_EmptyDefaults returns callBody unchanged.
+func TestInjectMissingDefaults_EmptyDefaults(t *testing.T) {
+	callBody := "amount=100)"
+	result := generator.InjectMissingDefaults(callBody, map[string]string{})
+	assert.Equal(t, callBody, result)
+}
+
+// TestReplaceDeprecatedHandler_AppliesDefaults verifies that ConversionRule.Defaults
+// are injected when the old call does not supply the new required param.
+func TestReplaceDeprecatedHandler_AppliesDefaults(t *testing.T) {
+	script := "old_handler(amount=50)"
+	info := generator.NewDeprecatedHandlerInfoWithDefaults("new_handler", map[string]string{
+		"currency": `"GBP"`,
+	})
+	result := generator.ReplaceDeprecatedHandler(script, "old_handler", info)
+	assert.Contains(t, result, "new_handler(")
+	assert.Contains(t, result, "amount=50")
+	assert.Contains(t, result, `currency="GBP"`)
 }

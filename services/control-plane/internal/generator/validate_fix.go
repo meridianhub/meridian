@@ -305,6 +305,11 @@ func replaceDeprecatedHandler(script string, oldName string, info deprecatedHand
 		if len(reverseMapping) > 0 {
 			callBody = renameKwargs(callBody, reverseMapping)
 		}
+		// Apply ConversionRule.Defaults: inject default values for any required args
+		// that the old caller did not provide (e.g., a new param added in the replacement).
+		if info.rule != nil && len(info.rule.Defaults) > 0 {
+			callBody = injectMissingDefaults(callBody, info.rule.Defaults)
+		}
 		result.WriteString(callBody)
 		remaining = rest
 	}
@@ -484,6 +489,108 @@ func renameKwargIdent(result *strings.Builder, s string, i int, reverseMapping m
 
 func isIdentStart(ch byte) bool {
 	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+
+// injectMissingDefaults appends keyword arguments from defaults that are not already
+// present at the top level of callBody (the content inside parentheses, including the
+// closing ')').  Only top-level kwargs are checked; nested calls are ignored.
+//
+// callBody is expected to end with ')'.  When defaults must be injected the result
+// is something like "existing_arg=v, new_param="default_value")".
+func injectMissingDefaults(callBody string, defaults map[string]string) string {
+	// Collect kwarg names already present at the top level (depth == 0).
+	present := collectTopLevelKwargNames(callBody)
+
+	// Determine which defaults are missing and need to be injected.
+	type kv struct{ k, v string }
+	var missing []kv
+	for param, val := range defaults {
+		if !present[param] {
+			missing = append(missing, kv{param, val})
+		}
+	}
+	if len(missing) == 0 {
+		return callBody
+	}
+
+	// Sort for deterministic output.
+	sort.Slice(missing, func(i, j int) bool { return missing[i].k < missing[j].k })
+
+	// Strip the trailing ')' and inject the missing args.
+	// callBody ends with ')'; content before it is the existing args.
+	closeParen := strings.LastIndex(callBody, ")")
+	if closeParen < 0 {
+		return callBody
+	}
+	before := strings.TrimRight(callBody[:closeParen], " \t\n")
+	var sb strings.Builder
+	sb.WriteString(before)
+	for _, entry := range missing {
+		if len(before) > 0 && !strings.HasSuffix(before, "(") {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(entry.k)
+		sb.WriteString("=")
+		sb.WriteString(entry.v)
+		before = sb.String() // update before for subsequent iterations
+	}
+	sb.WriteString(callBody[closeParen:]) // append rest from closing paren onwards
+	return sb.String()
+}
+
+// collectTopLevelKwargNames scans callBody and returns the set of keyword argument
+// names found at depth 0 (i.e. not inside nested calls or string literals).
+func collectTopLevelKwargNames(callBody string) map[string]bool {
+	present := make(map[string]bool)
+	i := 0
+	depth := 0
+	for i < len(callBody) {
+		i, depth = collectKwargStep(callBody, i, depth, present)
+	}
+	return present
+}
+
+// collectKwargStep processes one position in a call body, updating depth and the present set.
+// Returns the next position and new depth.
+func collectKwargStep(s string, i int, depth int, present map[string]bool) (int, int) {
+	if s[i] == '"' || s[i] == '\'' {
+		return advancePastString(s, i), depth
+	}
+	if next, skip := advancePastToken(s, i); skip {
+		return next, depth
+	}
+	if s[i] == '(' {
+		return i + 1, depth + 1
+	}
+	if s[i] == ')' {
+		if depth > 0 {
+			depth--
+		}
+		return i + 1, depth
+	}
+	if depth == 0 && isIdentStart(s[i]) {
+		return collectKwargIdent(s, i, present), depth
+	}
+	return i + 1, depth
+}
+
+// collectKwargIdent scans an identifier at position i and records it in present
+// when it is a keyword argument (followed by '=' but not '==').
+// Returns the position after the identifier.
+func collectKwargIdent(s string, i int, present map[string]bool) int {
+	start := i
+	for i < len(s) && isScriptIdentChar(s[i]) {
+		i++
+	}
+	ident := s[start:i]
+	j := i
+	for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+		j++
+	}
+	if j < len(s) && s[j] == '=' && (j+1 >= len(s) || s[j+1] != '=') {
+		present[ident] = true
+	}
+	return i
 }
 
 // enrichErrors augments validation errors with additional context to help the LLM
