@@ -36,10 +36,15 @@ web:
   http: 0.0.0.0:5556
 
 oauth2:
-  # "local" routes password grants through the built-in password DB.
-  # Once the Meridian identity connector is wired into the Dex server binary,
-  # change this to the connector ID registered at startup (e.g. "meridian").
-  passwordConnector: local
+  # "meridian" routes password grants through the Meridian identity connector.
+  # The connector validates credentials against the identity domain repository
+  # and resolves tenant context from the username field.
+  #
+  # Username format for password grant: "tenant:<slug>/<email>"
+  # Example: "tenant:volterra/admin@volterra.energy"
+  #
+  # Fallback: Set to "local" to use the staticPasswords block below instead.
+  passwordConnector: meridian
   skipApprovalScreen: true
 
 staticClients:
