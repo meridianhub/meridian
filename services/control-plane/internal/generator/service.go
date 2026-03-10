@@ -154,26 +154,78 @@ func (s *Service) GetGenerationContext(
 	}, nil
 }
 
+// amendContext holds the state loaded for amend mode generation.
+type amendContext struct {
+	originalYAML    string
+	currentManifest *controlplanev1.Manifest
+}
+
+// loadAmendContext loads the current manifest and serializes it to YAML for amend mode.
+func (s *Service) loadAmendContext(ctx context.Context) (*amendContext, error) {
+	if s.manifestHistory == nil {
+		return nil, status.Error(codes.FailedPrecondition, "manifest history is not available")
+	}
+
+	currentManifest, err := s.manifestHistory.GetCurrentManifest(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to get current manifest for amend", "error", err)
+		return nil, status.Error(codes.Internal, "failed to load current manifest")
+	}
+
+	yamlBytes, err := yaml.Marshal(protoManifestToYAMLMap(currentManifest))
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to serialize current manifest to YAML", "error", err)
+		return nil, status.Error(codes.Internal, "failed to serialize current manifest")
+	}
+
+	return &amendContext{
+		originalYAML:    string(yamlBytes),
+		currentManifest: currentManifest,
+	}, nil
+}
+
+// applyAmendImpact computes impact analysis and returns removal warnings for the response.
+func applyAmendImpact(originalYAML, amendedYAML string, meta *controlplanev1.GenerationMetadata) []*controlplanev1.ValidationError {
+	impact := ComputeAmendImpact(originalYAML, amendedYAML)
+	meta.Decisions = impact.ToDecisions()
+
+	warnings := make([]*controlplanev1.ValidationError, 0, len(impact.Removed))
+	for _, removed := range impact.Removed {
+		warnings = append(warnings, &controlplanev1.ValidationError{
+			Code:    "AMEND_RESOURCE_REMOVED",
+			Path:    removed,
+			Message: fmt.Sprintf("resource %s was present in the original manifest but is absent in the amended version", removed),
+		})
+	}
+	return warnings
+}
+
 // GenerateManifest generates a new economy manifest from a natural language description.
-// Create mode only — amend mode returns Unimplemented.
+// Supports both CREATE mode (from scratch) and AMEND mode (modifying existing economy).
 func (s *Service) GenerateManifest(
 	ctx context.Context,
 	req *controlplanev1.GenerateManifestRequest,
 ) (*controlplanev1.GenerateManifestResponse, error) {
-	// Amend mode is not yet implemented (task 12).
-	if req.GetMode() == controlplanev1.GenerationMode_GENERATION_MODE_AMEND {
-		return nil, status.Error(codes.Unimplemented, "GENERATION_MODE_AMEND is not yet implemented")
-	}
-
 	if req.GetDescription() == "" {
 		return nil, status.Error(codes.InvalidArgument, "description is required")
 	}
-
 	if s.llmClient == nil {
 		return nil, status.Error(codes.FailedPrecondition, "LLM client is not configured")
 	}
 	if s.validator == nil {
 		return nil, status.Error(codes.FailedPrecondition, "manifest validator is not configured")
+	}
+
+	isAmend := req.GetMode() == controlplanev1.GenerationMode_GENERATION_MODE_AMEND
+
+	// For amend mode, load the current manifest.
+	var ac *amendContext
+	if isAmend {
+		var err error
+		ac, err = s.loadAmendContext(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Determine max fix iterations.
@@ -190,6 +242,10 @@ func (s *Service) GenerateManifest(
 	}
 	if prefs := req.GetPreferences(); prefs != nil {
 		assembleOpts.Industry = prefs.GetIndustry()
+	}
+	if ac != nil {
+		assembleOpts.IncludeCurrentEconomy = true
+		assembleOpts.CurrentManifest = ac.currentManifest
 	}
 
 	assembled, err := AssembleContext(assembleOpts, s.schemaRegistry, s.cookbookFS)
@@ -220,18 +276,20 @@ func (s *Service) GenerateManifest(
 	// Extract metadata from the final manifest YAML.
 	meta, extractErr := extractManifestMetadata(fixResult.FinalManifest)
 	if extractErr != nil {
-		// Non-fatal: metadata extraction failure doesn't block returning the manifest.
 		s.logger.WarnContext(ctx, "failed to extract manifest metadata", "error", extractErr)
 		meta = &controlplanev1.GenerationMetadata{}
 	}
-
-	// Populate metadata from generation process.
 	meta.FixIterations = int32(fixResult.IterationsUsed)
 	meta.PatternsUsed = patternNames(assembled.MatchedPatterns)
 
 	// Convert validation findings to proto.
 	protoErrors := toProtoValidationErrors(fixResult.Errors)
 	protoWarnings := toProtoValidationErrors(fixResult.Warnings)
+
+	// For amend mode, compute impact analysis and flag removals as warnings.
+	if ac != nil {
+		protoWarnings = append(protoWarnings, applyAmendImpact(ac.originalYAML, fixResult.FinalManifest, meta)...)
+	}
 
 	return &controlplanev1.GenerateManifestResponse{
 		ManifestYaml:       fixResult.FinalManifest,
