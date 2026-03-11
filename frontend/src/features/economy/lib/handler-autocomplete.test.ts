@@ -96,12 +96,14 @@ describe('buildHandlerCompletionSource', () => {
       expect(labels).toContain('position_keeping')
     })
 
-    it('returns all services when at start of word with no prefix', async () => {
+    it('returns matching services when typing a single-character prefix', async () => {
       const ctx = makeContext('p')
       const result = await source(ctx)
       expect(result).not.toBeNull()
       const labels = result!.options.map((o) => o.label)
       expect(labels).toContain('position_keeping')
+      // 'current_account' does not start with 'p' so should not appear
+      expect(labels).not.toContain('current_account')
     })
 
     it('service completions have namespace type', async () => {
