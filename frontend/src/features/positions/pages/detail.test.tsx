@@ -85,22 +85,29 @@ describe('PositionDetailPage', () => {
     mockRetrieveFinancialPositionLog.mockResolvedValue({ log: null })
   })
 
-  it('renders page title', () => {
+  it('renders page title', async () => {
     renderDetailPage()
-    expect(screen.getByText('Position Log')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Position Log')).toBeInTheDocument()
+    })
   })
 
-  it('renders back link to positions list', () => {
+  it('renders back link to positions list', async () => {
     renderDetailPage()
-    const positionsLink = screen.getByRole('link', { name: 'Positions' })
-    expect(positionsLink).toBeInTheDocument()
-    expect(positionsLink).toHaveAttribute('href', '/positions')
+    await waitFor(() => {
+      const positionsLink = screen.getByRole('link', { name: 'Positions' })
+      expect(positionsLink).toBeInTheDocument()
+      expect(positionsLink).toHaveAttribute('href', '/positions')
+    })
   })
 
   it('navigates back to positions list on breadcrumb link click', async () => {
     const user = userEvent.setup()
     renderDetailPage()
 
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'Positions' })).toBeInTheDocument()
+    })
     const positionsLink = screen.getByRole('link', { name: 'Positions' })
     await user.click(positionsLink)
 
