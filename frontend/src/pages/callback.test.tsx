@@ -1,10 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
-import { http, HttpResponse } from 'msw'
-import { server } from '@/test/msw-handlers'
 import { AuthProvider } from '@/contexts/auth-context'
 import { CallbackPage } from './callback'
 
@@ -18,6 +16,7 @@ function renderCallback(initialUrl: string) {
             <Route path="/callback" element={<CallbackPage />} />
             <Route path="/login" element={<div data-testid="login-page">Login</div>} />
             <Route path="/" element={<div data-testid="home-page">Home</div>} />
+            <Route path="/dashboard" element={<div data-testid="dashboard-page">Dashboard</div>} />
           </Routes>
         </MemoryRouter>
       </AuthProvider>
@@ -28,9 +27,16 @@ function renderCallback(initialUrl: string) {
 describe('CallbackPage', () => {
   beforeEach(() => {
     sessionStorage.clear()
+    // Ensure hash is clean before each test
+    window.location.hash = ''
   })
 
-  it('shows error when error param is present', async () => {
+  afterEach(() => {
+    window.location.hash = ''
+    vi.restoreAllMocks()
+  })
+
+  it('shows error when error param is present in search params', async () => {
     renderCallback('/callback?error=access_denied&error_description=User+denied+access')
 
     await waitFor(() => {
@@ -39,71 +45,57 @@ describe('CallbackPage', () => {
     expect(screen.getByText('Return to Login')).toBeInTheDocument()
   })
 
-  it('shows error when code or state is missing', async () => {
+  it('shows error when no token and no error params are present', async () => {
     renderCallback('/callback')
 
     await waitFor(() => {
-      expect(screen.getByText('Missing authorization code or state parameter')).toBeInTheDocument()
+      expect(screen.getByText('No authentication token received')).toBeInTheDocument()
     })
   })
 
-  it('shows error when state does not match', async () => {
-    sessionStorage.setItem('meridian_pkce_state', 'expected-state')
-    renderCallback('/callback?code=test-code&state=wrong-state')
-
-    await waitFor(() => {
-      expect(screen.getByText('Invalid state parameter - possible CSRF attack')).toBeInTheDocument()
-    })
-  })
-
-  it('shows error when verifier is missing', async () => {
-    sessionStorage.setItem('meridian_pkce_state', 'test-state')
-    renderCallback('/callback?code=test-code&state=test-state')
-
-    await waitFor(() => {
-      expect(screen.getByText('Missing PKCE verifier - please try signing in again')).toBeInTheDocument()
-    })
-  })
-
-  it('exchanges code for token and navigates home on success', async () => {
+  it('extracts token from URL fragment and navigates home', async () => {
     const validJwt = [
       btoa(JSON.stringify({ alg: 'none', typ: 'JWT' })),
       btoa(JSON.stringify({ sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600, iss: 'dex', aud: 'meridian-service' })),
       'sig',
     ].join('.')
 
-    server.use(
-      http.post('*/dex/token', () => {
-        return HttpResponse.json({ id_token: validJwt })
-      }),
-    )
+    // Set hash fragment before rendering (simulates BFF redirect)
+    window.location.hash = `#access_token=${validJwt}`
+    const replaceStateSpy = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {})
 
-    sessionStorage.setItem('meridian_pkce_state', 'test-state')
-    sessionStorage.setItem('meridian_pkce_verifier', 'test-verifier')
-    renderCallback('/callback?code=test-code&state=test-state')
+    renderCallback('/callback')
 
     await waitFor(() => {
       expect(screen.getByTestId('home-page')).toBeInTheDocument()
     })
 
-    // PKCE values should be cleaned up
-    expect(sessionStorage.getItem('meridian_pkce_state')).toBeNull()
-    expect(sessionStorage.getItem('meridian_pkce_verifier')).toBeNull()
+    // Should clear the fragment from URL for security
+    expect(replaceStateSpy).toHaveBeenCalled()
   })
 
-  it('shows error on token exchange failure', async () => {
-    server.use(
-      http.post('*/dex/token', () => {
-        return HttpResponse.json({ error: 'invalid_grant' }, { status: 400 })
-      }),
-    )
-
-    sessionStorage.setItem('meridian_pkce_state', 'test-state')
-    sessionStorage.setItem('meridian_pkce_verifier', 'test-verifier')
-    renderCallback('/callback?code=test-code&state=test-state')
+  it('shows error when error_description is missing but error is present', async () => {
+    renderCallback('/callback?error=server_error')
 
     await waitFor(() => {
-      expect(screen.getByText('Authorization code expired or invalid')).toBeInTheDocument()
+      expect(screen.getByText('server_error')).toBeInTheDocument()
+    })
+  })
+
+  it('navigates to return_url when provided', async () => {
+    const validJwt = [
+      btoa(JSON.stringify({ alg: 'none', typ: 'JWT' })),
+      btoa(JSON.stringify({ sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600, iss: 'dex', aud: 'meridian-service' })),
+      'sig',
+    ].join('.')
+
+    window.location.hash = `#access_token=${validJwt}`
+    vi.spyOn(window.history, 'replaceState').mockImplementation(() => {})
+
+    renderCallback('/callback?return_url=/dashboard')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-page')).toBeInTheDocument()
     })
   })
 
