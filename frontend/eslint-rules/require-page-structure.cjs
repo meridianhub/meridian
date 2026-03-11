@@ -17,22 +17,21 @@ module.exports = {
       return {}
     }
     // Skip test files, dialog files, and tab components
+    const isDialogFile =
+      /(?:^|\/)[^/]*-dialog\.tsx$/.test(filename) || /\/dialogs?\//.test(filename)
     if (
       filename.includes('.test.') ||
       filename.includes('.spec.') ||
-      filename.includes('dialog') ||
+      isDialogFile ||
       filename.includes('/tabs/')
     ) {
       return {}
     }
     // Skip hub/dashboard pages (excluded from alignment per PRD)
     if (
-      filename.includes('/dashboard/') ||
-      filename.includes('/economy/') ||
-      filename.includes('/cookbook/') ||
-      filename.includes('/mcp-config/') ||
-      filename.includes('/tenants/') ||
-      filename.includes('/manifests/')
+      /\/features\/(?:dashboard|economy|cookbook|mcp-config|tenants|manifests)\/pages\//.test(
+        filename,
+      )
     ) {
       return {}
     }
@@ -44,9 +43,10 @@ module.exports = {
       ImportDeclaration(node) {
         const source = node.source.value
         const isPageImport =
-          source.includes('@/shared') ||
-          /^(\.\.?\/)*page-header$/.test(source) ||
-          /^(\.\.?\/)*page-shell$/.test(source)
+          source === '@/shared' ||
+          source.startsWith('@/shared/') ||
+          /^(?:\.\/|\.\.\/)+page-header$/.test(source) ||
+          /^(?:\.\/|\.\.\/)+page-shell$/.test(source)
         if (isPageImport) {
           node.specifiers.forEach((spec) => {
             if (spec.imported && spec.imported.name === 'PageShell') hasPageShell = true
