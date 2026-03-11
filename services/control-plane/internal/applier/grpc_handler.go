@@ -96,7 +96,7 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	if req.GetManifest() == nil {
 		return nil, status.Error(codes.InvalidArgument, "manifest is required")
 	}
-	if req.GetAppliedBy() == "" {
+	if req.GetAppliedBy() == "" && !req.GetDryRun() {
 		return nil, status.Error(codes.InvalidArgument, "applied_by is required")
 	}
 

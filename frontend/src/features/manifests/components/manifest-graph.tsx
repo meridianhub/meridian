@@ -15,7 +15,13 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useNavigate } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { Maximize2, X } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Tooltip,
   TooltipContent,
@@ -322,6 +328,7 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [showEventChain, setShowEventChain] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
   const [visibleTypes, setVisibleTypes] = useState<Set<ManifestNodeType>>(
     () => new Set<ManifestNodeType>(['instrument', 'account_type', 'valuation_rule', 'saga']),
   )
@@ -614,6 +621,30 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
           </div>
         </div>
       )}
+
+      {/* Fullscreen button — hidden when selection toolbar is visible (same position) */}
+      {!selectedManifestNode && (
+        <Button
+          variant="outline"
+          size="icon"
+          className="absolute top-3 right-3 z-10 size-8 bg-background/80 backdrop-blur-sm"
+          onClick={() => setFullscreen(true)}
+          aria-label="View fullscreen"
+        >
+          <Maximize2 className="size-4" />
+        </Button>
+      )}
+
+      <Dialog open={fullscreen} onOpenChange={setFullscreen}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] h-[calc(100vh-2rem)] sm:max-w-[calc(100vw-4rem)] sm:h-[calc(100vh-4rem)] flex flex-col p-4">
+          <DialogHeader className="shrink-0">
+            <DialogTitle>Economy Graph</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 rounded-lg border">
+            <ManifestGraph manifest={manifest} className="h-full w-full" />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

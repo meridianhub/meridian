@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ConnectError, Code } from '@connectrpc/connect'
 import yaml from 'js-yaml'
 import { create } from '@bufbuild/protobuf'
 import { useApiClients } from '@/api/context'
@@ -61,10 +62,12 @@ export function EconomyEditPage() {
   const { manifestHistory } = useApiClients()
   const { validate, result: validationResult } = useManifestValidate()
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: manifestKeys.current(),
     queryFn: () => manifestHistory.getCurrentManifest({}),
   })
+  const isNotFound = error instanceof ConnectError && error.code === Code.NotFound
+  const isError = !!error && !isNotFound
 
   // Initialise YAML once the query resolves; fall back to skeleton manifest
   const [initialised, setInitialised] = useState(false)
@@ -73,8 +76,8 @@ export function EconomyEditPage() {
   const [yamlParseError, setYamlParseError] = useState(false)
   const [manifestChangedSincePlan, setManifestChangedSincePlan] = useState(false)
 
-  // Hydrate state from loaded manifest on first successful fetch
-  if (!initialised && !isLoading && !isError && data !== undefined) {
+  // Hydrate state from loaded manifest on first successful fetch (or NotFound → create-new)
+  if (!initialised && !isLoading && !isError && (data !== undefined || isNotFound)) {
     const loadedManifest = data?.version?.manifest
     if (loadedManifest) {
       // Convert proto manifest → plain object → YAML string
