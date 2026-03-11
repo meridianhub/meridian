@@ -26,6 +26,15 @@ ruleTester.run('require-page-structure', rule, {
       filename: '/app/src/features/accounts/pages/index.tsx',
     },
     {
+      // Windows path normalization
+      code: `
+        import { PageShell } from '@/shared/page-shell'
+        import { PageHeader } from '@/shared/page-header'
+        export default function AccountsPage() { return null }
+      `,
+      filename: 'C:\\app\\src\\features\\accounts\\pages\\index.tsx',
+    },
+    {
       // Non-feature file should be ignored
       code: `export default function App() { return null }`,
       filename: '/app/src/components/App.tsx',
