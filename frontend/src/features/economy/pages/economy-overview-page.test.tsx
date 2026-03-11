@@ -139,6 +139,7 @@ describe('EconomyOverviewPage', () => {
     })
     expect(screen.getByTestId('stat-account-types')).toHaveTextContent('1')
     expect(screen.getByTestId('stat-sagas')).toHaveTextContent('2')
+    expect(screen.getByTestId('stat-valuation-rules')).toHaveTextContent('1')
   })
 
   it('renders Explore button that navigates to /economy/explore', async () => {
@@ -179,7 +180,7 @@ describe('EconomyOverviewPage', () => {
     })
   })
 
-  it('shows empty state when no manifest applied', async () => {
+  it('shows empty state when no manifest version applied', async () => {
     vi.mocked(useApiClients).mockReturnValue({
       manifestHistory: {
         getCurrentManifest: vi.fn().mockResolvedValue({ version: undefined }),

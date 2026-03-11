@@ -93,14 +93,14 @@ export function EconomyOverviewPage() {
 
   if (isLoading) return <LoadingSkeleton />
   if (error) return <ErrorState onRetry={() => void refetch()} />
-  if (!data?.version) return <EmptyState />
+  if (!data?.version?.manifest) return <EmptyState />
 
   const { manifest } = data.version
-  const metadata = manifest?.metadata
-  const instruments = manifest?.instruments ?? []
-  const accountTypes = manifest?.accountTypes ?? []
-  const sagas = manifest?.sagas ?? []
-  const handlers = (manifest as Record<string, unknown> | undefined)?.handlers as unknown[] | undefined
+  const metadata = manifest.metadata
+  const instruments = manifest.instruments ?? []
+  const accountTypes = manifest.accountTypes ?? []
+  const sagas = manifest.sagas ?? []
+  const valuationRules = manifest.valuationRules ?? []
 
   return (
     <div className="p-6 space-y-8">
@@ -139,14 +139,14 @@ export function EconomyOverviewPage() {
         <StatCard label="Instruments" value={instruments.length} testId="stat-instruments" />
         <StatCard label="Account Types" value={accountTypes.length} testId="stat-account-types" />
         <StatCard label="Sagas" value={sagas.length} testId="stat-sagas" />
-        <StatCard label="Handlers" value={handlers?.length ?? 0} testId="stat-handlers" />
+        <StatCard label="Valuation Rules" value={valuationRules.length} testId="stat-valuation-rules" />
       </div>
 
       {/* Relationship graph */}
       <section className="space-y-3">
         <h2 className="text-base font-semibold">Relationship Graph</h2>
         <div className="h-[480px] rounded-lg border overflow-hidden">
-          <ManifestGraph manifest={manifest!} className="h-full w-full" />
+          <ManifestGraph manifest={manifest} className="h-full w-full" />
         </div>
       </section>
 
