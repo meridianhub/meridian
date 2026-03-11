@@ -1,48 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
+import type { SagaDefinition, InstrumentDefinition, AccountTypeDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+import type { MappingDefinition } from '@/api/gen/meridian/mapping/v1/mapping_pb'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-interface ManifestSaga {
-  name: string
-  trigger: string
-  filter?: string
-  script?: string
-  [key: string]: unknown
-}
-
-interface ManifestMapping {
-  name: string
-  targetService?: string
-  targetRpc?: string
-  [key: string]: unknown
-}
-
-interface ManifestInstrument {
-  code: string
-  name: string
-  [key: string]: unknown
-}
-
-interface ManifestAccountType {
-  code: string
-  name: string
-  [key: string]: unknown
-}
-
-interface ManifestInput {
-  sagas?: ManifestSaga[]
-  mappings?: ManifestMapping[]
-  instruments?: ManifestInstrument[]
-  accountTypes?: ManifestAccountType[]
-}
 
 // ── Loading / empty / error states ────────────────────────────────────────────
 
@@ -82,11 +48,11 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 
 interface EventChannel {
   channel: string
-  boundSagas: ManifestSaga[]
+  sagas: SagaDefinition[]
 }
 
-function buildEventChannels(sagas: ManifestSaga[]): EventChannel[] {
-  const channelMap = new Map<string, ManifestSaga[]>()
+function buildEventChannels(sagas: SagaDefinition[]): EventChannel[] {
+  const channelMap = new Map<string, SagaDefinition[]>()
 
   for (const saga of sagas) {
     if (saga.trigger.startsWith('event:')) {
@@ -99,13 +65,11 @@ function buildEventChannels(sagas: ManifestSaga[]): EventChannel[] {
 
   return Array.from(channelMap.entries()).map(([channel, boundSagas]) => ({
     channel,
-    boundSagas,
+    sagas: boundSagas,
   }))
 }
 
-function EventChannelsPanel({ manifest }: { manifest: Manifest }) {
-  const m = manifest as unknown as ManifestInput
-  const sagas = m.sagas ?? []
+function EventChannelsPanel({ sagas }: { sagas: SagaDefinition[] }) {
   const channels = buildEventChannels(sagas)
 
   if (channels.length === 0) {
@@ -123,7 +87,7 @@ function EventChannelsPanel({ manifest }: { manifest: Manifest }) {
           <CardContent className="flex items-center justify-between px-4 py-3">
             <span className="font-mono text-sm font-medium text-foreground">{ch.channel}</span>
             <Badge className="bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900 dark:text-green-200">
-              {ch.boundSagas.length} saga{ch.boundSagas.length === 1 ? '' : 's'} attached
+              {ch.sagas.length} saga{ch.sagas.length === 1 ? '' : 's'} attached
             </Badge>
           </CardContent>
         </Card>
@@ -134,10 +98,7 @@ function EventChannelsPanel({ manifest }: { manifest: Manifest }) {
 
 // ── SagasPanel ─────────────────────────────────────────────────────────────────
 
-function SagasPanel({ manifest }: { manifest: Manifest }) {
-  const m = manifest as unknown as ManifestInput
-  const sagas = m.sagas ?? []
-
+function SagasPanel({ sagas }: { sagas: SagaDefinition[] }) {
   if (sagas.length === 0) {
     return (
       <div className="py-8 text-center text-muted-foreground text-sm">
@@ -160,11 +121,6 @@ function SagasPanel({ manifest }: { manifest: Manifest }) {
               )}
             </div>
             <p className="text-xs text-muted-foreground font-mono">{saga.trigger}</p>
-            {saga.filter && (
-              <p className="text-xs text-muted-foreground">
-                Filter: <code className="text-xs">{saga.filter}</code>
-              </p>
-            )}
           </CardContent>
         </Card>
       ))}
@@ -174,10 +130,7 @@ function SagasPanel({ manifest }: { manifest: Manifest }) {
 
 // ── Mappings panel ────────────────────────────────────────────────────────────
 
-function ApiEndpointsPanel({ manifest }: { manifest: Manifest }) {
-  const m = manifest as unknown as ManifestInput
-  const mappings = m.mappings ?? []
-
+function ApiEndpointsPanel({ mappings }: { mappings: MappingDefinition[] }) {
   if (mappings.length === 0) {
     return (
       <div className="py-8 text-center text-muted-foreground text-sm">
@@ -209,11 +162,13 @@ function ApiEndpointsPanel({ manifest }: { manifest: Manifest }) {
 
 // ── ResourcesPanel ────────────────────────────────────────────────────────────
 
-function ResourcesPanel({ manifest }: { manifest: Manifest }) {
-  const m = manifest as unknown as ManifestInput
-  const instruments = m.instruments ?? []
-  const accountTypes = m.accountTypes ?? []
-
+function ResourcesPanel({
+  instruments,
+  accountTypes,
+}: {
+  instruments: InstrumentDefinition[]
+  accountTypes: AccountTypeDefinition[]
+}) {
   if (instruments.length === 0 && accountTypes.length === 0) {
     return (
       <div className="py-8 text-center text-muted-foreground text-sm">
@@ -273,7 +228,11 @@ export function EconomyExplorePage() {
   if (error && !data) return <ErrorState onRetry={() => void refetch()} />
   if (!data?.version?.manifest) return <EmptyState />
 
-  const { manifest } = data.version
+  const manifest: Manifest = data.version.manifest
+  const sagas = manifest.sagas ?? []
+  const mappings = manifest.mappings ?? []
+  const instruments = manifest.instruments ?? []
+  const accountTypes = manifest.accountTypes ?? []
 
   return (
     <div className="p-6 space-y-6">
@@ -293,19 +252,19 @@ export function EconomyExplorePage() {
         </TabsList>
 
         <TabsContent value="event-channels" className="mt-4">
-          <EventChannelsPanel manifest={manifest} />
+          <EventChannelsPanel sagas={sagas} />
         </TabsContent>
 
         <TabsContent value="sagas" className="mt-4">
-          <SagasPanel manifest={manifest} />
+          <SagasPanel sagas={sagas} />
         </TabsContent>
 
         <TabsContent value="api-endpoints" className="mt-4">
-          <ApiEndpointsPanel manifest={manifest} />
+          <ApiEndpointsPanel mappings={mappings} />
         </TabsContent>
 
         <TabsContent value="resources" className="mt-4">
-          <ResourcesPanel manifest={manifest} />
+          <ResourcesPanel instruments={instruments} accountTypes={accountTypes} />
         </TabsContent>
       </Tabs>
     </div>

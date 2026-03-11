@@ -35,26 +35,13 @@ const mockManifestVersion = {
       { fromInstrument: 'KWH', toInstrument: 'GBP', cel: 'price * 0.1' },
     ],
     sagas: [
-      {
-        name: 'process_payment',
-        trigger: 'event:payment.requested',
-        filter: 'amount > 0',
-        script: 'def main(): pass',
-      },
-      {
-        name: 'settle_energy',
-        trigger: 'scheduled:daily',
-        script: 'def main(): pass',
-      },
-      {
-        name: 'on_meter_read',
-        trigger: 'event:meter.reading',
-        script: 'def main(): pass',
-      },
+      { name: 'process_payment', trigger: 'event:payment.requested', script: 'def main(): pass' },
+      { name: 'settle_energy', trigger: 'scheduled:daily', script: 'def main(): pass' },
+      { name: 'on_meter_read', trigger: 'event:meter.reading', script: 'def main(): pass' },
     ],
     mappings: [
       { name: 'stripe_webhook', targetService: 'meridian.payment_order.v1.PaymentOrderService', targetRpc: 'InitiatePaymentOrder' },
-      { name: 'meter_reading', targetService: 'meridian.energy.v1.EnergyService', targetRpc: 'RecordMeterReading' },
+      { name: 'meter_reading_mapping', targetService: 'meridian.energy.v1.EnergyService', targetRpc: 'RecordMeterReading' },
     ],
     seedData: undefined,
     paymentRails: [],
@@ -122,7 +109,7 @@ describe('EconomyExplorePage', () => {
     })
   })
 
-  it('renders error state when API fails', async () => {
+  it('renders error state when API fails with no cached data', async () => {
     vi.mocked(useApiClients).mockReturnValue({
       manifestHistory: {
         getCurrentManifest: vi.fn().mockRejectedValue(new Error('Network error')),
@@ -143,23 +130,30 @@ describe('EconomyExplorePage', () => {
       })
     })
 
-    it('shows bound events with saga badge', async () => {
+    it('shows event channels derived from event: saga triggers', async () => {
       renderPage()
       await waitFor(() => {
         expect(screen.getByText('payment.requested')).toBeInTheDocument()
       })
       expect(screen.getByText('meter.reading')).toBeInTheDocument()
-      // Both bound events should have saga attached badge
-      const sagaBadges = screen.getAllByText(/saga attached/i)
-      expect(sagaBadges.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('does not show Add Saga button (channels are derived from saga event: triggers, all are bound)', async () => {
+    it('shows saga count badge for each channel', async () => {
       renderPage()
       await waitFor(() => {
         expect(screen.getByText('payment.requested')).toBeInTheDocument()
       })
-      expect(screen.queryByRole('button', { name: /add saga/i })).not.toBeInTheDocument()
+      const sagaBadges = screen.getAllByText(/saga attached/i)
+      expect(sagaBadges.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('does not show non-event-triggered sagas as channels', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByText('payment.requested')).toBeInTheDocument()
+      })
+      // settle_energy has a scheduled: trigger, not event: — should not appear as a channel
+      expect(screen.queryByText('daily')).not.toBeInTheDocument()
     })
   })
 
@@ -217,7 +211,7 @@ describe('EconomyExplorePage', () => {
       await waitFor(() => {
         expect(screen.getByText('stripe_webhook')).toBeInTheDocument()
       })
-      expect(screen.getByText('meter_reading')).toBeInTheDocument()
+      expect(screen.getByText('meter_reading_mapping')).toBeInTheDocument()
     })
   })
 
