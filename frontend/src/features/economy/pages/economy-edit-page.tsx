@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import yaml from 'js-yaml'
 import { create } from '@bufbuild/protobuf'
@@ -58,8 +58,7 @@ export function EconomyEditPage() {
   const [initialised, setInitialised] = useState(false)
   const [manifestYaml, setManifestYaml] = useState(SKELETON_MANIFEST)
   const [draftManifest, setDraftManifest] = useState<Manifest | null>(null)
-  const [errors, setErrors] = useState<ValidationError[]>([])
-  const [warnings, setWarnings] = useState<ValidationError[]>([])
+  const [yamlParseError, setYamlParseError] = useState(false)
   const [manifestChangedSincePlan, setManifestChangedSincePlan] = useState(false)
 
   // Hydrate state from loaded manifest on first successful fetch
@@ -75,15 +74,11 @@ export function EconomyEditPage() {
     setInitialised(true)
   }
 
-  // Sync validation results from hook into local state so the UI always reflects
-  // the most recent completed validation cycle, not stale hook state.
-  useEffect(() => {
-    if (validationResult) {
-      setErrors(validationResult.errors)
-      setWarnings(validationResult.warnings)
-    }
-  }, [validationResult])
-
+  // Use validationResult from the hook directly. When YAML is unparseable, the
+  // draft manifest is not updated and no new validation is dispatched, so hide
+  // the previous result to avoid showing stale errors for a different manifest.
+  const errors: ValidationError[] = yamlParseError ? [] : (validationResult?.errors ?? [])
+  const warnings: ValidationError[] = yamlParseError ? [] : (validationResult?.warnings ?? [])
   const validationPassed = errors.length === 0
 
   const handleEditorChange = useCallback(
@@ -97,13 +92,14 @@ export function EconomyEditPage() {
         if (parsed && typeof parsed === 'object') {
           const manifest = create(ManifestSchema, parsed)
           setDraftManifest(manifest)
+          setYamlParseError(false)
           validate(manifest)
-          // Clear local state optimistically; the effect above syncs it when validate completes
-          setErrors([])
-          setWarnings([])
+        } else {
+          setYamlParseError(true)
         }
       } catch {
-        // Invalid YAML — keep previous validation state visible
+        // Invalid YAML — keep previous draft manifest, hide stale validation
+        setYamlParseError(true)
       }
     },
     [validate],
