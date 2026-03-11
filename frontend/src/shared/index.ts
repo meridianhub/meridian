@@ -20,3 +20,12 @@ export type { DetailSkeletonProps } from './detail-skeleton';
 
 export { useAccountResolver } from './use-account-resolver';
 export type { ResolvedAccount, ResolvedAccountType } from './use-account-resolver';
+
+export { PageHeader } from './page-header';
+export type { PageHeaderProps } from './page-header';
+
+export { PageShell } from './page-shell';
+export type { PageShellProps } from './page-shell';
+
+export { ErrorState } from './error-state';
+export type { ErrorStateProps } from './error-state';
