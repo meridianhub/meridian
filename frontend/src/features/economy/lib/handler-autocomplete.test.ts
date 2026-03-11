@@ -7,6 +7,8 @@ import {
   generateParameterTemplate,
   generateHandlerCallTemplate,
 } from './handler-autocomplete'
+// generateParameterTemplate and generateHandlerCallTemplate are re-exported from
+// @/shared/handler-template via handler-autocomplete for backwards compatibility
 
 const mockSchema: HandlerSchemaResponse = {
   services: [

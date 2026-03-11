@@ -1,34 +1,9 @@
 import { autocompletion, type CompletionSource, type Completion } from '@codemirror/autocomplete'
 import type { Extension } from '@codemirror/state'
-import type { Handler, HandlerSchemaResponse } from '@/shared/handler-reference'
+import type { HandlerSchemaResponse } from '@/shared/handler-reference'
+import { generateHandlerCallTemplate } from '@/shared/handler-template'
 
-/**
- * Generates a Starlark call template for a handler including the service name.
- * Example: position_keeping.initiate_log(amount="", direction="DEBIT")
- */
-export function generateParameterTemplate(serviceName: string, handler: Handler): string {
-  const params = buildParamString(handler)
-  return `${serviceName}.${handler.name}(${params})`
-}
-
-/**
- * Generates only the handler call portion (no service name prefix).
- * Used as the `apply` value in handler completions where the service name
- * and dot are already present in the document.
- * Example: initiate_log(amount="", direction="DEBIT")
- */
-export function generateHandlerCallTemplate(handler: Handler): string {
-  return `${handler.name}(${buildParamString(handler)})`
-}
-
-function buildParamString(handler: Handler): string {
-  return handler.params
-    .map((p) => {
-      const value = p.type === 'enum' ? `"${p.enumValues[0] ?? ''}"` : '""'
-      return `${p.name}=${value}`
-    })
-    .join(', ')
-}
+export { generateParameterTemplate, generateHandlerCallTemplate } from '@/shared/handler-template'
 
 /**
  * Builds a CodeMirror CompletionSource from a HandlerSchemaResponse.

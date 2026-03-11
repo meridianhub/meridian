@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ChevronRight } from 'lucide-react'
 import { useApiClients } from '@/api/context'
-import { generateParameterTemplate } from '@/features/economy/lib/handler-autocomplete'
+import { generateParameterTemplate } from './handler-template'
 
 /**
  * Represents a parameter for a Starlark handler.
