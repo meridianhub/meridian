@@ -174,9 +174,11 @@ In `create` mode, the `ApplyManifest` request should signal that
 no prior manifest comparison should be performed. This may require:
 
 - A new field on `ApplyManifestRequest`
-  (e.g., `skip_immutability_checks: true`), or
-- A separate validation endpoint that performs structural-only
-  validation without tenant state
+  (e.g., `skip_immutability_checks: true`) that skips tenant-state
+  comparison while preserving all semantic checks (CEL, Starlark,
+  event channels, instrument constraints), or
+- A separate validation endpoint that skips only tenant-state
+  comparison
 
 ### 2. Explicit tenant context handling in MCP middleware
 
@@ -187,9 +189,11 @@ the MCP server should:
 - If yes: return a clear error before invoking the gRPC call
 - If no: proceed without tenant scoping
 
-Alternatively, the `ApplyManifest` gRPC handler itself should
-return a clear error when tenant context is missing, rather than
-falling back to a default.
+Alternatively, for tenant-scoped operations (`mode: "amend"`),
+the `ApplyManifest` gRPC handler should return a clear error
+when tenant context is missing, rather than falling back to a
+default. Tenant-agnostic operations (`mode: "create"`) do not
+require tenant context.
 
 ### 3. Accept YAML string input in manifest tools
 

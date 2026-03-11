@@ -40,14 +40,23 @@ def join_syndicate():
     stake = Decimal(syndicate.attributes["stake_amount"])
     max_members = int(syndicate.attributes["max_members"])
 
-    # Check capacity before accepting payment
+    # Check syndicate is open
+    if syndicate.attributes.get("status", "OPEN") != "OPEN":
+        fail("syndicate is not open: " + syndicate.attributes.get("status", ""))
+
+    # Check capacity before accepting payment.
+    # query_positions filters by correlation_id to find all bets
+    # for this syndicate across all party-scoped BET_POSITION accounts.
     step(name="check_capacity")
     existing = position_keeping.query_positions(
-        position_id="BET_POSITION:" + ctx["syndicate_id"],
         instrument_code="BET_UNIT",
+        correlation_id=ctx["syndicate_id"],
     )
     if len(existing) >= max_members:
         fail("syndicate is full: %d/%d members" % (len(existing), max_members))
+
+    # Quantize stake to 2 decimal places for GBP precision
+    stake = stake.quantize(Decimal("0.01"))
 
     # Step 1: Collect payment via Financial Gateway (Stripe)
     step(name="collect_payment")

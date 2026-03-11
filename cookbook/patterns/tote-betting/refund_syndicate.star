@@ -31,11 +31,16 @@ def refund_syndicate():
     )
     stake = Decimal(syndicate.attributes["stake_amount"])
 
+    # Guard: only refund OPEN syndicates
+    status = syndicate.attributes.get("status", "")
+    if status != "OPEN":
+        fail("syndicate cannot be refunded: status is " + status)
+
     # Query all bet positions
     step(name="query_positions")
     positions = position_keeping.query_positions(
-        position_id="BET_POSITION:" + syndicate_id,
         instrument_code="BET_UNIT",
+        correlation_id=syndicate_id,
     )
 
     # Refund each member
