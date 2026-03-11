@@ -33,6 +33,8 @@ export interface DeployWizardProps {
   onLineClick?: (path: string) => void
   /** Called when the user applies a validation suggestion. */
   onSuggestionApply?: (path: string, suggestion: string) => void
+  /** Called when a plan run is initiated so callers can reset stale flags. */
+  onPlanStart?: () => void
 }
 
 // ── Plan hash ───────────────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ export function DeployWizard({
   manifestChanged,
   onLineClick,
   onSuggestionApply,
+  onPlanStart,
 }: DeployWizardProps) {
   const { claims } = useAuth()
   const { manifestApplier } = useApiClients()
@@ -69,6 +72,7 @@ export function DeployWizard({
   const handlePlan = useCallback(async () => {
     setStep('planning')
     setApplyError(null)
+    onPlanStart?.()
     try {
       await planManifestAsync(manifest)
       setPlanHash(hashManifest(manifest))
@@ -77,7 +81,7 @@ export function DeployWizard({
       setStep('error')
       setApplyError('Planning failed. Please try again.')
     }
-  }, [manifest, planManifestAsync])
+  }, [manifest, planManifestAsync, onPlanStart])
 
   // ── Subtask 2: Validation check ──────────────────────────────────────────
 

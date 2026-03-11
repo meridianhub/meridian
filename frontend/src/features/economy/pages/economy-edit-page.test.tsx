@@ -141,8 +141,8 @@ describe('EconomyEditPage', () => {
     renderPage()
     await waitFor(() => {
       const editor = screen.getByTestId('manifest-editor')
-      // The YAML should contain the version field from the manifest
-      expect((editor as HTMLTextAreaElement).value).toContain('version')
+      // Assert on a value unique to mockManifestVersion to verify the fetch → YAML path
+      expect((editor as HTMLTextAreaElement).value).toContain('Test Economy')
     })
   })
 

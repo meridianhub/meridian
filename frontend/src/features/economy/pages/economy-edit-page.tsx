@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import yaml from 'js-yaml'
 import { create } from '@bufbuild/protobuf'
@@ -21,8 +21,8 @@ metadata:
   industry: finance
   description: A new economy configuration
 instruments: []
-account_types: []
-valuation_rules: []
+accountTypes: []
+valuationRules: []
 sagas: []
 `
 
@@ -75,17 +75,16 @@ export function EconomyEditPage() {
     setInitialised(true)
   }
 
-  const validationErrors = validationResult?.errors ?? errors
-  const validationWarnings = validationResult?.warnings ?? warnings
-  const validationPassed = validationErrors.length === 0
+  // Sync validation results from hook into local state so the UI always reflects
+  // the most recent completed validation cycle, not stale hook state.
+  useEffect(() => {
+    if (validationResult) {
+      setErrors(validationResult.errors)
+      setWarnings(validationResult.warnings)
+    }
+  }, [validationResult])
 
-  const handleValidationChange = useCallback(
-    (newErrors: ValidationError[], newWarnings: ValidationError[]) => {
-      setErrors(newErrors)
-      setWarnings(newWarnings)
-    },
-    [],
-  )
+  const validationPassed = errors.length === 0
 
   const handleEditorChange = useCallback(
     (value: string) => {
@@ -99,14 +98,20 @@ export function EconomyEditPage() {
           const manifest = create(ManifestSchema, parsed)
           setDraftManifest(manifest)
           validate(manifest)
-          handleValidationChange([], [])
+          // Clear local state optimistically; the effect above syncs it when validate completes
+          setErrors([])
+          setWarnings([])
         }
       } catch {
-        // Invalid YAML — keep previous draft manifest
+        // Invalid YAML — keep previous validation state visible
       }
     },
-    [validate, handleValidationChange],
+    [validate],
   )
+
+  const handlePlanStart = useCallback(() => {
+    setManifestChangedSincePlan(false)
+  }, [])
 
   if (isLoading) return <LoadingSkeleton />
 
@@ -119,16 +124,16 @@ export function EconomyEditPage() {
           <ManifestEditor
             value={manifestYaml}
             onChange={handleEditorChange}
-            validationErrors={[...validationErrors, ...validationWarnings]}
+            validationErrors={[...errors, ...warnings]}
           />
         </div>
 
         {/* Validation panel (conditionally shown) */}
-        {(validationErrors.length > 0 || validationWarnings.length > 0) && (
+        {(errors.length > 0 || warnings.length > 0) && (
           <div className="shrink-0 border-t p-3">
             <ValidationPanel
-              errors={validationErrors}
-              warnings={validationWarnings}
+              errors={errors}
+              warnings={warnings}
               onLineClick={() => {}}
               onSuggestionApply={() => {}}
             />
@@ -143,6 +148,7 @@ export function EconomyEditPage() {
               manifestChanged={manifestChangedSincePlan}
               onLineClick={() => {}}
               onSuggestionApply={() => {}}
+              onPlanStart={handlePlanStart}
             />
           </div>
         )}
@@ -156,6 +162,7 @@ export function EconomyEditPage() {
           className="h-full"
         />
       </div>
+
     </div>
   )
 }
