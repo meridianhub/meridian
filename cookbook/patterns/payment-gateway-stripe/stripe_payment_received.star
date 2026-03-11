@@ -1,94 +1,99 @@
 # Saga: stripe_payment_received
-# Version: 1.0.0
-# Previous: none
-# Changed: Initial implementation of Stripe cash-in double-entry posting
+# Version: 2.0.0
+# Previous: 1.0.0
+# Changed: Migrated from operational_gateway to financial_gateway.
+#          The Financial Gateway provides typed payment APIs
+#          (dispatch_payment, dispatch_refund) with built-in Stripe
+#          integration, webhook handling, and payment event topics.
 # Author: Platform Team
-# Date: 2026-02-10
+# Date: 2026-03-11
 #
 # This Starlark script defines the stripe_payment_received saga workflow.
-# When Stripe reports a successful payment (payment_intent.succeeded), this saga
-# records the cash-in as a double-entry ledger posting in the meridian-ops tenant.
+# When Stripe reports a successful payment (payment_intent.succeeded),
+# this saga records the cash-in as a double-entry ledger posting.
 #
 # Double-Entry Accounting:
-#   DEBIT  stripe_nostro          (cash received from Stripe)
-#   CREDIT {party_id}_prepaid     (customer prepaid balance increases)
+#   DEBIT  PAYMENT_CLEARING   (cash received from Stripe via Financial Gateway)
+#   CREDIT CUSTOMER_CURRENT   (customer balance increases)
 #
-# The Stripe charge ID is stored as external_reference_id for O(1) reconciliation
-# against Stripe's settlement reports.
+# The Stripe charge ID is stored as external_reference_id for O(1)
+# reconciliation against Stripe's settlement reports.
 #
 # Input data (provided via input_data dictionary):
-#   - tenant_id: string        - The tenant receiving the payment (e.g., "meridian-ops")
 #   - party_id: string         - The customer party identifier
-#   - amount_cents: int        - Payment amount in smallest currency unit (e.g., pence)
-#   - instrument_code: string  - Instrument code (e.g., "GBP"). Replaces currency field.
-#   - currency: string         - Deprecated: use instrument_code instead. ISO 4217 currency code (e.g., "gbp")
+#   - amount_cents: int        - Payment amount in minor units (e.g., pence)
+#   - instrument_code: string  - Instrument code (e.g., "GBP")
 #   - charge_id: string        - Stripe Charge ID for reconciliation
 #   - payment_intent_id: string - Stripe PaymentIntent ID
-#   - stripe_event_id: string  - Original Stripe event ID for audit trail
+#   - idempotency_key: string  - Idempotency key for gateway dispatch
 #
 # Compensation Order (LIFO):
-#   If the credit step fails, the debit to stripe_nostro is reversed.
-
-stripe_payment_received_saga = saga(name="stripe_payment_received")
+#   If the credit step fails, the debit to PAYMENT_CLEARING is reversed.
 
 def execute_stripe_payment_received():
-    # Extract input parameters
-    tenant_id = input_data["tenant_id"]
-    party_id = input_data["party_id"]
-    amount_cents = input_data["amount_cents"]
-    # Accept instrument_code (preferred) or currency (deprecated alias).
-    # Normalize once: strip whitespace, uppercase, default to "GBP".
-    instrument_code = input_data.get("instrument_code", "") or input_data.get("currency", "")
-    instrument_code = instrument_code.strip().upper()
-    if instrument_code == "":
-        instrument_code = "GBP"
-    charge_id = input_data["charge_id"]
-    payment_intent_id = input_data.get("payment_intent_id", "")
-    stripe_event_id = input_data.get("stripe_event_id", "")
+    ctx = input_data
 
-    # Convert from cents to major currency unit (e.g., pence to pounds)
-    # Stripe amounts are in the smallest currency unit
+    party_id = ctx["party_id"]
+    amount_cents = ctx["amount_cents"]
+    instrument_code = ctx.get("instrument_code", "GBP").strip().upper()
+    charge_id = ctx["charge_id"]
+    payment_intent_id = ctx.get("payment_intent_id", "")
+
+    # Convert from minor units to major currency units
     amount = Decimal(str(amount_cents)) / Decimal("100")
 
-    # Derive account identifiers
-    nostro_account = "stripe_nostro"
-    prepaid_account = party_id + "_prepaid"
-
-    # Step 1: Debit the stripe nostro account (cash received from Stripe)
-    # This represents Stripe holding funds on our behalf
-    step(name="debit_stripe_nostro")
-    debit_result = position_keeping.initiate_log(
-        position_id=nostro_account,
-        amount=amount,
-        instrument_code=instrument_code,
-        direction="DEBIT",
-        description="Stripe payment received: " + charge_id,
-        external_reference_id=charge_id,
+    # Step 1: Dispatch payment via Financial Gateway
+    # The Financial Gateway handles Stripe API calls, retries,
+    # rate limiting, and circuit breaking internally.
+    step(name="dispatch_payment")
+    gateway_result = financial_gateway.dispatch_payment(
+        payment_order_id=charge_id,
+        amount_minor_units=amount_cents,
+        currency=instrument_code,
+        customer_reference=party_id,
+        idempotency_key=ctx.get("idempotency_key", charge_id),
+        rail="STRIPE",
+        metadata={
+            "charge_id": charge_id,
+            "payment_intent_id": payment_intent_id,
+        },
     )
 
-    # Step 2: Credit the customer prepaid balance
-    # This increases the customer's available balance
-    step(name="credit_customer_prepaid")
+    # Step 2: Debit the payment clearing account (cash received)
+    step(name="debit_clearing")
     position_keeping.initiate_log(
-        position_id=prepaid_account,
-        amount=amount,
+        account_type="PAYMENT_CLEARING",
+        party_id=party_id,
         instrument_code=instrument_code,
-        direction="CREDIT",
-        description="Payment from Stripe: " + charge_id,
-        external_reference_id=charge_id,
+        amount=amount,
+        direction="DEBIT",
+        attributes={
+            "charge_id": charge_id,
+            "provider_reference_id": gateway_result.provider_reference_id,
+        },
     )
 
-    result = {
-        "status": "completed",
-        "tenant_id": tenant_id,
+    # Step 3: Credit the customer current account
+    step(name="credit_customer")
+    position_keeping.initiate_log(
+        account_type="CUSTOMER_CURRENT",
+        party_id=party_id,
+        instrument_code=instrument_code,
+        amount=amount,
+        direction="CREDIT",
+        attributes={
+            "charge_id": charge_id,
+            "provider_reference_id": gateway_result.provider_reference_id,
+        },
+    )
+
+    return {
         "party_id": party_id,
         "amount_cents": amount_cents,
         "instrument_code": instrument_code,
         "charge_id": charge_id,
-        "payment_intent_id": payment_intent_id,
-        "stripe_event_id": stripe_event_id,
+        "provider_reference_id": gateway_result.provider_reference_id,
+        "gateway_status": gateway_result.status,
     }
-    return result
 
-# Execute the saga
 output = execute_stripe_payment_received()
