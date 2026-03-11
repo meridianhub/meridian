@@ -54,12 +54,6 @@ describe('McpConfigPage', () => {
       expect(screen.getByTestId('mcp-url')).toHaveTextContent('/mcp')
     })
 
-    it('shows legacy SSE endpoint reference', () => {
-      render(<McpConfigPage />, { wrapper: Wrapper })
-
-      expect(screen.getByText(/Legacy SSE endpoint/i)).toBeInTheDocument()
-    })
-
     it('renders client configuration section with streamable HTTP config', () => {
       render(<McpConfigPage />, { wrapper: Wrapper })
 
@@ -68,14 +62,6 @@ describe('McpConfigPage', () => {
       expect(configEl).toHaveTextContent('mcpServers')
       expect(configEl).toHaveTextContent('streamable-http')
       expect(configEl).toHaveTextContent('/mcp')
-    })
-
-    it('renders legacy SSE config section', () => {
-      render(<McpConfigPage />, { wrapper: Wrapper })
-
-      const configEl = screen.getByTestId('legacy-sse-config')
-      expect(configEl).toHaveTextContent('mcp-remote')
-      expect(configEl).toHaveTextContent('/sse')
     })
 
     it('renders OAuth authorization section', () => {
