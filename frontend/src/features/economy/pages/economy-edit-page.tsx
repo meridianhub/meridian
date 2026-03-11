@@ -5,6 +5,7 @@ import { create } from '@bufbuild/protobuf'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
 import { ManifestSchema, type Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ManifestEditor } from '../components/manifest-editor'
 import { ValidationPanel } from '../components/validation-panel'
@@ -43,13 +44,24 @@ function LoadingSkeleton() {
   )
 }
 
+function ErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div data-testid="edit-page-error" className="p-6 flex flex-col items-center gap-3 py-16 text-muted-foreground">
+      <span className="text-sm font-medium">Unable to load current manifest</span>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        Retry
+      </Button>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function EconomyEditPage() {
   const { manifestHistory } = useApiClients()
   const { validate, result: validationResult } = useManifestValidate()
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: manifestKeys.current(),
     queryFn: () => manifestHistory.getCurrentManifest({}),
   })
@@ -62,7 +74,7 @@ export function EconomyEditPage() {
   const [manifestChangedSincePlan, setManifestChangedSincePlan] = useState(false)
 
   // Hydrate state from loaded manifest on first successful fetch
-  if (!initialised && !isLoading && data !== undefined) {
+  if (!initialised && !isLoading && !isError && data !== undefined) {
     const loadedManifest = data?.version?.manifest
     if (loadedManifest) {
       // Convert proto manifest → plain object → YAML string
@@ -70,6 +82,15 @@ export function EconomyEditPage() {
       const yamlStr = yaml.dump(plainObj, { lineWidth: 120 })
       setManifestYaml(yamlStr)
       setDraftManifest(loadedManifest)
+    } else {
+      // Create-new mode: parse and hydrate draftManifest from SKELETON_MANIFEST
+      try {
+        const parsedSkeleton = yaml.load(SKELETON_MANIFEST) as Record<string, unknown>
+        setDraftManifest(create(ManifestSchema, parsedSkeleton))
+      } catch {
+        // In test environments the ManifestSchema stub may not support create();
+        // leave draftManifest null and let the first editor change hydrate it.
+      }
     }
     setInitialised(true)
   }
@@ -79,7 +100,8 @@ export function EconomyEditPage() {
   // the previous result to avoid showing stale errors for a different manifest.
   const errors: ValidationError[] = yamlParseError ? [] : (validationResult?.errors ?? [])
   const warnings: ValidationError[] = yamlParseError ? [] : (validationResult?.warnings ?? [])
-  const validationPassed = errors.length === 0
+  // Invalid YAML is not passing validation even if errors is empty
+  const validationPassed = !yamlParseError && errors.length === 0
 
   const handleEditorChange = useCallback(
     (value: string) => {
@@ -110,6 +132,7 @@ export function EconomyEditPage() {
   }, [])
 
   if (isLoading) return <LoadingSkeleton />
+  if (isError) return <ErrorState onRetry={() => void refetch()} />
 
   return (
     <div className="flex h-full gap-0 overflow-hidden">

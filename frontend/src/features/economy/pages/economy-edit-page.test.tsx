@@ -177,6 +177,22 @@ describe('EconomyEditPage', () => {
     })
   })
 
+  it('shows error state when manifest fetch fails', async () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockRejectedValue(new Error('Network error')),
+      },
+      manifestApplier: {
+        applyManifest: vi.fn(),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('edit-page-error')).toBeInTheDocument()
+    })
+  })
+
   it('passes validationPassed=false to EditorGraphPanel when there are errors', async () => {
     vi.mocked(useManifestValidate).mockReturnValue({
       validate: vi.fn(),
