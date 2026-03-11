@@ -33,6 +33,7 @@ export function EconomyCreatePage() {
         </div>
 
         <textarea
+          aria-label="Business description"
           className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
           rows={5}
           placeholder="e.g. An energy trading platform that manages kWh contracts and carbon credits for renewable energy co-ops..."
@@ -91,7 +92,7 @@ interface OptionCardProps {
 function OptionCard({ icon, title, description, disabled, tooltip, onClick }: OptionCardProps) {
   const card = (
     <Card
-      className={disabled ? 'opacity-50' : 'cursor-pointer hover:border-primary transition-colors'}
+      className={disabled ? 'opacity-50' : 'hover:border-primary transition-colors'}
     >
       <CardHeader>
         <div className="flex items-center gap-2">
