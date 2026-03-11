@@ -3,8 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
+import { PageHeader } from '@/shared/page-header'
+import { PageShell } from '@/shared/page-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { useReconciliationRunsTable } from '../hooks'
 import { InitiateReconciliationDialog } from './initiate-reconciliation-dialog'
 
@@ -92,47 +95,45 @@ export function ReconciliationPage() {
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Reconciliation</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Settlement runs, variance detection, and dispute resolution.
-          </p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)}>Start Reconciliation</Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Reconciliation"
+        description="Settlement runs, variance detection, and dispute resolution."
+        actions={<Button onClick={() => setDialogOpen(true)}>Start Reconciliation</Button>}
+      />
       <InitiateReconciliationDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onSuccess={handleReconciliationSuccess}
       />
-      <DataTable
-        queryKey={queryKey}
-        queryFn={queryFn}
-        columns={columns}
-        pageSize={25}
-        emptyState={
-          <div data-testid="empty-state" className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
-            <span className="text-sm font-medium">No reconciliation runs yet</span>
-            <span className="text-xs">Start a reconciliation to see results here.</span>
-          </div>
-        }
-        filters={[
-          {
-            field: 'status',
-            label: 'Status',
-            type: 'select',
-            options: [
-              { label: 'Running', value: 'RUN_STATUS_RUNNING' },
-              { label: 'Completed', value: 'RUN_STATUS_COMPLETED' },
-              { label: 'Failed', value: 'RUN_STATUS_FAILED' },
-            ],
-          },
-          { field: 'account_id', label: 'Account ID', type: 'text' },
-        ]}
-        onRowClick={handleRowClick}
-      />
-    </div>
+      <Card>
+        <DataTable
+          queryKey={queryKey}
+          queryFn={queryFn}
+          columns={columns}
+          pageSize={25}
+          emptyState={
+            <div data-testid="empty-state" className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+              <span className="text-sm font-medium">No reconciliation runs yet</span>
+              <span className="text-xs">Start a reconciliation to see results here.</span>
+            </div>
+          }
+          filters={[
+            {
+              field: 'status',
+              label: 'Status',
+              type: 'select',
+              options: [
+                { label: 'Running', value: 'RUN_STATUS_RUNNING' },
+                { label: 'Completed', value: 'RUN_STATUS_COMPLETED' },
+                { label: 'Failed', value: 'RUN_STATUS_FAILED' },
+              ],
+            },
+            { field: 'account_id', label: 'Account ID', type: 'text' },
+          ]}
+          onRowClick={handleRowClick}
+        />
+      </Card>
+    </PageShell>
   )
 }

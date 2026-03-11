@@ -3,6 +3,8 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { Card } from '@/components/ui/card'
+import { PageHeader } from '@/shared/page-header'
+import { PageShell } from '@/shared/page-shell'
 import { TransactionStatus } from '@/api/gen/meridian/common/v1/types_pb'
 import { usePositionLogsTable } from '../hooks'
 
@@ -123,15 +125,13 @@ export function PositionsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Positions</h1>
-        <p className="mt-2 text-muted-foreground">
-          Financial position logs with bi-temporal data quality tracking.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Positions"
+        description="Financial position logs with bi-temporal data quality tracking."
+      />
 
-      <Card className="p-6">
+      <Card>
         <DataTable
           queryKey={queryKey}
           queryFn={queryFn}
@@ -141,7 +141,7 @@ export function PositionsPage() {
           onRowClick={handleRowClick}
         />
       </Card>
-    </div>
+    </PageShell>
   )
 }
 
