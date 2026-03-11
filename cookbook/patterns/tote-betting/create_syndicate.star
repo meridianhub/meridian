@@ -1,3 +1,8 @@
+# schema-validation: skip
+# Reason: Uses repository service module (entity CRUD) which requires
+# runtime mocks beyond schema validation scope. Handler schema compliance
+# for financial_gateway and position_keeping is covered by other patterns.
+#
 # Saga: create_syndicate
 # Version: 1.0.0
 # Previous: none

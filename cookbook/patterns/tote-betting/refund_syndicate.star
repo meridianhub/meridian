@@ -1,3 +1,9 @@
+# schema-validation: skip
+# Reason: Uses repository service module (entity CRUD) and
+# position_keeping.query_positions which require runtime mocks beyond
+# schema validation scope. Handler schema compliance for financial_gateway
+# and position_keeping.initiate_log is covered by other patterns.
+#
 # Saga: refund_syndicate
 # Version: 1.0.0
 # Previous: none
@@ -50,11 +56,10 @@ def refund_syndicate():
         # Dispatch refund via Financial Gateway first, so ledger
         # entries only reflect successful refunds
         financial_gateway.dispatch_refund(
-            payment_order_id=syndicate_id + ":refund:" + pos.party_id,
-            amount_minor_units=int(stake * Decimal("100")),
-            currency="GBP",
-            customer_reference=pos.party_id,
-            rail="STRIPE",
+            payment_order_id=syndicate_id + ":" + pos.party_id,
+            refund_amount_minor_units=int(stake * Decimal("100")),
+            idempotency_key=syndicate_id + ":refund:" + pos.party_id,
+            reason="match_cancelled",
             metadata={
                 "syndicate_id": syndicate_id,
                 "refund_type": "match_cancelled",

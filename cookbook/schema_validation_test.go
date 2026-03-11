@@ -108,18 +108,26 @@ func openMockValue(contextName, name string) (starlark.Value, error) {
 		}), nil
 	}
 	// Integer fields (for comparison with int)
-	if name == "count" {
+	intFields := map[string]bool{
+		"count": true,
+	}
+	if intFields[name] {
 		return starlark.MakeInt(0), nil
+	}
+	// Capacity fields: return a value large enough that capacity checks pass
+	if name == "max_members" {
+		return starlark.MakeInt(100), nil
 	}
 	// Numeric fields used in arithmetic in cookbook scripts
 	numericFields := map[string]bool{
-		"amount":      true,
-		"total":       true,
-		"balance":     true,
-		"quantity":    true,
-		"units":       true,
-		"unit_amount": true,
-		"value":       true, // market_data.get_observation().value used as Decimal input
+		"amount":       true,
+		"total":        true,
+		"balance":      true,
+		"quantity":     true,
+		"units":        true,
+		"unit_amount":  true,
+		"value":        true, // market_data.get_observation().value used as Decimal input
+		"stake_amount": true, // tote-betting syndicate stake
 	}
 	if numericFields[name] {
 		return starlark.Float(0), nil
@@ -129,6 +137,7 @@ func openMockValue(contextName, name string) (starlark.Value, error) {
 	nestedFields := map[string]bool{
 		"metadata":          true,
 		"instrument_amount": true,
+		"attributes":        true,
 	}
 	if nestedFields[name] {
 		return &openResultStruct{name: contextName + "." + name}, nil
@@ -174,6 +183,15 @@ func (s *openResultStruct) Get(key starlark.Value) (starlark.Value, bool, error)
 		return starlark.String(""), true, nil
 	}
 	return v, true, nil
+}
+
+// Len implements starlark.Sequence so that len(result) works.
+// Returns 2 to match the iteration count.
+func (s *openResultStruct) Len() int { return 2 }
+
+// Index implements starlark.Indexable so that result[i] works.
+func (s *openResultStruct) Index(i int) starlark.Value {
+	return &openResultStruct{name: fmt.Sprintf("%s[%d]", s.name, i)}
 }
 
 // Iterate implements starlark.Iterable so that "for x in result" works.
@@ -318,8 +336,7 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 		},
 		"party": {
 			// Simple party lookup; not yet registered
-			"get":                        {},
-			"get_default_payment_method": {},
+			"get": {},
 		},
 		"position_keeping": {
 			// Balance and list queries; not yet registered
@@ -445,6 +462,22 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 		"status":               starlark.String("ACTIVE"),
 		// Precious metals
 		"settlement_account_id": starlark.String("acct-settlement"),
+		// Tote betting patterns
+		"syndicate_id":    starlark.String("synd-test"),
+		"match_id":        starlark.String("match-test"),
+		"stake_amount":    starlark.String("10.00"),
+		"max_members":     starlark.String("10"),
+		"selection":       starlark.String("HOME_WIN"),
+		"idempotency_key": starlark.String("idem-test"),
+		"created_by":      starlark.String("test-party"),
+		// Nested metadata dict (used by event-triggered sagas)
+		"metadata": func() starlark.Value {
+			d := starlark.NewDict(4)
+			_ = d.SetKey(starlark.String("syndicate_id"), starlark.String("synd-test"))
+			_ = d.SetKey(starlark.String("result"), starlark.String("HOME_WIN"))
+			_ = d.SetKey(starlark.String("billing_account_id"), starlark.String("acct-billing"))
+			return d
+		}(),
 	}
 	for k, v := range commonKeys {
 		_ = inputData.SetKey(starlark.String(k), v)
