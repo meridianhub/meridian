@@ -104,8 +104,10 @@ describe('PartyDetailPage', () => {
   it('renders all seven tabs', async () => {
     const { container } = renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Check that tabs container is rendered
-    expect(container.querySelector('[role="tablist"]')).toBeInTheDocument()
+    // Check that tabs container is rendered (wait for data to load)
+    await waitFor(() => {
+      expect(container.querySelector('[role="tablist"]')).toBeInTheDocument()
+    })
   })
 
   it('renders overview tab by default', async () => {

@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Breadcrumbs } from '@/shared'
+import { Breadcrumbs, DetailSkeleton, ErrorState, PageShell } from '@/shared'
 import { usePartyDetail } from '../hooks'
 import { PartyHeader } from './components/party-header'
 import { OverviewTab } from './tabs/overview-tab'
@@ -16,7 +16,7 @@ import { AccountsTab } from './tabs/accounts-tab'
 export function PartyDetailPage() {
   const { partyId } = useParams<{ partyId: string }>()
 
-  const { data: party } = usePartyDetail(partyId)
+  const { data: party, isLoading, isError, refetch } = usePartyDetail(partyId)
 
   if (!partyId) {
     return <div className="p-6 text-destructive">Party ID not found</div>
@@ -25,7 +25,7 @@ export function PartyDetailPage() {
   const partyLabel = party?.legalName ?? partyId
 
   return (
-    <div className="space-y-6">
+    <PageShell>
       <Breadcrumbs
         items={[
           { label: 'Parties', href: '/parties' },
@@ -33,58 +33,66 @@ export function PartyDetailPage() {
         ]}
       />
 
-      <Card>
-        <PartyHeader partyId={partyId} />
-      </Card>
+      {isLoading && <DetailSkeleton />}
 
-      <Card>
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-8 border-b rounded-none">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="demographics">Demographics</TabsTrigger>
-            <TabsTrigger value="references">References</TabsTrigger>
-            <TabsTrigger value="associations">Associations</TabsTrigger>
-            <TabsTrigger value="bank-relations">Bank Relations</TabsTrigger>
-            <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
-            <TabsTrigger value="accounts">Accounts</TabsTrigger>
-            <TabsTrigger value="audit-trail">Audit Trail</TabsTrigger>
-          </TabsList>
+      {!isLoading && (
+        <>
+          {isError && <ErrorState onRetry={refetch} />}
 
-          <div className="p-6">
-            <TabsContent value="overview" className="mt-0">
-              <OverviewTab partyId={partyId} />
-            </TabsContent>
+          <Card>
+            <PartyHeader partyId={partyId} />
+          </Card>
 
-            <TabsContent value="demographics" className="mt-0">
-              <DemographicsTab partyId={partyId} />
-            </TabsContent>
+          <Card>
+            <Tabs defaultValue="overview" className="w-full">
+              <TabsList className="grid w-full grid-cols-8 border-b rounded-none">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="demographics">Demographics</TabsTrigger>
+                <TabsTrigger value="references">References</TabsTrigger>
+                <TabsTrigger value="associations">Associations</TabsTrigger>
+                <TabsTrigger value="bank-relations">Bank Relations</TabsTrigger>
+                <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
+                <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                <TabsTrigger value="audit-trail">Audit Trail</TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="references" className="mt-0">
-              <ReferencesTab partyId={partyId} />
-            </TabsContent>
+              <div className="p-6">
+                <TabsContent value="overview" className="mt-0">
+                  <OverviewTab partyId={partyId} />
+                </TabsContent>
 
-            <TabsContent value="associations" className="mt-0">
-              <AssociationsTab partyId={partyId} />
-            </TabsContent>
+                <TabsContent value="demographics" className="mt-0">
+                  <DemographicsTab partyId={partyId} />
+                </TabsContent>
 
-            <TabsContent value="bank-relations" className="mt-0">
-              <BankRelationsTab partyId={partyId} />
-            </TabsContent>
+                <TabsContent value="references" className="mt-0">
+                  <ReferencesTab partyId={partyId} />
+                </TabsContent>
 
-            <TabsContent value="payment-methods" className="mt-0">
-              <PaymentMethodsTab partyId={partyId} />
-            </TabsContent>
+                <TabsContent value="associations" className="mt-0">
+                  <AssociationsTab partyId={partyId} />
+                </TabsContent>
 
-            <TabsContent value="accounts" className="mt-0">
-              <AccountsTab partyId={partyId} />
-            </TabsContent>
+                <TabsContent value="bank-relations" className="mt-0">
+                  <BankRelationsTab partyId={partyId} />
+                </TabsContent>
 
-            <TabsContent value="audit-trail" className="mt-0">
-              <AuditTrailTab partyId={partyId} />
-            </TabsContent>
-          </div>
-        </Tabs>
-      </Card>
-    </div>
+                <TabsContent value="payment-methods" className="mt-0">
+                  <PaymentMethodsTab partyId={partyId} />
+                </TabsContent>
+
+                <TabsContent value="accounts" className="mt-0">
+                  <AccountsTab partyId={partyId} />
+                </TabsContent>
+
+                <TabsContent value="audit-trail" className="mt-0">
+                  <AuditTrailTab partyId={partyId} />
+                </TabsContent>
+              </div>
+            </Tabs>
+          </Card>
+        </>
+      )}
+    </PageShell>
   )
 }

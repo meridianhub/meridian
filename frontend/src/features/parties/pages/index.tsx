@@ -4,6 +4,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { StatusBadge } from '@/shared/status-badge'
+import { PageHeader, PageShell } from '@/shared'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { usePartiesTable } from '../hooks'
@@ -98,21 +99,19 @@ export function PartiesPage() {
   if (!tenantSlug) return null
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Parties</h1>
-          <p className="mt-2 text-muted-foreground">
-            Manage parties, their demographics, and linked accounts.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => setRegisterOpen(true)}>Register Party</Button>
-          <Button variant="outline" onClick={() => setAddPartyTypeOpen(true)}>
-            Add Party Type
-          </Button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Parties"
+        description="Manage parties, their demographics, and linked accounts."
+        actions={
+          <>
+            <Button onClick={() => setRegisterOpen(true)}>Register Party</Button>
+            <Button variant="outline" onClick={() => setAddPartyTypeOpen(true)}>
+              Add Party Type
+            </Button>
+          </>
+        }
+      />
 
       <RegisterPartyDialog open={registerOpen} onOpenChange={setRegisterOpen} />
       <RegisterPartyTypeDialog
@@ -130,6 +129,6 @@ export function PartiesPage() {
           onRowClick={handleRowClick}
         />
       </Card>
-    </div>
+    </PageShell>
   )
 }
