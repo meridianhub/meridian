@@ -34,7 +34,6 @@ import { InternalAccountsPage, InternalAccountDetailPage } from '@/features/inte
 import { MarketDataPage, DatasetDetailPage } from '@/features/market-data'
 import { ForecastingPage } from '@/features/forecasting'
 import { DashboardPage } from '@/features/dashboard'
-import { ManifestsPage } from '@/features/manifests'
 import { McpConfigPage } from '@/features/mcp-config'
 import { TransactionsPage } from '@/features/transactions'
 import { UsersListPage, UserDetailPage } from '@/features/identity'
@@ -317,7 +316,6 @@ function AppShellLayout() {
         <Route path="/economy/edit" element={<FeatureGuard feature="economy">{guarded(<EconomyEditPage />)}</FeatureGuard>} />
         <Route path="/economy/explore" element={<FeatureGuard feature="economy">{guarded(<EconomyExplorePage />)}</FeatureGuard>} />
         <Route path="/economy/draft" element={<FeatureGuard feature="economy">{guarded(<EconomyDraftPage />)}</FeatureGuard>} />
-        <Route path="/manifests" element={<FeatureGuard feature="manifests">{guarded(<ManifestsPage />)}</FeatureGuard>} />
         <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config">{guarded(<McpConfigPage />)}</FeatureGuard>} />
         <Route path="/cookbook" element={guarded(<CookbookPage />)} />
         <Route path="/cookbook/patterns" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookPatternsPage /></Suspense>)} />

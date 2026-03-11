@@ -16,7 +16,6 @@ export const ALL_FEATURES = [
   "market-data",
   "forecasting",
   "sagas",
-  "manifests",
   "mappings",
   "audit",
   "mcp-config",
