@@ -189,7 +189,7 @@ export function PositionDetailPage() {
     return <DetailSkeleton fieldCount={5} tabCount={2} showBackNav />
   }
 
-  if (isError) {
+  if (isError || !log) {
     return (
       <PageShell>
         <Breadcrumbs
@@ -200,8 +200,8 @@ export function PositionDetailPage() {
         />
         <h1 className="text-3xl font-bold tracking-tight">Position Log</h1>
         <ErrorState
-          message="Failed to load position log"
-          onRetry={() => void refetch()}
+          message={isError ? 'Failed to load position log' : 'Position log not found'}
+          onRetry={isError ? () => void refetch() : undefined}
         />
       </PageShell>
     )
