@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { StarlarkEditor, type ValidationError, type ComplexityMetrics } from '@/features/sagas/components/starlark-editor'
-import { Breadcrumbs, DetailSkeleton, ErrorState, PageHeader, PageShell } from '@/shared'
+import { Breadcrumbs, DetailSkeleton, ErrorState, PageShell } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -226,54 +226,63 @@ export function StarlarkDetailPage() {
       />
 
       {/* Header */}
-      <PageHeader
-        title={sagaData.name}
-        description={sagaData.description ?? sagaData.displayName}
-        actions={
-          <div className="flex items-center gap-2 shrink-0">
-            {(!readOnly || showSplitPane) && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => validateMutation.mutate()}
-                disabled={validateMutation.isPending}
-              >
-                Validate
-              </Button>
-            )}
-            {sagaData.status === SagaStatus.DRAFT && (
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => activateMutation.mutate()}
-                disabled={activateMutation.isPending}
-              >
-                Activate
-              </Button>
-            )}
-            {sagaData.status === SagaStatus.ACTIVE && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => deprecateMutation.mutate()}
-                disabled={deprecateMutation.isPending}
-              >
-                Deprecate
-              </Button>
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight font-mono">
+              {sagaData.name}
+            </h1>
+            <StatusBadge status={sagaStatusLabel(sagaData.status)} />
+          </div>
+          {sagaData.displayName && (
+            <p className="text-muted-foreground">{sagaData.displayName}</p>
+          )}
+          {sagaData.description && (
+            <p className="text-sm text-muted-foreground">{sagaData.description}</p>
+          )}
+          <div className="flex items-center gap-4 text-sm text-muted-foreground pt-1">
+            <span>Version {sagaData.version}</span>
+            {sagaData.updatedAt && (
+              <span>
+                Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
+              </span>
             )}
           </div>
-        }
-      />
+        </div>
 
-      {/* Status and metadata row */}
-      <div className="flex items-center gap-4 text-sm text-muted-foreground -mt-4">
-        <StatusBadge status={sagaStatusLabel(sagaData.status)} />
-        <span>Version {sagaData.version}</span>
-        {sagaData.updatedAt && (
-          <span>
-            Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
-          </span>
-        )}
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 shrink-0">
+          {(!readOnly || showSplitPane) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => validateMutation.mutate()}
+              disabled={validateMutation.isPending}
+            >
+              Validate
+            </Button>
+          )}
+          {sagaData.status === SagaStatus.DRAFT && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => activateMutation.mutate()}
+              disabled={activateMutation.isPending}
+            >
+              Activate
+            </Button>
+          )}
+          {sagaData.status === SagaStatus.ACTIVE && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => deprecateMutation.mutate()}
+              disabled={deprecateMutation.isPending}
+            >
+              Deprecate
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Editor area */}
