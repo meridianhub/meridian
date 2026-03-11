@@ -34,10 +34,11 @@ export function PartyDetailPage() {
       />
 
       {isLoading && <DetailSkeleton />}
-      {isError && <ErrorState onRetry={refetch} />}
 
-      {!isLoading && !isError && (
+      {!isLoading && (
         <>
+          {isError && <ErrorState onRetry={refetch} />}
+
           <Card>
             <PartyHeader partyId={partyId} />
           </Card>
