@@ -192,6 +192,16 @@ describe('buildHandlerCompletionSource', () => {
       const handler = result!.options.find((o) => o.label === 'no_params')
       expect(handler?.apply).toBe('position_keeping.no_params()')
     })
+
+    it('from starts at beginning of service name to avoid duplicate prefix on apply', async () => {
+      // "position_keeping." starts at position 0 in doc "position_keeping."
+      const ctx = makeContext('position_keeping.')
+      const result = await source(ctx)
+      expect(result).not.toBeNull()
+      // from must be 0 (start of "position_keeping.") so that apply replaces
+      // the whole "position_keeping." and not just the part after the dot
+      expect(result!.from).toBe(0)
+    })
   })
 
   describe('with null schema', () => {

@@ -39,7 +39,7 @@ export function buildHandlerCompletionSource(schema: HandlerSchemaResponse | nul
       const handlerPrefix = text.slice(dotIndex + 1)
 
       const service = schema.services.find((s) => s.serviceName === serviceName)
-      if (!service) return { from: dotMatch.from + dotIndex + 1, options: [] }
+      if (!service) return { from: dotMatch.from, options: [] }
 
       const options: Completion[] = service.handlers
         .filter((h) => h.name.startsWith(handlerPrefix))
@@ -47,10 +47,13 @@ export function buildHandlerCompletionSource(schema: HandlerSchemaResponse | nul
           label: h.name,
           type: 'function',
           detail: h.description || undefined,
+          // apply replaces the entire "serviceName.partialHandler" range so
+          // the completed text becomes "serviceName.handlerName(params)"
           apply: generateParameterTemplate(serviceName, h),
         }))
 
-      return { from: dotMatch.from + dotIndex + 1, options }
+      // Replace from the start of "serviceName." so the full template is inserted
+      return { from: dotMatch.from, options }
     }
 
     // Service name completion — triggered when typing a word (no dot yet)
