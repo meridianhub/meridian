@@ -428,6 +428,29 @@ describe('TenantDetailPage - deprovision confirmation', () => {
       )
     })
   })
+
+  it('resets slug confirmation when dialog is closed and reopened', async () => {
+    vi.mocked(useApiClients).mockReturnValue(
+      makeTenantApi() as unknown as ReturnType<typeof useApiClients>,
+    )
+
+    renderTenantDetailPage('acme_corp', createPlatformAdminToken())
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /deprovision/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /deprovision/i }))
+    await userEvent.type(screen.getByPlaceholderText('acme-corp'), 'acme-corp')
+    await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+    await userEvent.click(screen.getByRole('button', { name: /deprovision/i }))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('acme-corp')).toHaveValue('')
+      expect(screen.getByRole('button', { name: /confirm deprovision/i })).toBeDisabled()
+    })
+  })
 })
 
 describe('TenantDetailPage - back navigation', () => {

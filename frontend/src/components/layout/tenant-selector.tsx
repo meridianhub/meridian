@@ -26,8 +26,10 @@ export function TenantSelector() {
 
   const activeTenants = tenants?.filter((t) => t.status !== TenantStatus.DEPROVISIONED)
 
-  // Use the loaded tenant data first, fall back to context (e.g., on error or partial data)
-  const resolvedTenant = activeTenants?.find((t) => t.slug === tenantSlug) ?? contextTenant
+  // Use loaded tenant data when available; only fall back to context while loading
+  const resolvedTenant = tenants
+    ? activeTenants?.find((t) => t.slug === tenantSlug)
+    : contextTenant
 
   if (isLoading) {
     return (

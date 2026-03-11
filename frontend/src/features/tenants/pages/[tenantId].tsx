@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
 import { Breadcrumbs } from '@/shared'
@@ -107,11 +107,11 @@ export function TenantDetailPage() {
   const [deprovisionDialogOpen, setDeprovisionDialogOpen] = useState(false)
   const [slugConfirmation, setSlugConfirmation] = useState('')
 
-  useEffect(() => {
-    if (!deprovisionDialogOpen) {
-      setSlugConfirmation('')
-    }
-  }, [deprovisionDialogOpen])
+  function handleDeprovisionDialogChange(open: boolean) {
+    if (updateStatus.isPending) return
+    setDeprovisionDialogOpen(open)
+    if (!open) setSlugConfirmation('')
+  }
 
   if (tenantLoading) {
     return <DetailSkeleton fieldCount={4} tabCount={0} showBackNav={true} />
@@ -269,7 +269,7 @@ export function TenantDetailPage() {
       </Card>
 
       {/* Deprovision Confirmation Dialog */}
-      <Dialog open={deprovisionDialogOpen} onOpenChange={setDeprovisionDialogOpen}>
+      <Dialog open={deprovisionDialogOpen} onOpenChange={handleDeprovisionDialogChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Deprovision Tenant</DialogTitle>
@@ -289,10 +289,15 @@ export function TenantDetailPage() {
               onChange={(e) => setSlugConfirmation(e.target.value)}
               placeholder={tenant.slug}
               autoComplete="off"
+              disabled={updateStatus.isPending}
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeprovisionDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => handleDeprovisionDialogChange(false)}
+              disabled={updateStatus.isPending}
+            >
               Cancel
             </Button>
             <Button
