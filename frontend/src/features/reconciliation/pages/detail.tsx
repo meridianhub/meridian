@@ -7,8 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StatusBadge } from '@/shared/status-badge'
 import { CELEditor } from '@/features/sagas/components/cel-editor'
-import { Breadcrumbs } from '@/shared'
-import { DetailSkeleton } from '@/shared/detail-skeleton'
+import { Breadcrumbs, DetailSkeleton, ErrorState, PageShell } from '@/shared'
 import {
   VarianceDetail,
   type Variance,
@@ -565,14 +564,20 @@ export function ReconciliationDetailPage() {
 
   if (isError || !run) {
     return (
-      <div className="p-6">
-        <p className="text-destructive text-sm">Failed to load reconciliation run.</p>
-      </div>
+      <PageShell className="p-6">
+        <Breadcrumbs
+          items={[
+            { label: 'Reconciliation', href: '/reconciliation' },
+            { label: runId },
+          ]}
+        />
+        <ErrorState message="Failed to load reconciliation run." />
+      </PageShell>
     )
   }
 
   return (
-    <div className="p-6">
+    <PageShell className="p-6">
       {/* Breadcrumb navigation */}
       <div className="mb-6">
         <Breadcrumbs
@@ -620,6 +625,6 @@ export function ReconciliationDetailPage() {
           <BalanceAssertionsTab runId={runId} />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   )
 }

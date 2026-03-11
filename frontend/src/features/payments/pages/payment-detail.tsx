@@ -10,7 +10,7 @@ import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { SagaTimeline } from '@/features/sagas/components/saga-timeline'
 import { AuditTrail } from '@/shared/audit-trail'
-import { EntityLink, Breadcrumbs } from '@/shared'
+import { EntityLink, Breadcrumbs, PageShell, ErrorState } from '@/shared'
 import { tenantKeys } from '@/lib/query-keys'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { usePaymentDetail } from '../hooks'
@@ -130,15 +130,17 @@ export function PaymentDetailPage() {
 
   if (isError || !data) {
     return (
-      <div data-testid="payment-detail-error" className="p-6">
-        <Breadcrumbs items={[{ label: 'Payments', href: '/payments' }, { label: 'Error' }]} />
-        <p className="mt-4 text-sm text-destructive">Failed to load payment order details.</p>
+      <div data-testid="payment-detail-error">
+        <PageShell className="p-6">
+          <Breadcrumbs items={[{ label: 'Payments', href: '/payments' }, { label: 'Error' }]} />
+          <ErrorState message="Failed to load payment order details." />
+        </PageShell>
       </div>
     )
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <PageShell className="p-6">
       {/* Breadcrumb navigation */}
       <Breadcrumbs
         items={[
@@ -244,6 +246,6 @@ export function PaymentDetailPage() {
         onOpenChange={setInitiateOpen}
         onSuccess={handleInitiateSuccess}
       />
-    </div>
+    </PageShell>
   )
 }

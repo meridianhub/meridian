@@ -1,15 +1,13 @@
 import * as React from 'react'
 import { useParams } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MoneyDisplay } from '@/shared/money-display'
 import { TimeDisplay } from '@/shared/time-display'
 import { QualityLadderBadge } from '@/features/positions/components/quality-ladder-badge'
 import { DirectionBadge } from '@/shared/direction-badge'
-import { EntityLink, Breadcrumbs } from '@/shared'
+import { EntityLink, Breadcrumbs, PageShell, DetailSkeleton, ErrorState } from '@/shared'
 import { accountEntityType } from '@/shared/account-entity-type'
-import { Skeleton } from '@/components/ui/skeleton'
 import { usePositionLogDetail } from '../hooks'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
 
@@ -187,8 +185,30 @@ export function PositionDetailPage() {
 
   const log = data?.log as FinancialPositionLog | undefined
 
+  if (isLoading) {
+    return <DetailSkeleton fieldCount={5} tabCount={2} showBackNav />
+  }
+
+  if (isError || !log) {
+    return (
+      <PageShell>
+        <Breadcrumbs
+          items={[
+            { label: 'Positions', href: '/positions' },
+            { label: logId ?? 'Position Log' },
+          ]}
+        />
+        <h1 className="text-3xl font-bold tracking-tight">Position Log</h1>
+        <ErrorState
+          message={isError ? 'Failed to load position log' : 'Position log not found'}
+          onRetry={isError ? () => void refetch() : undefined}
+        />
+      </PageShell>
+    )
+  }
+
   return (
-    <div className="space-y-6">
+    <PageShell>
       <Breadcrumbs
         items={[
           { label: 'Positions', href: '/positions' },
@@ -203,61 +223,39 @@ export function PositionDetailPage() {
         )}
       </div>
 
-      {isError && (
+      {log && (
         <Card className="p-6">
-          <div className="flex flex-col items-center gap-3 text-destructive">
-            <span className="text-sm font-medium">Failed to load position log</span>
-            <Button variant="outline" size="sm" onClick={() => void refetch()}>
-              Retry
-            </Button>
-          </div>
-        </Card>
-      )}
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <LabeledField label="Log ID">
+              <span className="font-mono text-xs">{log?.logId ?? '—'}</span>
+            </LabeledField>
 
-      {(isLoading || log) && (
-        <Card className="p-6">
-          {isLoading ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i}>
-                  <Skeleton className="h-4 w-24 mb-2" />
-                  <Skeleton className="h-5 w-40" />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <LabeledField label="Log ID">
-                <span className="font-mono text-xs">{log?.logId ?? '—'}</span>
-              </LabeledField>
-
-              <LabeledField label="Account ID">
-                {log?.accountId ? (
-                  accountEntityType(log.accountServiceDomain) ? (
-                    <EntityLink type={accountEntityType(log.accountServiceDomain)!} id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
-                  ) : (
-                    <span className="font-mono text-xs">{log.accountId}</span>
-                  )
+            <LabeledField label="Account ID">
+              {log?.accountId ? (
+                accountEntityType(log.accountServiceDomain) ? (
+                  <EntityLink type={accountEntityType(log.accountServiceDomain)!} id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
                 ) : (
-                  <span>—</span>
-                )}
-              </LabeledField>
+                  <span className="font-mono text-xs">{log.accountId}</span>
+                )
+              ) : (
+                <span>—</span>
+              )}
+            </LabeledField>
 
-              <LabeledField label="Status">
-                <span>
-                  {typeof log?.statusTracking?.currentStatus === 'string' ? log.statusTracking.currentStatus.replace(/_/g, ' ') : '—'}
-                </span>
-              </LabeledField>
+            <LabeledField label="Status">
+              <span>
+                {typeof log?.statusTracking?.currentStatus === 'string' ? log.statusTracking.currentStatus.replace(/_/g, ' ') : '—'}
+              </span>
+            </LabeledField>
 
-              <LabeledField label="Created">
-                <TimeDisplay timestamp={log?.createdAt} />
-              </LabeledField>
+            <LabeledField label="Created">
+              <TimeDisplay timestamp={log?.createdAt} />
+            </LabeledField>
 
-              <LabeledField label="Last Updated">
-                <TimeDisplay timestamp={log?.updatedAt} />
-              </LabeledField>
-            </dl>
-          )}
+            <LabeledField label="Last Updated">
+              <TimeDisplay timestamp={log?.updatedAt} />
+            </LabeledField>
+          </dl>
         </Card>
       )}
 
@@ -279,6 +277,6 @@ export function PositionDetailPage() {
           </TabsContent>
         </Tabs>
       )}
-    </div>
+    </PageShell>
   )
 }
