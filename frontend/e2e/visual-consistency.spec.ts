@@ -29,18 +29,24 @@ const LIST_PAGES = [
   { path: '/gateway-mappings', heading: 'Gateway Mappings' },
 ] as const
 
-const REFERENCE_DATA_PAGES = [
+const REFERENCE_DATA_TABLE_PAGES = [
   { path: '/reference-data/instruments', heading: 'Instruments' },
-  { path: '/reference-data/nodes', heading: 'Nodes' },
   { path: '/reference-data/account-types', heading: 'Account Types' },
+] as const
+
+// Nodes uses a tree view inside a Card, not a DataTable
+const REFERENCE_DATA_CARD_PAGES = [
+  { path: '/reference-data/nodes', heading: 'Nodes' },
 ] as const
 
 const ADMIN_LIST_PAGES = [
   { path: '/users', heading: 'Users' },
 ] as const
 
+const ALL_TENANT_LIST_PAGES = [...LIST_PAGES, ...REFERENCE_DATA_TABLE_PAGES, ...REFERENCE_DATA_CARD_PAGES]
+
 test.describe('Structural conformance — list pages (tenant-user)', () => {
-  for (const page of [...LIST_PAGES, ...REFERENCE_DATA_PAGES]) {
+  for (const page of ALL_TENANT_LIST_PAGES) {
     test.describe(page.path, () => {
       test('has PageShell wrapper (space-y-6)', async ({ authenticatedPage }) => {
         await navigateTo(authenticatedPage, page.path)
@@ -64,18 +70,29 @@ test.describe('Structural conformance — list pages (tenant-user)', () => {
         await expect(h1).toHaveClass(/tracking-tight/)
       })
 
-      test('has DataTable inside a Card', async ({ authenticatedPage }) => {
+      test('has content inside a Card', async ({ authenticatedPage }) => {
         await navigateTo(authenticatedPage, page.path)
         await expect(
           authenticatedPage.getByRole('heading', { level: 1 }),
         ).toBeVisible({ timeout: 10_000 })
-        // Card uses data-slot="card", table is rendered inside it
+        // Card uses data-slot="card"
         const card = authenticatedPage.locator('[data-slot="card"]').first()
         await expect(card).toBeVisible({ timeout: 10_000 })
-        // DataTable renders a <table> element
-        const table = card.locator('table')
-        await expect(table).toBeVisible()
       })
+    })
+  }
+
+  // DataTable-specific: verify <table> element exists inside the Card
+  for (const page of [...LIST_PAGES, ...REFERENCE_DATA_TABLE_PAGES]) {
+    test(`${page.path} has DataTable (table element) inside Card`, async ({ authenticatedPage }) => {
+      await navigateTo(authenticatedPage, page.path)
+      await expect(
+        authenticatedPage.getByRole('heading', { level: 1 }),
+      ).toBeVisible({ timeout: 10_000 })
+      const card = authenticatedPage.locator('[data-slot="card"]').first()
+      await expect(card).toBeVisible({ timeout: 10_000 })
+      const table = card.locator('table')
+      await expect(table).toBeVisible()
     })
   }
 })
