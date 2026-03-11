@@ -107,6 +107,31 @@ describe('parseJWT', () => {
     expect(claims).not.toBeNull()
     expect(claims!.roles).toEqual([])
   })
+
+  it('normalizes UPPERCASE and mixed-case roles to lowercase', () => {
+    const token = createTestToken({
+      userId: 'user-case',
+      roles: ['PLATFORM-ADMIN', 'Tenant-Admin', 'SUPER-ADMIN'],
+      iss: 'meridian-auth',
+      aud: 'meridian-console',
+    })
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.roles).toEqual(['platform-admin', 'tenant-admin', 'super-admin'])
+  })
+
+  it('normalizes UPPERCASE groups to lowercase when used as effective roles', () => {
+    const token = createTestToken({
+      userId: 'dex-user',
+      roles: [],
+      groups: ['PLATFORM-ADMIN', 'Operator'],
+      iss: 'dex',
+      aud: 'meridian',
+    })
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.roles).toEqual(['platform-admin', 'operator'])
+  })
 })
 
 describe('getUserLens', () => {

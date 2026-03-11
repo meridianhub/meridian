@@ -70,10 +70,10 @@ export function parseJWT(token: unknown): JWTClaims | null {
           : ''
 
     const roles = Array.isArray(decoded.roles)
-      ? (decoded.roles as unknown[]).filter((r): r is string => typeof r === 'string')
+      ? (decoded.roles as unknown[]).filter((r): r is string => typeof r === 'string').map(r => r.toLowerCase())
       : []
     const groups = Array.isArray(decoded.groups)
-      ? (decoded.groups as unknown[]).filter((g): g is string => typeof g === 'string')
+      ? (decoded.groups as unknown[]).filter((g): g is string => typeof g === 'string').map(g => g.toLowerCase())
       : []
     // Use roles if present, else fall back to groups (Dex uses groups instead of roles)
     const effectiveRoles = roles.length > 0 ? roles : groups
