@@ -162,7 +162,7 @@ describe('DatasetDetailPage', () => {
     })
   })
 
-  it('shows chart skeleton while loading', () => {
+  it('shows detail skeleton while loading', () => {
     vi.mocked(createServiceClients).mockReturnValue({
       currentAccount: {} as never,
       paymentOrder: {} as never,
@@ -183,7 +183,7 @@ describe('DatasetDetailPage', () => {
       } as never,
     })
     renderPage()
-    expect(screen.getByTestId('chart-skeleton')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-skeleton')).toBeInTheDocument()
   })
 
   it('renders no-tenant guard when tenant is missing', () => {

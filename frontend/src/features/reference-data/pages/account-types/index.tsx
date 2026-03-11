@@ -4,6 +4,8 @@ import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { CELEditor } from '@/features/sagas/components/cel-editor'
 import { useApiClients } from '@/api/context'
+import { PageShell } from '@/shared/page-shell'
+import { PageHeader } from '@/shared/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -104,18 +106,16 @@ export function AccountTypesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Account Types</h1>
-          <p className="mt-2 text-muted-foreground">
-            Account type registry with CEL policy configuration.
-          </p>
-        </div>
-        <Button onClick={() => setCreateDialogOpen(true)}>
-          Create Account Type
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Account Types"
+        description="Account type registry with CEL policy configuration."
+        actions={
+          <Button onClick={() => setCreateDialogOpen(true)}>
+            Create Account Type
+          </Button>
+        }
+      />
 
       <CreateAccountTypeDialog
         open={createDialogOpen}
@@ -207,6 +207,6 @@ export function AccountTypesPage() {
           </TabsContent>
         </Tabs>
       )}
-    </div>
+    </PageShell>
   )
 }
