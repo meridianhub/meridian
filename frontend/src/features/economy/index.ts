@@ -15,4 +15,6 @@ export type { ManifestPlan } from './hooks/use-manifest-plan'
 
 // Components
 export { EditorGraphPanel } from './components/editor-graph-panel'
+export { ManifestEditor } from './components/manifest-editor'
+export { ValidationPanel } from './components/validation-panel'
 export { ManifestDiffViewer } from './components/manifest-diff'
