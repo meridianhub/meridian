@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '@/test/test-utils'
 import { createTenantUserToken } from '@/test/jwt-helpers'
 import { DeployWizard } from '../deploy-wizard'
+import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ import { useManifestPlan } from '../../hooks/use-manifest-plan'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const fakeManifest = { $typeName: 'meridian.control_plane.v1.Manifest' } as unknown as import('@/api/gen/meridian/control_plane/v1/manifest_pb').Manifest
+const fakeManifest = { $typeName: 'meridian.control_plane.v1.Manifest' } as unknown as Manifest
 
 function makeValidationError(overrides: {
   path?: string

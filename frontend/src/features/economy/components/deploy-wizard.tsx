@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/auth-context'
 import { manifestKeys } from '@/lib/query-keys'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import type { ValidationError } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+import type { ManifestPlan } from '../hooks/use-manifest-plan'
 
 // ── Step state machine ──────────────────────────────────────────────────────
 
@@ -288,7 +289,7 @@ function StepIndicator({ step }: { step: DeployStep }) {
 interface ConfirmApplyDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  plan: import('../hooks/use-manifest-plan').ManifestPlan | null
+  plan: ManifestPlan | null
   isApplying: boolean
   onConfirm: () => void
 }
