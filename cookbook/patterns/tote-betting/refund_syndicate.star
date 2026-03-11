@@ -43,6 +43,20 @@ def refund_syndicate():
     for pos in positions:
         step(name="refund_" + pos.party_id)
 
+        # Dispatch refund via Financial Gateway first, so ledger
+        # entries only reflect successful refunds
+        financial_gateway.dispatch_refund(
+            payment_order_id=syndicate_id + ":refund:" + pos.party_id,
+            amount_minor_units=int(stake * Decimal("100")),
+            currency="GBP",
+            customer_reference=pos.party_id,
+            rail="STRIPE",
+            metadata={
+                "syndicate_id": syndicate_id,
+                "refund_type": "match_cancelled",
+            },
+        )
+
         # Debit pool (liability decreases)
         position_keeping.initiate_log(
             account_type="SYNDICATE_POOL",
@@ -61,19 +75,6 @@ def refund_syndicate():
             amount=stake,
             direction="CREDIT",
             attributes={"syndicate_id": syndicate_id},
-        )
-
-        # Dispatch refund via Financial Gateway
-        financial_gateway.dispatch_refund(
-            payment_order_id=syndicate_id + ":refund:" + pos.party_id,
-            amount_minor_units=int(stake * Decimal("100")),
-            currency="GBP",
-            customer_reference=pos.party_id,
-            rail="STRIPE",
-            metadata={
-                "syndicate_id": syndicate_id,
-                "refund_type": "match_cancelled",
-            },
         )
 
         # Burn bet unit

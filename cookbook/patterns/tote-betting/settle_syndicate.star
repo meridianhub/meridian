@@ -87,9 +87,30 @@ def settle_syndicate():
 
     # Distribute winnings equally among winners
     if len(winners) > 0:
-        per_winner = winnings_total / Decimal(str(len(winners)))
+        # Round down to avoid over-paying; remainder goes to platform
+        winner_count = Decimal(str(len(winners)))
+        per_winner = (winnings_total / winner_count).quantize(
+            Decimal("0.01"),
+        )
+        distributed = per_winner * winner_count
+        remainder = winnings_total - distributed
+
         for winner in winners:
             step(name="payout_" + winner.party_id)
+
+            # Dispatch payout via Financial Gateway (before ledger,
+            # so books only reflect successful payouts)
+            financial_gateway.dispatch_refund(
+                payment_order_id=syndicate_id + ":payout:" + winner.party_id,
+                amount_minor_units=int(per_winner * Decimal("100")),
+                currency="GBP",
+                customer_reference=winner.party_id,
+                rail="STRIPE",
+                metadata={
+                    "syndicate_id": syndicate_id,
+                    "payout_type": "winnings",
+                },
+            )
 
             # Debit pool (liability decreases)
             position_keeping.initiate_log(
@@ -111,18 +132,44 @@ def settle_syndicate():
                 attributes={"syndicate_id": syndicate_id},
             )
 
-            # Dispatch payout via Financial Gateway
-            financial_gateway.dispatch_refund(
-                payment_order_id=syndicate_id + ":payout:" + winner.party_id,
-                amount_minor_units=int(per_winner * Decimal("100")),
-                currency="GBP",
-                customer_reference=winner.party_id,
-                rail="STRIPE",
-                metadata={
-                    "syndicate_id": syndicate_id,
-                    "payout_type": "winnings",
-                },
+        # Any rounding remainder goes to platform commission
+        if remainder > Decimal("0"):
+            step(name="remainder_to_commission")
+            position_keeping.initiate_log(
+                account_type="SYNDICATE_POOL",
+                party_id=syndicate_id,
+                instrument_code="GBP",
+                amount=remainder,
+                direction="DEBIT",
+                attributes={"syndicate_id": syndicate_id},
             )
+            position_keeping.initiate_log(
+                account_type="PLATFORM_COMMISSION",
+                party_id="PLATFORM",
+                instrument_code="GBP",
+                amount=remainder,
+                direction="CREDIT",
+                attributes={"syndicate_id": syndicate_id},
+            )
+    else:
+        # No winners: unclaimed winnings go to platform commission
+        step(name="unclaimed_to_commission")
+        position_keeping.initiate_log(
+            account_type="SYNDICATE_POOL",
+            party_id=syndicate_id,
+            instrument_code="GBP",
+            amount=winnings_total,
+            direction="DEBIT",
+            attributes={"syndicate_id": syndicate_id},
+        )
+        position_keeping.initiate_log(
+            account_type="PLATFORM_COMMISSION",
+            party_id="PLATFORM",
+            instrument_code="GBP",
+            amount=winnings_total,
+            direction="CREDIT",
+            attributes={"syndicate_id": syndicate_id},
+        )
 
     # Burn all bet units for this syndicate
     step(name="burn_positions")
