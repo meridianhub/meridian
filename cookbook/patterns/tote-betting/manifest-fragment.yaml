@@ -1,0 +1,82 @@
+instruments:
+  - code: BET_UNIT
+    name: Bet Unit
+    type: INSTRUMENT_TYPE_VOUCHER
+    dimensions:
+      unit: units
+      precision: 0
+
+accountTypes:
+  - code: STRIPE_NOSTRO
+    name: Stripe Nostro
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+
+  - code: SYNDICATE_POOL
+    name: Syndicate Pool
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount > 0"
+      bucketing: "attributes.syndicate_id"
+
+  - code: BET_POSITION
+    name: Bet Position
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [BET_UNIT]
+    policies:
+      validation: "amount > 0"
+      bucketing: "attributes.syndicate_id + ':' + attributes.selection"
+
+  - code: PLATFORM_COMMISSION
+    name: Platform Commission
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+
+valuationRules:
+  - name: bet_unit_to_gbp
+    fromInstrument: BET_UNIT
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: syndicate_stake_config
+
+sagas:
+  - name: create_syndicate
+    trigger: "api:/v1/syndicates"
+  - name: join_syndicate
+    trigger: "api:/v1/syndicates/join"
+  - name: settle_syndicate
+    trigger: "event:market-information.observation-recorded.v1"
+    filter: "event.observation_type == 'MATCH_RESULT'"
+  - name: refund_syndicate
+    trigger: "api:/v1/syndicates/refund"
+
+# Payment collection and payout use the Financial Gateway, not the
+# Operational Gateway. The Financial Gateway provides typed payment
+# APIs (dispatch_payment, dispatch_refund) with provider-specific
+# lifecycle management, webhook handling, and payment event topics
+# (financial-gateway.payment-captured.v1, etc.).
+#
+# See the join_syndicate and settle_syndicate sagas for
+# financial_gateway.dispatch_payment() and financial_gateway.dispatch_refund()
+# usage.
+#
+# The payment_rails section configures Stripe Connect account-level
+# settings (fee structure, payout schedule). It is complementary to
+# the Financial Gateway, not a replacement.
+paymentRails:
+  - provider: stripe_connect
+    mode: CONNECT_MODE_STANDARD
+    accountId: "acct_REPLACE_WITH_REAL_ID"
+    webhookEndpointSecret: "sm://stripe/webhook_secret"
+    platformFee:
+      type: PLATFORM_FEE_TYPE_PERCENTAGE
+      value: "15.0"
+    payoutSchedule: PAYOUT_SCHEDULE_DAILY
+    supportedMethods: [card]

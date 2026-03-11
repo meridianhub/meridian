@@ -1,0 +1,55 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "tote-betting",
+    "type": "registry:pattern",
+    "title": "Tote (Parimutuel) Betting Platform",
+    "description": "Syndicate-based parimutuel betting with pooled stakes, equal-entry bets tracked as voucher instruments, market-data-driven settlement, 15% platform commission, and Stripe Connect payouts via the Financial Gateway.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["betting", "gaming", "payments"],
+    "meta": {
+        "complexity": 8,
+        "design_pattern": "voucher-position-tracking",
+        "industries": ["betting", "gaming"],
+        "provides": {
+            "instruments": ["BET_UNIT"],
+            "account_types": ["STRIPE_NOSTRO", "SYNDICATE_POOL", "BET_POSITION", "PLATFORM_COMMISSION"],
+            "sagas": ["create_syndicate", "join_syndicate", "settle_syndicate", "refund_syndicate"],
+            "valuation_rules": ["bet_unit_to_gbp"],
+            "triggers": [
+                "api:/v1/syndicates",
+                "api:/v1/syndicates/join",
+                "api:/v1/syndicates/refund",
+                "event:market-information.observation-recorded.v1"
+            ]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": ["match_results"]
+        },
+        "composes_with": ["kyc-compliance"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/tote-betting/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/tote-betting/join_syndicate.star",
+            "type": "registry:file",
+            "target": "~/sagas/join_syndicate.star"
+        },
+        {
+            "path": "patterns/tote-betting/settle_syndicate.star",
+            "type": "registry:file",
+            "target": "~/sagas/settle_syndicate.star"
+        },
+        {
+            "path": "patterns/tote-betting/refund_syndicate.star",
+            "type": "registry:file",
+            "target": "~/sagas/refund_syndicate.star"
+        }
+    ]
+}

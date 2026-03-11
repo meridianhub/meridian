@@ -1,0 +1,106 @@
+# Saga: refund_syndicate
+# Version: 1.0.0
+# Previous: none
+# Changed: Initial implementation
+# Author: Platform Team
+# Date: 2026-03-11
+#
+# Refunds all members of a syndicate when a match is cancelled or
+# postponed. Returns each member's stake via Stripe and burns all
+# bet positions.
+#
+# Double-Entry Accounting (per member):
+#   DEBIT  SYNDICATE_POOL  (liability decreases)
+#   CREDIT STRIPE_NOSTRO   (cash returned via Stripe)
+#   CREDIT BET_POSITION    (bet unit burned)
+#
+# Input data:
+#   - syndicate_id: string - Syndicate to refund
+#
+# No platform commission is taken on refunds.
+
+def refund_syndicate():
+    ctx = input_data
+    syndicate_id = ctx["syndicate_id"]
+
+    # Look up syndicate
+    step(name="get_syndicate")
+    syndicate = repository.get_entity(
+        entity_type="syndicate",
+        entity_id=syndicate_id,
+    )
+    stake = Decimal(syndicate.attributes["stake_amount"])
+
+    # Query all bet positions
+    step(name="query_positions")
+    positions = position_keeping.query_positions(
+        account_type="BET_POSITION",
+        instrument_code="BET_UNIT",
+        attributes={"syndicate_id": syndicate_id},
+    )
+
+    # Refund each member
+    for pos in positions:
+        step(name="refund_" + pos.party_id)
+
+        # Debit pool (liability decreases)
+        position_keeping.initiate_log(
+            account_type="SYNDICATE_POOL",
+            party_id=syndicate_id,
+            instrument_code="GBP",
+            amount=stake,
+            direction="DEBIT",
+            attributes={"syndicate_id": syndicate_id},
+        )
+
+        # Credit nostro (refund via Stripe)
+        position_keeping.initiate_log(
+            account_type="STRIPE_NOSTRO",
+            party_id=pos.party_id,
+            instrument_code="GBP",
+            amount=stake,
+            direction="CREDIT",
+            attributes={"syndicate_id": syndicate_id},
+        )
+
+        # Dispatch refund via Financial Gateway
+        financial_gateway.dispatch_refund(
+            payment_order_id=syndicate_id + ":refund:" + pos.party_id,
+            amount_minor_units=int(stake * Decimal("100")),
+            currency="GBP",
+            customer_reference=pos.party_id,
+            rail="STRIPE",
+            metadata={
+                "syndicate_id": syndicate_id,
+                "refund_type": "match_cancelled",
+            },
+        )
+
+        # Burn bet unit
+        position_keeping.initiate_log(
+            account_type="BET_POSITION",
+            party_id=pos.party_id,
+            instrument_code="BET_UNIT",
+            amount=Decimal("1"),
+            direction="CREDIT",
+            attributes={
+                "syndicate_id": syndicate_id,
+                "selection": pos.attributes["selection"],
+            },
+        )
+
+    # Mark syndicate as cancelled
+    step(name="mark_cancelled")
+    repository.update_entity(
+        entity_type="syndicate",
+        entity_id=syndicate_id,
+        attributes={"status": "CANCELLED"},
+    )
+
+    return {
+        "syndicate_id": syndicate_id,
+        "refunded_members": len(positions),
+        "refund_per_member": str(stake),
+    }
+
+output = refund_syndicate()
