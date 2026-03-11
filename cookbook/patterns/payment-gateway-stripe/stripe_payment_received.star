@@ -1,7 +1,7 @@
 # Saga: stripe_payment_received
 # Version: 2.0.0
 # Previous: 1.0.0
-# Changed: Migrated to use account_type-based position_keeping API
+# Changed: Migrated to use position_id-based position_keeping API
 #          and clarified this is a webhook handler (no gateway dispatch).
 # Author: Platform Team
 # Date: 2026-03-11
@@ -15,9 +15,7 @@
 # dispatch, see stripe_payment_via_gateway.star.
 #
 # Idempotency: payment_intent_id is required and used as the
-# external_reference on all ledger postings. The position_keeping
-# layer rejects duplicate postings with the same external_reference,
-# making webhook replays safe.
+# correlation_id on all ledger postings, making webhook replays safe.
 #
 # Double-Entry Accounting:
 #   DEBIT  PAYMENT_CLEARING   (cash received from Stripe)
@@ -46,34 +44,24 @@ def execute_stripe_payment_received():
     amount = Decimal(str(amount_cents)) / Decimal("100")
 
     # Step 1: Debit the payment clearing account (cash received)
-    # external_reference ensures idempotency on webhook replay
+    # correlation_id ensures idempotency on webhook replay
     step(name="debit_clearing")
     debit_result = position_keeping.initiate_log(
-        account_type="PAYMENT_CLEARING",
-        party_id=party_id,
+        position_id="PAYMENT_CLEARING:" + party_id,
         instrument_code=instrument_code,
         amount=amount,
         direction="DEBIT",
-        external_reference=payment_intent_id + ":debit",
-        attributes={
-            "charge_id": charge_id,
-            "payment_intent_id": payment_intent_id,
-        },
+        correlation_id=payment_intent_id + ":debit",
     )
 
     # Step 2: Credit the customer current account
     step(name="credit_customer")
     credit_result = position_keeping.initiate_log(
-        account_type="CUSTOMER_CURRENT",
-        party_id=party_id,
+        position_id="CUSTOMER_CURRENT:" + party_id,
         instrument_code=instrument_code,
         amount=amount,
         direction="CREDIT",
-        external_reference=payment_intent_id + ":credit",
-        attributes={
-            "charge_id": charge_id,
-            "payment_intent_id": payment_intent_id,
-        },
+        correlation_id=payment_intent_id + ":credit",
     )
 
     return {

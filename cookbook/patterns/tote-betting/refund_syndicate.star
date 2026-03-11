@@ -34,9 +34,8 @@ def refund_syndicate():
     # Query all bet positions
     step(name="query_positions")
     positions = position_keeping.query_positions(
-        account_type="BET_POSITION",
+        position_id="BET_POSITION:" + syndicate_id,
         instrument_code="BET_UNIT",
-        attributes={"syndicate_id": syndicate_id},
     )
 
     # Refund each member
@@ -59,35 +58,29 @@ def refund_syndicate():
 
         # Debit pool (liability decreases)
         position_keeping.initiate_log(
-            account_type="SYNDICATE_POOL",
-            party_id=syndicate_id,
+            position_id="SYNDICATE_POOL:" + syndicate_id,
             instrument_code="GBP",
             amount=stake,
             direction="DEBIT",
-            attributes={"syndicate_id": syndicate_id},
+            correlation_id=syndicate_id,
         )
 
         # Credit nostro (refund via Stripe)
         position_keeping.initiate_log(
-            account_type="STRIPE_NOSTRO",
-            party_id=pos.party_id,
+            position_id="STRIPE_NOSTRO:" + pos.party_id,
             instrument_code="GBP",
             amount=stake,
             direction="CREDIT",
-            attributes={"syndicate_id": syndicate_id},
+            correlation_id=syndicate_id,
         )
 
         # Burn bet unit
         position_keeping.initiate_log(
-            account_type="BET_POSITION",
-            party_id=pos.party_id,
+            position_id="BET_POSITION:" + pos.party_id,
             instrument_code="BET_UNIT",
             amount=Decimal("1"),
             direction="CREDIT",
-            attributes={
-                "syndicate_id": syndicate_id,
-                "selection": pos.attributes["selection"],
-            },
+            correlation_id=syndicate_id,
         )
 
     # Mark syndicate as cancelled

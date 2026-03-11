@@ -50,9 +50,8 @@ def settle_syndicate():
     # Query all bet positions for this syndicate
     step(name="query_positions")
     positions = position_keeping.query_positions(
-        account_type="BET_POSITION",
+        position_id="BET_POSITION:" + syndicate_id,
         instrument_code="BET_UNIT",
-        attributes={"syndicate_id": syndicate_id},
     )
 
     # Identify winners and calculate pool
@@ -69,20 +68,18 @@ def settle_syndicate():
     # Take 15% commission
     step(name="take_commission")
     position_keeping.initiate_log(
-        account_type="SYNDICATE_POOL",
-        party_id=syndicate_id,
+        position_id="SYNDICATE_POOL:" + syndicate_id,
         instrument_code="GBP",
         amount=commission,
         direction="DEBIT",
-        attributes={"syndicate_id": syndicate_id},
+        correlation_id=syndicate_id,
     )
     position_keeping.initiate_log(
-        account_type="PLATFORM_COMMISSION",
-        party_id="PLATFORM",
+        position_id="PLATFORM_COMMISSION:PLATFORM",
         instrument_code="GBP",
         amount=commission,
         direction="CREDIT",
-        attributes={"syndicate_id": syndicate_id},
+        correlation_id=syndicate_id,
     )
 
     # Distribute winnings equally among winners
@@ -114,76 +111,66 @@ def settle_syndicate():
 
             # Debit pool (liability decreases)
             position_keeping.initiate_log(
-                account_type="SYNDICATE_POOL",
-                party_id=syndicate_id,
+                position_id="SYNDICATE_POOL:" + syndicate_id,
                 instrument_code="GBP",
                 amount=per_winner,
                 direction="DEBIT",
-                attributes={"syndicate_id": syndicate_id},
+                correlation_id=syndicate_id,
             )
 
             # Credit nostro (payout via Stripe)
             position_keeping.initiate_log(
-                account_type="STRIPE_NOSTRO",
-                party_id=winner.party_id,
+                position_id="STRIPE_NOSTRO:" + winner.party_id,
                 instrument_code="GBP",
                 amount=per_winner,
                 direction="CREDIT",
-                attributes={"syndicate_id": syndicate_id},
+                correlation_id=syndicate_id,
             )
 
         # Any rounding remainder goes to platform commission
         if remainder > Decimal("0"):
             step(name="remainder_to_commission")
             position_keeping.initiate_log(
-                account_type="SYNDICATE_POOL",
-                party_id=syndicate_id,
+                position_id="SYNDICATE_POOL:" + syndicate_id,
                 instrument_code="GBP",
                 amount=remainder,
                 direction="DEBIT",
-                attributes={"syndicate_id": syndicate_id},
+                correlation_id=syndicate_id,
             )
             position_keeping.initiate_log(
-                account_type="PLATFORM_COMMISSION",
-                party_id="PLATFORM",
+                position_id="PLATFORM_COMMISSION:PLATFORM",
                 instrument_code="GBP",
                 amount=remainder,
                 direction="CREDIT",
-                attributes={"syndicate_id": syndicate_id},
+                correlation_id=syndicate_id,
             )
     else:
         # No winners: unclaimed winnings go to platform commission
         step(name="unclaimed_to_commission")
         position_keeping.initiate_log(
-            account_type="SYNDICATE_POOL",
-            party_id=syndicate_id,
+            position_id="SYNDICATE_POOL:" + syndicate_id,
             instrument_code="GBP",
             amount=winnings_total,
             direction="DEBIT",
-            attributes={"syndicate_id": syndicate_id},
+            correlation_id=syndicate_id,
         )
         position_keeping.initiate_log(
-            account_type="PLATFORM_COMMISSION",
-            party_id="PLATFORM",
+            position_id="PLATFORM_COMMISSION:PLATFORM",
             instrument_code="GBP",
             amount=winnings_total,
             direction="CREDIT",
-            attributes={"syndicate_id": syndicate_id},
+            correlation_id=syndicate_id,
         )
 
     # Burn all bet units for this syndicate
     step(name="burn_positions")
     for pos in positions:
         position_keeping.initiate_log(
-            account_type="BET_POSITION",
-            party_id=pos.party_id,
+            position_id="BET_POSITION:" + pos.party_id,
             instrument_code="BET_UNIT",
             amount=Decimal("1"),
             direction="CREDIT",
-            attributes={
-                "syndicate_id": syndicate_id,
-                "selection": pos.attributes["selection"],
-            },
+            correlation_id=syndicate_id,
         )
 
     # Mark syndicate as settled

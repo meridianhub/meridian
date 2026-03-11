@@ -43,9 +43,8 @@ def join_syndicate():
     # Check capacity before accepting payment
     step(name="check_capacity")
     existing = position_keeping.query_positions(
-        account_type="BET_POSITION",
+        position_id="BET_POSITION:" + ctx["syndicate_id"],
         instrument_code="BET_UNIT",
-        attributes={"syndicate_id": ctx["syndicate_id"]},
     )
     if len(existing) >= max_members:
         fail("syndicate is full: %d/%d members" % (len(existing), max_members))
@@ -68,39 +67,31 @@ def join_syndicate():
     # Step 2: Record cash received into nostro
     step(name="debit_nostro")
     position_keeping.initiate_log(
-        account_type="STRIPE_NOSTRO",
-        party_id=ctx["party_id"],
+        position_id="STRIPE_NOSTRO:" + ctx["party_id"],
         instrument_code="GBP",
         amount=stake,
         direction="DEBIT",
-        attributes={"syndicate_id": ctx["syndicate_id"]},
+        correlation_id=ctx["syndicate_id"],
     )
 
     # Step 3: Credit the syndicate pool (liability increases)
     step(name="credit_pool")
     position_keeping.initiate_log(
-        account_type="SYNDICATE_POOL",
-        party_id=ctx["syndicate_id"],
+        position_id="SYNDICATE_POOL:" + ctx["syndicate_id"],
         instrument_code="GBP",
         amount=stake,
         direction="CREDIT",
-        attributes={"syndicate_id": ctx["syndicate_id"]},
+        correlation_id=ctx["syndicate_id"],
     )
 
     # Step 4: Mint bet unit into customer's position
     step(name="mint_bet_unit")
     position_keeping.initiate_log(
-        account_type="BET_POSITION",
-        party_id=ctx["party_id"],
+        position_id="BET_POSITION:" + ctx["party_id"],
         instrument_code="BET_UNIT",
         amount=Decimal("1"),
         direction="DEBIT",
-        attributes={
-            "syndicate_id": ctx["syndicate_id"],
-            "selection": ctx["selection"],
-            "match_id": syndicate.attributes["match_id"],
-            "stake_amount": syndicate.attributes["stake_amount"],
-        },
+        correlation_id=ctx["syndicate_id"],
     )
 
     return {

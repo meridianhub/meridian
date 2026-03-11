@@ -68,27 +68,21 @@ def stripe_payment_via_gateway():
     # Step 3: Debit payment clearing account (cash received)
     step(name="debit_clearing")
     position_keeping.initiate_log(
-        account_type="PAYMENT_CLEARING",
-        party_id=party_id,
+        position_id="PAYMENT_CLEARING:" + party_id,
         instrument_code=currency,
         amount=amount,
         direction="DEBIT",
-        attributes={
-            "provider_reference_id": gateway_result.provider_reference_id,
-        },
+        correlation_id=ctx["payment_order_id"],
     )
 
     # Step 4: Credit the customer current account
     step(name="credit_customer")
     position_keeping.initiate_log(
-        account_type="CUSTOMER_CURRENT",
-        party_id=party_id,
+        position_id="CUSTOMER_CURRENT:" + party_id,
         instrument_code=currency,
         amount=amount,
         direction="CREDIT",
-        attributes={
-            "provider_reference_id": gateway_result.provider_reference_id,
-        },
+        correlation_id=ctx["payment_order_id"],
     )
 
     return {
