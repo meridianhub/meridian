@@ -227,7 +227,7 @@ export function DatasetDetailPage() {
         ]}
       />
 
-      {isLoading && <DetailSkeleton />}
+      {isLoading && <DetailSkeleton showBackNav={false} />}
       {isError && <ErrorState onRetry={() => datasetQuery.refetch()} />}
 
       {dataset && (
