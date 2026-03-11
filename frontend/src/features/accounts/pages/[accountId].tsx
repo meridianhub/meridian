@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { MoneyDisplay } from '@/shared/money-display'
-import { AuditTrail, EntityLink, Breadcrumbs } from '@/shared'
+import { AuditTrail, EntityLink, Breadcrumbs, PageShell, PageHeader, ErrorState, DetailSkeleton } from '@/shared'
 import { useAccountResolver } from '@/shared/use-account-resolver'
 import { DepositDialog } from './deposit-dialog'
 import { WithdrawDialog } from './withdraw-dialog'
@@ -17,26 +17,6 @@ import { CreateValuationFeatureDialog } from '@/features/reference-data/componen
 import type { AccountStatus as AccountStatusType } from './types'
 import { useAccountDetail, useAccountPostings, useAccountLiens } from '../hooks'
 
-// ---------------------------------------------------------------------------
-// Skeleton
-// ---------------------------------------------------------------------------
-
-function AccountDetailSkeleton() {
-  return (
-    <div data-testid="account-detail-skeleton" className="animate-pulse space-y-6 p-6">
-      <div className="flex items-center gap-3">
-        <div className="h-4 w-24 rounded bg-muted" />
-      </div>
-      <div className="h-8 w-64 rounded bg-muted" />
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-20 rounded bg-muted" />
-        ))}
-      </div>
-      <div className="h-64 rounded bg-muted" />
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Not found
@@ -358,13 +338,13 @@ export function AccountDetailPage() {
   )
 
   if (isLoading) {
-    return <AccountDetailSkeleton />
+    return <DetailSkeleton />
   }
 
   // Current-account returned 404 — check if it's an internal account
   if (account === null) {
     if (isResolving) {
-      return <AccountDetailSkeleton />
+      return <DetailSkeleton />
     }
     if (resolved?.type === 'internal') {
       return <Navigate to={`/internal-accounts/${encodeURIComponent(resolved.accountId)}`} replace />
@@ -374,30 +354,22 @@ export function AccountDetailPage() {
 
   if (isError || account === undefined) {
     return (
-      <div data-testid="account-error" className="p-6">
-        <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: accountId ?? 'Error' }]} />
-        <div className="mt-8 text-center">
-          <h2 className="text-xl font-semibold">Failed to load account</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            There was a problem loading this account. Please try again.
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-4"
-            disabled={isFetching}
-            onClick={() => void refetch()}
-          >
-            {isFetching ? 'Retrying…' : 'Retry'}
-          </Button>
-        </div>
+      <div data-testid="account-error">
+        <PageShell>
+          <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: accountId ?? 'Error' }]} />
+          <ErrorState
+            title="Failed to load account"
+            message="There was a problem loading this account. Please try again."
+            onRetry={() => void refetch()}
+            retryLabel={isFetching ? 'Retrying…' : 'Retry'}
+          />
+        </PageShell>
       </div>
     )
   }
 
   return (
-    <div className="p-6">
-      {/* Breadcrumb navigation */}
+    <PageShell>
       <Breadcrumbs
         items={[
           { label: 'Accounts', href: '/accounts' },
@@ -405,26 +377,27 @@ export function AccountDetailPage() {
         ]}
       />
 
-      {/* Page header */}
-      <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{account.accountId}</h1>
-            <StatusBadge status={account.status} />
-          </div>
+      <div>
+        <PageHeader
+          title={account.accountId}
+          actions={
+            <AccountActions
+              status={account.status}
+              accountId={account.accountId}
+              currency={account.instrumentCode}
+            />
+          }
+        />
+        <div className="mt-1 flex items-center gap-3">
+          <StatusBadge status={account.status} />
           {account.externalReference && (
-            <p className="mt-1 font-mono text-sm text-muted-foreground">{account.externalReference}</p>
+            <p className="font-mono text-sm text-muted-foreground">{account.externalReference}</p>
           )}
         </div>
-        <AccountActions
-          status={account.status}
-          accountId={account.accountId}
-          currency={account.instrumentCode}
-        />
       </div>
 
       {/* Summary fields */}
-      <Card className="mt-6">
+      <Card>
         <CardContent>
           <dl className="grid grid-cols-2 gap-4 pt-2 md:grid-cols-4">
             <DetailField label="Instrument">{account.instrumentCode}</DetailField>
@@ -444,73 +417,71 @@ export function AccountDetailPage() {
       </Card>
 
       {/* Tabs */}
-      <div className="mt-6">
-        <Tabs defaultValue="overview">
-          <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="transactions">Transactions</TabsTrigger>
-            <TabsTrigger value="liens">Liens</TabsTrigger>
-            <TabsTrigger value="audit">Audit Trail</TabsTrigger>
-          </TabsList>
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="liens">Liens</TabsTrigger>
+          <TabsTrigger value="audit">Audit Trail</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="overview" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Account Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <DetailField label="Account ID">{account.accountId}</DetailField>
-                  <DetailField label="External Reference">{account.externalReference || '—'}</DetailField>
-                  <DetailField label="Status">
-                    <StatusBadge status={account.status} />
+        <TabsContent value="overview" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Account Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <DetailField label="Account ID">{account.accountId}</DetailField>
+                <DetailField label="External Reference">{account.externalReference || '—'}</DetailField>
+                <DetailField label="Status">
+                  <StatusBadge status={account.status} />
+                </DetailField>
+                <DetailField label="Instrument">{account.instrumentCode}</DetailField>
+                <DetailField label="Available Balance">
+                  {account.availableBalance ?? '—'}
+                </DetailField>
+                <DetailField label="Reserved Balance">
+                  {account.reservedBalance ?? '—'}
+                </DetailField>
+                {account.name && (
+                  <DetailField label="Name">{account.name}</DetailField>
+                )}
+                {account.partyId && (
+                  <DetailField label="Party ID">
+                    <EntityLink type="party" id={account.partyId} />
                   </DetailField>
-                  <DetailField label="Instrument">{account.instrumentCode}</DetailField>
-                  <DetailField label="Available Balance">
-                    {account.availableBalance ?? '—'}
-                  </DetailField>
-                  <DetailField label="Reserved Balance">
-                    {account.reservedBalance ?? '—'}
-                  </DetailField>
-                  {account.name && (
-                    <DetailField label="Name">{account.name}</DetailField>
-                  )}
-                  {account.partyId && (
-                    <DetailField label="Party ID">
-                      <EntityLink type="party" id={account.partyId} />
-                    </DetailField>
-                  )}
-                  <DetailField label="Created">
-                    <TimeDisplay timestamp={account.createdAt} format="both" />
-                  </DetailField>
-                  <DetailField label="Last Updated">
-                    <TimeDisplay timestamp={account.updatedAt} format="both" />
-                  </DetailField>
-                </dl>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                )}
+                <DetailField label="Created">
+                  <TimeDisplay timestamp={account.createdAt} format="both" />
+                </DetailField>
+                <DetailField label="Last Updated">
+                  <TimeDisplay timestamp={account.updatedAt} format="both" />
+                </DetailField>
+              </dl>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          <TabsContent value="transactions" className="mt-4">
-            <AccountTransactions accountId={account.accountId} instrumentCode={account.instrumentCode} />
-          </TabsContent>
+        <TabsContent value="transactions" className="mt-4">
+          <AccountTransactions accountId={account.accountId} instrumentCode={account.instrumentCode} />
+        </TabsContent>
 
-          <TabsContent value="liens" className="mt-4">
-            <AccountLiens accountId={account.accountId} instrumentCode={account.instrumentCode} />
-          </TabsContent>
+        <TabsContent value="liens" className="mt-4">
+          <AccountLiens accountId={account.accountId} instrumentCode={account.instrumentCode} />
+        </TabsContent>
 
-          <TabsContent value="audit" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Audit Trail</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <AuditTrail entityType="CurrentAccount" entityId={account.accountId} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
-    </div>
+        <TabsContent value="audit" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Audit Trail</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AuditTrail entityType="CurrentAccount" entityId={account.accountId} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </PageShell>
   )
 }
