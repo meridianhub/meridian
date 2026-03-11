@@ -100,22 +100,20 @@ export function EconomyOverviewPage() {
 
   const isNotFound = error instanceof ConnectError && error.code === Code.NotFound
 
-  if (isLoading) return <LoadingSkeleton />
-  if (error && !isNotFound) return <ErrorState onRetry={() => void refetch()} />
-  if (isNotFound || !data?.version?.manifest) return <EmptyState />
+  const content = (() => {
+    if (isLoading) return <LoadingSkeleton />
+    if (error && !isNotFound) return <ErrorState onRetry={() => void refetch()} />
+    if (isNotFound || !data?.version?.manifest) return <EmptyState />
 
-  const { manifest } = data.version
-  const metadata = manifest.metadata
-  const instruments = manifest.instruments ?? []
-  const accountTypes = manifest.accountTypes ?? []
-  const sagas = manifest.sagas ?? []
-  const valuationRules = manifest.valuationRules ?? []
+    const { manifest } = data.version
+    const metadata = manifest.metadata
+    const instruments = manifest.instruments ?? []
+    const accountTypes = manifest.accountTypes ?? []
+    const sagas = manifest.sagas ?? []
+    const valuationRules = manifest.valuationRules ?? []
 
-  return (
-    <div className="p-6 space-y-8">
-      {/* Breadcrumbs */}
-      <Breadcrumbs items={[{ label: 'Economy' }]} />
-
+    return (
+      <>
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
@@ -167,6 +165,14 @@ export function EconomyOverviewPage() {
         <h2 className="text-base font-semibold">Version History</h2>
         <ManifestHistoryTable />
       </section>
+      </>
+    )
+  })()
+
+  return (
+    <div className="p-6 space-y-8">
+      <Breadcrumbs items={[{ label: 'Economy' }]} />
+      {content}
     </div>
   )
 }

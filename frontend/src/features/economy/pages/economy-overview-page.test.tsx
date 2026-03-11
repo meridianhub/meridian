@@ -257,4 +257,17 @@ describe('EconomyOverviewPage', () => {
       expect(screen.getByLabelText('Breadcrumb')).toBeInTheDocument()
     })
   })
+
+  it('renders breadcrumbs even during loading state', () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockReturnValue(new Promise(() => {})),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    expect(screen.getByTestId('overview-loading')).toBeInTheDocument()
+    expect(screen.getByLabelText('Breadcrumb')).toBeInTheDocument()
+  })
 })

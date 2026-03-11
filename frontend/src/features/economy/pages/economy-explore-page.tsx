@@ -225,51 +225,58 @@ export function EconomyExplorePage() {
     queryFn: () => manifestHistory.getCurrentManifest({}),
   })
 
-  if (isLoading && !data) return <LoadingSkeleton />
-  if (error && !data) return <ErrorState onRetry={() => void refetch()} />
-  if (!data?.version?.manifest) return <EmptyState />
+  const content = (() => {
+    if (isLoading && !data) return <LoadingSkeleton />
+    if (error && !data) return <ErrorState onRetry={() => void refetch()} />
+    if (!data?.version?.manifest) return <EmptyState />
 
-  const manifest: Manifest = data.version.manifest
-  const sagas = manifest.sagas ?? []
-  const mappings = manifest.mappings ?? []
-  const instruments = manifest.instruments ?? []
-  const accountTypes = manifest.accountTypes ?? []
+    const manifest: Manifest = data.version.manifest
+    const sagas = manifest.sagas ?? []
+    const mappings = manifest.mappings ?? []
+    const instruments = manifest.instruments ?? []
+    const accountTypes = manifest.accountTypes ?? []
+
+    return (
+      <>
+        <div>
+          <h1 className="text-2xl font-semibold">Economy Explorer</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Explore event channels, sagas, API mappings, and resources in your economy.
+          </p>
+        </div>
+
+        <Tabs defaultValue="event-channels">
+          <TabsList>
+            <TabsTrigger value="event-channels">Event Channels</TabsTrigger>
+            <TabsTrigger value="sagas">Sagas</TabsTrigger>
+            <TabsTrigger value="api-endpoints">API Endpoints</TabsTrigger>
+            <TabsTrigger value="resources">Resources</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="event-channels" className="mt-4">
+            <EventChannelsPanel sagas={sagas} />
+          </TabsContent>
+
+          <TabsContent value="sagas" className="mt-4">
+            <SagasPanel sagas={sagas} />
+          </TabsContent>
+
+          <TabsContent value="api-endpoints" className="mt-4">
+            <ApiEndpointsPanel mappings={mappings} />
+          </TabsContent>
+
+          <TabsContent value="resources" className="mt-4">
+            <ResourcesPanel instruments={instruments} accountTypes={accountTypes} />
+          </TabsContent>
+        </Tabs>
+      </>
+    )
+  })()
 
   return (
     <div className="p-6 space-y-6">
       <Breadcrumbs items={[{ label: 'Economy', href: '/economy' }, { label: 'Explore' }]} />
-
-      <div>
-        <h1 className="text-2xl font-semibold">Economy Explorer</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Explore event channels, sagas, API mappings, and resources in your economy.
-        </p>
-      </div>
-
-      <Tabs defaultValue="event-channels">
-        <TabsList>
-          <TabsTrigger value="event-channels">Event Channels</TabsTrigger>
-          <TabsTrigger value="sagas">Sagas</TabsTrigger>
-          <TabsTrigger value="api-endpoints">API Endpoints</TabsTrigger>
-          <TabsTrigger value="resources">Resources</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="event-channels" className="mt-4">
-          <EventChannelsPanel sagas={sagas} />
-        </TabsContent>
-
-        <TabsContent value="sagas" className="mt-4">
-          <SagasPanel sagas={sagas} />
-        </TabsContent>
-
-        <TabsContent value="api-endpoints" className="mt-4">
-          <ApiEndpointsPanel mappings={mappings} />
-        </TabsContent>
-
-        <TabsContent value="resources" className="mt-4">
-          <ResourcesPanel instruments={instruments} accountTypes={accountTypes} />
-        </TabsContent>
-      </Tabs>
+      {content}
     </div>
   )
 }
