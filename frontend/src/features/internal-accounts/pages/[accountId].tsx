@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { MoneyDisplay } from '@/shared/money-display'
-import { AuditTrail, Breadcrumbs, PageShell, PageHeader, DetailSkeleton, ErrorState } from '@/shared'
+import { AuditTrail, Breadcrumbs, PageShell, DetailSkeleton, ErrorState } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -274,17 +274,37 @@ export function InternalAccountDetailPage() {
         ]}
       />
 
-      <PageHeader
-        title={account.accountCode}
-        description={account.name}
-        actions={
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight font-mono">{account.accountCode}</h1>
+            <StatusBadge status={statusLabel} />
+          </div>
+          <p className="text-muted-foreground">{account.name}</p>
+        </div>
+        <div className="flex items-center gap-2">
           <InternalAccountActions
             accountId={account.accountId}
             accountStatus={account.accountStatus}
             queryKey={queryKey}
           />
-        }
-      />
+        </div>
+      </div>
+
+      <Card>
+        <CardContent>
+          <dl className="grid grid-cols-2 gap-4 pt-2 md:grid-cols-4">
+            <DetailField label="Account Code">
+              <span className="font-mono">{account.accountCode}</span>
+            </DetailField>
+            <DetailField label="Name">{account.name}</DetailField>
+            <DetailField label="Type">{account.behaviorClass}</DetailField>
+            <DetailField label="Instrument">
+              <span className="font-mono">{account.instrumentCode}</span>
+            </DetailField>
+          </dl>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="overview">
         <TabsList>
