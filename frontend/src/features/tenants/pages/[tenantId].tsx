@@ -139,6 +139,7 @@ export function TenantDetailPage() {
 
   function handleDeprovision() {
     void updateStatus.mutateAsync(TenantStatus.DEPROVISIONED).then(() => {
+      setSlugConfirmation('')
       setDeprovisionDialogOpen(false)
     })
   }
