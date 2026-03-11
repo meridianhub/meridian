@@ -980,12 +980,16 @@ func wireBFFAuth(identityDB *gorm.DB, logger *slog.Logger) (*platformauth.JWTSig
 
 	tokenTTL := env.GetEnvAsDuration("JWT_TOKEN_TTL", time.Hour)
 
-	handler := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
 		Connector: conn,
 		Signer:    signer,
 		TokenTTL:  tokenTTL,
 		Logger:    logger,
 	})
+	if err != nil {
+		logger.Error("failed to create auth handler, BFF auth disabled", "error", err)
+		return nil, nil
+	}
 
 	logger.Info("BFF auth handler initialized",
 		"issuer", signer.Issuer(),

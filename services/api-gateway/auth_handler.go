@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,6 +11,15 @@ import (
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+)
+
+var (
+	// ErrConnectorRequired is returned when no connector is provided to NewAuthHandler.
+	ErrConnectorRequired = errors.New("auth handler: connector is required")
+	// ErrSignerRequired is returned when no signer is provided to NewAuthHandler.
+	ErrSignerRequired = errors.New("auth handler: signer is required")
+	// ErrLoggerRequired is returned when no logger is provided to NewAuthHandler.
+	ErrLoggerRequired = errors.New("auth handler: logger is required")
 )
 
 // AuthHandler handles BFF password authentication and JWKS serving.
@@ -33,7 +43,17 @@ type AuthHandlerConfig struct {
 }
 
 // NewAuthHandler creates a handler for BFF password authentication.
-func NewAuthHandler(cfg AuthHandlerConfig) *AuthHandler {
+// Returns an error if required dependencies (connector, signer, logger) are nil.
+func NewAuthHandler(cfg AuthHandlerConfig) (*AuthHandler, error) {
+	if cfg.Connector == nil {
+		return nil, ErrConnectorRequired
+	}
+	if cfg.Signer == nil {
+		return nil, ErrSignerRequired
+	}
+	if cfg.Logger == nil {
+		return nil, ErrLoggerRequired
+	}
 	ttl := cfg.TokenTTL
 	if ttl == 0 {
 		ttl = time.Hour
@@ -44,7 +64,7 @@ func NewAuthHandler(cfg AuthHandlerConfig) *AuthHandler {
 		tenantResolver: cfg.TenantResolver,
 		tokenTTL:       ttl,
 		logger:         cfg.Logger,
-	}
+	}, nil
 }
 
 // loginRequest is the JSON body for POST /api/auth/login.

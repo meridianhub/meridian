@@ -86,17 +86,16 @@ func NewJWTSigner(cfg JWTSignerConfig) (*JWTSigner, error) {
 func (s *JWTSigner) SignClaims(customClaims map[string]interface{}, ttl time.Duration) (string, error) {
 	now := time.Now()
 
-	// Build MapClaims with registered claims
-	mapClaims := jwt.MapClaims{
-		"iss": s.issuer,
-		"iat": now.Unix(),
-		"exp": now.Add(ttl).Unix(),
-	}
-
-	// Merge custom claims
+	// Merge custom claims first, then set registered claims to prevent override.
+	mapClaims := jwt.MapClaims{}
 	for k, v := range customClaims {
 		mapClaims[k] = v
 	}
+
+	// Registered claims are set last — callers cannot accidentally override these.
+	mapClaims["iss"] = s.issuer
+	mapClaims["iat"] = now.Unix()
+	mapClaims["exp"] = now.Add(ttl).Unix()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, mapClaims)
 	token.Header["kid"] = s.keyID

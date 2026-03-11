@@ -53,11 +53,12 @@ func TestAuthHandler_LoginSuccess(t *testing.T) {
 		},
 	}
 
-	handler := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
 		Connector: conn,
 		Signer:    signer,
 		Logger:    slog.Default(),
 	})
+	require.NoError(t, err)
 
 	body, _ := json.Marshal(map[string]string{
 		"email":    "user@example.com",
@@ -77,7 +78,7 @@ func TestAuthHandler_LoginSuccess(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp map[string]interface{}
-	err := json.NewDecoder(rec.Body).Decode(&resp)
+	err = json.NewDecoder(rec.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp["access_token"])
 	assert.Equal(t, "Bearer", resp["token_type"])
@@ -103,11 +104,12 @@ func TestAuthHandler_InvalidCredentials(t *testing.T) {
 		},
 	}
 
-	handler := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
 		Connector: conn,
 		Signer:    signer,
 		Logger:    slog.Default(),
 	})
+	require.NoError(t, err)
 
 	body, _ := json.Marshal(map[string]string{
 		"email":    "wrong@example.com",
@@ -125,7 +127,7 @@ func TestAuthHandler_InvalidCredentials(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 
 	var resp map[string]string
-	err := json.NewDecoder(rec.Body).Decode(&resp)
+	err = json.NewDecoder(rec.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.Equal(t, "invalid email or password", resp["error"])
 }
@@ -133,11 +135,12 @@ func TestAuthHandler_InvalidCredentials(t *testing.T) {
 func TestAuthHandler_MissingFields(t *testing.T) {
 	signer := newTestSigner(t)
 
-	handler := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
 		Connector: &stubConnector{},
 		Signer:    signer,
 		Logger:    slog.Default(),
 	})
+	require.NoError(t, err)
 
 	tests := []struct {
 		name string
@@ -166,11 +169,12 @@ func TestAuthHandler_MissingFields(t *testing.T) {
 func TestAuthHandler_NoTenant(t *testing.T) {
 	signer := newTestSigner(t)
 
-	handler := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
 		Connector: &stubConnector{},
 		Signer:    signer,
 		Logger:    slog.Default(),
 	})
+	require.NoError(t, err)
 
 	body, _ := json.Marshal(map[string]string{
 		"email":    "test@example.com",
@@ -187,11 +191,12 @@ func TestAuthHandler_NoTenant(t *testing.T) {
 }
 
 func TestAuthHandler_MethodNotAllowed(t *testing.T) {
-	handler := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
 		Connector: &stubConnector{},
 		Signer:    newTestSigner(t),
 		Logger:    slog.Default(),
 	})
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/login", nil)
 	rec := httptest.NewRecorder()
