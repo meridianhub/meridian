@@ -6,6 +6,7 @@ export interface FilterState {
   type: string
   category: string
   industry: string
+  kind: string
 }
 
 export function useFilterState(): [FilterState, (patch: Partial<FilterState>) => void] {
@@ -16,6 +17,7 @@ export function useFilterState(): [FilterState, (patch: Partial<FilterState>) =>
     type: searchParams.get('type') ?? '',
     category: searchParams.get('category') ?? '',
     industry: searchParams.get('industry') ?? '',
+    kind: searchParams.get('kind') ?? '',
   }
 
   function update(patch: Partial<FilterState>) {
@@ -35,12 +37,38 @@ export function useFilterState(): [FilterState, (patch: Partial<FilterState>) =>
   return [state, update]
 }
 
+/** Derive a human-readable kind from pattern metadata. */
+export function derivePatternKind(item: CookbookItem): string | null {
+  if (item.type !== 'registry:pattern') return null
+  const meta = item.meta as PatternMeta | undefined
+  const dp = meta?.design_pattern ?? ''
+  if (dp.startsWith('foundation')) return 'foundation'
+  const hasSagas = (meta?.provides?.sagas?.length ?? 0) > 0
+  const categories = item.categories ?? []
+  if (categories.includes('gateway') || categories.includes('integration') || categories.includes('payments') || categories.includes('compliance')) {
+    return 'integration'
+  }
+  if (hasSagas) return 'economy'
+  return 'definition'
+}
+
+export const PATTERN_KINDS = [
+  { value: 'economy', label: 'Economy' },
+  { value: 'foundation', label: 'Foundation' },
+  { value: 'integration', label: 'Integration' },
+  { value: 'definition', label: 'Definition' },
+] as const
+
 export function applyFilters(items: CookbookItem[], filters: FilterState): CookbookItem[] {
   return items.filter((item) => {
     if (filters.type) {
       const typeMap: Record<string, string> = { pattern: 'registry:pattern', ui: 'registry:ui' }
       const typeLabel = typeMap[filters.type]
       if (!typeLabel || item.type !== typeLabel) return false
+    }
+
+    if (filters.kind) {
+      if (derivePatternKind(item) !== filters.kind) return false
     }
 
     if (filters.category) {

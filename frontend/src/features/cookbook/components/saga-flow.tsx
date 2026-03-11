@@ -74,6 +74,7 @@ interface StartNodeData {
   sagaName: string
   highlightedSaga: string | null
   sagaColor: string | undefined
+  direction: FlowDirection
   [key: string]: unknown
 }
 
@@ -109,7 +110,7 @@ function StartNode({ data }: { data: StartNodeData }) {
           </span>
         )}
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-emerald-500 !border-0 !w-2 !h-2" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="!bg-emerald-500 !border-0 !w-2 !h-2" />
     </>
   )
 }
@@ -122,6 +123,7 @@ interface StepNodeData {
   sagaName: string
   highlightedSaga: string | null
   sagaColor: string | undefined
+  direction: FlowDirection
   [key: string]: unknown
 }
 
@@ -143,9 +145,9 @@ function StepNode({ data }: { data: StepNodeData }) {
 
   return (
     <>
-      <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
       <div
-        className={`flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[180px] transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
+        className={`flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[140px] sm:min-w-[180px] transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={{
           borderColor,
           ...(activeBorder
@@ -174,7 +176,7 @@ function StepNode({ data }: { data: StepNodeData }) {
           </div>
         )}
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 }
@@ -183,6 +185,7 @@ interface DecisionNodeData {
   label: string
   sagaName: string
   highlightedSaga: string | null
+  direction: FlowDirection
   [key: string]: unknown
 }
 
@@ -190,7 +193,7 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
       <div
         className={`flex items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={{
@@ -203,8 +206,8 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
           {data.label}
         </span>
       </div>
-      <Handle type="source" position={Position.Bottom} id="exit" className="!bg-transparent !border-0 !w-0 !h-0" />
-      <Handle type="source" position={Position.Right} id="no" className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Right : Position.Bottom} id="exit" className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} id="no" className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 }
@@ -213,6 +216,7 @@ interface ExitNodeData {
   label: string
   sagaName: string
   highlightedSaga: string | null
+  direction: FlowDirection
   [key: string]: unknown
 }
 
@@ -220,7 +224,7 @@ function ExitNode({ data }: { data: ExitNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
       <div className={`flex items-center justify-center rounded-full border-2 border-red-500 bg-red-50 px-3 py-1.5 dark:bg-red-950/40 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
         <span className="text-[10px] font-semibold text-red-700 dark:text-red-300">{data.label}</span>
       </div>
@@ -231,6 +235,7 @@ function ExitNode({ data }: { data: ExitNodeData }) {
 interface EndNodeData {
   sagaName: string
   highlightedSaga: string | null
+  direction: FlowDirection
   [key: string]: unknown
 }
 
@@ -238,7 +243,7 @@ function EndNode({ data }: { data: EndNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
       <div className={`flex items-center justify-center rounded-full border-2 border-slate-500 bg-slate-100 px-4 py-2 dark:bg-slate-800 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
         <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">COMPLETED</span>
       </div>
@@ -264,9 +269,11 @@ const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
   sagaEnd: { width: 140, height: 44 },
 }
 
-function layoutNodes(nodes: Node[], edges: Edge[]): Node[] {
+export type FlowDirection = 'LR' | 'TB'
+
+function layoutNodes(nodes: Node[], edges: Edge[], direction: FlowDirection = 'LR'): Node[] {
   const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
-  g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 100 })
+  g.setGraph({ rankdir: direction, nodesep: 60, ranksep: 100 })
 
   for (const n of nodes) {
     const dims = NODE_DIMENSIONS[n.type ?? 'sagaStep'] ?? { width: 200, height: 60 }
@@ -300,6 +307,7 @@ function buildCombinedFlowGraph(
   sagaColors: Map<string, string>,
   highlightedService: string | null,
   highlightedSaga: string | null,
+  direction: FlowDirection = 'LR',
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
@@ -324,6 +332,7 @@ function buildCombinedFlowGraph(
         sagaName: flow.name,
         highlightedSaga,
         sagaColor,
+        direction,
       } satisfies StartNodeData,
     })
 
@@ -332,7 +341,7 @@ function buildCombinedFlowGraph(
         id: `${prefix}end`,
         type: 'sagaEnd',
         position: { x: 0, y: 0 },
-        data: { sagaName: flow.name, highlightedSaga } satisfies EndNodeData,
+        data: { sagaName: flow.name, highlightedSaga, direction } satisfies EndNodeData,
       })
       edges.push({ id: `${prefix}start-end`, source: `${prefix}start`, target: `${prefix}end` })
       continue
@@ -357,6 +366,7 @@ function buildCombinedFlowGraph(
           sagaName: flow.name,
           highlightedSaga,
           sagaColor,
+          direction,
         } satisfies StepNodeData,
       })
 
@@ -376,14 +386,14 @@ function buildCombinedFlowGraph(
           id: decisionId,
           type: 'sagaDecision',
           position: { x: 0, y: 0 },
-          data: { label: step.earlyExit.condition, sagaName: flow.name, highlightedSaga } satisfies DecisionNodeData,
+          data: { label: step.earlyExit.condition, sagaName: flow.name, highlightedSaga, direction } satisfies DecisionNodeData,
         })
 
         nodes.push({
           id: exitId,
           type: 'sagaExit',
           position: { x: 0, y: 0 },
-          data: { label: step.earlyExit.returnStatus, sagaName: flow.name, highlightedSaga } satisfies ExitNodeData,
+          data: { label: step.earlyExit.returnStatus, sagaName: flow.name, highlightedSaga, direction } satisfies ExitNodeData,
         })
 
         edges.push({
@@ -420,7 +430,7 @@ function buildCombinedFlowGraph(
       id: `${prefix}end`,
       type: 'sagaEnd',
       position: { x: 0, y: 0 },
-      data: { sagaName: flow.name, highlightedSaga } satisfies EndNodeData,
+      data: { sagaName: flow.name, highlightedSaga, direction } satisfies EndNodeData,
     })
 
     if (prevId) {
@@ -432,7 +442,7 @@ function buildCombinedFlowGraph(
     }
   }
 
-  return { nodes: layoutNodes(nodes, edges), edges }
+  return { nodes: layoutNodes(nodes, edges, direction), edges }
 }
 
 // --- Component ---
@@ -441,11 +451,13 @@ interface SagaFlowDiagramProps {
   flows: SagaFlow[]
   onStepClick?: (stepName: string, lineNumber: number) => void
   className?: string
+  direction?: FlowDirection
 }
 
-export function SagaFlowDiagram({ flows, onStepClick, className }: SagaFlowDiagramProps) {
+export function SagaFlowDiagram({ flows, onStepClick, className, direction = 'LR' }: SagaFlowDiagramProps) {
   const [highlightedService, setHighlightedService] = useState<string | null>(null)
   const [highlightedSaga, setHighlightedSaga] = useState<string | null>(null)
+  const [legendOpen, setLegendOpen] = useState(true)
 
   const serviceColors = useMemo(() => buildServiceColorMap(flows), [flows])
   const sagaColors = useMemo(() => buildSagaColorMap(flows), [flows])
@@ -459,8 +471,8 @@ export function SagaFlowDiagram({ flows, onStepClick, className }: SagaFlowDiagr
     : null
 
   const { nodes, edges } = useMemo(
-    () => buildCombinedFlowGraph(flows, serviceColors, sagaColors, effectiveServiceHighlight, effectiveSagaHighlight),
-    [flows, serviceColors, sagaColors, effectiveServiceHighlight, effectiveSagaHighlight],
+    () => buildCombinedFlowGraph(flows, serviceColors, sagaColors, effectiveServiceHighlight, effectiveSagaHighlight, direction),
+    [flows, serviceColors, sagaColors, effectiveServiceHighlight, effectiveSagaHighlight, direction],
   )
 
   const services = useMemo(() => [...serviceColors.keys()].sort(), [serviceColors])
@@ -502,68 +514,89 @@ export function SagaFlowDiagram({ flows, onStepClick, className }: SagaFlowDiagr
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
       </ReactFlow>
 
-      {/* Legend panel */}
-      <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm max-w-[200px]">
-        {/* Saga filter (only shown for multi-saga patterns) */}
-        {flows.length > 1 && (
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sagas</span>
-            {flows.map((flow) => {
-              const color = sagaColors.get(flow.name)
-              const isActive = effectiveSagaHighlight === flow.name
-              return (
-                <button
-                  key={flow.name}
-                  type="button"
-                  aria-pressed={isActive}
-                  className={`flex items-center gap-2 cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-muted/50 ${isActive ? 'font-semibold' : ''}`}
-                  onClick={() => {
-                    setHighlightedSaga((prev) => (prev === flow.name ? null : flow.name))
-                    setHighlightedService(null)
-                  }}
-                >
-                  <span
-                    className={`inline-block h-2.5 w-2.5 rounded-sm ${isActive ? 'ring-2 ring-offset-1' : ''}`}
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="text-xs text-muted-foreground truncate">{flow.name}</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
+      {/* Legend panel — collapsible to avoid overlapping diagram on small screens */}
+      <div className="absolute bottom-3 left-3 z-10">
+        {legendOpen ? (
+          <div className="flex flex-col gap-2 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm max-w-[200px]">
+            <button
+              type="button"
+              className="text-[10px] text-muted-foreground/60 self-end hover:text-muted-foreground"
+              onClick={() => setLegendOpen(false)}
+              aria-label="Collapse legend"
+            >
+              hide
+            </button>
+            {/* Saga filter (only shown for multi-saga patterns) */}
+            {flows.length > 1 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sagas</span>
+                {flows.map((flow) => {
+                  const color = sagaColors.get(flow.name)
+                  const isActive = effectiveSagaHighlight === flow.name
+                  return (
+                    <button
+                      key={flow.name}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`flex items-center gap-2 cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-muted/50 ${isActive ? 'font-semibold' : ''}`}
+                      onClick={() => {
+                        setHighlightedSaga((prev) => (prev === flow.name ? null : flow.name))
+                        setHighlightedService(null)
+                      }}
+                    >
+                      <span
+                        className={`inline-block h-2.5 w-2.5 rounded-sm ${isActive ? 'ring-2 ring-offset-1' : ''}`}
+                        style={{ backgroundColor: color }}
+                      />
+                      <span className="text-xs text-muted-foreground truncate">{flow.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
-        {/* Service filter */}
-        {services.length > 0 && (
-          <div className="flex flex-col gap-1">
-            {flows.length > 1 && <div className="border-t my-1" />}
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Services</span>
-            {services.map((svc) => {
-              const colors = serviceColors.get(svc)
-              const isActive = effectiveServiceHighlight === svc
-              return (
-                <button
-                  key={svc}
-                  type="button"
-                  aria-pressed={isActive}
-                  className={`flex items-center gap-2 cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-muted/50 ${isActive ? 'font-semibold' : ''}`}
-                  onClick={() => {
-                    setHighlightedService((prev) => (prev === svc ? null : svc))
-                    setHighlightedSaga(null)
-                  }}
-                >
-                  <span
-                    className={`inline-block h-2.5 w-2.5 rounded-full ${isActive ? 'ring-2 ring-offset-1' : ''}`}
-                    style={{ backgroundColor: colors?.fg }}
-                  />
-                  <span className="text-xs text-muted-foreground">{svc}</span>
-                  {triggerServices.has(svc) && (
-                    <span className="text-[9px] text-muted-foreground/60 italic">trigger</span>
-                  )}
-                </button>
-              )
-            })}
+            {/* Service filter */}
+            {services.length > 0 && (
+              <div className="flex flex-col gap-1">
+                {flows.length > 1 && <div className="border-t my-1" />}
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Services</span>
+                {services.map((svc) => {
+                  const colors = serviceColors.get(svc)
+                  const isActive = effectiveServiceHighlight === svc
+                  return (
+                    <button
+                      key={svc}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`flex items-center gap-2 cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-muted/50 ${isActive ? 'font-semibold' : ''}`}
+                      onClick={() => {
+                        setHighlightedService((prev) => (prev === svc ? null : svc))
+                        setHighlightedSaga(null)
+                      }}
+                    >
+                      <span
+                        className={`inline-block h-2.5 w-2.5 rounded-full ${isActive ? 'ring-2 ring-offset-1' : ''}`}
+                        style={{ backgroundColor: colors?.fg }}
+                      />
+                      <span className="text-xs text-muted-foreground">{svc}</span>
+                      {triggerServices.has(svc) && (
+                        <span className="text-[9px] text-muted-foreground/60 italic">trigger</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
+        ) : (
+          <button
+            type="button"
+            className="rounded-lg border bg-background/95 px-2.5 py-1.5 text-xs text-muted-foreground backdrop-blur-sm shadow-sm hover:text-foreground transition-colors"
+            onClick={() => setLegendOpen(true)}
+            aria-label="Show legend"
+          >
+            Legend
+          </button>
         )}
       </div>
     </div>
