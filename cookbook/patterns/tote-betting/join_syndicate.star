@@ -45,8 +45,11 @@ def join_syndicate():
         fail("syndicate is not open: " + syndicate.attributes.get("status", ""))
 
     # Check capacity before accepting payment.
-    # query_positions filters by correlation_id to find all bets
-    # for this syndicate across all party-scoped BET_POSITION accounts.
+    # Note: This is a best-effort guard — concurrent joins may pass this
+    # check simultaneously (TOCTOU). Production deployments should enforce
+    # atomic capacity limits at the position_keeping layer or use a
+    # distributed lock. The saga's idempotency_key prevents double-charges
+    # if a duplicate join is attempted by the same party.
     step(name="check_capacity")
     existing = position_keeping.query_positions(
         instrument_code="BET_UNIT",

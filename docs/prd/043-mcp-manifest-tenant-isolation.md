@@ -180,6 +180,29 @@ no prior manifest comparison should be performed. This may require:
 - A separate validation endpoint that skips only tenant-state
   comparison
 
+The MCP tool's `InputSchema` should be updated to expose these new
+parameters to LLM callers:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "manifest": { "type": "object", "description": "The manifest to validate" },
+    "mode": {
+      "type": "string",
+      "enum": ["create", "amend"],
+      "default": "create",
+      "description": "create: schema-only validation (no tenant state comparison); amend: validates against existing tenant manifest"
+    },
+    "tenant_id": {
+      "type": "string",
+      "description": "Required for amend mode. The tenant whose manifest to compare against."
+    }
+  },
+  "required": ["manifest"]
+}
+```
+
 ### 2. Explicit tenant context handling in MCP middleware
 
 When no subdomain is present and a tool requires tenant context,
