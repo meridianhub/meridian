@@ -565,6 +565,12 @@ export function ReconciliationDetailPage() {
   if (isError || !run) {
     return (
       <PageShell className="p-6">
+        <Breadcrumbs
+          items={[
+            { label: 'Reconciliation', href: '/reconciliation' },
+            { label: runId },
+          ]}
+        />
         <ErrorState message="Failed to load reconciliation run." />
       </PageShell>
     )
