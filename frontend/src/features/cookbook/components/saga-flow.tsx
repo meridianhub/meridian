@@ -510,7 +510,7 @@ export function SagaFlowDiagram({ flows, onStepClick, className, direction = 'LR
         nodesDraggable={false}
         nodesConnectable={false}
       >
-        <Controls showInteractive={false} position="top-right" />
+        <Controls showInteractive={false} position="bottom-right" />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
       </ReactFlow>
 
