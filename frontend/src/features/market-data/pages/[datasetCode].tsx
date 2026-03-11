@@ -1,9 +1,12 @@
 import { useParams } from 'react-router-dom'
-import { Breadcrumbs } from '@/shared'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
+import { PageShell } from '@/shared/page-shell'
+import { PageHeader } from '@/shared/page-header'
+import { DetailSkeleton } from '@/shared/detail-skeleton'
+import { ErrorState } from '@/shared/error-state'
 import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/shared/status-badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { useDatasetDetail, useDatasetObservations } from '../hooks'
 
@@ -162,21 +165,24 @@ export function DatasetDetailPage() {
   const datasetQuery = useDatasetDetail(datasetCode)
   const observationsQuery = useDatasetObservations(datasetCode)
 
+  const isLoading = datasetQuery.isLoading
+  const isError = datasetQuery.isError
+
   if (!tenantSlug) {
     return (
-      <div className="p-6">
+      <PageShell>
         <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
-        <p className="mt-4 text-muted-foreground">No tenant selected.</p>
-      </div>
+        <p className="text-muted-foreground">No tenant selected.</p>
+      </PageShell>
     )
   }
 
   if (!datasetCode) {
     return (
-      <div className="p-6">
+      <PageShell>
         <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
-        <p className="mt-4 text-muted-foreground">No dataset selected.</p>
-      </div>
+        <p className="text-muted-foreground">No dataset selected.</p>
+      </PageShell>
     )
   }
 
@@ -213,102 +219,97 @@ export function DatasetDetailPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <PageShell>
       <Breadcrumbs
         items={[
           { label: 'Market Data', href: '/market-data' },
           { label: dataset?.displayName || datasetCode },
         ]}
       />
-      <div>
-        {datasetQuery.isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-64" />
-            <Skeleton className="h-5 w-48" />
-          </div>
-        ) : (
-          <>
-            <h1 className="text-2xl font-semibold">
-              {dataset?.displayName || datasetCode}
-            </h1>
-            {dataset && (
-              <div className="mt-2 flex items-center gap-3">
+
+      {isLoading && <DetailSkeleton />}
+      {isError && <ErrorState onRetry={() => datasetQuery.refetch()} />}
+
+      {dataset && (
+        <>
+          <PageHeader
+            title={dataset.displayName || datasetCode}
+            description={dataset.description || undefined}
+            actions={
+              <div className="flex items-center gap-3">
                 <span className="font-mono text-sm text-muted-foreground">{dataset.code}</span>
                 <StatusBadge status={statusLabel(dataset.status)} />
                 <span className="text-sm text-muted-foreground">
                   Unit: <span className="font-mono">{dataset.unit}</span>
                 </span>
               </div>
-            )}
-            {dataset?.description && (
-              <p className="mt-2 text-sm text-muted-foreground">{dataset.description}</p>
-            )}
-          </>
-        )}
-      </div>
+            }
+          />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Recent Observations
-            {observations.length > 0 && (
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                ({observations.length} shown)
-              </span>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {observationsQuery.isLoading ? (
-            <div
-              data-testid="chart-skeleton"
-              className="h-48 animate-pulse rounded bg-muted"
-            />
-          ) : (
-            <ObservationChart
-              points={points}
-              unit={dataset?.unit ?? ''}
-            />
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Recent Observations
+                {observations.length > 0 && (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    ({observations.length} shown)
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {observationsQuery.isLoading ? (
+                <div
+                  data-testid="chart-skeleton"
+                  className="h-48 animate-pulse rounded bg-muted"
+                />
+              ) : (
+                <ObservationChart
+                  points={points}
+                  unit={dataset.unit ?? ''}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          {observations.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Latest Values</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {observations.slice(0, 10).map((obs) => {
+                    const seconds =
+                      obs.observedAt
+                        ? typeof obs.observedAt.seconds === 'bigint'
+                          ? Number(obs.observedAt.seconds)
+                          : obs.observedAt.seconds
+                        : null
+                    return (
+                      <div
+                        key={obs.id}
+                        className="flex items-center justify-between rounded border p-2 text-sm"
+                      >
+                        <span className="font-mono font-medium">{obs.value}</span>
+                        <span className="text-muted-foreground">
+                          {obs.resolutionKeyValue && (
+                            <span className="mr-3 font-mono text-xs">{obs.resolutionKeyValue}</span>
+                          )}
+                          <StatusBadge status={qualityLabel(obs.quality)} />
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {seconds ? format(new Date(seconds * 1000), 'MMM d, HH:mm') : '—'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
-
-      {observations.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Latest Values</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {observations.slice(0, 10).map((obs) => {
-                const seconds =
-                  obs.observedAt
-                    ? typeof obs.observedAt.seconds === 'bigint'
-                      ? Number(obs.observedAt.seconds)
-                      : obs.observedAt.seconds
-                    : null
-                return (
-                  <div
-                    key={obs.id}
-                    className="flex items-center justify-between rounded border p-2 text-sm"
-                  >
-                    <span className="font-mono font-medium">{obs.value}</span>
-                    <span className="text-muted-foreground">
-                      {obs.resolutionKeyValue && (
-                        <span className="mr-3 font-mono text-xs">{obs.resolutionKeyValue}</span>
-                      )}
-                      <StatusBadge status={qualityLabel(obs.quality)} />
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {seconds ? format(new Date(seconds * 1000), 'MMM d, HH:mm') : '—'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
+        </>
       )}
-    </div>
+    </PageShell>
   )
 }

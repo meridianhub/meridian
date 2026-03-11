@@ -1,6 +1,8 @@
 import * as React from 'react'
 import { useParams } from 'react-router-dom'
-import { Breadcrumbs } from '@/shared'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
+import { PageShell } from '@/shared/page-shell'
+import { ErrorState } from '@/shared/error-state'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -425,7 +427,7 @@ export function MappingDetailPage() {
   const { mappingId } = useParams<{ mappingId: string }>()
   const clients = useApiClients()
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['mapping', mappingId],
     queryFn: async () => {
       const response = await clients.mapping.getMapping({ id: mappingId! })
@@ -438,62 +440,49 @@ export function MappingDetailPage() {
     return <div className="p-6 text-destructive">Mapping ID not found</div>
   }
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Breadcrumbs items={[{ label: 'Gateway Mappings', href: '/mappings' }, { label: 'Loading...' }]} />
-        <DetailSkeleton fieldCount={4} tabCount={3} showBackNav={false} />
-      </div>
-    )
-  }
-
-  if (isError || !data) {
-    return (
-      <div className="space-y-6">
-        <Breadcrumbs items={[{ label: 'Gateway Mappings', href: '/mappings' }, { label: 'Error' }]} />
-        <Card className="p-6">
-          <p className="text-destructive">Failed to load mapping.</p>
-        </Card>
-      </div>
-    )
-  }
-
   return (
-    <div className="space-y-6">
+    <PageShell>
       <Breadcrumbs
         items={[
           { label: 'Gateway Mappings', href: '/mappings' },
-          { label: data.name },
+          { label: data?.name || (isLoading ? 'Loading...' : 'Error') },
         ]}
       />
 
-      <Card>
-        <MappingHeader mapping={data} />
-      </Card>
+      {isLoading && <DetailSkeleton fieldCount={4} tabCount={3} showBackNav={false} />}
+      {isError && <ErrorState onRetry={() => refetch()} />}
 
-      <Card>
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 border-b rounded-none">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="field-mapper">Field Mapper</TabsTrigger>
-            <TabsTrigger value="dry-run">Dry Run</TabsTrigger>
-          </TabsList>
+      {data && (
+        <>
+          <Card>
+            <MappingHeader mapping={data} />
+          </Card>
 
-          <div className="p-6">
-            <TabsContent value="overview" className="mt-0">
-              <OverviewTab mapping={data} />
-            </TabsContent>
+          <Card>
+            <Tabs defaultValue="overview" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 border-b rounded-none">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="field-mapper">Field Mapper</TabsTrigger>
+                <TabsTrigger value="dry-run">Dry Run</TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="field-mapper" className="mt-0">
-              <FieldMapperTab mapping={data} />
-            </TabsContent>
+              <div className="p-6">
+                <TabsContent value="overview" className="mt-0">
+                  <OverviewTab mapping={data} />
+                </TabsContent>
 
-            <TabsContent value="dry-run" className="mt-0">
-              <DryRunTab mapping={data} />
-            </TabsContent>
-          </div>
-        </Tabs>
-      </Card>
-    </div>
+                <TabsContent value="field-mapper" className="mt-0">
+                  <FieldMapperTab mapping={data} />
+                </TabsContent>
+
+                <TabsContent value="dry-run" className="mt-0">
+                  <DryRunTab mapping={data} />
+                </TabsContent>
+              </div>
+            </Tabs>
+          </Card>
+        </>
+      )}
+    </PageShell>
   )
 }

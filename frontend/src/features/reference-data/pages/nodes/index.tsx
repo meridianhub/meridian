@@ -1,6 +1,8 @@
 import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
+import { PageShell } from '@/shared/page-shell'
+import { PageHeader } from '@/shared/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -124,19 +126,17 @@ export function NodesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Nodes</h1>
-          <p className="mt-2 text-muted-foreground">
-            Hierarchical reference data node browser with bi-temporal query support.
-          </p>
-        </div>
-        <Button onClick={handleAddRootNode} aria-label="Add Node">
-          <Plus className="h-4 w-4 mr-1" />
-          Add Node
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Nodes"
+        description="Hierarchical reference data node browser with bi-temporal query support."
+        actions={
+          <Button onClick={handleAddRootNode} aria-label="Add Node">
+            <Plus className="h-4 w-4 mr-1" />
+            Add Node
+          </Button>
+        }
+      />
 
       <CreateNodeDialog
         open={createDialogOpen}
@@ -186,6 +186,6 @@ export function NodesPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   )
 }
