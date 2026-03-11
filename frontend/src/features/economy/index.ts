@@ -20,4 +20,4 @@ export { ValidationPanel } from './components/validation-panel'
 export { ManifestDiffViewer } from './components/manifest-diff'
 
 // Lib
-export { handlerAutocomplete, buildHandlerCompletionSource, generateParameterTemplate } from './lib/handler-autocomplete'
+export { handlerAutocomplete, buildHandlerCompletionSource, generateParameterTemplate, generateHandlerCallTemplate } from './lib/handler-autocomplete'

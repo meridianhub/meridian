@@ -3,17 +3,31 @@ import type { Extension } from '@codemirror/state'
 import type { Handler, HandlerSchemaResponse } from '@/shared/handler-reference'
 
 /**
- * Generates a Starlark call template for a handler.
+ * Generates a Starlark call template for a handler including the service name.
  * Example: position_keeping.initiate_log(amount="", direction="DEBIT")
  */
 export function generateParameterTemplate(serviceName: string, handler: Handler): string {
-  const params = handler.params
+  const params = buildParamString(handler)
+  return `${serviceName}.${handler.name}(${params})`
+}
+
+/**
+ * Generates only the handler call portion (no service name prefix).
+ * Used as the `apply` value in handler completions where the service name
+ * and dot are already present in the document.
+ * Example: initiate_log(amount="", direction="DEBIT")
+ */
+export function generateHandlerCallTemplate(handler: Handler): string {
+  return `${handler.name}(${buildParamString(handler)})`
+}
+
+function buildParamString(handler: Handler): string {
+  return handler.params
     .map((p) => {
       const value = p.type === 'enum' ? `"${p.enumValues[0] ?? ''}"` : '""'
       return `${p.name}=${value}`
     })
     .join(', ')
-  return `${serviceName}.${handler.name}(${params})`
 }
 
 /**
@@ -22,6 +36,8 @@ export function generateParameterTemplate(serviceName: string, handler: Handler)
  * Provides two levels of completion:
  * 1. Service name completions (type: 'namespace') — triggered when typing a word
  * 2. Handler completions (type: 'function') — triggered after "serviceName."
+ *    The `apply` string only includes the handler call (no service prefix) since
+ *    the service name and dot are already in the document before the cursor.
  *
  * @param schema The handler schema, or null if not yet loaded
  * @returns A CompletionSource for use with autocompletion()
@@ -39,7 +55,7 @@ export function buildHandlerCompletionSource(schema: HandlerSchemaResponse | nul
       const handlerPrefix = text.slice(dotIndex + 1)
 
       const service = schema.services.find((s) => s.serviceName === serviceName)
-      if (!service) return { from: dotMatch.from, options: [] }
+      if (!service) return { from: dotMatch.from + dotIndex + 1, options: [] }
 
       const options: Completion[] = service.handlers
         .filter((h) => h.name.startsWith(handlerPrefix))
@@ -47,13 +63,12 @@ export function buildHandlerCompletionSource(schema: HandlerSchemaResponse | nul
           label: h.name,
           type: 'function',
           detail: h.description || undefined,
-          // apply replaces the entire "serviceName.partialHandler" range so
-          // the completed text becomes "serviceName.handlerName(params)"
-          apply: generateParameterTemplate(serviceName, h),
+          // apply only inserts the handler call — the service name and dot are
+          // already in the document, so from is set to after the dot
+          apply: generateHandlerCallTemplate(h),
         }))
 
-      // Replace from the start of "serviceName." so the full template is inserted
-      return { from: dotMatch.from, options }
+      return { from: dotMatch.from + dotIndex + 1, options }
     }
 
     // Service name completion — triggered when typing a word (no dot yet)

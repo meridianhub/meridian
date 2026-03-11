@@ -5,6 +5,7 @@ import type { HandlerSchemaResponse } from '@/shared/handler-reference'
 import {
   buildHandlerCompletionSource,
   generateParameterTemplate,
+  generateHandlerCallTemplate,
 } from './handler-autocomplete'
 
 const mockSchema: HandlerSchemaResponse = {
@@ -81,6 +82,18 @@ describe('generateParameterTemplate', () => {
     const handler = mockSchema.services[0].handlers[1] // finalize_log
     const result = generateParameterTemplate('position_keeping', handler)
     expect(result).toBe('position_keeping.finalize_log(log_id="")')
+  })
+})
+
+describe('generateHandlerCallTemplate', () => {
+  it('generates handler call without service name prefix', () => {
+    const handler = mockSchema.services[0].handlers[0] // initiate_log
+    expect(generateHandlerCallTemplate(handler)).toBe('initiate_log(amount="", direction="DEBIT")')
+  })
+
+  it('generates bare call for handler with no params', () => {
+    const handler = mockSchema.services[0].handlers[2] // no_params
+    expect(generateHandlerCallTemplate(handler)).toBe('no_params()')
   })
 })
 
@@ -177,32 +190,32 @@ describe('buildHandlerCompletionSource', () => {
       }
     })
 
-    it('apply inserts full parameter template', async () => {
+    it('apply inserts handler call without service name prefix', async () => {
+      // apply must NOT include the service name — it's already in the document
       const ctx = makeContext('position_keeping.')
       const result = await source(ctx)
       expect(result).not.toBeNull()
       const handler = result!.options.find((o) => o.label === 'initiate_log')
-      expect(handler?.apply).toContain('position_keeping.initiate_log(')
-      expect(handler?.apply).toContain('amount=')
-      expect(handler?.apply).toContain('direction=')
+      expect(handler?.apply).toBe('initiate_log(amount="", direction="DEBIT")')
+      expect(handler?.apply).not.toContain('position_keeping')
     })
 
-    it('apply for handler with no params inserts empty call', async () => {
+    it('apply for handler with no params inserts bare call', async () => {
       const ctx = makeContext('position_keeping.')
       const result = await source(ctx)
       expect(result).not.toBeNull()
       const handler = result!.options.find((o) => o.label === 'no_params')
-      expect(handler?.apply).toBe('position_keeping.no_params()')
+      expect(handler?.apply).toBe('no_params()')
     })
 
-    it('from starts at beginning of service name to avoid duplicate prefix on apply', async () => {
-      // "position_keeping." starts at position 0 in doc "position_keeping."
-      const ctx = makeContext('position_keeping.')
+    it('from is set after the dot so serviceName. in document is preserved', async () => {
+      // doc: "position_keeping." — dot is at index 16, so from should be 17
+      const doc = 'position_keeping.'
+      const ctx = makeContext(doc)
       const result = await source(ctx)
       expect(result).not.toBeNull()
-      // from must be 0 (start of "position_keeping.") so that apply replaces
-      // the whole "position_keeping." and not just the part after the dot
-      expect(result!.from).toBe(0)
+      // from must be right after the dot (dotIndex + 1 = 17)
+      expect(result!.from).toBe(doc.indexOf('.') + 1)
     })
   })
 
