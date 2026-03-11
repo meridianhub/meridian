@@ -75,8 +75,8 @@ function mockApiClients(overrides: Record<string, unknown> = {}) {
 }
 
 const mockNavigate = vi.fn()
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
   return { ...actual, useNavigate: () => mockNavigate }
 })
 
