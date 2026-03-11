@@ -38,8 +38,11 @@ export function CallbackPage() {
     // Clear fragment from URL for security (don't leave JWT in browser history)
     window.history.replaceState(null, '', window.location.pathname)
     login(token)
-    navigate('/', { replace: true })
-  }, [token, login, navigate])
+
+    // Navigate to the return_url if the BFF passed one through, otherwise go home
+    const returnUrl = searchParams.get('return_url')
+    navigate(returnUrl || '/', { replace: true })
+  }, [token, login, navigate, searchParams])
 
   if (error) {
     return (

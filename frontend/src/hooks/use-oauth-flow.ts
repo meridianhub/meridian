@@ -6,7 +6,9 @@ import { useCallback } from 'react'
  */
 export function useOAuthFlow() {
   const startFlow = useCallback((connectorId: string) => {
-    const returnUrl = encodeURIComponent(window.location.pathname)
+    const returnUrl = encodeURIComponent(
+      `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    )
     window.location.href = `/api/auth/sso/${encodeURIComponent(connectorId)}?return_url=${returnUrl}`
   }, [])
 

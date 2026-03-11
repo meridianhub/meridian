@@ -16,6 +16,7 @@ function renderCallback(initialUrl: string) {
             <Route path="/callback" element={<CallbackPage />} />
             <Route path="/login" element={<div data-testid="login-page">Login</div>} />
             <Route path="/" element={<div data-testid="home-page">Home</div>} />
+            <Route path="/dashboard" element={<div data-testid="dashboard-page">Dashboard</div>} />
           </Routes>
         </MemoryRouter>
       </AuthProvider>
@@ -78,6 +79,23 @@ describe('CallbackPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('server_error')).toBeInTheDocument()
+    })
+  })
+
+  it('navigates to return_url when provided', async () => {
+    const validJwt = [
+      btoa(JSON.stringify({ alg: 'none', typ: 'JWT' })),
+      btoa(JSON.stringify({ sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600, iss: 'dex', aud: 'meridian-service' })),
+      'sig',
+    ].join('.')
+
+    window.location.hash = `#access_token=${validJwt}`
+    vi.spyOn(window.history, 'replaceState').mockImplementation(() => {})
+
+    renderCallback('/callback?return_url=/dashboard')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-page')).toBeInTheDocument()
     })
   })
 
