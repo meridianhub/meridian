@@ -88,12 +88,10 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve tenant from subdomain (or X-Tenant-Slug in dev mode).
-	// The tenant resolver stores the resolved tenant ID in the request context.
+	// Tenant is resolved by the tenant resolver middleware (from subdomain or X-Tenant-Slug header).
 	ctx := r.Context()
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
-		// Tenant wasn't resolved by middleware — try to resolve from request directly
 		h.logger.WarnContext(ctx, "auth: no tenant in context for login request",
 			"host", r.Host)
 		writeJSON(w, http.StatusBadRequest, map[string]string{
