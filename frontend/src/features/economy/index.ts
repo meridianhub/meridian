@@ -18,6 +18,8 @@ export { EditorGraphPanel } from './components/editor-graph-panel'
 export { ManifestEditor } from './components/manifest-editor'
 export { ValidationPanel } from './components/validation-panel'
 export { ManifestDiffViewer } from './components/manifest-diff'
+export { DeployWizard } from './components/deploy-wizard'
+export type { DeployWizardProps } from './components/deploy-wizard'
 
 // Lib
 export { handlerAutocomplete, buildHandlerCompletionSource, generateParameterTemplate, generateHandlerCallTemplate } from './lib/handler-autocomplete'
