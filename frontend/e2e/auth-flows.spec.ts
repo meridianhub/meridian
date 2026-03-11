@@ -1,7 +1,25 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { test as authTest, expect as authExpect, navigateTo, buildDevToken } from './fixtures'
 
 type DevWindow = Window & { __DEV_LOGIN__?: (token: string) => void }
+
+/**
+ * Inject a token via __DEV_LOGIN__ and navigate to / to render the authenticated app.
+ */
+async function injectTokenAndNavigate(page: Page, token: string) {
+  await page.goto('/')
+  await page.waitForFunction(
+    () => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function',
+  )
+  await page.evaluate((t) => {
+    ;(window as unknown as DevWindow).__DEV_LOGIN__?.(t)
+  }, token)
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await page.waitForSelector('main', { timeout: 10_000 })
+}
 
 /**
  * Auth flow E2E tests covering:
@@ -16,21 +34,7 @@ test.describe('Role normalization', () => {
   authTest(
     'UPPERCASE roles are normalized - platform admin can access dashboard',
     async ({ page }) => {
-      const token = buildDevToken('platform-admin', { uppercaseRoles: true })
-
-      await page.goto('/')
-      await page.waitForFunction(
-        () => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function',
-      )
-      await page.evaluate((t) => {
-        ;(window as unknown as DevWindow).__DEV_LOGIN__?.(t)
-      }, token)
-      await page.evaluate(() => {
-        window.history.pushState({}, '', '/')
-        window.dispatchEvent(new PopStateEvent('popstate'))
-      })
-
-      await authExpect(page.locator('main')).toBeVisible({ timeout: 10_000 })
+      await injectTokenAndNavigate(page, buildDevToken('platform-admin', { uppercaseRoles: true }))
       await authExpect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
     },
   )
@@ -38,21 +42,7 @@ test.describe('Role normalization', () => {
   authTest(
     'UPPERCASE roles are normalized - tenant user sees tenant context',
     async ({ page }) => {
-      const token = buildDevToken('tenant-user', { uppercaseRoles: true })
-
-      await page.goto('/')
-      await page.waitForFunction(
-        () => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function',
-      )
-      await page.evaluate((t) => {
-        ;(window as unknown as DevWindow).__DEV_LOGIN__?.(t)
-      }, token)
-      await page.evaluate(() => {
-        window.history.pushState({}, '', '/')
-        window.dispatchEvent(new PopStateEvent('popstate'))
-      })
-
-      await authExpect(page.locator('main')).toBeVisible({ timeout: 10_000 })
+      await injectTokenAndNavigate(page, buildDevToken('tenant-user', { uppercaseRoles: true }))
       await authExpect(page.getByText(/Overview for dev-tenant/)).toBeVisible({ timeout: 15_000 })
     },
   )
@@ -60,21 +50,7 @@ test.describe('Role normalization', () => {
   authTest(
     'UPPERCASE platform-admin role grants access to tenant list',
     async ({ page }) => {
-      const token = buildDevToken('platform-admin', { uppercaseRoles: true })
-
-      await page.goto('/')
-      await page.waitForFunction(
-        () => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function',
-      )
-      await page.evaluate((t) => {
-        ;(window as unknown as DevWindow).__DEV_LOGIN__?.(t)
-      }, token)
-      await page.evaluate(() => {
-        window.history.pushState({}, '', '/')
-        window.dispatchEvent(new PopStateEvent('popstate'))
-      })
-
-      await authExpect(page.locator('main')).toBeVisible({ timeout: 10_000 })
+      await injectTokenAndNavigate(page, buildDevToken('platform-admin', { uppercaseRoles: true }))
 
       await navigateTo(page, '/tenants')
       await authExpect(
