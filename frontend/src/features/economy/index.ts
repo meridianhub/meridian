@@ -23,3 +23,5 @@ export type { DeployWizardProps } from './components/deploy-wizard'
 
 // Lib
 export { handlerAutocomplete, buildHandlerCompletionSource, generateParameterTemplate, generateHandlerCallTemplate } from './lib/handler-autocomplete'
+export { useDraftStore, mergeDraftChanges } from './lib/draft-manager'
+export type { DraftChange } from './lib/draft-manager'
