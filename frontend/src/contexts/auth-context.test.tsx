@@ -69,6 +69,44 @@ describe('parseJWT', () => {
     expect(claims!.tenantId).toBeUndefined()
     expect(claims!.roles).toContain('platform-admin')
   })
+
+  it('uses groups as effective roles when roles is empty', () => {
+    const token = createTestToken({
+      userId: 'dex-user',
+      roles: [],
+      groups: ['platform-admin', 'operator'],
+      iss: 'dex',
+      aud: 'meridian',
+    })
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.roles).toEqual(['platform-admin', 'operator'])
+  })
+
+  it('prefers roles over groups when both present', () => {
+    const token = createTestToken({
+      userId: 'dex-user',
+      roles: ['admin'],
+      groups: ['platform-admin'],
+      iss: 'dex',
+      aud: 'meridian',
+    })
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.roles).toEqual(['admin'])
+  })
+
+  it('returns empty roles when both roles and groups absent', () => {
+    const token = createTestToken({
+      userId: 'dex-user',
+      roles: [],
+      iss: 'dex',
+      aud: 'meridian',
+    })
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.roles).toEqual([])
+  })
 })
 
 describe('getUserLens', () => {

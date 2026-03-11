@@ -1788,3 +1788,160 @@ func TestService_InitiateTenant_SlugRepositoryError(t *testing.T) {
 func stringPtr(s string) *string {
 	return &s
 }
+
+// ctxWithClaims returns a context with the given auth claims injected.
+func ctxWithClaims(claims *auth.Claims) context.Context {
+	return context.WithValue(context.Background(), auth.ClaimsContextKey, claims)
+}
+
+func TestService_ListTenants_RBAC(t *testing.T) {
+	t.Run("platform-admin sees all tenants", func(t *testing.T) {
+		svc, _, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		// Create tenants
+		for _, id := range []string{"rbac_a", "rbac_b", "rbac_c"} {
+			_, err := svc.InitiateTenant(ctx, &pb.InitiateTenantRequest{
+				TenantId:        id,
+				DisplayName:     "Tenant " + id,
+				SettlementAsset: "GBP",
+			})
+			require.NoError(t, err)
+		}
+
+		// Platform admin context
+		adminCtx := ctxWithClaims(&auth.Claims{
+			UserID:   "admin-user",
+			TenantID: "",
+			Roles:    []string{auth.RolePlatformAdmin.String()},
+		})
+
+		resp, err := svc.ListTenants(adminCtx, &pb.ListTenantsRequest{PageSize: 10})
+		require.NoError(t, err)
+		assert.Len(t, resp.Tenants, 3)
+	})
+
+	t.Run("super-admin sees all tenants", func(t *testing.T) {
+		svc, _, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		for _, id := range []string{"rbac_d", "rbac_e"} {
+			_, err := svc.InitiateTenant(ctx, &pb.InitiateTenantRequest{
+				TenantId:        id,
+				DisplayName:     "Tenant " + id,
+				SettlementAsset: "GBP",
+			})
+			require.NoError(t, err)
+		}
+
+		superCtx := ctxWithClaims(&auth.Claims{
+			UserID: "super-user",
+			Roles:  []string{auth.RoleSuperAdmin.String()},
+		})
+
+		resp, err := svc.ListTenants(superCtx, &pb.ListTenantsRequest{PageSize: 10})
+		require.NoError(t, err)
+		assert.Len(t, resp.Tenants, 2)
+	})
+
+	t.Run("tenant user sees only own tenant", func(t *testing.T) {
+		svc, _, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		for _, id := range []string{"rbac_mine", "rbac_other"} {
+			_, err := svc.InitiateTenant(ctx, &pb.InitiateTenantRequest{
+				TenantId:        id,
+				DisplayName:     "Tenant " + id,
+				SettlementAsset: "GBP",
+			})
+			require.NoError(t, err)
+		}
+
+		tenantCtx := ctxWithClaims(&auth.Claims{
+			UserID:   "tenant-user",
+			TenantID: "rbac_mine",
+			Roles:    []string{auth.RoleOperator.String()},
+		})
+
+		resp, err := svc.ListTenants(tenantCtx, &pb.ListTenantsRequest{PageSize: 10})
+		require.NoError(t, err)
+		assert.Len(t, resp.Tenants, 1)
+		assert.Equal(t, "rbac_mine", resp.Tenants[0].TenantId)
+	})
+
+	t.Run("user without tenant claim gets empty list", func(t *testing.T) {
+		svc, _, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		_, err := svc.InitiateTenant(ctx, &pb.InitiateTenantRequest{
+			TenantId:        "rbac_exists",
+			DisplayName:     "Existing",
+			SettlementAsset: "GBP",
+		})
+		require.NoError(t, err)
+
+		noTenantCtx := ctxWithClaims(&auth.Claims{
+			UserID: "orphan-user",
+			Roles:  []string{auth.RoleOperator.String()},
+		})
+
+		resp, err := svc.ListTenants(noTenantCtx, &pb.ListTenantsRequest{PageSize: 10})
+		require.NoError(t, err)
+		assert.Len(t, resp.Tenants, 0)
+	})
+
+	t.Run("no claims in context lists all (backwards compat)", func(t *testing.T) {
+		svc, _, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		for _, id := range []string{"rbac_noauth_a", "rbac_noauth_b"} {
+			_, err := svc.InitiateTenant(ctx, &pb.InitiateTenantRequest{
+				TenantId:        id,
+				DisplayName:     "Tenant " + id,
+				SettlementAsset: "GBP",
+			})
+			require.NoError(t, err)
+		}
+
+		// No claims in context - should fall through to full list
+		resp, err := svc.ListTenants(ctx, &pb.ListTenantsRequest{PageSize: 10})
+		require.NoError(t, err)
+		assert.Len(t, resp.Tenants, 2)
+	})
+
+	t.Run("groups-to-roles fallback grants admin access", func(t *testing.T) {
+		svc, _, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		for _, id := range []string{"rbac_groups_a", "rbac_groups_b"} {
+			_, err := svc.InitiateTenant(ctx, &pb.InitiateTenantRequest{
+				TenantId:        id,
+				DisplayName:     "Tenant " + id,
+				SettlementAsset: "GBP",
+			})
+			require.NoError(t, err)
+		}
+
+		// User with groups but no roles - groups contain platform-admin
+		groupsCtx := ctxWithClaims(&auth.Claims{
+			UserID: "dex-user",
+			Groups: []string{auth.RolePlatformAdmin.String()},
+		})
+
+		resp, err := svc.ListTenants(groupsCtx, &pb.ListTenantsRequest{PageSize: 10})
+		require.NoError(t, err)
+		assert.Len(t, resp.Tenants, 2)
+	})
+}

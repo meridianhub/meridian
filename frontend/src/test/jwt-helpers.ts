@@ -11,6 +11,7 @@ interface TokenPayload {
   userId?: string
   tenantId?: string
   roles?: string[]
+  groups?: string[]
   scopes?: string[]
   exp?: number
   iss?: string
