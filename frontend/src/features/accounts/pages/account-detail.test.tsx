@@ -55,7 +55,7 @@ describe('AccountDetailPage - loading and error states', () => {
 
     renderDetailPage()
 
-    expect(screen.getByTestId('account-detail-skeleton')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-skeleton')).toBeInTheDocument()
   })
 
   it('shows error state for failed account fetch', async () => {

@@ -3,7 +3,10 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useNavigate } from 'react-router-dom'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
-import { TimeDisplay } from '@/shared'
+import { TimeDisplay } from '@/shared/time-display'
+import { PageShell } from '@/shared/page-shell'
+import { PageHeader } from '@/shared/page-header'
+import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useDatasetsTable } from '../hooks'
 import { CATEGORY_OPTIONS, STATUS_OPTIONS } from './constants'
@@ -118,40 +121,38 @@ export function MarketDataPage() {
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Market Data</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Market data sets with price observations for FX rates, interest rates, energy prices, and more.
-          </p>
-        </div>
-        <Button onClick={() => setRegisterOpen(true)}>Register Dataset</Button>
-      </div>
-
-      <DataTable<DataSetRow>
-        queryKey={queryKey}
-        queryFn={queryFn}
-        columns={columns}
-        pageSize={25}
-        filters={[
-          {
-            field: 'category',
-            label: 'Category',
-            type: 'select',
-            options: CATEGORY_OPTIONS,
-          },
-          {
-            field: 'status',
-            label: 'Status',
-            type: 'select',
-            options: STATUS_OPTIONS,
-          },
-        ]}
-        onRowClick={(row) => navigate(`/market-data/${row.code}`)}
+    <PageShell>
+      <PageHeader
+        title="Market Data"
+        description="Market data sets with price observations for FX rates, interest rates, energy prices, and more."
+        actions={<Button onClick={() => setRegisterOpen(true)}>Register Dataset</Button>}
       />
 
+      <Card className="p-6">
+        <DataTable<DataSetRow>
+          queryKey={queryKey}
+          queryFn={queryFn}
+          columns={columns}
+          pageSize={25}
+          filters={[
+            {
+              field: 'category',
+              label: 'Category',
+              type: 'select',
+              options: CATEGORY_OPTIONS,
+            },
+            {
+              field: 'status',
+              label: 'Status',
+              type: 'select',
+              options: STATUS_OPTIONS,
+            },
+          ]}
+          onRowClick={(row) => navigate(`/market-data/${row.code}`)}
+        />
+      </Card>
+
       <RegisterDataSetDialog open={registerOpen} onOpenChange={setRegisterOpen} />
-    </div>
+    </PageShell>
   )
 }

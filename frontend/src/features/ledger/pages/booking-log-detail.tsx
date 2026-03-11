@@ -6,7 +6,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import { StatusBadge } from '@/shared/status-badge'
-import { TimeDisplay, EntityLink, Breadcrumbs } from '@/shared'
+import { TimeDisplay, EntityLink, Breadcrumbs, DetailSkeleton, ErrorState, PageShell } from '@/shared'
 import { accountEntityType } from '@/shared/account-entity-type'
 import { MoneyDisplay } from '@/shared/money-display'
 import {
@@ -164,26 +164,24 @@ export function BookingLogDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
+      <PageShell>
         <Breadcrumbs items={[{ label: 'Ledger', href: '/ledger' }, { label: 'Loading...' }]} />
-        <div className="h-32 animate-pulse rounded-lg bg-muted" />
-      </div>
+        <DetailSkeleton fieldCount={4} tabCount={0} showBackNav={false} />
+      </PageShell>
     )
   }
 
   if (isError || !data) {
     return (
-      <div className="space-y-6">
+      <PageShell>
         <Breadcrumbs items={[{ label: 'Ledger', href: '/ledger' }, { label: 'Error' }]} />
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          Failed to load booking log. Please try again.
-        </div>
-      </div>
+        <ErrorState title="Failed to load booking log" message="There was a problem loading this booking log. Please try again." />
+      </PageShell>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <PageShell>
       {/* Breadcrumb navigation */}
       <Breadcrumbs
         items={[
@@ -213,6 +211,6 @@ export function BookingLogDetailPage() {
           <PostingsTable postings={postings} />
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   )
 }

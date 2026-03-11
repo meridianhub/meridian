@@ -7,6 +7,8 @@ import { TimeDisplay } from '@/shared/time-display'
 import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink } from '@/shared/entity-link'
 import { MoneyDisplay } from '@/shared/money-display'
+import { PageShell, PageHeader } from '@/shared'
+import { Card } from '@/components/ui/card'
 
 import { accountEntityType } from '@/shared/account-entity-type'
 import type { EntityType } from '@/shared/entity-link'
@@ -178,36 +180,36 @@ export function TransactionsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
-        <p className="text-muted-foreground">
-          Ledger postings across all accounts
-        </p>
-      </div>
-
-      <DataTable<LedgerPosting>
-        queryKey={[...(tenantSlug ? tenantKeys.transactions(tenantSlug) : ['no-tenant']), 'postings']}
-        queryFn={fetchPostings}
-        columns={columns}
-        pageSize={25}
-        filters={[
-          {
-            field: 'accountId',
-            label: 'Account ID',
-            type: 'text',
-          },
-          {
-            field: 'postingDirection',
-            label: 'Direction',
-            type: 'select',
-            options: [
-              { label: 'Debit', value: 'DEBIT' },
-              { label: 'Credit', value: 'CREDIT' },
-            ],
-          },
-        ]}
+    <PageShell>
+      <PageHeader
+        title="Transactions"
+        description="Ledger postings across all accounts"
       />
-    </div>
+
+      <Card>
+        <DataTable<LedgerPosting>
+          queryKey={[...(tenantSlug ? tenantKeys.transactions(tenantSlug) : ['no-tenant']), 'postings']}
+          queryFn={fetchPostings}
+          columns={columns}
+          pageSize={25}
+          filters={[
+            {
+              field: 'accountId',
+              label: 'Account ID',
+              type: 'text',
+            },
+            {
+              field: 'postingDirection',
+              label: 'Direction',
+              type: 'select',
+              options: [
+                { label: 'Debit', value: 'DEBIT' },
+                { label: 'Credit', value: 'CREDIT' },
+              ],
+            },
+          ]}
+        />
+      </Card>
+    </PageShell>
   )
 }

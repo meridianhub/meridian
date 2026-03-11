@@ -83,7 +83,7 @@ describe('UserDetailPage', () => {
     renderUserDetailPage(createPlatformAdminToken())
 
     await waitFor(() => {
-      expect(screen.getByText('alice@example.com')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'alice@example.com' })).toBeInTheDocument()
     })
   })
 
@@ -140,12 +140,13 @@ describe('UserDetailPage', () => {
     })
   })
 
-  it('shows back link to users list', async () => {
+  it('shows breadcrumb navigation to users list', async () => {
     renderUserDetailPage(createPlatformAdminToken())
 
     await waitFor(() => {
-      expect(screen.getByText('Back to Users')).toBeInTheDocument()
+      expect(screen.getByRole('navigation', { name: /breadcrumb/i })).toBeInTheDocument()
     })
+    expect(screen.getByText('Users')).toBeInTheDocument()
   })
 
   it('shows grant role button', async () => {
@@ -182,7 +183,7 @@ describe('UserDetailPage - suspended user', () => {
 })
 
 describe('UserDetailPage - error state', () => {
-  it('shows error message when API fails', async () => {
+  it('shows error state when API fails', async () => {
     vi.mocked(useApiClients).mockReturnValue({
       identity: {
         retrieveIdentity: vi.fn().mockRejectedValue(new Error('Not Found')),
@@ -199,7 +200,8 @@ describe('UserDetailPage - error state', () => {
     renderUserDetailPage(createPlatformAdminToken())
 
     await waitFor(() => {
-      expect(screen.getByText(/failed to load user details/i)).toBeInTheDocument()
+      expect(screen.getByText(/failed to load/i)).toBeInTheDocument()
     })
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
   })
 })

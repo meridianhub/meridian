@@ -3,7 +3,8 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useNavigate } from 'react-router-dom'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
-import { TimeDisplay } from '@/shared'
+import { TimeDisplay, PageShell, PageHeader } from '@/shared'
+import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useInternalAccountsTable } from '../hooks'
 import { CreateInternalAccountDialog } from './create-internal-account-dialog'
@@ -94,50 +95,50 @@ export function InternalAccountsPage() {
 
   if (!tenantSlug) {
     return (
-      <div className="p-6">
+      <PageShell>
         <p className="text-muted-foreground">No tenant selected.</p>
-      </div>
+      </PageShell>
     )
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Internal Accounts</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Operational accounts including clearing, nostro, vostro, and holding accounts.
-          </p>
-        </div>
-        <Button onClick={() => setCreateDialogOpen(true)}>New Internal Account</Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Internal Accounts"
+        description="Operational accounts including clearing, nostro, vostro, and holding accounts."
+        actions={
+          <Button onClick={() => setCreateDialogOpen(true)}>New Internal Account</Button>
+        }
+      />
 
       <CreateInternalAccountDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
       />
 
-      <DataTable<InternalAccountRow>
-        queryKey={queryKey}
-        queryFn={queryFn}
-        columns={columns}
-        pageSize={25}
-        filters={[
-          {
-            field: 'behaviorClass',
-            label: 'Type',
-            type: 'select',
-            options: BEHAVIOR_CLASS_OPTIONS,
-          },
-          {
-            field: 'status',
-            label: 'Status',
-            type: 'select',
-            options: STATUS_OPTIONS,
-          },
-        ]}
-        onRowClick={(row) => navigate(`/internal-accounts/${row.accountId}`)}
-      />
-    </div>
+      <Card>
+        <DataTable<InternalAccountRow>
+          queryKey={queryKey}
+          queryFn={queryFn}
+          columns={columns}
+          pageSize={25}
+          filters={[
+            {
+              field: 'behaviorClass',
+              label: 'Type',
+              type: 'select',
+              options: BEHAVIOR_CLASS_OPTIONS,
+            },
+            {
+              field: 'status',
+              label: 'Status',
+              type: 'select',
+              options: STATUS_OPTIONS,
+            },
+          ]}
+          onRowClick={(row) => navigate(`/internal-accounts/${row.accountId}`)}
+        />
+      </Card>
+    </PageShell>
   )
 }

@@ -5,6 +5,8 @@ import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { CELEditor } from '@/features/sagas/components/cel-editor'
 import { useApiClients } from '@/api/context'
+import { PageShell } from '@/shared/page-shell'
+import { PageHeader } from '@/shared/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
@@ -182,18 +184,16 @@ export function InstrumentsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Instruments</h1>
-          <p className="mt-2 text-muted-foreground">
-            Reference data instrument definitions with CEL validation expressions.
-          </p>
-        </div>
-        <Button onClick={() => setRegisterDialogOpen(true)}>
-          Register Instrument
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Instruments"
+        description="Reference data instrument definitions with CEL validation expressions."
+        actions={
+          <Button onClick={() => setRegisterDialogOpen(true)}>
+            Register Instrument
+          </Button>
+        }
+      />
 
       <RegisterInstrumentDialog
         open={registerDialogOpen}
@@ -299,6 +299,6 @@ export function InstrumentsPage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageShell>
   )
 }

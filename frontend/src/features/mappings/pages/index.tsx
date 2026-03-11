@@ -4,6 +4,8 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { StatusBadge } from '@/shared/status-badge'
+import { PageShell } from '@/shared/page-shell'
+import { PageHeader } from '@/shared/page-header'
 import { useApiClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -125,17 +127,12 @@ export function MappingsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Gateway Mappings</h1>
-          <p className="mt-2 text-muted-foreground">
-            Manage field correspondence mappings between external JSON payloads and internal Meridian
-            services.
-          </p>
-        </div>
-        <Button onClick={() => setCreateDialogOpen(true)}>Create Mapping</Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Gateway Mappings"
+        description="Manage field correspondence mappings between external JSON payloads and internal Meridian services."
+        actions={<Button onClick={() => setCreateDialogOpen(true)}>Create Mapping</Button>}
+      />
 
       <CreateMappingDialog
         open={createDialogOpen}
@@ -153,6 +150,6 @@ export function MappingsPage() {
           onRowClick={handleRowClick}
         />
       </Card>
-    </div>
+    </PageShell>
   )
 }
