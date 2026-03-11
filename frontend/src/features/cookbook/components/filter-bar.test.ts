@@ -39,7 +39,7 @@ const mockItems: CookbookItem[] = [
   },
 ]
 
-const emptyFilters: FilterState = { search: '', type: '', category: '', industry: '' }
+const emptyFilters: FilterState = { search: '', type: '', category: '', industry: '', kind: '' }
 
 describe('applyFilters', () => {
   it('returns all items when no filters active', () => {

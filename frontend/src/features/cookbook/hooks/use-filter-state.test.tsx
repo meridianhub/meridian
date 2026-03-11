@@ -30,6 +30,7 @@ describe('useFilterState', () => {
     expect(state.type).toBe('')
     expect(state.category).toBe('')
     expect(state.industry).toBe('')
+    expect(state.kind).toBe('')
   })
 
   it('reads initial state from URL search params', () => {
@@ -93,7 +94,7 @@ describe('useFilterState', () => {
     })
 
     act(() => {
-      result.current[1]({ search: '', type: '', category: '', industry: '' })
+      result.current[1]({ search: '', type: '', category: '', industry: '', kind: '' })
     })
 
     const [state] = result.current
