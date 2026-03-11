@@ -16,6 +16,21 @@ global.ResizeObserver = class ResizeObserver {
 // Polyfill scrollIntoView for cmdk keyboard navigation in jsdom
 Element.prototype.scrollIntoView = function () {}
 
+// Polyfill matchMedia for responsive hooks in jsdom
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }),
+})
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
   cleanup()

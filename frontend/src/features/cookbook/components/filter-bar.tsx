@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 import type { FilterState } from '../hooks/use-filter-state'
+import { PATTERN_KINDS, derivePatternKind } from '../hooks/use-filter-state'
 
 function getUniqueCategories(items: CookbookItem[]): string[] {
   const set = new Set<string>()
@@ -26,17 +27,28 @@ function getUniqueIndustries(items: CookbookItem[]): string[] {
   return Array.from(set).sort()
 }
 
+function getAvailableKinds(items: CookbookItem[]): { value: string; label: string }[] {
+  const present = new Set<string>()
+  for (const item of items) {
+    const kind = derivePatternKind(item)
+    if (kind) present.add(kind)
+  }
+  return PATTERN_KINDS.filter((k) => present.has(k.value))
+}
+
 interface FilterBarProps {
   items: CookbookItem[]
   filters: FilterState
   onFilterChange: (patch: Partial<FilterState>) => void
   hideTypeFilter?: boolean
+  showKindFilter?: boolean
 }
 
-export function FilterBar({ items, filters, onFilterChange, hideTypeFilter }: FilterBarProps) {
+export function FilterBar({ items, filters, onFilterChange, hideTypeFilter, showKindFilter }: FilterBarProps) {
   const categories = getUniqueCategories(items)
   const industries = getUniqueIndustries(items)
-  const hasActiveFilters = filters.search || filters.type || filters.category || filters.industry
+  const kinds = showKindFilter ? getAvailableKinds(items) : []
+  const hasActiveFilters = filters.search || filters.type || filters.category || filters.industry || filters.kind
 
   return (
     <div className="space-y-3">
@@ -63,6 +75,15 @@ export function FilterBar({ items, filters, onFilterChange, hideTypeFilter }: Fi
           />
         )}
 
+        {kinds.length > 1 && (
+          <FilterChipGroup
+            label="Kind"
+            options={kinds}
+            value={filters.kind}
+            onChange={(value) => onFilterChange({ kind: value })}
+          />
+        )}
+
         {categories.length > 0 && (
           <FilterChipGroup
             label="Category"
@@ -85,7 +106,7 @@ export function FilterBar({ items, filters, onFilterChange, hideTypeFilter }: Fi
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onFilterChange({ search: '', type: '', category: '', industry: '' })}
+            onClick={() => onFilterChange({ search: '', type: '', category: '', industry: '', kind: '' })}
             className="h-7 text-xs"
           >
             <X className="size-3 mr-1" />

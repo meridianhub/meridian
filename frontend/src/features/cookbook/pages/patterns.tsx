@@ -10,7 +10,7 @@ export function CookbookPatternsPage() {
   const [filters, setFilters] = useFilterState()
   const effectiveFilters = { ...filters, type: '' }
   const filtered = applyFilters(patterns, effectiveFilters)
-  const hasActiveFilters = !!(filters.search || filters.category || filters.industry)
+  const hasActiveFilters = !!(filters.search || filters.category || filters.industry || filters.kind)
 
   return (
     <div className="space-y-6">
@@ -19,7 +19,7 @@ export function CookbookPatternsPage() {
         <h1 className="text-2xl font-semibold">Economy Patterns</h1>
         <p className="text-muted-foreground">Saga definitions, manifest fragments, and instrument configurations</p>
       </div>
-      <FilterBar items={patterns} filters={filters} onFilterChange={setFilters} hideTypeFilter />
+      <FilterBar items={patterns} filters={filters} onFilterChange={setFilters} hideTypeFilter showKindFilter />
       <CatalogueGrid items={filtered} hasActiveFilters={hasActiveFilters} />
     </div>
   )

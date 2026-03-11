@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/ui/empty-state'
 import type { CookbookItem, PatternMeta, ComponentMeta } from '../hooks/use-cookbook'
+import { derivePatternKind } from '../hooks/use-filter-state'
 
 interface CatalogueGridProps {
   items: CookbookItem[]
@@ -78,9 +79,19 @@ function CookbookCard({ item }: { item: CookbookItem }) {
             )}
             <CardTitle className="text-sm">{item.title}</CardTitle>
           </div>
-          <Badge variant={isPattern ? 'default' : 'secondary'} className="text-[10px] shrink-0">
-            {isPattern ? 'Pattern' : 'UI'}
-          </Badge>
+          <div className="flex items-center gap-1 shrink-0">
+            {isPattern && (() => {
+              const kind = derivePatternKind(item)
+              return kind ? (
+                <Badge variant="outline" className="text-[10px] capitalize">
+                  {kind}
+                </Badge>
+              ) : null
+            })()}
+            <Badge variant={isPattern ? 'default' : 'secondary'} className="text-[10px]">
+              {isPattern ? 'Pattern' : 'UI'}
+            </Badge>
+          </div>
         </div>
         {item.description && (
           <CardDescription className="line-clamp-2 text-xs">
