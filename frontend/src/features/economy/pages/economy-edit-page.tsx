@@ -1,8 +1,161 @@
-export function EconomyEditPage() {
+import { useCallback, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import yaml from 'js-yaml'
+import { create } from '@bufbuild/protobuf'
+import { useApiClients } from '@/api/context'
+import { manifestKeys } from '@/lib/query-keys'
+import { ManifestSchema, type Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+import { Skeleton } from '@/components/ui/skeleton'
+import { ManifestEditor } from '../components/manifest-editor'
+import { ValidationPanel } from '../components/validation-panel'
+import { EditorGraphPanel } from '../components/editor-graph-panel'
+import { DeployWizard } from '../components/deploy-wizard'
+import { useManifestValidate } from '../hooks/use-manifest-validate'
+import type { ValidationError } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+
+// ── Skeleton manifest for create-new mode ────────────────────────────────────
+
+const SKELETON_MANIFEST = `version: "1.0"
+metadata:
+  name: My Economy
+  industry: finance
+  description: A new economy configuration
+instruments: []
+account_types: []
+valuation_rules: []
+sagas: []
+`
+
+// ── Loading state ─────────────────────────────────────────────────────────────
+
+function LoadingSkeleton() {
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-semibold">Edit Economy</h1>
-      <p className="mt-2 text-muted-foreground">Edit manifest configuration.</p>
+    <div data-testid="edit-page-loading" className="flex h-full gap-4 p-4">
+      <div className="flex flex-[7] flex-col gap-3">
+        <Skeleton className="h-[60vh]" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-20" />
+      </div>
+      <div className="flex-[3]">
+        <Skeleton className="h-full" />
+      </div>
+    </div>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export function EconomyEditPage() {
+  const { manifestHistory } = useApiClients()
+  const { validate, result: validationResult } = useManifestValidate()
+
+  const { data, isLoading } = useQuery({
+    queryKey: manifestKeys.current(),
+    queryFn: () => manifestHistory.getCurrentManifest({}),
+  })
+
+  // Initialise YAML once the query resolves; fall back to skeleton manifest
+  const [initialised, setInitialised] = useState(false)
+  const [manifestYaml, setManifestYaml] = useState(SKELETON_MANIFEST)
+  const [draftManifest, setDraftManifest] = useState<Manifest | null>(null)
+  const [errors, setErrors] = useState<ValidationError[]>([])
+  const [warnings, setWarnings] = useState<ValidationError[]>([])
+  const [manifestChangedSincePlan, setManifestChangedSincePlan] = useState(false)
+
+  // Hydrate state from loaded manifest on first successful fetch
+  if (!initialised && !isLoading && data !== undefined) {
+    const loadedManifest = data?.version?.manifest
+    if (loadedManifest) {
+      // Convert proto manifest → plain object → YAML string
+      const plainObj = JSON.parse(JSON.stringify(loadedManifest)) as Record<string, unknown>
+      const yamlStr = yaml.dump(plainObj, { lineWidth: 120 })
+      setManifestYaml(yamlStr)
+      setDraftManifest(loadedManifest)
+    }
+    setInitialised(true)
+  }
+
+  const validationErrors = validationResult?.errors ?? errors
+  const validationWarnings = validationResult?.warnings ?? warnings
+  const validationPassed = validationErrors.length === 0
+
+  const handleValidationChange = useCallback(
+    (newErrors: ValidationError[], newWarnings: ValidationError[]) => {
+      setErrors(newErrors)
+      setWarnings(newWarnings)
+    },
+    [],
+  )
+
+  const handleEditorChange = useCallback(
+    (value: string) => {
+      setManifestYaml(value)
+      setManifestChangedSincePlan(true)
+
+      // Try to parse YAML → proto Manifest for live graph + validation
+      try {
+        const parsed = yaml.load(value) as Record<string, unknown> | null
+        if (parsed && typeof parsed === 'object') {
+          const manifest = create(ManifestSchema, parsed)
+          setDraftManifest(manifest)
+          validate(manifest)
+          handleValidationChange([], [])
+        }
+      } catch {
+        // Invalid YAML — keep previous draft manifest
+      }
+    },
+    [validate, handleValidationChange],
+  )
+
+  if (isLoading) return <LoadingSkeleton />
+
+  return (
+    <div className="flex h-full gap-0 overflow-hidden">
+      {/* Left panel: 70% — editor + validation + deploy */}
+      <div className="flex flex-[7] flex-col overflow-hidden border-r">
+        {/* Editor takes remaining height */}
+        <div className="min-h-0 flex-1 overflow-auto">
+          <ManifestEditor
+            value={manifestYaml}
+            onChange={handleEditorChange}
+            validationErrors={[...validationErrors, ...validationWarnings]}
+          />
+        </div>
+
+        {/* Validation panel (conditionally shown) */}
+        {(validationErrors.length > 0 || validationWarnings.length > 0) && (
+          <div className="shrink-0 border-t p-3">
+            <ValidationPanel
+              errors={validationErrors}
+              warnings={validationWarnings}
+              onLineClick={() => {}}
+              onSuggestionApply={() => {}}
+            />
+          </div>
+        )}
+
+        {/* Deploy wizard */}
+        {draftManifest && (
+          <div className="shrink-0 border-t p-4">
+            <DeployWizard
+              manifest={draftManifest}
+              manifestChanged={manifestChangedSincePlan}
+              onLineClick={() => {}}
+              onSuggestionApply={() => {}}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Right panel: 30% — relationship graph */}
+      <div className="flex-[3] overflow-hidden p-4">
+        <EditorGraphPanel
+          manifest={draftManifest}
+          validationPassed={validationPassed}
+          className="h-full"
+        />
+      </div>
     </div>
   )
 }
