@@ -15,15 +15,16 @@ import type { SagaFlow } from '../lib/star-parser'
 const MOBILE_BREAKPOINT = 640
 
 function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT : false,
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches
+      : false,
   )
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
     const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
     mql.addEventListener('change', onChange)
-    setIsMobile(mql.matches)
     return () => mql.removeEventListener('change', onChange)
   }, [])
 
