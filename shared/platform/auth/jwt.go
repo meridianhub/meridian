@@ -169,9 +169,13 @@ func (c *Claims) GetScopes() []string {
 }
 
 // HasRole checks if the claims contain a specific role.
-// Uses EffectiveRoles() to support groups-to-roles fallback.
+// Supports groups-to-roles fallback without allocation (hot path in interceptors).
 func (c *Claims) HasRole(role string) bool {
-	for _, r := range c.EffectiveRoles() {
+	source := c.Roles
+	if len(source) == 0 {
+		source = c.Groups
+	}
+	for _, r := range source {
 		if r == role {
 			return true
 		}

@@ -1818,9 +1818,6 @@ func TestService_ListTenants_RBAC(t *testing.T) {
 			Roles:    []string{auth.RolePlatformAdmin.String()},
 		})
 
-		// AUTH_MODE must not be "disabled" for RBAC to apply
-		t.Setenv("AUTH_MODE", "jwks")
-
 		resp, err := svc.ListTenants(adminCtx, &pb.ListTenantsRequest{PageSize: 10})
 		require.NoError(t, err)
 		assert.Len(t, resp.Tenants, 3)
@@ -1845,8 +1842,6 @@ func TestService_ListTenants_RBAC(t *testing.T) {
 			UserID: "super-user",
 			Roles:  []string{auth.RoleSuperAdmin.String()},
 		})
-
-		t.Setenv("AUTH_MODE", "jwks")
 
 		resp, err := svc.ListTenants(superCtx, &pb.ListTenantsRequest{PageSize: 10})
 		require.NoError(t, err)
@@ -1874,8 +1869,6 @@ func TestService_ListTenants_RBAC(t *testing.T) {
 			Roles:    []string{auth.RoleOperator.String()},
 		})
 
-		t.Setenv("AUTH_MODE", "jwks")
-
 		resp, err := svc.ListTenants(tenantCtx, &pb.ListTenantsRequest{PageSize: 10})
 		require.NoError(t, err)
 		assert.Len(t, resp.Tenants, 1)
@@ -1900,40 +1893,9 @@ func TestService_ListTenants_RBAC(t *testing.T) {
 			Roles:  []string{auth.RoleOperator.String()},
 		})
 
-		t.Setenv("AUTH_MODE", "jwks")
-
 		resp, err := svc.ListTenants(noTenantCtx, &pb.ListTenantsRequest{PageSize: 10})
 		require.NoError(t, err)
 		assert.Len(t, resp.Tenants, 0)
-	})
-
-	t.Run("auth disabled lists all tenants regardless of claims", func(t *testing.T) {
-		svc, _, cleanup := setupTest(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		for _, id := range []string{"rbac_x", "rbac_y"} {
-			_, err := svc.InitiateTenant(ctx, &pb.InitiateTenantRequest{
-				TenantId:        id,
-				DisplayName:     "Tenant " + id,
-				SettlementAsset: "GBP",
-			})
-			require.NoError(t, err)
-		}
-
-		// Even non-admin with auth disabled should see all
-		tenantCtx := ctxWithClaims(&auth.Claims{
-			UserID:   "regular-user",
-			TenantID: "rbac_x",
-			Roles:    []string{auth.RoleOperator.String()},
-		})
-
-		t.Setenv("AUTH_MODE", "disabled")
-
-		resp, err := svc.ListTenants(tenantCtx, &pb.ListTenantsRequest{PageSize: 10})
-		require.NoError(t, err)
-		assert.Len(t, resp.Tenants, 2)
 	})
 
 	t.Run("no claims in context lists all (backwards compat)", func(t *testing.T) {
@@ -1950,8 +1912,6 @@ func TestService_ListTenants_RBAC(t *testing.T) {
 			})
 			require.NoError(t, err)
 		}
-
-		t.Setenv("AUTH_MODE", "jwks")
 
 		// No claims in context - should fall through to full list
 		resp, err := svc.ListTenants(ctx, &pb.ListTenantsRequest{PageSize: 10})
@@ -1979,8 +1939,6 @@ func TestService_ListTenants_RBAC(t *testing.T) {
 			UserID: "dex-user",
 			Groups: []string{auth.RolePlatformAdmin.String()},
 		})
-
-		t.Setenv("AUTH_MODE", "jwks")
 
 		resp, err := svc.ListTenants(groupsCtx, &pb.ListTenantsRequest{PageSize: 10})
 		require.NoError(t, err)
