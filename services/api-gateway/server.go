@@ -35,6 +35,7 @@ type Server struct {
 	rawEventStreamHandler http.Handler // used by tests and WithEventStreamHandlerHTTP
 	versionInfo           *VersionInfo
 	providersConfig       ProvidersConfig
+	authHandler           *AuthHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -157,6 +158,21 @@ func (s *Server) registerRoutes() {
 	// Provider discovery endpoint - NO middleware (public, needed before login)
 	if s.providersConfig.Enabled {
 		s.mux.HandleFunc("/api/auth/providers", s.getOnly(s.handleProviders))
+	}
+
+	// BFF auth endpoints - tenant resolution but NO auth middleware (login is pre-auth).
+	// POST /api/auth/login: resolves tenant from subdomain, validates credentials, returns JWT.
+	// GET /api/auth/jwks: serves the Meridian signing key for token verification.
+	if s.authHandler != nil {
+		loginHandler := http.Handler(http.HandlerFunc(s.authHandler.HandleLogin))
+		if s.tenantResolver != nil {
+			loginHandler = s.tenantResolver.Handler(loginHandler)
+		}
+		s.mux.Handle("POST /api/auth/login", loginHandler)
+
+		if s.authHandler.signer != nil {
+			s.mux.HandleFunc("GET /api/auth/jwks", s.authHandler.signer.ServeJWKS())
+		}
 	}
 
 	// API routes - with auth and tenant middleware chain.

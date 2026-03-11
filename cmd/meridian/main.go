@@ -63,6 +63,7 @@ import (
 	forecastingstarlark "github.com/meridianhub/meridian/services/forecasting/starlark"
 	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
+	identityconnector "github.com/meridianhub/meridian/services/identity/connector"
 	identityservice "github.com/meridianhub/meridian/services/identity/service"
 	internalaccountpersistence "github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	internalaccountservice "github.com/meridianhub/meridian/services/internal-account/service"
@@ -104,6 +105,7 @@ import (
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -313,7 +315,12 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	// by the auth middleware via JWKS_URL. No gateway option needed.
 	wireExternalDex(logger)
 
-	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), logger, extraGWOpts...)
+	// Wire BFF auth handler: Meridian-signed JWTs for password login.
+	// The identity connector validates credentials directly against the identity domain.
+	bffSigner, bffAuthOpts := wireBFFAuth(conns.gormDB("identity"), logger)
+	extraGWOpts = append(extraGWOpts, bffAuthOpts...)
+
+	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)
 	}
@@ -944,6 +951,50 @@ func wireExternalDex(logger *slog.Logger) {
 	logger.Info("Dex configured as external sidecar", "dex_url", dexURL)
 }
 
+// wireBFFAuth creates the BFF auth handler for direct password login.
+// The handler validates credentials via the identity connector and signs
+// JWTs with Meridian's own RSA key. This bypasses Dex for password auth.
+//
+// Environment variables:
+//   - JWT_SIGNING_KEY: RSA private key in PEM format (auto-generated if unset)
+//   - JWT_SIGNING_KEY_ID: kid header value (default: "meridian-1")
+//   - JWT_SIGNING_ISSUER: iss claim value (default: "meridian")
+//   - JWT_TOKEN_TTL: token lifetime (default: "1h")
+func wireBFFAuth(identityDB *gorm.DB, logger *slog.Logger) (*platformauth.JWTSigner, []gateway.ServerOption) {
+	signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
+		PrivateKeyPEM: os.Getenv("JWT_SIGNING_KEY"),
+		KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+		Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+	})
+	if err != nil {
+		logger.Error("failed to create JWT signer, BFF auth disabled", "error", err)
+		return nil, nil
+	}
+
+	identityRepo := identitypersistence.NewRepository(identityDB)
+	conn, err := identityconnector.New(identityRepo, logger)
+	if err != nil {
+		logger.Error("failed to create identity connector, BFF auth disabled", "error", err)
+		return nil, nil
+	}
+
+	tokenTTL := env.GetEnvAsDuration("JWT_TOKEN_TTL", time.Hour)
+
+	handler := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+		Connector: conn,
+		Signer:    signer,
+		TokenTTL:  tokenTTL,
+		Logger:    logger,
+	})
+
+	logger.Info("BFF auth handler initialized",
+		"issuer", signer.Issuer(),
+		"key_id", signer.KeyID(),
+		"token_ttl", tokenTTL)
+
+	return signer, []gateway.ServerOption{gateway.WithAuthHandler(handler)}
+}
+
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
 func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, logger *slog.Logger) error {
@@ -1052,7 +1103,7 @@ var serviceNames = []string{
 // wireGateway creates the gateway HTTP server with the Vanguard transcoder
 // routing REST/JSON, Connect, and gRPC-Web requests to the shared gRPC server
 // running on grpcPort.
-func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, logger *slog.Logger, extraOpts ...gateway.ServerOption) (*gateway.Server, error) {
+func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, localSigner *platformauth.JWTSigner, logger *slog.Logger, extraOpts ...gateway.ServerOption) (*gateway.Server, error) {
 	grpcTarget := fmt.Sprintf("localhost:%d", grpcPort)
 
 	authConfig := gateway.LoadAuthConfig()
@@ -1089,9 +1140,11 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, 
 		opts = append(opts, gateway.WithTranscoder(transcoder))
 	}
 
-	// Wire auth middleware if enabled — fail fast if misconfigured
+	// Wire auth middleware if enabled — fail fast if misconfigured.
+	// Pass the local signer so the composite validator trusts both
+	// Meridian-issued (BFF) and Dex-issued (SSO) tokens.
 	if authConfig.Enabled {
-		authMiddleware, err := gateway.BuildAuthMiddleware(authConfig, logger)
+		authMiddleware, err := gateway.BuildAuthMiddleware(authConfig, logger, localSigner)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build auth middleware: %w", err)
 		}

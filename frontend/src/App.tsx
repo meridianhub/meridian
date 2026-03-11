@@ -82,44 +82,36 @@ function LoginPage() {
   const onBareDomain = isBareDomain()
   const externalProviders = providers?.filter((p: AuthProviderType) => p.type === 'oidc') ?? []
 
-  const handleDexLogin = useCallback(
+  const handleLogin = useCallback(
     async (e: FormEvent) => {
       e.preventDefault()
       setError('')
       setLoading(true)
 
       try {
-        const body = new URLSearchParams({
-          grant_type: 'password',
-          client_id: 'meridian-service',
-          scope: 'openid email profile',
-          username: email,
-          password,
-        })
-
-        const response = await fetch('/dex/token', {
+        const response = await fetch('/api/auth/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body.toString(),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
         })
 
         if (!response.ok) {
-          const text = await response.text()
-          setError(text.includes('invalid_grant') ? 'Invalid email or password' : 'Authentication failed')
+          const data = (await response.json().catch(() => null)) as { error?: string } | null
+          setError(data?.error ?? 'Authentication failed')
           return
         }
 
-        const data = (await response.json()) as { id_token?: string; access_token?: string }
-        const token = data.id_token ?? data.access_token
+        const data = (await response.json()) as { access_token?: string }
+        const token = data.access_token
         if (!token) {
-          setError('No token received from identity provider')
+          setError('No token received from server')
           return
         }
 
         login(token)
         navigate('/')
       } catch {
-        setError('Unable to reach identity provider')
+        setError('Unable to reach authentication service')
       } finally {
         setLoading(false)
       }
@@ -176,7 +168,7 @@ function LoginPage() {
 
         {/* Dex login form - shown in demo mode and production */}
         {(import.meta.env.VITE_DEMO_MODE === 'true' || !import.meta.env.DEV) && (
-          <form onSubmit={(e) => void handleDexLogin(e)} className="space-y-4">
+          <form onSubmit={(e) => void handleLogin(e)} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1">
                 Email
