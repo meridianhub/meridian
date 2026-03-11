@@ -26,8 +26,8 @@ func TestBuildClaims_FullIdentity(t *testing.T) {
 	assert.Equal(t, "alice@example.com", claims["email"])
 	assert.Equal(t, "Alice", claims["name"])
 	assert.Equal(t, "volterra", claims["x-tenant-id"])
-	assert.Equal(t, []string{"ADMIN", "OPERATOR"}, claims["roles"])
-	assert.Equal(t, []string{"ADMIN", "OPERATOR"}, claims["groups"])
+	assert.Equal(t, []string{"admin", "operator"}, claims["roles"])
+	assert.Equal(t, []string{"admin", "operator"}, claims["groups"])
 }
 
 func TestBuildClaims_EmptyUsernameDefaultsToEmail(t *testing.T) {
@@ -60,6 +60,53 @@ func TestBuildClaims_NilGroupsProducesEmptySlice(t *testing.T) {
 	roles, ok := claims["roles"].([]string)
 	require.True(t, ok)
 	assert.Empty(t, roles)
+}
+
+func TestBuildClaims_RoleNormalization(t *testing.T) {
+	tid, err := tenant.NewTenantID("volterra")
+	require.NoError(t, err)
+
+	cases := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "UPPERCASE input produces lowercase output",
+			input:    []string{"ADMIN", "OPERATOR"},
+			expected: []string{"admin", "operator"},
+		},
+		{
+			name:     "Mixed-Case input produces lowercase output",
+			input:    []string{"Admin", "ReadOnly"},
+			expected: []string{"admin", "readonly"},
+		},
+		{
+			name:     "already-lowercase input is unchanged",
+			input:    []string{"admin", "viewer"},
+			expected: []string{"admin", "viewer"},
+		},
+		{
+			name:     "empty roles produces empty slice",
+			input:    []string{},
+			expected: []string{},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := connector.Identity{
+				UserID: "user-uuid-norm",
+				Email:  "norm@example.com",
+				Groups: tc.input,
+			}
+
+			claims := connector.BuildClaims(id, tid)
+
+			assert.Equal(t, tc.expected, claims["roles"])
+			assert.Equal(t, tc.expected, claims["groups"])
+		})
+	}
 }
 
 func TestBuildClaims_TenantIDPropagated(t *testing.T) {

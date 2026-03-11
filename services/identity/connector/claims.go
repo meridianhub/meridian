@@ -1,6 +1,10 @@
 package connector
 
-import "github.com/meridianhub/meridian/shared/platform/tenant"
+import (
+	"strings"
+
+	"github.com/meridianhub/meridian/shared/platform/tenant"
+)
 
 // BuildClaims constructs the JWT custom claims map for an authenticated identity.
 // The map is consumed by Dex's ID-token builder when enriching tokens with
@@ -19,9 +23,13 @@ func BuildClaims(identity Identity, tenantID tenant.TenantID) map[string]interfa
 		name = identity.Email
 	}
 
-	roles := identity.Groups
-	if roles == nil {
-		roles = []string{}
+	rawRoles := identity.Groups
+	if rawRoles == nil {
+		rawRoles = []string{}
+	}
+	roles := make([]string, len(rawRoles))
+	for i, r := range rawRoles {
+		roles[i] = strings.ToLower(r)
 	}
 
 	return map[string]interface{}{
