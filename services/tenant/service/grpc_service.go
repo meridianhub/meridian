@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"time"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
@@ -383,7 +384,41 @@ func (s *Service) UpdateTenantStatus(ctx context.Context, req *pb.UpdateTenantSt
 }
 
 // ListTenants returns all tenants with optional status filter (BIAN: Control).
+// When auth is enabled, non-admin users see only their own tenant.
+// Platform admins and super admins see all tenants.
 func (s *Service) ListTenants(ctx context.Context, req *pb.ListTenantsRequest) (*pb.ListTenantsResponse, error) {
+	// RBAC: When auth is enabled, restrict non-admin users to their own tenant.
+	// When AUTH_MODE is disabled or no claims are present (backwards compat), list all.
+	if os.Getenv("AUTH_MODE") != "disabled" {
+		if claims, ok := auth.GetClaimsFromContext(ctx); ok {
+			if !auth.HasAnyRole(claims, auth.RolePlatformAdmin, auth.RoleSuperAdmin) {
+				// Non-admin: return only the user's own tenant
+				tenantID, err := claims.GetTenantID()
+				if err != nil {
+					s.logger.Warn("ListTenants: non-admin user without tenant claim",
+						"user_id", claims.EffectiveUserID(),
+						"error", err)
+					return &pb.ListTenantsResponse{}, nil
+				}
+
+				t, err := s.repo.GetByID(ctx, tenantID)
+				if err != nil {
+					if errors.Is(err, persistence.ErrTenantNotFound) {
+						return &pb.ListTenantsResponse{}, nil
+					}
+					s.logger.Error("failed to retrieve tenant for non-admin user",
+						"tenant_id", tenantID.String(),
+						"error", err)
+					return nil, status.Errorf(codes.Internal, "failed to list tenants")
+				}
+
+				return &pb.ListTenantsResponse{
+					Tenants: []*pb.Tenant{s.toProto(t)},
+				}, nil
+			}
+		}
+	}
+
 	// Convert proto status filter to domain status
 	var statusFilter *domain.Status
 	if req.StatusFilter != pb.TenantStatus_TENANT_STATUS_UNSPECIFIED {
