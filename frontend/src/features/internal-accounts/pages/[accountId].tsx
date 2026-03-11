@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { MoneyDisplay } from '@/shared/money-display'
-import { AuditTrail, Breadcrumbs } from '@/shared'
+import { AuditTrail, Breadcrumbs, PageShell, PageHeader, DetailSkeleton, ErrorState } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -52,41 +52,18 @@ function getTransactionStatusName(status: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// Skeleton
-// ---------------------------------------------------------------------------
-
-function InternalAccountDetailSkeleton() {
-  return (
-    <div data-testid="internal-account-detail-skeleton" className="animate-pulse space-y-6 p-6">
-      <div className="flex items-center gap-3">
-        <div className="h-4 w-32 rounded bg-muted" />
-      </div>
-      <div className="h-8 w-64 rounded bg-muted" />
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-20 rounded bg-muted" />
-        ))}
-      </div>
-      <div className="h-64 rounded bg-muted" />
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Not found
 // ---------------------------------------------------------------------------
 
 function InternalAccountNotFound() {
   return (
-    <div data-testid="internal-account-not-found" className="p-6">
+    <PageShell>
       <Breadcrumbs items={[{ label: 'Internal Accounts', href: '/internal-accounts' }, { label: 'Not found' }]} />
-      <div className="mt-8 text-center">
-        <h2 className="text-xl font-semibold">Account not found</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The internal account you are looking for does not exist or has been removed.
-        </p>
-      </div>
-    </div>
+      <ErrorState
+        title="Account not found"
+        message="The internal account you are looking for does not exist or has been removed."
+      />
+    </PageShell>
   )
 }
 
@@ -267,18 +244,18 @@ export function InternalAccountDetailPage() {
 
   const queryKey = tenantKeys.internalAccount(tenantSlug ?? '', accountId ?? '')
 
-  const { data: account, isLoading, isError } = useInternalAccountDetail(accountId)
+  const { data: account, isLoading, isError, refetch } = useInternalAccountDetail(accountId)
 
   if (isLoading) {
-    return <InternalAccountDetailSkeleton />
+    return <DetailSkeleton />
   }
 
   if (isError) {
     return (
-      <div className="p-6">
+      <PageShell>
         <Breadcrumbs items={[{ label: 'Internal Accounts', href: '/internal-accounts' }, { label: 'Error' }]} />
-        <p className="mt-4 text-sm text-destructive">Failed to load account details. Please try again.</p>
-      </div>
+        <ErrorState onRetry={refetch} />
+      </PageShell>
     )
   }
 
@@ -289,8 +266,7 @@ export function InternalAccountDetailPage() {
   const statusLabel = accountStatusLabel(account.accountStatus)
 
   return (
-    <div className="p-6">
-      {/* Breadcrumb navigation */}
+    <PageShell>
       <Breadcrumbs
         items={[
           { label: 'Internal Accounts', href: '/internal-accounts' },
@@ -298,99 +274,76 @@ export function InternalAccountDetailPage() {
         ]}
       />
 
-      {/* Page header */}
-      <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold font-mono">{account.accountCode}</h1>
-            <StatusBadge status={statusLabel} />
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{account.name}</p>
-        </div>
-        <InternalAccountActions
-          accountId={account.accountId}
-          accountStatus={account.accountStatus}
-          queryKey={queryKey}
-        />
-      </div>
+      <PageHeader
+        title={account.accountCode}
+        description={account.name}
+        actions={
+          <InternalAccountActions
+            accountId={account.accountId}
+            accountStatus={account.accountStatus}
+            queryKey={queryKey}
+          />
+        }
+      />
 
-      {/* Summary card */}
-      <Card className="mt-6">
-        <CardContent>
-          <dl className="grid grid-cols-2 gap-4 pt-2 md:grid-cols-4">
-            <DetailField label="Account Code">
-              <span className="font-mono">{account.accountCode}</span>
-            </DetailField>
-            <DetailField label="Name">{account.name}</DetailField>
-            <DetailField label="Type">{account.behaviorClass}</DetailField>
-            <DetailField label="Instrument">
-              <span className="font-mono">{account.instrumentCode}</span>
-            </DetailField>
-          </dl>
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="audit">Audit Trail</TabsTrigger>
+        </TabsList>
 
-      {/* Tabs */}
-      <div className="mt-6">
-        <Tabs defaultValue="overview">
-          <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="transactions">Transactions</TabsTrigger>
-            <TabsTrigger value="audit">Audit Trail</TabsTrigger>
-          </TabsList>
+        <TabsContent value="overview" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Account Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <DetailField label="Account ID">{account.accountId}</DetailField>
+                <DetailField label="Account Code">
+                  <span className="font-mono">{account.accountCode}</span>
+                </DetailField>
+                <DetailField label="Name">{account.name}</DetailField>
+                <DetailField label="Type (Behavior Class)">{account.behaviorClass}</DetailField>
+                <DetailField label="Instrument">
+                  <span className="font-mono">{account.instrumentCode}</span>
+                </DetailField>
+                <DetailField label="Status">
+                  <StatusBadge status={statusLabel} />
+                </DetailField>
+                {account.description && (
+                  <DetailField label="Description">{account.description}</DetailField>
+                )}
+                <DetailField label="Created">
+                  <TimeDisplay timestamp={account.createdAt} format="both" />
+                </DetailField>
+                <DetailField label="Last Updated">
+                  <TimeDisplay timestamp={account.updatedAt} format="both" />
+                </DetailField>
+              </dl>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          <TabsContent value="overview" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Account Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <DetailField label="Account ID">{account.accountId}</DetailField>
-                  <DetailField label="Account Code">
-                    <span className="font-mono">{account.accountCode}</span>
-                  </DetailField>
-                  <DetailField label="Name">{account.name}</DetailField>
-                  <DetailField label="Type (Behavior Class)">{account.behaviorClass}</DetailField>
-                  <DetailField label="Instrument">
-                    <span className="font-mono">{account.instrumentCode}</span>
-                  </DetailField>
-                  <DetailField label="Status">
-                    <StatusBadge status={statusLabel} />
-                  </DetailField>
-                  {account.description && (
-                    <DetailField label="Description">{account.description}</DetailField>
-                  )}
-                  <DetailField label="Created">
-                    <TimeDisplay timestamp={account.createdAt} format="both" />
-                  </DetailField>
-                  <DetailField label="Last Updated">
-                    <TimeDisplay timestamp={account.updatedAt} format="both" />
-                  </DetailField>
-                </dl>
-              </CardContent>
-            </Card>
-          </TabsContent>
+        <TabsContent value="transactions" className="mt-4">
+          <InternalAccountTransactions
+            accountId={account.accountId}
+            instrumentCode={account.instrumentCode}
+          />
+        </TabsContent>
 
-          <TabsContent value="transactions" className="mt-4">
-            <InternalAccountTransactions
-              accountId={account.accountId}
-              instrumentCode={account.instrumentCode}
-            />
-          </TabsContent>
-
-          <TabsContent value="audit" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Audit Trail</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <AuditTrail entityType="InternalAccount" entityId={account.accountId} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
-    </div>
+        <TabsContent value="audit" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Audit Trail</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AuditTrail entityType="InternalAccount" entityId={account.accountId} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </PageShell>
   )
 }

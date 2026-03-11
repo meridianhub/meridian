@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card'
 import { DataTable, type DataTableQueryParams, type DataTableResult, type FilterConfig } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { JsonDiffViewer } from '@/shared/audit-trail'
+import { PageShell, PageHeader } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { AuditOperation as AuditOperationEnum } from '@/api/gen/meridian/audit/v1/audit_events_pb'
 import { cn } from '@/lib/utils'
@@ -271,15 +272,13 @@ export function AuditLogPage() {
   }, [clients])
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Audit Log</h1>
-        <p className="mt-2 text-muted-foreground">
-          Browse and review all audit trail entries for your tenant
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Audit Log"
+        description="Browse and review all audit trail entries for your tenant"
+      />
 
-      <Card className="p-6">
+      <Card>
         <DataTable<AuditLogEntry>
           queryKey={['audit-log']}
           queryFn={fetchAuditEntries}
@@ -292,6 +291,6 @@ export function AuditLogPage() {
       </Card>
 
       <AuditDetailPanel entry={selectedEntry} onClose={() => setSelectedEntry(null)} />
-    </div>
+    </PageShell>
   )
 }

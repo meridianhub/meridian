@@ -1,10 +1,9 @@
 import * as React from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { useParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
-import { DetailSkeleton } from '@/shared/detail-skeleton'
+import { DetailSkeleton, Breadcrumbs, PageShell, PageHeader, ErrorState } from '@/shared'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -35,7 +34,7 @@ const STATUS_LABEL: Record<number, string> = {
 export function UserDetailPage() {
   const { userId } = useParams<{ userId: string }>()
   const { claims } = useAuth()
-  const { data: identity, isLoading, isError } = useIdentity(userId ?? '')
+  const { data: identity, isLoading, isError, refetch } = useIdentity(userId ?? '')
   const { data: roleAssignments } = useIdentityRoles(userId ?? '')
   const suspendIdentity = useSuspendIdentity()
   const reactivateIdentity = useReactivateIdentity()
@@ -50,13 +49,10 @@ export function UserDetailPage() {
 
   if (isError || !identity) {
     return (
-      <div className="p-6">
-        <Link to="/users" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
-          <ArrowLeft className="size-4" />
-          Back to Users
-        </Link>
-        <p className="text-destructive">Failed to load user details.</p>
-      </div>
+      <PageShell>
+        <Breadcrumbs items={[{ label: 'Users', href: '/users' }, { label: 'Error' }]} />
+        <ErrorState onRetry={refetch} />
+      </PageShell>
     )
   }
 
@@ -90,30 +86,32 @@ export function UserDetailPage() {
   const isPending = suspendIdentity.isPending || reactivateIdentity.isPending
 
   return (
-    <div className="p-6 space-y-6">
-      <Link to="/users" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" />
-        Back to Users
-      </Link>
+    <PageShell>
+      <Breadcrumbs
+        items={[
+          { label: 'Users', href: '/users' },
+          { label: identity.email },
+        ]}
+      />
 
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{identity.email}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">ID: {identity.id}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {canSuspend && (
-            <Button variant="destructive" size="sm" onClick={() => openAction('suspend')}>
-              Suspend
-            </Button>
-          )}
-          {canReactivate && (
-            <Button variant="outline" size="sm" onClick={() => openAction('reactivate')}>
-              Reactivate
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title={identity.email}
+        description={`ID: ${identity.id}`}
+        actions={
+          <>
+            {canSuspend && (
+              <Button variant="destructive" size="sm" onClick={() => openAction('suspend')}>
+                Suspend
+              </Button>
+            )}
+            {canReactivate && (
+              <Button variant="outline" size="sm" onClick={() => openAction('reactivate')}>
+                Reactivate
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div className="rounded-lg border p-4 space-y-3">
@@ -228,6 +226,6 @@ export function UserDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   )
 }

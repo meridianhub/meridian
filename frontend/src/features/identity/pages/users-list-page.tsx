@@ -6,6 +6,8 @@ import { useAuth } from '@/contexts/auth-context'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
+import { PageShell, PageHeader } from '@/shared'
+import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import type { Identity } from '@/api/gen/meridian/identity/v1/identity_pb'
 import { IdentityStatus } from '@/api/gen/meridian/identity/v1/identity_pb'
@@ -88,30 +90,34 @@ export function UsersListPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Users</h1>
-        <Button onClick={() => setInviteOpen(true)}>
-          <UserPlus className="mr-2 size-4" />
-          Invite User
-        </Button>
-      </div>
-
-      <DataTable<Identity>
-        key={tableKey}
-        queryKey={queryKey}
-        queryFn={queryFn}
-        columns={columns}
-        pageSize={25}
-        filters={statusFilterOptions}
-        onRowClick={handleRowClick}
-        emptyState={
-          <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
-            <span className="text-sm font-medium">No users found</span>
-            <span className="text-xs">Invite a user to get started.</span>
-          </div>
+    <PageShell>
+      <PageHeader
+        title="Users"
+        actions={
+          <Button onClick={() => setInviteOpen(true)}>
+            <UserPlus className="mr-2 size-4" />
+            Invite User
+          </Button>
         }
       />
+
+      <Card>
+        <DataTable<Identity>
+          key={tableKey}
+          queryKey={queryKey}
+          queryFn={queryFn}
+          columns={columns}
+          pageSize={25}
+          filters={statusFilterOptions}
+          onRowClick={handleRowClick}
+          emptyState={
+            <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+              <span className="text-sm font-medium">No users found</span>
+              <span className="text-xs">Invite a user to get started.</span>
+            </div>
+          }
+        />
+      </Card>
 
       <InviteDialog
         open={inviteOpen}
@@ -121,6 +127,6 @@ export function UsersListPage() {
         }}
         currentUserRoles={currentUserRoles}
       />
-    </div>
+    </PageShell>
   )
 }
