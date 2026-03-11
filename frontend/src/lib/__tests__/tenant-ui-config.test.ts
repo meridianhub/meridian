@@ -139,8 +139,8 @@ describe("tenant-ui-config", () => {
       expect(DEFAULT_UI_CONFIG.features?.defaultFeature).toBe("dashboard")
     })
 
-    it("contains all 17 features", () => {
-      expect(DEFAULT_UI_CONFIG.features?.enabled).toHaveLength(17)
+    it("contains all features", () => {
+      expect(DEFAULT_UI_CONFIG.features?.enabled).toHaveLength(ALL_FEATURES.length)
     })
   })
 
