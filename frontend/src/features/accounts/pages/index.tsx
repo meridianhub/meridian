@@ -4,7 +4,8 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
-import { EntityLink } from '@/shared'
+import { EntityLink, PageShell, PageHeader } from '@/shared'
+import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_account_pb'
 import { CreateAccountDialog } from './create-account-dialog'
@@ -55,37 +56,40 @@ export function AccountsPage() {
   ]
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Accounts</h1>
-        <Button onClick={() => setCreateOpen(true)}>Create Account</Button>
-      </div>
-
-      <DataTable
-        queryKey={queryKey}
-        queryFn={queryFn}
-        columns={columns}
-        filters={[
-          {
-            field: 'status',
-            label: 'Status',
-            type: 'select',
-            options: STATUS_OPTIONS,
-          },
-          {
-            field: 'externalReference',
-            label: 'External Ref',
-            type: 'text',
-          },
-        ]}
-        onRowClick={(row) => navigate(`/accounts/${row.accountId}`)}
+    <PageShell>
+      <PageHeader
+        title="Accounts"
+        description="Manage current accounts and their balances."
+        actions={<Button onClick={() => setCreateOpen(true)}>Create Account</Button>}
       />
+
+      <Card>
+        <DataTable
+          queryKey={queryKey}
+          queryFn={queryFn}
+          columns={columns}
+          filters={[
+            {
+              field: 'status',
+              label: 'Status',
+              type: 'select',
+              options: STATUS_OPTIONS,
+            },
+            {
+              field: 'externalReference',
+              label: 'External Ref',
+              type: 'text',
+            },
+          ]}
+          onRowClick={(row) => navigate(`/accounts/${row.accountId}`)}
+        />
+      </Card>
 
       <CreateAccountDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={(accountId) => navigate(`/accounts/${accountId}`)}
       />
-    </div>
+    </PageShell>
   )
 }
