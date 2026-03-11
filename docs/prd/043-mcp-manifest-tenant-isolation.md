@@ -192,7 +192,7 @@ parameters to LLM callers:
       "type": "string",
       "enum": ["create", "amend"],
       "default": "create",
-      "description": "create: schema-only validation (no tenant state comparison); amend: validates against existing tenant manifest"
+      "description": "create: schema-only validation; amend: validates against existing tenant"
     },
     "tenant_id": {
       "type": "string",
