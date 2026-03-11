@@ -4,6 +4,9 @@ import { DataTable } from '@/shared/data-table'
 import { MoneyDisplay } from '@/shared/money-display'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
+import { PageHeader } from '@/shared/page-header'
+import { PageShell } from '@/shared/page-shell'
+import { Card } from '@/components/ui/card'
 import { usePaymentsTable } from '../hooks'
 import type { PaymentOrder } from './payments-query'
 
@@ -75,21 +78,23 @@ export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
   }
 
   return (
-    <div className="p-6">
-      <h1 className="mb-6 text-2xl font-semibold">Payments</h1>
-      <DataTable
-        queryKey={queryKey}
-        queryFn={queryFn}
-        columns={columns}
-        filters={FILTER_CONFIGS}
-        onRowClick={handleRowClick}
-        emptyState={
-          <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
-            <span className="text-sm font-medium">No payments yet</span>
-            <span className="text-xs">Payments will appear here once initiated.</span>
-          </div>
-        }
-      />
-    </div>
+    <PageShell>
+      <PageHeader title="Payments" />
+      <Card>
+        <DataTable
+          queryKey={queryKey}
+          queryFn={queryFn}
+          columns={columns}
+          filters={FILTER_CONFIGS}
+          onRowClick={handleRowClick}
+          emptyState={
+            <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+              <span className="text-sm font-medium">No payments yet</span>
+              <span className="text-xs">Payments will appear here once initiated.</span>
+            </div>
+          }
+        />
+      </Card>
+    </PageShell>
   )
 }
