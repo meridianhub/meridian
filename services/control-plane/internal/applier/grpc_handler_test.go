@@ -157,6 +157,20 @@ func TestApplyManifest_EmptyAppliedBy(t *testing.T) {
 	assert.Contains(t, err.Error(), "applied_by is required")
 }
 
+func TestApplyManifest_DryRun_AllowsEmptyAppliedBy(t *testing.T) {
+	handler := newTestHandler(t)
+
+	resp, err := handler.ApplyManifest(context.Background(), &controlplanev1.ApplyManifestRequest{
+		Manifest: newTestManifest(),
+		DryRun:   true,
+		// AppliedBy intentionally omitted — dry-run should not require it
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN, resp.Status)
+}
+
 func TestApplyManifest_ValidManifest_DryRun(t *testing.T) {
 	handler := newTestHandler(t)
 

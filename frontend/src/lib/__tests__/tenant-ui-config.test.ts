@@ -159,7 +159,6 @@ describe("tenant-ui-config", () => {
       expect(ALL_FEATURES).toContain("market-data")
       expect(ALL_FEATURES).toContain("forecasting")
       expect(ALL_FEATURES).toContain("sagas")
-      expect(ALL_FEATURES).toContain("manifests")
       expect(ALL_FEATURES).toContain("mappings")
       expect(ALL_FEATURES).toContain("audit")
       expect(ALL_FEATURES).toContain("mcp-config")

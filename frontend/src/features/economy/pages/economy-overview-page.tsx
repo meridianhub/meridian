@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
 import { ManifestGraph } from '@/features/manifests/components/manifest-graph'
@@ -91,9 +92,11 @@ export function EconomyOverviewPage() {
     queryFn: () => manifestHistory.getCurrentManifest({}),
   })
 
+  const isNotFound = error instanceof ConnectError && error.code === Code.NotFound
+
   if (isLoading) return <LoadingSkeleton />
-  if (error) return <ErrorState onRetry={() => void refetch()} />
-  if (!data?.version?.manifest) return <EmptyState />
+  if (error && !isNotFound) return <ErrorState onRetry={() => void refetch()} />
+  if (isNotFound || !data?.version?.manifest) return <EmptyState />
 
   const { manifest } = data.version
   const metadata = manifest.metadata

@@ -15,7 +15,13 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useNavigate } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { Maximize2, X } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Tooltip,
   TooltipContent,
@@ -313,15 +319,18 @@ function LegendItem({ label, color, dashed }: { label: string; color: string; da
 interface ManifestGraphProps {
   manifest: Manifest
   className?: string
+  /** @internal Suppresses the fullscreen button to prevent recursive nesting. */
+  _fullscreen?: boolean
 }
 
-export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
+export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGraphProps) {
   const navigate = useNavigate()
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [showEventChain, setShowEventChain] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
   const [visibleTypes, setVisibleTypes] = useState<Set<ManifestNodeType>>(
     () => new Set<ManifestNodeType>(['instrument', 'account_type', 'valuation_rule', 'saga']),
   )
@@ -613,6 +622,32 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
             />
           </div>
         </div>
+      )}
+
+      {/* Fullscreen button + dialog — suppressed in nested (already-fullscreen) instances */}
+      {!_fullscreen && !selectedManifestNode && (
+        <Button
+          variant="outline"
+          size="icon"
+          className="absolute top-3 right-3 z-10 size-8 bg-background/80 backdrop-blur-sm"
+          onClick={() => setFullscreen(true)}
+          aria-label="View fullscreen"
+        >
+          <Maximize2 className="size-4" />
+        </Button>
+      )}
+
+      {!_fullscreen && (
+        <Dialog open={fullscreen} onOpenChange={setFullscreen}>
+          <DialogContent className="max-w-[calc(100vw-2rem)] h-[calc(100vh-2rem)] sm:max-w-[calc(100vw-4rem)] sm:h-[calc(100vh-4rem)] flex flex-col p-4">
+            <DialogHeader className="shrink-0">
+              <DialogTitle>Economy Graph</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 rounded-lg border">
+              <ManifestGraph manifest={manifest} className="h-full w-full" _fullscreen />
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   )

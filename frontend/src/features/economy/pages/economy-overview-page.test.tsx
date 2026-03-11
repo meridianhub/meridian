@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
 import { createTenantUserToken } from '@/test/jwt-helpers'
@@ -206,5 +207,22 @@ describe('EconomyOverviewPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('overview-error')).toBeInTheDocument()
     })
+  })
+
+  it('shows empty state when API returns NotFound', async () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockRejectedValue(
+          new ConnectError('no applied manifest found', Code.NotFound),
+        ),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-empty')).toBeInTheDocument()
+    })
+    expect(screen.getByText('No economy configured')).toBeInTheDocument()
   })
 })
