@@ -61,10 +61,11 @@ test.describe('Structural conformance — list pages (tenant-user)', () => {
         await expect(shell).toBeVisible()
       })
 
-      test('has PageHeader h1 with correct styling', async ({ authenticatedPage }) => {
+      test('has PageHeader h1 with correct text and styling', async ({ authenticatedPage }) => {
         await navigateTo(authenticatedPage, page.path)
         const h1 = authenticatedPage.getByRole('heading', { level: 1 })
         await expect(h1).toBeVisible({ timeout: 10_000 })
+        await expect(h1).toHaveText(page.heading)
         await expect(h1).toHaveClass(/text-3xl/)
         await expect(h1).toHaveClass(/font-bold/)
         await expect(h1).toHaveClass(/tracking-tight/)
@@ -111,10 +112,11 @@ test.describe('Structural conformance — list pages (platform-admin)', () => {
         await expect(shell).toBeVisible()
       })
 
-      test('has PageHeader h1 with correct styling', async ({ platformAdminPage }) => {
+      test('has PageHeader h1 with correct text and styling', async ({ platformAdminPage }) => {
         await navigateTo(platformAdminPage, page.path)
         const h1 = platformAdminPage.getByRole('heading', { level: 1 })
         await expect(h1).toBeVisible({ timeout: 10_000 })
+        await expect(h1).toHaveText(page.heading)
         await expect(h1).toHaveClass(/text-3xl/)
         await expect(h1).toHaveClass(/font-bold/)
         await expect(h1).toHaveClass(/tracking-tight/)
@@ -167,9 +169,12 @@ test.describe('Structural conformance — detail pages', () => {
 
       test('has PageShell wrapper (space-y-6)', async ({ authenticatedPage }) => {
         await navigateTo(authenticatedPage, page.path)
-        // Even error/not-found states should use PageShell
-        const shell = authenticatedPage.locator('.space-y-6').first()
-        await expect(shell).toBeVisible({ timeout: 10_000 })
+        // Wait for breadcrumbs to confirm page rendered, then check PageShell
+        await expect(authenticatedPage.getByLabel('Breadcrumb')).toBeVisible({ timeout: 10_000 })
+        const shell = authenticatedPage.locator('.space-y-6').filter({
+          has: authenticatedPage.getByLabel('Breadcrumb'),
+        })
+        await expect(shell).toBeVisible()
       })
     })
   }
@@ -182,6 +187,7 @@ test.describe('Structural conformance — Reference Data hub', () => {
     await navigateTo(authenticatedPage, '/reference-data')
     const h1 = authenticatedPage.getByRole('heading', { level: 1 })
     await expect(h1).toBeVisible({ timeout: 10_000 })
+    await expect(h1).toHaveText('Reference Data')
     await expect(h1).toHaveClass(/text-3xl/)
     await expect(h1).toHaveClass(/font-bold/)
     await expect(h1).toHaveClass(/tracking-tight/)
