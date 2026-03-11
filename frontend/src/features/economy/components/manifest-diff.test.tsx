@@ -108,6 +108,17 @@ describe('ManifestDiffViewer - modified nodes', () => {
   })
 })
 
+describe('ManifestDiffViewer - edge-only diff', () => {
+  it('does not render no-changes message when only edges changed', () => {
+    const diff: ManifestDiff = {
+      ...emptyDiff,
+      addedEdges: [{ id: 'e1', source: 'a', target: 'b', relationship: 'allowed_by' }],
+    }
+    render(<ManifestDiffViewer diff={diff} />)
+    expect(screen.queryByText(/no changes/i)).not.toBeInTheDocument()
+  })
+})
+
 describe('ManifestDiffViewer - mixed diff', () => {
   const diff: ManifestDiff = {
     addedNodes: [makeNode('instrument:GBP', 'GBP')],

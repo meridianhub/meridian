@@ -13,7 +13,11 @@ export function ManifestDiffViewer({ diff, onNodeClick, className }: ManifestDif
   if (!diff) return null
 
   const hasChanges =
-    diff.addedNodes.length > 0 || diff.removedNodes.length > 0 || diff.modifiedNodes.length > 0
+    diff.addedNodes.length > 0 ||
+    diff.removedNodes.length > 0 ||
+    diff.modifiedNodes.length > 0 ||
+    diff.addedEdges.length > 0 ||
+    diff.removedEdges.length > 0
 
   if (!hasChanges) {
     return (
@@ -121,15 +125,25 @@ interface NodeRowProps {
 }
 
 function NodeRow({ label, colorClass, onClick }: NodeRowProps) {
+  if (onClick) {
+    return (
+      <li>
+        <button
+          type="button"
+          className={cn(
+            'w-full rounded border px-3 py-1.5 text-left text-sm transition-opacity hover:opacity-80',
+            colorClass,
+          )}
+          onClick={onClick}
+        >
+          {label}
+        </button>
+      </li>
+    )
+  }
+
   return (
-    <li
-      className={cn(
-        'rounded border px-3 py-1.5 text-sm',
-        colorClass,
-        onClick && 'cursor-pointer transition-opacity hover:opacity-80',
-      )}
-      onClick={onClick}
-    >
+    <li className={cn('rounded border px-3 py-1.5 text-sm', colorClass)}>
       {label}
     </li>
   )
