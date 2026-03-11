@@ -101,9 +101,12 @@ sequenceDiagram
 - The PKCE `code_verifier` is stored server-side and never sent to the browser. Dex validates the
   verifier against the challenge on token exchange.
 - The `state` parameter is a 128-bit random key. Consuming it on callback prevents replay attacks.
-- The token exchange (`POST /dex/token`) is a server-to-server call over HTTPS. The gateway trusts
-  the `id_token` claims without re-verifying the JWT signature because the response arrives directly
-  from the Dex token endpoint.
+- The token exchange (`POST /dex/token`) is a server-to-server call over HTTPS. The current
+  implementation skips `id_token` signature verification on the basis that the token arrives
+  directly from the Dex endpoint over a trusted TLS connection. This is a deliberate trade-off
+  documented in the source (`auth_sso_handler.go`). Per RFC 8725, services that parse JWT claims
+  to make security decisions should verify the signature; a future hardening step would add
+  JWKS-based verification of the Dex `id_token`.
 - The Meridian JWT is delivered in the URL fragment (`#access_token=...`). Fragments are not sent to
   servers in subsequent HTTP requests, preventing the token from appearing in access logs.
 - The `return_url` parameter is sanitized to relative paths only. Absolute URLs and
@@ -154,10 +157,12 @@ and restarting the Dex container. No Meridian restart is needed.
 **Restart Dex after editing `dex.yaml`:**
 
 ```bash
-ssh root@68.183.40.239
+ssh root@<demo-server-ip>
 cd /opt/meridian
 docker compose restart dex
 ```
+
+The demo server IP is recorded in the internal runbook. Do not commit it to this file.
 
 ### Google connector
 
