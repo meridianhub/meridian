@@ -35,6 +35,9 @@ type Claims struct {
 	TenantID string   `json:"x-tenant-id"`
 	Roles    []string `json:"roles"`
 	Scopes   []string `json:"scopes"`
+	// Groups is the standard OIDC groups claim, present in tokens from providers like Dex.
+	// When Roles is empty, Groups is used as the effective roles via EffectiveRoles().
+	Groups []string `json:"groups"`
 	// Email is the standard OIDC email claim, present in tokens from providers like Dex.
 	Email string `json:"email"`
 	// Name is the standard OIDC name claim.
@@ -127,17 +130,29 @@ func (c *Claims) HasTenantID() bool {
 	return c.TenantID != ""
 }
 
-// GetRoles extracts the roles from the validated claims.
+// EffectiveRoles returns the roles to use for authorization decisions.
+// If the Roles claim is non-empty, it is returned. Otherwise, Groups is used as a fallback.
+// This enables compatibility with identity providers like Dex that use "groups" instead of "roles".
 // Returns a defensive copy to prevent external mutation.
-// Returns an empty slice if no roles are present.
-func (c *Claims) GetRoles() []string {
-	if c.Roles == nil {
+func (c *Claims) EffectiveRoles() []string {
+	source := c.Roles
+	if len(source) == 0 {
+		source = c.Groups
+	}
+	if len(source) == 0 {
 		return []string{}
 	}
-	// Return defensive copy to maintain immutability
-	roles := make([]string, len(c.Roles))
-	copy(roles, c.Roles)
-	return roles
+	result := make([]string, len(source))
+	copy(result, source)
+	return result
+}
+
+// GetRoles extracts the effective roles from the validated claims.
+// Returns a defensive copy to prevent external mutation.
+// Returns an empty slice if no roles are present.
+// Uses EffectiveRoles() to support groups-to-roles fallback.
+func (c *Claims) GetRoles() []string {
+	return c.EffectiveRoles()
 }
 
 // GetScopes extracts the scopes from the validated claims.
@@ -154,8 +169,13 @@ func (c *Claims) GetScopes() []string {
 }
 
 // HasRole checks if the claims contain a specific role.
+// Supports groups-to-roles fallback without allocation (hot path in interceptors).
 func (c *Claims) HasRole(role string) bool {
-	for _, r := range c.Roles {
+	source := c.Roles
+	if len(source) == 0 {
+		source = c.Groups
+	}
+	for _, r := range source {
 		if r == role {
 			return true
 		}

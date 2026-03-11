@@ -72,6 +72,11 @@ export function parseJWT(token: unknown): JWTClaims | null {
     const roles = Array.isArray(decoded.roles)
       ? (decoded.roles as unknown[]).filter((r): r is string => typeof r === 'string')
       : []
+    const groups = Array.isArray(decoded.groups)
+      ? (decoded.groups as unknown[]).filter((g): g is string => typeof g === 'string')
+      : []
+    // Use roles if present, else fall back to groups (Dex uses groups instead of roles)
+    const effectiveRoles = roles.length > 0 ? roles : groups
     const scopes = Array.isArray(decoded.scopes)
       ? (decoded.scopes as unknown[]).filter((s): s is string => typeof s === 'string')
       : []
@@ -79,7 +84,7 @@ export function parseJWT(token: unknown): JWTClaims | null {
     return {
       userId,
       tenantId: typeof decoded.tenantId === 'string' ? decoded.tenantId : undefined,
-      roles,
+      roles: effectiveRoles,
       scopes,
       exp: decoded.exp,
       iss: decoded.iss,

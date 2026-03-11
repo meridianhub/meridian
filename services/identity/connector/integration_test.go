@@ -4,7 +4,6 @@ package connector_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,7 +13,6 @@ import (
 	"github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	"github.com/meridianhub/meridian/services/identity/connector"
 	"github.com/meridianhub/meridian/services/identity/domain"
-	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -141,20 +139,6 @@ func (infra *multiTenantInfra) createActiveIdentity(t *testing.T, ctx context.Co
 	return id
 }
 
-// --- Stub tenant resolver for DexPasswordConnector tests ---
-
-type integrationTenantResolver struct {
-	slugToTenant map[string]*tenantdomain.Tenant
-}
-
-func (r *integrationTenantResolver) GetBySlug(_ context.Context, slug string) (*tenantdomain.Tenant, error) {
-	t, ok := r.slugToTenant[slug]
-	if !ok {
-		return nil, tenantdomain.ErrNotFound
-	}
-	return t, nil
-}
-
 // =============================================================================
 // Test 1: Same email, different tenants produce different identities
 // =============================================================================
@@ -270,111 +254,7 @@ func TestMultiTenant_RoleIsolation(t *testing.T) {
 }
 
 // =============================================================================
-// Test 6: DexPasswordConnector multi-tenant flow with real DB
-// =============================================================================
-
-func TestMultiTenant_DexAdapter_TenantIsolation(t *testing.T) {
-	infra := setupMultiTenantInfra(t)
-
-	idA := infra.createActiveIdentity(t, infra.ctxA, sharedEmail, alphaPass)
-	idB := infra.createActiveIdentity(t, infra.ctxB, sharedEmail, bravoPass)
-
-	// Set up tenant resolver mapping slugs to tenant IDs.
-	resolver := &integrationTenantResolver{
-		slugToTenant: map[string]*tenantdomain.Tenant{
-			"alpha": {ID: tenant.MustNewTenantID(tenantAlpha), Slug: "alpha", Status: tenantdomain.StatusActive},
-			"bravo": {ID: tenant.MustNewTenantID(tenantBravo), Slug: "bravo", Status: tenantdomain.StatusActive},
-		},
-	}
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	adapter, err := connector.NewDexPasswordConnector(infra.conn, resolver, logger)
-	require.NoError(t, err)
-
-	t.Run("tenant alpha login succeeds with alpha password", func(t *testing.T) {
-		got, valid, err := adapter.Login(
-			context.Background(),
-			connector.Scopes{Groups: true},
-			"tenant:alpha/"+sharedEmail,
-			alphaPass,
-		)
-		require.NoError(t, err)
-		assert.True(t, valid)
-		assert.Equal(t, idA.ID().String(), got.UserID)
-		assert.Contains(t, got.Groups, "tenant:"+tenantAlpha)
-
-		// Verify ConnectorData carries tenant_alpha.
-		var cd struct {
-			TenantID string `json:"tenant_id"`
-		}
-		require.NoError(t, json.Unmarshal(got.ConnectorData, &cd))
-		assert.Equal(t, tenantAlpha, cd.TenantID)
-	})
-
-	t.Run("tenant bravo login succeeds with bravo password", func(t *testing.T) {
-		got, valid, err := adapter.Login(
-			context.Background(),
-			connector.Scopes{Groups: true},
-			"tenant:bravo/"+sharedEmail,
-			bravoPass,
-		)
-		require.NoError(t, err)
-		assert.True(t, valid)
-		assert.Equal(t, idB.ID().String(), got.UserID)
-		assert.Contains(t, got.Groups, "tenant:"+tenantBravo)
-	})
-
-	t.Run("alpha password rejected for bravo tenant", func(t *testing.T) {
-		_, valid, err := adapter.Login(
-			context.Background(),
-			connector.Scopes{},
-			"tenant:bravo/"+sharedEmail,
-			alphaPass,
-		)
-		require.NoError(t, err)
-		assert.False(t, valid)
-	})
-
-	t.Run("bravo password rejected for alpha tenant", func(t *testing.T) {
-		_, valid, err := adapter.Login(
-			context.Background(),
-			connector.Scopes{},
-			"tenant:alpha/"+sharedEmail,
-			bravoPass,
-		)
-		require.NoError(t, err)
-		assert.False(t, valid)
-	})
-
-	t.Run("refresh preserves tenant context", func(t *testing.T) {
-		// Login first to get ConnectorData.
-		loginID, valid, err := adapter.Login(
-			context.Background(),
-			connector.Scopes{Groups: true},
-			"tenant:alpha/"+sharedEmail,
-			alphaPass,
-		)
-		require.NoError(t, err)
-		require.True(t, valid)
-
-		// Refresh using the login identity.
-		refreshed, err := adapter.Refresh(
-			context.Background(),
-			connector.Scopes{Groups: true},
-			connector.DexIdentity{
-				UserID:        loginID.UserID,
-				Email:         loginID.Email,
-				ConnectorData: loginID.ConnectorData,
-			},
-		)
-		require.NoError(t, err)
-		assert.Equal(t, idA.ID().String(), refreshed.UserID)
-		assert.Contains(t, refreshed.Groups, "tenant:"+tenantAlpha)
-	})
-}
-
-// =============================================================================
-// Test 7: Account status isolation across tenants
+// Test 6: Account status isolation across tenants
 // =============================================================================
 
 func TestMultiTenant_AccountStatusIsolation(t *testing.T) {

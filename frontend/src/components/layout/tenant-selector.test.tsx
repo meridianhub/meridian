@@ -224,6 +224,39 @@ describe('TenantSelector', () => {
         expect(selectedItem).toHaveAttribute('aria-selected', 'true')
       })
     })
+
+    it('excludes deprovisioned tenants from the dropdown', async () => {
+      const user = userEvent.setup()
+      const tenantsWithDeprovisioned = [
+        ...mockTenants,
+        {
+          tenantId: 'decom_corp',
+          slug: 'decom-corp',
+          displayName: 'Decommissioned Corp',
+          status: 3, // DEPROVISIONED = 3
+          settlementAsset: 'GBP',
+          subdomain: '',
+          partyId: '',
+          errorMessage: '',
+          version: 1,
+          createdAt: undefined,
+          deprovisionedAt: undefined,
+          metadata: undefined,
+        },
+      ]
+      setupMocks({ tenants: tenantsWithDeprovisioned })
+      renderWithProviders(<TenantSelector />, { initialToken: token })
+
+      const button = screen.getByRole('combobox')
+      await user.click(button)
+
+      await waitFor(() => {
+        expect(screen.getByText('Acme Bank')).toBeInTheDocument()
+        expect(screen.getByText('Beta Financial')).toBeInTheDocument()
+        expect(screen.getByText('Gamma Energy')).toBeInTheDocument()
+        expect(screen.queryByText('Decommissioned Corp')).not.toBeInTheDocument()
+      })
+    })
   })
 
   describe('search', () => {
