@@ -4,13 +4,17 @@ import { test as base, type Page } from '@playwright/test'
  * Build a dev-mode JWT that satisfies the AuthProvider's parseJWT validation.
  * These tokens are only accepted in DEV mode (import.meta.env.DEV).
  */
-function buildDevToken(role: 'platform-admin' | 'tenant-user'): string {
+export function buildDevToken(
+  role: 'platform-admin' | 'tenant-user',
+  options?: { uppercaseRoles?: boolean },
+): string {
   const header = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
+  const roleValue = options?.uppercaseRoles ? role.toUpperCase() : role
   const payload = btoa(
     JSON.stringify({
       userId: 'e2e-user',
       tenantId: role === 'tenant-user' ? 'dev-tenant' : undefined,
-      roles: [role],
+      roles: [roleValue],
       scopes: ['read', 'write'],
       // 24 hours from now
       exp: Math.floor(Date.now() / 1000) + 86_400,
