@@ -131,7 +131,7 @@ export function PaymentDetailPage() {
   if (isError || !data) {
     return (
       <div data-testid="payment-detail-error">
-        <PageShell>
+        <PageShell className="p-6">
           <Breadcrumbs items={[{ label: 'Payments', href: '/payments' }, { label: 'Error' }]} />
           <ErrorState message="Failed to load payment order details." />
         </PageShell>
@@ -140,7 +140,7 @@ export function PaymentDetailPage() {
   }
 
   return (
-    <PageShell>
+    <PageShell className="p-6">
       {/* Breadcrumb navigation */}
       <Breadcrumbs
         items={[
