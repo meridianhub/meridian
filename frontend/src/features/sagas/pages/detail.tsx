@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { StarlarkEditor, type ValidationError, type ComplexityMetrics } from '@/features/sagas/components/starlark-editor'
-import { Breadcrumbs } from '@/shared'
+import { Breadcrumbs, DetailSkeleton, ErrorState, PageHeader, PageShell } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
@@ -49,22 +49,6 @@ function isReadOnly(saga: SagaDefinition): boolean {
   // Active system sagas are read-only
   // Active non-system sagas are also read-only (script is immutable once activated)
   return saga.isSystem || saga.status === SagaStatus.ACTIVE || saga.status === SagaStatus.DEPRECATED
-}
-
-// ---------------------------------------------------------------------------
-// Loading Skeleton
-// ---------------------------------------------------------------------------
-
-function DetailSkeleton() {
-  return (
-    <div data-testid="detail-skeleton" className="flex flex-col gap-6 animate-pulse">
-      <div>
-        <div className="h-9 w-64 bg-muted rounded" />
-        <div className="mt-2 h-5 w-80 bg-muted rounded" />
-      </div>
-      <div className="h-64 bg-muted rounded" />
-    </div>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -208,14 +192,15 @@ export function StarlarkDetailPage() {
   }, [])
 
   if (isLoading) {
-    return <DetailSkeleton />
+    return <DetailSkeleton tabCount={0} fieldCount={2} />
   }
 
   if (!sagaData) {
     return (
-      <div className="p-6">
-        <p className="text-muted-foreground">Saga definition not found.</p>
-      </div>
+      <PageShell>
+        <Breadcrumbs items={[{ label: 'Starlark Config', href: '/starlark' }]} />
+        <ErrorState title="Saga not found" message="This saga definition could not be found." />
+      </PageShell>
     )
   }
 
@@ -231,7 +216,7 @@ export function StarlarkDetailPage() {
   const readOnly = isReadOnly(sagaData)
 
   return (
-    <div className="flex flex-col gap-6">
+    <PageShell>
       {/* Breadcrumb navigation */}
       <Breadcrumbs
         items={[
@@ -241,63 +226,54 @@ export function StarlarkDetailPage() {
       />
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight font-mono">
-              {sagaData.name}
-            </h1>
-            <StatusBadge status={sagaStatusLabel(sagaData.status)} />
-          </div>
-          {sagaData.displayName && (
-            <p className="mt-1 text-muted-foreground">{sagaData.displayName}</p>
-          )}
-          {sagaData.description && (
-            <p className="mt-1 text-sm text-muted-foreground">{sagaData.description}</p>
-          )}
-          <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">
-            <span>Version {sagaData.version}</span>
-            {sagaData.updatedAt && (
-              <span>
-                Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
-              </span>
+      <PageHeader
+        title={sagaData.name}
+        description={sagaData.description ?? sagaData.displayName}
+        actions={
+          <div className="flex items-center gap-2 shrink-0">
+            {(!readOnly || showSplitPane) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => validateMutation.mutate()}
+                disabled={validateMutation.isPending}
+              >
+                Validate
+              </Button>
+            )}
+            {sagaData.status === SagaStatus.DRAFT && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => activateMutation.mutate()}
+                disabled={activateMutation.isPending}
+              >
+                Activate
+              </Button>
+            )}
+            {sagaData.status === SagaStatus.ACTIVE && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => deprecateMutation.mutate()}
+                disabled={deprecateMutation.isPending}
+              >
+                Deprecate
+              </Button>
             )}
           </div>
-        </div>
+        }
+      />
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 shrink-0">
-          {(!readOnly || showSplitPane) && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => validateMutation.mutate()}
-              disabled={validateMutation.isPending}
-            >
-              Validate
-            </Button>
-          )}
-          {sagaData.status === SagaStatus.DRAFT && (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => activateMutation.mutate()}
-              disabled={activateMutation.isPending}
-            >
-              Activate
-            </Button>
-          )}
-          {sagaData.status === SagaStatus.ACTIVE && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => deprecateMutation.mutate()}
-              disabled={deprecateMutation.isPending}
-            >
-              Deprecate
-            </Button>
-          )}
-        </div>
+      {/* Status and metadata row */}
+      <div className="flex items-center gap-4 text-sm text-muted-foreground -mt-4">
+        <StatusBadge status={sagaStatusLabel(sagaData.status)} />
+        <span>Version {sagaData.version}</span>
+        {sagaData.updatedAt && (
+          <span>
+            Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
+          </span>
+        )}
       </div>
 
       {/* Editor area */}
@@ -322,6 +298,6 @@ export function StarlarkDetailPage() {
           />
         )}
       </Card>
-    </div>
+    </PageShell>
   )
 }
