@@ -41,6 +41,10 @@ var (
 	ErrInvalidJWTFormat = errors.New("invalid JWT format")
 	// ErrEmailClaimMissing is returned when the ID token has no email claim.
 	ErrEmailClaimMissing = errors.New("email claim missing from ID token")
+	// ErrSSOCallbackURLRequired is returned when no callback URL is provided.
+	ErrSSOCallbackURLRequired = errors.New("sso handler: callback URL is required")
+	// ErrSSOCallbackURLInvalid is returned when the callback URL is not a valid absolute URL.
+	ErrSSOCallbackURLInvalid = errors.New("sso handler: callback URL must be a valid absolute URL")
 )
 
 // IdentityResolver resolves an identity by email without password validation.
@@ -89,6 +93,36 @@ type SSOHandlerConfig struct {
 	StateStore *StateStore
 }
 
+// validateSSOConfig checks that all required fields are present and valid.
+func validateSSOConfig(cfg SSOHandlerConfig) error {
+	if cfg.DexIssuerURL == "" {
+		return ErrSSODexIssuerRequired
+	}
+	if _, err := url.Parse(cfg.DexIssuerURL); err != nil {
+		return fmt.Errorf("sso handler: invalid dex issuer URL: %w", err)
+	}
+	if cfg.CallbackURL == "" {
+		return ErrSSOCallbackURLRequired
+	}
+	callbackURL, err := url.Parse(cfg.CallbackURL)
+	if err != nil || !callbackURL.IsAbs() || callbackURL.Host == "" {
+		return fmt.Errorf("%w: %q", ErrSSOCallbackURLInvalid, cfg.CallbackURL)
+	}
+	if cfg.ClientID == "" {
+		return ErrSSOClientIDRequired
+	}
+	if cfg.Signer == nil {
+		return ErrSSOSignerRequired
+	}
+	if cfg.Resolver == nil {
+		return ErrSSOResolverRequired
+	}
+	if cfg.Logger == nil {
+		return ErrSSOLoggerRequired
+	}
+	return nil
+}
+
 // NewSSOHandler creates a handler for BFF SSO authentication via Dex.
 //
 // Security: The token exchange with Dex relies on server-to-server TLS for
@@ -96,28 +130,13 @@ type SSOHandlerConfig struct {
 // DexIssuerURL MUST use HTTPS. A warning is logged if HTTP is configured
 // (acceptable only in local development with trusted networks).
 func NewSSOHandler(cfg SSOHandlerConfig) (*SSOHandler, error) {
-	if cfg.DexIssuerURL == "" {
-		return nil, ErrSSODexIssuerRequired
+	if err := validateSSOConfig(cfg); err != nil {
+		return nil, err
 	}
-	issuerURL, err := url.Parse(cfg.DexIssuerURL)
-	if err != nil {
-		return nil, fmt.Errorf("sso handler: invalid dex issuer URL: %w", err)
-	}
-	if issuerURL.Scheme != "https" && cfg.Logger != nil {
+	issuerURL, _ := url.Parse(cfg.DexIssuerURL) // already validated
+	if issuerURL.Scheme != "https" {
 		cfg.Logger.Warn("sso handler: Dex issuer URL is not HTTPS — token exchange is not protected by TLS",
 			"dex_issuer_url", cfg.DexIssuerURL)
-	}
-	if cfg.ClientID == "" {
-		return nil, ErrSSOClientIDRequired
-	}
-	if cfg.Signer == nil {
-		return nil, ErrSSOSignerRequired
-	}
-	if cfg.Resolver == nil {
-		return nil, ErrSSOResolverRequired
-	}
-	if cfg.Logger == nil {
-		return nil, ErrSSOLoggerRequired
 	}
 	ttl := cfg.TokenTTL
 	if ttl == 0 {

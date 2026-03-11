@@ -3,11 +3,17 @@ package gateway
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
+
+// ErrStateStoreFull is returned when the state store has reached its maximum
+// capacity and cannot accept new entries. This prevents memory exhaustion
+// from unauthenticated SSO initiation requests.
+var ErrStateStoreFull = errors.New("state store: capacity limit reached")
 
 // StateData holds the PKCE and tenant context for an in-flight SSO authorization.
 type StateData struct {
@@ -41,7 +47,8 @@ type StateStore struct {
 const (
 	defaultStateTTL = 5 * time.Minute
 	maxLazyPurge    = 100
-	stateKeyBytes   = 16 // 128-bit random state keys
+	maxStoreEntries = 10000 // hard cap to prevent memory exhaustion from unauthenticated requests
+	stateKeyBytes   = 16    // 128-bit random state keys
 )
 
 // NewStateStore creates a StateStore with the given TTL.
@@ -67,14 +74,20 @@ func (s *StateStore) Set(data StateData) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Purge expired entries if approaching capacity to make room.
+	if len(s.items) >= maxLazyPurge {
+		s.purgeExpiredLocked()
+	}
+
+	// Hard cap: reject new entries if the store is full after purging.
+	// This prevents memory exhaustion from unauthenticated SSO initiation flood.
+	if len(s.items) >= maxStoreEntries {
+		return "", ErrStateStoreFull
+	}
+
 	s.items[key] = stateEntry{
 		data:      data,
 		expiresAt: s.now().Add(s.ttl),
-	}
-
-	// Lazy purge: if too many entries, sweep expired ones.
-	if len(s.items) > maxLazyPurge {
-		s.purgeExpiredLocked()
 	}
 
 	return key, nil

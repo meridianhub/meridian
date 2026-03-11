@@ -75,23 +75,33 @@ func TestNewSSOHandler_Validation(t *testing.T) {
 		},
 		{
 			name:    "missing client ID",
-			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", Signer: signer, Resolver: resolver, Logger: logger},
+			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", CallbackURL: "https://example.com/cb", Signer: signer, Resolver: resolver, Logger: logger},
 			wantErr: gateway.ErrSSOClientIDRequired,
 		},
 		{
 			name:    "missing signer",
-			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", Resolver: resolver, Logger: logger},
+			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", CallbackURL: "https://example.com/cb", Resolver: resolver, Logger: logger},
 			wantErr: gateway.ErrSSOSignerRequired,
 		},
 		{
 			name:    "missing resolver",
-			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", Signer: signer, Logger: logger},
+			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", CallbackURL: "https://example.com/cb", Signer: signer, Logger: logger},
 			wantErr: gateway.ErrSSOResolverRequired,
 		},
 		{
 			name:    "missing logger",
-			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", Signer: signer, Resolver: resolver},
+			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", CallbackURL: "https://example.com/callback", Signer: signer, Resolver: resolver},
 			wantErr: gateway.ErrSSOLoggerRequired,
+		},
+		{
+			name:    "missing callback URL",
+			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", Signer: signer, Resolver: resolver, Logger: logger},
+			wantErr: gateway.ErrSSOCallbackURLRequired,
+		},
+		{
+			name:    "invalid callback URL (relative)",
+			cfg:     gateway.SSOHandlerConfig{DexIssuerURL: "http://dex", ClientID: "c", CallbackURL: "/api/auth/callback", Signer: signer, Resolver: resolver, Logger: logger},
+			wantErr: gateway.ErrSSOCallbackURLInvalid,
 		},
 	}
 
