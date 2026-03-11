@@ -24,8 +24,8 @@ func TestWireGateway_Config(t *testing.T) {
 	databaseURL := "postgres://root@localhost:26257/defaultdb?sslmode=disable"
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// Pass nil DB — health endpoints bypass tenant resolution so DB is not exercised.
-	srv, err := wireGateway(grpcPort, httpPort, databaseURL, (*gorm.DB)(nil), logger)
+	// Pass nil DB and nil signer — health endpoints bypass tenant resolution and auth.
+	srv, err := wireGateway(grpcPort, httpPort, databaseURL, (*gorm.DB)(nil), nil, logger)
 	require.NoError(t, err)
 	require.NotNil(t, srv)
 
