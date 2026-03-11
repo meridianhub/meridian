@@ -198,6 +198,7 @@ export function PositionDetailPage() {
             { label: logId ?? 'Position Log' },
           ]}
         />
+        <h1 className="text-3xl font-bold tracking-tight">Position Log</h1>
         <ErrorState
           message="Failed to load position log"
           onRetry={() => void refetch()}
