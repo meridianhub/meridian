@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
 import type { SagaDefinition, InstrumentDefinition, AccountTypeDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
@@ -225,10 +226,12 @@ export function EconomyExplorePage() {
     queryFn: () => manifestHistory.getCurrentManifest({}),
   })
 
+  const isNotFound = error instanceof ConnectError && error.code === Code.NotFound
+
   const content = (() => {
     if (isLoading && !data) return <LoadingSkeleton />
-    if (error && !data) return <ErrorState onRetry={() => void refetch()} />
-    if (!data?.version?.manifest) return <EmptyState />
+    if (error && !isNotFound && !data) return <ErrorState onRetry={() => void refetch()} />
+    if (isNotFound || !data?.version?.manifest) return <EmptyState />
 
     const manifest: Manifest = data.version.manifest
     const sagas = manifest.sagas ?? []
