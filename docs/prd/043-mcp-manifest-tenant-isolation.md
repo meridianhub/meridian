@@ -81,7 +81,36 @@ no indication of which tenant was used.
   `create` mode) should be explicitly marked as such and bypass
   tenant state comparison.
 
-### Issue 3: Economy Generator Service Unavailable
+### Issue 3: Confusing Manifest Input Format
+
+**Current behaviour:** The `meridian_manifest_validate` tool
+description says "Validate a manifest YAML/JSON" but the input
+schema declares `manifest` as `type: "object"`. This creates
+confusion: the description suggests YAML strings are accepted,
+but only a parsed JSON object works. Passing a YAML string
+produces a type error (`expected object, but got string`) with
+no guidance on the correct format.
+
+**Location:**
+`services/mcp-server/internal/tools/economy.go:86-97` — the
+description mentions "YAML/JSON" but `InputSchema` requires
+`type: "object"`.
+
+**Expected behaviour:** Either:
+
+- (a) Accept both formats: if the input is a string, attempt to
+  parse it as YAML first, then JSON, before proto conversion.
+  This matches the tool description and is more forgiving for
+  LLM callers that naturally produce YAML.
+- (b) Update the description to explicitly state "JSON object"
+  and remove the YAML reference, so callers know to pass a
+  parsed object rather than a string.
+
+Option (a) is preferred since YAML is the canonical format used
+in cookbook patterns and documentation. LLMs generating manifests
+will naturally produce YAML strings.
+
+### Issue 4: Economy Generator Service Unavailable
 
 **Current behaviour:** `meridian_economy_generate` and
 `meridian_economy_generate_context` fail with
@@ -115,7 +144,10 @@ These issues collectively degrade the economy design workflow:
 2. **Silent tenant leakage** — Operating on the wrong tenant's data
    without explicit indication is a security and correctness
    concern.
-3. **Blocked primary workflow** — The AI generator being unavailable
+3. **Input format confusion** — The tool description says
+   "YAML/JSON" but only accepts a JSON object, causing silent
+   failures and trial-and-error for LLM callers.
+4. **Blocked primary workflow** — The AI generator being unavailable
    forces the manual path, which requires deep knowledge of the
    proto schema, registered event topics, handler signatures, and
    Starlark built-ins.
@@ -157,7 +189,17 @@ Alternatively, the `ApplyManifest` gRPC handler itself should
 return a clear error when tenant context is missing, rather than
 falling back to a default.
 
-### 3. Deploy or gracefully degrade the Economy Generator Service
+### 3. Accept YAML string input in manifest tools
+
+Update `manifestJSONToProto` (or a wrapper) to detect whether the
+input is a string (YAML/JSON text) or an object (already-parsed
+JSON). If a string is received, parse it as YAML first (which is
+a superset of JSON), then proceed with proto conversion.
+
+This applies to `meridian_manifest_validate`,
+`meridian_manifest_plan`, and `meridian_manifest_apply`.
+
+### 4. Deploy or gracefully degrade the Economy Generator Service
 
 Either:
 
@@ -168,7 +210,7 @@ Either:
   "Economy generator is not available on this instance. Use
   meridian_manifest_validate to check manually composed manifests."
 
-### 4. Add `meridian_manifest_schema` reference tool
+### 5. Add `meridian_manifest_schema` reference tool
 
 A new read-only tool that returns the full manifest schema (field
 names, types, enums, constraints) without requiring any tenant
@@ -193,9 +235,11 @@ This tool should return:
    manifest without comparing against existing tenant state
 2. Accessing the MCP server at the base domain does not silently
    execute tools against an arbitrary tenant
-3. `meridian_economy_generate` either works on demo or returns a
+3. Manifest tools accept both YAML strings and JSON objects as
+   input without type errors
+4. `meridian_economy_generate` either works on demo or returns a
    clear "service unavailable" message
-4. A new `meridian_manifest_schema` tool returns the full schema
+5. A new `meridian_manifest_schema` tool returns the full schema
    reference without tenant context
 
 ## Files Affected
