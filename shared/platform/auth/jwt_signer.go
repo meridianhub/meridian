@@ -24,6 +24,8 @@ var (
 	ErrInvalidPEM = errors.New("failed to decode PEM block")
 	// ErrNotRSAKey is returned when the PEM does not contain an RSA private key.
 	ErrNotRSAKey = errors.New("PEM does not contain an RSA private key")
+	// ErrInvalidTTL is returned when a non-positive token TTL is provided.
+	ErrInvalidTTL = errors.New("token TTL must be positive")
 )
 
 // JWTSigner signs JWT tokens using an RSA private key.
@@ -84,6 +86,9 @@ func NewJWTSigner(cfg JWTSignerConfig) (*JWTSigner, error) {
 // The claims map is merged with standard registered claims (iss, iat, exp, sub).
 // The "sub" key in customClaims sets the subject; all other keys become custom claims.
 func (s *JWTSigner) SignClaims(customClaims map[string]interface{}, ttl time.Duration) (string, error) {
+	if ttl <= 0 {
+		return "", ErrInvalidTTL
+	}
 	now := time.Now()
 
 	// Merge custom claims first, then set registered claims to prevent override.

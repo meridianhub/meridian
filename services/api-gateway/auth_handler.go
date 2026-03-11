@@ -9,7 +9,6 @@ import (
 
 	"github.com/meridianhub/meridian/services/identity/connector"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
-	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -26,20 +25,18 @@ var (
 // Password login bypasses Dex entirely — the backend validates credentials
 // directly against the identity domain and signs its own JWT.
 type AuthHandler struct {
-	connector      connector.PasswordConnector
-	signer         *platformauth.JWTSigner
-	tenantResolver *platformgateway.TenantResolverMiddleware
-	tokenTTL       time.Duration
-	logger         *slog.Logger
+	connector connector.PasswordConnector
+	signer    *platformauth.JWTSigner
+	tokenTTL  time.Duration
+	logger    *slog.Logger
 }
 
 // AuthHandlerConfig holds configuration for creating an AuthHandler.
 type AuthHandlerConfig struct {
-	Connector      connector.PasswordConnector
-	Signer         *platformauth.JWTSigner
-	TenantResolver *platformgateway.TenantResolverMiddleware
-	TokenTTL       time.Duration // Defaults to 1 hour.
-	Logger         *slog.Logger
+	Connector connector.PasswordConnector
+	Signer    *platformauth.JWTSigner
+	TokenTTL  time.Duration // Defaults to 1 hour.
+	Logger    *slog.Logger
 }
 
 // NewAuthHandler creates a handler for BFF password authentication.
@@ -59,11 +56,10 @@ func NewAuthHandler(cfg AuthHandlerConfig) (*AuthHandler, error) {
 		ttl = time.Hour
 	}
 	return &AuthHandler{
-		connector:      cfg.Connector,
-		signer:         cfg.Signer,
-		tenantResolver: cfg.TenantResolver,
-		tokenTTL:       ttl,
-		logger:         cfg.Logger,
+		connector: cfg.Connector,
+		signer:    cfg.Signer,
+		tokenTTL:  ttl,
+		logger:    cfg.Logger,
 	}, nil
 }
 
