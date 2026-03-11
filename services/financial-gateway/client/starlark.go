@@ -46,11 +46,11 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 				Version:             1,
 				ParamOverrides: map[string]saga.ParamOverride{
 					// Starlark-friendly aliases for proto field names
-					"amount_units":      {Alias: "amount_minor_units"},
-					"instrument_code":   {Alias: "currency"},
-					"debtor_account_id": {Derived: true},
+					"amount_units":        {Alias: "amount_minor_units"},
+					"instrument_code":     {Alias: "currency"},
+					"debtor_account_id":   {Derived: true},
 					"creditor_account_id": {Derived: true},
-					"reference": {Derived: true},
+					"reference":           {Derived: true},
 					// Handler params not in proto (resolved internally)
 					"customer_reference":       {Type: "string"},
 					"payment_method_reference": {Type: "string"},
