@@ -46,6 +46,15 @@ ruleTester.run('require-page-structure', rule, {
       filename: '/app/src/features/accounts/pages/create-dialog.tsx',
     },
     {
+      // Nested page importing via relative path
+      code: `
+        import { PageShell } from '../../page-shell'
+        import { PageHeader } from '../../page-header'
+        export default function NodePage() { return null }
+      `,
+      filename: '/app/src/features/reference-data/pages/nodes/index.tsx',
+    },
+    {
       // Economy page is excluded
       code: `export default function EconomyPage() { return null }`,
       filename: '/app/src/features/economy/pages/economy-overview-page.tsx',

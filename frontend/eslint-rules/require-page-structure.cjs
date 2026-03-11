@@ -7,7 +7,7 @@ module.exports = {
     schema: [],
   },
   create(context) {
-    const filename = context.filename || context.getFilename()
+    const filename = (context.filename || context.getFilename()).replace(/\\/g, '/')
     // Only apply to feature page files
     if (!filename.includes('/features/') || !filename.includes('/pages/')) {
       return {}
@@ -16,12 +16,11 @@ module.exports = {
     if (!filename.endsWith('.tsx')) {
       return {}
     }
-    // Skip test files, dialog files, component helpers, and tab components
+    // Skip test files, dialog files, and tab components
     if (
       filename.includes('.test.') ||
       filename.includes('.spec.') ||
       filename.includes('dialog') ||
-      filename.includes('component') ||
       filename.includes('/tabs/')
     ) {
       return {}
@@ -44,11 +43,11 @@ module.exports = {
     return {
       ImportDeclaration(node) {
         const source = node.source.value
-        if (
+        const isPageImport =
           source.includes('@/shared') ||
-          source.includes('./page-header') ||
-          source.includes('./page-shell')
-        ) {
+          /^(\.\.?\/)*page-header$/.test(source) ||
+          /^(\.\.?\/)*page-shell$/.test(source)
+        if (isPageImport) {
           node.specifiers.forEach((spec) => {
             if (spec.imported && spec.imported.name === 'PageShell') hasPageShell = true
             if (spec.imported && spec.imported.name === 'PageHeader') hasPageHeader = true
