@@ -18,10 +18,10 @@ interface ManifestSaga {
   [key: string]: unknown
 }
 
-interface ManifestHandler {
+interface ManifestMapping {
   name: string
-  module?: string
-  path?: string
+  targetService?: string
+  targetRpc?: string
   [key: string]: unknown
 }
 
@@ -39,7 +39,7 @@ interface ManifestAccountType {
 
 interface ManifestInput {
   sagas?: ManifestSaga[]
-  handlers?: ManifestHandler[]
+  mappings?: ManifestMapping[]
   instruments?: ManifestInstrument[]
   accountTypes?: ManifestAccountType[]
 }
@@ -123,7 +123,7 @@ function EventChannelsPanel({ manifest }: { manifest: Manifest }) {
           <CardContent className="flex items-center justify-between px-4 py-3">
             <span className="font-mono text-sm font-medium text-foreground">{ch.channel}</span>
             <Badge className="bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900 dark:text-green-200">
-              {ch.boundSagas.length} saga attached
+              {ch.boundSagas.length} saga{ch.boundSagas.length === 1 ? '' : 's'} attached
             </Badge>
           </CardContent>
         </Card>
@@ -172,33 +172,33 @@ function SagasPanel({ manifest }: { manifest: Manifest }) {
   )
 }
 
-// ── API Endpoints panel ────────────────────────────────────────────────────────
+// ── Mappings panel ────────────────────────────────────────────────────────────
 
 function ApiEndpointsPanel({ manifest }: { manifest: Manifest }) {
   const m = manifest as unknown as ManifestInput
-  const handlers = m.handlers ?? []
+  const mappings = m.mappings ?? []
 
-  if (handlers.length === 0) {
+  if (mappings.length === 0) {
     return (
       <div className="py-8 text-center text-muted-foreground text-sm">
-        No API endpoints defined in this manifest.
+        No API mappings defined in this manifest.
       </div>
     )
   }
 
   return (
     <div className="space-y-2">
-      {handlers.map((handler) => (
-        <Card key={handler.name}>
+      {mappings.map((mapping, i) => (
+        <Card key={mapping.name ?? i}>
           <CardContent className="flex items-center justify-between px-4 py-3">
             <div className="space-y-0.5">
-              <span className="font-mono text-sm font-medium">{handler.name}</span>
-              {handler.path && (
-                <p className="text-xs text-muted-foreground font-mono">{handler.path}</p>
+              <span className="font-mono text-sm font-medium">{mapping.name}</span>
+              {mapping.targetService && (
+                <p className="text-xs text-muted-foreground font-mono">{mapping.targetService}</p>
               )}
             </div>
-            {handler.module && (
-              <Badge variant="secondary">{handler.module}</Badge>
+            {mapping.targetRpc && (
+              <Badge variant="secondary">{mapping.targetRpc}</Badge>
             )}
           </CardContent>
         </Card>
@@ -269,8 +269,8 @@ export function EconomyExplorePage() {
     queryFn: () => manifestHistory.getCurrentManifest({}),
   })
 
-  if (isLoading) return <LoadingSkeleton />
-  if (error) return <ErrorState onRetry={() => void refetch()} />
+  if (isLoading && !data) return <LoadingSkeleton />
+  if (error && !data) return <ErrorState onRetry={() => void refetch()} />
   if (!data?.version?.manifest) return <EmptyState />
 
   const { manifest } = data.version
@@ -280,7 +280,7 @@ export function EconomyExplorePage() {
       <div>
         <h1 className="text-2xl font-semibold">Economy Explorer</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Explore event channels, sagas, API endpoints, and resources in your economy.
+          Explore event channels, sagas, API mappings, and resources in your economy.
         </p>
       </div>
 

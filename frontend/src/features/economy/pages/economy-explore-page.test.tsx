@@ -52,15 +52,13 @@ const mockManifestVersion = {
         script: 'def main(): pass',
       },
     ],
-    handlers: [
-      { name: 'charge_customer', module: 'payments', path: '/v1/payments/charge' },
-      { name: 'create_lien', module: 'payments', path: '/v1/payments/lien' },
-      { name: 'settle_trade', module: 'trading', path: '/v1/trades/settle' },
+    mappings: [
+      { name: 'stripe_webhook', targetService: 'meridian.payment_order.v1.PaymentOrderService', targetRpc: 'InitiatePaymentOrder' },
+      { name: 'meter_reading', targetService: 'meridian.energy.v1.EnergyService', targetRpc: 'RecordMeterReading' },
     ],
     seedData: undefined,
     paymentRails: [],
     partyTypes: [],
-    mappings: [],
   },
   appliedAt: { seconds: BigInt(1700000000), nanos: 0 },
   appliedBy: 'admin@example.com',
@@ -209,7 +207,7 @@ describe('EconomyExplorePage', () => {
       })
     })
 
-    it('shows handlers after clicking API Endpoints tab', async () => {
+    it('shows mappings after clicking API Endpoints tab', async () => {
       renderPage()
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: /api endpoints/i })).toBeInTheDocument()
@@ -217,10 +215,9 @@ describe('EconomyExplorePage', () => {
       await userEvent.click(screen.getByRole('tab', { name: /api endpoints/i }))
 
       await waitFor(() => {
-        expect(screen.getByText('charge_customer')).toBeInTheDocument()
+        expect(screen.getByText('stripe_webhook')).toBeInTheDocument()
       })
-      expect(screen.getByText('create_lien')).toBeInTheDocument()
-      expect(screen.getByText('settle_trade')).toBeInTheDocument()
+      expect(screen.getByText('meter_reading')).toBeInTheDocument()
     })
   })
 
