@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
 import { createTenantUserToken } from '@/test/jwt-helpers'
@@ -227,5 +227,40 @@ describe('EconomyEditPage', () => {
       const panel = screen.getByTestId('editor-graph-panel')
       expect(panel.getAttribute('data-validation-passed')).toBe('true')
     })
+  })
+
+  it('renders breadcrumbs with link back to /economy', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByLabelText('Breadcrumb')).toBeInTheDocument()
+    })
+
+    const breadcrumb = screen.getByLabelText('Breadcrumb')
+    const economyLink = within(breadcrumb).getByText('Economy')
+    expect(economyLink.closest('a')).toHaveAttribute('href', '/economy')
+    expect(within(breadcrumb).getByText('Edit')).toBeInTheDocument()
+  })
+
+  it('renders a page title', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('Edit Economy')).toBeInTheDocument()
+    })
+  })
+
+  it('renders breadcrumbs even during loading state', () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockReturnValue(new Promise(() => {})),
+      },
+      manifestApplier: {
+        applyManifest: vi.fn(),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+    expect(screen.getByTestId('edit-page-loading')).toBeInTheDocument()
+    expect(screen.getByLabelText('Breadcrumb')).toBeInTheDocument()
+    expect(screen.getByText('Edit Economy')).toBeInTheDocument()
   })
 })

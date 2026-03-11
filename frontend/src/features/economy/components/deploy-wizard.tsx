@@ -235,14 +235,25 @@ export function DeployWizard({
         )}
 
         {step === 'review' && (
-          <Button
-            onClick={() => setConfirmOpen(true)}
-            disabled={!canApply}
-            size="sm"
-            data-testid="deploy-apply-button"
-          >
-            Apply
-          </Button>
+          <>
+            <Button
+              onClick={() => setConfirmOpen(true)}
+              disabled={!canApply}
+              size="sm"
+              data-testid="deploy-apply-button"
+            >
+              Apply
+            </Button>
+            {!canApply && (
+              <span className="text-xs text-muted-foreground" data-testid="apply-disabled-reason">
+                {hasBlockingErrors
+                  ? 'Cannot apply: plan contains validation errors'
+                  : isPlanStale
+                    ? 'Cannot apply: manifest changed since last plan'
+                    : 'Cannot apply'}
+              </span>
+            )}
+          </>
         )}
 
         {step === 'error' && (

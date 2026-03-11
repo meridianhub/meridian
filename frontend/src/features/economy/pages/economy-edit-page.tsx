@@ -12,6 +12,7 @@ import { ManifestEditor } from '../components/manifest-editor'
 import { ValidationPanel } from '../components/validation-panel'
 import { EditorGraphPanel } from '../components/editor-graph-panel'
 import { DeployWizard } from '../components/deploy-wizard'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { useManifestValidate } from '../hooks/use-manifest-validate'
 import type { ValidationError } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 
@@ -134,57 +135,67 @@ export function EconomyEditPage() {
     setManifestChangedSincePlan(false)
   }, [])
 
-  if (isLoading) return <LoadingSkeleton />
-  if (isError) return <ErrorState onRetry={() => void refetch()} />
-
   return (
-    <div className="flex h-full gap-0 overflow-hidden">
-      {/* Left panel: 70% — editor + validation + deploy */}
-      <div className="flex flex-[7] flex-col overflow-hidden border-r">
-        {/* Editor takes remaining height */}
-        <div className="min-h-0 flex-1 overflow-auto">
-          <ManifestEditor
-            value={manifestYaml}
-            onChange={handleEditorChange}
-            validationErrors={[...errors, ...warnings]}
-          />
-        </div>
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Breadcrumbs + title bar — always visible */}
+      <div className="shrink-0 border-b px-4 py-3 space-y-1">
+        <Breadcrumbs items={[{ label: 'Economy', href: '/economy' }, { label: 'Edit' }]} />
+        <h1 className="text-lg font-semibold">Edit Economy</h1>
+      </div>
 
-        {/* Validation panel (conditionally shown) */}
-        {(errors.length > 0 || warnings.length > 0) && (
-          <div className="shrink-0 border-t p-3">
-            <ValidationPanel
-              errors={errors}
-              warnings={warnings}
-              onLineClick={() => {}}
-              onSuggestionApply={() => {}}
-            />
+      {isLoading ? (
+        <LoadingSkeleton />
+      ) : isError ? (
+        <ErrorState onRetry={() => void refetch()} />
+      ) : (
+        <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
+          {/* Left panel: 70% — editor + validation + deploy */}
+          <div className="flex flex-[7] flex-col overflow-hidden border-r">
+            {/* Editor takes remaining height */}
+            <div className="min-h-0 flex-1 overflow-auto">
+              <ManifestEditor
+                value={manifestYaml}
+                onChange={handleEditorChange}
+                validationErrors={[...errors, ...warnings]}
+              />
+            </div>
+
+            {/* Validation panel (conditionally shown) */}
+            {(errors.length > 0 || warnings.length > 0) && (
+              <div className="shrink-0 border-t p-3">
+                <ValidationPanel
+                  errors={errors}
+                  warnings={warnings}
+                  onLineClick={() => {}}
+                  onSuggestionApply={() => {}}
+                />
+              </div>
+            )}
+
+            {/* Deploy wizard */}
+            {draftManifest && (
+              <div className="shrink-0 border-t p-4">
+                <DeployWizard
+                  manifest={draftManifest}
+                  manifestChanged={manifestChangedSincePlan}
+                  onLineClick={() => {}}
+                  onSuggestionApply={() => {}}
+                  onPlanStart={handlePlanStart}
+                />
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Deploy wizard */}
-        {draftManifest && (
-          <div className="shrink-0 border-t p-4">
-            <DeployWizard
+          {/* Right panel: 30% — relationship graph */}
+          <div className="flex-[3] overflow-hidden p-4">
+            <EditorGraphPanel
               manifest={draftManifest}
-              manifestChanged={manifestChangedSincePlan}
-              onLineClick={() => {}}
-              onSuggestionApply={() => {}}
-              onPlanStart={handlePlanStart}
+              validationPassed={validationPassed}
+              className="h-full"
             />
           </div>
-        )}
-      </div>
-
-      {/* Right panel: 30% — relationship graph */}
-      <div className="flex-[3] overflow-hidden p-4">
-        <EditorGraphPanel
-          manifest={draftManifest}
-          validationPassed={validationPassed}
-          className="h-full"
-        />
-      </div>
-
+        </div>
+      )}
     </div>
   )
 }
