@@ -1,23 +1,22 @@
 # Dex OIDC provider configuration for Meridian demo environment.
 #
-# Dex is a lightweight, Go-based OIDC identity provider (~20MB RAM vs ~500MB for Keycloak).
-# It serves JWKS keys and issues JWTs that the Meridian gateway validates.
+# Architecture: SSO-only mode with BFF (Backend For Frontend) pattern.
 #
-# Authentication is handled by the MeridianConnector (services/identity/connector/),
-# a Go-level integration wired directly into the Dex PasswordConnector interface at
-# process startup. It validates credentials by calling the identity domain repository
-# in-process — no network hop required.
+# Dex acts as an OIDC federation hub — it connects to upstream identity providers
+# (Google, GitHub, SAML, etc.) and issues ID tokens that the Meridian BFF consumes.
+# The BFF handles the full OAuth2 authorization code flow with PKCE:
 #
-# Demo users are seeded by the identity service bootstrap (services/identity/bootstrap/)
-# from DEMO_OPERATOR_EMAIL / DEMO_OPERATOR_PASSWORD environment variables.
+#   1. Frontend → GET /api/auth/sso/{connector_id} (BFF generates PKCE, redirects to Dex)
+#   2. Dex → upstream IdP (Google, GitHub, etc.) → Dex callback
+#   3. Dex → GET /api/auth/callback (BFF exchanges code with PKCE verifier)
+#   4. BFF resolves identity, signs Meridian JWT, redirects frontend with token
 #
-# Token acquisition (password grant):
-#   curl -X POST http://dex:5556/dex/token \
-#     -d "grant_type=password" \
-#     -d "client_id=meridian-service" \
-#     -d "scope=openid email profile" \
-#     -d "username=tenant:<slug>/${DEMO_OPERATOR_EMAIL}" \
-#     -d "password=${DEMO_OPERATOR_PASSWORD}"
+# Password authentication is handled directly by the BFF (POST /api/auth/login)
+# without involving Dex at all. The password grant type is therefore removed from
+# Dex's configuration.
+#
+# The single BFF callback URL (/api/auth/callback) replaces per-tenant/per-frontend
+# redirect URIs — tenant context is preserved in the PKCE state parameter.
 
 issuer: https://demo.meridianhub.cloud/dex
 
@@ -30,38 +29,23 @@ web:
   http: 0.0.0.0:5556
 
 oauth2:
-  # Dex v2.41.1 defaults do not include "password" in grantTypes. List it
-  # explicitly so the Resource Owner Password grant works with the connector.
   grantTypes:
     - authorization_code
     - refresh_token
-    - password
-  # "meridian" routes password grants through the Meridian identity connector.
-  # The connector validates credentials against the identity domain repository
-  # and resolves tenant context from the username field.
-  #
-  # Username format for password grant: "tenant:<slug>/<email>"
-  # Example: "tenant:volterra/admin@volterra.energy"
-  passwordConnector: meridian
   skipApprovalScreen: true
 
 staticClients:
   - id: meridian-service
     name: Meridian
-    # Dex requires exact redirect URI matching per the OAuth 2.0 / OIDC spec
-    # (no wildcard or pattern support). Each tenant subdomain must be listed
-    # explicitly. When onboarding a new tenant, add its callback URL here and
-    # restart Dex.
+    # Single BFF callback URL — the gateway handles all SSO callbacks centrally.
+    # Tenant context is preserved in the PKCE state parameter, so per-tenant
+    # redirect URIs are no longer needed.
     redirectURIs:
-      # Platform root
-      - "https://demo.meridianhub.cloud/callback"
-      # Tenant subdomains — add one entry per onboarded tenant
-      - "https://volterra.demo.meridianhub.cloud/callback"
-      # Local development — the frontend hardcodes client_id "meridian-service"
-      # in use-oauth-flow.ts, App.tsx, and callback.tsx, so localhost callbacks
-      # must be registered on this client for PKCE auth to work locally.
-      - "http://localhost:8090/callback"
-      - "http://localhost:3000/callback"
+      # Production BFF callback
+      - "https://demo.meridianhub.cloud/api/auth/callback"
+      # Local development
+      - "http://localhost:8090/api/auth/callback"
+      - "http://localhost:3000/api/auth/callback"
     public: true
 
 enablePasswordDB: false
