@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
+import { Card } from '@/components/ui/card'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
-import { TimeDisplay } from '@/shared'
+import { TimeDisplay, PageShell, PageHeader } from '@/shared'
 import { useBookingLogsTable } from '../hooks'
 import type { FinancialBookingLog } from './types'
 
@@ -49,35 +50,35 @@ export function LedgerPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Ledger</h1>
-        <p className="text-muted-foreground">
-          Financial booking logs and double-entry postings
-        </p>
-      </div>
-
-      <DataTable<FinancialBookingLog>
-        queryKey={queryKey}
-        queryFn={queryFn}
-        columns={columns}
-        pageSize={25}
-        filters={[
-          {
-            field: 'status',
-            label: 'Status',
-            type: 'select',
-            options: [
-              { label: 'Pending', value: 'PENDING' },
-              { label: 'Posted', value: 'POSTED' },
-              { label: 'Failed', value: 'FAILED' },
-              { label: 'Cancelled', value: 'CANCELLED' },
-              { label: 'Reversed', value: 'REVERSED' },
-            ],
-          },
-        ]}
-        onRowClick={handleRowClick}
+    <PageShell>
+      <PageHeader
+        title="Ledger"
+        description="Financial booking logs and double-entry postings"
       />
-    </div>
+
+      <Card className="p-6">
+        <DataTable<FinancialBookingLog>
+          queryKey={queryKey}
+          queryFn={queryFn}
+          columns={columns}
+          pageSize={25}
+          filters={[
+            {
+              field: 'status',
+              label: 'Status',
+              type: 'select',
+              options: [
+                { label: 'Pending', value: 'PENDING' },
+                { label: 'Posted', value: 'POSTED' },
+                { label: 'Failed', value: 'FAILED' },
+                { label: 'Cancelled', value: 'CANCELLED' },
+                { label: 'Reversed', value: 'REVERSED' },
+              ],
+            },
+          ]}
+          onRowClick={handleRowClick}
+        />
+      </Card>
+    </PageShell>
   )
 }

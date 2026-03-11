@@ -45,6 +45,7 @@ function genStubPlugin(): Plugin {
     export const ApplyManifestStatus = { UNSPECIFIED: 0, DRY_RUN: 1, APPLIED: 2, VALIDATION_FAILED: 3, FAILED: 4 }
     export const ApplyStatus = { UNSPECIFIED: 0, APPLIED: 1, FAILED: 2, ROLLED_BACK: 3 }
     export const ManifestSchema = { typeName: 'meridian.control_plane.v1.Manifest', fields: [] }
+    export const AuditOperation = { UNSPECIFIED: 0, INSERT: 1, UPDATE: 2, DELETE: 3 }
     export default {}
   `
   return {

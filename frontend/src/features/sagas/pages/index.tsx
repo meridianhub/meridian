@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { StatusBadge } from '@/shared/status-badge'
+import { PageShell, PageHeader } from '@/shared'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { SagaStatus } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { useSagasTable } from '../hooks'
@@ -119,16 +120,12 @@ export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPa
   }, [isPlatformAdmin])
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Starlark Configuration</h1>
-          <p className="mt-2 text-muted-foreground">
-            Manage saga workflow definitions and Starlark scripts
-          </p>
-        </div>
-        <Button onClick={() => setCreateDialogOpen(true)}>Create Saga</Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Starlark Configuration"
+        description="Manage saga workflow definitions and Starlark scripts"
+        actions={<Button onClick={() => setCreateDialogOpen(true)}>Create Saga</Button>}
+      />
 
       <CreateSagaDraftDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
 
@@ -141,6 +138,6 @@ export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPa
           className="w-full"
         />
       </Card>
-    </div>
+    </PageShell>
   )
 }
