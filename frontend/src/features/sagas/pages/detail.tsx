@@ -192,7 +192,11 @@ export function StarlarkDetailPage() {
   }, [])
 
   if (isLoading) {
-    return <DetailSkeleton tabCount={0} fieldCount={2} />
+    return (
+      <PageShell>
+        <DetailSkeleton tabCount={0} fieldCount={2} />
+      </PageShell>
+    )
   }
 
   if (!sagaData) {
