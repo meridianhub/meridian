@@ -165,7 +165,7 @@ type manifestValidateParams struct {
 }
 ```
 
-- `mode`: `"create"` or `"amend"` (default: `"amend"`)
+- `mode`: `"create"` or `"amend"` (default: `"create"`)
 - `tenant_id`: required when mode is `"create"` to specify target
 
 In `create` mode, the `ApplyManifest` request should signal that
@@ -239,8 +239,10 @@ This tool should return:
    input without type errors
 4. `meridian_economy_generate` either works on demo or returns a
    clear "service unavailable" message
-5. Tenant-agnostic reference tools exist for: manifest schema,
-   event topics, Starlark bindings, and cookbook patterns
+5. Tenant-agnostic reference tools exist as defined in Issue 5:
+   `meridian_manifest_schema` (schema only),
+   `meridian_topics_list`, `meridian_starlark_reference`,
+   `meridian_cookbook_list/get`, `meridian_gateway_guide`
 6. Cookbook patterns correctly guide financial vs operational
    gateway selection for payment flows
 
@@ -248,7 +250,8 @@ This tool should return:
 
 | File | Change |
 |------|--------|
-| `services/mcp-server/internal/tools/economy.go` | Add mode/tenant_id to validate, add schema tool |
+| `services/mcp-server/internal/tools/economy.go` | Add mode/tenant_id to validate |
+| `services/mcp-server/internal/tools/reference.go` | New file: reference tools (see Issue 5) |
 | `services/mcp-server/internal/auth/subdomain.go` | Explicit tenant context enforcement |
 | `services/control-plane/.../manifest_validator.go` | Support skip-immutability mode |
 | `api/proto/.../manifest.proto` | Optional: `skip_immutability_checks` field |
@@ -276,8 +279,9 @@ currently lives only in source files.
 
 ### What MCP should expose (without source code access)
 
-**1. `meridian_manifest_schema`** (proposed in Issue 5 above) —
-covers enums, constraints, field definitions.
+**1. `meridian_manifest_schema`** — covers schema enums,
+constraints, and field definitions only (not event topics or
+Starlark bindings, which have dedicated tools below).
 
 **2. `meridian_topics_list`** — returns all registered event
 topics from `topics.All()`. This is a static list that does not
