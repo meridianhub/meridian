@@ -35,6 +35,11 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy dex:5556
 	}
 
+	# BFF auth endpoints (login, JWKS)
+	handle /api/* {
+		reverse_proxy meridian:8090
+	}
+
 	# API: REST transcoding + ConnectRPC + version
 	@api {
 		path /v1/* /meridian.* /grpc.* /version
