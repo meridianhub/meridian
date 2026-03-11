@@ -248,8 +248,15 @@ Example values for the demo environment:
 | `JWT_AUDIENCE` | No | — | Expected `aud` claim; validation skipped if empty |
 
 In the demo environment, `JWKS_URL` is set to `http://dex:5556/dex/keys` (the internal Dex
-endpoint), allowing the gateway to validate JWTs issued by both Dex and the BFF without exposing
-Dex to the public internet.
+endpoint). This validates **Dex-issued tokens only**.
+
+When SSO is enabled (`SSO_DEX_ISSUER_URL` is set), the auth middleware builds a **composite
+validator**: it first tries the local `JWT_SIGNING_KEY` (for Meridian BFF tokens issued by
+`HandleLogin` and `HandleCallback`), and falls back to the Dex JWKS endpoint for any Dex-issued
+tokens. The gateway's own public key is served at `GET /api/auth/jwks`.
+
+Setting `JWKS_URL` to Dex's keys endpoint is therefore correct: Meridian tokens are validated
+locally against `JWT_SIGNING_KEY`, while the Dex JWKS covers the fallback path.
 
 ---
 
