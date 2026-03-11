@@ -24,18 +24,6 @@ function buildStreamableHttpConfig(serverUrl: string): string {
   return JSON.stringify(config, null, 2)
 }
 
-function buildLegacySseConfig(serverUrl: string): string {
-  const config = {
-    mcpServers: {
-      meridian: {
-        command: 'npx',
-        args: ['-y', 'mcp-remote', `${serverUrl}/sse`],
-      },
-    },
-  }
-  return JSON.stringify(config, null, 2)
-}
-
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false)
   const resetTimerRef = useRef<number | null>(null)
@@ -88,10 +76,8 @@ export function McpConfigPage() {
 
   const serverUrl = buildMcpTenantUrl(MCP_BASE_URL, tenantSlug)
   const mcpUrl = `${serverUrl}/mcp`
-  const sseUrl = `${serverUrl}/sse`
   const oauthUrl = `${serverUrl}/oauth/authorize`
   const streamableHttpConfig = buildStreamableHttpConfig(serverUrl)
-  const legacySseConfig = buildLegacySseConfig(serverUrl)
 
   return (
     <div className="flex flex-col gap-6">
@@ -114,7 +100,7 @@ export function McpConfigPage() {
         <div>
           <h2 className="text-lg font-semibold">Server Connection</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Streamable HTTP endpoint for connecting MCP clients to Meridian (recommended)
+            Streamable HTTP endpoint for connecting MCP clients to Meridian
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -125,12 +111,6 @@ export function McpConfigPage() {
             {mcpUrl}
           </code>
           <CopyButton text={mcpUrl} label="Copy MCP URL" />
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">
-            Legacy SSE endpoint also available at{' '}
-            <code className="text-xs">{sseUrl}</code>
-          </p>
         </div>
       </Card>
 
@@ -148,21 +128,12 @@ export function McpConfigPage() {
           <CopyButton text={streamableHttpConfig} label="Copy streamable HTTP config" />
         </div>
         <div>
-          <h3 className="mb-2 text-sm font-medium">Streamable HTTP (recommended)</h3>
+          <h3 className="mb-2 text-sm font-medium">Streamable HTTP</h3>
           <pre
             data-testid="streamable-http-config"
             className="overflow-x-auto rounded-md bg-muted p-4 font-mono text-sm"
           >
             {streamableHttpConfig}
-          </pre>
-        </div>
-        <div>
-          <h3 className="mb-2 text-sm font-medium text-muted-foreground">Legacy SSE</h3>
-          <pre
-            data-testid="legacy-sse-config"
-            className="overflow-x-auto rounded-md bg-muted/60 p-4 font-mono text-sm text-muted-foreground"
-          >
-            {legacySseConfig}
           </pre>
         </div>
       </Card>
