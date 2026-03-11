@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
-import { buildManifestGraph } from '@/features/manifests/lib/manifest-graph-model'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -117,48 +116,18 @@ function EventChannelsPanel({ manifest }: { manifest: Manifest }) {
     )
   }
 
-  const bound = channels.filter((c) => c.boundSagas.length > 0)
-  const unbound = channels.filter((c) => c.boundSagas.length === 0)
-
   return (
-    <div className="space-y-4">
-      {bound.length > 0 && (
-        <section>
-          <h3 className="text-sm font-medium text-muted-foreground mb-2">Bound Channels</h3>
-          <div className="space-y-2">
-            {bound.map((ch) => (
-              <Card key={ch.channel}>
-                <CardContent className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-sm font-medium text-foreground">{ch.channel}</span>
-                  </div>
-                  <Badge className="bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900 dark:text-green-200">
-                    {ch.boundSagas.length} saga attached
-                  </Badge>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {unbound.length > 0 && (
-        <section>
-          <h3 className="text-sm font-medium text-muted-foreground mb-2">Unbound Channels</h3>
-          <div className="space-y-2">
-            {unbound.map((ch) => (
-              <Card key={ch.channel}>
-                <CardContent className="flex items-center justify-between px-4 py-3">
-                  <span className="font-mono text-sm font-medium text-foreground">{ch.channel}</span>
-                  <Button size="sm" variant="outline">
-                    Add Saga
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
+    <div className="space-y-2">
+      {channels.map((ch) => (
+        <Card key={ch.channel}>
+          <CardContent className="flex items-center justify-between px-4 py-3">
+            <span className="font-mono text-sm font-medium text-foreground">{ch.channel}</span>
+            <Badge className="bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900 dark:text-green-200">
+              {ch.boundSagas.length} saga attached
+            </Badge>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   )
 }
@@ -166,13 +135,10 @@ function EventChannelsPanel({ manifest }: { manifest: Manifest }) {
 // ── SagasPanel ─────────────────────────────────────────────────────────────────
 
 function SagasPanel({ manifest }: { manifest: Manifest }) {
-  // Use buildManifestGraph to extract saga nodes (consistent with graph view)
-  const graph = buildManifestGraph(manifest)
-  const sagaNodes = graph.nodes.filter((n) => n.type === 'saga')
   const m = manifest as unknown as ManifestInput
   const sagas = m.sagas ?? []
 
-  if (sagaNodes.length === 0) {
+  if (sagas.length === 0) {
     return (
       <div className="py-8 text-center text-muted-foreground text-sm">
         No sagas defined in this manifest.

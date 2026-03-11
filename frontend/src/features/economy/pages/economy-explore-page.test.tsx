@@ -156,48 +156,12 @@ describe('EconomyExplorePage', () => {
       expect(sagaBadges.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('shows Add Saga button for unbound events - none in this manifest', async () => {
-      // All events in test data are bound to sagas
+    it('does not show Add Saga button (channels are derived from saga event: triggers, all are bound)', async () => {
       renderPage()
       await waitFor(() => {
         expect(screen.getByText('payment.requested')).toBeInTheDocument()
       })
-      // No unbound events in this data
       expect(screen.queryByRole('button', { name: /add saga/i })).not.toBeInTheDocument()
-    })
-
-    it('shows Add Saga button for unbound events when present', async () => {
-      vi.mocked(useApiClients).mockReturnValue({
-        manifestHistory: {
-          getCurrentManifest: vi.fn().mockResolvedValue({
-            version: {
-              ...mockManifestVersion,
-              manifest: {
-                ...mockManifestVersion.manifest,
-                sagas: [
-                  // saga triggered by event:payment.requested - bound
-                  { name: 'process_payment', trigger: 'event:payment.requested', script: '' },
-                  // saga NOT triggered by an event (api trigger) - no event channel
-                  { name: 'settle_energy', trigger: 'api:/v1/settle', script: '' },
-                ],
-                // unbound = events that appear in sagas' non-event triggers or not at all
-                // Here we want to show events that don't have any saga - but we need to
-                // discover events from somewhere. Events are derived from saga triggers.
-                // An unbound channel is one referenced by some saga with a non-event trigger?
-                // Actually: bound = event: trigger, unbound = no saga has event: trigger for it.
-                // In this test data, only payment.requested is bound. settle_energy uses api trigger.
-                // But there's no "unbound" channel unless we have a mechanism to define channels.
-                // This test checks that we at least show the bound event channels correctly.
-              },
-            },
-          }),
-        },
-      } as unknown as ReturnType<typeof useApiClients>)
-
-      renderPage()
-      await waitFor(() => {
-        expect(screen.getByText('payment.requested')).toBeInTheDocument()
-      })
     })
   })
 
