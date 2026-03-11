@@ -15,3 +15,4 @@ export type { ManifestPlan } from './hooks/use-manifest-plan'
 
 // Components
 export { EditorGraphPanel } from './components/editor-graph-panel'
+export { ManifestDiffViewer } from './components/manifest-diff'
