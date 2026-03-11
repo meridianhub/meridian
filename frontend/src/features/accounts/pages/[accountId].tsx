@@ -67,7 +67,7 @@ function AccountActions({ status, accountId, currency }: AccountActionsProps) {
 
   return (
     <>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         {status === 'ACTIVE' && (
           <>
             <Button variant="outline" size="sm" onClick={() => setDepositOpen(true)}>
@@ -338,13 +338,23 @@ export function AccountDetailPage() {
   )
 
   if (isLoading) {
-    return <DetailSkeleton />
+    return (
+      <PageShell>
+        <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }]} />
+        <DetailSkeleton />
+      </PageShell>
+    )
   }
 
   // Current-account returned 404 — check if it's an internal account
   if (account === null) {
     if (isResolving) {
-      return <DetailSkeleton />
+      return (
+        <PageShell>
+          <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }]} />
+          <DetailSkeleton />
+        </PageShell>
+      )
     }
     if (resolved?.type === 'internal') {
       return <Navigate to={`/internal-accounts/${encodeURIComponent(resolved.accountId)}`} replace />
@@ -360,8 +370,8 @@ export function AccountDetailPage() {
           <ErrorState
             title="Failed to load account"
             message="There was a problem loading this account. Please try again."
-            onRetry={() => void refetch()}
-            retryLabel={isFetching ? 'Retrying…' : 'Retry'}
+            onRetry={isFetching ? undefined : () => void refetch()}
+            retryLabel="Retry"
           />
         </PageShell>
       </div>
