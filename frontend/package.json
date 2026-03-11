@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.11.0",
+    "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/lang-yaml": "^6.1.2",
     "@codemirror/lint": "^6.9.4",
