@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pathToLine } from '../manifest-editor'
+import { pathToLine } from '../path-to-line'
 
 const sampleYaml = `name: test-economy
 instruments:

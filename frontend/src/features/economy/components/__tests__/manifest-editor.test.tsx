@@ -1,11 +1,11 @@
+import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ManifestEditor } from '../manifest-editor'
 
 // Mock CodeMirror since jsdom doesn't support the canvas/DOM APIs it needs
 vi.mock('@uiw/react-codemirror', () => {
-  const React = require('react')
   return {
     __esModule: true,
     default: React.forwardRef(function MockCodeMirror(
