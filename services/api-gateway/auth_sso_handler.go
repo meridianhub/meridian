@@ -45,6 +45,8 @@ var (
 	ErrSSOCallbackURLRequired = errors.New("sso handler: callback URL is required")
 	// ErrSSOCallbackURLInvalid is returned when the callback URL is not a valid absolute URL.
 	ErrSSOCallbackURLInvalid = errors.New("sso handler: callback URL must be a valid absolute URL")
+	// ErrSSODexIssuerInvalid is returned when the Dex issuer URL is not a valid absolute URL.
+	ErrSSODexIssuerInvalid = errors.New("sso handler: dex issuer URL must be an absolute URL with scheme and host")
 )
 
 // IdentityResolver resolves an identity by email without password validation.
@@ -98,8 +100,9 @@ func validateSSOConfig(cfg SSOHandlerConfig) error {
 	if cfg.DexIssuerURL == "" {
 		return ErrSSODexIssuerRequired
 	}
-	if _, err := url.Parse(cfg.DexIssuerURL); err != nil {
-		return fmt.Errorf("sso handler: invalid dex issuer URL: %w", err)
+	issuerURL, err := url.Parse(cfg.DexIssuerURL)
+	if err != nil || !issuerURL.IsAbs() || issuerURL.Host == "" {
+		return fmt.Errorf("%w: %q", ErrSSODexIssuerInvalid, cfg.DexIssuerURL)
 	}
 	if cfg.CallbackURL == "" {
 		return ErrSSOCallbackURLRequired
@@ -314,7 +317,6 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.ErrorContext(ctx, "sso: identity resolution error",
 			"tenant_id", stateData.TenantID,
-			"email", email,
 			"error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to resolve identity",
@@ -323,8 +325,7 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		h.logger.WarnContext(ctx, "sso: no matching identity for SSO email",
-			"tenant_id", stateData.TenantID,
-			"email", email)
+			"tenant_id", stateData.TenantID)
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error": "no matching account for this SSO identity",
 		})
