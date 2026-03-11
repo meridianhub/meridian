@@ -14,9 +14,13 @@ import (
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream"
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream/adapters"
 	gwhealth "github.com/meridianhub/meridian/services/api-gateway/health"
+	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
+	identityconnector "github.com/meridianhub/meridian/services/identity/connector"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -24,6 +28,11 @@ import (
 
 // ErrRedisURLRequired is returned when Redis fan-out is enabled but no REDIS_URL is configured.
 var ErrRedisURLRequired = errors.New("redis fan-out requires REDIS_URL to be configured")
+
+// ErrJWTSigningKeyRequired is returned when SSO is enabled but JWT_SIGNING_KEY is not set
+// outside local dev mode. Auto-generation would produce instance-local keys that break
+// multi-replica deployments and any gateway restart.
+var ErrJWTSigningKeyRequired = errors.New("JWT_SIGNING_KEY must be set when SSO is enabled outside local dev mode")
 
 // Build information set via ldflags during compilation.
 var (
@@ -132,6 +141,18 @@ func run(logger *slog.Logger) error {
 		if authMiddleware != nil {
 			serverOpts = append(serverOpts, gateway.WithAuthMiddleware(authMiddleware))
 		}
+	}
+
+	// Wire BFF SSO if configured
+	ssoOpt, ssoCleanup, err := wireBFFSSO(config, logger)
+	if err != nil {
+		return bootstrap.Permanent(fmt.Errorf("failed to wire BFF SSO: %w", err))
+	}
+	if ssoCleanup != nil {
+		defer ssoCleanup()
+	}
+	if ssoOpt != nil {
+		serverOpts = append(serverOpts, ssoOpt)
 	}
 
 	// Wire event streaming if enabled
@@ -289,6 +310,88 @@ func buildEventStreamComponents(
 	handler := eventstream.NewHandler(router, logger)
 
 	return router, handler, cleanup, nil
+}
+
+// wireBFFSSO creates the BFF SSO handler for OIDC-based login via Dex.
+// Returns (nil, nil, nil) when SSO_DEX_ISSUER_URL is unset — SSO is optional.
+// The returned cleanup func must be called on shutdown to close the identity DB pool.
+//
+// Environment variables:
+//   - SSO_DEX_ISSUER_URL: Dex issuer URL (e.g., "https://demo.meridianhub.cloud/dex"). Required to enable SSO.
+//   - SSO_CLIENT_ID: OAuth client ID (default: "meridian-service")
+//   - SSO_CALLBACK_URL: BFF callback URL (e.g., "https://demo.meridianhub.cloud/api/auth/callback")
+//   - JWT_SIGNING_KEY: RSA private key in PEM format. Required unless LocalDevMode is enabled.
+//   - JWT_SIGNING_KEY_ID: kid header value (default: "meridian-1")
+//   - JWT_SIGNING_ISSUER: iss claim value (default: "meridian")
+//   - JWT_TOKEN_TTL: token lifetime (default: "1h")
+func wireBFFSSO(config *gateway.Config, logger *slog.Logger) (gateway.ServerOption, func(), error) {
+	dexIssuerURL := os.Getenv("SSO_DEX_ISSUER_URL")
+	if dexIssuerURL == "" {
+		logger.Info("SSO_DEX_ISSUER_URL not set, BFF SSO disabled")
+		return nil, nil, nil //nolint:nilnil // SSO is optional; absent config intentionally returns no option and no error
+	}
+
+	privateKeyPEM := os.Getenv("JWT_SIGNING_KEY")
+	if privateKeyPEM == "" && !config.LocalDevMode {
+		return nil, nil, ErrJWTSigningKeyRequired
+	}
+
+	signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
+		PrivateKeyPEM: privateKeyPEM,
+		KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+		Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create JWT signer for SSO: %w", err)
+	}
+
+	identityDB, err := gorm.Open(postgres.Open(config.DatabaseURL), &gorm.Config{
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open identity DB for SSO: %w", err)
+	}
+
+	cleanup := func() {
+		sqlDB, dbErr := identityDB.DB()
+		if dbErr != nil {
+			logger.Warn("failed to get underlying DB for SSO cleanup", "error", dbErr)
+			return
+		}
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			logger.Warn("failed to close SSO identity DB connection", "error", closeErr)
+		}
+	}
+
+	identityRepo := identitypersistence.NewRepository(identityDB)
+	conn, err := identityconnector.New(identityRepo, logger)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to create identity connector for SSO: %w", err)
+	}
+
+	tokenTTL := env.GetEnvAsDuration("JWT_TOKEN_TTL", time.Hour)
+
+	handler, err := gateway.NewSSOHandler(gateway.SSOHandlerConfig{
+		DexIssuerURL: dexIssuerURL,
+		ClientID:     env.GetEnvOrDefault("SSO_CLIENT_ID", "meridian-service"),
+		CallbackURL:  os.Getenv("SSO_CALLBACK_URL"),
+		Signer:       signer,
+		Resolver:     conn,
+		TokenTTL:     tokenTTL,
+		Logger:       logger,
+	})
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to create SSO handler: %w", err)
+	}
+
+	logger.Info("BFF SSO handler initialized",
+		"dex_issuer_url", dexIssuerURL,
+		"client_id", env.GetEnvOrDefault("SSO_CLIENT_ID", "meridian-service"),
+		"token_ttl", tokenTTL)
+
+	return gateway.WithSSOHandler(handler), cleanup, nil
 }
 
 // parseLogLevel converts a string log level to slog.Level.
