@@ -39,9 +39,11 @@ export function CallbackPage() {
     window.history.replaceState(null, '', window.location.pathname)
     login(token)
 
-    // Navigate to the return_url if the BFF passed one through, otherwise go home
+    // Navigate to the return_url if the BFF passed one through, otherwise go home.
+    // Guard against open redirects: only accept paths starting with exactly one slash.
     const returnUrl = searchParams.get('return_url')
-    navigate(returnUrl || '/', { replace: true })
+    const safeUrl = returnUrl && returnUrl.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : '/'
+    navigate(safeUrl, { replace: true })
   }, [token, login, navigate, searchParams])
 
   if (error) {
