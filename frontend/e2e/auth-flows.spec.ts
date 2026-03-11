@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { test as authTest, expect as authExpect, navigateTo, buildDevToken } from './fixtures'
 
+type DevWindow = Window & { __DEV_LOGIN__?: (token: string) => void }
+
 /**
  * Auth flow E2E tests covering:
  * - Role normalization (UPPERCASE roles work correctly)
@@ -21,7 +23,7 @@ test.describe('Role normalization', () => {
         () => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function',
       )
       await page.evaluate((t) => {
-        ;(window as Record<string, unknown>).__DEV_LOGIN__(t)
+        ;(window as unknown as DevWindow).__DEV_LOGIN__?.(t)
       }, token)
       await page.evaluate(() => {
         window.history.pushState({}, '', '/')
@@ -43,7 +45,7 @@ test.describe('Role normalization', () => {
         () => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function',
       )
       await page.evaluate((t) => {
-        ;(window as Record<string, unknown>).__DEV_LOGIN__(t)
+        ;(window as unknown as DevWindow).__DEV_LOGIN__?.(t)
       }, token)
       await page.evaluate(() => {
         window.history.pushState({}, '', '/')
@@ -65,7 +67,7 @@ test.describe('Role normalization', () => {
         () => typeof (window as Record<string, unknown>).__DEV_LOGIN__ === 'function',
       )
       await page.evaluate((t) => {
-        ;(window as Record<string, unknown>).__DEV_LOGIN__(t)
+        ;(window as unknown as DevWindow).__DEV_LOGIN__?.(t)
       }, token)
       await page.evaluate(() => {
         window.history.pushState({}, '', '/')
