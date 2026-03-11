@@ -30,8 +30,9 @@ sagas:
 # integrations (APIs, webhooks, MQTT, AMQP) and explicitly rejects
 # payment.* instruction types.
 #
-# See stripe_payment_received.star for financial_gateway.dispatch_payment()
-# usage.
+# See stripe_payment_via_gateway.star for financial_gateway.dispatch_payment()
+# usage. stripe_payment_received.star is a webhook handler that records
+# confirmed payments in the ledger (no gateway dispatch needed).
 paymentRails:
   - provider: stripe
     mode: CONNECT_MODE_STANDARD

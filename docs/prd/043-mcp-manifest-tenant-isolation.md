@@ -217,17 +217,18 @@ names, types, enums, constraints) without requiring any tenant
 context. This supports manual manifest composition when the
 generator is unavailable.
 
-This tool should return:
+This tool should return manifest schema metadata only:
 
 - All instrument types
 - All normal balance values
 - All valuation methods
-- All registered event topics
-  (from `shared/platform/events/topics/topics.go`)
 - Trigger format patterns
   (`api:`, `webhook:`, `scheduled:`, `event:`)
 - Field constraints (max lengths, regex patterns, required fields)
-- Available Starlark service modules and built-ins
+
+Event topics, Starlark bindings, and cookbook patterns are covered
+by dedicated tools in Issue 5 (`meridian_topics_list`,
+`meridian_starlark_reference`, `meridian_cookbook_list/get`).
 
 ## Success Criteria
 
@@ -256,6 +257,8 @@ This tool should return:
 | `services/control-plane/.../manifest_validator.go` | Support skip-immutability mode |
 | `api/proto/.../manifest.proto` | Optional: `skip_immutability_checks` field |
 | `services/mcp-server/.../economy_generator.go` | Graceful degradation for unavailable service |
+| `cookbook/patterns/payment-gateway-stripe/*` | Migrate from operational to financial gateway |
+| `cookbook/patterns/tote-betting/*` | New: tote betting pattern with financial gateway |
 
 ## Issue 5: Source Code Knowledge Not Exposed via MCP
 

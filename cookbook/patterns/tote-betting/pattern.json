@@ -37,6 +37,11 @@
             "target": "~/manifest-fragment.yaml"
         },
         {
+            "path": "patterns/tote-betting/create_syndicate.star",
+            "type": "registry:file",
+            "target": "~/sagas/create_syndicate.star"
+        },
+        {
             "path": "patterns/tote-betting/join_syndicate.star",
             "type": "registry:file",
             "target": "~/sagas/join_syndicate.star"
