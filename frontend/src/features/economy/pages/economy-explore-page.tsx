@@ -188,8 +188,8 @@ function ApiEndpointsPanel({ manifest }: { manifest: Manifest }) {
 
   return (
     <div className="space-y-2">
-      {mappings.map((mapping, i) => (
-        <Card key={mapping.name ?? i}>
+      {mappings.map((mapping) => (
+        <Card key={mapping.name}>
           <CardContent className="flex items-center justify-between px-4 py-3">
             <div className="space-y-0.5">
               <span className="font-mono text-sm font-medium">{mapping.name}</span>
