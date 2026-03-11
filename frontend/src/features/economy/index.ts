@@ -20,3 +20,6 @@ export { ValidationPanel } from './components/validation-panel'
 export { ManifestDiffViewer } from './components/manifest-diff'
 export { DeployWizard } from './components/deploy-wizard'
 export type { DeployWizardProps } from './components/deploy-wizard'
+
+// Lib
+export { handlerAutocomplete, buildHandlerCompletionSource, generateParameterTemplate, generateHandlerCallTemplate } from './lib/handler-autocomplete'

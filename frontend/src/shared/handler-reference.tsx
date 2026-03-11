@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ChevronRight } from 'lucide-react'
 import { useApiClients } from '@/api/context'
+import { generateParameterTemplate } from './handler-template'
 
 /**
  * Represents a parameter for a Starlark handler.
@@ -105,30 +106,13 @@ export function HandlerReference({ filter = '', serviceNames: serviceNameFilter,
   })
 
   /**
-   * Generates a Starlark call template for a handler with its parameters.
-   * @param serviceName The service name (e.g., 'position_keeping')
-   * @param handler The handler definition with parameters
-   * @returns A Starlark function call template (e.g., 'service.handler(param1="", param2="")')
-   */
-  const generateTemplate = (serviceName: string, handler: Handler): string => {
-    const params = handler.params
-      .map((p) => {
-        const paramValue = p.type === 'enum' ? `"${p.enumValues[0] || ''}"` : '""'
-        return `${p.name}=${paramValue}`
-      })
-      .join(', ')
-
-    return params ? `${serviceName}.${handler.name}(${params})` : `${serviceName}.${handler.name}()`
-  }
-
-  /**
    * Handles the insert button click by generating and passing the template to onInsert callback.
    * @param serviceName The service name
    * @param handler The handler to insert
    */
   const handleInsert = (serviceName: string, handler: Handler) => {
     if (!onInsert) return
-    const template = generateTemplate(serviceName, handler)
+    const template = generateParameterTemplate(serviceName, handler)
     onInsert(template)
   }
 
