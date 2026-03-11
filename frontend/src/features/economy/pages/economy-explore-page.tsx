@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 
 // ── Loading / empty / error states ────────────────────────────────────────────
@@ -236,6 +237,8 @@ export function EconomyExplorePage() {
 
   return (
     <div className="p-6 space-y-6">
+      <Breadcrumbs items={[{ label: 'Economy', href: '/economy' }, { label: 'Explore' }]} />
+
       <div>
         <h1 className="text-2xl font-semibold">Economy Explorer</h1>
         <p className="mt-1 text-sm text-muted-foreground">

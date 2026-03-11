@@ -12,6 +12,7 @@ import { ManifestEditor } from '../components/manifest-editor'
 import { ValidationPanel } from '../components/validation-panel'
 import { EditorGraphPanel } from '../components/editor-graph-panel'
 import { DeployWizard } from '../components/deploy-wizard'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { useManifestValidate } from '../hooks/use-manifest-validate'
 import type { ValidationError } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 
@@ -138,7 +139,14 @@ export function EconomyEditPage() {
   if (isError) return <ErrorState onRetry={() => void refetch()} />
 
   return (
-    <div className="flex h-full gap-0 overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Breadcrumbs + title bar */}
+      <div className="shrink-0 border-b px-4 py-3 space-y-1">
+        <Breadcrumbs items={[{ label: 'Economy', href: '/economy' }, { label: 'Edit' }]} />
+        <h1 className="text-lg font-semibold">Edit Economy</h1>
+      </div>
+
+      <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
       {/* Left panel: 70% — editor + validation + deploy */}
       <div className="flex flex-[7] flex-col overflow-hidden border-r">
         {/* Editor takes remaining height */}
@@ -185,6 +193,7 @@ export function EconomyEditPage() {
         />
       </div>
 
+    </div>
     </div>
   )
 }

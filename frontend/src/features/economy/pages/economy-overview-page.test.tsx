@@ -225,4 +225,36 @@ describe('EconomyOverviewPage', () => {
     })
     expect(screen.getByText('No economy configured')).toBeInTheDocument()
   })
+
+  it('renders compact stat cards inside a stats-bar container', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stats-bar')).toBeInTheDocument()
+    })
+
+    // Stat chips should be inside the stats-bar
+    const statsBar = screen.getByTestId('stats-bar')
+    expect(statsBar.querySelector('[data-testid="stat-instruments"]')).toBeInTheDocument()
+  })
+
+  it('stat cards are clickable buttons', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stat-instruments')).toBeInTheDocument()
+    })
+
+    const instruments = screen.getByTestId('stat-instruments')
+    const clickableCard = instruments.closest('button')
+    expect(clickableCard).toBeInTheDocument()
+  })
+
+  it('renders breadcrumbs navigation', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Breadcrumb')).toBeInTheDocument()
+    })
+  })
 })
