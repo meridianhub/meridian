@@ -25,6 +25,12 @@ type stateEntry struct {
 // StateStore is a thread-safe in-memory TTL cache for PKCE state parameters.
 // Entries are automatically removed on Get (one-time use) and lazily purged
 // on Set when more than maxLazyPurge expired entries have accumulated.
+//
+// Limitation: In-memory storage only works with a single gateway replica. With
+// horizontal scaling, the initiate and callback requests may hit different
+// replicas. For multi-replica deployments, swap this for a shared store (Redis,
+// CockroachDB, or signed encrypted state tokens). The injectable StateStore
+// design makes this straightforward.
 type StateStore struct {
 	mu    sync.Mutex
 	items map[string]stateEntry

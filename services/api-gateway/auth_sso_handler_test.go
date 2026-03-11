@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -444,6 +445,139 @@ func TestSSOHandler_CallbackTokenExchangeError(t *testing.T) {
 	handler.HandleCallback(rec, req)
 
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
+}
+
+// --- Open redirect protection tests ---
+
+func TestSSOHandler_InitiateRejectsAbsoluteReturnURL(t *testing.T) {
+	// Verifies that an absolute URL in return_url is sanitized to "/" to prevent
+	// open redirect attacks that could steal the JWT from the URL fragment.
+	fakeEmail := "alice@volterra.energy"
+	idToken := buildFakeIDToken(t, fakeEmail)
+
+	dexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id_token":     idToken,
+			"access_token": "at",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	}))
+	defer dexServer.Close()
+
+	resolver := &stubResolver{
+		resolveFn: func(_ context.Context, _ string) (connector.Identity, bool, error) {
+			return connector.Identity{
+				UserID: "user-1", Email: fakeEmail, Groups: []string{},
+			}, true, nil
+		},
+	}
+
+	stateStore := gateway.NewStateStore(5 * time.Minute)
+	handler, err := gateway.NewSSOHandler(gateway.SSOHandlerConfig{
+		DexIssuerURL: dexServer.URL,
+		ClientID:     "meridian-service",
+		CallbackURL:  "https://demo.meridianhub.cloud/api/auth/callback",
+		Signer:       newSSOTestSigner(t),
+		Resolver:     resolver,
+		Logger:       slog.Default(),
+		HTTPClient:   dexServer.Client(),
+		StateStore:   stateStore,
+	})
+	require.NoError(t, err)
+
+	// Simulate initiate with malicious return_url
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/google?return_url=https://evil.com/steal", nil)
+	tid, _ := tenant.NewTenantID("volterra")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	req.SetPathValue("connector_id", "google")
+
+	rec := httptest.NewRecorder()
+	handler.HandleInitiate(rec, req)
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+
+	// Extract state from the redirect to Dex
+	location := rec.Header().Get("Location")
+	u, err := url.Parse(location)
+	require.NoError(t, err)
+	stateKey := u.Query().Get("state")
+	require.NotEmpty(t, stateKey)
+
+	// Now simulate the callback with that state
+	callbackReq := httptest.NewRequest(http.MethodGet, "/api/auth/callback?state="+stateKey+"&code=auth-code", nil)
+	callbackRec := httptest.NewRecorder()
+	handler.HandleCallback(callbackRec, callbackReq)
+
+	assert.Equal(t, http.StatusFound, callbackRec.Code)
+
+	// The redirect should go to "/" (sanitized), NOT "https://evil.com/steal"
+	callbackLocation := callbackRec.Header().Get("Location")
+	assert.NotContains(t, callbackLocation, "evil.com")
+	assert.True(t, strings.HasPrefix(callbackLocation, "/"), "redirect should be relative, got: %s", callbackLocation)
+}
+
+func TestSSOHandler_InitiateAcceptsRelativeReturnURL(t *testing.T) {
+	fakeEmail := "bob@volterra.energy"
+	idToken := buildFakeIDToken(t, fakeEmail)
+
+	dexServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id_token":     idToken,
+			"access_token": "at",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	}))
+	defer dexServer.Close()
+
+	resolver := &stubResolver{
+		resolveFn: func(_ context.Context, _ string) (connector.Identity, bool, error) {
+			return connector.Identity{
+				UserID: "user-2", Email: fakeEmail, Groups: []string{},
+			}, true, nil
+		},
+	}
+
+	stateStore := gateway.NewStateStore(5 * time.Minute)
+	handler, err := gateway.NewSSOHandler(gateway.SSOHandlerConfig{
+		DexIssuerURL: dexServer.URL,
+		ClientID:     "meridian-service",
+		CallbackURL:  "https://demo.meridianhub.cloud/api/auth/callback",
+		Signer:       newSSOTestSigner(t),
+		Resolver:     resolver,
+		Logger:       slog.Default(),
+		HTTPClient:   dexServer.Client(),
+		StateStore:   stateStore,
+	})
+	require.NoError(t, err)
+
+	// Initiate with valid relative return_url
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/google?return_url=/dashboard/overview", nil)
+	tid, _ := tenant.NewTenantID("volterra")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	req.SetPathValue("connector_id", "google")
+
+	rec := httptest.NewRecorder()
+	handler.HandleInitiate(rec, req)
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+
+	location := rec.Header().Get("Location")
+	u, err := url.Parse(location)
+	require.NoError(t, err)
+	stateKey := u.Query().Get("state")
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/api/auth/callback?state="+stateKey+"&code=auth-code", nil)
+	callbackRec := httptest.NewRecorder()
+	handler.HandleCallback(callbackRec, callbackReq)
+
+	assert.Equal(t, http.StatusFound, callbackRec.Code)
+
+	callbackLocation := callbackRec.Header().Get("Location")
+	assert.Contains(t, callbackLocation, "/dashboard/overview")
 }
 
 // --- Helpers ---

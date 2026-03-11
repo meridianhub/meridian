@@ -90,9 +90,22 @@ type SSOHandlerConfig struct {
 }
 
 // NewSSOHandler creates a handler for BFF SSO authentication via Dex.
+//
+// Security: The token exchange with Dex relies on server-to-server TLS for
+// integrity (ID token signature verification is skipped). In production, the
+// DexIssuerURL MUST use HTTPS. A warning is logged if HTTP is configured
+// (acceptable only in local development with trusted networks).
 func NewSSOHandler(cfg SSOHandlerConfig) (*SSOHandler, error) {
 	if cfg.DexIssuerURL == "" {
 		return nil, ErrSSODexIssuerRequired
+	}
+	issuerURL, err := url.Parse(cfg.DexIssuerURL)
+	if err != nil {
+		return nil, fmt.Errorf("sso handler: invalid dex issuer URL: %w", err)
+	}
+	if issuerURL.Scheme != "https" && cfg.Logger != nil {
+		cfg.Logger.Warn("sso handler: Dex issuer URL is not HTTPS — token exchange is not protected by TLS",
+			"dex_issuer_url", cfg.DexIssuerURL)
 	}
 	if cfg.ClientID == "" {
 		return nil, ErrSSOClientIDRequired
@@ -171,7 +184,7 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 
 	codeChallenge := computeCodeChallenge(codeVerifier)
 
-	returnURL := r.URL.Query().Get("return_url")
+	returnURL := sanitizeReturnURL(r.URL.Query().Get("return_url"))
 
 	stateKey, err := h.stateStore.Set(StateData{
 		CodeVerifier: codeVerifier,
@@ -186,8 +199,9 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build Dex authorization URL.
-	authURL := h.dexIssuerURL + "/auth/" + connectorID
+	// Build Dex authorization URL. Path-escape the connector ID to prevent
+	// path traversal (e.g., "../../admin" → "%2E%2E%2Fadmin").
+	authURL := h.dexIssuerURL + "/auth/" + url.PathEscape(connectorID)
 	params := url.Values{
 		"client_id":             {h.clientID},
 		"redirect_uri":          {h.callbackURL},
@@ -434,6 +448,32 @@ func generateCodeVerifier() (string, error) {
 func computeCodeChallenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// sanitizeReturnURL validates that the return URL is a safe relative path.
+// This prevents open redirect attacks where an attacker crafts a return_url
+// pointing to an external domain to steal the JWT from the URL fragment.
+//
+// Only paths starting with "/" (relative to the origin) are accepted.
+// Absolute URLs, protocol-relative URLs (//evil.com), and malformed input
+// are rejected and replaced with "/".
+func sanitizeReturnURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	// Reject protocol-relative URLs like "//evil.com/steal"
+	if strings.HasPrefix(raw, "//") {
+		return "/"
+	}
+	// Must be a relative path starting with "/"
+	if !strings.HasPrefix(raw, "/") {
+		return "/"
+	}
+	return raw
 }
 
 // buildTokenRedirectURL appends the access token as a fragment to the return URL.
