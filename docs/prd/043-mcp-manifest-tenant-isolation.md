@@ -231,16 +231,18 @@ This tool should return:
 
 ## Success Criteria
 
-1. `meridian_manifest_validate` with `mode: "create"` validates a
-   manifest without comparing against existing tenant state
+1. `meridian_manifest_validate` with `mode: "create"` validates
+   a manifest without comparing against existing tenant state
 2. Accessing the MCP server at the base domain does not silently
    execute tools against an arbitrary tenant
 3. Manifest tools accept both YAML strings and JSON objects as
    input without type errors
 4. `meridian_economy_generate` either works on demo or returns a
    clear "service unavailable" message
-5. A new `meridian_manifest_schema` tool returns the full schema
-   reference without tenant context
+5. Tenant-agnostic reference tools exist for: manifest schema,
+   event topics, Starlark bindings, and cookbook patterns
+6. Cookbook patterns correctly guide financial vs operational
+   gateway selection for payment flows
 
 ## Files Affected
 
@@ -252,6 +254,118 @@ This tool should return:
 | `api/proto/.../manifest.proto` | Optional: `skip_immutability_checks` field |
 | `services/mcp-server/.../economy_generator.go` | Graceful degradation for unavailable service |
 
+## Issue 5: Source Code Knowledge Not Exposed via MCP
+
+During the economy design session, several critical decisions
+required reading source code that an MCP-only consumer would not
+have access to. The MCP server is designed as an AI view over
+existing gRPC endpoints with RBAC — but to be effective for
+economy design, it needs to expose the reference data that
+currently lives only in source files.
+
+### What was needed and where it came from
+
+| Information Needed | Source (code) | MCP Tool Gap |
+|---|---|---|
+| Registered event topics | `shared/platform/events/topics/topics.go` | No tool exposes this list |
+| Manifest field schema (enums, constraints, patterns) | `api/proto/.../manifest.proto` | No schema introspection tool |
+| Available Starlark built-ins and service modules | Starlark VM registration code | No tool lists available ctx bindings |
+| Cookbook pattern examples | `cookbook/patterns/*/manifest-fragment.yaml` | `meridian_economy_generate_context` should serve this but the service is down |
+| Gateway distinction (financial vs operational) | Service architecture knowledge | No tool explains when to use which |
+| Handler signatures and parameters | `handlers.yaml` / proto definitions | `meridian_handlers_describe` exists but requires tenant context |
+
+### What MCP should expose (without source code access)
+
+**1. `meridian_manifest_schema`** (proposed in Issue 5 above) —
+covers enums, constraints, field definitions.
+
+**2. `meridian_topics_list`** — returns all registered event
+topics from `topics.All()`. This is a static list that does not
+require tenant context. Without it, an MCP consumer cannot know
+which event triggers are valid and must guess or fail validation
+repeatedly.
+
+**3. `meridian_starlark_reference`** — returns available service
+module bindings (`ctx.position_keeping`, `ctx.repository`, etc.),
+their methods, and parameter signatures. Currently this requires
+reading the Starlark VM registration code.
+
+**4. `meridian_cookbook_list` / `meridian_cookbook_get`** — browse
+and retrieve cookbook patterns without needing the generator
+service. The patterns are static YAML files that provide
+worked examples. An MCP consumer composing a manifest manually
+needs these as reference material.
+
+**5. `meridian_gateway_guide`** — returns guidance on when to
+use the financial gateway vs the operational gateway (see
+Issue 6 below). This could be a static reference or derived
+from the handler registry.
+
+### Design principle
+
+These tools should be **tenant-agnostic** (no tenant context
+required) and **read-only** (no state mutation). They expose
+platform reference data, not tenant-specific configuration.
+This matches the MCP design of providing an AI-friendly view
+over existing system knowledge.
+
+## Issue 6: Financial Gateway vs Operational Gateway Confusion
+
+### The problem
+
+During the design session, the generated manifest routed Stripe
+payment collection and payouts through the **operational
+gateway** (`operational_gateway.instruction_routes`). However,
+Meridian has a dedicated **financial gateway** service
+(`financial-gateway`) specifically designed for payment
+processing, with:
+
+- Built-in Stripe webhook handling
+  (`financial-gateway.payment-captured.v1`, etc.)
+- Payment-specific event topics
+- Dedicated proto definitions for payment lifecycle
+
+The operational gateway is designed for general-purpose external
+provider integrations (APIs, webhooks, MQTT, AMQP), not for
+payment-specific flows that the financial gateway already
+handles.
+
+### Why this happened
+
+1. The `payment-gateway-stripe` cookbook pattern uses
+   `operational_gateway` configuration, which the manifest
+   composer followed as precedent
+2. No MCP tool or cookbook guidance explains the distinction
+   between financial and operational gateways
+3. The manifest schema accepts payment-related instruction
+   routes in `operational_gateway` without warning that a
+   more appropriate gateway exists
+
+### Cookbook improvements needed
+
+- The `payment-gateway-stripe` cookbook pattern should be
+  updated to use the financial gateway where appropriate,
+  or clearly document when operational gateway is the
+  correct choice for payment flows
+- A new cookbook topic or pattern preamble should explain:
+  - **Financial gateway**: Use for payment collection,
+    refunds, disputes — any flow where Meridian manages
+    the payment lifecycle and emits payment-specific events
+  - **Operational gateway**: Use for general external API
+    calls, non-payment webhooks, IoT/MQTT, or providers
+    without a dedicated gateway integration
+- The `meridian_economy_generate_context` tool should
+  surface this guidance when payment-related patterns are
+  matched
+
+### Files affected
+
+| File | Change |
+|---|---|
+| `cookbook/patterns/payment-gateway-stripe/` | Review and update to use financial gateway |
+| Cookbook authoring docs | Add gateway selection guidance |
+| MCP generator context | Include gateway guidance in matched patterns |
+
 ## Context: The Economy Design Session
 
 For reference, the tote betting platform manifest that exposed
@@ -259,7 +373,8 @@ these issues included:
 
 - 2 instruments (GBP fiat, BET_UNIT voucher)
 - 4 account types
-  (STRIPE_NOSTRO, SYNDICATE_POOL, BET_POSITION, PLATFORM_COMMISSION)
+  (STRIPE_NOSTRO, SYNDICATE_POOL, BET_POSITION,
+  PLATFORM_COMMISSION)
 - 4 sagas
   (create, join, settle, refund syndicate)
 - Stripe Connect payment rails and operational gateway
@@ -267,4 +382,7 @@ these issues included:
   `market-information.observation-recorded.v1`
 
 All structural validation passed. The only errors were false
-positives from tenant state comparison.
+positives from tenant state comparison. The Stripe integration
+was routed through the operational gateway rather than the
+financial gateway, which should be corrected in future
+iterations.
