@@ -36,6 +36,7 @@ type Server struct {
 	versionInfo           *VersionInfo
 	providersConfig       ProvidersConfig
 	authHandler           *AuthHandler
+	ssoHandler            *SSOHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -173,6 +174,22 @@ func (s *Server) registerRoutes() {
 		if s.authHandler.signer != nil {
 			s.mux.HandleFunc("GET /api/auth/jwks", s.authHandler.signer.ServeJWKS())
 		}
+	}
+
+	// BFF SSO endpoints - tenant resolution but NO auth middleware (pre-auth).
+	// GET /api/auth/sso/{connector_id}: initiates PKCE flow, redirects to Dex.
+	// GET /api/auth/callback: handles Dex callback, exchanges code, issues Meridian JWT.
+	if s.ssoHandler != nil {
+		initiateHandler := http.Handler(http.HandlerFunc(s.ssoHandler.HandleInitiate))
+		if s.tenantResolver != nil {
+			initiateHandler = s.tenantResolver.Handler(initiateHandler)
+		}
+		s.mux.Handle("GET /api/auth/sso/{connector_id}", initiateHandler)
+
+		// Callback does NOT use tenant resolver — tenant context is recovered from the
+		// state parameter stored during initiation. The callback URL is a single global
+		// endpoint (no tenant subdomain required).
+		s.mux.Handle("GET /api/auth/callback", http.HandlerFunc(s.ssoHandler.HandleCallback))
 	}
 
 	// API routes - with auth and tenant middleware chain.
