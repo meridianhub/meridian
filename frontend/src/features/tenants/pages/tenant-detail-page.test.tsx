@@ -355,6 +355,104 @@ describe('TenantDetailPage - lifecycle actions', () => {
   })
 })
 
+describe('TenantDetailPage - deprovision confirmation', () => {
+  it('opens confirmation dialog when Deprovision is clicked', async () => {
+    vi.mocked(useApiClients).mockReturnValue(
+      makeTenantApi() as unknown as ReturnType<typeof useApiClients>,
+    )
+
+    renderTenantDetailPage('acme_corp', createPlatformAdminToken())
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /deprovision/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /deprovision/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/This action cannot be undone/i)).toBeInTheDocument()
+    })
+  })
+
+  it('disables confirm button until slug is typed correctly', async () => {
+    vi.mocked(useApiClients).mockReturnValue(
+      makeTenantApi() as unknown as ReturnType<typeof useApiClients>,
+    )
+
+    renderTenantDetailPage('acme_corp', createPlatformAdminToken())
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /deprovision/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /deprovision/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /confirm deprovision/i })).toBeDisabled()
+    })
+
+    await userEvent.type(screen.getByPlaceholderText('acme-corp'), 'acme-corp')
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /confirm deprovision/i })).toBeEnabled()
+    })
+  })
+
+  it('calls UpdateTenantStatus with DEPROVISIONED after slug confirmation', async () => {
+    const updateStatusMock = vi.fn().mockResolvedValue({ tenant: { ...mockActiveTenant, status: 3 } })
+
+    vi.mocked(useApiClients).mockReturnValue({
+      tenant: {
+        retrieveTenant: vi.fn().mockResolvedValue({ tenant: mockActiveTenant }),
+        getTenantProvisioningStatus: vi.fn().mockResolvedValue(mockProvisioningStatus),
+        updateTenantStatus: updateStatusMock,
+        listTenants: vi.fn(),
+        initiateTenant: vi.fn(),
+        reconcileMigrations: vi.fn(),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderTenantDetailPage('acme_corp', createPlatformAdminToken())
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /deprovision/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /deprovision/i }))
+    await userEvent.type(screen.getByPlaceholderText('acme-corp'), 'acme-corp')
+    await userEvent.click(screen.getByRole('button', { name: /confirm deprovision/i }))
+
+    await waitFor(() => {
+      expect(updateStatusMock).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: 'acme_corp', status: 3 }), // DEPROVISIONED = 3
+      )
+    })
+  })
+
+  it('resets slug confirmation when dialog is closed and reopened', async () => {
+    vi.mocked(useApiClients).mockReturnValue(
+      makeTenantApi() as unknown as ReturnType<typeof useApiClients>,
+    )
+
+    renderTenantDetailPage('acme_corp', createPlatformAdminToken())
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /deprovision/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /deprovision/i }))
+    await userEvent.type(screen.getByPlaceholderText('acme-corp'), 'acme-corp')
+    await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+    await userEvent.click(screen.getByRole('button', { name: /deprovision/i }))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('acme-corp')).toHaveValue('')
+      expect(screen.getByRole('button', { name: /confirm deprovision/i })).toBeDisabled()
+    })
+  })
+})
+
 describe('TenantDetailPage - back navigation', () => {
   beforeEach(() => {
     vi.mocked(useApiClients).mockReturnValue(
