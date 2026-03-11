@@ -51,4 +51,29 @@ describe('getGrantableRoles', () => {
     const result = getGrantableRoles([])
     expect(result).toEqual([])
   })
+
+  it('works correctly with UPPERCASE input pre-normalized to lowercase (super-admin)', () => {
+    // parseJWT normalizes roles to lowercase; verify getGrantableRoles handles normalized input
+    const normalizedRoles = ['SUPER-ADMIN'].map(r => r.toLowerCase())
+    const result = getGrantableRoles(normalizedRoles)
+    expect(result).toContain(Role.SUPER_ADMIN)
+    expect(result).toContain(Role.PLATFORM_ADMIN)
+    expect(result).toContain(Role.ADMIN)
+    expect(result).toHaveLength(6)
+  })
+
+  it('works correctly with UPPERCASE input pre-normalized to lowercase (platform-admin)', () => {
+    const normalizedRoles = ['PLATFORM-ADMIN'].map(r => r.toLowerCase())
+    const result = getGrantableRoles(normalizedRoles)
+    expect(result).toContain(Role.ADMIN)
+    expect(result).toContain(Role.TENANT_OWNER)
+    expect(result).not.toContain(Role.PLATFORM_ADMIN)
+    expect(result).not.toContain(Role.SUPER_ADMIN)
+  })
+
+  it('works correctly with mixed-case input pre-normalized to lowercase (admin)', () => {
+    const normalizedRoles = ['Admin'].map(r => r.toLowerCase())
+    const result = getGrantableRoles(normalizedRoles)
+    expect(result).toEqual([Role.OPERATOR, Role.AUDITOR])
+  })
 })
