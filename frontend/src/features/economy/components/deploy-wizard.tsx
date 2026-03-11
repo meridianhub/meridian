@@ -21,7 +21,7 @@ import type { ManifestPlan } from '../hooks/use-manifest-plan'
 
 // ── Step state machine ──────────────────────────────────────────────────────
 
-type DeployStep = 'idle' | 'planning' | 'review' | 'confirming' | 'applying' | 'success' | 'error'
+type DeployStep = 'idle' | 'planning' | 'review' | 'applying' | 'success' | 'error'
 
 // ── Props ───────────────────────────────────────────────────────────────────
 
@@ -110,14 +110,21 @@ export function DeployWizard({
     },
   })
 
-  const handleConfirmApply = useCallback(() => {
-    setStep('applying')
-    applyMutation.mutate()
-  }, [applyMutation])
-
   // ── Subtask 4: Plan hash invalidation ────────────────────────────────────
 
-  const canApply = step === 'review' && !hasBlockingErrors && !isPlanStale
+  // Shared eligibility guard — re-evaluated inside the confirm path to prevent
+  // deploying a stale or invalid plan even if the manifest changes while the
+  // dialog is already open.
+  const isApplyAllowed =
+    plan !== null && !hasBlockingErrors && !isPlanStale && Boolean(claims?.userId)
+
+  const canApply = step === 'review' && isApplyAllowed
+
+  const handleConfirmApply = useCallback(() => {
+    if (!isApplyAllowed) return
+    setStep('applying')
+    applyMutation.mutate()
+  }, [applyMutation, isApplyAllowed])
 
   const handleRetry = useCallback(() => {
     setStep('idle')
@@ -253,6 +260,7 @@ export function DeployWizard({
         onOpenChange={setConfirmOpen}
         plan={plan}
         isApplying={step === 'applying'}
+        canConfirm={isApplyAllowed}
         onConfirm={handleConfirmApply}
       />
     </div>
@@ -265,7 +273,6 @@ const STEP_LABELS: Record<DeployStep, string> = {
   idle: 'Ready to plan',
   planning: 'Planning…',
   review: 'Review plan',
-  confirming: 'Confirm apply',
   applying: 'Applying…',
   success: 'Applied',
   error: 'Failed',
@@ -291,6 +298,7 @@ interface ConfirmApplyDialogProps {
   onOpenChange: (open: boolean) => void
   plan: ManifestPlan | null
   isApplying: boolean
+  canConfirm: boolean
   onConfirm: () => void
 }
 
@@ -299,6 +307,7 @@ function ConfirmApplyDialog({
   onOpenChange,
   plan,
   isApplying,
+  canConfirm,
   onConfirm,
 }: ConfirmApplyDialogProps) {
   return (
@@ -324,7 +333,7 @@ function ConfirmApplyDialog({
         <DialogFooter showCloseButton={!isApplying}>
           <Button
             onClick={onConfirm}
-            disabled={isApplying}
+            disabled={isApplying || !canConfirm}
             data-testid="confirm-apply-button"
           >
             {isApplying ? (
