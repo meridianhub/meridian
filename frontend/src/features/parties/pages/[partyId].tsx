@@ -36,7 +36,7 @@ export function PartyDetailPage() {
       {isLoading && <DetailSkeleton />}
       {isError && <ErrorState onRetry={refetch} />}
 
-      {!isLoading && (
+      {!isLoading && !isError && (
         <>
           <Card>
             <PartyHeader partyId={partyId} />
