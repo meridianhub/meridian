@@ -331,6 +331,76 @@ func TestClaims_HasRole(t *testing.T) {
 	})
 }
 
+func TestClaims_EffectiveRoles(t *testing.T) {
+	t.Run("returns roles when both roles and groups present", func(t *testing.T) {
+		claims := &Claims{
+			Roles:  []string{"admin"},
+			Groups: []string{"platform-admin"},
+		}
+		assert.Equal(t, []string{"admin"}, claims.EffectiveRoles())
+	})
+
+	t.Run("falls back to groups when roles empty", func(t *testing.T) {
+		claims := &Claims{
+			Groups: []string{"platform-admin", "operator"},
+		}
+		assert.Equal(t, []string{"platform-admin", "operator"}, claims.EffectiveRoles())
+	})
+
+	t.Run("falls back to groups when roles nil", func(t *testing.T) {
+		claims := &Claims{
+			Roles:  nil,
+			Groups: []string{"auditor"},
+		}
+		assert.Equal(t, []string{"auditor"}, claims.EffectiveRoles())
+	})
+
+	t.Run("returns empty slice when both nil", func(t *testing.T) {
+		claims := &Claims{}
+		assert.Equal(t, []string{}, claims.EffectiveRoles())
+	})
+
+	t.Run("returns defensive copy", func(t *testing.T) {
+		claims := &Claims{Groups: []string{"admin"}}
+		result := claims.EffectiveRoles()
+		result[0] = "mutated"
+		assert.Equal(t, []string{"admin"}, claims.EffectiveRoles())
+	})
+}
+
+func TestClaims_HasRole_WithGroups(t *testing.T) {
+	t.Run("finds role in groups when roles empty", func(t *testing.T) {
+		claims := &Claims{Groups: []string{"platform-admin", "operator"}}
+		assert.True(t, claims.HasRole("platform-admin"))
+		assert.True(t, claims.HasRole("operator"))
+		assert.False(t, claims.HasRole("admin"))
+	})
+
+	t.Run("uses roles over groups when both present", func(t *testing.T) {
+		claims := &Claims{
+			Roles:  []string{"admin"},
+			Groups: []string{"platform-admin"},
+		}
+		assert.True(t, claims.HasRole("admin"))
+		assert.False(t, claims.HasRole("platform-admin"))
+	})
+}
+
+func TestClaims_GetRoles_WithGroups(t *testing.T) {
+	t.Run("returns groups when roles empty", func(t *testing.T) {
+		claims := &Claims{Groups: []string{"platform-admin"}}
+		assert.Equal(t, []string{"platform-admin"}, claims.GetRoles())
+	})
+
+	t.Run("returns roles when roles present", func(t *testing.T) {
+		claims := &Claims{
+			Roles:  []string{"admin"},
+			Groups: []string{"platform-admin"},
+		}
+		assert.Equal(t, []string{"admin"}, claims.GetRoles())
+	})
+}
+
 func TestClaims_HasScope(t *testing.T) {
 	claims := &Claims{Scopes: []string{"read", "write", "delete"}}
 
@@ -436,6 +506,57 @@ func TestClaims_EdgeCases(t *testing.T) {
 		assert.False(t, claims.IsExpired())
 		assert.Equal(t, "test-issuer", claims.Issuer)
 		assert.Equal(t, "test-subject", claims.Subject)
+	})
+}
+
+func TestValidateToken_WithGroupsClaim(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	validator, err := NewJWTValidator(publicKey)
+	require.NoError(t, err)
+
+	t.Run("extracts groups claim from valid JWT", func(t *testing.T) {
+		claims := &Claims{
+			UserID: "user-123",
+			Groups: []string{"platform-admin", "operator"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
+		}
+
+		tokenString, err := createTestToken(privateKey, claims)
+		require.NoError(t, err)
+
+		extracted, err := validator.ValidateToken(tokenString)
+
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"platform-admin", "operator"}, extracted.Groups)
+		assert.True(t, extracted.HasRole("platform-admin"))
+		assert.Equal(t, []string{"platform-admin", "operator"}, extracted.EffectiveRoles())
+	})
+
+	t.Run("roles take precedence over groups in JWT", func(t *testing.T) {
+		claims := &Claims{
+			UserID: "user-123",
+			Roles:  []string{"admin"},
+			Groups: []string{"platform-admin"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
+		}
+
+		tokenString, err := createTestToken(privateKey, claims)
+		require.NoError(t, err)
+
+		extracted, err := validator.ValidateToken(tokenString)
+
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"admin"}, extracted.EffectiveRoles())
+		assert.True(t, extracted.HasRole("admin"))
+		assert.False(t, extracted.HasRole("platform-admin"))
 	})
 }
 
