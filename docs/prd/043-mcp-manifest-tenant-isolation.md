@@ -166,7 +166,9 @@ type manifestValidateParams struct {
 ```
 
 - `mode`: `"create"` or `"amend"` (default: `"create"`)
-- `tenant_id`: required when mode is `"create"` to specify target
+- `tenant_id`: optional for `"create"` (tenant-agnostic schema
+  validation); required for `"amend"` (compares against existing
+  tenant state)
 
 In `create` mode, the `ApplyManifest` request should signal that
 no prior manifest comparison should be performed. This may require:

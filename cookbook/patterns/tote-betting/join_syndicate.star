@@ -38,6 +38,17 @@ def join_syndicate():
         entity_id=ctx["syndicate_id"],
     )
     stake = Decimal(syndicate.attributes["stake_amount"])
+    max_members = int(syndicate.attributes["max_members"])
+
+    # Check capacity before accepting payment
+    step(name="check_capacity")
+    existing = position_keeping.query_positions(
+        account_type="BET_POSITION",
+        instrument_code="BET_UNIT",
+        attributes={"syndicate_id": ctx["syndicate_id"]},
+    )
+    if len(existing) >= max_members:
+        fail("syndicate is full: %d/%d members" % (len(existing), max_members))
 
     # Step 1: Collect payment via Financial Gateway (Stripe)
     step(name="collect_payment")

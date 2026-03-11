@@ -22,9 +22,8 @@ sagas:
 
 # Payment collection uses the Financial Gateway, not the Operational Gateway.
 # The Financial Gateway provides typed payment APIs
-# (financial_gateway.dispatch_payment) with built-in Stripe integration,
-# webhook handling, and payment-specific event topics
-# (financial-gateway.payment-captured.v1, etc.).
+# (financial_gateway.dispatch_payment) with built-in Stripe integration
+# and payment lifecycle management.
 #
 # The Operational Gateway is for general-purpose external provider
 # integrations (APIs, webhooks, MQTT, AMQP) and explicitly rejects
