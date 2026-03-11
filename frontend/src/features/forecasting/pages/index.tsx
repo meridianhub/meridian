@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PageShell, PageHeader } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 
@@ -157,9 +158,9 @@ export function ForecastingPage() {
 
   if (!tenantSlug) {
     return (
-      <div className="p-6">
+      <PageShell>
         <p className="text-muted-foreground">No tenant selected.</p>
-      </div>
+      </PageShell>
     )
   }
 
@@ -174,13 +175,11 @@ export function ForecastingPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Forecasting</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Compute forward curves by executing a forecasting strategy.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Forecasting"
+        description="Compute forward curves by executing a forecasting strategy."
+      />
 
       <Card>
         <CardHeader>
@@ -278,6 +277,6 @@ export function ForecastingPage() {
           </Card>
         </>
       )}
-    </div>
+    </PageShell>
   )
 }
