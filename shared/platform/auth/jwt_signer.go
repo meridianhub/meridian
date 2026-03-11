@@ -142,9 +142,17 @@ func (s *JWTSigner) JWKS() JWKS {
 }
 
 // ServeJWKS returns an http.HandlerFunc that serves the JWKS endpoint.
+// The JWKS JSON is pre-serialized at construction time for efficiency.
 func (s *JWTSigner) ServeJWKS() http.HandlerFunc {
 	jwks := s.JWKS()
-	body, _ := json.Marshal(jwks)
+	body, err := json.Marshal(jwks)
+	if err != nil {
+		// JWKS marshaling should never fail with valid RSA keys, but if it does,
+		// return a handler that reports the error.
+		return func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "internal error: failed to serialize JWKS", http.StatusInternalServerError)
+		}
+	}
 
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

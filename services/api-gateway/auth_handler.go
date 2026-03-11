@@ -70,6 +70,9 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit request body to 4KB to prevent memory exhaustion on this unauthenticated endpoint.
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{

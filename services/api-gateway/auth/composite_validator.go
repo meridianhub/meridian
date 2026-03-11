@@ -18,6 +18,9 @@ func NewCompositeJWTValidator(validators ...JWTValidator) *CompositeJWTValidator
 
 // ValidateToken tries each validator in order. Returns the first successful result.
 func (c *CompositeJWTValidator) ValidateToken(tokenString string) (*platformauth.Claims, error) {
+	if len(c.validators) == 0 {
+		return nil, platformauth.ErrInvalidToken
+	}
 	var lastErr error
 	for _, v := range c.validators {
 		claims, err := v.ValidateToken(tokenString)
