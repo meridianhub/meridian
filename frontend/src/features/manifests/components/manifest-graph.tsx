@@ -319,9 +319,11 @@ function LegendItem({ label, color, dashed }: { label: string; color: string; da
 interface ManifestGraphProps {
   manifest: Manifest
   className?: string
+  /** @internal Suppresses the fullscreen button to prevent recursive nesting. */
+  _fullscreen?: boolean
 }
 
-export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
+export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGraphProps) {
   const navigate = useNavigate()
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -622,8 +624,8 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
         </div>
       )}
 
-      {/* Fullscreen button — hidden when selection toolbar is visible (same position) */}
-      {!selectedManifestNode && (
+      {/* Fullscreen button + dialog — suppressed in nested (already-fullscreen) instances */}
+      {!_fullscreen && !selectedManifestNode && (
         <Button
           variant="outline"
           size="icon"
@@ -635,16 +637,18 @@ export function ManifestGraph({ manifest, className }: ManifestGraphProps) {
         </Button>
       )}
 
-      <Dialog open={fullscreen} onOpenChange={setFullscreen}>
-        <DialogContent className="max-w-[calc(100vw-2rem)] h-[calc(100vh-2rem)] sm:max-w-[calc(100vw-4rem)] sm:h-[calc(100vh-4rem)] flex flex-col p-4">
-          <DialogHeader className="shrink-0">
-            <DialogTitle>Economy Graph</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 rounded-lg border">
-            <ManifestGraph manifest={manifest} className="h-full w-full" />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {!_fullscreen && (
+        <Dialog open={fullscreen} onOpenChange={setFullscreen}>
+          <DialogContent className="max-w-[calc(100vw-2rem)] h-[calc(100vh-2rem)] sm:max-w-[calc(100vw-4rem)] sm:h-[calc(100vh-4rem)] flex flex-col p-4">
+            <DialogHeader className="shrink-0">
+              <DialogTitle>Economy Graph</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 rounded-lg border">
+              <ManifestGraph manifest={manifest} className="h-full w-full" _fullscreen />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }
