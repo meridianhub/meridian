@@ -51,6 +51,8 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 					"debtor_account_id":   {Derived: true},
 					"creditor_account_id": {Derived: true},
 					"reference":           {Derived: true},
+					// Proto uses IdempotencyKey message; handler accepts plain string
+					"idempotency_key": {Type: "string"},
 					// Handler params not in proto (resolved internally)
 					"customer_reference":       {Type: "string"},
 					"payment_method_reference": {Type: "string"},
@@ -83,6 +85,8 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 					// Starlark-friendly aliases for proto field names
 					"original_dispatch_id": {Alias: "payment_order_id"},
 					"refund_amount_units":  {Alias: "refund_amount_minor_units"},
+					// Proto uses IdempotencyKey message; handler accepts plain string
+					"idempotency_key": {Type: "string"},
 				},
 			},
 		},
