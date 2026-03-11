@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react'
 import { Breadcrumbs } from '@/shared'
@@ -5,7 +6,16 @@ import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { DetailSkeleton } from '@/shared/detail-skeleton'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { useTenant, useTenantProvisioningStatus, useUpdateTenantStatus } from '@/hooks/use-tenant'
 import {
   TenantStatus,
@@ -94,6 +104,14 @@ export function TenantDetailPage() {
     tenant?.status,
   )
   const updateStatus = useUpdateTenantStatus(tenantId ?? '')
+  const [deprovisionDialogOpen, setDeprovisionDialogOpen] = useState(false)
+  const [slugConfirmation, setSlugConfirmation] = useState('')
+
+  useEffect(() => {
+    if (!deprovisionDialogOpen) {
+      setSlugConfirmation('')
+    }
+  }, [deprovisionDialogOpen])
 
   if (tenantLoading) {
     return <DetailSkeleton fieldCount={4} tabCount={0} showBackNav={true} />
@@ -120,7 +138,9 @@ export function TenantDetailPage() {
   }
 
   function handleDeprovision() {
-    void updateStatus.mutateAsync(TenantStatus.DEPROVISIONED)
+    void updateStatus.mutateAsync(TenantStatus.DEPROVISIONED).then(() => {
+      setDeprovisionDialogOpen(false)
+    })
   }
 
   return (
@@ -164,7 +184,7 @@ export function TenantDetailPage() {
             <Button
               variant="destructive"
               size="sm"
-              onClick={handleDeprovision}
+              onClick={() => setDeprovisionDialogOpen(true)}
               disabled={updateStatus.isPending}
             >
               Deprovision
@@ -247,6 +267,44 @@ export function TenantDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Deprovision Confirmation Dialog */}
+      <Dialog open={deprovisionDialogOpen} onOpenChange={setDeprovisionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Deprovision Tenant</DialogTitle>
+            <DialogDescription>
+              This will mark <span className="font-medium">{tenant.displayName}</span> as
+              deprovisioned. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <label htmlFor="slug-confirmation" className="text-sm">
+              To confirm, type{' '}
+              <span className="font-mono font-medium">{tenant.slug}</span> below:
+            </label>
+            <Input
+              id="slug-confirmation"
+              value={slugConfirmation}
+              onChange={(e) => setSlugConfirmation(e.target.value)}
+              placeholder={tenant.slug}
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeprovisionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeprovision}
+              disabled={slugConfirmation !== tenant.slug || updateStatus.isPending}
+            >
+              {updateStatus.isPending ? 'Deprovisioning...' : 'Confirm Deprovision'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

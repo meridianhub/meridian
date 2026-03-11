@@ -17,14 +17,17 @@ import {
 } from '@/components/ui/popover'
 import { useTenants } from '@/hooks/use-tenants'
 import { useTenantContext } from '@/contexts/tenant-context'
+import { TenantStatus } from '@/api/gen/meridian/tenant/v1/tenant_pb'
 
 export function TenantSelector() {
   const [open, setOpen] = React.useState(false)
   const { data: tenants, isLoading } = useTenants()
   const { tenantSlug, currentTenant: contextTenant, switchTenant } = useTenantContext()
 
+  const activeTenants = tenants?.filter((t) => t.status !== TenantStatus.DEPROVISIONED)
+
   // Use the loaded tenant data first, fall back to context (e.g., on error or partial data)
-  const resolvedTenant = tenants?.find((t) => t.slug === tenantSlug) ?? contextTenant
+  const resolvedTenant = activeTenants?.find((t) => t.slug === tenantSlug) ?? contextTenant
 
   if (isLoading) {
     return (
@@ -67,7 +70,7 @@ export function TenantSelector() {
             >
               <CommandEmpty>No tenants found.</CommandEmpty>
               <CommandGroup>
-                {tenants?.map((tenant) => (
+                {activeTenants?.map((tenant) => (
                   <CommandItem
                     key={tenant.tenantId}
                     value={`${tenant.displayName} ${tenant.slug}`}
