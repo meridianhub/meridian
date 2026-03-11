@@ -37,6 +37,8 @@ def stripe_payment_via_gateway():
     party_id = ctx["party_id"]
     amount_cents = ctx["amount_cents"]
     currency = ctx.get("currency", "GBP").strip().upper()
+    payment_order_id = ctx.get("payment_order_id", "po_" + party_id)
+    idempotency_key = ctx.get("idempotency_key", payment_order_id)
     amount = Decimal(str(amount_cents)) / Decimal("100")
 
     # Step 1: Resolve the party's default Stripe payment method
@@ -53,12 +55,12 @@ def stripe_payment_via_gateway():
     # rate limiting, and circuit breaking internally.
     step(name="dispatch_payment")
     gateway_result = financial_gateway.dispatch_payment(
-        payment_order_id=ctx["payment_order_id"],
+        payment_order_id=payment_order_id,
         amount_minor_units=amount_cents,
         currency=currency,
         customer_reference=pm_result.provider_customer_id,
         payment_method_reference=pm_result.provider_method_id,
-        idempotency_key=ctx["idempotency_key"],
+        idempotency_key=idempotency_key,
         rail="STRIPE",
         metadata={
             "party_id": party_id,
@@ -72,7 +74,7 @@ def stripe_payment_via_gateway():
         instrument_code=currency,
         amount=amount,
         direction="DEBIT",
-        correlation_id=ctx["payment_order_id"],
+        correlation_id=payment_order_id,
     )
 
     # Step 4: Credit the customer current account
@@ -82,7 +84,7 @@ def stripe_payment_via_gateway():
         instrument_code=currency,
         amount=amount,
         direction="CREDIT",
-        correlation_id=ctx["payment_order_id"],
+        correlation_id=payment_order_id,
     )
 
     return {

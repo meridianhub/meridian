@@ -70,8 +70,8 @@ def execute_stripe_payment_received():
         "instrument_code": instrument_code,
         "charge_id": charge_id,
         "payment_intent_id": payment_intent_id,
-        "debit_log_id": debit_result.log_id,
-        "credit_log_id": credit_result.log_id,
+        "debit_log_id": debit_result.log,
+        "credit_log_id": credit_result.log,
     }
 
 output = execute_stripe_payment_received()

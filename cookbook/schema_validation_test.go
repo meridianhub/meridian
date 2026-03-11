@@ -291,6 +291,7 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 		"position_keeping",
 		"reconciliation",
 		"reference_data",
+		"repository",
 		"valuation_engine",
 	}
 
@@ -317,7 +318,8 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 		},
 		"party": {
 			// Simple party lookup; not yet registered
-			"get": {},
+			"get":                        {},
+			"get_default_payment_method": {},
 		},
 		"position_keeping": {
 			// Balance and list queries; not yet registered
@@ -325,6 +327,7 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 			"list_accounts":    {},
 			"query_accounts":   {},
 			"query_logs":       {},
+			"query_positions":  {},
 			"retrieve_balance": {},
 		},
 		"reference_data": {
