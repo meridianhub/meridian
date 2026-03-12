@@ -148,7 +148,8 @@ The `meta.design_pattern` field names the design pattern this entry exemplifies.
 | `cross-instrument-valuation` | Pattern 1 | kWh → GBP, GPU_HOUR → USD (multi-leg) |
 | `compute-metering` | Pattern 2 | Usage billing with single target instrument |
 | `credit-retirement-lifecycle` | Pattern 3 | Carbon credits, irreversible retirement |
-| `operational-gateway` | Pattern 5/6 | External payment provider integration |
+| `financial-gateway` | Pattern 5 | Stripe payment collection and payout via Financial Gateway |
+| `operational-gateway` | Pattern 6 | Generic external REST/gRPC calls, non-payment webhooks |
 | `compliance-marker` | Custom | Zero-amount positions as compliance audit trail |
 
 Set to `null` for foundation patterns (`base-fiat-*`). Set to the closest named pattern otherwise.
@@ -190,6 +191,91 @@ GPU_HOUR, and it creates USD — so its output never matches the filter.
 
 Both approaches are valid. Use `==` (allowlist) when your pattern handles exactly one source instrument.
 Use `!=` (denylist) when the pattern should handle any non-settlement instrument.
+
+---
+
+## Gateway Selection
+
+Meridian provides two gateways for external integrations. Choosing the wrong one is the most common
+mistake when authoring payment-adjacent patterns.
+
+### Financial Gateway
+
+Use `financial_gateway` in Starlark sagas when the integration involves **payment collection or
+payout** with a supported payment provider (Stripe, Stripe Connect).
+
+The Financial Gateway provides:
+
+- `financial_gateway.dispatch_payment()` — charge a customer's payment method
+- `financial_gateway.dispatch_refund()` — issue a refund or payout to a connected account
+- `financial_gateway.cancel_payment()` — cancel an in-flight payment (compensation step)
+- Built-in idempotency, retry logic, and payment lifecycle management
+- Automatic routing via the `payment_rails` configuration in `manifest-fragment.yaml`
+
+Configure the provider in `manifest-fragment.yaml` under `paymentRails`:
+
+```yaml
+paymentRails:
+  - provider: stripe
+    mode: CONNECT_MODE_STANDARD
+    accountId: "acct_REPLACE_WITH_REAL_ID"
+    webhookEndpointSecret: "sm://stripe/webhook_secret"
+    payoutSchedule: PAYOUT_SCHEDULE_DAILY
+    supportedMethods: [card]
+```
+
+**When to use the Financial Gateway:**
+
+- Charging a customer's card for a service
+- Issuing a payout or refund to a connected account
+- Any saga where money moves through Stripe
+
+**Examples:** `payment-gateway-stripe` (payment collection), `tote-betting` (stake collection and
+winner payouts via Stripe Connect).
+
+### Operational Gateway
+
+Use the Operational Gateway when the integration is a **generic external API call** that is not a
+payment — REST endpoints, gRPC services, non-payment webhooks, MQTT/AMQP brokers.
+
+The Operational Gateway is configured via `operationalConnections` in the manifest and dispatched
+through the gateway instruction API. It explicitly rejects `payment.*` instruction types.
+
+**When to use the Operational Gateway:**
+
+- Calling an external REST or gRPC API from a saga
+- Consuming non-payment webhooks (e.g., IoT meter events, market data feeds)
+- MQTT/AMQP broker integrations
+
+**Examples:** `saas-billing` receives GPU meter events via `webhook:gpu_meter_event` — this is a
+data ingestion webhook, not a payment, so no gateway dispatch is needed. The webhook saga records
+usage positions directly via `position_keeping.initiate_log`.
+
+### Decision Tree
+
+```text
+Does the saga move money through a payment provider (Stripe)?
+├── Yes → financial_gateway.dispatch_payment() or dispatch_refund()
+│         Configure paymentRails in manifest-fragment.yaml
+│         design_pattern: "financial-gateway"
+└── No  → Does the saga call an external service or consume a webhook?
+          ├── Yes, payment webhook (Stripe event) → webhook: trigger, no dispatch needed
+          │   The Financial Gateway handles the inbound webhook routing.
+          │   The saga only records confirmed payments in the ledger.
+          └── Yes, non-payment external call → operational_gateway or webhook: trigger
+              design_pattern: "operational-gateway"
+```
+
+### Common Mistake
+
+**Do not use the Operational Gateway for Stripe payments.** The Operational Gateway does not have
+Stripe credentials, does not manage payment state, and rejects `payment.*` instruction types at
+runtime. Attempting to dispatch a Stripe payment through it will fail.
+
+The `webhook:` trigger type is used for inbound webhook delivery (e.g., `stripe.payment_intent.succeeded`).
+That is distinct from the Financial Gateway, which handles outbound payment dispatch. A pattern can use
+both: `stripe_payment_via_gateway.star` dispatches outbound via Financial Gateway, while
+`stripe_payment_received.star` handles the inbound Stripe webhook confirmation.
 
 ---
 
