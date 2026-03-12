@@ -235,35 +235,41 @@ paymentRails:
 
 ### Operational Gateway
 
-Use the Operational Gateway when the integration is a **generic external API call** that is not a
-payment — REST endpoints, gRPC services, non-payment webhooks, MQTT/AMQP brokers.
+Use the Operational Gateway when a saga needs to make an **outbound call to a generic external
+service** — REST endpoints, gRPC services, or MQTT/AMQP brokers. The Operational Gateway is for
+outbound dispatch only; inbound data from external systems arrives via the `webhook:` trigger type
+on sagas (no gateway involved).
 
-The Operational Gateway is configured via `operationalConnections` in the manifest and dispatched
-through the gateway instruction API. It explicitly rejects `payment.*` instruction types.
+The Operational Gateway is configured via `operationalGateway.providerConnections` in the manifest
+and dispatched through the gateway instruction API. It explicitly rejects `payment.*` instruction
+types.
 
 **When to use the Operational Gateway:**
 
 - Calling an external REST or gRPC API from a saga
-- Consuming non-payment webhooks (e.g., IoT meter events, market data feeds)
-- MQTT/AMQP broker integrations
+- Dispatching outbound messages to MQTT/AMQP brokers
 
-**Examples:** `saas-billing` receives GPU meter events via `webhook:gpu_meter_event` — this is a
-data ingestion webhook, not a payment, so no gateway dispatch is needed. The webhook saga records
-usage positions directly via `position_keeping.initiate_log`.
+**For inbound webhooks** (e.g., IoT meter events, market data feeds): use the `webhook:` saga
+trigger type directly. Meridian delivers inbound webhook payloads to the matching saga trigger
+without involving the Operational Gateway. The `saas-billing` pattern is an example: its
+`record_gpu_usage` saga uses `webhook:gpu_meter_event` to receive meter events and records usage
+positions via `position_keeping.initiate_log`, with no outbound dispatch at all.
 
 ### Decision Tree
 
 ```text
-Does the saga move money through a payment provider (Stripe)?
+Does the saga need to move money through Stripe?
 ├── Yes → financial_gateway.dispatch_payment() or dispatch_refund()
 │         Configure paymentRails in manifest-fragment.yaml
 │         design_pattern: "financial-gateway"
-└── No  → Does the saga call an external service or consume a webhook?
-          ├── Yes, payment webhook (Stripe event) → webhook: trigger, no dispatch needed
-          │   Meridian routes inbound Stripe webhooks to the saga trigger.
-          │   The saga only records confirmed payments in the ledger.
-          └── Yes, non-payment external call → operational_gateway or webhook: trigger
-              design_pattern: "operational-gateway"
+└── No → Is the saga receiving data from an external system?
+         ├── Yes, inbound webhook → webhook: trigger on the saga
+         │   Meridian routes the webhook payload directly to the saga.
+         │   No gateway dispatch. Saga records positions via position_keeping.
+         └── No → Does the saga need to call an external system outbound?
+                  ├── Yes → operationalGateway.providerConnections in the manifest
+                  │         design_pattern: "operational-gateway"
+                  └── No → No gateway needed
 ```
 
 ### Common Mistake
