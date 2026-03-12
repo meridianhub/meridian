@@ -85,13 +85,22 @@ func buildManifestValidateTool(client ManifestApplier) Tool {
 		Category: CategorySimulate,
 		Description: "Validate a manifest YAML/JSON without applying it. " +
 			"Runs structural validation and returns any errors with paths and suggestions. " +
-			"Use this to check a manifest before planning or applying.",
+			"Use mode='create' (default) for new economy validation or mode='amend' with tenant_id to validate against an existing tenant's manifest.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"manifest": map[string]interface{}{
 					"type":        "object",
 					"description": "The manifest JSON object to validate.",
+				},
+				"mode": map[string]interface{}{
+					"type":        "string",
+					"description": "Validation mode: 'create' (default) performs schema-only validation for new economies; 'amend' validates against the existing tenant's manifest.",
+					"enum":        []interface{}{"create", "amend"},
+				},
+				"tenant_id": map[string]interface{}{
+					"type":        "string",
+					"description": "Required for amend mode. The tenant whose manifest to compare against.",
 				},
 			},
 			"required": []interface{}{"manifest"},
@@ -105,6 +114,8 @@ func buildManifestValidateTool(client ManifestApplier) Tool {
 // manifestValidateParams holds parsed parameters for meridian_manifest_validate.
 type manifestValidateParams struct {
 	Manifest json.RawMessage `json:"manifest"`
+	Mode     string          `json:"mode"`      // "create" or "amend"
+	TenantID string          `json:"tenant_id"` // Required for amend mode
 }
 
 // handleManifestValidate implements the meridian_manifest_validate handler logic.
@@ -112,6 +123,27 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 	var p manifestValidateParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return mcperrors.FormatGRPCError(err), nil
+	}
+
+	// Validate mode parameter.
+	var forceSkipImmutability bool
+	switch p.Mode {
+	case "", "create":
+		// Create mode: schema-only validation, skip tenant state comparison.
+		// TODO: Replace Force with SkipImmutabilityChecks once proto field is added (task 2).
+		forceSkipImmutability = true
+	case "amend":
+		if p.TenantID == "" {
+			return map[string]interface{}{
+				"error":   "tenant_id is required when mode is 'amend'",
+				"message": "Provide a tenant_id to validate against the tenant's existing manifest.",
+			}, nil
+		}
+	default:
+		return map[string]interface{}{
+			"error":   "invalid mode: " + p.Mode,
+			"message": "mode must be 'create' or 'amend'",
+		}, nil
 	}
 
 	manifest, err := manifestJSONToProto(p.Manifest)
@@ -125,6 +157,7 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 	resp, err := client.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
 		Manifest:  manifest,
 		DryRun:    true,
+		Force:     forceSkipImmutability,
 		AppliedBy: "mcp-server-validate",
 	})
 	if err != nil {

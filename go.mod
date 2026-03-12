@@ -10,6 +10,7 @@ require (
 	connectrpc.com/vanguard v0.3.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/anthropics/anthropic-sdk-go v1.26.0
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/bsm/redislock v0.9.4
 	github.com/coder/websocket v1.8.14
@@ -56,7 +57,6 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.26.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
