@@ -257,6 +257,67 @@ func TestOIDCHandler_Authorize_MissingPKCE(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestOIDCHandler_Authorize_RejectsHTTPRedirect(t *testing.T) {
+	signer := newTestSigner(t)
+	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
+		OIDC: auth.OIDCConfig{
+			DexIssuerURL: "https://dex.example.com/dex",
+			ClientID:     "meridian-service",
+			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
+		},
+		OAuth:      auth.OAuthConfig{ClientID: "meridian-mcp"},
+		StateStore: newTestOIDCStateStore(t),
+		CodeStore:  newTestStore(t),
+		Signer:     signer,
+		Logger:     slog.Default(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"http://evil.example.com/steal"},
+		"code_challenge":        {"abc123"},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "redirect_uri must use https")
+}
+
+func TestOIDCHandler_Authorize_AllowsLocalhostHTTP(t *testing.T) {
+	dexSrv := fakeDexServer(t, "admin@acme.com")
+	signer := newTestSigner(t)
+	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
+		OIDC: auth.OIDCConfig{
+			DexIssuerURL: dexSrv.URL + "/dex",
+			ClientID:     "meridian-service",
+			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
+		},
+		OAuth:      auth.OAuthConfig{ClientID: "meridian-mcp"},
+		StateStore: newTestOIDCStateStore(t),
+		CodeStore:  newTestStore(t),
+		Signer:     signer,
+		Logger:     slog.Default(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"http://localhost:3000/callback"},
+		"code_challenge":        {"abc123"},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	// Should redirect to Dex (302), not reject
+	assert.Equal(t, http.StatusFound, w.Code)
+}
+
 // -----------------------------------------------------------------------
 // OIDCHandler — HandleCallback
 // -----------------------------------------------------------------------

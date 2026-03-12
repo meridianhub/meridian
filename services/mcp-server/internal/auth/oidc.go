@@ -284,6 +284,15 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate redirect_uri scheme to prevent open-redirect attacks.
+	// MCP clients provide dynamic callback URIs, so we validate the scheme
+	// rather than matching a single registered URI: HTTPS is required for
+	// production; HTTP is allowed only for localhost (development).
+	if !isAllowedRedirectURI(redirectURI) {
+		http.Error(w, "redirect_uri must use https (or http://localhost for development)", http.StatusBadRequest)
+		return
+	}
+
 	// Extract tenant slug from request subdomain.
 	tenantSlug := extractSubdomain(r.Host, h.baseDomain)
 
@@ -529,4 +538,21 @@ func generateRandomToken(n int) (string, error) {
 func computeS256Challenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// isAllowedRedirectURI validates that a redirect URI is safe to redirect to.
+// HTTPS is required for production; HTTP is allowed only for localhost (development).
+func isAllowedRedirectURI(uri string) bool {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme == "https" {
+		return true
+	}
+	if parsed.Scheme == "http" {
+		host := parsed.Hostname()
+		return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	}
+	return false
 }
