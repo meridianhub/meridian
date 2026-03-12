@@ -6,17 +6,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"gopkg.in/yaml.v3"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
+
+// errUnsupportedManifestType is returned by parseManifestInput when the value is not
+// a string, json.RawMessage, or map.
+var errUnsupportedManifestType = errors.New("manifest must be a YAML/JSON string or object")
 
 // PlanStore abstracts the session plan cache to avoid an import cycle
 // between tools and session packages. The session.Session type satisfies
@@ -79,6 +85,38 @@ func manifestJSONToProto(manifestJSON json.RawMessage) (*controlplanev1.Manifest
 	return m, nil
 }
 
+// parseManifestInput converts the raw manifest field value into JSON suitable for
+// manifestJSONToProto. When Manifest is typed as interface{} in the param struct,
+// json.Unmarshal decodes JSON strings as string and JSON objects as map[string]interface{}.
+// It accepts:
+//   - string: parsed as YAML (which is a superset of JSON), then marshaled to JSON
+//   - map[string]interface{}: marshaled to JSON
+//
+// Any other type returns an error.
+func parseManifestInput(v interface{}) (json.RawMessage, error) {
+	switch val := v.(type) {
+	case string:
+		// Parse YAML (superset of JSON) into a generic map, then re-encode as JSON.
+		var parsed interface{}
+		if err := yaml.Unmarshal([]byte(val), &parsed); err != nil {
+			return nil, fmt.Errorf("invalid YAML/JSON string: %w", err)
+		}
+		b, err := json.Marshal(parsed)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert YAML to JSON: %w", err)
+		}
+		return json.RawMessage(b), nil
+	case map[string]interface{}:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal manifest object: %w", err)
+		}
+		return json.RawMessage(b), nil
+	default:
+		return nil, errUnsupportedManifestType
+	}
+}
+
 // buildManifestValidateTool returns the meridian_manifest_validate tool.
 func buildManifestValidateTool(client ManifestApplier) Tool {
 	return Tool{
@@ -91,8 +129,11 @@ func buildManifestValidateTool(client ManifestApplier) Tool {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"manifest": map[string]interface{}{
-					"type":        "object",
-					"description": "The manifest JSON object to validate.",
+					"oneOf": []interface{}{
+						map[string]interface{}{"type": "object"},
+						map[string]interface{}{"type": "string"},
+					},
+					"description": "The manifest to validate, as a YAML/JSON string or a JSON object.",
 				},
 				"mode": map[string]interface{}{
 					"type":        "string",
@@ -114,9 +155,9 @@ func buildManifestValidateTool(client ManifestApplier) Tool {
 
 // manifestValidateParams holds parsed parameters for meridian_manifest_validate.
 type manifestValidateParams struct {
-	Manifest json.RawMessage `json:"manifest"`
-	Mode     string          `json:"mode"`      // "create" or "amend"
-	TenantID string          `json:"tenant_id"` // Required for amend mode
+	Manifest interface{} `json:"manifest"` // string (YAML/JSON) or object
+	Mode     string      `json:"mode"`     // "create" or "amend"
+	TenantID string      `json:"tenant_id"`
 }
 
 // handleManifestValidate implements the meridian_manifest_validate handler logic.
@@ -149,7 +190,14 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 		}, nil
 	}
 
-	manifest, err := manifestJSONToProto(p.Manifest)
+	manifestJSON, err := parseManifestInput(p.Manifest)
+	if err != nil {
+		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
+			"valid":  false,
+			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
+		}, nil
+	}
+	manifest, err := manifestJSONToProto(manifestJSON)
 	if err != nil {
 		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
 			"valid":  false,
@@ -196,8 +244,11 @@ func buildManifestPlanTool(client ManifestApplier, sess PlanStore) Tool {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"manifest": map[string]interface{}{
-					"type":        "object",
-					"description": "The manifest JSON object to plan.",
+					"oneOf": []interface{}{
+						map[string]interface{}{"type": "object"},
+						map[string]interface{}{"type": "string"},
+					},
+					"description": "The manifest to plan, as a YAML/JSON string or a JSON object.",
 				},
 			},
 			"required": []interface{}{"manifest"},
@@ -210,7 +261,7 @@ func buildManifestPlanTool(client ManifestApplier, sess PlanStore) Tool {
 
 // manifestPlanParams holds parsed parameters for meridian_manifest_plan.
 type manifestPlanParams struct {
-	Manifest json.RawMessage `json:"manifest"`
+	Manifest interface{} `json:"manifest"` // string (YAML/JSON) or object
 }
 
 // handleManifestPlan implements the meridian_manifest_plan handler logic.
@@ -220,7 +271,14 @@ func handleManifestPlan(ctx context.Context, client ManifestApplier, sess PlanSt
 		return mcperrors.FormatGRPCError(err), nil
 	}
 
-	manifest, err := manifestJSONToProto(p.Manifest)
+	manifestJSON, err := parseManifestInput(p.Manifest)
+	if err != nil {
+		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
+			"valid":  false,
+			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
+		}, nil
+	}
+	manifest, err := manifestJSONToProto(manifestJSON)
 	if err != nil {
 		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
 			"valid":  false,
@@ -281,8 +339,11 @@ func buildManifestApplyTool(client ManifestApplier, sess PlanStore) Tool {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"manifest": map[string]interface{}{
-					"type":        "object",
-					"description": "The manifest JSON object to apply (must match the planned manifest).",
+					"oneOf": []interface{}{
+						map[string]interface{}{"type": "object"},
+						map[string]interface{}{"type": "string"},
+					},
+					"description": "The manifest to apply (must match the planned manifest), as a YAML/JSON string or a JSON object.",
 				},
 				"plan_hash": map[string]interface{}{
 					"type":        "string",
@@ -303,9 +364,9 @@ func buildManifestApplyTool(client ManifestApplier, sess PlanStore) Tool {
 
 // manifestApplyParams holds parsed parameters for meridian_manifest_apply.
 type manifestApplyParams struct {
-	Manifest  json.RawMessage `json:"manifest"`
-	PlanHash  string          `json:"plan_hash"`
-	AppliedBy string          `json:"applied_by"`
+	Manifest  interface{} `json:"manifest"` // string (YAML/JSON) or object
+	PlanHash  string      `json:"plan_hash"`
+	AppliedBy string      `json:"applied_by"`
 }
 
 // handleManifestApply implements the meridian_manifest_apply handler logic.
@@ -323,7 +384,14 @@ func handleManifestApply(ctx context.Context, client ManifestApplier, sess PlanS
 		}, nil
 	}
 
-	manifest, err := manifestJSONToProto(p.Manifest)
+	manifestJSON, err := parseManifestInput(p.Manifest)
+	if err != nil {
+		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
+			"valid":  false,
+			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
+		}, nil
+	}
+	manifest, err := manifestJSONToProto(manifestJSON)
 	if err != nil {
 		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
 			"valid":  false,
