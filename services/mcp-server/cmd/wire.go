@@ -72,6 +72,12 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 		logger.Warn("failed to register manifest fix tool", "error", err)
 	}
 
+	// Reference tools are static metadata (topics, starlark bindings, manifest schema,
+	// gateway guide). They are tenant-agnostic and require no gRPC clients.
+	if err := tools.RegisterReferenceTools(toolReg); err != nil {
+		return nil, fmt.Errorf("register reference tools: %w", err)
+	}
+
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()
 
