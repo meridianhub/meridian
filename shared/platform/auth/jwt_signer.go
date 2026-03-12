@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -167,7 +168,10 @@ func (s *JWTSigner) ServeJWKS() http.HandlerFunc {
 
 // parseRSAPrivateKey decodes a PEM-encoded RSA private key.
 // Supports both PKCS#1 and PKCS#8 formats.
+// Handles escaped newlines (literal \n) commonly found in environment variables
+// where multiline values are not supported (e.g., docker-compose .env files).
 func parseRSAPrivateKey(pemStr string) (*rsa.PrivateKey, error) {
+	pemStr = strings.ReplaceAll(pemStr, `\n`, "\n")
 	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
 		return nil, ErrInvalidPEM
