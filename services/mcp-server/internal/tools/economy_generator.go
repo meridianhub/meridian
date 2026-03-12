@@ -7,7 +7,27 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+// generatorUnavailableMessage is returned when the economy generator service is not deployed.
+const generatorUnavailableMessage = "Economy generator is not available on this instance. " +
+	"Use meridian_manifest_validate (mode=create) to check manually composed manifests, " +
+	"or meridian_cookbook_list/describe for pattern examples."
+
+// IsServiceUnavailable returns true when err is a gRPC Unimplemented error, which indicates
+// the server does not know the requested service (i.e. the service is not deployed).
+func IsServiceUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	return st.Code() == codes.Unimplemented
+}
 
 // EconomyGeneratorClient is the minimal interface for the EconomyGeneratorService RPCs.
 type EconomyGeneratorClient interface {
@@ -103,6 +123,9 @@ func handleEconomyGenerateContext(ctx context.Context, client EconomyGeneratorCl
 
 	resp, err := client.GetGenerationContext(ctx, req)
 	if err != nil {
+		if IsServiceUnavailable(err) {
+			return map[string]interface{}{"message": generatorUnavailableMessage}, nil
+		}
 		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
 	}
 
@@ -214,6 +237,49 @@ type economyGenerateParams struct {
 	MaxFixIterations int32                       `json:"max_fix_iterations"`
 }
 
+// resolveGenerationMode converts the string mode parameter to a proto GenerationMode,
+// returning an error response map if validation fails, or nil on success.
+func resolveGenerationMode(mode, tenantID string) (controlplanev1.GenerationMode, map[string]interface{}) {
+	switch mode {
+	case "", "create":
+		return controlplanev1.GenerationMode_GENERATION_MODE_CREATE, nil
+	case "amend":
+		if tenantID == "" {
+			return 0, map[string]interface{}{
+				"error":   "tenant_id is required when mode is 'amend'",
+				"message": "Provide a tenant_id to amend the tenant's existing manifest.",
+			}
+		}
+		return controlplanev1.GenerationMode_GENERATION_MODE_AMEND, nil
+	default:
+		return 0, map[string]interface{}{
+			"error":   "invalid mode: " + mode,
+			"message": "mode must be 'create' or 'amend'",
+		}
+	}
+}
+
+// buildGenerationMetadata converts proto GenerationMetadata to a map for JSON serialization.
+func buildGenerationMetadata(m *controlplanev1.GenerationMetadata) map[string]interface{} {
+	meta := map[string]interface{}{"fix_iterations": m.FixIterations}
+	if len(m.PatternsUsed) > 0 {
+		meta["patterns_used"] = m.PatternsUsed
+	}
+	if len(m.InstrumentsCreated) > 0 {
+		meta["instruments_created"] = m.InstrumentsCreated
+	}
+	if len(m.AccountTypesCreated) > 0 {
+		meta["account_types_created"] = m.AccountTypesCreated
+	}
+	if len(m.SagasCreated) > 0 {
+		meta["sagas_created"] = m.SagasCreated
+	}
+	if len(m.Decisions) > 0 {
+		meta["decisions"] = m.Decisions
+	}
+	return meta
+}
+
 // handleEconomyGenerate implements the meridian_economy_generate handler.
 func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, params json.RawMessage) (interface{}, error) {
 	var p economyGenerateParams
@@ -221,23 +287,9 @@ func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, p
 		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
 	}
 
-	var mode controlplanev1.GenerationMode
-	switch p.Mode {
-	case "", "create":
-		mode = controlplanev1.GenerationMode_GENERATION_MODE_CREATE
-	case "amend":
-		mode = controlplanev1.GenerationMode_GENERATION_MODE_AMEND
-		if p.TenantID == "" {
-			return map[string]interface{}{
-				"error":   "tenant_id is required when mode is 'amend'",
-				"message": "Provide a tenant_id to amend the tenant's existing manifest.",
-			}, nil
-		}
-	default:
-		return map[string]interface{}{
-			"error":   "invalid mode: " + p.Mode,
-			"message": "mode must be 'create' or 'amend'",
-		}, nil
+	mode, errResp := resolveGenerationMode(p.Mode, p.TenantID)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	req := &controlplanev1.GenerateManifestRequest{
@@ -257,6 +309,9 @@ func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, p
 
 	resp, err := client.GenerateManifest(ctx, req)
 	if err != nil {
+		if IsServiceUnavailable(err) {
+			return map[string]interface{}{"message": generatorUnavailableMessage}, nil
+		}
 		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
 	}
 
@@ -271,27 +326,8 @@ func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, p
 	if len(resp.ValidationWarnings) > 0 {
 		result["validation_warnings"] = formatProtoValidationErrors(resp.ValidationWarnings)
 	}
-
-	if m := resp.GenerationMetadata; m != nil {
-		meta := map[string]interface{}{
-			"fix_iterations": m.FixIterations,
-		}
-		if len(m.PatternsUsed) > 0 {
-			meta["patterns_used"] = m.PatternsUsed
-		}
-		if len(m.InstrumentsCreated) > 0 {
-			meta["instruments_created"] = m.InstrumentsCreated
-		}
-		if len(m.AccountTypesCreated) > 0 {
-			meta["account_types_created"] = m.AccountTypesCreated
-		}
-		if len(m.SagasCreated) > 0 {
-			meta["sagas_created"] = m.SagasCreated
-		}
-		if len(m.Decisions) > 0 {
-			meta["decisions"] = m.Decisions
-		}
-		result["generation_metadata"] = meta
+	if resp.GenerationMetadata != nil {
+		result["generation_metadata"] = buildGenerationMetadata(resp.GenerationMetadata)
 	}
 
 	return result, nil
