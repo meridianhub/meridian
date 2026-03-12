@@ -38,16 +38,18 @@ import (
 )
 
 var (
-	errOIDCDexIssuerRequired = errors.New("oidc handler: dex issuer URL is required")
-	errOIDCClientIDRequired  = errors.New("oidc handler: client ID is required")
-	errOIDCCallbackRequired  = errors.New("oidc handler: callback URL is required")
-	errOIDCSignerRequired    = errors.New("oidc handler: JWT signer is required")
-	errOIDCLoggerRequired    = errors.New("oidc handler: logger is required")
-	errDexTokenError         = errors.New("dex token error")
-	errDexBadStatus          = errors.New("dex token endpoint returned non-200 status")
-	errDexEmptyIDToken       = errors.New("dex returned empty id_token")
-	errInvalidJWTFormat      = errors.New("invalid JWT format")
-	errEmailClaimMissing     = errors.New("email claim missing from ID token")
+	errOIDCDexIssuerRequired  = errors.New("oidc handler: dex issuer URL is required")
+	errOIDCClientIDRequired   = errors.New("oidc handler: client ID is required")
+	errOIDCCallbackRequired   = errors.New("oidc handler: callback URL is required")
+	errOIDCStateStoreRequired = errors.New("oidc handler: state store is required")
+	errOIDCCodeStoreRequired  = errors.New("oidc handler: code store is required")
+	errOIDCSignerRequired     = errors.New("oidc handler: JWT signer is required")
+	errOIDCLoggerRequired     = errors.New("oidc handler: logger is required")
+	errDexTokenError          = errors.New("dex token error")
+	errDexBadStatus           = errors.New("dex token endpoint returned non-200 status")
+	errDexEmptyIDToken        = errors.New("dex returned empty id_token")
+	errInvalidJWTFormat       = errors.New("invalid JWT format")
+	errEmailClaimMissing      = errors.New("email claim missing from ID token")
 )
 
 const (
@@ -207,6 +209,12 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 	}
 	if cfg.OIDC.CallbackURL == "" {
 		return nil, errOIDCCallbackRequired
+	}
+	if cfg.StateStore == nil {
+		return nil, errOIDCStateStoreRequired
+	}
+	if cfg.CodeStore == nil {
+		return nil, errOIDCCodeStoreRequired
 	}
 	if cfg.Signer == nil {
 		return nil, errOIDCSignerRequired
@@ -410,8 +418,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}, tokenStr)
 
 	h.logger.Info("oidc: authentication successful",
-		"tenant", flowState.TenantSlug,
-		"email", email)
+		"tenant", flowState.TenantSlug)
 
 	// Redirect to MCP client's redirect_uri with the authorization code.
 	target, err := url.Parse(flowState.MCPRedirectURI)

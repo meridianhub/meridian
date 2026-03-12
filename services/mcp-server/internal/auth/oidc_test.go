@@ -622,6 +622,24 @@ func TestNewOIDCHandler_MissingConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "missing state store",
+			cfg: auth.OIDCHandlerConfig{
+				OIDC:      auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c", CallbackURL: "https://x/cb"},
+				CodeStore: newTestStore(t),
+				Signer:    signer,
+				Logger:    slog.Default(),
+			},
+		},
+		{
+			name: "missing code store",
+			cfg: auth.OIDCHandlerConfig{
+				OIDC:       auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c", CallbackURL: "https://x/cb"},
+				StateStore: newTestOIDCStateStore(t),
+				Signer:     signer,
+				Logger:     slog.Default(),
+			},
+		},
+		{
 			name: "missing signer",
 			cfg: auth.OIDCHandlerConfig{
 				OIDC:       auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c", CallbackURL: "https://x/cb"},
