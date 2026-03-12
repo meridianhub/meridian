@@ -15,16 +15,10 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy meridian:8090
 	}
 
-	# OAuth well-known discovery — return 404 when OAuth is not enabled.
-	# This must come before the SPA catch-all so MCP clients get a proper
-	# HTTP error instead of HTML, which they interpret as "needs auth".
-	handle /.well-known/* {
-		respond "Not Found" 404
-	}
-
-	# MCP Server: streamable HTTP transport
+	# MCP Server: streamable HTTP transport + OAuth 2.1 endpoints
+	# Also handles /.well-known/* for OAuth metadata discovery.
 	@mcp_transport {
-		path /mcp /mcp/*
+		path /mcp /mcp/* /oauth/* /.well-known/oauth-authorization-server
 	}
 	handle @mcp_transport {
 		reverse_proxy mcp-server:8090

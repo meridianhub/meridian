@@ -134,10 +134,23 @@ services:
       # --- Application ---
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
-      # --- OAuth (optional) ---
+      # --- OAuth 2.1 + OIDC (optional) ---
       MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
-      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}      # required when MCP_OAUTH_ENABLED=true
-      MCP_OAUTH_REDIRECT_URI: ${MCP_OAUTH_REDIRECT_URI:-} # required when MCP_OAUTH_ENABLED=true
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
+      MCP_BASE_DOMAIN: ${BASE_DOMAIN:-}
+
+      # --- Dex OIDC (delegates authentication to Dex when MCP_OAUTH_ENABLED=true) ---
+      MCP_DEX_ISSUER_URL: ${MCP_DEX_ISSUER_URL:-}                 # e.g. http://dex:5556/dex (internal) or https://demo.meridianhub.cloud/dex
+      MCP_DEX_CLIENT_ID: ${MCP_DEX_CLIENT_ID:-meridian-service}   # Dex static client ID
+      MCP_DEX_CALLBACK_URL: ${MCP_DEX_CALLBACK_URL:-}             # e.g. https://demo.meridianhub.cloud/oauth/callback
+
+      # --- JWT signing (shared with BFF for session interoperability) ---
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
+      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-1}
+      JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian}
+
+      # --- Bearer token validation ---
+      MCP_JWKS_URL: ${MCP_JWKS_URL:-}                             # e.g. https://demo.meridianhub.cloud/api/auth/jwks
     # Not exposed to host — accessed only by caddy on the internal network
     # Caddy proxies /mcp to this container
 
