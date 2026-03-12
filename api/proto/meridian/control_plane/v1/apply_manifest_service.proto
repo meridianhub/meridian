@@ -38,6 +38,12 @@ message ApplyManifestRequest {
     min_len: 1
     max_len: 255
   }];
+
+  // skip_immutability_checks when true bypasses immutability enforcement and
+  // destructive removal checks. Use with dry_run=true to validate a manifest
+  // that is intended for a new tenant (create mode) without comparing against
+  // existing tenant state. Has no effect when dry_run=false.
+  bool skip_immutability_checks = 5;
 }
 
 // ApplyManifestResponse contains the result of a manifest application.

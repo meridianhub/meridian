@@ -361,6 +361,7 @@ type ValidateOption func(*validateConfig)
 
 type validateConfig struct {
 	forceDestructiveChanges bool
+	skipImmutabilityChecks  bool
 }
 
 // WithForceDestructiveChanges converts destructive change errors into warnings,
@@ -368,6 +369,15 @@ type validateConfig struct {
 func WithForceDestructiveChanges() ValidateOption {
 	return func(c *validateConfig) {
 		c.forceDestructiveChanges = true
+	}
+}
+
+// WithSkipImmutabilityChecks skips immutability enforcement and destructive
+// change detection. Use when validating a manifest intended for a new tenant
+// (create mode) that has no existing state to compare against.
+func WithSkipImmutabilityChecks() ValidateOption {
+	return func(c *validateConfig) {
+		c.skipImmutabilityChecks = true
 	}
 }
 
@@ -423,16 +433,16 @@ func (v *ManifestValidator) Validate(
 	// 13. Operational gateway orphan detection
 	v.validateOperationalGatewayOrphans(manifest, result)
 
-	// 14. Immutability checks
-	if previousManifest != nil {
+	// 14. Immutability checks (skipped when validating for a new tenant)
+	if previousManifest != nil && !cfg.skipImmutabilityChecks {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
 
-	// 15. Destructive change detection
+	// 15. Destructive change detection (skipped when validating for a new tenant)
 	// Use the previous manifest's call logs for graph construction so that
 	// dependencies that existed in the previous version are correctly detected,
 	// even if a saga was modified or removed in the current manifest.
-	if previousManifest != nil {
+	if previousManifest != nil && !cfg.skipImmutabilityChecks {
 		previousCallLogs := v.validateStarlarkScripts(previousManifest, &ValidationResult{})
 		v.validateDestructiveChanges(manifest, previousManifest, previousCallLogs, cfg, result)
 	}
