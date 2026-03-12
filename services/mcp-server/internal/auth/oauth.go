@@ -63,6 +63,10 @@ type CodeEntry struct {
 	ClientID      string
 	RedirectURI   string
 	IssuedAt      time.Time
+	// Token is the pre-signed JWT to return at token exchange time.
+	// When set (by the OIDC callback flow), the TokenHandler returns this
+	// token directly instead of calling the TokenIssuer.
+	Token string
 }
 
 // CodeStore is a thread-safe in-memory store for authorization codes.
@@ -71,6 +75,7 @@ type CodeEntry struct {
 type CodeStore struct {
 	mu        sync.Mutex
 	codes     map[string]CodeEntry
+	tokens    map[string]string // code → pre-signed JWT (set by OIDC flow)
 	stop      chan struct{}
 	closeOnce sync.Once
 }
@@ -79,8 +84,9 @@ type CodeStore struct {
 // Call [CodeStore.Close] to stop the eviction goroutine when the store is no longer needed.
 func NewCodeStore() *CodeStore {
 	s := &CodeStore{
-		codes: make(map[string]CodeEntry),
-		stop:  make(chan struct{}),
+		codes:  make(map[string]CodeEntry),
+		tokens: make(map[string]string),
+		stop:   make(chan struct{}),
 	}
 	go s.evictLoop()
 	return s
@@ -112,6 +118,7 @@ func (s *CodeStore) evictExpired() {
 	for code, entry := range s.codes {
 		if time.Since(entry.IssuedAt) > authCodeTTL {
 			delete(s.codes, code)
+			delete(s.tokens, code)
 		}
 	}
 }
@@ -123,9 +130,21 @@ func (s *CodeStore) Store(code string, entry CodeEntry) {
 	s.codes[code] = entry
 }
 
+// StoreWithToken saves an authorization code entry alongside a pre-signed JWT.
+// The token is returned directly by the TokenHandler during code exchange,
+// bypassing the TokenIssuer. Used by the OIDC callback flow.
+func (s *CodeStore) StoreWithToken(code string, entry CodeEntry, token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.codes[code] = entry
+	s.tokens[code] = token
+}
+
 // Consume atomically retrieves and deletes an authorization code.
 // Returns (entry, true) if the code exists and has not expired.
 // Returns (zero, false) if the code is unknown or expired.
+// If a pre-signed token was stored with StoreWithToken, the entry's Token
+// field is populated.
 func (s *CodeStore) Consume(code string) (CodeEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -135,8 +154,14 @@ func (s *CodeStore) Consume(code string) (CodeEntry, bool) {
 		return CodeEntry{}, false
 	}
 
+	// Retrieve pre-signed token if present.
+	if token, hasToken := s.tokens[code]; hasToken {
+		entry.Token = token
+	}
+
 	// Always delete (one-time use), even if expired.
 	delete(s.codes, code)
+	delete(s.tokens, code)
 
 	if time.Since(entry.IssuedAt) > authCodeTTL {
 		return CodeEntry{}, false
@@ -332,16 +357,22 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Issue token via the configured issuer.
-	claims := map[string]any{
-		"client_id": clientID,
-		"iat":       time.Now().Unix(),
-	}
-	token, err := h.issuer.Issue(claims)
-	if err != nil {
-		h.logger.Error("token issuer failed", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+	// Use pre-signed token from OIDC flow if available, otherwise issue via TokenIssuer.
+	var token string
+	if entry.Token != "" {
+		token = entry.Token
+	} else {
+		claims := map[string]any{
+			"client_id": clientID,
+			"iat":       time.Now().Unix(),
+		}
+		var err error
+		token, err = h.issuer.Issue(claims)
+		if err != nil {
+			h.logger.Error("token issuer failed", "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	h.logger.Info("access token issued", "client_id", clientID)

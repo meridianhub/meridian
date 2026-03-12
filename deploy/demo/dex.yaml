@@ -43,9 +43,12 @@ staticClients:
     redirectURIs:
       # Production BFF callback
       - "https://demo.meridianhub.cloud/api/auth/callback"
+      # MCP server OAuth callback (OIDC-delegated auth for MCP clients)
+      - "https://demo.meridianhub.cloud/oauth/callback"
       # Local development
       - "http://localhost:8090/api/auth/callback"
       - "http://localhost:3000/api/auth/callback"
+      - "http://localhost:8091/oauth/callback"
     public: true
 
 enablePasswordDB: false
