@@ -259,21 +259,18 @@ func (h *ApplyManifestHandler) validate(
 	mf *controlplanev1.Manifest,
 	skipImmutability bool,
 ) validationOutput {
-	// Get the previous manifest for immutability checks (best-effort)
+	// Get the previous manifest for immutability checks (best-effort).
+	// When skipImmutability is true we model a new-tenant create, so there
+	// is no previous manifest to compare against.
 	var previousManifest *controlplanev1.Manifest
-	if h.versionStore != nil {
+	if h.versionStore != nil && !skipImmutability {
 		prev, err := h.versionStore.GetLatestApplied(ctx)
 		if err == nil && prev != nil {
 			previousManifest = prev.Manifest
 		}
 	}
 
-	var opts []validator.ValidateOption
-	if skipImmutability {
-		opts = append(opts, validator.WithSkipImmutabilityChecks())
-	}
-
-	result := h.validator.Validate(mf, previousManifest, opts...)
+	result := h.validator.Validate(mf, previousManifest)
 
 	step := &controlplanev1.StepResult{
 		StepName: "validate",
@@ -326,9 +323,11 @@ func (h *ApplyManifestHandler) diff(
 	mf *controlplanev1.Manifest,
 	skipImmutability bool,
 ) diffOutput {
-	// Get the last-applied manifest (nil means first apply)
+	// Get the last-applied manifest (nil means first apply).
+	// When skipImmutability is true we model a new-tenant create, so there
+	// is no baseline to diff against — everything is treated as CREATE.
 	var lastApplied *controlplanev1.Manifest
-	if h.versionStore != nil {
+	if h.versionStore != nil && !skipImmutability {
 		prev, err := h.versionStore.GetLatestApplied(ctx)
 		if err != nil {
 			return diffOutput{
@@ -345,12 +344,7 @@ func (h *ApplyManifestHandler) diff(
 		}
 	}
 
-	var diffOpts []differ.DiffOption
-	if skipImmutability {
-		diffOpts = append(diffOpts, differ.WithSkipSafetyChecks())
-	}
-
-	diffPlan, err := h.differ.Diff(ctx, lastApplied, mf, diffOpts...)
+	diffPlan, err := h.differ.Diff(ctx, lastApplied, mf)
 	if err != nil {
 		return diffOutput{
 			err: err,
