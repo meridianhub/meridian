@@ -48,6 +48,7 @@ var (
 	errDexTokenError          = errors.New("dex token error")
 	errDexBadStatus           = errors.New("dex token endpoint returned non-200 status")
 	errDexEmptyIDToken        = errors.New("dex returned empty id_token")
+	errOIDCStateFull          = errors.New("oidc state store is full")
 	errInvalidJWTFormat       = errors.New("invalid JWT format")
 	errEmailClaimMissing      = errors.New("email claim missing from ID token")
 )
@@ -65,6 +66,9 @@ const (
 	oidcHTTPTimeout = 10 * time.Second
 	// oidcStateEvictInterval is how often expired state entries are swept.
 	oidcStateEvictInterval = 5 * time.Minute
+	// oidcStateMaxEntries caps the number of in-flight OIDC authorizations
+	// to prevent memory exhaustion from unauthenticated requests.
+	oidcStateMaxEntries = 10_000
 
 	// defaultTokenTTL is the default JWT token lifetime.
 	defaultTokenTTL = time.Hour
@@ -147,6 +151,7 @@ func (s *OIDCStateStore) evictExpired() {
 }
 
 // Store saves an OIDC flow state entry and returns a key for retrieval.
+// Returns errOIDCStateFull if the store has reached its capacity limit.
 func (s *OIDCStateStore) Store(entry OIDCFlowState) (string, error) {
 	key, err := generateRandomToken(oidcStateBytes)
 	if err != nil {
@@ -154,6 +159,9 @@ func (s *OIDCStateStore) Store(entry OIDCFlowState) (string, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.entries) >= oidcStateMaxEntries {
+		return "", errOIDCStateFull
+	}
 	s.entries[key] = entry
 	return key, nil
 }

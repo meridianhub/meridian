@@ -52,9 +52,30 @@ func fakeDexServer(t *testing.T, email string) *httptest.Server {
 		http.Redirect(w, r, target.String(), http.StatusFound)
 	})
 
-	// Simulate Dex token endpoint — return a fake ID token
-	mux.HandleFunc("/dex/token", func(w http.ResponseWriter, _ *http.Request) {
-		// Build a fake JWT with just the email claim (no signature validation needed)
+	// Simulate Dex token endpoint — return a fake ID token.
+	// Asserts required PKCE exchange fields to catch regressions in exchangeDexCode.
+	mux.HandleFunc("/dex/token", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		// Assert required token exchange parameters.
+		for _, field := range []string{"grant_type", "code", "redirect_uri", "code_verifier", "client_id"} {
+			if r.PostForm.Get(field) == "" {
+				http.Error(w, "missing required field: "+field, http.StatusBadRequest)
+				return
+			}
+		}
+		if r.PostForm.Get("grant_type") != "authorization_code" {
+			http.Error(w, "wrong grant_type", http.StatusBadRequest)
+			return
+		}
+
+		// Build a fake JWT with just the email claim (no signature validation needed).
 		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
 		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"` + email + `","sub":"fake-sub"}`))
 		fakeJWT := header + "." + payload + ".fake-signature"
