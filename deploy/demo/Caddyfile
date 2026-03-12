@@ -18,7 +18,7 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	# MCP Server: streamable HTTP transport + OAuth 2.1 endpoints
 	# Also handles /.well-known/* for OAuth metadata discovery.
 	@mcp_transport {
-		path /mcp /mcp/* /oauth/*
+		path /mcp /mcp/* /oauth/* /.well-known/oauth-authorization-server
 	}
 	handle @mcp_transport {
 		reverse_proxy mcp-server:8090
