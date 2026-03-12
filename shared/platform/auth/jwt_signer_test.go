@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,6 +171,26 @@ func TestJWTSigner_RoundTripWithJWKS(t *testing.T) {
 	assert.Equal(t, "admin@acme.com", parsed.Email)
 	assert.Equal(t, "acme", parsed.TenantID)
 	assert.Equal(t, []string{"platform-admin", "super-admin"}, parsed.Roles)
+}
+
+func TestNewJWTSigner_EscapedNewlinePEM(t *testing.T) {
+	// Simulate environment variable injection where real newlines
+	// are replaced with literal \n (e.g., docker-compose .env files).
+	pemKey := generateTestPEM(t)
+	escapedPEM := strings.ReplaceAll(pemKey, "\n", `\n`)
+
+	signer, err := auth.NewJWTSigner(auth.JWTSignerConfig{
+		PrivateKeyPEM: escapedPEM,
+		KeyID:         "escaped-key",
+	})
+	require.NoError(t, err)
+
+	// Verify the signer works end-to-end.
+	tokenStr, err := signer.SignClaims(map[string]interface{}{
+		"sub": "user-escaped",
+	}, time.Hour)
+	require.NoError(t, err)
+	assert.NotEmpty(t, tokenStr)
 }
 
 func generateTestPEM(t *testing.T) string {

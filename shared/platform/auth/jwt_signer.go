@@ -171,6 +171,7 @@ func (s *JWTSigner) ServeJWKS() http.HandlerFunc {
 // Handles escaped newlines (literal \n) commonly found in environment variables
 // where multiline values are not supported (e.g., docker-compose .env files).
 func parseRSAPrivateKey(pemStr string) (*rsa.PrivateKey, error) {
+	pemStr = strings.ReplaceAll(pemStr, `\r\n`, "\n")
 	pemStr = strings.ReplaceAll(pemStr, `\n`, "\n")
 	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
