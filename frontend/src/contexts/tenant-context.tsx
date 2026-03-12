@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
 import { DEFAULT_UI_CONFIG, type TenantThemeConfig, type TenantUIConfig } from '@/lib/tenant-ui-config'
 import { applyTenantTheme, resetTheme } from '@/lib/theme-utils'
+import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 
 export interface Tenant {
   id: string
@@ -73,8 +74,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     setTenantTheme(theme)
   }, [])
 
-  // For tenant admins, tenant slug is fixed from JWT claims
-  const tenantSlug = isPlatformAdmin ? selectedTenant?.slug ?? null : claims?.tenantId ?? null
+  // For tenant users, slug comes from JWT claims or falls back to the current
+  // subdomain (needed in demo mode where OIDC tokens lack tenantId).
+  const tenantSlug = isPlatformAdmin
+    ? selectedTenant?.slug ?? null
+    : claims?.tenantId ?? getTenantSlugFromSubdomain(window.location.hostname)
 
   const value: TenantContextValue = {
     currentTenant: isPlatformAdmin ? selectedTenant : null,

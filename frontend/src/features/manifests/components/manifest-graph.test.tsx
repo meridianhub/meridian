@@ -281,7 +281,7 @@ describe('ManifestGraph', () => {
       renderGraph(energyManifest)
       const node = await screen.findByTestId('node-saga:usage_to_value')
       fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/sagas/usage_to_value')
+      expect(mockNavigate).toHaveBeenCalledWith('/starlark-config/usage_to_value')
     })
   })
 

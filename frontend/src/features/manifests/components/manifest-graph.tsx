@@ -453,7 +453,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
           navigate('/reference-data/account-types')
           break
         case 'saga':
-          navigate(`/sagas/${mn.label}`)
+          navigate(`/starlark-config/${mn.label}`)
           break
       }
     },
@@ -517,6 +517,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
           onNodeMouseLeave={onNodeMouseLeave}
           nodeTypes={nodeTypes}
           fitView
+          fitViewOptions={{ padding: 0.3 }}
           proOptions={{ hideAttribution: true }}
         >
           <Controls />
@@ -618,7 +619,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
             <EventChainPanel
               chain={eventChain}
               startNodeLabel={selectedManifestNode.label}
-              onSagaClick={(sagaId) => navigate(`/sagas/${sagaId.replace(/^saga:/, '')}`)}
+              onSagaClick={(sagaId) => navigate(`/starlark-config/${sagaId.replace(/^saga:/, '')}`)}
             />
           </div>
         </div>

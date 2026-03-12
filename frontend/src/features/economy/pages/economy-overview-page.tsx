@@ -146,9 +146,9 @@ export function EconomyOverviewPage() {
 
       {/* Stats - compact inline bar */}
       <div className="flex flex-wrap gap-3" data-testid="stats-bar">
-        <StatChip label="Instruments" value={instruments.length} testId="stat-instruments" onClick={scrollToGraph} />
-        <StatChip label="Account Types" value={accountTypes.length} testId="stat-account-types" onClick={scrollToGraph} />
-        <StatChip label="Sagas" value={sagas.length} testId="stat-sagas" onClick={scrollToGraph} />
+        <StatChip label="Instruments" value={instruments.length} testId="stat-instruments" onClick={() => navigate('/reference-data/instruments')} />
+        <StatChip label="Account Types" value={accountTypes.length} testId="stat-account-types" onClick={() => navigate('/reference-data/account-types')} />
+        <StatChip label="Sagas" value={sagas.length} testId="stat-sagas" onClick={() => navigate('/starlark-config')} />
         <StatChip label="Valuation Rules" value={valuationRules.length} testId="stat-valuation-rules" onClick={scrollToGraph} />
       </div>
 
