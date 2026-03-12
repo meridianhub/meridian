@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -8,6 +9,20 @@ import (
 	"net/http"
 	"strings"
 )
+
+// baseDomainAccessKeyType is an unexported type for the base domain access context key,
+// preventing collisions with other packages' context keys.
+type baseDomainAccessKeyType struct{}
+
+var baseDomainAccessKey = baseDomainAccessKeyType{}
+
+// IsBaseDomainAccess reports whether the request was made to the base domain
+// (i.e., no tenant subdomain was present). Tools can query this to determine
+// whether to operate in multi-tenant discovery mode vs. single-tenant mode.
+func IsBaseDomainAccess(ctx context.Context) bool {
+	v, _ := ctx.Value(baseDomainAccessKey).(bool)
+	return v
+}
 
 // Subdomain validation errors.
 var (
@@ -67,8 +82,9 @@ func (m *TenantSubdomainMiddleware) Handler(validator ClaimsBearerValidator, met
 		subdomainSlug := extractSubdomain(r.Host, m.baseDomain)
 		if subdomainSlug == "" {
 			// No subdomain present — request is to the base domain directly.
-			// Allow it through (no tenant scoping needed).
-			next.ServeHTTP(w, r)
+			// Annotate context so tools can detect base domain access mode.
+			ctx := context.WithValue(r.Context(), baseDomainAccessKey, true)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 

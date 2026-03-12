@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +96,29 @@ func (m *mockClaimsValidator) ValidateBearerWithTenant(_ string) (string, error)
 		return "", m.err
 	}
 	return m.tenantID, nil
+}
+
+func TestIsBaseDomainAccess(t *testing.T) {
+	t.Run("returns true when context has baseDomainAccessKey=true", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), baseDomainAccessKey, true)
+		if !IsBaseDomainAccess(ctx) {
+			t.Error("expected IsBaseDomainAccess to return true")
+		}
+	})
+
+	t.Run("returns false when context lacks the key", func(t *testing.T) {
+		ctx := context.Background()
+		if IsBaseDomainAccess(ctx) {
+			t.Error("expected IsBaseDomainAccess to return false")
+		}
+	})
+
+	t.Run("returns false when context has key set to false", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), baseDomainAccessKey, false)
+		if IsBaseDomainAccess(ctx) {
+			t.Error("expected IsBaseDomainAccess to return false")
+		}
+	})
 }
 
 func TestTenantSubdomainMiddleware(t *testing.T) {
@@ -205,6 +229,57 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("expected 401, got %d", rec.Code)
+		}
+	})
+
+	t.Run("annotates context with baseDomainAccessKey when no subdomain present", func(t *testing.T) {
+		mw := NewTenantSubdomainMiddleware("demo.meridianhub.cloud", logger)
+		validator := &mockClaimsValidator{tenantID: "acme"}
+
+		var capturedCtx context.Context
+		captureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedCtx = r.Context()
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := mw.Handler(validator, meta, captureHandler)
+		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req.Host = "demo.meridianhub.cloud"
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rec.Code)
+		}
+		if !IsBaseDomainAccess(capturedCtx) {
+			t.Error("expected IsBaseDomainAccess to be true for base domain request")
+		}
+	})
+
+	t.Run("does not annotate context with baseDomainAccessKey when subdomain present", func(t *testing.T) {
+		mw := NewTenantSubdomainMiddleware("demo.meridianhub.cloud", logger)
+		validator := &mockClaimsValidator{tenantID: "acme"}
+
+		var capturedCtx context.Context
+		captureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedCtx = r.Context()
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := mw.Handler(validator, meta, captureHandler)
+		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req.Host = "acme.demo.meridianhub.cloud"
+		req.Header.Set("Authorization", "Bearer valid-token")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rec.Code)
+		}
+		if IsBaseDomainAccess(capturedCtx) {
+			t.Error("expected IsBaseDomainAccess to be false for subdomain request")
 		}
 	})
 }
