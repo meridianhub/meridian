@@ -4,6 +4,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
@@ -16,8 +17,10 @@ const generatorUnavailableMessage = "Economy generator is not available on this 
 	"Use meridian_manifest_validate (mode=create) to check manually composed manifests, " +
 	"or meridian_cookbook_list/describe for pattern examples."
 
-// IsServiceUnavailable returns true when err is a gRPC Unimplemented error, which indicates
-// the server does not know the requested service (i.e. the service is not deployed).
+// IsServiceUnavailable returns true when err is a transport-generated gRPC Unimplemented
+// error indicating that the entire service is not registered on the server (i.e. not deployed).
+// It deliberately excludes method-level Unimplemented errors that signal unsupported operations,
+// by requiring the message to contain the transport phrase "unknown service".
 func IsServiceUnavailable(err error) bool {
 	if err == nil {
 		return false
@@ -26,7 +29,7 @@ func IsServiceUnavailable(err error) bool {
 	if !ok {
 		return false
 	}
-	return st.Code() == codes.Unimplemented
+	return st.Code() == codes.Unimplemented && strings.Contains(st.Message(), "unknown service")
 }
 
 // EconomyGeneratorClient is the minimal interface for the EconomyGeneratorService RPCs.

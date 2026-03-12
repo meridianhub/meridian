@@ -446,6 +446,13 @@ func TestIsServiceUnavailable_NilError_ReturnsFalse(t *testing.T) {
 	assert.False(t, tools.IsServiceUnavailable(nil))
 }
 
+func TestIsServiceUnavailable_UnimplementedMethodLevel_ReturnsFalse(t *testing.T) {
+	// Unimplemented for a known method limitation (not a missing service) should not
+	// be treated as service unavailable — it is a real capability error.
+	err := status.Error(codes.Unimplemented, "feature not supported in this configuration")
+	assert.False(t, tools.IsServiceUnavailable(err))
+}
+
 // --- graceful degradation on service unavailable ---
 
 func TestEconomyGenerateContext_ServiceUnavailable_ReturnsFriendlyMessage(t *testing.T) {
