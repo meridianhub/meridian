@@ -72,6 +72,9 @@ const (
 
 	// defaultTokenTTL is the default JWT token lifetime.
 	defaultTokenTTL = time.Hour
+
+	schemeHTTP  = "http"
+	schemeHTTPS = "https"
 )
 
 // OIDCConfig holds configuration for the Dex OIDC integration.
@@ -212,6 +215,17 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 	if cfg.OIDC.DexIssuerURL == "" {
 		return nil, errOIDCDexIssuerRequired
 	}
+	// Parse and validate the Dex issuer URL scheme. HTTPS is required because
+	// the OIDC callback trusts the Dex token response without signature
+	// verification (server-to-server over TLS). HTTP is allowed for local
+	// development (e.g., http://dex:5556/dex) but logged as a warning.
+	issuerURL, err := url.Parse(cfg.OIDC.DexIssuerURL)
+	if err != nil {
+		return nil, fmt.Errorf("oidc handler: invalid dex issuer URL: %w", err)
+	}
+	if issuerURL.Scheme != schemeHTTPS && issuerURL.Scheme != schemeHTTP {
+		return nil, fmt.Errorf("oidc handler: dex issuer URL must use http or https: %w", errOIDCDexIssuerRequired)
+	}
 	if cfg.OIDC.ClientID == "" {
 		return nil, errOIDCClientIDRequired
 	}
@@ -229,6 +243,11 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 	}
 	if cfg.Logger == nil {
 		return nil, errOIDCLoggerRequired
+	}
+
+	if issuerURL.Scheme == schemeHTTP {
+		cfg.Logger.Warn("oidc: Dex issuer URL uses HTTP — ID token integrity depends on network trust; use HTTPS in production",
+			"issuer_url", cfg.OIDC.DexIssuerURL)
 	}
 
 	ttl := cfg.TokenTTL
@@ -555,10 +574,10 @@ func isAllowedRedirectURI(uri string) bool {
 	if err != nil {
 		return false
 	}
-	if parsed.Scheme == "https" {
+	if parsed.Scheme == schemeHTTPS {
 		return true
 	}
-	if parsed.Scheme == "http" {
+	if parsed.Scheme == schemeHTTP {
 		host := parsed.Hostname()
 		return host == "localhost" || host == "127.0.0.1" || host == "::1"
 	}
