@@ -45,6 +45,7 @@ func TestTopicsList_NoFilter_ReturnsAllTopics(t *testing.T) {
 
 	topicList := result["topics"].([]interface{})
 	assert.Len(t, topicList, len(allTopics))
+	require.NotEmpty(t, topicList, "topics.All() must return at least one topic")
 
 	// Verify each entry has required fields.
 	first := topicList[0].(map[string]interface{})
