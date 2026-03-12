@@ -15,6 +15,7 @@ import (
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // --- Mock implementations ---
@@ -201,6 +202,162 @@ func TestManifestValidate_MissingManifest_SchemaError(t *testing.T) {
 	_, err := r.Call(context.Background(), "meridian_manifest_validate", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatal("expected schema validation error for missing manifest")
+	}
+}
+
+// --- meridian_manifest_validate mode tests ---
+
+func TestManifestValidate_ModeDefaultsToCreate(t *testing.T) {
+	var capturedReq *controlplanev1.ApplyManifestRequest
+	mock := &mockManifestApplier{
+		applyFn: func(_ context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			capturedReq = req
+			return &controlplanev1.ApplyManifestResponse{
+				Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+
+	// No mode specified — should default to "create"
+	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s}`, validManifestJSON()))
+	result, err := r.Call(context.Background(), "meridian_manifest_validate", params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if valid, _ := m["valid"].(bool); !valid {
+		t.Errorf("expected valid=true, got %v", m)
+	}
+	if capturedReq == nil {
+		t.Fatal("expected ApplyManifest to be called")
+	}
+	// In create mode, DryRun should be true
+	if !capturedReq.DryRun {
+		t.Error("expected dry_run=true in create mode")
+	}
+}
+
+func TestManifestValidate_AmendModeRequiresTenantID(t *testing.T) {
+	mock := &mockManifestApplier{
+		applyFn: func(_ context.Context, _ *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			t.Fatal("should not call backend when tenant_id is missing for amend mode")
+			return nil, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+
+	// amend mode without tenant_id
+	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "mode": "amend"}`, validManifestJSON()))
+	result, err := r.Call(context.Background(), "meridian_manifest_validate", params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if _, hasError := m["error"]; !hasError {
+		t.Error("expected error when amend mode is used without tenant_id")
+	}
+}
+
+func TestManifestValidate_CreateModeSkipsImmutabilityChecks(t *testing.T) {
+	var capturedReq *controlplanev1.ApplyManifestRequest
+	mock := &mockManifestApplier{
+		applyFn: func(_ context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			capturedReq = req
+			return &controlplanev1.ApplyManifestResponse{
+				Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+
+	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "mode": "create"}`, validManifestJSON()))
+	result, err := r.Call(context.Background(), "meridian_manifest_validate", params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if valid, _ := m["valid"].(bool); !valid {
+		t.Errorf("expected valid=true, got %v", m)
+	}
+	if capturedReq == nil {
+		t.Fatal("expected ApplyManifest to be called")
+	}
+	// Create mode should set Force=true to skip immutability/tenant-comparison checks
+	// TODO: Replace Force with SkipImmutabilityChecks once proto field is added (task 2)
+	if !capturedReq.Force {
+		t.Error("expected Force=true in create mode to skip immutability checks")
+	}
+}
+
+func TestManifestValidate_AmendModeWithTenantID(t *testing.T) {
+	var capturedReq *controlplanev1.ApplyManifestRequest
+	var capturedCtx context.Context
+	mock := &mockManifestApplier{
+		applyFn: func(ctx context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			capturedReq = req
+			capturedCtx = ctx
+			return &controlplanev1.ApplyManifestResponse{
+				Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN,
+			}, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+
+	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "mode": "amend", "tenant_id": "tenant_123"}`, validManifestJSON()))
+	result, err := r.Call(context.Background(), "meridian_manifest_validate", params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if valid, _ := m["valid"].(bool); !valid {
+		t.Errorf("expected valid=true, got %v", m)
+	}
+	if capturedReq == nil {
+		t.Fatal("expected ApplyManifest to be called")
+	}
+	// Amend mode should NOT set Force (immutability checks apply)
+	if capturedReq.Force {
+		t.Error("expected Force=false in amend mode")
+	}
+	// Verify tenant context was propagated
+	tenantID, ok := tenant.FromContext(capturedCtx)
+	if !ok {
+		t.Fatal("expected tenant context to be set in amend mode")
+	}
+	if string(tenantID) != "tenant_123" {
+		t.Errorf("expected tenant_id=tenant_123, got %q", tenantID)
+	}
+}
+
+func TestManifestValidate_InvalidMode_SchemaError(t *testing.T) {
+	mock := &mockManifestApplier{
+		applyFn: func(_ context.Context, _ *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+			t.Fatal("should not call backend with invalid mode")
+			return nil, nil
+		},
+	}
+
+	r := tools.NewRegistry()
+	sess := newTestSession()
+	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+
+	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "mode": "invalid"}`, validManifestJSON()))
+	_, err := r.Call(context.Background(), "meridian_manifest_validate", params)
+	if err == nil {
+		t.Fatal("expected schema validation error for invalid mode enum value")
 	}
 }
 
