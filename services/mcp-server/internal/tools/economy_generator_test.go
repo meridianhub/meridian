@@ -416,3 +416,117 @@ func TestEconomyGenerate_GRPCError_ReturnsFormattedError(t *testing.T) {
 	// Result should be non-nil (a FormattedError from mcperrors).
 	assert.NotNil(t, result)
 }
+
+// --- isServiceUnavailable ---
+
+func TestIsServiceUnavailable_Unimplemented_ReturnsTrue(t *testing.T) {
+	err := status.Error(codes.Unimplemented, "unknown service meridian.control_plane.v1.EconomyGeneratorService")
+	assert.True(t, tools.IsServiceUnavailable(err))
+}
+
+func TestIsServiceUnavailable_OtherCodes_ReturnsFalse(t *testing.T) {
+	cases := []struct {
+		code codes.Code
+		name string
+	}{
+		{codes.Internal, "Internal"},
+		{codes.InvalidArgument, "InvalidArgument"},
+		{codes.NotFound, "NotFound"},
+		{codes.Unavailable, "Unavailable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := status.Error(tc.code, "some error")
+			assert.False(t, tools.IsServiceUnavailable(err))
+		})
+	}
+}
+
+func TestIsServiceUnavailable_NilError_ReturnsFalse(t *testing.T) {
+	assert.False(t, tools.IsServiceUnavailable(nil))
+}
+
+func TestIsServiceUnavailable_UnimplementedMethodLevel_ReturnsFalse(t *testing.T) {
+	// Unimplemented for a known method limitation (not a missing service) should not
+	// be treated as service unavailable — it is a real capability error.
+	err := status.Error(codes.Unimplemented, "feature not supported in this configuration")
+	assert.False(t, tools.IsServiceUnavailable(err))
+}
+
+// --- graceful degradation on service unavailable ---
+
+func TestEconomyGenerateContext_ServiceUnavailable_ReturnsFriendlyMessage(t *testing.T) {
+	mock := &mockEconomyGeneratorClient{
+		contextFn: func(_ context.Context, _ *controlplanev1.GetGenerationContextRequest) (*controlplanev1.GetGenerationContextResponse, error) {
+			return nil, status.Error(codes.Unimplemented, "unknown service meridian.control_plane.v1.EconomyGeneratorService")
+		},
+	}
+
+	reg := tools.NewRegistry()
+	tools.RegisterEconomyGeneratorTools(reg, mock)
+
+	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{"description": "energy"}`))
+	require.NoError(t, err)
+
+	m, ok := result.(map[string]interface{})
+	require.True(t, ok)
+	assert.Contains(t, m["message"], "not available")
+	assert.NotContains(t, m["message"], "Unimplemented")
+}
+
+func TestEconomyGenerate_ServiceUnavailable_ReturnsFriendlyMessage(t *testing.T) {
+	mock := &mockEconomyGeneratorClient{
+		generateFn: func(_ context.Context, _ *controlplanev1.GenerateManifestRequest) (*controlplanev1.GenerateManifestResponse, error) {
+			return nil, status.Error(codes.Unimplemented, "unknown service meridian.control_plane.v1.EconomyGeneratorService")
+		},
+	}
+
+	reg := tools.NewRegistry()
+	tools.RegisterEconomyGeneratorTools(reg, mock)
+
+	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "energy"}`))
+	require.NoError(t, err)
+
+	m, ok := result.(map[string]interface{})
+	require.True(t, ok)
+	assert.Contains(t, m["message"], "not available")
+	assert.NotContains(t, m["message"], "Unimplemented")
+}
+
+func TestEconomyGenerateContext_OtherGRPCError_ReturnsFormattedError(t *testing.T) {
+	mock := &mockEconomyGeneratorClient{
+		contextFn: func(_ context.Context, _ *controlplanev1.GetGenerationContextRequest) (*controlplanev1.GetGenerationContextResponse, error) {
+			return nil, status.Error(codes.Internal, "internal server error")
+		},
+	}
+
+	reg := tools.NewRegistry()
+	tools.RegisterEconomyGeneratorTools(reg, mock)
+
+	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{"description": "energy"}`))
+	require.NoError(t, err)
+
+	// Should be a FormattedError (from mcperrors), not the friendly message map.
+	_, isMap := result.(map[string]interface{})
+	assert.False(t, isMap, "non-Unimplemented errors should return FormattedError, not a plain map")
+	assert.NotNil(t, result)
+}
+
+func TestEconomyGenerate_OtherGRPCError_ReturnsFormattedError(t *testing.T) {
+	mock := &mockEconomyGeneratorClient{
+		generateFn: func(_ context.Context, _ *controlplanev1.GenerateManifestRequest) (*controlplanev1.GenerateManifestResponse, error) {
+			return nil, status.Error(codes.Internal, "internal server error")
+		},
+	}
+
+	reg := tools.NewRegistry()
+	tools.RegisterEconomyGeneratorTools(reg, mock)
+
+	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "energy"}`))
+	require.NoError(t, err)
+
+	// Should be a FormattedError (from mcperrors), not the friendly message map.
+	_, isMap := result.(map[string]interface{})
+	assert.False(t, isMap, "non-Unimplemented errors should return FormattedError, not a plain map")
+	assert.NotNil(t, result)
+}
