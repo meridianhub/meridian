@@ -16,6 +16,7 @@ import (
 	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/server"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/transport"
+	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 )
@@ -217,13 +218,13 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 			"authorization_url", oauthCfg.AuthorizationURL,
 			"token_url", oauthCfg.TokenURL)
 
-		store := mcpauth.NewCodeStore()
-		defer store.Close()
-		issuer := &passthroughIssuer{logger: logger}
-		authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, store)
-		tokenHandler := mcpauth.NewTokenHandler(oauthCfg, store, issuer)
+		codeStore := mcpauth.NewCodeStore()
+		defer codeStore.Close()
 
-		mux.Handle("/oauth/authorize", authzHandler)
+		// Token endpoint uses passthrough issuer as fallback; the OIDC flow
+		// stores pre-signed JWTs directly via StoreWithToken.
+		issuer := &passthroughIssuer{logger: logger}
+		tokenHandler := mcpauth.NewTokenHandler(oauthCfg, codeStore, issuer)
 		mux.Handle("/oauth/token", tokenHandler)
 
 		meta := mcpauth.Metadata{
@@ -231,8 +232,58 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 			TokenURL:         oauthCfg.TokenURL,
 		}
 
-		// The JWKS provider uses its own Close() to stop the background refresh
-		// goroutine on shutdown.
+		baseDomain := env.GetEnvOrDefault("MCP_BASE_DOMAIN", "")
+
+		// OIDC-backed authorization flow: /oauth/authorize → Dex → /oauth/callback.
+		dexIssuerURL := env.GetEnvOrDefault("MCP_DEX_ISSUER_URL", "")
+		dexClientID := env.GetEnvOrDefault("MCP_DEX_CLIENT_ID", "meridian-service")
+		dexCallbackURL := env.GetEnvOrDefault("MCP_DEX_CALLBACK_URL", baseURL+"/oauth/callback")
+
+		if dexIssuerURL != "" {
+			// Build JWT signer with the same key as BFF for session sharing.
+			signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
+				PrivateKeyPEM: env.GetEnvOrDefault("JWT_SIGNING_KEY", ""),
+				KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+				Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+			})
+			if err != nil {
+				return fmt.Errorf("jwt signer: %w", err)
+			}
+
+			oidcStateStore := mcpauth.NewOIDCStateStore()
+			defer oidcStateStore.Close()
+
+			oidcHandler, err := mcpauth.NewOIDCHandler(mcpauth.OIDCHandlerConfig{
+				OIDC: mcpauth.OIDCConfig{
+					DexIssuerURL: dexIssuerURL,
+					ClientID:     dexClientID,
+					CallbackURL:  dexCallbackURL,
+				},
+				OAuth:      oauthCfg,
+				StateStore: oidcStateStore,
+				CodeStore:  codeStore,
+				Signer:     signer,
+				BaseDomain: baseDomain,
+				Logger:     logger,
+			})
+			if err != nil {
+				return fmt.Errorf("oidc handler: %w", err)
+			}
+
+			mux.HandleFunc("/oauth/authorize", oidcHandler.HandleAuthorize)
+			mux.HandleFunc("/oauth/callback", oidcHandler.HandleCallback)
+
+			logger.Info("OIDC-backed OAuth enabled",
+				"dex_issuer", dexIssuerURL,
+				"callback", dexCallbackURL)
+		} else {
+			// No Dex configured — use the direct authorization handler (dev/CI only).
+			logger.Warn("MCP_DEX_ISSUER_URL not set — /oauth/authorize issues codes without authentication")
+			authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, codeStore)
+			mux.Handle("/oauth/authorize", authzHandler)
+		}
+
+		// Bearer token validation on the /mcp endpoint.
 		validator, validatorCleanup, err := buildBearerValidator(context.Background(), logger)
 		if err != nil {
 			return fmt.Errorf("bearer validator: %w", err)
@@ -244,7 +295,6 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 
 		// Subdomain-to-tenant validation: ensures the request's subdomain
 		// matches the authenticated user's tenant from the JWT.
-		baseDomain := env.GetEnvOrDefault("MCP_BASE_DOMAIN", "")
 		subdomainMW := mcpauth.NewTenantSubdomainMiddleware(baseDomain, logger)
 
 		mcpHandler := bearerMW.Handler(streamableHandler)
