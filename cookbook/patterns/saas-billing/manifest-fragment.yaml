@@ -72,6 +72,12 @@ valuationRules:
     method: VALUATION_METHOD_FIXED
     source: credit_exchange_rate
 
+# Usage metering uses webhook and event triggers, not the Financial Gateway.
+# The gpu_meter_event webhook is a data ingestion event from a compute
+# provider — it carries usage telemetry, not payment instructions.
+# The Financial Gateway is for payment collection and payout (Stripe).
+# If this pattern is combined with payment-gateway-stripe, payment
+# collection is handled in the stripe sagas, not here.
 sagas:
   - name: record_gpu_usage
     trigger: "webhook:gpu_meter_event"

@@ -148,7 +148,8 @@ The `meta.design_pattern` field names the design pattern this entry exemplifies.
 | `cross-instrument-valuation` | Pattern 1 | kWh → GBP, GPU_HOUR → USD (multi-leg) |
 | `compute-metering` | Pattern 2 | Usage billing with single target instrument |
 | `credit-retirement-lifecycle` | Pattern 3 | Carbon credits, irreversible retirement |
-| `operational-gateway` | Pattern 5/6 | External payment provider integration |
+| `financial-gateway` | Custom | Stripe payment collection and payout via Financial Gateway |
+| `operational-gateway` | Custom | Generic external REST/gRPC calls, non-payment webhooks |
 | `compliance-marker` | Custom | Zero-amount positions as compliance audit trail |
 
 Set to `null` for foundation patterns (`base-fiat-*`). Set to the closest named pattern otherwise.
@@ -190,6 +191,98 @@ GPU_HOUR, and it creates USD — so its output never matches the filter.
 
 Both approaches are valid. Use `==` (allowlist) when your pattern handles exactly one source instrument.
 Use `!=` (denylist) when the pattern should handle any non-settlement instrument.
+
+---
+
+## Gateway Selection
+
+Meridian provides two gateways for external integrations. Choosing the wrong one is the most common
+mistake when authoring payment-adjacent patterns.
+
+### Financial Gateway
+
+Use `financial_gateway` in Starlark sagas when the integration involves **payment collection or
+payout** with a supported payment provider (Stripe, Stripe Connect).
+
+The Financial Gateway provides:
+
+- `financial_gateway.dispatch_payment()` — charge a customer's payment method
+- `financial_gateway.dispatch_refund()` — issue a refund or payout to a connected account
+- `financial_gateway.cancel_payment()` — cancel an in-flight payment (compensation step)
+- Built-in idempotency, retry logic, and payment lifecycle management
+- Automatic routing via the `paymentRails` configuration in `manifest-fragment.yaml`
+
+Configure the provider in `manifest-fragment.yaml` under `paymentRails`:
+
+```yaml
+paymentRails:
+  - provider: stripe
+    mode: CONNECT_MODE_STANDARD
+    accountId: "acct_REPLACE_WITH_REAL_ID"
+    webhookEndpointSecret: "sm://stripe/webhook_secret"
+    payoutSchedule: PAYOUT_SCHEDULE_DAILY
+    supportedMethods: [card]
+```
+
+**When to use the Financial Gateway:**
+
+- Charging a customer's card for a service
+- Issuing a payout or refund to a connected account
+- Any saga where money moves through Stripe
+
+**Example:** `payment-gateway-stripe` uses `financial_gateway.dispatch_payment()` and
+`financial_gateway.cancel_payment()` for Stripe payment collection with full compensation support.
+
+### Operational Gateway
+
+Use the Operational Gateway when a saga needs to make an **outbound call to a generic external
+service** — REST endpoints, gRPC services, or MQTT/AMQP brokers. The Operational Gateway is for
+outbound dispatch only; inbound data from external systems arrives via the `webhook:` trigger type
+on sagas (no gateway involved).
+
+The Operational Gateway is configured via `operationalGateway.providerConnections` in the manifest
+and dispatched through the gateway instruction API. It explicitly rejects `payment.*` instruction
+types.
+
+**When to use the Operational Gateway:**
+
+- Calling an external REST or gRPC API from a saga
+- Dispatching outbound messages to MQTT/AMQP brokers
+
+**For inbound webhooks** (e.g., IoT meter events, market data feeds): use the `webhook:` saga
+trigger type directly. Meridian delivers inbound webhook payloads to the matching saga trigger
+without involving the Operational Gateway. The `saas-billing` pattern is an example: its
+`record_gpu_usage` saga uses `webhook:gpu_meter_event` to receive meter events and records usage
+positions via `position_keeping.initiate_log`, with no outbound dispatch at all.
+
+### Decision Tree
+
+```text
+Does the saga need to move money through Stripe?
+├── Yes → financial_gateway.dispatch_payment() or dispatch_refund()
+│         Configure paymentRails in manifest-fragment.yaml
+│         design_pattern: "financial-gateway"
+└── No → Is the saga receiving data from an external system?
+         ├── Yes, inbound webhook → webhook: trigger on the saga
+         │   Meridian routes the webhook payload directly to the saga.
+         │   No gateway dispatch. Saga records positions via position_keeping.
+         └── No → Does the saga need to call an external system outbound?
+                  ├── Yes → operationalGateway.providerConnections in the manifest
+                  │         design_pattern: "operational-gateway"
+                  └── No → No gateway needed
+```
+
+### Common Mistake
+
+**Do not use the Operational Gateway for Stripe payments.** The Operational Gateway does not have
+Stripe credentials, does not manage payment state, and rejects `payment.*` instruction types at
+runtime. Attempting to dispatch a Stripe payment through it will fail.
+
+The `webhook:` trigger type is used for inbound webhook delivery (e.g., `stripe.payment_intent.succeeded`).
+Meridian routes inbound Stripe webhooks to saga triggers based on the `webhookEndpointSecret` in
+`paymentRails`. This is separate from the Financial Gateway, which handles outbound payment dispatch.
+A pattern can use both: `stripe_payment_via_gateway.star` dispatches outbound via Financial Gateway,
+while `stripe_payment_received.star` handles the inbound Stripe webhook confirmation.
 
 ---
 
