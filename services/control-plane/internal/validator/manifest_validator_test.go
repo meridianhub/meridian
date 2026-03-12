@@ -2931,3 +2931,57 @@ func TestValidateDestructiveChanges_RemoveInstrumentUsedByValuationRule(t *testi
 	}
 	assert.True(t, found, "expected DESTRUCTIVE_INSTRUMENT_REMOVAL for KWH used in valuation rule, got: %v", result.Errors)
 }
+
+func TestWithSkipImmutabilityChecks_SkipsImmutableFieldChanged(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest()
+	curr := validManifest()
+	curr.Instruments[0].Code = "USD" // Changed from GBP - normally triggers IMMUTABLE_FIELD_CHANGED
+
+	result := v.Validate(curr, prev, WithSkipImmutabilityChecks())
+
+	// Should NOT contain IMMUTABLE_FIELD_CHANGED errors
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "IMMUTABLE_FIELD_CHANGED", e.Code,
+			"expected no IMMUTABLE_FIELD_CHANGED errors when skip_immutability_checks is set")
+	}
+}
+
+func TestWithSkipImmutabilityChecks_SkipsDestructiveRemoval(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest()
+	curr := validManifest()
+	curr.Instruments = curr.Instruments[:1] // Remove KWH - normally triggers DESTRUCTIVE_INSTRUMENT_REMOVAL
+
+	result := v.Validate(curr, prev, WithSkipImmutabilityChecks())
+
+	for _, e := range result.Errors {
+		assert.NotEqual(t, "DESTRUCTIVE_INSTRUMENT_REMOVAL", e.Code,
+			"expected no DESTRUCTIVE_INSTRUMENT_REMOVAL errors when skip_immutability_checks is set")
+	}
+}
+
+func TestWithoutSkipImmutabilityChecks_StillEnforcesImmutability(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	prev := validManifest()
+	curr := validManifest()
+	curr.Instruments[0].Code = "USD" // Changed from GBP
+
+	result := v.Validate(curr, prev)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "IMMUTABLE_FIELD_CHANGED" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected IMMUTABLE_FIELD_CHANGED error without skip option")
+}

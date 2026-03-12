@@ -368,3 +368,103 @@ func TestBuildExecutorInput(t *testing.T) {
 	require.Len(t, input.SagaDefinitions, 1)
 	assert.Equal(t, "test_saga", input.SagaDefinitions[0].Name)
 }
+
+// --- skip_immutability_checks tests ---
+
+// mockVersionStore returns a fixed manifest as the latest applied version.
+type mockVersionStore struct {
+	manifest *controlplanev1.Manifest
+}
+
+func (m *mockVersionStore) GetLatestApplied(_ context.Context) (*differ.ManifestVersion, error) {
+	if m.manifest == nil {
+		return nil, nil
+	}
+	return &differ.ManifestVersion{Manifest: m.manifest}, nil
+}
+
+func (m *mockVersionStore) Save(_ context.Context, _ *controlplanev1.Manifest, _ string) error {
+	return nil
+}
+
+// newTestHandlerWithVersionStore creates a handler backed by a version store
+// that returns prev as the last-applied manifest.
+func newTestHandlerWithVersionStore(t *testing.T, prev *controlplanev1.Manifest) *ApplyManifestHandler {
+	t.Helper()
+
+	v, err := validator.New()
+	require.NoError(t, err)
+
+	d := differ.New(nil, nil)
+	p := planner.NewManifestPlanner()
+
+	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
+		Validator:    v,
+		Differ:       d,
+		Planner:      p,
+		VersionStore: &mockVersionStore{manifest: prev},
+	})
+	require.NoError(t, err)
+	return handler
+}
+
+func TestApplyManifest_SkipImmutabilityChecks_DryRun_SkipsImmutabilityErrors(t *testing.T) {
+	prev := newTestManifest()
+	handler := newTestHandlerWithVersionStore(t, prev)
+
+	// Change instrument code — normally triggers IMMUTABLE_FIELD_CHANGED
+	curr := newTestManifest()
+	curr.Instruments[0].Code = "USD"
+	curr.AccountTypes[0].AllowedInstruments = []string{"USD"}
+
+	resp, err := handler.ApplyManifest(context.Background(), &controlplanev1.ApplyManifestRequest{
+		Manifest:               curr,
+		DryRun:                 true,
+		SkipImmutabilityChecks: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Should succeed as dry-run, not fail validation
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN, resp.Status,
+		"expected DRY_RUN status when skip_immutability_checks is set with dry_run=true")
+
+	// No IMMUTABLE_FIELD_CHANGED in validation errors
+	for _, ve := range resp.ValidationErrors {
+		assert.NotEqual(t, "IMMUTABLE_FIELD_CHANGED", ve.Code)
+	}
+}
+
+func TestApplyManifest_SkipImmutabilityChecks_NotDryRun_StillEnforces(t *testing.T) {
+	prev := newTestManifest()
+	handler := newTestHandlerWithVersionStore(t, prev)
+
+	// Change instrument code — triggers IMMUTABLE_FIELD_CHANGED
+	curr := newTestManifest()
+	curr.Instruments[0].Code = "USD"
+	curr.AccountTypes[0].AllowedInstruments = []string{"USD"}
+
+	resp, err := handler.ApplyManifest(context.Background(), &controlplanev1.ApplyManifestRequest{
+		Manifest:               curr,
+		DryRun:                 false,
+		AppliedBy:              "test-user",
+		SkipImmutabilityChecks: true, // should be ignored because dry_run=false
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Should fail validation because skip_immutability_checks is ignored when dry_run=false
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_VALIDATION_FAILED, resp.Status,
+		"expected VALIDATION_FAILED when skip_immutability_checks is set but dry_run=false")
+
+	found := false
+	for _, ve := range resp.ValidationErrors {
+		if ve.Code == "IMMUTABLE_FIELD_CHANGED" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected IMMUTABLE_FIELD_CHANGED error when dry_run=false, regardless of skip flag")
+}

@@ -108,9 +108,13 @@ func (h *ApplyManifestHandler) ApplyManifest(
 
 	response := &controlplanev1.ApplyManifestResponse{}
 
+	// Determine whether to skip immutability/safety checks.
+	// Only respected during dry-run; ignored for real applies.
+	skipImmutability := req.GetSkipImmutabilityChecks() && req.GetDryRun()
+
 	// Step 1: Validate the manifest
 	logger.Info("step 1: validating manifest")
-	validationResult := h.validate(ctx, req.GetManifest())
+	validationResult := h.validate(ctx, req.GetManifest(), skipImmutability)
 	response.StepResults = append(response.StepResults, validationResult.stepResult)
 
 	if !validationResult.valid {
@@ -122,7 +126,7 @@ func (h *ApplyManifestHandler) ApplyManifest(
 
 	// Step 2: Diff against current manifest
 	logger.Info("step 2: diffing against current manifest")
-	diffResult := h.diff(ctx, req.GetManifest())
+	diffResult := h.diff(ctx, req.GetManifest(), skipImmutability)
 	response.StepResults = append(response.StepResults, diffResult.stepResult)
 	response.DiffSummary = diffResult.summary
 
@@ -133,22 +137,9 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	}
 
 	// Check for blocked deletions
-	if diffResult.plan.HasBlockedDeletions() && !req.GetForce() {
-		logger.Warn("apply blocked by safety checks",
-			"blocked_deletions", len(diffResult.plan.BlockedDeletions))
+	if blocked := h.checkBlockedDeletions(diffResult.plan, req.GetForce(), logger); blocked != nil {
 		response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_BLOCKED
-
-		blockStep := &controlplanev1.StepResult{
-			StepName: "safety_check",
-			Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
-			Message:  "Deletions blocked by safety checks (use force=true to override)",
-			Details:  make(map[string]string),
-		}
-		for i, bd := range diffResult.plan.BlockedDeletions {
-			blockStep.Details[fmt.Sprintf("blocked_%d", i)] = fmt.Sprintf(
-				"%s %s: %s", bd.ResourceType, bd.ResourceCode, bd.Reason)
-		}
-		response.StepResults = append(response.StepResults, blockStep)
+		response.StepResults = append(response.StepResults, blocked)
 		return response, nil
 	}
 
@@ -232,6 +223,28 @@ func (h *ApplyManifestHandler) runPostApplyHooks(ctx context.Context, tenantID s
 	}
 }
 
+// checkBlockedDeletions returns a StepResult if the plan contains blocked deletions
+// and force is not set. Returns nil if there are no blocked deletions or force overrides them.
+func (h *ApplyManifestHandler) checkBlockedDeletions(plan *differ.DiffPlan, force bool, logger *slog.Logger) *controlplanev1.StepResult {
+	if !plan.HasBlockedDeletions() || force {
+		return nil
+	}
+	logger.Warn("apply blocked by safety checks",
+		"blocked_deletions", len(plan.BlockedDeletions))
+
+	step := &controlplanev1.StepResult{
+		StepName: "safety_check",
+		Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
+		Message:  "Deletions blocked by safety checks (use force=true to override)",
+		Details:  make(map[string]string),
+	}
+	for i, bd := range plan.BlockedDeletions {
+		step.Details[fmt.Sprintf("blocked_%d", i)] = fmt.Sprintf(
+			"%s %s: %s", bd.ResourceType, bd.ResourceCode, bd.Reason)
+	}
+	return step
+}
+
 // validationOutput holds the results of manifest validation.
 type validationOutput struct {
 	valid      bool
@@ -244,10 +257,13 @@ type validationOutput struct {
 func (h *ApplyManifestHandler) validate(
 	ctx context.Context,
 	mf *controlplanev1.Manifest,
+	skipImmutability bool,
 ) validationOutput {
-	// Get the previous manifest for immutability checks (best-effort)
+	// Get the previous manifest for immutability checks (best-effort).
+	// When skipImmutability is true we model a new-tenant create, so there
+	// is no previous manifest to compare against.
 	var previousManifest *controlplanev1.Manifest
-	if h.versionStore != nil {
+	if h.versionStore != nil && !skipImmutability {
 		prev, err := h.versionStore.GetLatestApplied(ctx)
 		if err == nil && prev != nil {
 			previousManifest = prev.Manifest
@@ -305,10 +321,13 @@ type diffOutput struct {
 func (h *ApplyManifestHandler) diff(
 	ctx context.Context,
 	mf *controlplanev1.Manifest,
+	skipImmutability bool,
 ) diffOutput {
-	// Get the last-applied manifest (nil means first apply)
+	// Get the last-applied manifest (nil means first apply).
+	// When skipImmutability is true we model a new-tenant create, so there
+	// is no baseline to diff against — everything is treated as CREATE.
 	var lastApplied *controlplanev1.Manifest
-	if h.versionStore != nil {
+	if h.versionStore != nil && !skipImmutability {
 		prev, err := h.versionStore.GetLatestApplied(ctx)
 		if err != nil {
 			return diffOutput{

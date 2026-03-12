@@ -903,3 +903,76 @@ func TestDiff_ModifiedSagaFilter_DescribesChange(t *testing.T) {
 	assert.Len(t, updates, 1)
 	assert.Contains(t, updates[0].Description, "filter changed")
 }
+
+func TestDiff_WithSkipSafetyChecks_SkipsSafetyChecksAndBreakingFlags(t *testing.T) {
+	checker := &mockSafetyChecker{
+		instrumentBlocked: map[string]*BlockedDeletion{
+			"KWH": {
+				ResourceType: ResourceInstrument,
+				ResourceCode: "KWH",
+				Reason:       "referenced by 3 active valuation rules",
+			},
+		},
+	}
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments = newManifest.Instruments[:1] // remove KWH
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest, WithSkipSafetyChecks())
+	require.NoError(t, err)
+
+	// DELETE actions should still be present
+	deletes := filterActions(plan.Actions, ActionDelete)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "KWH", deletes[0].ResourceCode)
+
+	// But they should NOT be flagged as breaking
+	assert.False(t, deletes[0].Breaking)
+	assert.False(t, plan.HasBreakingChanges)
+
+	// And no blocked deletions should be recorded (safety checks skipped)
+	assert.False(t, plan.HasBlockedDeletions())
+	assert.Empty(t, plan.BlockedDeletions)
+}
+
+func TestDiff_WithSkipSafetyChecks_SafetyCheckerErrorNotReturned(t *testing.T) {
+	checker := &mockSafetyChecker{
+		err: fmt.Errorf("connection refused"),
+	}
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.AccountTypes = nil
+
+	// With skip, the safety checker error should not propagate
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest, WithSkipSafetyChecks())
+	require.NoError(t, err)
+	assert.NotNil(t, plan)
+}
+
+func TestDiff_WithoutSkipSafetyChecks_SafetyChecksStillRun(t *testing.T) {
+	checker := &mockSafetyChecker{
+		instrumentBlocked: map[string]*BlockedDeletion{
+			"KWH": {
+				ResourceType: ResourceInstrument,
+				ResourceCode: "KWH",
+				Reason:       "referenced by active rules",
+			},
+		},
+	}
+	d := New(checker, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Instruments = newManifest.Instruments[:1]
+
+	// Without skip option, safety checks run as normal
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	assert.True(t, plan.HasBlockedDeletions())
+	assert.True(t, plan.HasBreakingChanges)
+}

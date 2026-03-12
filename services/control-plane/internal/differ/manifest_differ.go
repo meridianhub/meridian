@@ -40,11 +40,32 @@ func New(safety SafetyChecker, drift DriftDetector) *ManifestDiffer {
 	}
 }
 
+// DiffOption configures optional behavior of a Diff call.
+type DiffOption func(*diffConfig)
+
+type diffConfig struct {
+	skipSafetyChecks bool
+}
+
+// WithSkipSafetyChecks skips safety checks (blocked deletions) and breaking
+// change flagging. Use when validating a manifest for a new tenant that has
+// no existing state.
+func WithSkipSafetyChecks() DiffOption {
+	return func(c *diffConfig) {
+		c.skipSafetyChecks = true
+	}
+}
+
 // Diff compares lastApplied against newManifest and returns a plan.
 // If lastApplied is nil, all resources in newManifest are treated as CREATE.
-func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *controlplanev1.Manifest) (*DiffPlan, error) {
+func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *controlplanev1.Manifest, opts ...DiffOption) (*DiffPlan, error) {
 	if newManifest == nil {
 		return nil, ErrNilManifest
+	}
+
+	cfg := &diffConfig{}
+	for _, opt := range opts {
+		opt(cfg)
 	}
 
 	plan := &DiffPlan{}
@@ -58,16 +79,20 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 	d.diffMappings(lastApplied, newManifest, plan)
 	d.diffOperationalGateway(lastApplied, newManifest, plan)
 
-	// Run safety checks on all DELETE actions
-	if err := d.runSafetyChecks(ctx, plan); err != nil {
-		return nil, fmt.Errorf("safety check failed: %w", err)
+	// Run safety checks on all DELETE actions (skip when validating for a new tenant)
+	if !cfg.skipSafetyChecks {
+		if err := d.runSafetyChecks(ctx, plan); err != nil {
+			return nil, fmt.Errorf("safety check failed: %w", err)
+		}
 	}
 
-	// Flag breaking changes
-	for i := range plan.Actions {
-		if plan.Actions[i].Action == ActionDelete {
-			plan.Actions[i].Breaking = true
-			plan.HasBreakingChanges = true
+	// Flag breaking changes (skip when validating for a new tenant)
+	if !cfg.skipSafetyChecks {
+		for i := range plan.Actions {
+			if plan.Actions[i].Action == ActionDelete {
+				plan.Actions[i].Breaking = true
+				plan.HasBreakingChanges = true
+			}
 		}
 	}
 
