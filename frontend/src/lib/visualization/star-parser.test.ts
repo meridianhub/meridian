@@ -241,8 +241,8 @@ position_keeping.initiate_log(account_id=aid)
       expect(result.name).toBe('stripe_payment_received')
       // No trigger/filter headers in this file
       expect(result.steps.length).toBe(2)
-      expect(result.steps[0].name).toBe('debit_stripe_nostro')
-      expect(result.steps[1].name).toBe('credit_customer_prepaid')
+      expect(result.steps[0].name).toBe('debit_clearing')
+      expect(result.steps[1].name).toBe('credit_customer')
 
       // Both steps call position_keeping.initiate_log
       expect(result.steps[0].serviceCalls[0].service).toBe('position_keeping')
@@ -495,8 +495,8 @@ account = reference_data.get_account(id=aid)
 
       // Two position_keeping.initiate_log calls
       expect(result.producedEvents).toHaveLength(2)
-      expect(result.producedEvents[0].stepName).toBe('debit_stripe_nostro')
-      expect(result.producedEvents[1].stepName).toBe('credit_customer_prepaid')
+      expect(result.producedEvents[0].stepName).toBe('debit_clearing')
+      expect(result.producedEvents[1].stepName).toBe('credit_customer')
 
       // No valuation calls
       expect(result.valuationCalls).toHaveLength(0)
