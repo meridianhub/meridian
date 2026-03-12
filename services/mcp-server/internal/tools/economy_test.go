@@ -15,6 +15,7 @@ import (
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // --- Mock implementations ---
@@ -300,9 +301,11 @@ func TestManifestValidate_CreateModeSkipsImmutabilityChecks(t *testing.T) {
 
 func TestManifestValidate_AmendModeWithTenantID(t *testing.T) {
 	var capturedReq *controlplanev1.ApplyManifestRequest
+	var capturedCtx context.Context
 	mock := &mockManifestApplier{
-		applyFn: func(_ context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+		applyFn: func(ctx context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
 			capturedReq = req
+			capturedCtx = ctx
 			return &controlplanev1.ApplyManifestResponse{
 				Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN,
 			}, nil
@@ -313,7 +316,7 @@ func TestManifestValidate_AmendModeWithTenantID(t *testing.T) {
 	sess := newTestSession()
 	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
 
-	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "mode": "amend", "tenant_id": "tenant-123"}`, validManifestJSON()))
+	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s, "mode": "amend", "tenant_id": "tenant_123"}`, validManifestJSON()))
 	result, err := r.Call(context.Background(), "meridian_manifest_validate", params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -328,6 +331,14 @@ func TestManifestValidate_AmendModeWithTenantID(t *testing.T) {
 	// Amend mode should NOT set Force (immutability checks apply)
 	if capturedReq.Force {
 		t.Error("expected Force=false in amend mode")
+	}
+	// Verify tenant context was propagated
+	tenantID, ok := tenant.FromContext(capturedCtx)
+	if !ok {
+		t.Fatal("expected tenant context to be set in amend mode")
+	}
+	if string(tenantID) != "tenant_123" {
+		t.Errorf("expected tenant_id=tenant_123, got %q", tenantID)
 	}
 }
 

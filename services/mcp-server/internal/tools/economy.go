@@ -15,6 +15,7 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // PlanStore abstracts the session plan cache to avoid an import cycle
@@ -139,6 +140,8 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 				"message": "Provide a tenant_id to validate against the tenant's existing manifest.",
 			}, nil
 		}
+		// Inject tenant context so the control plane validates against the correct tenant's state.
+		ctx = tenant.WithTenant(ctx, tenant.TenantID(p.TenantID))
 	default:
 		return map[string]interface{}{
 			"error":   "invalid mode: " + p.Mode,
