@@ -3,12 +3,12 @@
     "name": "payment-gateway-stripe",
     "type": "registry:pattern",
     "title": "Stripe Payment Gateway",
-    "description": "Stripe payment integration via the Operational Gateway abstraction layer. Includes provider connection configuration, outbound/inbound mapping definitions for payload transformation, instruction routing, and a multi-step saga with lien reservation, gateway dispatch, and conditional ledger posting.",
+    "description": "Stripe payment integration via the Financial Gateway. Includes payment rail configuration, Financial Gateway dispatch for typed payment APIs, and a multi-step saga with gateway dispatch and double-entry ledger posting.",
     "registryDependencies": ["base-fiat-gbp"],
     "categories": ["payments", "gateway", "integration"],
     "meta": {
         "complexity": 8,
-        "design_pattern": "operational-gateway",
+        "design_pattern": "financial-gateway",
         "industries": ["payments", "fintech"],
         "provides": {
             "instruments": [],
@@ -30,6 +30,11 @@
             "path": "patterns/payment-gateway-stripe/manifest-fragment.yaml",
             "type": "registry:file",
             "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/payment-gateway-stripe/stripe_payment_via_gateway.star",
+            "type": "registry:file",
+            "target": "~/sagas/stripe_payment_via_gateway.star"
         },
         {
             "path": "patterns/payment-gateway-stripe/stripe_payment_received.star",

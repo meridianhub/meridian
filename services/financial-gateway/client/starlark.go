@@ -44,6 +44,19 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 				ProtoRequestType:    (*financialgatewayv1.DispatchPaymentRequest)(nil),
 				ProtoResponseType:   (*financialgatewayv1.DispatchPaymentResponse)(nil),
 				Version:             1,
+				ParamOverrides: map[string]saga.ParamOverride{
+					// Starlark-friendly aliases for proto field names
+					"amount_units":        {Alias: "amount_minor_units"},
+					"instrument_code":     {Alias: "currency"},
+					"debtor_account_id":   {Derived: true},
+					"creditor_account_id": {Derived: true},
+					"reference":           {Derived: true},
+					// Proto uses IdempotencyKey message; handler accepts plain string
+					"idempotency_key": {Type: "string"},
+					// Handler params not in proto (resolved internally)
+					"customer_reference":       {Type: "string"},
+					"payment_method_reference": {Type: "string"},
+				},
 			},
 		},
 		"financial_gateway.cancel_payment": {
@@ -68,6 +81,13 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 				ProtoRequestType:     (*financialgatewayv1.DispatchRefundRequest)(nil),
 				ProtoResponseType:    (*financialgatewayv1.DispatchRefundResponse)(nil),
 				Version:              1,
+				ParamOverrides: map[string]saga.ParamOverride{
+					// Starlark-friendly aliases for proto field names
+					"original_dispatch_id": {Alias: "payment_order_id"},
+					"refund_amount_units":  {Alias: "refund_amount_minor_units"},
+					// Proto uses IdempotencyKey message; handler accepts plain string
+					"idempotency_key": {Type: "string"},
+				},
 			},
 		},
 	}

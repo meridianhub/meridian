@@ -373,7 +373,7 @@ func TestEnergySettlement_StarFileExists(t *testing.T) {
 	require.NoError(t, err, "usage_to_value.star should exist in energy-settlement pattern")
 }
 
-// --- economy pattern tests (all 9 patterns) ---
+// --- economy pattern tests (all 10 patterns) ---
 
 // allEconomyPatterns lists all economy pattern names that should exist.
 var allEconomyPatterns = []string{
@@ -386,6 +386,7 @@ var allEconomyPatterns = []string{
 	"payment-gateway-stripe",
 	"entity-distribution",
 	"phantom-cost-basis",
+	"tote-betting",
 }
 
 func TestEconomyPatterns_PatternJSONValidatesAgainstSchema(t *testing.T) {
