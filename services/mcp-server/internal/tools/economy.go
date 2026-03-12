@@ -86,9 +86,10 @@ func manifestJSONToProto(manifestJSON json.RawMessage) (*controlplanev1.Manifest
 }
 
 // parseManifestInput converts the raw manifest field value into JSON suitable for
-// manifestJSONToProto. It accepts:
+// manifestJSONToProto. When Manifest is typed as interface{} in the param struct,
+// json.Unmarshal decodes JSON strings as string and JSON objects as map[string]interface{}.
+// It accepts:
 //   - string: parsed as YAML (which is a superset of JSON), then marshaled to JSON
-//   - json.RawMessage: passed through as-is
 //   - map[string]interface{}: marshaled to JSON
 //
 // Any other type returns an error.
@@ -105,8 +106,6 @@ func parseManifestInput(v interface{}) (json.RawMessage, error) {
 			return nil, fmt.Errorf("failed to convert YAML to JSON: %w", err)
 		}
 		return json.RawMessage(b), nil
-	case json.RawMessage:
-		return val, nil
 	case map[string]interface{}:
 		b, err := json.Marshal(val)
 		if err != nil {
