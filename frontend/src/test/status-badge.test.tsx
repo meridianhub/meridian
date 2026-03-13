@@ -19,46 +19,46 @@ describe('StatusBadge', () => {
     it('maps ACTIVE to success variant', () => {
       render(<StatusBadge status="ACTIVE" />)
       const badge = screen.getByText('ACTIVE')
-      expect(badge.className).toMatch(/green/)
+      expect(badge.className).toMatch(/success/)
     })
 
     it('maps FROZEN to warning variant', () => {
       render(<StatusBadge status="FROZEN" />)
       const badge = screen.getByText('FROZEN')
-      expect(badge.className).toMatch(/yellow/)
+      expect(badge.className).toMatch(/warning/)
     })
 
     it('maps FAILED to error variant', () => {
       render(<StatusBadge status="FAILED" />)
       const badge = screen.getByText('FAILED')
-      expect(badge.className).toMatch(/red/)
+      expect(badge.className).toMatch(/destructive/)
     })
 
     it('maps INITIATED to info variant', () => {
       render(<StatusBadge status="INITIATED" />)
       const badge = screen.getByText('INITIATED')
-      expect(badge.className).toMatch(/blue/)
+      expect(badge.className).toMatch(/info/)
     })
 
     it('maps CLOSED to neutral variant', () => {
       render(<StatusBadge status="CLOSED" />)
       const badge = screen.getByText('CLOSED')
-      expect(badge.className).toMatch(/gray/)
+      expect(badge.className).toMatch(/muted/)
     })
 
     it('maps unknown status to neutral variant', () => {
       render(<StatusBadge status="UNKNOWN_STATUS" />)
       const badge = screen.getByText('UNKNOWN STATUS')
-      expect(badge.className).toMatch(/gray/)
+      expect(badge.className).toMatch(/muted/)
     })
   })
 
   describe('account statuses', () => {
     it.each([
-      ['ACTIVE', 'green'],
-      ['FROZEN', 'yellow'],
-      ['CLOSED', 'gray'],
-      ['SUSPENDED', 'red'],
+      ['ACTIVE', 'success'],
+      ['FROZEN', 'warning'],
+      ['CLOSED', 'muted'],
+      ['SUSPENDED', 'destructive'],
     ])('maps account status %s to correct color', (status, color) => {
       render(<StatusBadge status={status} />)
       const badge = screen.getByText(status.replace(/_/g, ' '))
@@ -68,13 +68,13 @@ describe('StatusBadge', () => {
 
   describe('payment order statuses', () => {
     it.each([
-      ['INITIATED', 'blue'],
-      ['RESERVED', 'blue'],
-      ['EXECUTING', 'yellow'],
-      ['COMPLETED', 'green'],
-      ['FAILED', 'red'],
-      ['CANCELLED', 'gray'],
-      ['REVERSED', 'gray'],
+      ['INITIATED', 'info'],
+      ['RESERVED', 'info'],
+      ['EXECUTING', 'warning'],
+      ['COMPLETED', 'success'],
+      ['FAILED', 'destructive'],
+      ['CANCELLED', 'muted'],
+      ['REVERSED', 'muted'],
     ])('maps payment status %s to correct color', (status, color) => {
       render(<StatusBadge status={status} />)
       const badge = screen.getByText(status.replace(/_/g, ' '))
@@ -84,8 +84,8 @@ describe('StatusBadge', () => {
 
   describe('saga statuses', () => {
     it.each([
-      ['DRAFT', 'gray'],
-      ['DEPRECATED', 'yellow'],
+      ['DRAFT', 'muted'],
+      ['DEPRECATED', 'warning'],
     ])('maps saga status %s to correct color', (status, color) => {
       render(<StatusBadge status={status} />)
       const badge = screen.getByText(status.replace(/_/g, ' '))
@@ -95,10 +95,10 @@ describe('StatusBadge', () => {
 
   describe('tenant statuses', () => {
     it.each([
-      ['PROVISIONING', 'blue'],
-      ['PROVISIONING_PENDING', 'blue'],
-      ['PROVISIONING_FAILED', 'red'],
-      ['DEPROVISIONED', 'gray'],
+      ['PROVISIONING', 'info'],
+      ['PROVISIONING_PENDING', 'info'],
+      ['PROVISIONING_FAILED', 'destructive'],
+      ['DEPROVISIONED', 'muted'],
     ])('maps tenant status %s to correct color', (status, color) => {
       render(<StatusBadge status={status} />)
       const badge = screen.getByText(status.replace(/_/g, ' '))
@@ -110,16 +110,16 @@ describe('StatusBadge', () => {
     it('maps RUNNING to warning variant', () => {
       render(<StatusBadge status="RUNNING" />)
       const badge = screen.getByText('RUNNING')
-      expect(badge.className).toMatch(/yellow/)
+      expect(badge.className).toMatch(/warning/)
     })
   })
 
   describe('position quality ladder', () => {
     it.each([
-      ['ESTIMATE', 'yellow'],
-      ['COEFFICIENT', 'blue'],
-      ['ACTUAL', 'green'],
-      ['REVISED', 'blue'],
+      ['ESTIMATE', 'warning'],
+      ['COEFFICIENT', 'info'],
+      ['ACTUAL', 'success'],
+      ['REVISED', 'info'],
     ])('maps quality ladder %s to correct color', (status, color) => {
       render(<StatusBadge status={status} />)
       const badge = screen.getByText(status.replace(/_/g, ' '))
@@ -146,44 +146,39 @@ describe('StatusBadge', () => {
   })
 
   describe('WCAG AA color contrast', () => {
-    it('success variant uses dark text on light background', () => {
+    it('success variant uses semantic token classes', () => {
       render(<StatusBadge status="ACTIVE" />)
       const badge = screen.getByText('ACTIVE')
-      // green-800 on green-100: contrast ratio ~7:1, exceeds AA requirement
-      expect(badge.className).toMatch(/text-green-800/)
-      expect(badge.className).toMatch(/bg-green-100/)
+      expect(badge.className).toMatch(/text-success-foreground/)
+      expect(badge.className).toMatch(/bg-success-muted/)
     })
 
-    it('warning variant uses dark text on light background', () => {
+    it('warning variant uses semantic token classes', () => {
       render(<StatusBadge status="FROZEN" />)
       const badge = screen.getByText('FROZEN')
-      // yellow-800 on yellow-100: contrast ratio ~7:1, exceeds AA requirement
-      expect(badge.className).toMatch(/text-yellow-800/)
-      expect(badge.className).toMatch(/bg-yellow-100/)
+      expect(badge.className).toMatch(/text-warning-foreground/)
+      expect(badge.className).toMatch(/bg-warning-muted/)
     })
 
-    it('error variant uses dark text on light background', () => {
+    it('error variant uses semantic token classes', () => {
       render(<StatusBadge status="FAILED" />)
       const badge = screen.getByText('FAILED')
-      // red-800 on red-100: contrast ratio ~7:1, exceeds AA requirement
-      expect(badge.className).toMatch(/text-red-800/)
-      expect(badge.className).toMatch(/bg-red-100/)
+      expect(badge.className).toMatch(/text-destructive/)
+      expect(badge.className).toMatch(/bg-destructive/)
     })
 
-    it('info variant uses dark text on light background', () => {
+    it('info variant uses semantic token classes', () => {
       render(<StatusBadge status="INITIATED" />)
       const badge = screen.getByText('INITIATED')
-      // blue-800 on blue-100: contrast ratio ~7:1, exceeds AA requirement
-      expect(badge.className).toMatch(/text-blue-800/)
-      expect(badge.className).toMatch(/bg-blue-100/)
+      expect(badge.className).toMatch(/text-info-foreground/)
+      expect(badge.className).toMatch(/bg-info-muted/)
     })
 
-    it('neutral variant uses dark text on light background', () => {
+    it('neutral variant uses semantic token classes', () => {
       render(<StatusBadge status="CLOSED" />)
       const badge = screen.getByText('CLOSED')
-      // gray-800 on gray-100: contrast ratio ~7:1, exceeds AA requirement
-      expect(badge.className).toMatch(/text-gray-800/)
-      expect(badge.className).toMatch(/bg-gray-100/)
+      expect(badge.className).toMatch(/text-muted-foreground/)
+      expect(badge.className).toMatch(/bg-muted/)
     })
   })
 })

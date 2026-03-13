@@ -42,17 +42,17 @@ describe('StatusBadge accessibility', () => {
 
   it('provides sufficient color contrast for all variants', () => {
     const variants = [
-      { status: 'ACTIVE', expectedColor: 'green' },
-      { status: 'FROZEN', expectedColor: 'yellow' },
-      { status: 'FAILED', expectedColor: 'red' },
-      { status: 'INITIATED', expectedColor: 'blue' },
-      { status: 'CLOSED', expectedColor: 'gray' },
+      { status: 'ACTIVE', expectedColor: 'success' },
+      { status: 'FROZEN', expectedColor: 'warning' },
+      { status: 'FAILED', expectedColor: 'destructive' },
+      { status: 'INITIATED', expectedColor: 'info' },
+      { status: 'CLOSED', expectedColor: 'muted' },
     ]
 
     variants.forEach(({ status, expectedColor }) => {
       const { container } = render(<StatusBadge status={status} />)
       const badge = container.querySelector('span')
-      // Verify color combination exists (e.g., dark text on light background)
+      // Verify semantic token class exists
       expect(badge?.className).toContain(expectedColor)
     })
   })

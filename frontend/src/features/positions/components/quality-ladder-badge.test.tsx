@@ -46,27 +46,27 @@ describe('QualityLadderBadge', () => {
     expect(screen.getByTestId('quality-ladder-badge')).toBeInTheDocument()
   })
 
-  it('applies yellow color for ESTIMATE quality', () => {
+  it('applies warning token for ESTIMATE quality', () => {
     render(<QualityLadderBadge quality="ESTIMATE" />)
     const badge = screen.getByTestId('quality-ladder-badge')
-    expect(badge.className).toMatch(/yellow/)
+    expect(badge.className).toMatch(/warning/)
   })
 
-  it('applies green color for ACTUAL quality', () => {
+  it('applies success token for ACTUAL quality', () => {
     render(<QualityLadderBadge quality="ACTUAL" />)
     const badge = screen.getByTestId('quality-ladder-badge')
-    expect(badge.className).toMatch(/green/)
+    expect(badge.className).toMatch(/success/)
   })
 
-  it('applies blue color for COEFFICIENT quality', () => {
+  it('applies info token for COEFFICIENT quality', () => {
     render(<QualityLadderBadge quality="COEFFICIENT" />)
     const badge = screen.getByTestId('quality-ladder-badge')
-    expect(badge.className).toMatch(/blue/)
+    expect(badge.className).toMatch(/info/)
   })
 
-  it('applies purple color for REVISED quality', () => {
+  it('applies info token for REVISED quality', () => {
     render(<QualityLadderBadge quality="REVISED" />)
     const badge = screen.getByTestId('quality-ladder-badge')
-    expect(badge.className).toMatch(/purple/)
+    expect(badge.className).toMatch(/info/)
   })
 })

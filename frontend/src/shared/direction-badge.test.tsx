@@ -14,16 +14,16 @@ describe('DirectionBadge', () => {
     expect(screen.getByText('Debit')).toBeInTheDocument()
   })
 
-  it('applies green styling for CREDIT', () => {
+  it('applies success styling for CREDIT', () => {
     render(<DirectionBadge direction="CREDIT" />)
     const badge = screen.getByTestId('direction-badge')
-    expect(badge.className).toMatch(/green/)
+    expect(badge.className).toMatch(/success/)
   })
 
-  it('applies red styling for DEBIT', () => {
+  it('applies destructive styling for DEBIT', () => {
     render(<DirectionBadge direction="DEBIT" />)
     const badge = screen.getByTestId('direction-badge')
-    expect(badge.className).toMatch(/red/)
+    expect(badge.className).toMatch(/destructive/)
   })
 
   it('sets data-direction attribute', () => {
@@ -31,9 +31,9 @@ describe('DirectionBadge', () => {
     expect(screen.getByTestId('direction-badge')).toHaveAttribute('data-direction', 'CREDIT')
   })
 
-  it('treats unknown direction as DEBIT (red)', () => {
+  it('treats unknown direction as DEBIT (destructive)', () => {
     render(<DirectionBadge direction="UNKNOWN" />)
     const badge = screen.getByTestId('direction-badge')
-    expect(badge.className).toMatch(/red/)
+    expect(badge.className).toMatch(/destructive/)
   })
 })
