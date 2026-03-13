@@ -227,6 +227,10 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 		tokenHandler := mcpauth.NewTokenHandler(oauthCfg, codeStore, issuer)
 		mux.Handle("/oauth/token", tokenHandler)
 
+		// RFC 8414 OAuth Authorization Server Metadata — required by MCP clients
+		// (e.g. Claude.ai) to discover auth endpoints before connecting.
+		mux.HandleFunc("/.well-known/oauth-authorization-server", mcpauth.NewMetadataHandler(baseURL, oauthCfg))
+
 		meta := mcpauth.Metadata{
 			AuthorizationURL: oauthCfg.AuthorizationURL,
 			TokenURL:         oauthCfg.TokenURL,

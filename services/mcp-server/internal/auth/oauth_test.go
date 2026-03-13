@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -70,6 +71,38 @@ func TestAuthMetadata_JSON(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
+// MetadataHandler — /.well-known/oauth-authorization-server
+// -----------------------------------------------------------------------
+
+func TestMetadataHandler_ServesRFC8414(t *testing.T) {
+	cfg := auth.OAuthConfig{
+		ClientID:         "meridian-mcp",
+		AuthorizationURL: "https://mcp.example.com/oauth/authorize",
+		TokenURL:         "https://mcp.example.com/oauth/token",
+	}
+
+	handler := auth.NewMetadataHandler("https://mcp.example.com", cfg)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+	assert.Contains(t, rec.Header().Get("Cache-Control"), "public")
+
+	var meta auth.AuthorizationServerMetadata
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &meta))
+
+	assert.Equal(t, "https://mcp.example.com", meta.Issuer)
+	assert.Equal(t, "https://mcp.example.com/oauth/authorize", meta.AuthorizationEndpoint)
+	assert.Equal(t, "https://mcp.example.com/oauth/token", meta.TokenEndpoint)
+	assert.Equal(t, []string{"code"}, meta.ResponseTypesSupported)
+	assert.Equal(t, []string{"authorization_code"}, meta.GrantTypesSupported)
+	assert.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
+	assert.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
+}
+
+// -----------------------------------------------------------------------
 // AuthorizationHandler
 // -----------------------------------------------------------------------
 
@@ -85,7 +118,7 @@ func TestAuthorizationHandler_GeneratesCode(t *testing.T) {
 
 	_, challenge := generatePKCEPair(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {cfg.ClientID},
 		"redirect_uri":          {cfg.RedirectURI},
@@ -119,7 +152,7 @@ func TestAuthorizationHandler_MissingChallenge_ReturnsBadRequest(t *testing.T) {
 	}
 	handler := auth.NewAuthorizationHandler(cfg, store)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?response_type=code&client_id=meridian-mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?response_type=code&client_id=meridian-mcp", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -136,7 +169,7 @@ func TestAuthorizationHandler_WrongClientID_ReturnsBadRequest(t *testing.T) {
 
 	_, challenge := generatePKCEPair(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {"wrong-client"},
 		"redirect_uri":          {cfg.RedirectURI},
@@ -159,7 +192,7 @@ func TestAuthorizationHandler_WrongRedirectURI_ReturnsBadRequest(t *testing.T) {
 
 	_, challenge := generatePKCEPair(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {cfg.ClientID},
 		"redirect_uri":          {"https://evil.example.com/steal"},
@@ -180,7 +213,7 @@ func TestAuthorizationHandler_NonGetMethod_ReturnsMethodNotAllowed(t *testing.T)
 	}
 	handler := auth.NewAuthorizationHandler(cfg, store)
 
-	req := httptest.NewRequest(http.MethodPost, "/oauth/authorize", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/authorize", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -220,7 +253,7 @@ func TestTokenHandler_ExchangesCodeForToken(t *testing.T) {
 		"client_id":     {cfg.ClientID},
 		"code_verifier": {verifier},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -261,7 +294,7 @@ func TestTokenHandler_InvalidVerifier_ReturnsBadRequest(t *testing.T) {
 		"client_id":     {cfg.ClientID},
 		"code_verifier": {"wrong-verifier-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}, // 43+ chars per RFC 7636
 	}
-	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -298,7 +331,7 @@ func TestTokenHandler_ExpiredCode_ReturnsBadRequest(t *testing.T) {
 		"client_id":     {cfg.ClientID},
 		"code_verifier": {verifier},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -326,7 +359,7 @@ func TestTokenHandler_UnknownCode_ReturnsBadRequest(t *testing.T) {
 		"client_id":     {cfg.ClientID},
 		"code_verifier": {verifier},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -362,7 +395,7 @@ func TestTokenHandler_CodeIsConsumedAfterExchange(t *testing.T) {
 			"client_id":     {cfg.ClientID},
 			"code_verifier": {verifier},
 		}
-		req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 			strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		w := httptest.NewRecorder()
@@ -405,7 +438,7 @@ func TestTokenHandler_MismatchedRedirectURI_ReturnsBadRequest(t *testing.T) {
 		"client_id":     {cfg.ClientID},
 		"code_verifier": {verifier},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -470,7 +503,7 @@ func TestBearerMiddleware_RejectsUnauthenticated(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/mcp", nil)
 	w := httptest.NewRecorder()
 	mw.Handler(inner).ServeHTTP(w, req)
 
@@ -496,7 +529,7 @@ func TestBearerMiddleware_AcceptsValidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/mcp", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
 	w := httptest.NewRecorder()
 	mw.Handler(inner).ServeHTTP(w, req)
