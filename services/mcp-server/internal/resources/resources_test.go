@@ -27,7 +27,8 @@ func setupResourceServer(t *testing.T, client resources.ManifestClient) *mcp.Cli
 	ctx := context.Background()
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "v0.0.1"}, nil)
-	resources.RegisterResources(srv, client)
+	resources.RegisterEmbeddedDocs(srv)
+	resources.RegisterManifestResource(srv, client)
 
 	ct, st := mcp.NewInMemoryTransports()
 	ss, err := srv.Connect(ctx, st, nil)

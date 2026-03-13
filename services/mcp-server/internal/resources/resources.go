@@ -10,10 +10,15 @@ package resources
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/meridianhub/meridian/services/mcp-server/internal/mcputil"
 )
+
+var errManifestRetrieval = errors.New("retrieve current manifest")
 
 //go:embed docs/starlark-guide.md docs/cel-reference.md
 var embeddedDocs embed.FS
@@ -24,18 +29,9 @@ type ManifestClient interface {
 	GetCurrentManifestYAML(ctx context.Context) (string, error)
 }
 
-// RegisterResources registers all MCP resources onto the SDK server.
-// manifestClient may be nil; in that case the meridian://manifest/current
-// resource returns a placeholder message.
-func RegisterResources(srv *mcp.Server, manifestClient ManifestClient) {
-	// Current economy manifest (live or placeholder).
-	srv.AddResource(&mcp.Resource{
-		URI:         "meridian://manifest/current",
-		Name:        "Current Economy Manifest",
-		Description: "The active economy manifest for the current tenant, describing instruments, account types, sagas, valuation rules, and payment rails.",
-		MIMEType:    "text/yaml",
-	}, manifestResourceHandler(manifestClient))
-
+// RegisterEmbeddedDocs registers static embedded documentation resources.
+// These are always available regardless of backend connectivity.
+func RegisterEmbeddedDocs(srv *mcp.Server) {
 	// Starlark saga development guide (embedded).
 	srv.AddResource(&mcp.Resource{
 		URI:         "meridian://docs/starlark-guide",
@@ -51,6 +47,17 @@ func RegisterResources(srv *mcp.Server, manifestClient ManifestClient) {
 		Description: "Reference guide for Common Expression Language (CEL) used in Meridian validation rules, bucketing expressions, and precondition checks.",
 		MIMEType:    "text/markdown",
 	}, embeddedResourceHandler("meridian://docs/cel-reference", "docs/cel-reference.md"))
+}
+
+// RegisterManifestResource registers the current economy manifest resource.
+// manifestClient may be nil; in that case a placeholder message is returned.
+func RegisterManifestResource(srv *mcp.Server, manifestClient ManifestClient) {
+	srv.AddResource(&mcp.Resource{
+		URI:         "meridian://manifest/current",
+		Name:        "Current Economy Manifest",
+		Description: "The active economy manifest for the current tenant, describing instruments, account types, sagas, valuation rules, and payment rails.",
+		MIMEType:    "text/yaml",
+	}, manifestResourceHandler(manifestClient))
 }
 
 // manifestResourceHandler returns a ResourceHandler that fetches the current manifest.
@@ -69,13 +76,7 @@ func manifestResourceHandler(manifestClient ManifestClient) mcp.ResourceHandler 
 
 		yaml, err := manifestClient.GetCurrentManifestYAML(ctx)
 		if err != nil {
-			return &mcp.ReadResourceResult{
-				Contents: []*mcp.ResourceContents{{
-					URI:      "meridian://manifest/current",
-					MIMEType: "text/plain",
-					Text:     fmt.Sprintf("Failed to retrieve manifest: %v", err),
-				}},
-			}, nil
+			return nil, fmt.Errorf("%w: %s", errManifestRetrieval, mcputil.SanitizeError(err))
 		}
 
 		return &mcp.ReadResourceResult{

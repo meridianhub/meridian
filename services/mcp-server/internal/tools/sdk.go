@@ -41,31 +41,39 @@ type Tool struct {
 }
 
 // compileSchema compiles a map-based JSON Schema into a validator.
-func compileSchema(schema map[string]interface{}) *jsonschema.Schema {
+// Returns an error if the schema is invalid — callers should treat this as fatal
+// since tool schemas are static and known at startup.
+func compileSchema(schema map[string]interface{}) (*jsonschema.Schema, error) {
 	if schema == nil {
-		return nil
+		return nil, nil //nolint:nilnil // nil schema means no validation needed
 	}
 	data, err := json.Marshal(schema)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("marshal schema: %w", err)
 	}
 	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("schema.json", bytes.NewReader(data)); err != nil {
-		return nil
+	compiler.Draft = jsonschema.Draft7
+
+	const schemaURL = "schema.json"
+	if err := compiler.AddResource(schemaURL, bytes.NewReader(data)); err != nil {
+		return nil, fmt.Errorf("add schema resource: %w", err)
 	}
-	compiled, err := compiler.Compile("schema.json")
+	compiled, err := compiler.Compile(schemaURL)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("compile: %w", err)
 	}
-	return compiled
+	return compiled, nil
 }
 
 // addTool registers a Tool on the SDK server, wrapping its handler so that
 // the return value is JSON-serialized into an MCP CallToolResult.
 // Input is validated against the tool's JSON Schema before the handler is called.
 func addTool(srv *mcp.Server, t Tool) {
-	handler := t.Handler                      // capture for closure
-	validator := compileSchema(t.InputSchema) // compile schema once
+	handler := t.Handler // capture for closure
+	validator, err := compileSchema(t.InputSchema)
+	if err != nil {
+		panic(fmt.Sprintf("compile schema for tool %q: %v", t.Name, err))
+	}
 	srv.AddTool(&mcp.Tool{
 		Name:        t.Name,
 		Description: t.Description,

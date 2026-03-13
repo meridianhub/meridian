@@ -98,9 +98,8 @@ func (ts *testServer) Call(ctx context.Context, name string, params json.RawMess
 	}
 
 	var v interface{}
-	if err := json.Unmarshal([]byte(tc.Text), &v); err != nil {
-		// Not valid JSON — return the raw text.
-		return nil, fmt.Errorf("unmarshal tool result: %w", err)
+	if unmarshalErr := json.Unmarshal([]byte(tc.Text), &v); unmarshalErr != nil {
+		return tc.Text, nil //nolint:nilerr // intentional: non-JSON text is a valid result, not an error
 	}
 	return v, nil
 }

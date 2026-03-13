@@ -65,7 +65,9 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 	tools.RegisterReferenceTools(srv)
 
 	// Resources: embedded documentation is always available.
-	resources.RegisterResources(srv, nil)
+	resources.RegisterEmbeddedDocs(srv)
+	// Manifest resource placeholder (no backend).
+	resources.RegisterManifestResource(srv, nil)
 
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()
@@ -85,8 +87,8 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 
 	logger.Info("gRPC clients connected", "target", authCfg.APIUrl)
 
-	// -- Resource provider (live manifest) — re-register with live client --
-	resources.RegisterResources(srv, &manifestResourceAdapter{c: mc.ManifestHistory})
+	// -- Live manifest resource (replaces placeholder registered above) --
+	resources.RegisterManifestResource(srv, &manifestResourceAdapter{c: mc.ManifestHistory})
 
 	// -- Reference data tools --
 	mhAdapter := manifestHistoryAdapter{c: mc.ManifestHistory}
