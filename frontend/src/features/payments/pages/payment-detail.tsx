@@ -32,7 +32,7 @@ function PaymentDetailSkeleton() {
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[180px_1fr] gap-4 py-2 border-b last:border-0">
+    <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-4 py-2 border-b last:border-0">
       <span className="text-sm font-medium text-muted-foreground">{label}</span>
       <span className="text-sm">{children}</span>
     </div>
