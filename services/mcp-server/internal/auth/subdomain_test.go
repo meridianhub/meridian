@@ -137,7 +137,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		validator := &mockClaimsValidator{tenantID: "acme"}
 
 		handler := mw.Handler(validator, meta, okHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "acme.demo.meridianhub.cloud"
 		rec := httptest.NewRecorder()
 
@@ -153,7 +153,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		validator := &mockClaimsValidator{tenantID: "acme"}
 
 		handler := mw.Handler(validator, meta, okHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "demo.meridianhub.cloud"
 		rec := httptest.NewRecorder()
 
@@ -169,7 +169,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		validator := &mockClaimsValidator{tenantID: "volterra-energy"}
 
 		handler := mw.Handler(validator, meta, okHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "volterra-energy.demo.meridianhub.cloud"
 		req.Header.Set("Authorization", "Bearer valid-token")
 		rec := httptest.NewRecorder()
@@ -186,7 +186,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		validator := &mockClaimsValidator{tenantID: "other-tenant"}
 
 		handler := mw.Handler(validator, meta, okHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "volterra-energy.demo.meridianhub.cloud"
 		req.Header.Set("Authorization", "Bearer valid-token")
 		rec := httptest.NewRecorder()
@@ -203,7 +203,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		validator := &mockClaimsValidator{tenantID: "acme"}
 
 		handler := mw.Handler(validator, meta, okHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "acme.demo.meridianhub.cloud"
 		// No Authorization header
 		rec := httptest.NewRecorder()
@@ -220,7 +220,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		validator := &mockClaimsValidator{err: ErrInvalidBearerToken}
 
 		handler := mw.Handler(validator, meta, okHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "acme.demo.meridianhub.cloud"
 		req.Header.Set("Authorization", "Bearer bad-token")
 		rec := httptest.NewRecorder()
@@ -243,7 +243,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		})
 
 		handler := mw.Handler(validator, meta, captureHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "demo.meridianhub.cloud"
 		rec := httptest.NewRecorder()
 
@@ -268,7 +268,7 @@ func TestTenantSubdomainMiddleware(t *testing.T) {
 		})
 
 		handler := mw.Handler(validator, meta, captureHandler)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 		req.Host = "acme.demo.meridianhub.cloud"
 		req.Header.Set("Authorization", "Bearer valid-token")
 		rec := httptest.NewRecorder()

@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -182,7 +183,7 @@ func TestOIDCHandler_Authorize_RedirectsToDex(t *testing.T) {
 
 	_, challenge := generatePKCEPair(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {"meridian-mcp"},
 		"redirect_uri":          {"https://claude.ai/callback"},
@@ -234,7 +235,7 @@ func TestOIDCHandler_Authorize_InvalidClientID(t *testing.T) {
 
 	_, challenge := generatePKCEPair(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {"wrong-client"},
 		"redirect_uri":          {"https://claude.ai/callback"},
@@ -267,7 +268,7 @@ func TestOIDCHandler_Authorize_MissingPKCE(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type": {"code"},
 		"client_id":     {"meridian-mcp"},
 		"redirect_uri":  {"https://claude.ai/callback"},
@@ -294,7 +295,7 @@ func TestOIDCHandler_Authorize_RejectsHTTPRedirect(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {"meridian-mcp"},
 		"redirect_uri":          {"http://evil.example.com/steal"},
@@ -325,7 +326,7 @@ func TestOIDCHandler_Authorize_AllowsLocalhostHTTP(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {"meridian-mcp"},
 		"redirect_uri":          {"http://localhost:3000/callback"},
@@ -381,7 +382,7 @@ func TestOIDCHandler_Callback_ExchangesAndRedirects(t *testing.T) {
 	require.NoError(t, err)
 
 	// Simulate Dex callback
-	req := httptest.NewRequest(http.MethodGet, "/oauth/callback?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
 		"code":  {"fake-dex-code"},
 		"state": {stateKey},
 	}.Encode(), nil)
@@ -440,7 +441,7 @@ func TestOIDCHandler_Callback_InvalidState(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/callback?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
 		"code":  {"fake-dex-code"},
 		"state": {"invalid-state-key"},
 	}.Encode(), nil)
@@ -470,7 +471,7 @@ func TestOIDCHandler_Callback_DexError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/oauth/callback?"+url.Values{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
 		"error":             {"access_denied"},
 		"error_description": {"user cancelled"},
 	}.Encode(), nil)
@@ -516,7 +517,7 @@ func TestOIDCFlow_EndToEnd(t *testing.T) {
 	verifier, challenge := generatePKCEPair(t)
 
 	// Step 1: Authorize — get redirect to Dex
-	authReq := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+url.Values{
+	authReq := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
 		"client_id":             {"meridian-mcp"},
 		"redirect_uri":          {"https://claude.ai/callback"},
@@ -536,7 +537,7 @@ func TestOIDCFlow_EndToEnd(t *testing.T) {
 	require.NotEmpty(t, internalState)
 
 	// Step 2: Callback — simulate Dex returning with code
-	cbReq := httptest.NewRequest(http.MethodGet, "/oauth/callback?"+url.Values{
+	cbReq := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
 		"code":  {"fake-dex-code"},
 		"state": {internalState},
 	}.Encode(), nil)
@@ -558,7 +559,7 @@ func TestOIDCFlow_EndToEnd(t *testing.T) {
 		"client_id":     {"meridian-mcp"},
 		"code_verifier": {verifier},
 	}
-	tokenReq := httptest.NewRequest(http.MethodPost, "/oauth/token",
+	tokenReq := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
 	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	tokenW := httptest.NewRecorder()
@@ -649,7 +650,7 @@ func TestTokenHandler_UsesPreSignedToken(t *testing.T) {
 		"client_id":     {cfg.ClientID},
 		"code_verifier": {verifier},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
