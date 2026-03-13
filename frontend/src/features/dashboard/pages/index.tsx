@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useApiClients } from '@/api/context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { StatCard } from './stat-card'
 import { ActivityFeed, type ActivityItem } from './activity-feed'
 import { QuickActions, type QuickAction } from './quick-actions'
@@ -81,6 +82,7 @@ function getCountFromPagination(
 }
 
 export function DashboardPage() {
+  usePageTitle('Dashboard')
   const navigate = useNavigate()
   const { tenantSlug } = useTenantContext()
   const { paymentsQuery, bookingLogsQuery, ledgerPostingsQuery, activityQuery } =

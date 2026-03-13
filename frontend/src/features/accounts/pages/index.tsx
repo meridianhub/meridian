@@ -8,6 +8,7 @@ import { EntityLink, PageShell, PageHeader } from '@/shared'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_account_pb'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { CreateAccountDialog } from './create-account-dialog'
 import type { CurrentAccount } from './types'
 import { useAccountsTable } from '../hooks'
@@ -19,6 +20,7 @@ const STATUS_OPTIONS = [
 ]
 
 export function AccountsPage() {
+  usePageTitle('Accounts')
   const navigate = useNavigate()
   const [createOpen, setCreateOpen] = React.useState(false)
   const { queryKey, queryFn } = useAccountsTable()

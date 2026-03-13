@@ -7,6 +7,7 @@ import { TimeDisplay } from '@/shared/time-display'
 import { PageHeader } from '@/shared/page-header'
 import { PageShell } from '@/shared/page-shell'
 import { Card } from '@/components/ui/card'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { usePaymentsTable } from '../hooks'
 import type { PaymentOrder } from './payments-query'
 
@@ -66,6 +67,7 @@ interface PaymentsPageProps {
 }
 
 export function PaymentsPage({ onRowNavigate }: PaymentsPageProps = {}) {
+  usePageTitle('Payments')
   const navigate = useNavigate()
   const { queryKey, queryFn } = usePaymentsTable()
 

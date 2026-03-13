@@ -20,6 +20,7 @@ import { platformKeys } from '@/lib/query-keys'
 import type { DataTableQueryParams, DataTableResult } from '@/shared/data-table'
 import type { Tenant } from '@/api/gen/meridian/tenant/v1/tenant_pb'
 import { TenantStatus } from '@/api/gen/meridian/tenant/v1/tenant_pb'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { useInitiateTenant } from '@/hooks/use-tenant'
 
 const STATUS_LABEL: Record<number, string> = {
@@ -228,6 +229,7 @@ function InitiateTenantDialog({ open, onOpenChange, onSuccess }: InitiateTenantD
 }
 
 export function TenantsPage() {
+  usePageTitle('Tenants')
   const { tenant } = useApiClients()
   const navigate = useNavigate()
   const [dialogOpen, setDialogOpen] = React.useState(false)

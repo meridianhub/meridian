@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { BookOpen, Blocks, ChevronRight, GitBranch } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { useCookbook } from '../hooks/use-cookbook'
 
 interface CookbookHubCardProps {
@@ -33,6 +34,7 @@ function CookbookHubCard({ title, description, count, href, icon }: CookbookHubC
 }
 
 export function CookbookPage() {
+  usePageTitle('Cookbook')
   const { items } = useCookbook()
   const patternCount = items.filter((i) => i.type === 'registry:pattern').length
   const componentCount = items.filter((i) => i.type === 'registry:ui').length

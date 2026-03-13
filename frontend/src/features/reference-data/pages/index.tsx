@@ -7,6 +7,7 @@ import { useApiClients } from '@/api/context'
 import { referenceKeys } from '@/lib/query-keys'
 import { InstrumentStatus } from '@/api/gen/meridian/reference_data/v1/instrument_pb'
 import { BehaviorClass } from '@/api/gen/meridian/reference_data/v1/account_type_pb'
+import { usePageTitle } from '@/hooks/use-page-title'
 
 interface ReferenceDataCardProps {
   title: string
@@ -50,6 +51,7 @@ function ReferenceDataCard({ title, description, count, isLoading, isError, href
 }
 
 export function ReferenceDataHubPage() {
+  usePageTitle('Reference Data')
   const clients = useApiClients()
 
   // Reference data APIs return no totalCount field, so we fetch all items to count them.

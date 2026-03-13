@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
@@ -182,6 +183,27 @@ function HandlerReferenceTab({ flows }: { flows: SagaFlow[] }) {
 function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }) {
   const [activeFile, setActiveFile] = useState(0)
   const activeIndex = activeFile >= starlarkFiles.length ? 0 : activeFile
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  useEffect(() => {
+    tabRefs.current[activeIndex]?.focus()
+  }, [activeIndex])
+
+  function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setActiveFile((index + 1) % starlarkFiles.length)
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setActiveFile((index - 1 + starlarkFiles.length) % starlarkFiles.length)
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setActiveFile(0)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setActiveFile(starlarkFiles.length - 1)
+    }
+  }
 
   if (starlarkFiles.length === 0) {
     return <p className="text-sm text-muted-foreground">No Starlark file found.</p>
@@ -193,11 +215,18 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b" role="tablist" aria-label="Starlark files">
         {starlarkFiles.map((f, i) => (
           <button
             key={f.name}
+            ref={(el) => { tabRefs.current[i] = el }}
             type="button"
+            id={`starlark-tab-${i}`}
+            role="tab"
+            aria-selected={i === activeIndex}
+            aria-controls="starlark-panel"
+            tabIndex={i === activeIndex ? 0 : -1}
+            onKeyDown={(e) => handleTabKeyDown(e, i)}
             onClick={() => setActiveFile(i)}
             className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
               i === activeIndex
@@ -209,7 +238,13 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
           </button>
         ))}
       </div>
-      <StarlarkEditor value={starlarkFiles[activeIndex].content} onChange={() => {}} readOnly />
+      <div
+        id="starlark-panel"
+        role="tabpanel"
+        aria-labelledby={`starlark-tab-${activeIndex}`}
+      >
+        <StarlarkEditor value={starlarkFiles[activeIndex].content} onChange={() => {}} readOnly />
+      </div>
     </div>
   )
 }
@@ -217,6 +252,8 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
 export function CookbookDetailPage() {
   const { name } = useParams<{ name: string }>()
   const { items, isLoading: catalogueLoading } = useCookbook()
+
+  usePageTitle(name ? `Cookbook: ${name}` : 'Cookbook')
 
   const item = items.find((i) => i.name === name)
   const { starlarkFiles, manifestContent, manifestSagas, hasSagas } = usePatternFiles(item)

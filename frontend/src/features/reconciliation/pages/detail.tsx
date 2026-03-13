@@ -13,6 +13,7 @@ import {
   type Variance,
 } from '../components/variance-detail'
 import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { cn } from '@/lib/utils'
 import { CreateDisputeDialog } from './create-dispute-dialog'
 
@@ -492,7 +493,7 @@ function BalanceAssertionsTab({ runId }: { runId: string }) {
 
       {/* Add new assertion */}
       <div className="rounded-lg border p-4">
-        <h3 className="mb-3 text-sm font-semibold">Add Balance Assertion</h3>
+        <h2 className="mb-3 text-sm font-semibold">Add Balance Assertion</h2>
         <form onSubmit={handleSave} className="space-y-3" data-testid="assertion-form">
           <div>
             <label htmlFor="assertion-name" className="mb-1 block text-xs font-medium">
@@ -556,10 +557,16 @@ export function ReconciliationDetailPage() {
     enabled: !!runId,
   })
 
+  usePageTitle(run ? `Reconciliation ${run.runId}` : 'Reconciliation')
+
   if (!runId) return null
 
   if (isLoading) {
-    return <DetailSkeleton fieldCount={4} tabCount={3} showBackNav={true} />
+    return (
+      <div role="status" aria-live="polite" aria-busy={true}>
+        <DetailSkeleton fieldCount={4} tabCount={3} showBackNav={true} />
+      </div>
+    )
   }
 
   if (isError || !run) {

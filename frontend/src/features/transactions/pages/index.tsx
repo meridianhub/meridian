@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/card'
 
 import { accountEntityType } from '@/shared/account-entity-type'
 import type { EntityType } from '@/shared/entity-link'
+import { usePageTitle } from '@/hooks/use-page-title'
 
 interface LedgerPosting {
   id: string
@@ -123,6 +124,7 @@ const columns: ColumnDef<LedgerPosting>[] = [
 ]
 
 export function TransactionsPage() {
+  usePageTitle('Transactions')
   const { tenantSlug } = useTenantContext()
   const clients = useApiClients()
 

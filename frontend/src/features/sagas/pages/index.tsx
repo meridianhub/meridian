@@ -10,6 +10,7 @@ import { PageShell, PageHeader } from '@/shared'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { SagaStatus } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { useSagasTable } from '../hooks'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { CreateSagaDraftDialog } from './create-saga-draft-dialog'
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,7 @@ export interface StarlarkConfigPageProps {
 // ---------------------------------------------------------------------------
 
 export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPageProps) {
+  usePageTitle('Starlark Config')
   const { queryKey, queryFn } = useSagasTable()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
