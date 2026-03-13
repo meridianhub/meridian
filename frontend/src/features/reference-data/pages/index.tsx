@@ -1,11 +1,11 @@
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, Layers, Tag, GitBranch } from 'lucide-react'
+import { ChevronRight, Layers, Tag, GitBranch, Scale } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { useApiClients } from '@/api/context'
-import { referenceKeys } from '@/lib/query-keys'
+import { referenceKeys, manifestKeys } from '@/lib/query-keys'
 import { InstrumentStatus } from '@/api/gen/meridian/reference_data/v1/instrument_pb'
 import { BehaviorClass } from '@/api/gen/meridian/reference_data/v1/account_type_pb'
 import { usePageTitle } from '@/hooks/use-page-title'
@@ -95,6 +95,15 @@ export function ReferenceDataHubPage() {
     staleTime: 60_000,
   })
 
+  const valuationRulesQuery = useQuery({
+    queryKey: [...manifestKeys.current(), 'hub-valuation-rules-count'],
+    queryFn: async () => {
+      const res = await clients.manifestHistory.getCurrentManifest({})
+      return res.version?.manifest?.valuationRules ?? []
+    },
+    staleTime: 60_000,
+  })
+
   const cards = [
     {
       title: 'Instruments',
@@ -123,6 +132,15 @@ export function ReferenceDataHubPage() {
       href: '/reference-data/nodes',
       icon: <GitBranch className="h-4 w-4" />,
     },
+    {
+      title: 'Valuation Rules',
+      description: 'Instrument conversion rules for cross-asset valuation.',
+      count: valuationRulesQuery.data?.length,
+      isLoading: valuationRulesQuery.isLoading,
+      isError: valuationRulesQuery.isError,
+      href: '/reference-data/valuation-rules',
+      icon: <Scale className="h-4 w-4" />,
+    },
   ]
 
   return (
@@ -139,7 +157,7 @@ export function ReferenceDataHubPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {cards.map((card) => (
           <ReferenceDataCard key={card.href} {...card} />
         ))}
