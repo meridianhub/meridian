@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
 import { CatalogueGrid } from './catalogue-grid'
@@ -32,12 +31,6 @@ const mockItems: CookbookItem[] = [
     meta: { feature_module: 'accounts', configurable: true },
   },
 ]
-
-const mockNavigate = vi.fn()
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
-  return { ...actual, useNavigate: () => mockNavigate }
-})
 
 function renderGrid(items: CookbookItem[], hasActiveFilters = false) {
   return renderWithProviders(
@@ -77,11 +70,10 @@ describe('CatalogueGrid', () => {
     expect(screen.getByText('No matching items')).toBeInTheDocument()
   })
 
-  it('navigates on card click', async () => {
-    const user = userEvent.setup()
+  it('navigates on card click', () => {
     renderGrid(mockItems)
-    await user.click(screen.getByText('Energy Trading'))
-    expect(mockNavigate).toHaveBeenCalledWith('/cookbook/energy-trading')
+    const link = screen.getByText('Energy Trading').closest('a')
+    expect(link).toHaveAttribute('href', '/cookbook/energy-trading')
   })
 
   it('shows complexity indicator for patterns', () => {
