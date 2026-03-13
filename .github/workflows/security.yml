@@ -204,10 +204,13 @@ jobs:
         # includes all fixes. See ADR-0036.
         #
         # NOTE: allow-ghsas is NOT package-scoped — these are globally ignored.
-        # Only Dex-specific advisories are listed here. GHSA-m9hp-7r99-94h5
-        # (encoding/xml) is intentionally excluded to avoid masking XML vulns
-        # in other dependencies.
-        allow-ghsas: GHSA-2x32-jm95-2cpx, GHSA-vh7g-p26c-j2cw, GHSA-gr79-9v6v-gc9r
+        # All four advisories are filed against github.com/dexidp/dex specifically
+        # (not Go stdlib), so the global scope doesn't mask non-Dex issues.
+        # GHSA-m9hp-7r99-94h5: XML encoding in Dex (advisory scoped to Dex module)
+        # GHSA-2x32-jm95-2cpx: Auth bypass in Dex
+        # GHSA-vh7g-p26c-j2cw: MitM ID token capture in Dex
+        # GHSA-gr79-9v6v-gc9r: TLS config discarding in Dex
+        allow-ghsas: GHSA-m9hp-7r99-94h5, GHSA-2x32-jm95-2cpx, GHSA-vh7g-p26c-j2cw, GHSA-gr79-9v6v-gc9r
 
   sbom:
     name: Generate SBOM
