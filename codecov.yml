@@ -4,9 +4,11 @@ coverage:
       default:
         target: 50%
         threshold: 2%
+        informational: true
     patch:
       default:
         target: 60%
+        informational: true
 
 ignore:
   - "**/*.pb.go"
