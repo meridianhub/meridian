@@ -221,6 +221,13 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 		codeStore := mcpauth.NewCodeStore()
 		defer codeStore.Close()
 
+		// Dynamic client registration (RFC 7591) — MCP clients like Claude.ai
+		// register themselves before starting the OAuth flow.
+		clientRegistry := mcpauth.NewClientRegistry()
+		defer clientRegistry.Close()
+		regHandler := mcpauth.NewRegistrationHandler(clientRegistry, logger)
+		mux.Handle("/oauth/register", regHandler)
+
 		// Token endpoint uses passthrough issuer as fallback; the OIDC flow
 		// stores pre-signed JWTs directly via StoreWithToken.
 		issuer := &passthroughIssuer{logger: logger}
@@ -266,6 +273,7 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 				OAuth:      oauthCfg,
 				StateStore: oidcStateStore,
 				CodeStore:  codeStore,
+				Registry:   clientRegistry,
 				Signer:     signer,
 				BaseDomain: baseDomain,
 				Logger:     logger,
@@ -283,7 +291,7 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 		} else {
 			// No Dex configured — use the direct authorization handler (dev/CI only).
 			logger.Warn("MCP_DEX_ISSUER_URL not set — /oauth/authorize issues codes without authentication")
-			authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, codeStore)
+			authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, codeStore, clientRegistry)
 			mux.Handle("/oauth/authorize", authzHandler)
 		}
 

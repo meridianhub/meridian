@@ -193,6 +193,7 @@ type AuthorizationServerMetadata struct {
 	Issuer                            string   `json:"issuer"`
 	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
 	TokenEndpoint                     string   `json:"token_endpoint"`
+	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`
 	ResponseTypesSupported            []string `json:"response_types_supported"`
 	GrantTypesSupported               []string `json:"grant_types_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
@@ -209,6 +210,7 @@ func NewMetadataHandler(baseURL string, cfg OAuthConfig) http.HandlerFunc {
 		Issuer:                            baseURL,
 		AuthorizationEndpoint:             cfg.AuthorizationURL,
 		TokenEndpoint:                     cfg.TokenURL,
+		RegistrationEndpoint:              baseURL + "/oauth/register",
 		ResponseTypesSupported:            []string{"code"},
 		GrantTypesSupported:               []string{"authorization_code"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
@@ -237,18 +239,50 @@ func NewMetadataHandler(baseURL string, cfg OAuthConfig) http.HandlerFunc {
 // It validates the PKCE challenge, generates an authorization code,
 // and redirects the client back to redirect_uri.
 type AuthorizationHandler struct {
-	cfg    OAuthConfig
-	store  *CodeStore
-	logger *slog.Logger
+	cfg      OAuthConfig
+	store    *CodeStore
+	registry *ClientRegistry
+	logger   *slog.Logger
 }
 
 // NewAuthorizationHandler creates a new AuthorizationHandler.
-func NewAuthorizationHandler(cfg OAuthConfig, store *CodeStore) *AuthorizationHandler {
+// If registry is non-nil, dynamically registered clients are accepted
+// in addition to the static client ID from cfg.
+func NewAuthorizationHandler(cfg OAuthConfig, store *CodeStore, registry *ClientRegistry) *AuthorizationHandler {
 	return &AuthorizationHandler{
-		cfg:    cfg,
-		store:  store,
-		logger: slog.Default(),
+		cfg:      cfg,
+		store:    store,
+		registry: registry,
+		logger:   slog.Default(),
 	}
+}
+
+// resolveClient validates the client_id and redirect_uri combination.
+// Returns the resolved redirect URI or an error description string.
+func (h *AuthorizationHandler) resolveClient(clientID, redirectURI string) (string, string) {
+	if clientID == h.cfg.ClientID {
+		if redirectURI != "" && redirectURI != h.cfg.RedirectURI {
+			return "", "redirect_uri does not match registered value"
+		}
+		if redirectURI == "" {
+			return h.cfg.RedirectURI, ""
+		}
+		return redirectURI, ""
+	}
+	if h.registry != nil {
+		client, ok := h.registry.Lookup(clientID)
+		if !ok {
+			return "", "invalid client_id"
+		}
+		if redirectURI == "" {
+			return "", "redirect_uri is required for dynamic clients"
+		}
+		if !client.HasRedirectURI(redirectURI) {
+			return "", "redirect_uri does not match registered value"
+		}
+		return redirectURI, ""
+	}
+	return "", "invalid client_id"
 }
 
 // ServeHTTP implements http.Handler.
@@ -261,24 +295,17 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	q := r.URL.Query()
 
-	clientID := q.Get("client_id")
-	if clientID != h.cfg.ClientID {
-		http.Error(w, "invalid client_id", http.StatusBadRequest)
+	redirectURI, errMsg := h.resolveClient(q.Get("client_id"), q.Get("redirect_uri"))
+	if errMsg != "" {
+		http.Error(w, errMsg, http.StatusBadRequest)
 		return
 	}
+
+	clientID := q.Get("client_id")
 
 	// Require response_type=code (only supported grant).
 	if q.Get("response_type") != "code" {
 		http.Error(w, "response_type must be 'code'", http.StatusBadRequest)
-		return
-	}
-
-	// Validate redirect_uri against the registered value to prevent open redirect.
-	// If the client provides one it must match exactly; reject mismatches.
-	// After validation, always redirect to the registered URI (not the client-supplied one)
-	// so the redirect target is never user-controlled.
-	if clientRedirect := q.Get("redirect_uri"); clientRedirect != "" && clientRedirect != h.cfg.RedirectURI {
-		http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
 		return
 	}
 
@@ -305,15 +332,16 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	h.store.Store(code, CodeEntry{
 		CodeChallenge: challenge,
 		ClientID:      clientID,
-		RedirectURI:   h.cfg.RedirectURI,
+		RedirectURI:   redirectURI,
 		IssuedAt:      time.Now(),
 	})
 
 	h.logger.Info("authorization code issued", "client_id", clientID)
 
-	// Build redirect URL via url.Parse using the registered (trusted) URI.
-	// The redirect target is never derived from user-supplied input.
-	target, err := url.Parse(h.cfg.RedirectURI)
+	// Build redirect URL via url.Parse using the validated redirect URI.
+	// For static clients this is the registered URI; for dynamic clients
+	// it was validated against the client's registered redirect_uris.
+	target, err := url.Parse(redirectURI)
 	if err != nil {
 		h.logger.Error("invalid registered redirect URI", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
