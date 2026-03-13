@@ -120,7 +120,7 @@ function AuditDetailPanel({ entry, onClose }: AuditDetailPanelProps) {
           {/* Content */}
           <div className="p-6 space-y-6">
             {/* Metadata */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Table</p>
                 <p className="mt-1 text-sm font-mono">{entry.tableName}</p>

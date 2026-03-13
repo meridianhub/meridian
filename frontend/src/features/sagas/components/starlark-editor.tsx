@@ -261,7 +261,7 @@ function ComplexityMetricsPanel({ metrics }: ComplexityMetricsPanelProps) {
       <p className="mb-1.5 text-xs font-medium text-muted-foreground">
         Complexity Metrics
       </p>
-      <div className="grid grid-cols-4 gap-3 text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
         <div className="flex flex-col gap-0.5">
           <span className="text-muted-foreground">Handler Calls</span>
           <span className="font-mono font-semibold">{handlerCalls}</span>
