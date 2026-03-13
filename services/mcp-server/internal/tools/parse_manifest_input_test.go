@@ -38,9 +38,9 @@ func TestManifestValidate_YAMLStringInput_Accepted(t *testing.T) {
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	// Pass manifest as a YAML string (not an object)
 	yamlStr, _ := json.Marshal(validManifestYAML())
@@ -70,9 +70,9 @@ func TestManifestValidate_JSONStringInput_Accepted(t *testing.T) {
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	// Pass manifest as a JSON string (YAML is a superset of JSON)
 	jsonStr, _ := json.Marshal(validManifestJSONString())
@@ -98,9 +98,9 @@ func TestManifestValidate_InvalidYAMLString_ReturnsError(t *testing.T) {
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	// Pass an invalid YAML string
 	invalidYAML := `"invalid: yaml: [unclosed bracket"`
@@ -130,9 +130,9 @@ func TestManifestPlan_YAMLStringInput_Accepted(t *testing.T) {
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	yamlStr, _ := json.Marshal(validManifestYAML())
 	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s}`, yamlStr))
@@ -167,9 +167,9 @@ func TestManifestApply_YAMLStringInput_Accepted(t *testing.T) {
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	yamlStr, _ := json.Marshal(validManifestYAML())
 	planParams := json.RawMessage(fmt.Sprintf(`{"manifest": %s}`, yamlStr))
@@ -206,9 +206,9 @@ func TestManifestValidate_JSONObjectInput_StillWorks(t *testing.T) {
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	// Pass manifest as a JSON object (the original behavior)
 	params := json.RawMessage(fmt.Sprintf(`{"manifest": %s}`, validManifestJSON()))

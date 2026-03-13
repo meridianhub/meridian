@@ -4,16 +4,17 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
 )
 
 // RegisterReferenceTools registers all static reference tools that return
 // platform metadata. These tools are tenant-agnostic and require no gRPC clients.
-func RegisterReferenceTools(registry *Registry) error {
+func RegisterReferenceTools(srv *mcp.Server) {
 	allTools := []Tool{
 		buildTopicsListTool(),
 		buildStarlarkReferenceTool(),
@@ -22,11 +23,8 @@ func RegisterReferenceTools(registry *Registry) error {
 	}
 
 	for _, t := range allTools {
-		if err := registry.Register(t); err != nil {
-			return fmt.Errorf("register tool %q: %w", t.Name, err)
-		}
+		addTool(srv, t)
 	}
-	return nil
 }
 
 // topicEntry describes a single event topic.

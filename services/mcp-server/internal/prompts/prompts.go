@@ -10,122 +10,41 @@
 package prompts
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ErrPromptNotFound is returned when the requested prompt name is not registered.
-var ErrPromptNotFound = errors.New("prompt not found")
+var (
+	errMissingTransactionID     = errors.New("missing required argument: transaction_id")
+	errMissingChangeDescription = errors.New("missing required argument: change_description")
+	errMissingSagaID            = errors.New("missing required argument: saga_id")
+)
 
-// ErrMissingRequiredArgument is returned when a required argument is absent.
-var ErrMissingRequiredArgument = errors.New("missing required argument")
-
-// Argument describes a single parameter accepted by a prompt.
-type Argument struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required,omitempty"`
+// RegisterPrompts registers all built-in Meridian prompts onto the SDK server.
+func RegisterPrompts(srv *mcp.Server) {
+	registerDesignEconomy(srv)
+	registerAuditTransaction(srv)
+	registerSimulateChange(srv)
+	registerDebugSaga(srv)
 }
 
-// Prompt describes a registered prompt and its accepted arguments.
-type Prompt struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description,omitempty"`
-	Arguments   []Argument `json:"arguments,omitempty"`
-}
-
-// MessageContent holds the text payload of a prompt message.
-type MessageContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-// Message is a single role+content pair in a prompt result.
-type Message struct {
-	Role    string         `json:"role"`
-	Content MessageContent `json:"content"`
-}
-
-// GetResult is the payload returned by prompts/get.
-type GetResult struct {
-	Description string    `json:"description,omitempty"`
-	Messages    []Message `json:"messages"`
-}
-
-// promptDef holds the static definition and a factory function for building messages.
-type promptDef struct {
-	meta    Prompt
-	builder func(args map[string]string) (*GetResult, error)
-}
-
-// Registry holds all registered prompts and dispatches Get calls.
-type Registry struct {
-	defs []promptDef
-}
-
-// NewRegistry creates a Registry pre-loaded with all built-in Meridian prompts.
-func NewRegistry() *Registry {
-	r := &Registry{}
-	r.register()
-	return r
-}
-
-func (r *Registry) register() {
-	r.defs = []promptDef{
-		buildDesignEconomy(),
-		buildAuditTransaction(),
-		buildSimulateChange(),
-		buildDebugSaga(),
-	}
-}
-
-// List returns all registered prompt descriptors (without message content).
-// Each Prompt is a deep copy; callers cannot mutate registry state.
-func (r *Registry) List() []Prompt {
-	result := make([]Prompt, len(r.defs))
-	for i, d := range r.defs {
-		p := d.meta
-		if len(p.Arguments) > 0 {
-			args := make([]Argument, len(p.Arguments))
-			copy(args, p.Arguments)
-			p.Arguments = args
-		}
-		result[i] = p
-	}
-	return result
-}
-
-// Get returns the message list for the named prompt, substituting the provided
-// arguments into templates. Returns ErrPromptNotFound or ErrMissingRequiredArgument
-// on failure.
-func (r *Registry) Get(name string, args map[string]string) (*GetResult, error) {
-	for _, d := range r.defs {
-		if d.meta.Name == name {
-			return d.builder(args)
-		}
-	}
-	return nil, fmt.Errorf("%w: %q", ErrPromptNotFound, name)
-}
-
-// ---- prompt builders ----
-
-func buildDesignEconomy() promptDef {
-	return promptDef{
-		meta: Prompt{
-			Name:        "design-economy",
-			Description: "Guided workflow for creating a new Meridian economy manifest. Asks clarifying questions about instruments, account types, sagas, and valuation rules, then generates a complete manifest.",
-			Arguments:   []Argument{},
-		},
-		builder: func(_ map[string]string) (*GetResult, error) {
-			return &GetResult{
-				Description: "Guided manifest creation workflow",
-				Messages: []Message{
-					{
-						Role: "user",
-						Content: MessageContent{
-							Type: "text",
-							Text: strings.TrimSpace(`
+func registerDesignEconomy(srv *mcp.Server) {
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "design-economy",
+		Description: "Guided workflow for creating a new Meridian economy manifest. Asks clarifying questions about instruments, account types, sagas, and valuation rules, then generates a complete manifest.",
+		Arguments:   []*mcp.PromptArgument{},
+	}, func(_ context.Context, _ *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{
+			Description: "Guided manifest creation workflow",
+			Messages: []*mcp.PromptMessage{
+				{
+					Role: "user",
+					Content: &mcp.TextContent{
+						Text: strings.TrimSpace(`
 I want to design a new Meridian economy manifest. Please guide me through the process.
 
 Start by asking me about:
@@ -137,40 +56,36 @@ Start by asking me about:
 
 After gathering this information, generate a complete manifest in YAML format that I can apply with the meridian_apply_manifest tool.
 `),
-						},
 					},
 				},
-			}, nil
-		},
-	}
+			},
+		}, nil
+	})
 }
 
-func buildAuditTransaction() promptDef {
-	return promptDef{
-		meta: Prompt{
-			Name:        "audit-transaction",
-			Description: "Investigate a specific transaction's causation tree: find the originating saga, its steps, position movements, journal entries, and any compensation actions.",
-			Arguments: []Argument{
-				{
-					Name:        "transaction_id",
-					Description: "The transaction ID (UUID or external reference) to audit.",
-					Required:    true,
-				},
+func registerAuditTransaction(srv *mcp.Server) {
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "audit-transaction",
+		Description: "Investigate a specific transaction's causation tree: find the originating saga, its steps, position movements, journal entries, and any compensation actions.",
+		Arguments: []*mcp.PromptArgument{
+			{
+				Name:        "transaction_id",
+				Description: "The transaction ID (UUID or external reference) to audit.",
+				Required:    true,
 			},
 		},
-		builder: func(args map[string]string) (*GetResult, error) {
-			txnID := args["transaction_id"]
-			if txnID == "" {
-				return nil, fmt.Errorf("%w: transaction_id", ErrMissingRequiredArgument)
-			}
-			return &GetResult{
-				Description: fmt.Sprintf("Audit transaction %s", txnID),
-				Messages: []Message{
-					{
-						Role: "user",
-						Content: MessageContent{
-							Type: "text",
-							Text: fmt.Sprintf(strings.TrimSpace(`
+	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		txnID := req.Params.Arguments["transaction_id"]
+		if txnID == "" {
+			return nil, errMissingTransactionID
+		}
+		return &mcp.GetPromptResult{
+			Description: fmt.Sprintf("Audit transaction %s", txnID),
+			Messages: []*mcp.PromptMessage{
+				{
+					Role: "user",
+					Content: &mcp.TextContent{
+						Text: fmt.Sprintf(strings.TrimSpace(`
 Please perform a complete audit of transaction %s.
 
 Use the available tools to investigate:
@@ -191,40 +106,36 @@ Use the available tools to investigate:
 
 Transaction ID: %s
 `), txnID, txnID),
-						},
 					},
 				},
-			}, nil
-		},
-	}
+			},
+		}, nil
+	})
 }
 
-func buildSimulateChange() promptDef {
-	return promptDef{
-		meta: Prompt{
-			Name:        "simulate-change",
-			Description: "Test a proposed manifest change before applying it. Analyses the impact on existing sagas, instruments, and account types, and identifies potential breaking changes.",
-			Arguments: []Argument{
-				{
-					Name:        "change_description",
-					Description: "A description of the manifest change to simulate (e.g., 'add a new instrument CARBON_CREDIT' or 'deprecate the LEGACY_RAIL payment rail').",
-					Required:    true,
-				},
+func registerSimulateChange(srv *mcp.Server) {
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "simulate-change",
+		Description: "Test a proposed manifest change before applying it. Analyses the impact on existing sagas, instruments, and account types, and identifies potential breaking changes.",
+		Arguments: []*mcp.PromptArgument{
+			{
+				Name:        "change_description",
+				Description: "A description of the manifest change to simulate (e.g., 'add a new instrument CARBON_CREDIT' or 'deprecate the LEGACY_RAIL payment rail').",
+				Required:    true,
 			},
 		},
-		builder: func(args map[string]string) (*GetResult, error) {
-			change := args["change_description"]
-			if change == "" {
-				return nil, fmt.Errorf("%w: change_description", ErrMissingRequiredArgument)
-			}
-			return &GetResult{
-				Description: "Simulate manifest change",
-				Messages: []Message{
-					{
-						Role: "user",
-						Content: MessageContent{
-							Type: "text",
-							Text: fmt.Sprintf(strings.TrimSpace(`
+	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		change := req.Params.Arguments["change_description"]
+		if change == "" {
+			return nil, errMissingChangeDescription
+		}
+		return &mcp.GetPromptResult{
+			Description: "Simulate manifest change",
+			Messages: []*mcp.PromptMessage{
+				{
+					Role: "user",
+					Content: &mcp.TextContent{
+						Text: fmt.Sprintf(strings.TrimSpace(`
 I want to simulate the following change to my Meridian economy manifest before applying it:
 
 %s
@@ -243,40 +154,36 @@ Please help me understand the impact of this change:
 
 6. **Generate updated manifest**: If the change is safe to apply, generate the updated manifest YAML that I can review before applying.
 `), change),
-						},
 					},
 				},
-			}, nil
-		},
-	}
+			},
+		}, nil
+	})
 }
 
-func buildDebugSaga() promptDef {
-	return promptDef{
-		meta: Prompt{
-			Name:        "debug-saga",
-			Description: "Diagnose a failed or stuck saga execution. Examines the execution log, identifies the failing step, checks compensation status, and suggests remediation.",
-			Arguments: []Argument{
-				{
-					Name:        "saga_id",
-					Description: "The saga execution ID (UUID) to debug.",
-					Required:    true,
-				},
+func registerDebugSaga(srv *mcp.Server) {
+	srv.AddPrompt(&mcp.Prompt{
+		Name:        "debug-saga",
+		Description: "Diagnose a failed or stuck saga execution. Examines the execution log, identifies the failing step, checks compensation status, and suggests remediation.",
+		Arguments: []*mcp.PromptArgument{
+			{
+				Name:        "saga_id",
+				Description: "The saga execution ID (UUID) to debug.",
+				Required:    true,
 			},
 		},
-		builder: func(args map[string]string) (*GetResult, error) {
-			sagaID := args["saga_id"]
-			if sagaID == "" {
-				return nil, fmt.Errorf("%w: saga_id", ErrMissingRequiredArgument)
-			}
-			return &GetResult{
-				Description: fmt.Sprintf("Debug saga execution %s", sagaID),
-				Messages: []Message{
-					{
-						Role: "user",
-						Content: MessageContent{
-							Type: "text",
-							Text: fmt.Sprintf(strings.TrimSpace(`
+	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		sagaID := req.Params.Arguments["saga_id"]
+		if sagaID == "" {
+			return nil, errMissingSagaID
+		}
+		return &mcp.GetPromptResult{
+			Description: fmt.Sprintf("Debug saga execution %s", sagaID),
+			Messages: []*mcp.PromptMessage{
+				{
+					Role: "user",
+					Content: &mcp.TextContent{
+						Text: fmt.Sprintf(strings.TrimSpace(`
 Please diagnose the failed or stuck saga execution %s.
 
 Use the available tools to investigate:
@@ -298,10 +205,9 @@ Use the available tools to investigate:
 
 Saga execution ID: %s
 `), sagaID, sagaID, sagaID),
-						},
 					},
 				},
-			}, nil
-		},
-	}
+			},
+		}, nil
+	})
 }

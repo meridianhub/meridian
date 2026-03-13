@@ -73,16 +73,14 @@ func (m *mockMarketInformationClient) ListObservations(_ context.Context, _ *mar
 
 // ---- helpers ----
 
-func mustRegisterRefdata(t *testing.T, deps tools.ReferenceDataDeps) *tools.Registry {
+func mustRegisterRefdata(t *testing.T, deps tools.ReferenceDataDeps) *testServer {
 	t.Helper()
-	r := tools.NewRegistry()
-	if err := tools.RegisterReferenceDataTools(r, deps); err != nil {
-		t.Fatalf("RegisterReferenceDataTools: %v", err)
-	}
+	r := newTestServer(t)
+	tools.RegisterReferenceDataTools(r.Server(), deps)
 	return r
 }
 
-func callTool(t *testing.T, r *tools.Registry, name string, params string) interface{} {
+func callTool(t *testing.T, r *testServer, name string, params string) interface{} {
 	t.Helper()
 	result, err := r.Call(context.Background(), name, json.RawMessage(params))
 	if err != nil {
@@ -193,7 +191,7 @@ func buildTestManifest() *controlplanev1.Manifest {
 
 func TestRegisterReferenceDataTools_RegistersAllTools(t *testing.T) {
 	r := mustRegisterRefdata(t, tools.ReferenceDataDeps{})
-	listed := r.List()
+	listed := r.List(context.Background())
 
 	expectedNames := []string{
 		"meridian_economy_structure",
@@ -217,7 +215,7 @@ func TestRegisterReferenceDataTools_RegistersAllTools(t *testing.T) {
 
 func TestRegisterReferenceDataTools_AllCategoryRead(t *testing.T) {
 	r := mustRegisterRefdata(t, tools.ReferenceDataDeps{})
-	for _, tool := range r.List() {
+	for _, tool := range r.List(context.Background()) {
 		if tool.Category != tools.CategoryRead {
 			t.Errorf("tool %q has category %v, want CategoryRead", tool.Name, tool.Category)
 		}
@@ -254,7 +252,7 @@ func TestEconomyStructure_ValidManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("expected instruments map in economy")
 	}
-	if instruments["count"] != 2 {
+	if instruments["count"] != float64(2) {
 		t.Errorf("expected 2 instruments, got %v", instruments["count"])
 	}
 
@@ -262,7 +260,7 @@ func TestEconomyStructure_ValidManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("expected sagas map in economy")
 	}
-	if sagas["count"] != 2 {
+	if sagas["count"] != float64(2) {
 		t.Errorf("expected 2 sagas, got %v", sagas["count"])
 	}
 }
@@ -331,19 +329,20 @@ func TestInstrumentsList_ValidQuery(t *testing.T) {
 	result := callTool(t, r, "meridian_instruments_list", `{}`)
 	m := resultMap(t, result)
 
-	if m["count"] != 2 {
+	if m["count"] != float64(2) {
 		t.Fatalf("expected count=2, got %v", m["count"])
 	}
 
-	instruments, ok := m["instruments"].([]map[string]interface{})
+	instrumentsRaw, ok := m["instruments"].([]interface{})
 	if !ok {
 		t.Fatal("expected instruments slice")
 	}
-	if len(instruments) == 0 {
+	if len(instrumentsRaw) == 0 {
 		t.Fatal("expected at least one instrument")
 	}
-	if instruments[0]["code"] != "USD" {
-		t.Errorf("expected first instrument code USD, got %v", instruments[0]["code"])
+	inst0 := instrumentsRaw[0].(map[string]interface{})
+	if inst0["code"] != "USD" {
+		t.Errorf("expected first instrument code USD, got %v", inst0["code"])
 	}
 }
 
@@ -358,7 +357,7 @@ func TestInstrumentsList_WithStatusFilter(t *testing.T) {
 	// Valid status filter does not error
 	result := callTool(t, r, "meridian_instruments_list", `{"status_filter":"ACTIVE"}`)
 	m := resultMap(t, result)
-	if m["count"] != 0 {
+	if m["count"] != float64(0) {
 		t.Errorf("expected count=0, got %v", m["count"])
 	}
 }
@@ -468,19 +467,20 @@ func TestSagasList_ValidQuery(t *testing.T) {
 	result := callTool(t, r, "meridian_sagas_list", `{}`)
 	m := resultMap(t, result)
 
-	if m["count"] != 1 {
+	if m["count"] != float64(1) {
 		t.Fatalf("expected count=1, got %v", m["count"])
 	}
 
-	sagas, ok := m["sagas"].([]map[string]interface{})
+	sagasRaw, ok := m["sagas"].([]interface{})
 	if !ok {
 		t.Fatal("expected sagas slice")
 	}
-	if len(sagas) == 0 {
+	if len(sagasRaw) == 0 {
 		t.Fatal("expected at least one saga")
 	}
-	if sagas[0]["name"] != "process_payment" {
-		t.Errorf("expected saga name process_payment, got %v", sagas[0]["name"])
+	s0 := sagasRaw[0].(map[string]interface{})
+	if s0["name"] != "process_payment" {
+		t.Errorf("expected saga name process_payment, got %v", s0["name"])
 	}
 }
 
@@ -579,12 +579,12 @@ func TestHandlersDescribe_ValidManifest(t *testing.T) {
 	result := callTool(t, r, "meridian_handlers_describe", `{}`)
 	m := resultMap(t, result)
 
-	triggerCount, _ := m["saga_trigger_count"].(int)
+	triggerCount, _ := m["saga_trigger_count"].(float64)
 	if triggerCount != 2 {
 		t.Errorf("expected 2 saga triggers, got %v", m["saga_trigger_count"])
 	}
 
-	policyCount, _ := m["policy_count"].(int)
+	policyCount, _ := m["policy_count"].(float64)
 	if policyCount != 1 {
 		t.Errorf("expected 1 account type policy, got %v", m["policy_count"])
 	}
@@ -606,7 +606,7 @@ func TestHandlersDescribe_TriggerFilter(t *testing.T) {
 	result := callTool(t, r, "meridian_handlers_describe", `{"trigger_prefix":"api"}`)
 	m := resultMap(t, result)
 
-	triggerCount, _ := m["saga_trigger_count"].(int)
+	triggerCount, _ := m["saga_trigger_count"].(float64)
 	if triggerCount != 1 {
 		t.Errorf("expected 1 api saga trigger, got %v", m["saga_trigger_count"])
 	}
@@ -635,7 +635,7 @@ func TestHandlersDescribe_EventTriggerFilter(t *testing.T) {
 	result := callTool(t, r, "meridian_handlers_describe", `{"trigger_prefix":"event"}`)
 	m := resultMap(t, result)
 
-	triggerCount, _ := m["saga_trigger_count"].(int)
+	triggerCount, _ := m["saga_trigger_count"].(float64)
 	if triggerCount != 1 {
 		t.Errorf("expected 1 event saga trigger, got %v", m["saga_trigger_count"])
 	}
@@ -643,7 +643,7 @@ func TestHandlersDescribe_EventTriggerFilter(t *testing.T) {
 	// Unfiltered result should include all 3 sagas now
 	result = callTool(t, r, "meridian_handlers_describe", `{}`)
 	m = resultMap(t, result)
-	triggerCount, _ = m["saga_trigger_count"].(int)
+	triggerCount, _ = m["saga_trigger_count"].(float64)
 	if triggerCount != 3 {
 		t.Errorf("expected 3 saga triggers (api + scheduled + event), got %v", m["saga_trigger_count"])
 	}
@@ -682,19 +682,20 @@ func TestMarketDataQuery_ListDatasets(t *testing.T) {
 	result := callTool(t, r, "meridian_market_data_query", `{}`)
 	m := resultMap(t, result)
 
-	if m["count"] != 1 {
+	if m["count"] != float64(1) {
 		t.Fatalf("expected count=1, got %v", m["count"])
 	}
 
-	datasets, ok := m["datasets"].([]map[string]interface{})
+	datasetsRaw, ok := m["datasets"].([]interface{})
 	if !ok {
 		t.Fatal("expected datasets slice")
 	}
-	if len(datasets) == 0 {
+	if len(datasetsRaw) == 0 {
 		t.Fatal("expected at least one dataset")
 	}
-	if datasets[0]["code"] != "USD_EUR_FX" {
-		t.Errorf("expected dataset code USD_EUR_FX, got %v", datasets[0]["code"])
+	ds0 := datasetsRaw[0].(map[string]interface{})
+	if ds0["code"] != "USD_EUR_FX" {
+		t.Errorf("expected dataset code USD_EUR_FX, got %v", ds0["code"])
 	}
 }
 
@@ -724,19 +725,20 @@ func TestMarketDataQuery_ListObservations(t *testing.T) {
 	if m["dataset_code"] != "USD_EUR_FX" {
 		t.Errorf("expected dataset_code=USD_EUR_FX, got %v", m["dataset_code"])
 	}
-	if m["count"] != 1 {
+	if m["count"] != float64(1) {
 		t.Fatalf("expected count=1, got %v", m["count"])
 	}
 
-	observations, ok := m["observations"].([]map[string]interface{})
+	observationsRaw, ok := m["observations"].([]interface{})
 	if !ok {
 		t.Fatal("expected observations slice")
 	}
-	if len(observations) == 0 {
+	if len(observationsRaw) == 0 {
 		t.Fatal("expected at least one observation")
 	}
-	if observations[0]["value"] != "1.0823" {
-		t.Errorf("expected value=1.0823, got %v", observations[0]["value"])
+	obs0 := observationsRaw[0].(map[string]interface{})
+	if obs0["value"] != "1.0823" {
+		t.Errorf("expected value=1.0823, got %v", obs0["value"])
 	}
 }
 

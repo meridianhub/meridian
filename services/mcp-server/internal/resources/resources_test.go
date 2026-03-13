@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/meridianhub/meridian/services/mcp-server/internal/resources"
 )
 
@@ -18,17 +20,47 @@ func (f *fakeManifestClient) GetCurrentManifestYAML(_ context.Context) (string, 
 	return f.yaml, f.err
 }
 
+// setupResourceServer creates an in-memory MCP server+client pair with
+// resources registered, returning the connected client session.
+func setupResourceServer(t *testing.T, client resources.ManifestClient) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "v0.0.1"}, nil)
+	resources.RegisterEmbeddedDocs(srv)
+	resources.RegisterManifestResource(srv, client)
+
+	ct, st := mcp.NewInMemoryTransports()
+	ss, err := srv.Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { ss.Close() })
+
+	c := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	cs, err := c.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { cs.Close() })
+
+	return cs
+}
+
 func TestResourceProvider_List_ReturnsAllResources(t *testing.T) {
-	provider := resources.New(nil)
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
 
-	list := provider.List()
+	result, err := cs.ListResources(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
 
-	if len(list) == 0 {
+	if len(result.Resources) == 0 {
 		t.Fatal("expected at least one resource, got none")
 	}
 
-	// Verify each resource has a non-empty URI and name
-	for _, r := range list {
+	for _, r := range result.Resources {
 		if r.URI == "" {
 			t.Errorf("resource missing URI: %+v", r)
 		}
@@ -39,11 +71,16 @@ func TestResourceProvider_List_ReturnsAllResources(t *testing.T) {
 }
 
 func TestResourceProvider_List_IncludesDocResources(t *testing.T) {
-	provider := resources.New(nil)
-	list := provider.List()
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
+
+	result, err := cs.ListResources(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
 
 	uris := make(map[string]bool)
-	for _, r := range list {
+	for _, r := range result.Resources {
 		uris[r.URI] = true
 	}
 
@@ -59,11 +96,16 @@ func TestResourceProvider_List_IncludesDocResources(t *testing.T) {
 }
 
 func TestResourceProvider_List_IncludesManifestResource(t *testing.T) {
-	provider := resources.New(nil)
-	list := provider.List()
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
+
+	result, err := cs.ListResources(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
 
 	uris := make(map[string]bool)
-	for _, r := range list {
+	for _, r := range result.Resources {
 		uris[r.URI] = true
 	}
 
@@ -73,14 +115,14 @@ func TestResourceProvider_List_IncludesManifestResource(t *testing.T) {
 }
 
 func TestResourceProvider_Read_StarlarkGuide(t *testing.T) {
-	provider := resources.New(nil)
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
 
-	result, err := provider.Read(context.Background(), "meridian://docs/starlark-guide")
+	result, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: "meridian://docs/starlark-guide",
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
+		t.Fatalf("ReadResource: %v", err)
 	}
 	if len(result.Contents) == 0 {
 		t.Fatal("expected at least one content block")
@@ -93,11 +135,14 @@ func TestResourceProvider_Read_StarlarkGuide(t *testing.T) {
 }
 
 func TestResourceProvider_Read_CELReference(t *testing.T) {
-	provider := resources.New(nil)
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
 
-	result, err := provider.Read(context.Background(), "meridian://docs/cel-reference")
+	result, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: "meridian://docs/cel-reference",
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("ReadResource: %v", err)
 	}
 	if len(result.Contents) == 0 {
 		t.Fatal("expected at least one content block")
@@ -112,11 +157,14 @@ func TestResourceProvider_Read_CELReference(t *testing.T) {
 func TestResourceProvider_Read_ManifestCurrent_WithClient(t *testing.T) {
 	manifestYAML := "instruments:\n  - code: GBP\n    name: British Pound\n"
 	client := &fakeManifestClient{yaml: manifestYAML}
-	provider := resources.New(client)
+	cs := setupResourceServer(t, client)
+	ctx := context.Background()
 
-	result, err := provider.Read(context.Background(), "meridian://manifest/current")
+	result, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: "meridian://manifest/current",
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("ReadResource: %v", err)
 	}
 	if len(result.Contents) == 0 {
 		t.Fatal("expected at least one content block")
@@ -129,38 +177,46 @@ func TestResourceProvider_Read_ManifestCurrent_WithClient(t *testing.T) {
 }
 
 func TestResourceProvider_Read_ManifestCurrent_NoClient(t *testing.T) {
-	provider := resources.New(nil)
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
 
-	result, err := provider.Read(context.Background(), "meridian://manifest/current")
+	result, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: "meridian://manifest/current",
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("ReadResource: %v", err)
 	}
 	if len(result.Contents) == 0 {
 		t.Fatal("expected at least one content block")
 	}
-	// Should return a message indicating no client configured
 	if result.Contents[0].Text == "" {
 		t.Error("expected non-empty content for manifest with no client")
 	}
 }
 
 func TestResourceProvider_Read_UnknownURI_ReturnsError(t *testing.T) {
-	provider := resources.New(nil)
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
 
-	_, err := provider.Read(context.Background(), "meridian://unknown/resource")
+	_, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: "meridian://unknown/resource",
+	})
 	if err == nil {
 		t.Fatal("expected error for unknown URI")
 	}
 }
 
 func TestResourceProvider_EmbeddedDocs_NotEmpty(t *testing.T) {
-	provider := resources.New(nil)
+	cs := setupResourceServer(t, nil)
+	ctx := context.Background()
 
 	for _, uri := range []string{
 		"meridian://docs/starlark-guide",
 		"meridian://docs/cel-reference",
 	} {
-		result, err := provider.Read(context.Background(), uri)
+		result, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{
+			URI: uri,
+		})
 		if err != nil {
 			t.Errorf("URI %q: unexpected error: %v", uri, err)
 			continue

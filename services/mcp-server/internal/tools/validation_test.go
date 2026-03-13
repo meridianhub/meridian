@@ -8,12 +8,10 @@ import (
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
 )
 
-func newValidationRegistry(t *testing.T) *tools.Registry {
+func newValidationRegistry(t *testing.T) *testServer {
 	t.Helper()
-	r := tools.NewRegistry()
-	if err := tools.RegisterValidationTools(r); err != nil {
-		t.Fatalf("RegisterValidationTools: %v", err)
-	}
+	r := newTestServer(t)
+	tools.RegisterValidationTools(r.Server())
 	return r
 }
 

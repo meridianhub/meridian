@@ -6,16 +6,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
-	"github.com/meridianhub/meridian/services/mcp-server/internal/server"
-	"github.com/meridianhub/meridian/services/mcp-server/internal/transport"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -56,28 +55,12 @@ func run(logger *slog.Logger) error {
 	transportMode := env.GetEnvOrDefault("MCP_TRANSPORT", "stdio")
 	serverName := env.GetEnvOrDefault("MCP_SERVER_NAME", "meridian-mcp")
 
-	cfg := server.Config{
-		ServerName:    serverName,
-		ServerVersion: Version,
-	}
-
-	switch transportMode {
-	case "stdio":
-		return runStdio(logger, cfg)
-	case "http":
-		return runHTTP(logger, cfg)
-	default:
-		return bootstrap.Permanent(fmt.Errorf("%w: %s (expected stdio or http)", errUnknownTransport, transportMode))
-	}
-}
-
-func runStdio(logger *slog.Logger, cfg server.Config) error {
-	logger.Info("using stdio transport")
-
-	tr := transport.NewStdioTransport(os.Stdin, os.Stdout)
-	defer tr.Close()
-
-	srv := server.New(tr, cfg, logger)
+	srv := mcp.NewServer(&mcp.Implementation{
+		Name:    serverName,
+		Version: Version,
+	}, &mcp.ServerOptions{
+		Logger: logger,
+	})
 
 	// Wire tools, resources, and prompts onto the server.
 	// cookbookFS is nil until the cookbook directory is embedded at build time.
@@ -88,6 +71,19 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 	if cleanup != nil {
 		defer cleanup()
 	}
+
+	switch transportMode {
+	case "stdio":
+		return runStdio(logger, srv)
+	case "http":
+		return runHTTP(logger, srv)
+	default:
+		return bootstrap.Permanent(fmt.Errorf("%w: %s (expected stdio or http)", errUnknownTransport, transportMode))
+	}
+}
+
+func runStdio(logger *slog.Logger, srv *mcp.Server) error {
+	logger.Info("using stdio transport")
 
 	// For stdio, we run until stdin closes or we receive a signal.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -105,7 +101,7 @@ func runStdio(logger *slog.Logger, cfg server.Config) error {
 		}
 	}()
 
-	return srv.Run(ctx)
+	return srv.Run(ctx, &mcp.StdioTransport{})
 }
 
 const (
@@ -180,33 +176,16 @@ func (p *passthroughIssuer) Issue(claims map[string]any) (string, error) {
 	return fmt.Sprintf("mcp-issued-%v", claims["client_id"]), nil
 }
 
-func runHTTP(logger *slog.Logger, cfg server.Config) error {
+func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 	port := env.GetEnvOrDefault("MCP_PORT", "8090")
 	addr := fmt.Sprintf(":%s", port)
 
 	logger.Info("using streamable HTTP transport", "address", addr)
 
-	// The streamable HTTP handler calls Dispatch() directly — no transport
-	// read/write loop is needed. We provide a no-op transport to satisfy
-	// server.New(); Run() is never called in HTTP mode.
-	pr, pw := io.Pipe()
-	noopTr := transport.NewStdioTransport(pr, io.Discard)
-	defer func() { _ = pw.Close(); _ = noopTr.Close() }()
-
-	srv := server.New(noopTr, cfg, logger)
-
-	// Wire tools, resources, and prompts onto the server.
-	// cookbookFS is nil until the cookbook directory is embedded at build time.
-	cleanup, wireErr := wireServer(srv, logger, nil)
-	if wireErr != nil {
-		return fmt.Errorf("wire server: %w", wireErr)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	streamableHandler := transport.NewStreamableHTTPHandler(srv, logger)
-	defer streamableHandler.Close()
+	// The SDK's StreamableHTTPHandler creates sessions and transports internally.
+	streamableHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		return srv
+	}, nil)
 
 	mux := http.NewServeMux()
 

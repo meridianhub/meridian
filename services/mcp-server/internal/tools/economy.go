@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -51,9 +52,9 @@ type EconomyDeps struct {
 	Historian ManifestHistorian
 }
 
-// RegisterEconomyTools registers the manifest lifecycle tools into the registry.
+// RegisterEconomyTools registers the manifest lifecycle tools onto the SDK server.
 // Tools whose required client is nil are silently skipped.
-func RegisterEconomyTools(registry *Registry, sess PlanStore, deps EconomyDeps) {
+func RegisterEconomyTools(srv *mcp.Server, sess PlanStore, deps EconomyDeps) {
 	var candidates []Tool
 
 	if deps.Applier != nil {
@@ -69,9 +70,7 @@ func RegisterEconomyTools(registry *Registry, sess PlanStore, deps EconomyDeps) 
 	}
 
 	for _, t := range candidates {
-		if err := registry.Register(t); err != nil {
-			panic(fmt.Sprintf("failed to register economy tool %q: %v", t.Name, err))
-		}
+		addTool(srv, t)
 	}
 }
 

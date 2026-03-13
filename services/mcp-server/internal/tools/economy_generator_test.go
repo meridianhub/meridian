@@ -32,18 +32,18 @@ func (m *mockEconomyGeneratorClient) GetGenerationContext(ctx context.Context, r
 // --- RegisterEconomyGeneratorTools ---
 
 func TestRegisterEconomyGeneratorTools_NilClient_NoRegistration(t *testing.T) {
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, nil)
-	assert.Empty(t, reg.List())
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), nil)
+	assert.Empty(t, reg.List(context.Background()))
 }
 
 func TestRegisterEconomyGeneratorTools_RegistersBothTools(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := newTestServer(t)
 	mock := &mockEconomyGeneratorClient{}
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	names := make(map[string]bool)
-	for _, t := range reg.List() {
+	for _, t := range reg.List(context.Background()) {
 		names[t.Name] = true
 	}
 	assert.True(t, names["meridian_economy_generate_context"])
@@ -65,8 +65,8 @@ func TestEconomyGenerateContext_MapsParamsToRequest(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	params := json.RawMessage(`{
 		"description": "energy trading platform",
@@ -97,8 +97,8 @@ func TestEconomyGenerateContext_IncludePatternsDefault_ExcludeFalse(t *testing.T
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	params := json.RawMessage(`{"description": "fintech ledger"}`)
 	_, err := reg.Call(context.Background(), "meridian_economy_generate_context", params)
@@ -125,21 +125,22 @@ func TestEconomyGenerateContext_MatchedPatterns_Included(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{"description": "energy"}`))
 	require.NoError(t, err)
 
 	m := result.(map[string]interface{})
-	patterns, ok := m["matched_patterns"].([]map[string]interface{})
+	patternsRaw, ok := m["matched_patterns"].([]interface{})
 	require.True(t, ok)
-	require.Len(t, patterns, 1)
-	assert.Equal(t, "energy_settlement", patterns[0]["name"])
-	assert.Equal(t, "Energy Settlement", patterns[0]["title"])
-	assert.Equal(t, 0.92, patterns[0]["score"])
-	assert.Equal(t, "instruments:\n  - code: kWh", patterns[0]["manifest_fragment"])
-	assert.Equal(t, "def run(): pass", patterns[0]["saga_script"])
+	require.Len(t, patternsRaw, 1)
+	p0 := patternsRaw[0].(map[string]interface{})
+	assert.Equal(t, "energy_settlement", p0["name"])
+	assert.Equal(t, "Energy Settlement", p0["title"])
+	assert.Equal(t, 0.92, p0["score"])
+	assert.Equal(t, "instruments:\n  - code: kWh", p0["manifest_fragment"])
+	assert.Equal(t, "def run(): pass", p0["saga_script"])
 }
 
 func TestEconomyGenerateContext_CurrentEconomyYaml_IncludedWhenPresent(t *testing.T) {
@@ -151,8 +152,8 @@ func TestEconomyGenerateContext_CurrentEconomyYaml_IncludedWhenPresent(t *testin
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{"description": "amend"}`))
 	require.NoError(t, err)
@@ -169,8 +170,8 @@ func TestEconomyGenerateContext_IncludeCurrentEconomy_WithoutTenantID_ReturnsErr
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{
 		"description": "energy",
@@ -190,8 +191,8 @@ func TestEconomyGenerateContext_GRPCError_ReturnsFormattedError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{"description": "x"}`))
 	require.NoError(t, err)
@@ -221,8 +222,8 @@ func TestEconomyGenerate_CreateMode_MapsParamsToRequest(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	params := json.RawMessage(`{
 		"description": "simple payment system",
@@ -252,11 +253,11 @@ func TestEconomyGenerate_CreateMode_MapsParamsToRequest(t *testing.T) {
 
 	meta, ok := m["generation_metadata"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, int32(1), meta["fix_iterations"])
-	assert.Equal(t, []string{"payment"}, meta["patterns_used"])
-	assert.Equal(t, []string{"GBP"}, meta["instruments_created"])
-	assert.Equal(t, []string{"transfer"}, meta["sagas_created"])
-	assert.Equal(t, []string{"chose payment pattern"}, meta["decisions"])
+	assert.Equal(t, float64(1), meta["fix_iterations"])
+	assert.Equal(t, []interface{}{"payment"}, meta["patterns_used"])
+	assert.Equal(t, []interface{}{"GBP"}, meta["instruments_created"])
+	assert.Equal(t, []interface{}{"transfer"}, meta["sagas_created"])
+	assert.Equal(t, []interface{}{"chose payment pattern"}, meta["decisions"])
 }
 
 func TestEconomyGenerate_AmendMode_SetsCorrectProtoMode(t *testing.T) {
@@ -268,8 +269,8 @@ func TestEconomyGenerate_AmendMode_SetsCorrectProtoMode(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	params := json.RawMessage(`{
 		"description": "add carbon credits",
@@ -292,8 +293,8 @@ func TestEconomyGenerate_AmendMode_WithoutTenantID_ReturnsError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{
 		"description": "add carbon credits",
@@ -314,8 +315,8 @@ func TestEconomyGenerate_UnknownMode_ReturnsError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	// JSON schema enum validation rejects invalid mode values before the handler runs.
 	_, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{
@@ -335,8 +336,8 @@ func TestEconomyGenerate_DefaultMode_IsCreate(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	_, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "no mode specified"}`))
 	require.NoError(t, err)
@@ -360,8 +361,8 @@ func TestEconomyGenerate_ValidationErrors_IncludedInResponse(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "incomplete"}`))
 	require.NoError(t, err)
@@ -391,8 +392,8 @@ func TestEconomyGenerate_NoPreferences_NilPreferencesInRequest(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	_, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "minimal"}`))
 	require.NoError(t, err)
@@ -407,8 +408,8 @@ func TestEconomyGenerate_GRPCError_ReturnsFormattedError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "error case"}`))
 	require.NoError(t, err)
@@ -462,8 +463,8 @@ func TestEconomyGenerateContext_ServiceUnavailable_ReturnsFriendlyMessage(t *tes
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{"description": "energy"}`))
 	require.NoError(t, err)
@@ -481,8 +482,8 @@ func TestEconomyGenerate_ServiceUnavailable_ReturnsFriendlyMessage(t *testing.T)
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "energy"}`))
 	require.NoError(t, err)
@@ -500,16 +501,20 @@ func TestEconomyGenerateContext_OtherGRPCError_ReturnsFormattedError(t *testing.
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate_context", json.RawMessage(`{"description": "energy"}`))
 	require.NoError(t, err)
 
-	// Should be a FormattedError (from mcperrors), not the friendly message map.
-	_, isMap := result.(map[string]interface{})
-	assert.False(t, isMap, "non-Unimplemented errors should return FormattedError, not a plain map")
-	assert.NotNil(t, result)
+	// After JSON round-trip, FormattedError becomes a map with "valid" and "errors" keys,
+	// distinct from the friendly "message" map returned for service-unavailable.
+	m, ok := result.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, false, m["valid"], "FormattedError should have valid=false")
+	assert.NotNil(t, m["errors"], "FormattedError should contain errors list")
+	_, hasMessage := m["message"]
+	assert.False(t, hasMessage, "non-Unimplemented errors should not have a friendly message key")
 }
 
 func TestEconomyGenerate_OtherGRPCError_ReturnsFormattedError(t *testing.T) {
@@ -519,14 +524,18 @@ func TestEconomyGenerate_OtherGRPCError_ReturnsFormattedError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	result, err := reg.Call(context.Background(), "meridian_economy_generate", json.RawMessage(`{"description": "energy"}`))
 	require.NoError(t, err)
 
-	// Should be a FormattedError (from mcperrors), not the friendly message map.
-	_, isMap := result.(map[string]interface{})
-	assert.False(t, isMap, "non-Unimplemented errors should return FormattedError, not a plain map")
-	assert.NotNil(t, result)
+	// After JSON round-trip, FormattedError becomes a map with "valid" and "errors" keys,
+	// distinct from the friendly "message" map returned for service-unavailable.
+	m, ok := result.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, false, m["valid"], "FormattedError should have valid=false")
+	assert.NotNil(t, m["errors"], "FormattedError should contain errors list")
+	_, hasMessage := m["message"]
+	assert.False(t, hasMessage, "non-Unimplemented errors should not have a friendly message key")
 }

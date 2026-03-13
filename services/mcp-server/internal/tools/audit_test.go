@@ -111,8 +111,8 @@ func TestCausationTree_ValidParams_ReturnTree(t *testing.T) {
 	}
 
 	clients := newAuditClients(mock, nil, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(fmt.Sprintf(`{"saga_id": %q}`, sagaID))
 	result, err := r.Call(context.Background(), "meridian_causation_tree", params)
@@ -132,8 +132,8 @@ func TestCausationTree_MissingSagaID_ValidationError(t *testing.T) {
 		},
 	}
 	clients := newAuditClients(mock, nil, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	_, err := r.Call(context.Background(), "meridian_causation_tree", json.RawMessage(`{}`))
 	if err == nil {
@@ -151,8 +151,8 @@ func TestCausationTree_GRPCError_FormattedResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(mock, nil, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(fmt.Sprintf(`{"saga_id": %q}`, sagaID))
 	result, err := r.Call(context.Background(), "meridian_causation_tree", params)
@@ -177,8 +177,8 @@ func TestCausationTree_EmptyTree_MeaningfulResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(mock, nil, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(fmt.Sprintf(`{"saga_id": %q}`, sagaID))
 	result, err := r.Call(context.Background(), "meridian_causation_tree", params)
@@ -212,8 +212,8 @@ func TestPositionsQuery_ValidParams_ReturnLogs(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, mock, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(`{"account_id": "acc-001"}`)
 	result, err := r.Call(context.Background(), "meridian_positions_query", params)
@@ -235,8 +235,8 @@ func TestPositionsQuery_NoParams_DefaultQuery(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, mock, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_positions_query", json.RawMessage(`{}`))
 	if err != nil {
@@ -258,8 +258,8 @@ func TestPositionsQuery_GRPCError_FormattedResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, mock, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_positions_query", json.RawMessage(`{}`))
 	if err != nil {
@@ -280,8 +280,8 @@ func TestPositionsQuery_EmptyResults_MeaningfulResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, mock, nil, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_positions_query", json.RawMessage(`{}`))
 	if err != nil {
@@ -312,8 +312,8 @@ func TestPostingsQuery_ValidParams_ReturnPostings(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, mock, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(`{"account_id": "acc-001"}`)
 	result, err := r.Call(context.Background(), "meridian_postings_query", params)
@@ -336,8 +336,8 @@ func TestPostingsQuery_DateRangeFilter_PassedToClient(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, mock, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(`{"date_from": "2024-01-01T00:00:00Z", "date_to": "2024-01-31T23:59:59Z", "page_size": 50}`)
 	_, err := r.Call(context.Background(), "meridian_postings_query", params)
@@ -366,8 +366,8 @@ func TestPostingsQuery_GRPCError_FormattedResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, mock, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_postings_query", json.RawMessage(`{}`))
 	if err != nil {
@@ -387,8 +387,8 @@ func TestPostingsQuery_DateFromAfterDateTo_ReturnsError(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, mock, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	// date_from is after date_to — should return an error map, not call the backend.
 	params := json.RawMessage(`{"date_from": "2024-02-01T00:00:00Z", "date_to": "2024-01-01T00:00:00Z"}`)
@@ -415,8 +415,8 @@ func TestPostingsQuery_EmptyResults_MeaningfulResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, mock, nil, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_postings_query", json.RawMessage(`{}`))
 	if err != nil {
@@ -445,8 +445,8 @@ func TestSagaExecutions_ValidParams_ReturnSagas(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, nil, mock, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_saga_executions", json.RawMessage(`{}`))
 	if err != nil {
@@ -468,8 +468,8 @@ func TestSagaExecutions_StatusFilter_PassedToClient(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, nil, mock, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(`{"status": "ACTIVE"}`)
 	_, err := r.Call(context.Background(), "meridian_saga_executions", params)
@@ -492,8 +492,8 @@ func TestSagaExecutions_InvalidStatus_ValidationError(t *testing.T) {
 		},
 	}
 	clients := newAuditClients(nil, nil, nil, mock, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	// "INVALID_STATUS_VALUE" is rejected by the JSON schema enum constraint,
 	// so r.Call returns a non-nil error (schema validation, not tool-not-found).
@@ -512,8 +512,8 @@ func TestSagaExecutions_GRPCError_FormattedResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, nil, mock, nil)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_saga_executions", json.RawMessage(`{}`))
 	if err != nil {
@@ -552,8 +552,8 @@ func TestReconciliationStatus_ValidParams_ReturnRuns(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, nil, nil, mock)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_reconciliation_status", json.RawMessage(`{}`))
 	if err != nil {
@@ -609,8 +609,8 @@ func TestReconciliationStatus_WithRunID_FetchesVariances(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, nil, nil, mock)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	params := json.RawMessage(fmt.Sprintf(`{"run_id": %q}`, runID))
 	result, err := r.Call(context.Background(), "meridian_reconciliation_status", params)
@@ -634,8 +634,8 @@ func TestReconciliationStatus_GRPCError_FormattedResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, nil, nil, mock)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_reconciliation_status", json.RawMessage(`{}`))
 	if err != nil {
@@ -659,8 +659,8 @@ func TestReconciliationStatus_EmptyResults_MeaningfulResponse(t *testing.T) {
 	}
 
 	clients := newAuditClients(nil, nil, nil, nil, mock)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
 	result, err := r.Call(context.Background(), "meridian_reconciliation_status", json.RawMessage(`{}`))
 	if err != nil {
@@ -708,10 +708,10 @@ func noopMocks() (tools.SagaAdminQuerier, tools.PositionQuerier, tools.PostingQu
 
 func TestAuditLogEntries_ToolRegistered(t *testing.T) {
 	clients := newAuditClients(noopMocks())
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
-	listed := r.List()
+	listed := r.List(context.Background())
 	names := make(map[string]bool)
 	for _, tool := range listed {
 		names[tool.Name] = true
@@ -733,10 +733,10 @@ func TestAuditLogEntries_ToolRegistered(t *testing.T) {
 
 func TestAuditTools_AllCategoryRead(t *testing.T) {
 	clients := newAuditClients(noopMocks())
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
-	for _, tool := range r.List() {
+	for _, tool := range r.List(context.Background()) {
 		if tool.Category != tools.CategoryRead {
 			t.Errorf("expected tool %q to be CategoryRead, got %v", tool.Name, tool.Category)
 		}
@@ -753,10 +753,10 @@ func TestAuditTools_NilClient_SkipsRegistration(t *testing.T) {
 		},
 		nil, nil, nil, nil,
 	)
-	r := tools.NewRegistry()
-	tools.RegisterAuditTools(r, clients)
+	r := newTestServer(t)
+	tools.RegisterAuditTools(r.Server(), clients)
 
-	listed := r.List()
+	listed := r.List(context.Background())
 	if len(listed) != 1 {
 		t.Fatalf("expected 1 registered tool, got %d", len(listed))
 	}

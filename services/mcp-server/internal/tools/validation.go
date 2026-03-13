@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
 	sharedcel "github.com/meridianhub/meridian/shared/pkg/cel"
 	starlarkSyntax "go.starlark.net/syntax"
@@ -18,15 +20,10 @@ import (
 var ErrUnknownCELEnvironment = errors.New("unknown CEL environment")
 
 // RegisterValidationTools registers the meridian_cel_validate and
-// meridian_starlark_validate tools into the provided Registry.
-func RegisterValidationTools(r *Registry) error {
-	if err := r.Register(celValidateTool()); err != nil {
-		return fmt.Errorf("register meridian_cel_validate: %w", err)
-	}
-	if err := r.Register(starlarkValidateTool()); err != nil {
-		return fmt.Errorf("register meridian_starlark_validate: %w", err)
-	}
-	return nil
+// meridian_starlark_validate tools onto the SDK server.
+func RegisterValidationTools(srv *mcp.Server) {
+	addTool(srv, celValidateTool())
+	addTool(srv, starlarkValidateTool())
 }
 
 // celValidateTool builds the meridian_cel_validate Tool definition.

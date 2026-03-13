@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -53,10 +54,9 @@ type AuditClients struct {
 	Reconciliation      ReconciliationQuerier
 }
 
-// RegisterAuditTools registers all read-only audit tools into the registry.
-// It does not modify registry.go or cmd/main.go.
+// RegisterAuditTools registers all read-only audit tools onto the SDK server.
 // Tools whose required client is nil are silently skipped.
-func RegisterAuditTools(r *Registry, clients AuditClients) {
+func RegisterAuditTools(srv *mcp.Server, clients AuditClients) {
 	candidates := []Tool{}
 	if clients.SagaAdmin != nil {
 		candidates = append(candidates, buildCausationTreeTool(clients.SagaAdmin))
@@ -74,9 +74,7 @@ func RegisterAuditTools(r *Registry, clients AuditClients) {
 		candidates = append(candidates, buildReconciliationStatusTool(clients.Reconciliation))
 	}
 	for _, t := range candidates {
-		if err := r.Register(t); err != nil {
-			panic(fmt.Sprintf("failed to register audit tool %q: %v", t.Name, err))
-		}
+		addTool(srv, t)
 	}
 }
 

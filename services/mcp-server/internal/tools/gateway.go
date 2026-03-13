@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
@@ -37,9 +39,9 @@ type GatewayClients struct {
 	InstructionWriter  GatewayInstructionWriter
 }
 
-// RegisterGatewayTools registers all operational gateway tools into the registry.
+// RegisterGatewayTools registers all operational gateway tools onto the SDK server.
 // Tools whose required client is nil are silently skipped.
-func RegisterGatewayTools(r *Registry, clients GatewayClients) {
+func RegisterGatewayTools(srv *mcp.Server, clients GatewayClients) {
 	var candidates []Tool
 
 	if clients.InstructionQuerier != nil {
@@ -54,9 +56,7 @@ func RegisterGatewayTools(r *Registry, clients GatewayClients) {
 	}
 
 	for _, t := range candidates {
-		if err := r.Register(t); err != nil {
-			panic(fmt.Sprintf("failed to register gateway tool %q: %v", t.Name, err))
-		}
+		addTool(srv, t)
 	}
 }
 

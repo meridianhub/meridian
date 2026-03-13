@@ -10,18 +10,18 @@ import (
 )
 
 // newCookbookRegistry creates a test Registry with cookbook tools registered.
-func newCookbookRegistry(t *testing.T) *tools.Registry {
+func newCookbookRegistry(t *testing.T) *testServer {
 	t.Helper()
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	fsys := os.DirFS("testdata/cookbook")
-	tools.RegisterCookbookTools(r, fsys)
+	tools.RegisterCookbookTools(r.Server(), fsys)
 	return r
 }
 
 // callCookbookTool calls the given tool with JSON params and returns the result.
 // The result is round-tripped through JSON to normalise types (e.g. int → float64,
 // []map[...]... → []interface{}) matching what an MCP client would see.
-func callCookbookTool(t *testing.T, r *tools.Registry, name string, params string) map[string]interface{} {
+func callCookbookTool(t *testing.T, r *testServer, name string, params string) map[string]interface{} {
 	t.Helper()
 	raw, err := r.Call(context.Background(), name, json.RawMessage(params))
 	if err != nil {
@@ -245,7 +245,7 @@ func TestCookbookDescribe_NonexistentEntry_ReturnsError(t *testing.T) {
 func TestCookbookTools_Registered(t *testing.T) {
 	r := newCookbookRegistry(t)
 
-	listed := r.List()
+	listed := r.List(context.Background())
 	names := make(map[string]bool)
 	for _, tool := range listed {
 		names[tool.Name] = true
@@ -263,10 +263,10 @@ func TestCookbookTools_Registered(t *testing.T) {
 }
 
 func TestCookbookTools_NilFS_SkipsRegistration(t *testing.T) {
-	r := tools.NewRegistry()
-	tools.RegisterCookbookTools(r, nil)
+	r := newTestServer(t)
+	tools.RegisterCookbookTools(r.Server(), nil)
 
-	if len(r.List()) != 0 {
+	if len(r.List(context.Background())) != 0 {
 		t.Error("expected no tools registered when cookbookFS is nil")
 	}
 }
@@ -274,7 +274,7 @@ func TestCookbookTools_NilFS_SkipsRegistration(t *testing.T) {
 func TestCookbookTools_CorrectCategory(t *testing.T) {
 	r := newCookbookRegistry(t)
 
-	for _, tool := range r.List() {
+	for _, tool := range r.List(context.Background()) {
 		if tool.Category != tools.CategoryRead {
 			t.Errorf("tool %q: expected CategoryRead, got %v", tool.Name, tool.Category)
 		}

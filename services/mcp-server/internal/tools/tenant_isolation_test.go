@@ -28,9 +28,9 @@ func TestManifestValidate_YAMLInput_AmendMode_PropagatesTenantContext(t *testing
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	// Combine YAML string input with amend mode and tenant_id
 	yamlStr, _ := json.Marshal(validManifestYAML())
@@ -77,9 +77,9 @@ func TestManifestValidate_YAMLInput_CreateMode_SkipsImmutabilityChecks(t *testin
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	// YAML string + explicit create mode
 	yamlStr, _ := json.Marshal(validManifestYAML())
@@ -113,9 +113,9 @@ func TestManifestValidate_YAMLInput_AmendMode_MissingTenantID_ReturnsError(t *te
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	// YAML string + amend mode but no tenant_id
 	yamlStr, _ := json.Marshal(validManifestYAML())
@@ -146,9 +146,9 @@ func TestManifestPlanThenApply_YAMLInput_FullLifecycle(t *testing.T) {
 		},
 	}
 
-	r := tools.NewRegistry()
+	r := newTestServer(t)
 	sess := newTestSession()
-	tools.RegisterEconomyTools(r, sess, tools.EconomyDeps{Applier: mock})
+	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Applier: mock})
 
 	yamlStr, _ := json.Marshal(validManifestYAML())
 
@@ -191,8 +191,8 @@ func TestEconomyGenerate_CreateMode_DoesNotRequireTenantID(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterEconomyGeneratorTools(reg, mock)
+	reg := newTestServer(t)
+	tools.RegisterEconomyGeneratorTools(reg.Server(), mock)
 
 	// Create mode (explicit) without tenant_id should succeed
 	params := json.RawMessage(`{"description": "payment system", "mode": "create"}`)

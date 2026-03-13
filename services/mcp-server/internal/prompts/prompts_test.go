@@ -1,21 +1,56 @@
 package prompts_test
 
 import (
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/meridianhub/meridian/services/mcp-server/internal/prompts"
 )
 
-func TestRegistry_List_ReturnsAllPrompts(t *testing.T) {
-	reg := prompts.NewRegistry()
+// setupClientServer creates an in-memory MCP server+client pair with all
+// prompts registered, returning the connected client session. The caller must
+// defer cleanup.
+func setupClientServer(t *testing.T) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
 
-	list := reg.List()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "v0.0.1"}, nil)
+	prompts.RegisterPrompts(srv)
 
-	if len(list) == 0 {
+	ct, st := mcp.NewInMemoryTransports()
+	ss, err := srv.Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { ss.Close() })
+
+	c := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	cs, err := c.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { cs.Close() })
+
+	return cs
+}
+
+func TestRegisterPrompts_ListReturnsAllPrompts(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
+
+	result, err := cs.ListPrompts(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListPrompts: %v", err)
+	}
+
+	if len(result.Prompts) == 0 {
 		t.Fatal("expected at least one prompt, got none")
 	}
 
-	for _, p := range list {
+	for _, p := range result.Prompts {
 		if p.Name == "" {
 			t.Errorf("prompt missing Name: %+v", p)
 		}
@@ -25,12 +60,17 @@ func TestRegistry_List_ReturnsAllPrompts(t *testing.T) {
 	}
 }
 
-func TestRegistry_List_IncludesRequiredPrompts(t *testing.T) {
-	reg := prompts.NewRegistry()
-	list := reg.List()
+func TestRegisterPrompts_IncludesRequiredPrompts(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
+
+	result, err := cs.ListPrompts(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListPrompts: %v", err)
+	}
 
 	names := make(map[string]bool)
-	for _, p := range list {
+	for _, p := range result.Prompts {
 		names[p.Name] = true
 	}
 
@@ -47,56 +87,54 @@ func TestRegistry_List_IncludesRequiredPrompts(t *testing.T) {
 	}
 }
 
-func TestRegistry_Get_DesignEconomy(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_DesignEconomy(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	result, err := reg.Get("design-economy", nil)
+	result, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "design-economy",
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("GetPrompt: %v", err)
 	}
 
 	if len(result.Messages) == 0 {
 		t.Fatal("expected at least one message")
 	}
 
-	// Should have a system message and a user message
-	hasSystem := false
 	hasUser := false
 	for _, msg := range result.Messages {
 		if msg.Role == "user" {
 			hasUser = true
 		}
-		// system messages use role "assistant" in MCP prompts, or may be embedded as user
-		if msg.Role == "system" || msg.Role == "assistant" {
-			hasSystem = true
-		}
 	}
 	if !hasUser {
 		t.Error("expected at least one user message")
 	}
-	_ = hasSystem
 }
 
-func TestRegistry_Get_AuditTransaction_WithArgs(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_AuditTransaction_WithArgs(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	args := map[string]string{
-		"transaction_id": "txn_abc123",
-	}
-
-	result, err := reg.Get("audit-transaction", args)
+	result, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "audit-transaction",
+		Arguments: map[string]string{
+			"transaction_id": "txn_abc123",
+		},
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("GetPrompt: %v", err)
 	}
 
 	if len(result.Messages) == 0 {
 		t.Fatal("expected at least one message")
 	}
 
-	// Verify the transaction ID is templated into the messages
 	found := false
 	for _, msg := range result.Messages {
-		if contains(msg.Content.Text, "txn_abc123") {
+		tc, ok := msg.Content.(*mcp.TextContent)
+		if ok && strings.Contains(tc.Text, "txn_abc123") {
 			found = true
 			break
 		}
@@ -106,25 +144,30 @@ func TestRegistry_Get_AuditTransaction_WithArgs(t *testing.T) {
 	}
 }
 
-func TestRegistry_Get_AuditTransaction_MissingRequiredArg(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_AuditTransaction_MissingRequiredArg(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	_, err := reg.Get("audit-transaction", nil)
+	_, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "audit-transaction",
+	})
 	if err == nil {
 		t.Fatal("expected error for missing required argument transaction_id")
 	}
 }
 
-func TestRegistry_Get_SimulateChange_WithArgs(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_SimulateChange_WithArgs(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	args := map[string]string{
-		"change_description": "add a new instrument CARBON_CREDIT",
-	}
-
-	result, err := reg.Get("simulate-change", args)
+	result, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "simulate-change",
+		Arguments: map[string]string{
+			"change_description": "add a new instrument CARBON_CREDIT",
+		},
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("GetPrompt: %v", err)
 	}
 
 	if len(result.Messages) == 0 {
@@ -133,7 +176,8 @@ func TestRegistry_Get_SimulateChange_WithArgs(t *testing.T) {
 
 	found := false
 	for _, msg := range result.Messages {
-		if contains(msg.Content.Text, "CARBON_CREDIT") {
+		tc, ok := msg.Content.(*mcp.TextContent)
+		if ok && strings.Contains(tc.Text, "CARBON_CREDIT") {
 			found = true
 			break
 		}
@@ -143,25 +187,30 @@ func TestRegistry_Get_SimulateChange_WithArgs(t *testing.T) {
 	}
 }
 
-func TestRegistry_Get_SimulateChange_MissingRequiredArg(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_SimulateChange_MissingRequiredArg(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	_, err := reg.Get("simulate-change", nil)
+	_, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "simulate-change",
+	})
 	if err == nil {
 		t.Fatal("expected error for missing required argument change_description")
 	}
 }
 
-func TestRegistry_Get_DebugSaga_WithArgs(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_DebugSaga_WithArgs(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	args := map[string]string{
-		"saga_id": "saga_xyz789",
-	}
-
-	result, err := reg.Get("debug-saga", args)
+	result, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "debug-saga",
+		Arguments: map[string]string{
+			"saga_id": "saga_xyz789",
+		},
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("GetPrompt: %v", err)
 	}
 
 	if len(result.Messages) == 0 {
@@ -170,7 +219,8 @@ func TestRegistry_Get_DebugSaga_WithArgs(t *testing.T) {
 
 	found := false
 	for _, msg := range result.Messages {
-		if contains(msg.Content.Text, "saga_xyz789") {
+		tc, ok := msg.Content.(*mcp.TextContent)
+		if ok && strings.Contains(tc.Text, "saga_xyz789") {
 			found = true
 			break
 		}
@@ -180,60 +230,41 @@ func TestRegistry_Get_DebugSaga_WithArgs(t *testing.T) {
 	}
 }
 
-func TestRegistry_Get_DebugSaga_MissingRequiredArg(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_DebugSaga_MissingRequiredArg(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	_, err := reg.Get("debug-saga", nil)
+	_, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "debug-saga",
+	})
 	if err == nil {
 		t.Fatal("expected error for missing required argument saga_id")
 	}
 }
 
-func TestRegistry_Get_UnknownPrompt(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_UnknownPrompt(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	_, err := reg.Get("unknown-prompt", nil)
+	_, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "unknown-prompt",
+	})
 	if err == nil {
 		t.Fatal("expected error for unknown prompt")
 	}
 }
 
-func TestRegistry_Get_DesignEconomy_NoRequiredArgs(t *testing.T) {
-	reg := prompts.NewRegistry()
+func TestGetPrompt_DesignEconomy_NoRequiredArgs(t *testing.T) {
+	cs := setupClientServer(t)
+	ctx := context.Background()
 
-	// design-economy requires no args
-	result, err := reg.Get("design-economy", nil)
+	result, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name: "design-economy",
+	})
 	if err != nil {
 		t.Fatalf("expected no error for design-economy with no args, got: %v", err)
 	}
 	if len(result.Messages) == 0 {
 		t.Fatal("expected at least one message")
 	}
-}
-
-func TestPrompt_Arguments_HaveRequiredFlag(t *testing.T) {
-	reg := prompts.NewRegistry()
-	list := reg.List()
-
-	// Verify that prompts with required args declare them
-	for _, p := range list {
-		for _, arg := range p.Arguments {
-			if arg.Name == "" {
-				t.Errorf("prompt %q has argument with empty name", p.Name)
-			}
-		}
-	}
-}
-
-// contains is a helper for string containment checks.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}())
 }

@@ -9,16 +9,14 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 )
 
-// RegisterManifestFixTool registers the meridian_manifest_fix tool into the provided Registry.
-func RegisterManifestFixTool(r *Registry, schemaRegistry *schema.Registry) error {
-	tool := buildManifestFixTool(schemaRegistry)
-	if err := r.Register(tool); err != nil {
-		return fmt.Errorf("register manifest fix tool: %w", err)
-	}
-	return nil
+// RegisterManifestFixTool registers the meridian_manifest_fix tool onto the SDK server.
+func RegisterManifestFixTool(srv *mcp.Server, schemaRegistry *schema.Registry) {
+	addTool(srv, buildManifestFixTool(schemaRegistry))
 }
 
 // buildManifestFixTool returns the meridian_manifest_fix Tool definition.
