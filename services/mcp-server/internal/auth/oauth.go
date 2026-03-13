@@ -212,7 +212,7 @@ func NewMetadataHandler(baseURL string, cfg OAuthConfig) http.HandlerFunc {
 		TokenEndpoint:                     cfg.TokenURL,
 		RegistrationEndpoint:              baseURL + "/oauth/register",
 		ResponseTypesSupported:            []string{"code"},
-		GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
+		GrantTypesSupported:               []string{"authorization_code"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
 		TokenEndpointAuthMethodsSupported: []string{"none"},
 	}

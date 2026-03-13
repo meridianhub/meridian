@@ -97,7 +97,7 @@ func TestMetadataHandler_ServesRFC8414(t *testing.T) {
 	assert.Equal(t, "https://mcp.example.com/oauth/authorize", meta.AuthorizationEndpoint)
 	assert.Equal(t, "https://mcp.example.com/oauth/token", meta.TokenEndpoint)
 	assert.Equal(t, []string{"code"}, meta.ResponseTypesSupported)
-	assert.Equal(t, []string{"authorization_code", "refresh_token"}, meta.GrantTypesSupported)
+	assert.Equal(t, []string{"authorization_code"}, meta.GrantTypesSupported)
 	assert.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
 	assert.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
 }
