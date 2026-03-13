@@ -13,6 +13,7 @@ import { AuditTrail } from '@/shared/audit-trail'
 import { EntityLink, Breadcrumbs, PageShell, ErrorState } from '@/shared'
 import { tenantKeys } from '@/lib/query-keys'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { usePaymentDetail } from '../hooks'
 import {
   InitiatePaymentDialog,
@@ -113,6 +114,8 @@ export function PaymentDetailPage() {
     : ['payments', paymentOrderId]
 
   const { data, isLoading, isError } = usePaymentDetail(paymentOrderId)
+
+  usePageTitle(data ? `Payment ${data.paymentOrderId}` : 'Payment')
 
   function handleActionSuccess() {
     void queryClient.invalidateQueries({ queryKey })

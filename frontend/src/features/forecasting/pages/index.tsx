@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PageShell, PageHeader } from '@/shared'
 import { useApiClients } from '@/api/context'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { useTenantContext } from '@/contexts/tenant-context'
 
 interface ForecastPoint {
@@ -147,6 +148,7 @@ function CurveChart({ points, label }: CurveChartProps) {
 }
 
 export function ForecastingPage() {
+  usePageTitle('Forecasting')
   const { tenantSlug } = useTenantContext()
   const clients = useApiClients()
   const [strategyId, setStrategyId] = useState('')

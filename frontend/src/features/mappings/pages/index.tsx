@@ -9,6 +9,7 @@ import { PageHeader } from '@/shared/page-header'
 import { useApiClients } from '@/api/context'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { CreateMappingDialog } from './dialogs/create-mapping-dialog'
 
 export interface MappingDefinition {
@@ -41,6 +42,7 @@ const STATUS_MAP: Record<string, 0 | 1 | 2 | 3> = {
 }
 
 export function MappingsPage() {
+  usePageTitle('Mappings')
   const navigate = useNavigate()
   const clients = useApiClients()
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false)

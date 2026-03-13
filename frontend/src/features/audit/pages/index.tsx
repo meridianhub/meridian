@@ -6,6 +6,7 @@ import { DataTable, type DataTableQueryParams, type DataTableResult, type Filter
 import { TimeDisplay } from '@/shared/time-display'
 import { JsonDiffViewer } from '@/shared/audit-trail'
 import { PageShell, PageHeader } from '@/shared'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { useApiClients } from '@/api/context'
 import { AuditOperation as AuditOperationEnum } from '@/api/gen/meridian/audit/v1/audit_events_pb'
 import { cn } from '@/lib/utils'
@@ -238,6 +239,7 @@ const columns: ColumnDef<AuditLogEntry>[] = [
 ]
 
 export function AuditLogPage() {
+  usePageTitle('Audit Log')
   const [selectedEntry, setSelectedEntry] = useState<AuditLogEntry | null>(null)
   const clients = useApiClients()
 

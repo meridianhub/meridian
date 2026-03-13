@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Copy, Check, ExternalLink } from 'lucide-react'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { buildMcpTenantUrl } from '@/api/config'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { McpToolsSection } from './mcp-tools-section'
 
 const MCP_BASE_URL =
@@ -72,6 +73,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 }
 
 export function McpConfigPage() {
+  usePageTitle('MCP Config')
   const { tenantSlug } = useTenantContext()
 
   const serverUrl = buildMcpTenantUrl(MCP_BASE_URL, tenantSlug)

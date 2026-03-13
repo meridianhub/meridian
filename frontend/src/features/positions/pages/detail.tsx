@@ -8,6 +8,7 @@ import { QualityLadderBadge } from '@/features/positions/components/quality-ladd
 import { DirectionBadge } from '@/shared/direction-badge'
 import { EntityLink, Breadcrumbs, PageShell, DetailSkeleton, ErrorState } from '@/shared'
 import { accountEntityType } from '@/shared/account-entity-type'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { usePositionLogDetail } from '../hooks'
 import type { FinancialPositionLog, TransactionLogEntry } from './index'
 
@@ -185,8 +186,14 @@ export function PositionDetailPage() {
 
   const log = data?.log as FinancialPositionLog | undefined
 
+  usePageTitle(log ? `Position ${log.logId}` : 'Position')
+
   if (isLoading) {
-    return <DetailSkeleton fieldCount={5} tabCount={2} showBackNav />
+    return (
+      <div role="status" aria-live="polite" aria-busy={true}>
+        <DetailSkeleton fieldCount={5} tabCount={2} showBackNav />
+      </div>
+    )
   }
 
   if (isError || !log) {

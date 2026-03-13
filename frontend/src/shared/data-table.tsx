@@ -282,6 +282,7 @@ export function DataTable<T>({
         <FilterBar filters={filters} values={activeFilters} onChange={handleFilterChange} />
       )}
 
+      <div role="status" aria-live="polite" aria-busy={isLoading}>
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
@@ -321,6 +322,7 @@ export function DataTable<T>({
                 onClick={() => onRowClick?.(row.original)}
                 className={onRowClick ? 'cursor-pointer' : undefined}
                 {...(onRowClick ? {
+                  role: 'button' as const,
                   tabIndex: 0,
                   onKeyDown: (e: React.KeyboardEvent) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -347,6 +349,7 @@ export function DataTable<T>({
         onNext={handleNextPage}
         onPrev={handlePrevPage}
       />
+      </div>
     </div>
   )
 }

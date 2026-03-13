@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/card'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay, PageShell, PageHeader } from '@/shared'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { useBookingLogsTable } from '../hooks'
 import type { FinancialBookingLog } from './types'
 
@@ -42,6 +43,7 @@ const columns: ColumnDef<FinancialBookingLog>[] = [
 ]
 
 export function LedgerPage() {
+  usePageTitle('Ledger')
   const { queryKey, queryFn } = useBookingLogsTable()
   const navigate = useNavigate()
 

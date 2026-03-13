@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
@@ -193,11 +194,13 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b" role="tablist">
         {starlarkFiles.map((f, i) => (
           <button
             key={f.name}
             type="button"
+            role="tab"
+            aria-selected={i === activeIndex}
             onClick={() => setActiveFile(i)}
             className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
               i === activeIndex
@@ -217,6 +220,8 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
 export function CookbookDetailPage() {
   const { name } = useParams<{ name: string }>()
   const { items, isLoading: catalogueLoading } = useCookbook()
+
+  usePageTitle(name ? `Cookbook: ${name}` : 'Cookbook')
 
   const item = items.find((i) => i.name === name)
   const { starlarkFiles, manifestContent, manifestSagas, hasSagas } = usePatternFiles(item)

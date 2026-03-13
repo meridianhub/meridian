@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useDatasetsTable } from '../hooks'
 import { CATEGORY_OPTIONS, STATUS_OPTIONS } from './constants'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { RegisterDataSetDialog } from './register-dataset-dialog'
 
 interface DataSetRow {
@@ -108,6 +109,7 @@ const columns: ColumnDef<DataSetRow>[] = [
 ]
 
 export function MarketDataPage() {
+  usePageTitle('Market Data')
   const { queryKey, queryFn, tenantSlug } = useDatasetsTable()
   const navigate = useNavigate()
   const [registerOpen, setRegisterOpen] = React.useState(false)

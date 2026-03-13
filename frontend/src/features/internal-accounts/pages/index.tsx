@@ -7,6 +7,7 @@ import { TimeDisplay, PageShell, PageHeader } from '@/shared'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useInternalAccountsTable } from '../hooks'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { CreateInternalAccountDialog } from './create-internal-account-dialog'
 
 interface InternalAccountRow {
@@ -89,6 +90,7 @@ const columns: ColumnDef<InternalAccountRow>[] = [
 ]
 
 export function InternalAccountsPage() {
+  usePageTitle('Internal Accounts')
   const { queryKey, queryFn, tenantSlug } = useInternalAccountsTable()
   const navigate = useNavigate()
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
