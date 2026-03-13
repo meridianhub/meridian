@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { Sidebar } from '@/components/layout/sidebar'
@@ -224,19 +224,21 @@ describe('Sidebar', () => {
     it('places Economy items under Economy group', () => {
       renderSidebar({ lens: 'tenant' })
 
-      expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Reference Data' })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Starlark Config' })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Market Data' })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Forecasting' })).toBeInTheDocument()
+      const economyGroup = screen.getByRole('button', { name: /economy/i }).closest('li')!
+      expect(within(economyGroup).getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Reference Data' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Starlark Config' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Market Data' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Forecasting' })).toBeInTheDocument()
     })
 
     it('places remaining config items under Configuration group', () => {
       renderSidebar({ lens: 'tenant' })
 
-      expect(screen.getByRole('link', { name: 'Gateway Mappings' })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'MCP Config' })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Cookbook' })).toBeInTheDocument()
+      const configGroup = screen.getByText('Configuration').closest('li')!
+      expect(within(configGroup).getByRole('link', { name: 'Gateway Mappings' })).toBeInTheDocument()
+      expect(within(configGroup).getByRole('link', { name: 'MCP Config' })).toBeInTheDocument()
+      expect(within(configGroup).getByRole('link', { name: 'Cookbook' })).toBeInTheDocument()
     })
   })
 

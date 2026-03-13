@@ -103,7 +103,9 @@ function loadCollapsedGroups(): Set<string> {
 }
 
 function saveCollapsedGroups(collapsed: Set<string>): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsed]))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsed]))
+  } catch { /* ignore storage write failures (quota, private browsing) */ }
 }
 
 function useCollapsedGroups(currentPath: string) {
