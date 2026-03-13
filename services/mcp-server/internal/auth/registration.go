@@ -28,7 +28,6 @@ const (
 	registrationBodyLimit = 64 << 10 // 64 KiB
 
 	// Supported OAuth 2.1 values for MCP.
-	supportedGrantType    = "authorization_code"
 	supportedResponseType = "code"
 	supportedAuthMethod   = "none"
 )
@@ -168,14 +167,25 @@ type registrationRequest struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 }
 
+// allowedGrantTypes is the set of grant types this server supports.
+// authorization_code is required; refresh_token is optional per MCP OAuth 2.1.
+var allowedGrantTypes = map[string]bool{
+	"authorization_code": true,
+	"refresh_token":      true,
+}
+
 // validateMetadata validates and defaults the registration metadata fields.
 // Returns the resolved values and an error description if validation fails.
 func (req registrationRequest) validateMetadata() (grantTypes, responseTypes []string, authMethod, errDesc string) {
 	grantTypes = req.GrantTypes
 	if len(grantTypes) == 0 {
-		grantTypes = []string{supportedGrantType}
-	} else if len(grantTypes) != 1 || grantTypes[0] != supportedGrantType {
-		return nil, nil, "", "unsupported grant_types: only authorization_code is supported"
+		grantTypes = []string{"authorization_code"}
+	} else {
+		for _, gt := range grantTypes {
+			if !allowedGrantTypes[gt] {
+				return nil, nil, "", fmt.Sprintf("unsupported grant_type: %s", gt)
+			}
+		}
 	}
 
 	responseTypes = req.ResponseTypes
