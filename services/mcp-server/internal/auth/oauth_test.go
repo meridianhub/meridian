@@ -70,6 +70,38 @@ func TestAuthMetadata_JSON(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
+// MetadataHandler — /.well-known/oauth-authorization-server
+// -----------------------------------------------------------------------
+
+func TestMetadataHandler_ServesRFC8414(t *testing.T) {
+	cfg := auth.OAuthConfig{
+		ClientID:         "meridian-mcp",
+		AuthorizationURL: "https://mcp.example.com/oauth/authorize",
+		TokenURL:         "https://mcp.example.com/oauth/token",
+	}
+
+	handler := auth.NewMetadataHandler("https://mcp.example.com", cfg)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+	assert.Contains(t, rec.Header().Get("Cache-Control"), "public")
+
+	var meta auth.AuthorizationServerMetadata
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &meta))
+
+	assert.Equal(t, "https://mcp.example.com", meta.Issuer)
+	assert.Equal(t, "https://mcp.example.com/oauth/authorize", meta.AuthorizationEndpoint)
+	assert.Equal(t, "https://mcp.example.com/oauth/token", meta.TokenEndpoint)
+	assert.Equal(t, []string{"code"}, meta.ResponseTypesSupported)
+	assert.Equal(t, []string{"authorization_code"}, meta.GrantTypesSupported)
+	assert.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
+	assert.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
+}
+
+// -----------------------------------------------------------------------
 // AuthorizationHandler
 // -----------------------------------------------------------------------
 

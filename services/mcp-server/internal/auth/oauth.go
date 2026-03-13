@@ -183,6 +183,53 @@ type BearerValidator interface {
 }
 
 // -----------------------------------------------------------------------
+// Authorization Server Metadata — GET /.well-known/oauth-authorization-server
+// -----------------------------------------------------------------------
+
+// AuthorizationServerMetadata represents the OAuth 2.0 Authorization Server
+// Metadata response per RFC 8414. MCP clients (e.g. Claude.ai) fetch this
+// endpoint to discover how to authenticate.
+type AuthorizationServerMetadata struct {
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	GrantTypesSupported               []string `json:"grant_types_supported"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
+}
+
+// NewMetadataHandler returns an http.HandlerFunc that serves the OAuth 2.0
+// Authorization Server Metadata document (RFC 8414) at
+// /.well-known/oauth-authorization-server.
+//
+// The response is pre-serialized at construction time for efficiency.
+func NewMetadataHandler(baseURL string, cfg OAuthConfig) http.HandlerFunc {
+	meta := AuthorizationServerMetadata{
+		Issuer:                            baseURL,
+		AuthorizationEndpoint:             cfg.AuthorizationURL,
+		TokenEndpoint:                     cfg.TokenURL,
+		ResponseTypesSupported:            []string{"code"},
+		GrantTypesSupported:               []string{"authorization_code"},
+		CodeChallengeMethodsSupported:     []string{"S256"},
+		TokenEndpointAuthMethodsSupported: []string{"none"},
+	}
+
+	body, err := json.Marshal(meta)
+	if err != nil {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "internal error: failed to serialize metadata", http.StatusInternalServerError)
+		}
+	}
+
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write(body)
+	}
+}
+
+// -----------------------------------------------------------------------
 // AuthorizationHandler — GET /oauth/authorize
 // -----------------------------------------------------------------------
 
