@@ -36,7 +36,7 @@ export function AppShell({ children, currentPath = '/' }: AppShellProps) {
           sidebarOpen={sidebarOpen}
           sidebarId={SIDEBAR_ID}
         />
-        <main id="main-content" className="flex-1 overflow-y-auto p-4">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4">
           {children}
         </main>
       </div>

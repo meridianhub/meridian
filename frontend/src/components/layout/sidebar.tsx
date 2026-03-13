@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { BuildInfo } from './build-info'
 import {
@@ -93,6 +94,15 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
   const { isFeatureEnabled } = useTenantFeatures()
   const { isPlatformAdmin } = useTenantContext()
 
+  useEffect(() => {
+    if (!isOpen || !onClose) return
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose!()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
+
   function isItemVisible(item: NavItem): boolean {
     if (!item.feature) return true
     if (isPlatformAdmin) return true
@@ -108,7 +118,6 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
           role="presentation"
           tabIndex={-1}
           onClick={onClose}
-          onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
         />
       )}
       <aside

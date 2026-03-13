@@ -322,7 +322,6 @@ export function DataTable<T>({
                 className={onRowClick ? 'cursor-pointer' : undefined}
                 {...(onRowClick ? {
                   tabIndex: 0,
-                  role: 'link',
                   onKeyDown: (e: React.KeyboardEvent) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
