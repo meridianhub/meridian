@@ -137,13 +137,13 @@ describe('AuditLogPage', () => {
 
       await waitFor(() => {
         const insertBadge = screen.getAllByText('INSERT')[0]
-        expect(insertBadge).toHaveClass('bg-green-100')
+        expect(insertBadge).toHaveClass('bg-success-muted')
 
         const updateBadge = screen.getAllByText('UPDATE')[0]
-        expect(updateBadge).toHaveClass('bg-blue-100')
+        expect(updateBadge).toHaveClass('bg-info-muted')
 
         const deleteBadge = screen.getAllByText('DELETE')[0]
-        expect(deleteBadge).toHaveClass('bg-red-100')
+        expect(deleteBadge.className).toMatch(/bg-destructive/)
       })
     })
 

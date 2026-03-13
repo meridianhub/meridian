@@ -103,10 +103,10 @@ const StartNode = memo(function StartNode({ data }: { data: StartNodeData }) {
   return (
     <>
       <div
-        className={`flex flex-col items-center justify-center rounded-full border-2 border-emerald-500 bg-emerald-50 px-4 py-2 dark:bg-emerald-950/40 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
+        className={`flex flex-col items-center justify-center rounded-full border-2 border-success bg-success-muted px-4 py-2 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={containerStyle}
       >
-        <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{data.label}</span>
+        <span className="text-xs font-semibold text-success-foreground">{data.label}</span>
         {data.trigger && (
           <span
             className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium mt-0.5"
@@ -116,7 +116,7 @@ const StartNode = memo(function StartNode({ data }: { data: StartNodeData }) {
           </span>
         )}
       </div>
-      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="!bg-emerald-500 !border-0 !w-2 !h-2" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="bg-success! border-0! w-2! h-2!" />
     </>
   )
 })
@@ -158,7 +158,7 @@ const StepNode = memo(function StepNode({ data }: { data: StepNodeData }) {
 
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div
         className={`flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[140px] sm:min-w-[180px] transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={containerStyle}
@@ -184,7 +184,7 @@ const StepNode = memo(function StepNode({ data }: { data: StepNodeData }) {
           </div>
         )}
       </div>
-      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="bg-transparent! border-0! w-0! h-0!" />
     </>
   )
 })
@@ -207,17 +207,17 @@ const DecisionNode = memo(function DecisionNode({ data }: { data: DecisionNodeDa
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div
-        className={`flex items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
+        className={`flex items-center justify-center border-2 border-warning bg-warning-muted transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={DECISION_NODE_STYLE}
       >
-        <span className="inline-block text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-4 max-w-[120px]">
+        <span className="inline-block text-[10px] font-medium text-warning-foreground text-center leading-tight px-4 max-w-[120px]">
           {data.label}
         </span>
       </div>
-      <Handle type="source" position={data.direction === 'TB' ? Position.Right : Position.Bottom} id="exit" className="!bg-transparent !border-0 !w-0 !h-0" />
-      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} id="no" className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Right : Position.Bottom} id="exit" className="bg-transparent! border-0! w-0! h-0!" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} id="no" className="bg-transparent! border-0! w-0! h-0!" />
     </>
   )
 })
@@ -234,9 +234,9 @@ const ExitNode = memo(function ExitNode({ data }: { data: ExitNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
-      <div className={`flex items-center justify-center rounded-full border-2 border-red-500 bg-red-50 px-3 py-1.5 dark:bg-red-950/40 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
-        <span className="text-[10px] font-semibold text-red-700 dark:text-red-300">{data.label}</span>
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
+      <div className={`flex items-center justify-center rounded-full border-2 border-destructive bg-destructive/10 px-3 py-1.5 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
+        <span className="text-[10px] font-semibold text-destructive">{data.label}</span>
       </div>
     </>
   )
@@ -253,9 +253,9 @@ const EndNode = memo(function EndNode({ data }: { data: EndNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
-      <div className={`flex items-center justify-center rounded-full border-2 border-slate-500 bg-slate-100 px-4 py-2 dark:bg-slate-800 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
-        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">COMPLETED</span>
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
+      <div className={`flex items-center justify-center rounded-full border-2 border-border bg-muted px-4 py-2 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
+        <span className="text-xs font-semibold text-muted-foreground">COMPLETED</span>
       </div>
     </>
   )

@@ -78,7 +78,7 @@ test.describe('Active link highlighting', () => {
     const dashboardLink = nav.getByRole('link', { name: 'Dashboard' })
 
     await expect(dashboardLink).toHaveAttribute('aria-current', 'page')
-    await expect(dashboardLink).toHaveClass(/bg-gray-700/)
+    await expect(dashboardLink).toHaveClass(/bg-sidebar-accent/)
   })
 
   test('Accounts link is active on /accounts', async ({ authenticatedPage: page }) => {
@@ -87,7 +87,7 @@ test.describe('Active link highlighting', () => {
     const accountsLink = nav.getByRole('link', { name: 'Accounts', exact: true })
 
     await expect(accountsLink).toHaveAttribute('aria-current', 'page')
-    await expect(accountsLink).toHaveClass(/bg-gray-700/)
+    await expect(accountsLink).toHaveClass(/bg-sidebar-accent/)
   })
 
   test('only the active link has aria-current="page"', async ({ authenticatedPage: page }) => {

@@ -21,7 +21,7 @@ export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
   const { isPlatformAdmin } = useTenantContext()
 
   return (
-    <header className="relative z-50 flex h-14 items-center gap-4 border-b bg-white px-4 shadow-sm">
+    <header className="relative z-50 flex h-14 items-center gap-4 border-b bg-background px-4 shadow-sm">
       <Button
         variant="ghost"
         size="icon"
@@ -35,7 +35,7 @@ export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
       </Button>
 
       <div className="flex items-center gap-2">
-        <span className="font-semibold text-gray-900">Meridian</span>
+        <span className="font-semibold text-foreground">Meridian</span>
       </div>
 
       <div className="ml-auto flex items-center gap-4">

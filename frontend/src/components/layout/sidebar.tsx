@@ -113,7 +113,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
     <>
       {isOpen && onClose && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          className="fixed inset-0 z-30 bg-overlay md:hidden"
           aria-hidden="true"
           role="presentation"
           onClick={onClose}
@@ -123,7 +123,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
       id={id}
       data-open={String(isOpen)}
       className={cn(
-        'flex h-full w-64 flex-col bg-gray-900 text-white transition-transform duration-200',
+        'flex h-full w-64 flex-col bg-sidebar text-sidebar-foreground transition-transform duration-200',
         'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40',
         !isOpen && 'max-md:-translate-x-full',
       )}
@@ -136,7 +136,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
 
             acc.elements.push(
               <li key={group.label}>
-                <div className={cn('mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500', acc.visibleIndex > 0 && 'mt-4')}>
+                <div className={cn('mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50', acc.visibleIndex > 0 && 'mt-4')}>
                   {group.label}
                 </div>
                 <ul role="list" className="space-y-0.5">
@@ -151,8 +151,8 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
                           className={cn(
                             'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                             isActive
-                              ? 'bg-gray-700 text-white'
-                              : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                              ? 'bg-sidebar-accent text-sidebar-foreground'
+                              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                           )}
                         >
                           <Icon className="size-4 shrink-0" />
@@ -170,9 +170,9 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
 
           {showPlatformItems && (
             <>
-              <li role="separator" className="my-3 border-t border-gray-700" />
+              <li role="separator" className="my-3 border-t border-sidebar-border" />
               <li>
-                <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
                   Platform
                 </div>
                 <ul role="list" className="space-y-0.5">
@@ -187,8 +187,8 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
                           className={cn(
                             'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                             isActive
-                              ? 'bg-gray-700 text-white'
-                              : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                              ? 'bg-sidebar-accent text-sidebar-foreground'
+                              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                           )}
                         >
                           <Icon className="size-4 shrink-0" />

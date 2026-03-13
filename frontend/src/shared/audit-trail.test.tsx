@@ -184,22 +184,22 @@ describe('AuditTrail', () => {
 import { JsonDiffViewer } from './audit-trail';
 
 describe('JsonDiffViewer', () => {
-  it('shows inserted values in green for INSERT (null oldValue, object newValue)', () => {
+  it('shows inserted values in success color for INSERT (null oldValue, object newValue)', () => {
     const { container } = render(
       <JsonDiffViewer oldValue={null} newValue={{ id: 'abc', status: 'ACTIVE' }} />,
     );
     expect(screen.getByTestId('diff-inserted')).toBeInTheDocument();
     const inserted = container.querySelector('[data-testid="diff-inserted"]');
-    expect(inserted?.className).toMatch(/green/i);
+    expect(inserted?.className).toMatch(/success/i);
   });
 
-  it('shows deleted values in red for DELETE (object oldValue, null newValue)', () => {
+  it('shows deleted values in destructive color for DELETE (object oldValue, null newValue)', () => {
     const { container } = render(
       <JsonDiffViewer oldValue={{ id: 'abc', status: 'ACTIVE' }} newValue={null} />,
     );
     expect(screen.getByTestId('diff-deleted')).toBeInTheDocument();
     const deleted = container.querySelector('[data-testid="diff-deleted"]');
-    expect(deleted?.className).toMatch(/red/i);
+    expect(deleted?.className).toMatch(/destructive/i);
   });
 
   it('shows before/after diff for UPDATE (both oldValue and newValue present)', () => {

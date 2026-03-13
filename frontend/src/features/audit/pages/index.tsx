@@ -62,14 +62,14 @@ function toObject(value: unknown): object | null {
 // ---------------------------------------------------------------------------
 
 const OPERATION_STYLES: Record<AuditOperation, string> = {
-  INSERT: 'bg-green-100 text-green-800 border-green-200',
-  UPDATE: 'bg-blue-100 text-blue-800 border-blue-200',
-  DELETE: 'bg-red-100 text-red-800 border-red-200',
-  UNKNOWN: 'bg-gray-100 text-gray-800 border-gray-200',
+  INSERT: 'bg-success-muted text-success-foreground border-success/30',
+  UPDATE: 'bg-info-muted text-info-foreground border-info/30',
+  DELETE: 'bg-destructive/10 text-destructive border-destructive/30',
+  UNKNOWN: 'bg-muted text-muted-foreground border-border',
 }
 
 function OperationBadge({ operation }: { operation: AuditOperation }) {
-  const style = OPERATION_STYLES[operation] ?? 'bg-gray-100 text-gray-800 border-gray-200'
+  const style = OPERATION_STYLES[operation] ?? 'bg-muted text-muted-foreground border-border'
   return (
     <span
       className={cn(
@@ -98,7 +98,7 @@ function AuditDetailPanel({ entry, onClose }: AuditDetailPanelProps) {
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 transition-opacity"
+        className="fixed inset-0 bg-overlay transition-opacity"
         onClick={onClose}
         data-testid="detail-panel-backdrop"
       />

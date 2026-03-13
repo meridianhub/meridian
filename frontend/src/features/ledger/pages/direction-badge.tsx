@@ -15,9 +15,9 @@ export function DirectionBadge({ direction, className }: DirectionBadgeProps) {
       data-direction={direction}
       className={cn(
         'inline-flex items-center justify-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-        isDebit && 'border-orange-200 bg-orange-100 text-orange-800',
-        isCredit && 'border-blue-200 bg-blue-100 text-blue-800',
-        !isDebit && !isCredit && 'border-gray-200 bg-gray-100 text-gray-800',
+        isDebit && 'border-warning/30 bg-warning-muted text-warning-foreground',
+        isCredit && 'border-info/30 bg-info-muted text-info-foreground',
+        !isDebit && !isCredit && 'border-border bg-muted text-muted-foreground',
         className,
       )}
     >
