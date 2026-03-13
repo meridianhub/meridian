@@ -43,20 +43,30 @@ jobs:
 
     - name: Run govulncheck
       run: |
+        set -euo pipefail
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        # GO-2024-2476: Dex TLS config false positive — embedded Dex serves HTTP
-        # behind the gateway (Caddy terminates TLS). No upstream fix available.
-        # See ADR-0036 for context on Dex go.mod versioning issues.
-        govulncheck ./... 2>&1 | tee /tmp/govulncheck.out
-        # Fail only if vulnerabilities OTHER than the known Dex false positive are found
+        # Known Dex false positive — see ADR-0036 for context.
+        # GO-2024-2476: Dex TLS config discarding. Not applicable because
+        # embedded Dex serves HTTP behind the gateway (Caddy terminates TLS).
+        GOVULN_ALLOWLIST="GO-2024-2476"
+
+        govulncheck ./... 2>&1 | tee /tmp/govulncheck.out || true
+        GOVULN_RC=${PIPESTATUS[0]:-$?}
+
+        # If govulncheck failed but NOT due to found vulnerabilities, propagate the error
+        if [ "$GOVULN_RC" -ne 0 ] && ! grep -q 'Your code is affected by' /tmp/govulncheck.out; then
+          echo "::error::govulncheck execution failed (exit ${GOVULN_RC})"
+          exit "$GOVULN_RC"
+        fi
+
+        # Filter by explicit vulnerability ID allowlist (not module name)
         if grep -q 'Your code is affected by' /tmp/govulncheck.out; then
-          VULN_COUNT=$(grep -c 'Vulnerability #' /tmp/govulncheck.out || true)
-          DEX_ONLY=$(grep -A2 'Vulnerability #' /tmp/govulncheck.out | grep -c 'github.com/dexidp/dex' || true)
-          if [ "$VULN_COUNT" -gt "$DEX_ONLY" ]; then
-            echo "::error::Non-Dex vulnerabilities detected"
+          NON_ALLOWLISTED=$(grep -oE 'GO-[0-9]{4}-[0-9]+' /tmp/govulncheck.out | sort -u | grep -Fxv -e "$GOVULN_ALLOWLIST" || true)
+          if [ -n "$NON_ALLOWLISTED" ]; then
+            echo "::error::Non-allowlisted vulnerabilities detected: $NON_ALLOWLISTED"
             exit 1
           fi
-          echo "::warning::Suppressed $DEX_ONLY known Dex false positive(s) — see ADR-0036"
+          echo "::warning::Suppressed allowlisted Dex false positive(s) — see ADR-0036"
         fi
 
   gosec:
@@ -192,7 +202,12 @@ jobs:
         # Dex go.mod false positives: module path lacks /v2 suffix, so GitHub
         # reports all historical CVEs against v0.0.0. Pinned commit (v2.45.1)
         # includes all fixes. See ADR-0036.
-        allow-ghsas: GHSA-m9hp-7r99-94h5, GHSA-2x32-jm95-2cpx, GHSA-vh7g-p26c-j2cw, GHSA-gr79-9v6v-gc9r
+        #
+        # NOTE: allow-ghsas is NOT package-scoped — these are globally ignored.
+        # Only Dex-specific advisories are listed here. GHSA-m9hp-7r99-94h5
+        # (encoding/xml) is intentionally excluded to avoid masking XML vulns
+        # in other dependencies.
+        allow-ghsas: GHSA-2x32-jm95-2cpx, GHSA-vh7g-p26c-j2cw, GHSA-gr79-9v6v-gc9r
 
   sbom:
     name: Generate SBOM
