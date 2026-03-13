@@ -12,7 +12,7 @@ var handlersYAMLBytes []byte
 // Useful for callers that need to load the canonical handler definitions
 // without filesystem access (e.g., embedded binaries).
 func HandlersYAML() []byte {
-	return handlersYAMLBytes
+	return append([]byte(nil), handlersYAMLBytes...)
 }
 
 // NewRegistryWithHandlers creates a Registry pre-loaded with the canonical
