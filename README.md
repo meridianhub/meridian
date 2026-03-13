@@ -4,6 +4,7 @@
 [![Nightly](https://github.com/meridianhub/meridian/actions/workflows/nightly.yml/badge.svg)](https://github.com/meridianhub/meridian/actions/workflows/nightly.yml)
 [![Code Quality](https://github.com/meridianhub/meridian/actions/workflows/quality.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/quality.yml?query=branch%3Adevelop)
 [![Security Scanning](https://github.com/meridianhub/meridian/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/security.yml?query=branch%3Adevelop)
+[![codecov](https://codecov.io/gh/meridianhub/meridian/branch/develop/graph/badge.svg)](https://codecov.io/gh/meridianhub/meridian)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/meridianhub/meridian)](https://go.dev/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 
