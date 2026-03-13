@@ -44,7 +44,20 @@ jobs:
     - name: Run govulncheck
       run: |
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        govulncheck ./...
+        # GO-2024-2476: Dex TLS config false positive — embedded Dex serves HTTP
+        # behind the gateway (Caddy terminates TLS). No upstream fix available.
+        # See ADR-0036 for context on Dex go.mod versioning issues.
+        govulncheck ./... 2>&1 | tee /tmp/govulncheck.out
+        # Fail only if vulnerabilities OTHER than the known Dex false positive are found
+        if grep -q 'Your code is affected by' /tmp/govulncheck.out; then
+          VULN_COUNT=$(grep -c 'Vulnerability #' /tmp/govulncheck.out || true)
+          DEX_ONLY=$(grep -A2 'Vulnerability #' /tmp/govulncheck.out | grep -c 'github.com/dexidp/dex' || true)
+          if [ "$VULN_COUNT" -gt "$DEX_ONLY" ]; then
+            echo "::error::Non-Dex vulnerabilities detected"
+            exit 1
+          fi
+          echo "::warning::Suppressed $DEX_ONLY known Dex false positive(s) — see ADR-0036"
+        fi
 
   gosec:
     name: Security Scanner (Gosec)
@@ -112,6 +125,7 @@ jobs:
         output: 'trivy-repo-results.sarif'
         severity: 'CRITICAL,HIGH'
         exit-code: '1'  # Fail on critical/high vulnerabilities
+        trivyignores: '.trivyignore'
 
     - name: Upload Trivy results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v4
@@ -175,6 +189,10 @@ jobs:
       uses: actions/dependency-review-action@v4
       with:
         fail-on-severity: high
+        # Dex go.mod false positives: module path lacks /v2 suffix, so GitHub
+        # reports all historical CVEs against v0.0.0. Pinned commit (v2.45.1)
+        # includes all fixes. See ADR-0036.
+        allow-ghsas: GHSA-m9hp-7r99-94h5, GHSA-2x32-jm95-2cpx, GHSA-vh7g-p26c-j2cw, GHSA-gr79-9v6v-gc9r
 
   sbom:
     name: Generate SBOM

@@ -1,0 +1,27 @@
+# Dex OIDC provider — false positives from broken go.mod versioning.
+#
+# Dex declares its module as github.com/dexidp/dex without a /v2 suffix
+# despite being at major version 2. Go resolves this as v0.0.0-*, causing
+# scanners to report all historical CVEs as unfixed. The actual pinned
+# commit (v2.45.1, 11d2eeb52b42) includes all fixes.
+#
+# See: ADR-0036 (docs/adr/0036-embedded-dex-identity.md)
+# See: https://github.com/dexidp/dex/issues/2942
+
+# CVE-2020-26290 — XML encoding issues (fixed in Dex v2.27.0)
+CVE-2020-26290
+
+# CVE-2020-27847 — Authentication bypass (fixed in Dex v2.27.0)
+CVE-2020-27847
+
+# CVE-2022-39222 — MitM ID token capture via intercepted auth code (fixed in Dex v2.35.0)
+CVE-2022-39222
+
+# GHSA equivalents (Trivy may use either identifier)
+GHSA-m9hp-7r99-94h5
+GHSA-2x32-jm95-2cpx
+GHSA-vh7g-p26c-j2cw
+
+# GO-2024-2476 — Dex TLS config discarding (no upstream fix; not applicable
+# because embedded Dex serves HTTP behind the gateway, Caddy terminates TLS)
+GHSA-gr79-9v6v-gc9r
