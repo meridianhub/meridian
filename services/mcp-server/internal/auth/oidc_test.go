@@ -764,6 +764,58 @@ func TestNewOIDCHandler_MissingConfig(t *testing.T) {
 	}
 }
 
+func TestOIDCHandler_Authorize_UsesExternalDexURL(t *testing.T) {
+	// When BaseURL is set and DexIssuerURL points to an internal Docker hostname,
+	// the browser redirect should use the external URL, not the internal one.
+	dexSrv := fakeDexServer(t, "user@example.com")
+	signer := newTestSigner(t)
+
+	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
+		OIDC: auth.OIDCConfig{
+			DexIssuerURL: dexSrv.URL + "/dex", // Internal: http://127.0.0.1:PORT/dex
+			ClientID:     "meridian-service",
+			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
+		},
+		OAuth: auth.OAuthConfig{
+			ClientID:    "meridian-mcp",
+			RedirectURI: "https://claude.ai/callback",
+		},
+		BaseURL:    "https://demo.meridianhub.cloud",
+		StateStore: newTestOIDCStateStore(t),
+		CodeStore:  newTestStore(t),
+		Signer:     signer,
+		BaseDomain: "demo.meridianhub.cloud",
+		Logger:     slog.Default(),
+	})
+	require.NoError(t, err)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"state":                 {"client-state-123"},
+	}.Encode(), nil)
+	req.Host = "acme.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+
+	location := resp.Header.Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	// The redirect should go to the external host, not the internal test server.
+	assert.Equal(t, "demo.meridianhub.cloud", redirectURL.Host)
+	assert.Equal(t, "https", redirectURL.Scheme)
+	assert.Equal(t, "/dex/auth", redirectURL.Path)
+}
+
 func TestOIDCHandler_Authorize_RejectsStaticClientEvilRedirect(t *testing.T) {
 	dexSrv := fakeDexServer(t, "user@example.com")
 	signer := newTestSigner(t)
