@@ -106,24 +106,8 @@ function saveCollapsedGroups(collapsed: Set<string>): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsed]))
 }
 
-export function useCollapsedGroups(currentPath: string) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsedGroups())
-
-  // Auto-expand when current path matches a child route
-  useEffect(() => {
-    for (const group of TENANT_NAV_GROUPS) {
-      if (!group.collapsible) continue
-      const matchesChild = group.items.some(item => currentPath === item.href)
-      if (matchesChild && collapsed.has(group.label)) {
-        setCollapsed(prev => {
-          const next = new Set(prev)
-          next.delete(group.label)
-          saveCollapsedGroups(next)
-          return next
-        })
-      }
-    }
-  }, [currentPath]) // eslint-disable-line react-hooks/exhaustive-deps
+function useCollapsedGroups(currentPath: string) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsedGroups)
 
   const toggle = useCallback((label: string) => {
     setCollapsed(prev => {
@@ -138,7 +122,16 @@ export function useCollapsedGroups(currentPath: string) {
     })
   }, [])
 
-  const isCollapsed = useCallback((label: string) => collapsed.has(label), [collapsed])
+  // Derive effective collapsed state: auto-expand groups matching current path
+  const isCollapsed = useCallback((label: string) => {
+    if (!collapsed.has(label)) return false
+    // Auto-expand if current path matches a child of this group
+    const group = TENANT_NAV_GROUPS.find(g => g.label === label)
+    if (group?.collapsible && group.items.some(item => currentPath === item.href)) {
+      return false
+    }
+    return true
+  }, [collapsed, currentPath])
 
   return { toggle, isCollapsed }
 }
