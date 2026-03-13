@@ -56,7 +56,7 @@ export function EconomyCreatePage() {
 
           {/* I'm Feeling Lucky */}
           <OptionCard
-            icon={<Sparkles className="size-5 text-amber-500" />}
+            icon={<Sparkles className="size-5 text-warning" />}
             title="I'm Feeling Lucky"
             description="Single-pass AI generation"
             disabled={generatorDisabled}
@@ -68,7 +68,7 @@ export function EconomyCreatePage() {
 
           {/* Start from Scratch */}
           <OptionCard
-            icon={<FileCode className="size-5 text-green-500" />}
+            icon={<FileCode className="size-5 text-success" />}
             title="Start from Scratch"
             description="Open the editor with a blank template"
             disabled={false}

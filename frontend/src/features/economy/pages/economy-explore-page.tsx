@@ -88,7 +88,7 @@ function EventChannelsPanel({ sagas }: { sagas: SagaDefinition[] }) {
         <Card key={ch.channel}>
           <CardContent className="flex items-center justify-between px-4 py-3">
             <span className="font-mono text-sm font-medium text-foreground">{ch.channel}</span>
-            <Badge className="bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900 dark:text-green-200">
+            <Badge className="bg-success-muted text-success-foreground hover:bg-success-muted">
               {ch.sagas.length} saga{ch.sagas.length === 1 ? '' : 's'} attached
             </Badge>
           </CardContent>

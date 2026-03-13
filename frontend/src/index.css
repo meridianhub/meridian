@@ -100,6 +100,16 @@
     --info-muted: oklch(0.95 0.04 250);
     --destructive-foreground: oklch(1 0 0);
     --overlay: oklch(0 0 0 / 50%);
+
+    /* Graph node/edge colors */
+    --graph-instrument: oklch(0.59 0.15 250);
+    --graph-account-type: oklch(0.59 0.15 145);
+    --graph-valuation-rule: oklch(0.75 0.15 85);
+    --graph-saga: oklch(0.59 0.15 295);
+    --graph-diff-added: oklch(0.59 0.15 145);
+    --graph-diff-removed: oklch(0.577 0.245 27.325);
+    --graph-diff-modified: oklch(0.75 0.15 85);
+    --graph-diff-unchanged: oklch(0.554 0.046 257.417);
 }
 
 .dark {
@@ -145,6 +155,16 @@
     --info-muted: oklch(0.25 0.06 250);
     --destructive-foreground: oklch(1 0 0);
     --overlay: oklch(0 0 0 / 60%);
+
+    /* Graph node/edge colors */
+    --graph-instrument: oklch(0.65 0.18 250);
+    --graph-account-type: oklch(0.65 0.18 145);
+    --graph-valuation-rule: oklch(0.75 0.18 85);
+    --graph-saga: oklch(0.65 0.18 295);
+    --graph-diff-added: oklch(0.65 0.18 145);
+    --graph-diff-removed: oklch(0.704 0.191 22.216);
+    --graph-diff-modified: oklch(0.75 0.18 85);
+    --graph-diff-unchanged: oklch(0.704 0.04 256.788);
 }
 
 @layer base {
