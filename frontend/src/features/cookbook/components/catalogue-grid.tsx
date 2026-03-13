@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Blocks, BookOpen, SearchX } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -30,7 +30,6 @@ function ComplexityIndicator({ score }: { score: number }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          tabIndex={0}
           aria-label={`Complexity: ${score} — ${label}`}
           className="flex items-center gap-1"
           data-testid="complexity-indicator"
@@ -51,23 +50,14 @@ function ComplexityIndicator({ score }: { score: number }) {
 }
 
 function CookbookCard({ item }: { item: CookbookItem }) {
-  const navigate = useNavigate()
   const isPattern = item.type === 'registry:pattern'
   const meta = item.meta
   const patternMeta = isPatternMeta(meta) ? meta : undefined
 
   return (
+    <Link to={`/cookbook/${item.name}`} className="rounded-xl outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]">
     <Card
-      role="link"
-      tabIndex={0}
-      className="cursor-pointer transition-colors hover:border-primary/50 focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none"
-      onClick={() => navigate(`/cookbook/${item.name}`)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          navigate(`/cookbook/${item.name}`)
-        }
-      }}
+      className="h-full cursor-pointer transition-colors hover:border-primary/50"
     >
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
@@ -118,6 +108,7 @@ function CookbookCard({ item }: { item: CookbookItem }) {
         </CardFooter>
       )}
     </Card>
+    </Link>
   )
 }
 

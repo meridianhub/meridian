@@ -105,7 +105,10 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
           aria-hidden="true"
+          role="presentation"
+          tabIndex={-1}
           onClick={onClose}
+          onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
         />
       )}
       <aside

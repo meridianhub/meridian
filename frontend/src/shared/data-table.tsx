@@ -76,7 +76,7 @@ function SortableHeader({ label, isSorted, onToggle }: SortableHeaderProps) {
       onClick={onToggle}
       aria-sort={ariaSort}
       aria-label={ariaLabel}
-      className="flex items-center gap-1 font-medium hover:text-foreground"
+      className="flex items-center gap-1 font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]"
     >
       {label}
       {isSorted === 'asc' ? (
@@ -320,6 +320,16 @@ export function DataTable<T>({
                 key={row.id}
                 onClick={() => onRowClick?.(row.original)}
                 className={onRowClick ? 'cursor-pointer' : undefined}
+                {...(onRowClick ? {
+                  tabIndex: 0,
+                  role: 'link',
+                  onKeyDown: (e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onRowClick(row.original)
+                    }
+                  },
+                } : {})}
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>
