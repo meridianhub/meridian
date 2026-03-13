@@ -282,7 +282,9 @@ export function DataTable<T>({
         <FilterBar filters={filters} values={activeFilters} onChange={handleFilterChange} />
       )}
 
-      <div role="status" aria-live="polite" aria-busy={isLoading}>
+      <span className="sr-only" role="status" aria-live="polite">
+        {isLoading ? 'Loading data…' : `${rows.length} rows loaded`}
+      </span>
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
@@ -348,7 +350,6 @@ export function DataTable<T>({
         onNext={handleNextPage}
         onPrev={handlePrevPage}
       />
-      </div>
     </div>
   )
 }
