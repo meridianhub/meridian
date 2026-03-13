@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { Sidebar } from '@/components/layout/sidebar'
 import type { TenantContextValue } from '@/contexts/tenant-context'
@@ -51,6 +52,7 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.mocked(useTenantContext).mockReturnValue(makeContext())
     vi.mocked(useTenantFeatures).mockReturnValue(makeFeatures())
+    localStorage.clear()
   })
 
   describe('tenant lens', () => {
@@ -206,6 +208,176 @@ describe('Sidebar', () => {
       expect(screen.getByRole('link', { name: 'Ledger' })).toBeInTheDocument()
       expect(screen.queryByRole('link', { name: 'Payments' })).not.toBeInTheDocument()
       expect(screen.queryByRole('link', { name: 'Reconciliation' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('nav group structure', () => {
+    it('renders four groups: Operations, Economy, Configuration, Admin', () => {
+      renderSidebar({ lens: 'tenant' })
+
+      expect(screen.getByText('Operations')).toBeInTheDocument()
+      expect(screen.getByText('Economy')).toBeInTheDocument()
+      expect(screen.getByText('Configuration')).toBeInTheDocument()
+      expect(screen.getByText('Admin')).toBeInTheDocument()
+    })
+
+    it('places Economy items under Economy group', () => {
+      renderSidebar({ lens: 'tenant' })
+
+      const economyGroup = screen.getByRole('button', { name: /economy/i }).closest('li')!
+      expect(within(economyGroup).getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Reference Data' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Starlark Config' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Market Data' })).toBeInTheDocument()
+      expect(within(economyGroup).getByRole('link', { name: 'Forecasting' })).toBeInTheDocument()
+    })
+
+    it('places remaining config items under Configuration group', () => {
+      renderSidebar({ lens: 'tenant' })
+
+      const configGroup = screen.getByText('Configuration').closest('li')!
+      expect(within(configGroup).getByRole('link', { name: 'Gateway Mappings' })).toBeInTheDocument()
+      expect(within(configGroup).getByRole('link', { name: 'MCP Config' })).toBeInTheDocument()
+      expect(within(configGroup).getByRole('link', { name: 'Cookbook' })).toBeInTheDocument()
+    })
+  })
+
+  describe('collapsible Economy group', () => {
+    it('renders Economy header as a button with aria-expanded', () => {
+      renderSidebar({ lens: 'tenant' })
+
+      const economyButton = screen.getByRole('button', { name: /economy/i })
+      expect(economyButton).toBeInTheDocument()
+      expect(economyButton).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('collapses Economy items when toggle button is clicked', async () => {
+      const user = userEvent.setup()
+      renderSidebar({ lens: 'tenant' })
+
+      const economyButton = screen.getByRole('button', { name: /economy/i })
+      await user.click(economyButton)
+
+      expect(economyButton).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Reference Data' })).not.toBeInTheDocument()
+    })
+
+    it('expands Economy items when toggle is clicked again', async () => {
+      const user = userEvent.setup()
+      renderSidebar({ lens: 'tenant' })
+
+      const economyButton = screen.getByRole('button', { name: /economy/i })
+      await user.click(economyButton) // collapse
+      await user.click(economyButton) // expand
+
+      expect(economyButton).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+    })
+
+    it('persists collapsed state to localStorage', async () => {
+      const user = userEvent.setup()
+      renderSidebar({ lens: 'tenant' })
+
+      const economyButton = screen.getByRole('button', { name: /economy/i })
+      await user.click(economyButton)
+
+      const stored = JSON.parse(localStorage.getItem('meridian:sidebar-collapsed') ?? '[]')
+      expect(stored).toContain('Economy')
+    })
+
+    it('restores collapsed state from localStorage', () => {
+      localStorage.setItem('meridian:sidebar-collapsed', JSON.stringify(['Economy']))
+      renderSidebar({ lens: 'tenant' })
+
+      const economyButton = screen.getByRole('button', { name: /economy/i })
+      expect(economyButton).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
+    })
+
+    it('auto-expands Economy when currentPath matches an Economy child route', () => {
+      localStorage.setItem('meridian:sidebar-collapsed', JSON.stringify(['Economy']))
+      renderSidebar({ lens: 'tenant', currentPath: '/economy' })
+
+      const economyButton = screen.getByRole('button', { name: /economy/i })
+      expect(economyButton).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+    })
+
+    it('auto-expands Economy when currentPath is /reference-data', () => {
+      localStorage.setItem('meridian:sidebar-collapsed', JSON.stringify(['Economy']))
+      renderSidebar({ lens: 'tenant', currentPath: '/reference-data' })
+
+      expect(screen.getByRole('button', { name: /economy/i })).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('auto-expands Economy when currentPath is /starlark-config', () => {
+      localStorage.setItem('meridian:sidebar-collapsed', JSON.stringify(['Economy']))
+      renderSidebar({ lens: 'tenant', currentPath: '/starlark-config' })
+
+      expect(screen.getByRole('button', { name: /economy/i })).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('does not auto-expand Economy for unrelated paths', () => {
+      localStorage.setItem('meridian:sidebar-collapsed', JSON.stringify(['Economy']))
+      renderSidebar({ lens: 'tenant', currentPath: '/accounts' })
+
+      expect(screen.getByRole('button', { name: /economy/i })).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('non-collapsible groups render header as static text, not button', () => {
+      renderSidebar({ lens: 'tenant' })
+
+      // Operations is not collapsible — no button for it
+      expect(screen.queryByRole('button', { name: /operations/i })).not.toBeInTheDocument()
+      expect(screen.getByText('Operations')).toBeInTheDocument()
+    })
+  })
+
+  describe('Economy group feature gate', () => {
+    it('hides entire Economy group when economy feature is disabled', () => {
+      vi.mocked(useTenantFeatures).mockReturnValue(
+        makeFeatures(['dashboard', 'accounts']),
+      )
+      vi.mocked(useTenantContext).mockReturnValue(makeContext({ isPlatformAdmin: false }))
+
+      renderSidebar({ lens: 'tenant' })
+
+      expect(screen.queryByRole('button', { name: /economy/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Reference Data' })).not.toBeInTheDocument()
+    })
+
+    it('shows Economy group for platform admin even when economy feature disabled', () => {
+      vi.mocked(useTenantFeatures).mockReturnValue(
+        makeFeatures(['dashboard']),
+      )
+      vi.mocked(useTenantContext).mockReturnValue(makeContext({ isPlatformAdmin: true }))
+
+      renderSidebar({ lens: 'platform' })
+
+      expect(screen.getByRole('button', { name: /economy/i })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+    })
+
+    it('hides individual Economy items whose specific feature is disabled', () => {
+      vi.mocked(useTenantFeatures).mockReturnValue(
+        makeFeatures(['dashboard', 'economy', 'reference-data']),
+      )
+      vi.mocked(useTenantContext).mockReturnValue(makeContext({ isPlatformAdmin: false }))
+
+      renderSidebar({ lens: 'tenant' })
+
+      // Economy group visible (economy feature enabled)
+      expect(screen.getByRole('button', { name: /economy/i })).toBeInTheDocument()
+      // Overview visible (economy feature)
+      expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+      // Reference Data visible (reference-data feature)
+      expect(screen.getByRole('link', { name: 'Reference Data' })).toBeInTheDocument()
+      // Starlark Config hidden (sagas feature not enabled)
+      expect(screen.queryByRole('link', { name: 'Starlark Config' })).not.toBeInTheDocument()
+      // Market Data hidden
+      expect(screen.queryByRole('link', { name: 'Market Data' })).not.toBeInTheDocument()
     })
   })
 })

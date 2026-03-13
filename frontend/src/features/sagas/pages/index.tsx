@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DataTable } from '@/shared/data-table'
 import { TimeDisplay } from '@/shared/time-display'
 import { StatusBadge } from '@/shared/status-badge'
-import { PageShell, PageHeader } from '@/shared'
+import { PageShell, PageHeader, Breadcrumbs } from '@/shared'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { SagaStatus } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { useSagasTable } from '../hooks'
@@ -123,6 +123,11 @@ export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPa
 
   return (
     <PageShell>
+      <Breadcrumbs items={[
+        { label: 'Economy', href: '/economy' },
+        { label: 'Starlark Config' },
+      ]} />
+
       <PageHeader
         title="Starlark Configuration"
         description="Manage saga workflow definitions and Starlark scripts"

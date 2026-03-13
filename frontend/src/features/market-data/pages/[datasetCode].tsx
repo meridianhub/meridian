@@ -171,7 +171,10 @@ export function DatasetDetailPage() {
   if (!tenantSlug) {
     return (
       <PageShell>
-        <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
+        <Breadcrumbs items={[
+          { label: 'Economy', href: '/economy' },
+          { label: 'Market Data', href: '/market-data' },
+        ]} />
         <p className="text-muted-foreground">No tenant selected.</p>
       </PageShell>
     )
@@ -180,7 +183,10 @@ export function DatasetDetailPage() {
   if (!datasetCode) {
     return (
       <PageShell>
-        <Breadcrumbs items={[{ label: 'Market Data', href: '/market-data' }]} />
+        <Breadcrumbs items={[
+          { label: 'Economy', href: '/economy' },
+          { label: 'Market Data', href: '/market-data' },
+        ]} />
         <p className="text-muted-foreground">No dataset selected.</p>
       </PageShell>
     )
@@ -222,6 +228,7 @@ export function DatasetDetailPage() {
     <PageShell>
       <Breadcrumbs
         items={[
+          { label: 'Economy', href: '/economy' },
           { label: 'Market Data', href: '/market-data' },
           { label: dataset?.displayName || datasetCode },
         ]}
