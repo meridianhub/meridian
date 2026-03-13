@@ -64,9 +64,9 @@ describe('QualityLadderBadge', () => {
     expect(badge.className).toMatch(/info/)
   })
 
-  it('applies info token for REVISED quality', () => {
+  it('applies accent token for REVISED quality', () => {
     render(<QualityLadderBadge quality="REVISED" />)
     const badge = screen.getByTestId('quality-ladder-badge')
-    expect(badge.className).toMatch(/info/)
+    expect(badge.className).toMatch(/accent/)
   })
 })

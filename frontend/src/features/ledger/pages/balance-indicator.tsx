@@ -27,8 +27,8 @@ export function BalanceIndicator({
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              'inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-destructive-foreground',
-              isBalanced ? 'bg-success' : 'bg-destructive',
+              'inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold',
+              isBalanced ? 'bg-success text-success-foreground' : 'bg-destructive text-destructive-foreground',
             )}
           >
             {isBalanced ? '✓' : '✗'}

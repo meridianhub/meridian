@@ -110,7 +110,7 @@ function StartNode({ data }: { data: StartNodeData }) {
           </span>
         )}
       </div>
-      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="!bg-success !border-0 !w-2 !h-2" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="bg-success! border-0! w-2! h-2!" />
     </>
   )
 }
@@ -145,7 +145,7 @@ function StepNode({ data }: { data: StepNodeData }) {
 
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div
         className={`flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[140px] sm:min-w-[180px] transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={{
@@ -176,7 +176,7 @@ function StepNode({ data }: { data: StepNodeData }) {
           </div>
         )}
       </div>
-      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="bg-transparent! border-0! w-0! h-0!" />
     </>
   )
 }
@@ -193,7 +193,7 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div
         className={`flex items-center justify-center border-2 border-warning bg-warning-muted transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={{
@@ -206,8 +206,8 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
           {data.label}
         </span>
       </div>
-      <Handle type="source" position={data.direction === 'TB' ? Position.Right : Position.Bottom} id="exit" className="!bg-transparent !border-0 !w-0 !h-0" />
-      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} id="no" className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Right : Position.Bottom} id="exit" className="bg-transparent! border-0! w-0! h-0!" />
+      <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} id="no" className="bg-transparent! border-0! w-0! h-0!" />
     </>
   )
 }
@@ -224,7 +224,7 @@ function ExitNode({ data }: { data: ExitNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div className={`flex items-center justify-center rounded-full border-2 border-destructive bg-destructive/10 px-3 py-1.5 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
         <span className="text-[10px] font-semibold text-destructive">{data.label}</span>
       </div>
@@ -243,7 +243,7 @@ function EndNode({ data }: { data: EndNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
-      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div className={`flex items-center justify-center rounded-full border-2 border-border bg-muted px-4 py-2 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}>
         <span className="text-xs font-semibold text-muted-foreground">COMPLETED</span>
       </div>

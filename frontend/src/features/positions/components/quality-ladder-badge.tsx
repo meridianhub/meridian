@@ -27,7 +27,7 @@ const QUALITY_LEVELS: Record<QualityLevel, QualityConfig> = {
   },
   REVISED: {
     icon: RefreshCw,
-    colorClass: 'text-info-foreground bg-info-muted border-info/30',
+    colorClass: 'text-accent-foreground bg-accent border-accent-foreground/20',
     label: 'Revised',
   },
 }
