@@ -136,7 +136,7 @@ interface StepNodeData {
 const StepNode = memo(function StepNode({ data }: { data: StepNodeData }) {
   const primaryService = data.serviceCalls[0]?.service
   const primaryColors = primaryService ? data.serviceColors.get(primaryService) : undefined
-  const borderColor = primaryColors?.fg ?? '#71717a'
+  const borderColor = primaryColors?.fg ?? 'var(--muted-foreground)'
 
   const usesHighlighted = data.highlightedService
     ? data.serviceCalls.some((c) => c.service === data.highlightedService)
@@ -418,7 +418,7 @@ function buildCombinedFlowGraph(
           sourceHandle: 'exit',
           target: exitId,
           label: 'Yes',
-          style: { stroke: '#ef4444', strokeDasharray: '6 3' },
+          style: { stroke: 'var(--destructive)', strokeDasharray: '6 3' },
         })
 
         edges.push({

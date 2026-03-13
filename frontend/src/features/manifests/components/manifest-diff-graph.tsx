@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { memo, useEffect, useMemo } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -32,10 +32,10 @@ import { computeManifestDiff, type ManifestDiff } from '../lib/manifest-diff'
 type DiffStatus = 'added' | 'removed' | 'modified' | 'unchanged'
 
 const DIFF_COLORS: Record<DiffStatus, { border: string; bg: string }> = {
-  added: { border: '#16a34a', bg: '#16a34a18' },
-  removed: { border: '#dc2626', bg: '#dc262618' },
-  modified: { border: '#d97706', bg: '#d9770618' },
-  unchanged: { border: '#6b7280', bg: '#6b728010' },
+  added: { border: 'var(--graph-diff-added)', bg: 'color-mix(in oklch, var(--graph-diff-added) 10%, transparent)' },
+  removed: { border: 'var(--graph-diff-removed)', bg: 'color-mix(in oklch, var(--graph-diff-removed) 10%, transparent)' },
+  modified: { border: 'var(--graph-diff-modified)', bg: 'color-mix(in oklch, var(--graph-diff-modified) 10%, transparent)' },
+  unchanged: { border: 'var(--graph-diff-unchanged)', bg: 'color-mix(in oklch, var(--graph-diff-unchanged) 6%, transparent)' },
 }
 
 const LAYER_PRIORITY: Record<ManifestNodeType, string> = {
@@ -51,20 +51,23 @@ interface DiffNodeData {
   [key: string]: unknown
 }
 
-function DiffNode({ data }: { data: DiffNodeData }) {
+const DiffNode = memo(function DiffNode({ data }: { data: DiffNodeData }) {
   const node = data.manifestNode
   const colors = DIFF_COLORS[data.diffStatus]
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    textDecoration: data.diffStatus === 'removed' ? 'line-through' as const : undefined,
+  }), [colors.border, colors.bg, data.diffStatus])
+
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
       <div
         className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
-        style={{
-          width: 180,
-          borderColor: colors.border,
-          backgroundColor: colors.bg,
-          textDecoration: data.diffStatus === 'removed' ? 'line-through' : undefined,
-        }}
+        style={containerStyle}
         data-testid={`diff-node-${data.diffStatus}`}
       >
         <span className="text-[11px] font-bold font-mono text-foreground">{node.label}</span>
@@ -73,7 +76,7 @@ function DiffNode({ data }: { data: DiffNodeData }) {
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
-}
+})
 
 const nodeTypes = {
   diff_node: DiffNode,
@@ -240,7 +243,7 @@ export function ManifestDiffGraph({ before, after, className }: ManifestDiffGrap
 
   if (noDiff) {
     return (
-      <div className={className} data-testid="manifest-diff-no-changes" style={{ width: '100%', height: '100%' }}>
+      <div className={`${className ?? ''} w-full h-full`} data-testid="manifest-diff-no-changes">
         <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
           No differences between versions.
         </div>
@@ -249,7 +252,7 @@ export function ManifestDiffGraph({ before, after, className }: ManifestDiffGrap
   }
 
   return (
-    <div className={className} style={{ width: '100%', height: '100%', position: 'relative' }} data-testid="manifest-diff-graph">
+    <div className={`${className ?? ''} w-full h-full relative`} data-testid="manifest-diff-graph">
       <TooltipProvider>
         <ReactFlow
           nodes={nodes}
@@ -270,29 +273,29 @@ export function ManifestDiffGraph({ before, after, className }: ManifestDiffGrap
       <div className="absolute top-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm" data-testid="diff-summary">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Changes</span>
         {diff.addedNodes.length > 0 && (
-          <span className="text-xs text-green-600">+{diff.addedNodes.length} added</span>
+          <span className="text-xs text-success-foreground">+{diff.addedNodes.length} added</span>
         )}
         {diff.removedNodes.length > 0 && (
-          <span className="text-xs text-red-600">-{diff.removedNodes.length} removed</span>
+          <span className="text-xs text-destructive">-{diff.removedNodes.length} removed</span>
         )}
         {diff.modifiedNodes.length > 0 && (
-          <span className="text-xs text-amber-600">~{diff.modifiedNodes.length} modified</span>
+          <span className="text-xs text-warning-foreground">~{diff.modifiedNodes.length} modified</span>
         )}
         {diff.addedEdges.length > 0 && (
-          <span className="text-xs text-green-600">+{diff.addedEdges.length} edge{diff.addedEdges.length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-success-foreground">+{diff.addedEdges.length} edge{diff.addedEdges.length !== 1 ? 's' : ''}</span>
         )}
         {diff.removedEdges.length > 0 && (
-          <span className="text-xs text-red-600">-{diff.removedEdges.length} edge{diff.removedEdges.length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-destructive">-{diff.removedEdges.length} edge{diff.removedEdges.length !== 1 ? 's' : ''}</span>
         )}
       </div>
 
       {/* Legend */}
       <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Legend</span>
-        <DiffLegendItem label="Added" color="#16a34a" />
-        <DiffLegendItem label="Removed" color="#dc2626" dashed />
-        <DiffLegendItem label="Modified" color="#d97706" />
-        <DiffLegendItem label="Unchanged" color="#6b7280" />
+        <DiffLegendItem label="Added" color="var(--graph-diff-added)" />
+        <DiffLegendItem label="Removed" color="var(--graph-diff-removed)" dashed />
+        <DiffLegendItem label="Modified" color="var(--graph-diff-modified)" />
+        <DiffLegendItem label="Unchanged" color="var(--graph-diff-unchanged)" />
       </div>
     </div>
   )

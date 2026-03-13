@@ -233,7 +233,7 @@ export function PositionDetailPage() {
             <LabeledField label="Account ID">
               {log?.accountId ? (
                 accountEntityType(log.accountServiceDomain) ? (
-                  <EntityLink type={accountEntityType(log.accountServiceDomain)!} id={log.accountId} className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400" />
+                  <EntityLink type={accountEntityType(log.accountServiceDomain)!} id={log.accountId} className="font-mono text-xs text-primary hover:underline" />
                 ) : (
                   <span className="font-mono text-xs">{log.accountId}</span>
                 )

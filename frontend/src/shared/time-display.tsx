@@ -61,7 +61,7 @@ export function TimeDisplay({
       <TooltipTrigger asChild>
         <span className="cursor-help">
           {relative}
-          <span className="text-xs text-gray-500 ml-1">({absolute} UTC)</span>
+          <span className="text-xs text-muted-foreground ml-1">({absolute} UTC)</span>
         </span>
       </TooltipTrigger>
       <TooltipContent>

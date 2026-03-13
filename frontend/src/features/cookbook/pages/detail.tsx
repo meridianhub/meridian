@@ -23,9 +23,9 @@ function complexityLabel(score: number): string {
 }
 
 function complexityColor(score: number): string {
-  if (score <= 3) return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-  if (score <= 6) return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
-  return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+  if (score <= 3) return 'bg-success-muted text-success-foreground'
+  if (score <= 6) return 'bg-warning-muted text-warning-foreground'
+  return 'bg-destructive/10 text-destructive'
 }
 
 function PatternInfoSection({ item, computedComplexity }: { item: CookbookItem; computedComplexity: number | null }) {

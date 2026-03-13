@@ -123,7 +123,7 @@ export function InstrumentsPage() {
             <span className="text-sm">{p}</span>
             {p > 12 && (
               <span data-testid="precision-overflow-warning" title="High precision may cause display overflow">
-                <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+                <AlertTriangle className="h-3.5 w-3.5 text-warning" />
               </span>
             )}
           </div>
@@ -257,7 +257,7 @@ export function InstrumentsPage() {
             <div data-testid="cel-result" className="rounded border bg-muted/30 p-4 space-y-2">
               <div className="flex items-center gap-2 text-sm">
                 <span className="font-medium">Validation:</span>
-                <span className={celResult.validationResult ? 'text-green-600' : 'text-red-600'}>
+                <span className={celResult.validationResult ? 'text-success-foreground' : 'text-destructive'}>
                   {celResult.validationResult ? 'PASS' : 'FAIL'}
                 </span>
               </div>
@@ -270,12 +270,12 @@ export function InstrumentsPage() {
                 </div>
               )}
               {celResult.errorMessage && (
-                <div className="text-sm text-red-600">
+                <div className="text-sm text-destructive">
                   <span className="font-medium">Error:</span> {celResult.errorMessage}
                 </div>
               )}
               {celResult.compileErrors.length > 0 && (
-                <div className="text-sm text-red-600">
+                <div className="text-sm text-destructive">
                   <span className="font-medium">Compile Errors:</span>
                   <ul className="mt-1 list-disc list-inside">
                     {celResult.compileErrors.map((e, i) => (

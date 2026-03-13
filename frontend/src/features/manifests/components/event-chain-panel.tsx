@@ -9,9 +9,9 @@ import { Badge } from '@/components/ui/badge'
 import type { EventChain, EventHop } from '../lib/transitive-closure'
 
 const FILTER_BADGE_STYLES: Record<string, string> = {
-  pass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
-  fail: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
-  indeterminate: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+  pass: 'bg-success-muted text-success-foreground',
+  fail: 'bg-destructive/10 text-destructive',
+  indeterminate: 'bg-warning-muted text-warning-foreground',
 }
 
 const TERMINATION_LABELS: Record<string, string> = {

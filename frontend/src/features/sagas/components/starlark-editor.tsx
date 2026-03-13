@@ -215,7 +215,7 @@ export function StarlarkEditor({
                   data-testid={`error-item-${index}`}
                   className={cn(
                     'flex w-full cursor-pointer items-start gap-2 px-3 py-1.5 text-left hover:bg-destructive/10',
-                    error.category === 'WARNING' && 'text-yellow-700 dark:text-yellow-400',
+                    error.category === 'WARNING' && 'text-warning-foreground',
                     error.category !== 'WARNING' && 'text-destructive',
                   )}
                   onClick={() => onErrorClick?.(error)}
@@ -248,10 +248,10 @@ function ComplexityMetricsPanel({ metrics }: ComplexityMetricsPanelProps) {
 
   const scoreColor =
     complexityScore <= 3
-      ? 'text-green-600 dark:text-green-400'
+      ? 'text-success-foreground'
       : complexityScore <= 6
-        ? 'text-yellow-600 dark:text-yellow-400'
-        : 'text-red-600 dark:text-red-400'
+        ? 'text-warning-foreground'
+        : 'text-destructive'
 
   return (
     <div

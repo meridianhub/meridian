@@ -44,13 +44,13 @@ const SERVICE_STATUS_LABEL: Record<number, string> = {
 function ServiceStatusIcon({ status }: { status: ServiceProvisioningStatus_Status }) {
   switch (status) {
     case ServiceProvisioningStatus_Status.COMPLETED:
-      return <CheckCircle2 className="size-4 text-green-600" aria-label="Completed" />
+      return <CheckCircle2 className="size-4 text-success" aria-label="Completed" />
     case ServiceProvisioningStatus_Status.IN_PROGRESS:
-      return <Loader2 className="size-4 animate-spin text-blue-600" aria-label="In Progress" />
+      return <Loader2 className="size-4 animate-spin text-info" aria-label="In Progress" />
     case ServiceProvisioningStatus_Status.FAILED:
-      return <XCircle className="size-4 text-red-600" aria-label="Failed" />
+      return <XCircle className="size-4 text-destructive" aria-label="Failed" />
     default:
-      return <Circle className="size-4 text-gray-400" aria-label="Pending" />
+      return <Circle className="size-4 text-muted-foreground" aria-label="Pending" />
   }
 }
 
@@ -72,9 +72,9 @@ function ProvisioningStatusGrid({ services }: ProvisioningStatusGridProps) {
           key={svc.serviceName}
           className={cn(
             'flex items-start gap-3 rounded-md border p-3',
-            svc.status === ServiceProvisioningStatus_Status.FAILED && 'border-red-200 bg-red-50',
-            svc.status === ServiceProvisioningStatus_Status.IN_PROGRESS && 'border-blue-200 bg-blue-50',
-            svc.status === ServiceProvisioningStatus_Status.COMPLETED && 'border-green-200 bg-green-50',
+            svc.status === ServiceProvisioningStatus_Status.FAILED && 'border-destructive/30 bg-destructive/10',
+            svc.status === ServiceProvisioningStatus_Status.IN_PROGRESS && 'border-info/30 bg-info-muted',
+            svc.status === ServiceProvisioningStatus_Status.COMPLETED && 'border-success/30 bg-success-muted',
           )}
         >
           <ServiceStatusIcon status={svc.status} />
@@ -87,7 +87,7 @@ function ProvisioningStatusGrid({ services }: ProvisioningStatusGridProps) {
               <p className="text-xs text-muted-foreground font-mono">{svc.migrationVersion}</p>
             )}
             {svc.errorMessage && (
-              <p className="mt-1 text-xs text-red-700">{svc.errorMessage}</p>
+              <p className="mt-1 text-xs text-destructive">{svc.errorMessage}</p>
             )}
           </div>
         </div>
@@ -247,9 +247,9 @@ export function TenantDetailPage() {
             </div>
           </dl>
           {tenant.errorMessage && (
-            <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3">
-              <p className="text-sm font-medium text-red-800">Error</p>
-              <p className="text-sm text-red-700">{tenant.errorMessage}</p>
+            <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3">
+              <p className="text-sm font-medium text-destructive">Error</p>
+              <p className="text-sm text-destructive">{tenant.errorMessage}</p>
             </div>
           )}
         </CardContent>
