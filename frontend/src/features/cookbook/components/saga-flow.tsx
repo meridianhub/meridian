@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -78,33 +78,39 @@ interface StartNodeData {
   [key: string]: unknown
 }
 
-function StartNode({ data }: { data: StartNodeData }) {
+const StartNode = memo(function StartNode({ data }: { data: StartNodeData }) {
   const triggerColors = data.triggerService ? data.serviceColors.get(data.triggerService) : undefined
   const isTriggerHighlighted = data.highlightedService === data.triggerService && data.triggerService != null
   const dimmedByService = data.highlightedService && !isTriggerHighlighted
   const dimmedBySaga = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   const dimmed = dimmedByService || dimmedBySaga
 
+  const containerStyle = useMemo(() => ({
+    ...(isTriggerHighlighted && triggerColors
+      ? { borderColor: triggerColors.fg, boxShadow: `0 0 0 2px ${triggerColors.fg}`, outline: `2px solid ${triggerColors.fg}`, outlineOffset: '2px' }
+      : {}),
+    ...(data.highlightedSaga === data.sagaName && data.sagaColor
+      ? { borderColor: data.sagaColor, boxShadow: `0 0 0 2px ${data.sagaColor}` }
+      : {}),
+  }), [isTriggerHighlighted, triggerColors, data.highlightedSaga, data.sagaName, data.sagaColor])
+
+  const triggerBadgeStyle = useMemo(() => (
+    triggerColors
+      ? { backgroundColor: triggerColors.bg, color: triggerColors.fg }
+      : {}
+  ), [triggerColors])
+
   return (
     <>
       <div
         className={`flex flex-col items-center justify-center rounded-full border-2 border-success bg-success-muted px-4 py-2 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
-        style={{
-          ...(isTriggerHighlighted && triggerColors
-            ? { borderColor: triggerColors.fg, boxShadow: `0 0 0 2px ${triggerColors.fg}`, outline: `2px solid ${triggerColors.fg}`, outlineOffset: '2px' }
-            : {}),
-          ...(data.highlightedSaga === data.sagaName && data.sagaColor
-            ? { borderColor: data.sagaColor, boxShadow: `0 0 0 2px ${data.sagaColor}` }
-            : {}),
-        }}
+        style={containerStyle}
       >
         <span className="text-xs font-semibold text-success-foreground">{data.label}</span>
         {data.trigger && (
           <span
             className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium mt-0.5"
-            style={triggerColors
-              ? { backgroundColor: triggerColors.bg, color: triggerColors.fg }
-              : {}}
+            style={triggerBadgeStyle}
           >
             {data.trigger}
           </span>
@@ -113,7 +119,7 @@ function StartNode({ data }: { data: StartNodeData }) {
       <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="bg-success! border-0! w-2! h-2!" />
     </>
   )
-}
+})
 
 interface StepNodeData {
   label: string
@@ -127,7 +133,7 @@ interface StepNodeData {
   [key: string]: unknown
 }
 
-function StepNode({ data }: { data: StepNodeData }) {
+const StepNode = memo(function StepNode({ data }: { data: StepNodeData }) {
   const primaryService = data.serviceCalls[0]?.service
   const primaryColors = primaryService ? data.serviceColors.get(primaryService) : undefined
   const borderColor = primaryColors?.fg ?? '#71717a'
@@ -143,17 +149,19 @@ function StepNode({ data }: { data: StepNodeData }) {
     ? data.sagaColor
     : (data.highlightedService && usesHighlighted ? borderColor : undefined)
 
+  const containerStyle = useMemo(() => ({
+    borderColor,
+    ...(activeBorder
+      ? { boxShadow: `0 0 0 2px ${activeBorder}`, outline: `2px solid ${activeBorder}`, outlineOffset: '2px' }
+      : {}),
+  }), [borderColor, activeBorder])
+
   return (
     <>
       <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div
         className={`flex flex-col gap-1 rounded-lg border-2 bg-background px-3 py-2 shadow-sm min-w-[140px] sm:min-w-[180px] transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
-        style={{
-          borderColor,
-          ...(activeBorder
-            ? { boxShadow: `0 0 0 2px ${activeBorder}`, outline: `2px solid ${activeBorder}`, outlineOffset: '2px' }
-            : {}),
-        }}
+        style={containerStyle}
       >
         <span className="text-xs font-semibold text-foreground">{data.label}</span>
         {data.serviceCalls.length > 0 && (
@@ -179,7 +187,7 @@ function StepNode({ data }: { data: StepNodeData }) {
       <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} className="bg-transparent! border-0! w-0! h-0!" />
     </>
   )
-}
+})
 
 interface DecisionNodeData {
   label: string
@@ -189,20 +197,22 @@ interface DecisionNodeData {
   [key: string]: unknown
 }
 
-function DecisionNode({ data }: { data: DecisionNodeData }) {
+const DECISION_NODE_STYLE = {
+  width: 120,
+  height: 80,
+  clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+} as const
+
+const DecisionNode = memo(function DecisionNode({ data }: { data: DecisionNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
       <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div
         className={`flex items-center justify-center border-2 border-warning bg-warning-muted transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
-        style={{
-          width: 120,
-          height: 80,
-          clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-        }}
+        style={DECISION_NODE_STYLE}
       >
-        <span className="text-[10px] font-medium text-warning-foreground text-center leading-tight px-4 max-w-[90px]">
+        <span className="inline-block text-[10px] font-medium text-warning-foreground text-center leading-tight px-4 max-w-[120px]">
           {data.label}
         </span>
       </div>
@@ -210,7 +220,7 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
       <Handle type="source" position={data.direction === 'TB' ? Position.Bottom : Position.Right} id="no" className="bg-transparent! border-0! w-0! h-0!" />
     </>
   )
-}
+})
 
 interface ExitNodeData {
   label: string
@@ -220,7 +230,7 @@ interface ExitNodeData {
   [key: string]: unknown
 }
 
-function ExitNode({ data }: { data: ExitNodeData }) {
+const ExitNode = memo(function ExitNode({ data }: { data: ExitNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
@@ -230,7 +240,7 @@ function ExitNode({ data }: { data: ExitNodeData }) {
       </div>
     </>
   )
-}
+})
 
 interface EndNodeData {
   sagaName: string
@@ -239,7 +249,7 @@ interface EndNodeData {
   [key: string]: unknown
 }
 
-function EndNode({ data }: { data: EndNodeData }) {
+const EndNode = memo(function EndNode({ data }: { data: EndNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
   return (
     <>
@@ -249,7 +259,7 @@ function EndNode({ data }: { data: EndNodeData }) {
       </div>
     </>
   )
-}
+})
 
 const nodeTypes = {
   sagaStart: StartNode,
@@ -488,7 +498,7 @@ export function SagaFlowDiagram({ flows, onStepClick, className, direction = 'LR
   }, [flows])
 
   return (
-    <div className={`relative ${className ?? ''}`} style={{ width: '100%', height: '100%', minHeight: 300 }}>
+    <div className={`relative w-full h-full min-h-[300px] ${className ?? ''}`}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
