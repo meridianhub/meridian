@@ -24,9 +24,9 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		reverse_proxy mcp-server:8090
 	}
 
-	# Dex OIDC endpoints (external sidecar container)
+	# Dex OIDC endpoints (embedded in meridian binary)
 	handle /dex/* {
-		reverse_proxy dex:5556
+		reverse_proxy meridian:8090
 	}
 
 	# BFF auth endpoints (login, JWKS)

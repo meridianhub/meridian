@@ -33,6 +33,7 @@ type Server struct {
 	transcoderHandler     http.Handler
 	eventStreamHandler    *eventstream.Handler
 	rawEventStreamHandler http.Handler // used by tests and WithEventStreamHandlerHTTP
+	dexHandler            http.Handler
 	versionInfo           *VersionInfo
 	providersConfig       ProvidersConfig
 	authHandler           *AuthHandler
@@ -53,6 +54,17 @@ func WithAuthMiddleware(authMiddleware *auth.CombinedAuthMiddleware) ServerOptio
 func WithHealthChecker(healthChecker *gwhealth.GatewayHealthChecker) ServerOption {
 	return func(s *Server) {
 		s.healthChecker = healthChecker
+	}
+}
+
+// WithDexHandler sets the Dex OIDC handler to be mounted at /dex/*.
+// The handler is mounted with tenant resolution middleware (so that the
+// MeridianConnector can resolve the tenant from the subdomain) but WITHOUT
+// auth or tenant-authorization middleware since Dex manages its own
+// authentication flows (login forms, token issuance, etc.).
+func WithDexHandler(handler http.Handler) ServerOption {
+	return func(s *Server) {
+		s.dexHandler = handler
 	}
 }
 
@@ -213,6 +225,14 @@ func (s *Server) registerRoutes() {
 		apiHandler = http.HandlerFunc(s.handleAPI)
 	}
 
+	// Dex endpoints (/dex/*) go through tenant resolution only (no auth or tenant-authz).
+	// This allows the MeridianConnector to resolve the tenant from the subdomain for
+	// credential lookups while Dex manages its own authentication flows.
+	if s.dexHandler != nil {
+		dexHandler := s.wrapWithTenantOnly(s.dexHandler)
+		s.mux.Handle("/dex/", dexHandler)
+	}
+
 	// Build middleware chain: auth → tenant → tenant_authz → transcoder/proxy
 	s.mux.Handle("/", s.wrapWithAuthChain(apiHandler))
 
@@ -270,6 +290,16 @@ func (s *Server) wrapWithAuthChain(inner http.Handler) http.Handler {
 	}
 
 	return handler
+}
+
+// wrapWithTenantOnly wraps a handler with tenant resolution only (no auth, no
+// tenant-authz). Used for Dex endpoints where the handler manages its own
+// authentication but needs tenant context for credential lookups.
+func (s *Server) wrapWithTenantOnly(inner http.Handler) http.Handler {
+	if s.tenantResolver != nil {
+		return s.tenantResolver.Handler(inner)
+	}
+	return inner
 }
 
 // getOnly wraps a handler to only accept GET (and HEAD) requests,

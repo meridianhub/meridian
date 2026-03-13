@@ -43,8 +43,31 @@ jobs:
 
     - name: Run govulncheck
       run: |
+        set -euo pipefail
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        govulncheck ./...
+        # Known Dex false positive — see ADR-0036 for context.
+        # GO-2024-2476: Dex TLS config discarding. Not applicable because
+        # embedded Dex serves HTTP behind the gateway (Caddy terminates TLS).
+        GOVULN_ALLOWLIST="GO-2024-2476"
+
+        govulncheck ./... 2>&1 | tee /tmp/govulncheck.out || true
+        GOVULN_RC=${PIPESTATUS[0]:-$?}
+
+        # If govulncheck failed but NOT due to found vulnerabilities, propagate the error
+        if [ "$GOVULN_RC" -ne 0 ] && ! grep -q 'Your code is affected by' /tmp/govulncheck.out; then
+          echo "::error::govulncheck execution failed (exit ${GOVULN_RC})"
+          exit "$GOVULN_RC"
+        fi
+
+        # Filter by explicit vulnerability ID allowlist (not module name)
+        if grep -q 'Your code is affected by' /tmp/govulncheck.out; then
+          NON_ALLOWLISTED=$(grep -oE 'GO-[0-9]{4}-[0-9]+' /tmp/govulncheck.out | sort -u | grep -Fxv -e "$GOVULN_ALLOWLIST" || true)
+          if [ -n "$NON_ALLOWLISTED" ]; then
+            echo "::error::Non-allowlisted vulnerabilities detected: $NON_ALLOWLISTED"
+            exit 1
+          fi
+          echo "::warning::Suppressed allowlisted Dex false positive(s) — see ADR-0036"
+        fi
 
   gosec:
     name: Security Scanner (Gosec)
@@ -112,6 +135,7 @@ jobs:
         output: 'trivy-repo-results.sarif'
         severity: 'CRITICAL,HIGH'
         exit-code: '1'  # Fail on critical/high vulnerabilities
+        trivyignores: '.trivyignore'
 
     - name: Upload Trivy results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v4
@@ -175,6 +199,18 @@ jobs:
       uses: actions/dependency-review-action@v4
       with:
         fail-on-severity: high
+        # Dex go.mod false positives: module path lacks /v2 suffix, so GitHub
+        # reports all historical CVEs against v0.0.0. Pinned commit (v2.45.1)
+        # includes all fixes. See ADR-0036.
+        #
+        # NOTE: allow-ghsas is NOT package-scoped — these are globally ignored.
+        # All four advisories are filed against github.com/dexidp/dex specifically
+        # (not Go stdlib), so the global scope doesn't mask non-Dex issues.
+        # GHSA-m9hp-7r99-94h5: XML encoding in Dex (advisory scoped to Dex module)
+        # GHSA-2x32-jm95-2cpx: Auth bypass in Dex
+        # GHSA-vh7g-p26c-j2cw: MitM ID token capture in Dex
+        # GHSA-gr79-9v6v-gc9r: TLS config discarding in Dex
+        allow-ghsas: GHSA-m9hp-7r99-94h5, GHSA-2x32-jm95-2cpx, GHSA-vh7g-p26c-j2cw, GHSA-gr79-9v6v-gc9r
 
   sbom:
     name: Generate SBOM
