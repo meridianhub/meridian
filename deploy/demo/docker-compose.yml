@@ -2,8 +2,7 @@
 #
 # Services:
 #   postgres    - PostgreSQL 16 (internal only, not exposed to host)
-#   dex         - Dex OIDC identity provider (sidecar, internal only)
-#   meridian    - Unified binary; starts after postgres and dex are healthy
+#   meridian    - Unified binary with embedded Dex OIDC; starts after postgres is healthy
 #   caddy       - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
 #   mcp-server  - MCP server for AI integration (internal, proxied via Caddy)
 #
@@ -40,27 +39,14 @@ services:
       start_period: 10s
     # Not exposed to host — accessed only by meridian on the internal network
 
-  dex:
-    image: ghcr.io/dexidp/dex:v2.41.1-alpine
-    restart: unless-stopped
-    command: ["dex", "serve", "/etc/dex/config.yaml"]
-    volumes:
-      - ./dex.yaml:/etc/dex/config.yaml:ro
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5556/dex/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    # Not exposed to host — accessed only by meridian and caddy on the internal network
+  # Dex OIDC is embedded in the meridian binary (no sidecar container needed).
+  # See ADR-0036 for rationale.
 
   meridian:
     image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
     restart: unless-stopped
     depends_on:
       postgres:
-        condition: service_healthy
-      dex:
         condition: service_healthy
     environment:
       # --- Application ---
@@ -75,10 +61,10 @@ services:
       # Per-service databases are created by init-databases.sql on first Postgres boot.
       DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
-      # --- Authentication (external Dex OIDC sidecar) ---
+      # --- Authentication (embedded Dex OIDC server) ---
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-      JWKS_URL: ${JWKS_URL:-http://dex:5556/dex/keys}
-      DEX_URL: ${DEX_URL:-http://dex:5556/dex}
+      DEX_ISSUER: ${DEX_ISSUER:-https://${BASE_DOMAIN:-demo.meridianhub.cloud}/dex}
+      DEX_BASE_DOMAIN: ${BASE_DOMAIN:-demo.meridianhub.cloud}
       API_KEYS: ${API_KEYS:-}
       BASE_DOMAIN: ${BASE_DOMAIN:-demo.meridianhub.cloud}
       LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}
@@ -139,8 +125,8 @@ services:
       MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
       MCP_BASE_DOMAIN: ${BASE_DOMAIN:-}
 
-      # --- Dex OIDC (delegates authentication to Dex when MCP_OAUTH_ENABLED=true) ---
-      MCP_DEX_ISSUER_URL: ${MCP_DEX_ISSUER_URL:-}                 # e.g. http://dex:5556/dex (internal) or https://demo.meridianhub.cloud/dex
+      # --- Dex OIDC (delegates authentication to embedded Dex when MCP_OAUTH_ENABLED=true) ---
+      MCP_DEX_ISSUER_URL: ${MCP_DEX_ISSUER_URL:-}                 # e.g. https://demo.meridianhub.cloud/dex (Dex is embedded in meridian binary)
       MCP_DEX_CLIENT_ID: ${MCP_DEX_CLIENT_ID:-meridian-service}   # Dex static client ID
       MCP_DEX_CALLBACK_URL: ${MCP_DEX_CALLBACK_URL:-}             # e.g. https://demo.meridianhub.cloud/oauth/callback
 

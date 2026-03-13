@@ -64,6 +64,7 @@ import (
 	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
 	identityconnector "github.com/meridianhub/meridian/services/identity/connector"
+	identitydex "github.com/meridianhub/meridian/services/identity/dex"
 	identityservice "github.com/meridianhub/meridian/services/identity/service"
 	internalaccountpersistence "github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	internalaccountservice "github.com/meridianhub/meridian/services/internal-account/service"
@@ -311,9 +312,12 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	eventRouter, extraGWOpts := wireEventStream(conns.gormDB("financial-accounting"), logger)
 
-	// Dex runs as an external sidecar container; JWT validation is handled
-	// by the auth middleware via JWKS_URL. No gateway option needed.
-	wireExternalDex(logger)
+	// Embedded Dex OIDC server (opt-in via DEX_ISSUER).
+	dexOpt, err := wireEmbeddedDex(ctx, conns.gormDB("identity"), logger)
+	if err != nil {
+		return fmt.Errorf("embedded dex: %w", err)
+	}
+	extraGWOpts = append(extraGWOpts, dexOpt)
 
 	// Wire BFF auth handler: Meridian-signed JWTs for password login.
 	// The identity connector validates credentials directly against the identity domain.
@@ -943,12 +947,48 @@ func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	return nil
 }
 
-// wireExternalDex logs that Dex is expected as an external sidecar container.
-// JWT validation is handled by the auth middleware via JWKS_URL; the gateway
-// no longer needs to mount a Dex HTTP handler.
-func wireExternalDex(logger *slog.Logger) {
-	dexURL := env.GetEnvOrDefault("DEX_URL", "http://dex:5556/dex")
-	logger.Info("Dex configured as external sidecar", "dex_url", dexURL)
+// wireEmbeddedDex creates the embedded Dex OIDC server and returns a gateway
+// ServerOption that mounts its HTTP handler at /dex/*. When DEX_ISSUER is not
+// set, returns a no-op option (Dex is opt-in).
+func wireEmbeddedDex(ctx context.Context, identityDB *gorm.DB, logger *slog.Logger) (gateway.ServerOption, error) {
+	noopOption := func(*gateway.Server) {}
+
+	issuer := os.Getenv("DEX_ISSUER")
+	if issuer == "" {
+		logger.Info("DEX_ISSUER not set, embedded Dex disabled")
+		return noopOption, nil
+	}
+
+	baseDomain := env.GetEnvOrDefault("DEX_BASE_DOMAIN", env.GetEnvOrDefault("BASE_DOMAIN", "localhost"))
+
+	// Create identity repository and connector.
+	repo := identitypersistence.NewRepository(identityDB)
+	conn, err := identityconnector.New(repo, logger)
+	if err != nil {
+		return nil, fmt.Errorf("dex connector: %w", err)
+	}
+
+	// Build client list: default demo client + MCP OAuth callback.
+	clients := []identitydex.ClientConfig{identitydex.DefaultDemoClient(baseDomain)}
+
+	// Create embedded Dex.
+	embedded, err := identitydex.New(ctx, identitydex.Config{
+		Issuer:    issuer,
+		Connector: conn,
+		Logger:    logger,
+		Clients:   clients,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("embedded dex: %w", err)
+	}
+
+	// Start the Dex OIDC HTTP server (creates signing keys, mounts endpoints).
+	if err := embedded.StartServer(ctx, issuer, true); err != nil {
+		return nil, fmt.Errorf("dex server start: %w", err)
+	}
+
+	logger.Info("embedded Dex wired", "issuer", issuer, "base_domain", baseDomain)
+	return gateway.WithDexHandler(embedded.Handler()), nil
 }
 
 // wireBFFAuth creates the BFF auth handler for direct password login.
