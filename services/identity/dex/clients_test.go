@@ -50,8 +50,17 @@ func TestClientConfig_Validate(t *testing.T) {
 			wantErr: ErrRedirectURIsRequired,
 		},
 		{
-			name:   "valid",
-			config: ClientConfig{ID: "test", RedirectURIs: []string{"http://localhost/cb"}},
+			name:    "confidential client without secret",
+			config:  ClientConfig{ID: "test", RedirectURIs: []string{"http://localhost/cb"}},
+			wantErr: ErrSecretRequiredForConfidentialClient,
+		},
+		{
+			name:   "valid public client",
+			config: ClientConfig{ID: "test", Public: true, RedirectURIs: []string{"http://localhost/cb"}},
+		},
+		{
+			name:   "valid confidential client",
+			config: ClientConfig{ID: "test", Secret: "s3cret", RedirectURIs: []string{"http://localhost/cb"}},
 		},
 	}
 
@@ -98,14 +107,14 @@ func TestRegisterClients_UpdatesExisting(t *testing.T) {
 
 	// Register initial client.
 	initial := []ClientConfig{
-		{ID: "upsert-client", Name: "Old Name", RedirectURIs: []string{"http://old/cb"}},
+		{ID: "upsert-client", Name: "Old Name", Public: true, RedirectURIs: []string{"http://old/cb"}},
 	}
 	err := registerClients(ctx, store, initial, slog.Default())
 	require.NoError(t, err)
 
 	// Re-register with different config.
 	updated := []ClientConfig{
-		{ID: "upsert-client", Name: "New Name", RedirectURIs: []string{"http://new/cb"}},
+		{ID: "upsert-client", Name: "New Name", Public: true, RedirectURIs: []string{"http://new/cb"}},
 	}
 	err = registerClients(ctx, store, updated, slog.Default())
 	require.NoError(t, err)
@@ -122,8 +131,8 @@ func TestRegisterClients_MultipleClients(t *testing.T) {
 	ctx := context.Background()
 
 	clients := []ClientConfig{
-		{ID: "client-a", Name: "A", RedirectURIs: []string{"http://a/cb"}},
-		{ID: "client-b", Name: "B", RedirectURIs: []string{"http://b/cb"}},
+		{ID: "client-a", Name: "A", Public: true, RedirectURIs: []string{"http://a/cb"}},
+		{ID: "client-b", Name: "B", Public: true, RedirectURIs: []string{"http://b/cb"}},
 	}
 
 	err := registerClients(ctx, store, clients, slog.Default())

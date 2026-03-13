@@ -39,7 +39,7 @@ func TestConfig_Validate_Valid(t *testing.T) {
 		Issuer:    "https://auth.example.com/dex",
 		Connector: &stubConnector{},
 		Clients: []ClientConfig{
-			{ID: "test", RedirectURIs: []string{"http://localhost/cb"}},
+			{ID: "test", Public: true, RedirectURIs: []string{"http://localhost/cb"}},
 		},
 	}
 	err := cfg.validate()

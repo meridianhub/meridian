@@ -31,6 +31,9 @@ var ErrClientIDRequired = errors.New("dex: client ID is required")
 // ErrRedirectURIsRequired is returned when a ClientConfig has no redirect URIs.
 var ErrRedirectURIsRequired = errors.New("dex: at least one redirect URI is required")
 
+// ErrSecretRequiredForConfidentialClient is returned when a non-public client has no secret.
+var ErrSecretRequiredForConfidentialClient = errors.New("dex: secret is required for confidential (non-public) clients")
+
 // validate checks that required ClientConfig fields are set.
 func (c *ClientConfig) validate() error {
 	if c.ID == "" {
@@ -38,6 +41,9 @@ func (c *ClientConfig) validate() error {
 	}
 	if len(c.RedirectURIs) == 0 {
 		return ErrRedirectURIsRequired
+	}
+	if !c.Public && c.Secret == "" {
+		return ErrSecretRequiredForConfidentialClient
 	}
 	return nil
 }
@@ -77,6 +83,9 @@ func DefaultDemoClient(baseDomain string) ClientConfig {
 // registerClients writes clients to Dex storage idempotently. If a client
 // already exists with the same ID, it is updated to match the provided config.
 func registerClients(ctx context.Context, s storage.Storage, clients []ClientConfig, logger *slog.Logger) error {
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	}
 	for _, c := range clients {
 		if err := c.validate(); err != nil {
 			return fmt.Errorf("dex: invalid client %q: %w", c.ID, err)
