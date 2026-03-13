@@ -16,6 +16,12 @@ export function AppShell({ children, currentPath = '/' }: AppShellProps) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-muted">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-background focus:text-foreground"
+      >
+        Skip to main content
+      </a>
       <Sidebar
         id={SIDEBAR_ID}
         lens={lens}
@@ -30,7 +36,7 @@ export function AppShell({ children, currentPath = '/' }: AppShellProps) {
           sidebarOpen={sidebarOpen}
           sidebarId={SIDEBAR_ID}
         />
-        <main className="flex-1 overflow-y-auto p-4">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4">
           {children}
         </main>
       </div>
