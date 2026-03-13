@@ -186,16 +186,17 @@ func (s *OIDCStateStore) Consume(key string) (OIDCFlowState, bool) {
 
 // OIDCHandler manages the OIDC authorization flow with Dex.
 type OIDCHandler struct {
-	cfg        OIDCConfig
-	oauthCfg   OAuthConfig
-	stateStore *OIDCStateStore
-	codeStore  *CodeStore
-	registry   *ClientRegistry
-	signer     *platformauth.JWTSigner
-	tokenTTL   time.Duration
-	baseDomain string
-	httpClient *http.Client
-	logger     *slog.Logger
+	cfg            OIDCConfig
+	oauthCfg       OAuthConfig
+	stateStore     *OIDCStateStore
+	codeStore      *CodeStore
+	registry       *ClientRegistry
+	signer         *platformauth.JWTSigner
+	tokenTTL       time.Duration
+	baseDomain     string
+	dexAuthBaseURL string // External Dex base URL for browser redirects (derived from BaseURL + DexIssuerURL path).
+	httpClient     *http.Client
+	logger         *slog.Logger
 }
 
 // OIDCHandlerConfig holds configuration for creating an OIDCHandler.
@@ -207,6 +208,10 @@ type OIDCHandlerConfig struct {
 	Registry   *ClientRegistry
 	Signer     *platformauth.JWTSigner
 	TokenTTL   time.Duration
+	// BaseURL is the public-facing base URL of the MCP server
+	// (e.g., "https://demo.meridianhub.cloud"). Used to construct browser-facing
+	// Dex redirect URLs when DexIssuerURL is an internal Docker hostname.
+	BaseURL    string
 	BaseDomain string
 	HTTPClient *http.Client
 	Logger     *slog.Logger
@@ -252,6 +257,8 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 			"issuer_url", cfg.OIDC.DexIssuerURL)
 	}
 
+	dexAuthBaseURL := resolveDexAuthBaseURL(cfg.BaseURL, issuerURL, cfg.OIDC.DexIssuerURL, cfg.Logger)
+
 	ttl := cfg.TokenTTL
 	if ttl == 0 {
 		ttl = defaultTokenTTL
@@ -262,17 +269,40 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 	}
 
 	return &OIDCHandler{
-		cfg:        cfg.OIDC,
-		oauthCfg:   cfg.OAuth,
-		stateStore: cfg.StateStore,
-		codeStore:  cfg.CodeStore,
-		registry:   cfg.Registry,
-		signer:     cfg.Signer,
-		tokenTTL:   ttl,
-		baseDomain: cfg.BaseDomain,
-		httpClient: httpClient,
-		logger:     cfg.Logger,
+		cfg:            cfg.OIDC,
+		oauthCfg:       cfg.OAuth,
+		stateStore:     cfg.StateStore,
+		codeStore:      cfg.CodeStore,
+		registry:       cfg.Registry,
+		signer:         cfg.Signer,
+		tokenTTL:       ttl,
+		baseDomain:     cfg.BaseDomain,
+		dexAuthBaseURL: dexAuthBaseURL,
+		httpClient:     httpClient,
+		logger:         cfg.Logger,
 	}, nil
+}
+
+// resolveDexAuthBaseURL computes the browser-facing Dex base URL. When
+// DexIssuerURL is an internal hostname (e.g., http://dex:5556/dex), browsers
+// can't reach it. If publicBaseURL is set, we combine its scheme+host with
+// the path from the internal issuer URL so the browser is redirected to the
+// external reverse proxy instead.
+func resolveDexAuthBaseURL(publicBaseURL string, issuerURL *url.URL, dexIssuerURL string, logger *slog.Logger) string {
+	if publicBaseURL == "" {
+		return dexIssuerURL
+	}
+	parsed, err := url.Parse(publicBaseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return dexIssuerURL
+	}
+	external := *parsed
+	external.Path = issuerURL.Path
+	result := external.String()
+	logger.Info("oidc: using external Dex URL for browser redirects",
+		"dex_auth_base_url", result,
+		"dex_internal_url", dexIssuerURL)
+	return result
 }
 
 // HandleAuthorize handles GET /oauth/authorize from the MCP client.
@@ -370,10 +400,10 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redirect to Dex authorization endpoint.
-	// Use the "local" connector for password-based auth, or omit connector_id
-	// to let Dex show its connector selection page.
-	dexAuthURL := h.cfg.DexIssuerURL + "/auth"
+	// Redirect to Dex authorization endpoint via the external URL so the
+	// browser can reach Dex through the reverse proxy, even when the internal
+	// DexIssuerURL points to a Docker-internal hostname.
+	dexAuthURL := h.dexAuthBaseURL + "/auth"
 	params := url.Values{
 		"client_id":             {h.cfg.ClientID},
 		"redirect_uri":          {h.cfg.CallbackURL},

@@ -275,6 +275,7 @@ func runHTTP(logger *slog.Logger, cfg server.Config) error {
 				CodeStore:  codeStore,
 				Registry:   clientRegistry,
 				Signer:     signer,
+				BaseURL:    baseURL,
 				BaseDomain: baseDomain,
 				Logger:     logger,
 			})
