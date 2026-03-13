@@ -29,7 +29,7 @@ import { ReconciliationPage, ReconciliationDetailPage } from '@/features/reconci
 import { AuditLogPage } from '@/features/audit'
 import { StarlarkConfigPage, StarlarkDetailPage } from '@/features/sagas'
 import { MappingsPage, MappingDetailPage } from '@/features/mappings'
-import { ReferenceDataHubPage, InstrumentsPage, AccountTypesPage, NodesPage } from '@/features/reference-data'
+import { ReferenceDataHubPage, InstrumentsPage, AccountTypesPage, NodesPage, ValuationRulesPage } from '@/features/reference-data'
 import { InternalAccountsPage, InternalAccountDetailPage } from '@/features/internal-accounts'
 import { MarketDataPage, DatasetDetailPage } from '@/features/market-data'
 import { ForecastingPage } from '@/features/forecasting'
@@ -309,6 +309,7 @@ function AppShellLayout() {
         <Route path="/reference-data/instruments" element={<FeatureGuard feature="reference-data">{guarded(<InstrumentsPage />)}</FeatureGuard>} />
         <Route path="/reference-data/account-types" element={<FeatureGuard feature="reference-data">{guarded(<AccountTypesPage />)}</FeatureGuard>} />
         <Route path="/reference-data/nodes" element={<FeatureGuard feature="reference-data">{guarded(<NodesPage />)}</FeatureGuard>} />
+        <Route path="/reference-data/valuation-rules" element={<FeatureGuard feature="reference-data">{guarded(<ValuationRulesPage />)}</FeatureGuard>} />
         <Route path="/gateway-mappings" element={<FeatureGuard feature="mappings">{guarded(<MappingsPage />)}</FeatureGuard>} />
         <Route path="/gateway-mappings/:mappingId" element={<FeatureGuard feature="mappings">{guarded(<MappingDetailPage />)}</FeatureGuard>} />
         <Route path="/economy" element={<FeatureGuard feature="economy">{guarded(<EconomyOverviewPage />)}</FeatureGuard>} />
