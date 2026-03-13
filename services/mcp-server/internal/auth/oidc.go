@@ -288,8 +288,17 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	clientID := q.Get("client_id")
 	redirectURI := q.Get("redirect_uri")
 
-	// Accept static client ID or dynamically registered clients.
-	if clientID != h.oauthCfg.ClientID {
+	// Validate client_id and redirect_uri for both static and dynamic clients.
+	if clientID == h.oauthCfg.ClientID {
+		// Static client: default to configured redirect_uri, reject mismatches.
+		if redirectURI == "" {
+			redirectURI = h.oauthCfg.RedirectURI
+		} else if redirectURI != h.oauthCfg.RedirectURI {
+			http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
+			return
+		}
+	} else {
+		// Dynamic client: must be in registry with a matching redirect_uri.
 		if h.registry == nil {
 			http.Error(w, "invalid client_id", http.StatusBadRequest)
 			return
@@ -299,8 +308,11 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid client_id", http.StatusBadRequest)
 			return
 		}
-		// Dynamic client: redirect_uri must match a registered URI.
-		if redirectURI != "" && !client.HasRedirectURI(redirectURI) {
+		if redirectURI == "" {
+			http.Error(w, "redirect_uri is required for dynamic clients", http.StatusBadRequest)
+			return
+		}
+		if !client.HasRedirectURI(redirectURI) {
 			http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
 			return
 		}
@@ -320,11 +332,6 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	method := q.Get("code_challenge_method")
 	if method != "S256" {
 		http.Error(w, "only code_challenge_method=S256 is supported", http.StatusBadRequest)
-		return
-	}
-
-	if redirectURI == "" {
-		http.Error(w, "redirect_uri is required", http.StatusBadRequest)
 		return
 	}
 

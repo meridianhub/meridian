@@ -118,6 +118,22 @@ func TestRegisteredClient_HasRedirectURI(t *testing.T) {
 	assert.False(t, client.HasRedirectURI("https://c.com/cb"))
 }
 
+func TestRegistrationHandler_RejectsOversizedBody(t *testing.T) {
+	registry := newTestRegistry(t)
+	handler := auth.NewRegistrationHandler(registry, slog.Default())
+
+	// Build valid-looking JSON that exceeds 64 KiB.
+	// The key is a long string value that forces the reader past the limit.
+	body := strings.NewReader(`{"client_name":"` + strings.Repeat("a", 128<<10) + `"}`)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/register", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
 func TestMetadataHandler_IncludesRegistrationEndpoint(t *testing.T) {
 	cfg := auth.OAuthConfig{
 		ClientID:         "meridian-mcp",

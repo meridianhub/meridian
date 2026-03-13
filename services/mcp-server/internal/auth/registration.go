@@ -94,6 +94,15 @@ func (r *ClientRegistry) Register(client RegisteredClient) (RegisteredClient, er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Evict expired clients before enforcing the cap so that stale entries
+	// don't block legitimate registrations between background sweeps.
+	now := time.Now()
+	for id, existing := range r.clients {
+		if now.Sub(existing.registeredAt) > clientTTL {
+			delete(r.clients, id)
+		}
+	}
+
 	if len(r.clients) >= registryMaxClients {
 		return RegisteredClient{}, errRegistryFull
 	}
@@ -104,7 +113,7 @@ func (r *ClientRegistry) Register(client RegisteredClient) (RegisteredClient, er
 	}
 
 	client.ClientID = id
-	client.registeredAt = time.Now()
+	client.registeredAt = now
 	r.clients[id] = client
 	return client, nil
 }
@@ -174,7 +183,13 @@ func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req registrationRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KiB
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
