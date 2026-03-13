@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BuildInfo } from './build-info'
 import {
@@ -44,6 +44,55 @@ interface NavGroup {
 }
 
 const STORAGE_KEY = 'meridian:sidebar-collapsed'
+
+const FOCUSABLE_SELECTORS =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function useFocusTrap(containerRef: React.RefObject<HTMLElement | null>, active: boolean) {
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!active) return
+
+    previousFocusRef.current = document.activeElement as HTMLElement
+
+    const container = containerRef.current
+    if (!container) return
+
+    const focusables = () =>
+      Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS)).filter(
+        el => !el.closest('[hidden]') && getComputedStyle(el).display !== 'none',
+      )
+
+    const first = focusables()[0]
+    if (first) first.focus()
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Tab') return
+      const items = focusables()
+      if (items.length === 0) return
+      const firstItem = items[0]
+      const lastItem = items[items.length - 1]
+      if (e.shiftKey) {
+        if (document.activeElement === firstItem) {
+          e.preventDefault()
+          lastItem.focus()
+        }
+      } else {
+        if (document.activeElement === lastItem) {
+          e.preventDefault()
+          firstItem.focus()
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      previousFocusRef.current?.focus()
+    }
+  }, [active, containerRef])
+}
 
 const TENANT_NAV_GROUPS: NavGroup[] = [
   {
@@ -151,6 +200,10 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
   const { isFeatureEnabled } = useTenantFeatures()
   const { isPlatformAdmin } = useTenantContext()
   const { toggle, isCollapsed } = useCollapsedGroups(currentPath)
+  const sidebarRef = useRef<HTMLElement>(null)
+
+  // Only trap focus when sidebar is acting as a mobile overlay (isOpen + onClose present)
+  useFocusTrap(sidebarRef, isOpen && !!onClose)
 
   useEffect(() => {
     if (!isOpen || !onClose) return
@@ -185,6 +238,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
         />
       )}
       <aside
+      ref={sidebarRef}
       id={id}
       data-open={String(isOpen)}
       className={cn(
