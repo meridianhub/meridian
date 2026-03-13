@@ -35,7 +35,7 @@ export function TenantSelector() {
     return (
       <div
         data-testid="tenant-selector-loading"
-        className="flex h-9 w-[200px] items-center justify-between rounded-md border px-3 py-2 text-sm opacity-50"
+        className="flex h-9 w-full sm:w-[200px] items-center justify-between rounded-md border px-3 py-2 text-sm opacity-50"
         aria-busy="true"
         aria-label="Loading tenants"
       >
@@ -63,7 +63,7 @@ export function TenantSelector() {
             <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[200px] p-0">
+        <PopoverContent className="w-full sm:w-[200px] p-0">
           <Command>
             <CommandInput placeholder="Search tenants..." />
             <CommandList

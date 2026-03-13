@@ -202,7 +202,7 @@ function DecisionNode({ data }: { data: DecisionNodeData }) {
           clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
         }}
       >
-        <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-4 max-w-[120px]">
+        <span className="inline-block text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-4 max-w-[120px]">
           {data.label}
         </span>
       </div>
