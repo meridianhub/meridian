@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { usePageTitle } from '@/hooks/use-page-title'
 import { Badge } from '@/components/ui/badge'
@@ -183,6 +183,11 @@ function HandlerReferenceTab({ flows }: { flows: SagaFlow[] }) {
 function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }) {
   const [activeFile, setActiveFile] = useState(0)
   const activeIndex = activeFile >= starlarkFiles.length ? 0 : activeFile
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  useEffect(() => {
+    tabRefs.current[activeIndex]?.focus()
+  }, [activeIndex])
 
   function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     if (e.key === 'ArrowRight') {
@@ -214,6 +219,7 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
         {starlarkFiles.map((f, i) => (
           <button
             key={f.name}
+            ref={(el) => { tabRefs.current[i] = el }}
             type="button"
             id={`starlark-tab-${i}`}
             role="tab"

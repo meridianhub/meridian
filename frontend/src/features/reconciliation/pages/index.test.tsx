@@ -136,9 +136,9 @@ describe('ReconciliationPage - list view', () => {
       expect(screen.getByText('run-001')).toBeInTheDocument()
     })
 
-    // Clickable rows have role="button" (added for accessibility)
-    const buttons = screen.getAllByRole('button')
-    const dataRow = buttons.find((r) => r.textContent?.includes('run-001'))
+    // Row should be clickable (cursor-pointer class applied by DataTable when onRowClick provided)
+    const rows = screen.getAllByRole('row')
+    const dataRow = rows.find((r) => r.textContent?.includes('run-001'))
     expect(dataRow).toBeDefined()
     expect(dataRow?.className).toContain('cursor-pointer')
 

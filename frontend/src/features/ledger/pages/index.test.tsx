@@ -216,9 +216,9 @@ describe('LedgerPage - list view', () => {
     })
 
     await waitFor(() => {
-      // log-001 has 2 postings; clickable rows have role="button"
-      const buttons = screen.getAllByRole('button')
-      const log001Row = buttons.find((row) => row.textContent?.includes('log-001'))
+      // log-001 has 2 postings
+      const rows = screen.getAllByRole('row')
+      const log001Row = rows.find((row) => row.textContent?.includes('log-001'))
       expect(log001Row).toHaveTextContent('2')
     })
   })
