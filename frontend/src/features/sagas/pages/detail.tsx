@@ -12,6 +12,7 @@ import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { SagaStatus, ErrorCategory } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { useSagaDetail, useActiveSaga } from '../hooks'
 
 // ---------------------------------------------------------------------------
@@ -110,6 +111,7 @@ function SplitPane({
 
 export function StarlarkDetailPage() {
   const { definitionId } = useParams<{ definitionId: string }>()
+  usePageTitle(definitionId ? `Saga ${definitionId}` : 'Saga')
   const { sagaRegistry } = useApiClients()
   const tenantSlug = useTenantSlug()
   const qc = useQueryClient()

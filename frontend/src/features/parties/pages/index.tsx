@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { usePartiesTable } from '../hooks'
 import { RegisterPartyDialog } from './dialogs/register-party-dialog'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { RegisterPartyTypeDialog } from './dialogs/register-party-type-dialog'
 
 export interface Party {
@@ -29,6 +30,7 @@ function formatPartyType(value: string): string {
 }
 
 export function PartiesPage() {
+  usePageTitle('Parties')
   const navigate = useNavigate()
   const { queryKey, queryFn, tenantSlug } = usePartiesTable()
   const [registerOpen, setRegisterOpen] = React.useState(false)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -46,25 +46,25 @@ import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import { useEventChain } from '../hooks/use-event-chain'
 import { EventChainPanel } from './event-chain-panel'
 
-// Theme colors per node type
+// Theme colors per node type — uses CSS variables for dark mode support
 const NODE_THEMES: Record<ManifestNodeType, { color: string; label: string }> = {
-  instrument: { color: '#3b82f6', label: 'Instruments' },
-  account_type: { color: '#22c55e', label: 'Account Types' },
-  valuation_rule: { color: '#f59e0b', label: 'Valuation Rules' },
-  saga: { color: '#8b5cf6', label: 'Sagas' },
+  instrument: { color: 'var(--graph-instrument)', label: 'Instruments' },
+  account_type: { color: 'var(--graph-account-type)', label: 'Account Types' },
+  valuation_rule: { color: 'var(--graph-valuation-rule)', label: 'Valuation Rules' },
+  saga: { color: 'var(--graph-saga)', label: 'Sagas' },
 }
 
 // Edge styles per relationship type
 const MANIFEST_EDGE_STYLES: Record<string, React.CSSProperties> = {
-  allowed_by: { stroke: '#3b82f6', strokeWidth: 2 },
-  converts_from: { stroke: '#f59e0b', strokeWidth: 1.5, strokeDasharray: '6 3' },
-  converts_to: { stroke: '#f59e0b', strokeWidth: 1.5 },
+  allowed_by: { stroke: 'var(--graph-instrument)', strokeWidth: 2 },
+  converts_from: { stroke: 'var(--graph-valuation-rule)', strokeWidth: 1.5, strokeDasharray: '6 3' },
+  converts_to: { stroke: 'var(--graph-valuation-rule)', strokeWidth: 1.5 },
 }
 
 const EDGE_LEGEND: { label: string; color: string; dashed?: boolean }[] = [
-  { label: 'Allowed by', color: '#3b82f6' },
-  { label: 'Converts from', color: '#f59e0b', dashed: true },
-  { label: 'Converts to', color: '#f59e0b' },
+  { label: 'Allowed by', color: 'var(--graph-instrument)' },
+  { label: 'Converts from', color: 'var(--graph-valuation-rule)', dashed: true },
+  { label: 'Converts to', color: 'var(--graph-valuation-rule)' },
 ]
 
 // ELK layer priority: higher values are placed earlier (top in DOWN direction)
@@ -77,10 +77,10 @@ const LAYER_PRIORITY: Record<ManifestNodeType, string> = {
 
 // Trigger type display
 function getTriggerBadge(trigger: string): { label: string; variant: string } {
-  if (trigger.startsWith('event:')) return { label: 'event', variant: 'bg-purple-100 text-purple-800' }
-  if (trigger.startsWith('scheduled:')) return { label: 'scheduled', variant: 'bg-blue-100 text-blue-800' }
-  if (trigger.startsWith('api:')) return { label: 'api', variant: 'bg-green-100 text-green-800' }
-  return { label: 'unknown', variant: 'bg-gray-100 text-gray-800' }
+  if (trigger.startsWith('event:')) return { label: 'event', variant: 'bg-accent text-accent-foreground' }
+  if (trigger.startsWith('scheduled:')) return { label: 'scheduled', variant: 'bg-info-muted text-info-foreground' }
+  if (trigger.startsWith('api:')) return { label: 'api', variant: 'bg-success-muted text-success-foreground' }
+  return { label: 'unknown', variant: 'bg-muted text-muted-foreground' }
 }
 
 // Custom node data interface
@@ -93,10 +93,19 @@ interface ManifestNodeData {
   [key: string]: unknown
 }
 
-function InstrumentNode({ data }: { data: ManifestNodeData }) {
+const InstrumentNode = memo(function InstrumentNode({ data }: { data: ManifestNodeData }) {
   const node = data.manifestNode
   const code = node.data.code as string
   const unit = (node.data.dimensions as Record<string, unknown> | undefined)?.unit as string | undefined
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -104,13 +113,7 @@ function InstrumentNode({ data }: { data: ManifestNodeData }) {
         <TooltipTrigger asChild>
           <div
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
-            style={{
-              width: 180,
-              borderColor: data.color,
-              backgroundColor: `${data.color}18`,
-              opacity: data.dimmed ? 0.25 : 1,
-              boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
-            }}
+            style={containerStyle}
           >
             <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
             <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
@@ -122,12 +125,21 @@ function InstrumentNode({ data }: { data: ManifestNodeData }) {
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
-}
+})
 
-function AccountTypeNode({ data }: { data: ManifestNodeData }) {
+const AccountTypeNode = memo(function AccountTypeNode({ data }: { data: ManifestNodeData }) {
   const node = data.manifestNode
   const code = node.data.code as string
   const allowedCount = data.connectedInstrumentCount ?? 0
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -135,13 +147,7 @@ function AccountTypeNode({ data }: { data: ManifestNodeData }) {
         <TooltipTrigger asChild>
           <div
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
-            style={{
-              width: 180,
-              borderColor: data.color,
-              backgroundColor: `${data.color}18`,
-              opacity: data.dimmed ? 0.25 : 1,
-              boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
-            }}
+            style={containerStyle}
           >
             <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
             <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
@@ -153,12 +159,21 @@ function AccountTypeNode({ data }: { data: ManifestNodeData }) {
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
-}
+})
 
-function ValuationRuleNode({ data }: { data: ManifestNodeData }) {
+const ValuationRuleNode = memo(function ValuationRuleNode({ data }: { data: ManifestNodeData }) {
   const node = data.manifestNode
   const from = node.data.fromInstrument as string
   const to = node.data.toInstrument as string
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -166,13 +181,7 @@ function ValuationRuleNode({ data }: { data: ManifestNodeData }) {
         <TooltipTrigger asChild>
           <div
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150"
-            style={{
-              width: 180,
-              borderColor: data.color,
-              backgroundColor: `${data.color}18`,
-              opacity: data.dimmed ? 0.25 : 1,
-              boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
-            }}
+            style={containerStyle}
           >
             <span className="text-[10px] font-semibold text-foreground">{from} &rarr; {to}</span>
           </div>
@@ -182,12 +191,21 @@ function ValuationRuleNode({ data }: { data: ManifestNodeData }) {
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
-}
+})
 
-function SagaNode({ data }: { data: ManifestNodeData }) {
+const SagaNode = memo(function SagaNode({ data }: { data: ManifestNodeData }) {
   const node = data.manifestNode
   const trigger = node.data.trigger as string
   const badge = getTriggerBadge(trigger)
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -195,13 +213,7 @@ function SagaNode({ data }: { data: ManifestNodeData }) {
         <TooltipTrigger asChild>
           <div
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
-            style={{
-              width: 180,
-              borderColor: data.color,
-              backgroundColor: `${data.color}18`,
-              opacity: data.dimmed ? 0.25 : 1,
-              boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
-            }}
+            style={containerStyle}
           >
             <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
             <span className={`mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full ${badge.variant}`}>
@@ -214,7 +226,7 @@ function SagaNode({ data }: { data: ManifestNodeData }) {
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
-}
+})
 
 const nodeTypes = {
   instrument: InstrumentNode,
@@ -494,7 +506,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
 
   if (graph.nodes.length === 0) {
     return (
-      <div className={className} data-testid="manifest-graph-empty" style={{ width: '100%', height: '100%' }}>
+      <div className={`${className ?? ''} w-full h-full`} data-testid="manifest-graph-empty">
         <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
           No elements in manifest to visualize.
         </div>
@@ -503,7 +515,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
   }
 
   return (
-    <div className={className} style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div className={`${className ?? ''} w-full h-full relative`}>
       <TooltipProvider>
         <ReactFlow
           nodes={nodes}

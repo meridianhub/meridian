@@ -35,14 +35,14 @@ export function ManifestDiffViewer({ diff, onNodeClick, className }: ManifestDif
             icon={<Plus className="h-3.5 w-3.5" />}
             label="Added"
             count={diff.addedNodes.length}
-            colorClass="text-green-600 dark:text-green-400"
+            colorClass="text-success-foreground"
           />
           <ul className="mt-1.5 space-y-1">
             {diff.addedNodes.map((node) => (
               <NodeRow
                 key={node.id}
                 label={node.label}
-                colorClass="border-green-500/40 bg-green-50/60 dark:bg-green-950/30"
+                colorClass="border-success/40 bg-success-muted"
                 onClick={onNodeClick ? () => onNodeClick(node) : undefined}
               />
             ))}
@@ -56,11 +56,11 @@ export function ManifestDiffViewer({ diff, onNodeClick, className }: ManifestDif
             icon={<RefreshCw className="h-3.5 w-3.5" />}
             label="Modified"
             count={diff.modifiedNodes.length}
-            colorClass="text-amber-600 dark:text-amber-400"
+            colorClass="text-warning-foreground"
           />
           <ul className="mt-1.5 space-y-2">
             {diff.modifiedNodes.map(({ before, after }) => (
-              <li key={after.id} className="rounded border border-amber-500/40 bg-amber-50/60 px-3 py-2 text-sm dark:bg-amber-950/30">
+              <li key={after.id} className="rounded border border-warning/40 bg-warning-muted px-3 py-2 text-sm">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground/70">Before:</span>
                   <span>{before.label}</span>
@@ -81,14 +81,14 @@ export function ManifestDiffViewer({ diff, onNodeClick, className }: ManifestDif
             icon={<Minus className="h-3.5 w-3.5" />}
             label="Removed"
             count={diff.removedNodes.length}
-            colorClass="text-red-600 dark:text-red-400"
+            colorClass="text-destructive"
           />
           <ul className="mt-1.5 space-y-1">
             {diff.removedNodes.map((node) => (
               <NodeRow
                 key={node.id}
                 label={node.label}
-                colorClass="border-red-500/40 bg-red-50/60 dark:bg-red-950/30"
+                colorClass="border-destructive/40 bg-destructive/10"
                 onClick={onNodeClick ? () => onNodeClick(node) : undefined}
               />
             ))}

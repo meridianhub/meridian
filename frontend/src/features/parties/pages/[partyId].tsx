@@ -45,7 +45,7 @@ export function PartyDetailPage() {
 
           <Card>
             <Tabs defaultValue="overview" className="w-full">
-              <TabsList className="grid w-full grid-cols-8 border-b rounded-none">
+              <TabsList variant="line" className="w-full justify-start overflow-x-auto border-b">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="demographics">Demographics</TabsTrigger>
                 <TabsTrigger value="references">References</TabsTrigger>

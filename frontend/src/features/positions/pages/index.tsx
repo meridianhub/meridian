@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/shared/page-header'
 import { PageShell } from '@/shared/page-shell'
 import { TransactionStatus } from '@/api/gen/meridian/common/v1/types_pb'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { usePositionLogsTable } from '../hooks'
 
 const TRANSACTION_STATUS_NAMES: Record<number, string> = {
@@ -59,6 +60,7 @@ export interface TransactionLogEntry {
 }
 
 export function PositionsPage() {
+  usePageTitle('Positions')
   const navigate = useNavigate()
   const { queryKey, queryFn } = usePositionLogsTable()
 

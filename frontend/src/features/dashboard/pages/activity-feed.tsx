@@ -65,6 +65,8 @@ export function ActivityFeed({ items, isLoading, className }: ActivityFeedProps)
         const itemContent = (
           <>
             <div
+              role="img"
+              aria-label={item.type}
               className={cn(
                 'mt-2 h-2 w-2 flex-shrink-0 rounded-full',
                 TYPE_COLORS[item.type] ?? 'bg-muted-foreground',

@@ -137,7 +137,7 @@ function ObservationChart({ points, unit }: { points: ObservationPoint[]; unit: 
         <path
           d={pathData}
           fill="none"
-          stroke="#3b82f6"
+          stroke="var(--info)"
           strokeWidth={2}
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -150,7 +150,7 @@ function ObservationChart({ points, unit }: { points: ObservationPoint[]; unit: 
             cx={toSvgX(p.x)}
             cy={toSvgY(p.y)}
             r={3}
-            fill="#3b82f6"
+            fill="var(--info)"
           />
         ))}
       </svg>

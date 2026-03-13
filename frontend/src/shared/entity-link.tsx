@@ -42,7 +42,7 @@ export function EntityLink({ type, id, label, className }: EntityLinkProps) {
   return (
     <Link
       to={entityPath(type, id)}
-      className={className ?? 'text-blue-600 hover:underline dark:text-blue-400'}
+      className={className ?? 'text-primary hover:underline'}
     >
       {label ?? id}
     </Link>

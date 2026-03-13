@@ -145,7 +145,7 @@ export function PaymentMethodsTab({ partyId }: PaymentMethodsTabProps) {
                   <div className="flex items-center gap-2">
                     <span className="font-medium font-mono text-sm">{method.providerMethodId}</span>
                     {method.isDefault && (
-                      <span className="inline-block rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
+                      <span className="inline-block rounded bg-info-muted px-2 py-1 text-xs font-medium text-info-foreground">
                         Default
                       </span>
                     )}

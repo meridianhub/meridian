@@ -34,7 +34,7 @@ export function BuildInfo() {
   const label = shortCommit ? `${info.version} (${shortCommit})` : info.version
 
   return (
-    <div className="px-3 py-2 text-xs text-gray-500">
+    <div className="px-3 py-2 text-xs text-muted-foreground">
       <span title={info.commit}>{label}</span>
     </div>
   )

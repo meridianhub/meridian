@@ -31,26 +31,27 @@ import {
 } from '@/lib/visualization/graph-layout'
 import type { CookbookItem, PatternMeta } from '../hooks/use-cookbook'
 
-// Category color mapping
+// Category color mapping — uses CSS variables where possible for dark mode support
+// Note: these are used as inline styles for ReactFlow nodes
 const CATEGORY_COLORS: Record<string, string> = {
-  foundation: '#6366f1', // indigo
-  energy: '#f59e0b',     // amber
-  economy: '#10b981',    // emerald
-  carbon: '#22c55e',     // green
-  compute: '#8b5cf6',    // violet
-  compliance: '#ef4444', // red
-  payments: '#3b82f6',   // blue
-  trading: '#ec4899',    // pink
-  billing: '#06b6d4',    // cyan
-  commodities: '#d97706', // amber-dark
+  foundation: 'var(--chart-1)',
+  energy: 'var(--graph-valuation-rule)',
+  economy: 'var(--graph-account-type)',
+  carbon: 'var(--graph-account-type)',
+  compute: 'var(--graph-saga)',
+  compliance: 'var(--destructive)',
+  payments: 'var(--graph-instrument)',
+  trading: 'var(--chart-5)',
+  billing: 'var(--chart-2)',
+  commodities: 'var(--graph-valuation-rule)',
 }
 
 function getCategoryColor(categories?: string[]): string {
-  if (!categories?.length) return '#71717a' // zinc-500
+  if (!categories?.length) return 'var(--muted-foreground)' // zinc-500
   for (const cat of categories) {
     if (CATEGORY_COLORS[cat]) return CATEGORY_COLORS[cat]
   }
-  return '#71717a'
+  return 'var(--muted-foreground)'
 }
 
 // Custom node component
@@ -99,7 +100,7 @@ const PatternNode = memo(function PatternNode({ data }: { data: PatternNodeData 
             </span>
             {data.complexity > 0 && (
               <span
-                className="mt-0.5 inline-flex items-center justify-center rounded-full text-[8px] font-bold text-white"
+                className="mt-0.5 inline-flex items-center justify-center rounded-full text-[8px] font-bold text-primary-foreground"
                 style={badgeStyle}
               >
                 {data.complexity}
@@ -138,7 +139,7 @@ function buildEdges(patterns: CookbookItem[]): Edge[] {
             source: dep,
             target: pattern.name,
             style: EDGE_STYLES.registryDependencies,
-            markerEnd: { type: 'arrowclosed' as const, color: '#3b82f6' },
+            markerEnd: { type: 'arrowclosed' as const, color: 'var(--graph-instrument)' },
             data: { type: 'registryDependencies' as RelationshipType },
           })
         }
@@ -174,7 +175,7 @@ function buildEdges(patterns: CookbookItem[]): Edge[] {
             source: base,
             target: pattern.name,
             style: EDGE_STYLES.extends,
-            markerEnd: { type: 'arrowclosed' as const, color: '#8b5cf6' },
+            markerEnd: { type: 'arrowclosed' as const, color: 'var(--graph-saga)' },
             data: { type: 'extends' as RelationshipType },
           })
         }
@@ -439,10 +440,10 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
       {/* Legend */}
       <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Edges</span>
-        <LegendItem label="Dependency" color="#3b82f6" />
-        <LegendItem label="Composes with" color="#22c55e" dashed />
-        <LegendItem label="Extends" color="#8b5cf6" thick />
-        <LegendItem label="Conflicts" color="#ef4444" dashed />
+        <LegendItem label="Dependency" color="var(--graph-instrument)" />
+        <LegendItem label="Composes with" color="var(--graph-account-type)" dashed />
+        <LegendItem label="Extends" color="var(--graph-saga)" thick />
+        <LegendItem label="Conflicts" color="var(--destructive)" dashed />
       </div>
     </div>
   )

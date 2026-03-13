@@ -282,6 +282,9 @@ export function DataTable<T>({
         <FilterBar filters={filters} values={activeFilters} onChange={handleFilterChange} />
       )}
 
+      <span className="sr-only" role="status" aria-live="polite">
+        {isLoading ? 'Loading data…' : `${rows.length} rows loaded`}
+      </span>
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (

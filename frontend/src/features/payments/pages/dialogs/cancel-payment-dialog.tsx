@@ -82,7 +82,7 @@ export function CancelPaymentDialog({
             {!canCancel && (
               <div
                 role="alert"
-                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                className="rounded-md border border-warning/30 bg-warning-muted px-3 py-2 text-sm text-warning-foreground"
               >
                 This payment cannot be cancelled while executing. It must wait for the gateway
                 response.

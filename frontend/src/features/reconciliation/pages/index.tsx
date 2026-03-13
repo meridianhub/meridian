@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useReconciliationRunsTable } from '../hooks'
+import { usePageTitle } from '@/hooks/use-page-title'
 import { InitiateReconciliationDialog } from './initiate-reconciliation-dialog'
 
 export interface ReconciliationRun {
@@ -82,6 +83,7 @@ const columns: ColumnDef<ReconciliationRun>[] = [
 ]
 
 export function ReconciliationPage() {
+  usePageTitle('Reconciliation')
   const navigate = useNavigate()
   const { queryKey, queryFn } = useReconciliationRunsTable()
   const [dialogOpen, setDialogOpen] = React.useState(false)

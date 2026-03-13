@@ -254,7 +254,7 @@ export function CreateAccountTypeDialog({ open, onOpenChange }: CreateAccountTyp
             {successMessage && (
               <div
                 role="status"
-                className="rounded-md border border-green-500/50 bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-950/30 dark:text-green-300"
+                className="rounded-md border border-success/50 bg-success-muted px-3 py-2 text-sm text-success-foreground"
               >
                 {successMessage}
               </div>

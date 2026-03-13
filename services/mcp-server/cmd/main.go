@@ -254,6 +254,7 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 				CodeStore:  codeStore,
 				Registry:   clientRegistry,
 				Signer:     signer,
+				BaseURL:    baseURL,
 				BaseDomain: baseDomain,
 				Logger:     logger,
 			})
