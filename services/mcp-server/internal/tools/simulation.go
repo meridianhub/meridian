@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/shopspring/decimal"
+
 	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
 	"github.com/meridianhub/meridian/shared/pkg/valuation"
-	"github.com/shopspring/decimal"
 )
 
 // CELEvaluator evaluates CEL expressions against named environments with
@@ -55,10 +57,9 @@ type SimulationDeps struct {
 	SagaSimulator      SagaSimulator
 }
 
-// RegisterSimulationTools registers simulation tools into r using deps.
+// RegisterSimulationTools registers simulation tools onto the SDK server using deps.
 // Tools whose corresponding dependency is nil are silently skipped.
-// Panics if registration fails for a non-nil dependency (schema error).
-func RegisterSimulationTools(r *Registry, deps SimulationDeps) {
+func RegisterSimulationTools(srv *mcp.Server, deps SimulationDeps) {
 	candidates := []Tool{}
 	if deps.CELEvaluator != nil {
 		candidates = append(candidates, buildCELEvaluateTool(deps.CELEvaluator))
@@ -73,9 +74,7 @@ func RegisterSimulationTools(r *Registry, deps SimulationDeps) {
 		candidates = append(candidates, buildSagaSimulateTool(deps.SagaSimulator))
 	}
 	for _, t := range candidates {
-		if err := r.Register(t); err != nil {
-			panic(fmt.Sprintf("failed to register simulation tool %q: %v", t.Name, err))
-		}
+		addTool(srv, t)
 	}
 }
 

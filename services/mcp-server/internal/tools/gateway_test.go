@@ -56,8 +56,8 @@ func (m *mockGatewayInstructionWriter) CancelInstruction(ctx context.Context, re
 
 func callGatewayTool(t *testing.T, clients tools.GatewayClients, toolName string, params interface{}) map[string]interface{} {
 	t.Helper()
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, clients)
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), clients)
 
 	raw, err := json.Marshal(params)
 	require.NoError(t, err)
@@ -132,15 +132,15 @@ func TestGatewayDispatchStatus_InvalidStatus_FailsSchemaValidation(t *testing.T)
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{InstructionQuerier: mock})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{InstructionQuerier: mock})
 
 	raw, err := json.Marshal(map[string]interface{}{"status": "BOGUS_STATUS"})
 	require.NoError(t, err)
 
 	_, callErr := reg.Call(context.Background(), "meridian_gateway_dispatch_status", raw)
 	require.Error(t, callErr, "invalid enum value should fail schema validation")
-	assert.Contains(t, callErr.Error(), "validation failed")
+	assert.Contains(t, callErr.Error(), "validation error")
 }
 
 func TestGatewayDispatchStatus_InvalidTimeRange_ReturnsError(t *testing.T) {
@@ -165,8 +165,8 @@ func TestGatewayDispatchStatus_GRPCError_ReturnsFormattedError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{InstructionQuerier: mock})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{InstructionQuerier: mock})
 
 	result, err := reg.Call(context.Background(), "meridian_gateway_dispatch_status", json.RawMessage(`{}`))
 	require.NoError(t, err, "gRPC errors should be returned as formatted result, not error")
@@ -261,15 +261,15 @@ func TestGatewayConnectionHealth_InvalidHealthStatus_FailsSchemaValidation(t *te
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{ConnectionQuerier: mock})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{ConnectionQuerier: mock})
 
 	raw, err := json.Marshal(map[string]interface{}{"health_status": "INVALID"})
 	require.NoError(t, err)
 
 	_, callErr := reg.Call(context.Background(), "meridian_gateway_connection_health", raw)
 	require.Error(t, callErr, "invalid enum value should fail schema validation")
-	assert.Contains(t, callErr.Error(), "validation failed")
+	assert.Contains(t, callErr.Error(), "validation error")
 }
 
 func TestGatewayConnectionHealth_GRPCError_ReturnsFormattedError(t *testing.T) {
@@ -279,8 +279,8 @@ func TestGatewayConnectionHealth_GRPCError_ReturnsFormattedError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{ConnectionQuerier: mock})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{ConnectionQuerier: mock})
 
 	result, err := reg.Call(context.Background(), "meridian_gateway_connection_health", json.RawMessage(`{}`))
 	require.NoError(t, err, "gRPC errors should be returned as formatted result, not error")
@@ -347,8 +347,8 @@ func TestGatewayInstructionDetail_NotFound_ReturnsFormattedError(t *testing.T) {
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{InstructionQuerier: mock})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{InstructionQuerier: mock})
 
 	raw, err := json.Marshal(map[string]interface{}{"instruction_id": instructionID})
 	require.NoError(t, err)
@@ -404,8 +404,8 @@ func TestGatewayCancelInstruction_FailedPrecondition_ReturnsFormattedError(t *te
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{InstructionWriter: mock})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{InstructionWriter: mock})
 
 	raw, err := json.Marshal(map[string]interface{}{"instruction_id": instructionID})
 	require.NoError(t, err)
@@ -423,10 +423,10 @@ func TestGatewayCancelInstruction_FailedPrecondition_ReturnsFormattedError(t *te
 // --- RegisterGatewayTools nil-skipping tests ---
 
 func TestRegisterGatewayTools_NilClients_SkipsRegistration(t *testing.T) {
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{})
 
-	toolList := reg.List()
+	toolList := reg.List(context.Background())
 	assert.Empty(t, toolList, "no tools should be registered when all clients are nil")
 }
 
@@ -440,10 +440,10 @@ func TestRegisterGatewayTools_OnlyInstructionQuerier_RegistersReadTools(t *testi
 		},
 	}
 
-	reg := tools.NewRegistry()
-	tools.RegisterGatewayTools(reg, tools.GatewayClients{InstructionQuerier: mock})
+	reg := newTestServer(t)
+	tools.RegisterGatewayTools(reg.Server(), tools.GatewayClients{InstructionQuerier: mock})
 
-	toolList := reg.List()
+	toolList := reg.List(context.Background())
 	names := make([]string, len(toolList))
 	for i, t := range toolList {
 		names[i] = t.Name

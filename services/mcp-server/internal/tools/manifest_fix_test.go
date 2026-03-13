@@ -66,8 +66,8 @@ handlers:
 
 func TestManifestFix_DeprecatedHandlerConverted(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	manifest := map[string]interface{}{
 		"version": "1.0",
@@ -131,8 +131,8 @@ func TestManifestFix_DeprecatedHandlerConverted(t *testing.T) {
 
 func TestManifestFix_NoDeprecatedHandlers_PassesThrough(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	manifest := map[string]interface{}{
 		"version": "1.0",
@@ -180,8 +180,8 @@ func TestManifestFix_NoDeprecatedHandlers_PassesThrough(t *testing.T) {
 
 func TestManifestFix_MultipleSagas(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	manifest := map[string]interface{}{
 		"version": "1.0",
@@ -225,8 +225,8 @@ func TestManifestFix_MultipleSagas(t *testing.T) {
 
 func TestManifestFix_NoSagas_ReturnsEmpty(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	manifest := map[string]interface{}{
 		"version": "1.0",
@@ -251,20 +251,20 @@ func TestManifestFix_NoSagas_ReturnsEmpty(t *testing.T) {
 
 func TestManifestFix_InvalidManifestJSON(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	params := json.RawMessage(`{"manifest": "not an object"}`)
 	_, err := r.Call(context.Background(), "meridian_manifest_fix", params)
 	// JSON schema validation rejects non-object manifest
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "validation failed")
+	assert.Contains(t, err.Error(), "validation error")
 }
 
 func TestManifestFix_ParamRenamingScopedToCallSite(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	// Script has both a deprecated call AND a non-deprecated call using
 	// the same old param name "amount". Param renaming must only apply
@@ -315,8 +315,8 @@ func TestManifestFix_ParamRenamingScopedToCallSite(t *testing.T) {
 
 func TestManifestFix_ParensInStringLiteral(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	// Script has a string literal containing a closing paren.
 	// extractCallBody must not be fooled by it.
@@ -363,8 +363,8 @@ func TestManifestFix_ParensInStringLiteral(t *testing.T) {
 
 func TestManifestFix_SuffixParamNotRenamed(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	// "total_amount" should NOT be renamed even though "amount" is in the mapping.
 	manifest := map[string]interface{}{
@@ -405,8 +405,8 @@ func TestManifestFix_SuffixParamNotRenamed(t *testing.T) {
 
 func TestManifestFix_NestedCallParamsNotRenamed(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	// The deprecated call has a nested function call with a param name
 	// that matches the mapping. Only the outer kwarg should be renamed.
@@ -450,8 +450,8 @@ func TestManifestFix_NestedCallParamsNotRenamed(t *testing.T) {
 
 func TestManifestFix_ParamMappingApplied(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	manifest := map[string]interface{}{
 		"version": "1.0",
@@ -495,8 +495,8 @@ func TestManifestFix_ParamMappingApplied(t *testing.T) {
 
 func TestManifestFix_StringAndCommentNotModified(t *testing.T) {
 	reg := testRegistryWithEvolution()
-	r := tools.NewRegistry()
-	require.NoError(t, tools.RegisterManifestFixTool(r, reg))
+	r := newTestServer(t)
+	tools.RegisterManifestFixTool(r.Server(), reg)
 
 	// Handler calls inside strings and comments must NOT be modified.
 	// Only the actual call site on the last line should be converted.

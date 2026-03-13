@@ -4,15 +4,15 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
-	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
 )
 
 // Status filter constants used across tool parameter parsing.
@@ -54,9 +54,9 @@ type ReferenceDataDeps struct {
 	MarketInformation MarketInformationClient
 }
 
-// RegisterReferenceDataTools registers all reference data query tools into the registry.
+// RegisterReferenceDataTools registers all reference data query tools onto the SDK server.
 // All tools are read-only (CategoryRead) and query gRPC services for reference data.
-func RegisterReferenceDataTools(registry *Registry, deps ReferenceDataDeps) error {
+func RegisterReferenceDataTools(srv *mcp.Server, deps ReferenceDataDeps) {
 	allTools := []Tool{
 		buildEconomyStructureTool(deps.ManifestHistory),
 		buildInstrumentsListTool(deps.ReferenceData),
@@ -68,11 +68,8 @@ func RegisterReferenceDataTools(registry *Registry, deps ReferenceDataDeps) erro
 	}
 
 	for _, t := range allTools {
-		if err := registry.Register(t); err != nil {
-			return fmt.Errorf("register tool %q: %w", t.Name, err)
-		}
+		addTool(srv, t)
 	}
-	return nil
 }
 
 // buildEconomyStructureTool creates the meridian_economy_structure tool.

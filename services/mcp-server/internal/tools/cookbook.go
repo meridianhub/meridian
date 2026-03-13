@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // itemTypePattern is the registry:pattern item type constant.
@@ -26,23 +28,21 @@ type cookbookRegistry struct {
 }
 
 // RegisterCookbookTools registers the meridian_cookbook_list and meridian_cookbook_describe
-// tools into the registry. cookbookFS must expose the cookbook directory tree, rooted such that
+// tools onto the SDK server. cookbookFS must expose the cookbook directory tree, rooted such that
 // "registry.json", "ui/<name>/component.json" and "patterns/<name>/pattern.json" are resolvable.
 //
 // If cookbookFS is nil the tools are silently skipped.
-func RegisterCookbookTools(registry *Registry, cookbookFS fs.FS) {
+func RegisterCookbookTools(srv *mcp.Server, cookbookFS fs.FS) {
 	if cookbookFS == nil {
 		return
 	}
 
-	tools := []Tool{
+	allTools := []Tool{
 		buildCookbookListTool(cookbookFS),
 		buildCookbookDescribeTool(cookbookFS),
 	}
-	for _, t := range tools {
-		if err := registry.Register(t); err != nil {
-			panic(fmt.Sprintf("failed to register cookbook tool %q: %v", t.Name, err))
-		}
+	for _, t := range allTools {
+		addTool(srv, t)
 	}
 }
 

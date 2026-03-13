@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"strings"
 
-	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
-	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
 )
 
 // generatorUnavailableMessage is returned when the economy generator service is not deployed.
@@ -38,9 +40,9 @@ type EconomyGeneratorClient interface {
 	GetGenerationContext(ctx context.Context, req *controlplanev1.GetGenerationContextRequest) (*controlplanev1.GetGenerationContextResponse, error)
 }
 
-// RegisterEconomyGeneratorTools registers the economy generator MCP tools into the registry.
+// RegisterEconomyGeneratorTools registers the economy generator MCP tools onto the SDK server.
 // Tools are silently skipped if the client is nil.
-func RegisterEconomyGeneratorTools(registry *Registry, client EconomyGeneratorClient) {
+func RegisterEconomyGeneratorTools(srv *mcp.Server, client EconomyGeneratorClient) {
 	if client == nil {
 		return
 	}
@@ -49,9 +51,7 @@ func RegisterEconomyGeneratorTools(registry *Registry, client EconomyGeneratorCl
 		buildEconomyGenerateTool(client),
 	}
 	for _, t := range candidates {
-		if err := registry.Register(t); err != nil {
-			panic("failed to register economy generator tool " + t.Name + ": " + err.Error())
-		}
+		addTool(srv, t)
 	}
 }
 

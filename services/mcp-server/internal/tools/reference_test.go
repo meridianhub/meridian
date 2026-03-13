@@ -16,9 +16,8 @@ import (
 // callReferenceTool registers all reference tools and calls the named one.
 func callReferenceTool(t *testing.T, toolName string, params interface{}) map[string]interface{} {
 	t.Helper()
-	reg := tools.NewRegistry()
-	err := tools.RegisterReferenceTools(reg)
-	require.NoError(t, err)
+	reg := newTestServer(t)
+	tools.RegisterReferenceTools(reg.Server())
 
 	raw, err := json.Marshal(params)
 	require.NoError(t, err)
@@ -225,11 +224,10 @@ func TestGatewayGuide_DecisionTree(t *testing.T) {
 // --- Registration tests ---
 
 func TestRegisterReferenceTools_AllToolsRegistered(t *testing.T) {
-	reg := tools.NewRegistry()
-	err := tools.RegisterReferenceTools(reg)
-	require.NoError(t, err)
+	reg := newTestServer(t)
+	tools.RegisterReferenceTools(reg.Server())
 
-	toolList := reg.List()
+	toolList := reg.List(context.Background())
 	names := make([]string, len(toolList))
 	for i, tl := range toolList {
 		names[i] = tl.Name

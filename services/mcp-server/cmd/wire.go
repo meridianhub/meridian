@@ -1,16 +1,16 @@
 // Package main provides the wiring layer that connects gRPC clients to the
-// MCP server's tool registry, resource provider, and prompt registry.
+// MCP server's tool, resource, and prompt registrations.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
 
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
@@ -24,7 +24,6 @@ import (
 	"github.com/meridianhub/meridian/services/mcp-server/internal/clients"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/prompts"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/resources"
-	"github.com/meridianhub/meridian/services/mcp-server/internal/server"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/session"
 	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
@@ -39,44 +38,34 @@ import (
 //
 // Returns a cleanup function to close the gRPC connection (nil when no
 // connection was established).
-func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (func(), error) {
+func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(), error) {
 	// Prompts are always available (no external deps).
-	srv.SetPromptRegistry(prompts.NewRegistry())
-
-	// Tool registry collects all tools, then bridges them to the server.
-	toolReg := tools.NewRegistry()
+	prompts.RegisterPrompts(srv)
 
 	// Validation tools use local CEL/Starlark libraries — no gRPC needed.
-	if err := tools.RegisterValidationTools(toolReg); err != nil {
-		return nil, fmt.Errorf("register validation tools: %w", err)
-	}
+	tools.RegisterValidationTools(srv)
 
 	// Cookbook tools are local (filesystem-based). cookbookFS may be nil if the
 	// cookbook is not embedded in this build; in that case tools are silently skipped.
-	tools.RegisterCookbookTools(toolReg, cookbookFS)
+	tools.RegisterCookbookTools(srv, cookbookFS)
 
 	// Cookbook discover tool inspects the manifest against the cookbook registry.
 	// Skip when cookbookFS is nil (build without embedded cookbook).
 	if cookbookFS != nil {
 		cookbookLoader := tools.NewFSCookbookLoader(cookbookFS)
-		tools.RegisterCookbookDiscoverTool(toolReg, cookbookLoader)
+		tools.RegisterCookbookDiscoverTool(srv, cookbookLoader)
 	}
 
 	// Manifest fix tool uses handler schema to convert deprecated calls.
-	// TODO: The schema registry is empty here, so manifest fix cannot resolve deprecated
-	// handler names. Once the gRPC backend connects, the registry should be populated
-	// from DescribeHandlers or the proto-derived schema. For now, the tool will
-	// report "no deprecated handlers found" rather than silently producing wrong results.
 	schemaReg := schema.NewRegistry()
-	if err := tools.RegisterManifestFixTool(toolReg, schemaReg); err != nil {
-		logger.Warn("failed to register manifest fix tool", "error", err)
-	}
+	tools.RegisterManifestFixTool(srv, schemaReg)
 
 	// Reference tools are static metadata (topics, starlark bindings, manifest schema,
 	// gateway guide). They are tenant-agnostic and require no gRPC clients.
-	if err := tools.RegisterReferenceTools(toolReg); err != nil {
-		return nil, fmt.Errorf("register reference tools: %w", err)
-	}
+	tools.RegisterReferenceTools(srv)
+
+	// Resources: embedded documentation is always available.
+	resources.RegisterResources(srv, nil)
 
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()
@@ -84,25 +73,20 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 	authCfg, err := mcpauth.LoadFromEnv()
 	if err != nil {
 		logger.Warn("Meridian backend not configured — only local tools available", "error", err)
-		bridgeToolsToServer(srv, toolReg, logger)
-		// Resource provider with nil manifest client returns a placeholder.
-		srv.SetResourceProvider(resources.New(nil))
 		return nil, nil //nolint:nilnil // partial availability is intentional
 	}
 
 	mc, err := clients.New(authCfg)
 	if err != nil {
 		logger.Warn("failed to create gRPC clients — only local tools available", "error", err)
-		bridgeToolsToServer(srv, toolReg, logger)
-		srv.SetResourceProvider(resources.New(nil))
 		return nil, nil //nolint:nilnil // partial availability is intentional
 	}
 	cleanup = func() { _ = mc.Close() }
 
 	logger.Info("gRPC clients connected", "target", authCfg.APIUrl)
 
-	// -- Resource provider (live manifest) --
-	srv.SetResourceProvider(resources.New(&manifestResourceAdapter{c: mc.ManifestHistory}))
+	// -- Resource provider (live manifest) — re-register with live client --
+	resources.RegisterResources(srv, &manifestResourceAdapter{c: mc.ManifestHistory})
 
 	// -- Reference data tools --
 	mhAdapter := manifestHistoryAdapter{c: mc.ManifestHistory}
@@ -110,17 +94,15 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 	srAdapter := sagaRegistryAdapter{c: mc.SagaRegistry}
 	miAdapter := marketInfoAdapter{c: mc.MarketInfo}
 
-	if err := tools.RegisterReferenceDataTools(toolReg, tools.ReferenceDataDeps{
+	tools.RegisterReferenceDataTools(srv, tools.ReferenceDataDeps{
 		ManifestHistory:   mhAdapter,
 		ReferenceData:     rdAdapter,
 		SagaRegistry:      srAdapter,
 		MarketInformation: miAdapter,
-	}); err != nil {
-		logger.Warn("failed to register reference data tools", "error", err)
-	}
+	})
 
 	// -- Audit tools --
-	tools.RegisterAuditTools(toolReg, tools.AuditClients{
+	tools.RegisterAuditTools(srv, tools.AuditClients{
 		SagaAdmin:           sagaAdminAdapter{c: mc.SagaAdmin},
 		PositionKeeping:     positionKeepingAdapter{c: mc.PositionKeeping},
 		FinancialAccounting: postingAdapter{c: mc.Accounting},
@@ -130,90 +112,28 @@ func wireServer(srv *server.MCPServer, logger *slog.Logger, cookbookFS fs.FS) (f
 
 	// -- Economy tools (manifest plan/apply/history) --
 	sess := session.NewDefault()
-	tools.RegisterEconomyTools(toolReg, sess, tools.EconomyDeps{
+	tools.RegisterEconomyTools(srv, sess, tools.EconomyDeps{
 		Applier:   applyManifestAdapter{c: mc.ApplyManifest},
 		Historian: mhAdapter,
 	})
 
 	// -- Economy generator tools (generate context + generate manifest) --
-	tools.RegisterEconomyGeneratorTools(toolReg, economyGeneratorAdapter{c: mc.EconomyGenerator})
+	tools.RegisterEconomyGeneratorTools(srv, economyGeneratorAdapter{c: mc.EconomyGenerator})
 
 	// -- Simulation tools --
 	// CELEvaluator, ManifestDiffer, ValuationSimulator, and SagaSimulator
 	// require dedicated implementations that don't exist yet. Tools with
 	// nil deps are silently skipped — they'll light up once implemented.
-	tools.RegisterSimulationTools(toolReg, tools.SimulationDeps{})
+	tools.RegisterSimulationTools(srv, tools.SimulationDeps{})
 
 	// -- Gateway tools (instruction dispatch status, connection health, instruction detail, cancel) --
-	tools.RegisterGatewayTools(toolReg, tools.GatewayClients{
+	tools.RegisterGatewayTools(srv, tools.GatewayClients{
 		InstructionQuerier: gatewayInstructionAdapter{c: mc.OperationalGateway},
 		ConnectionQuerier:  gatewayConnectionAdapter{c: mc.ProviderConnection},
 		InstructionWriter:  gatewayInstructionAdapter{c: mc.OperationalGateway},
 	})
 
-	// Bridge all registered tools to the server.
-	bridgeToolsToServer(srv, toolReg, logger)
-
 	return cleanup, nil
-}
-
-// bridgeToolsToServer iterates tools from the registry and registers each
-// with the server, adapting the tools.ToolHandler signature to server.ToolHandler.
-func bridgeToolsToServer(srv *server.MCPServer, reg *tools.Registry, logger *slog.Logger) {
-	for _, t := range reg.List() {
-		name := t.Name // capture for closure
-		srv.RegisterTool(
-			server.Tool{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: t.InputSchema,
-			},
-			toolHandlerFor(reg, name, logger),
-		)
-	}
-}
-
-// toolHandlerFor returns a server.ToolHandler that delegates to the registry.
-// Tool-level errors (validation failures, gRPC errors) are returned as MCP
-// error content blocks rather than Go errors, following MCP convention.
-// Detailed error information is logged server-side; the client receives a
-// sanitized message to avoid leaking internal details.
-func toolHandlerFor(reg *tools.Registry, name string, logger *slog.Logger) server.ToolHandler {
-	return func(ctx context.Context, args json.RawMessage) (*server.ToolCallResult, error) {
-		result, callErr := reg.Call(ctx, name, args)
-		if callErr != nil {
-			// Log the full error server-side for debugging.
-			logger.Warn("tool call failed", "tool", name, "error", callErr)
-			// Return a sanitized message to the MCP client.
-			sanitized := fmt.Sprintf("tool %q failed: %s", name, sanitizeError(callErr))
-			return toolErrorResult(sanitized), nil //nolint:nilerr // callErr is logged and returned as MCP content
-		}
-		data, err := json.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("marshal tool result: %w", err)
-		}
-		return &server.ToolCallResult{
-			Content: []server.ContentBlock{{Type: "text", Text: string(data)}},
-		}, nil
-	}
-}
-
-// toolErrorResult builds an MCP error content block from a message string.
-func toolErrorResult(msg string) *server.ToolCallResult {
-	return &server.ToolCallResult{
-		Content: []server.ContentBlock{{Type: "text", Text: msg}},
-		IsError: true,
-	}
-}
-
-// sanitizeError extracts a user-safe message from the error.
-// gRPC status errors are reduced to their message; other errors pass through
-// as-is since they originate from local validation (CEL, Starlark, etc.).
-func sanitizeError(err error) string {
-	if s, ok := status.FromError(err); ok {
-		return s.Message()
-	}
-	return err.Error()
 }
 
 // ---------------------------------------------------------------------------

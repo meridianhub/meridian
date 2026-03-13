@@ -25,8 +25,8 @@ func testdataCookbookLoader(t *testing.T) tools.CookbookLoader {
 // callDiscover is a helper that registers and calls the discover tool with the given params.
 func callDiscover(t *testing.T, loader tools.CookbookLoader, params json.RawMessage) map[string]interface{} {
 	t.Helper()
-	r := tools.NewRegistry()
-	tools.RegisterCookbookDiscoverTool(r, loader)
+	r := newTestServer(t)
+	tools.RegisterCookbookDiscoverTool(r.Server(), loader)
 
 	result, err := r.Call(context.Background(), "meridian_cookbook_discover", params)
 	if err != nil {
@@ -271,8 +271,8 @@ func TestCookbookDiscover_TypeFilter_UIOnly(t *testing.T) {
 // return a structured error rather than panicking.
 func TestCookbookDiscover_InvalidParams_ReturnsError(t *testing.T) {
 	loader := testdataCookbookLoader(t)
-	r := tools.NewRegistry()
-	tools.RegisterCookbookDiscoverTool(r, loader)
+	r := newTestServer(t)
+	tools.RegisterCookbookDiscoverTool(r.Server(), loader)
 
 	// The registry validates against the JSON schema before calling the handler.
 	// An invalid type value should be caught by schema validation.

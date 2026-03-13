@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // CookbookLoader abstracts loading of cookbook registry and pattern files.
@@ -383,11 +385,8 @@ func buildCookbookDiscoverTool(loader CookbookLoader) Tool {
 	}
 }
 
-// RegisterCookbookDiscoverTool registers the meridian_cookbook_discover tool into the registry.
+// RegisterCookbookDiscoverTool registers the meridian_cookbook_discover tool onto the SDK server.
 // loader provides access to the cookbook registry and pattern files.
-func RegisterCookbookDiscoverTool(registry *Registry, loader CookbookLoader) {
-	t := buildCookbookDiscoverTool(loader)
-	if err := registry.Register(t); err != nil {
-		panic(fmt.Sprintf("failed to register cookbook_discover tool: %v", err))
-	}
+func RegisterCookbookDiscoverTool(srv *mcp.Server, loader CookbookLoader) {
+	addTool(srv, buildCookbookDiscoverTool(loader))
 }
