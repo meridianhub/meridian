@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -218,12 +219,18 @@ func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	var req registrationRequest
 	r.Body = http.MaxBytesReader(w, r.Body, registrationBodyLimit)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	// Reject trailing data after the JSON object.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
