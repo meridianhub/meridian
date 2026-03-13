@@ -73,7 +73,7 @@ function SplitPane({
   complexityMetrics,
 }: SplitPaneProps) {
   return (
-    <div data-testid="split-pane" className="grid grid-cols-2 gap-4">
+    <div data-testid="split-pane" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-muted-foreground">Platform Default</span>
