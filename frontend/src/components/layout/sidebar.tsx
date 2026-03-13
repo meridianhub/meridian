@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BuildInfo } from './build-info'
 import {
@@ -22,6 +22,8 @@ import {
   Bot,
   Library,
   Boxes,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTenantFeatures } from '@/hooks/use-tenant-features'
@@ -37,7 +39,11 @@ interface NavItem {
 interface NavGroup {
   label: string
   items: NavItem[]
+  collapsible?: boolean
+  feature?: string
 }
+
+const STORAGE_KEY = 'meridian:sidebar-collapsed'
 
 const TENANT_NAV_GROUPS: NavGroup[] = [
   {
@@ -55,14 +61,21 @@ const TENANT_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Configuration',
+    label: 'Economy',
+    collapsible: true,
+    feature: 'economy',
     items: [
+      { label: 'Overview', href: '/economy', icon: Boxes, feature: 'economy' },
+      { label: 'Reference Data', href: '/reference-data', icon: Database, feature: 'reference-data' },
       { label: 'Starlark Config', href: '/starlark-config', icon: Code, feature: 'sagas' },
       { label: 'Market Data', href: '/market-data', icon: LineChart, feature: 'market-data' },
       { label: 'Forecasting', href: '/forecasting', icon: BarChart3, feature: 'forecasting' },
-      { label: 'Reference Data', href: '/reference-data', icon: Database, feature: 'reference-data' },
+    ],
+  },
+  {
+    label: 'Configuration',
+    items: [
       { label: 'Gateway Mappings', href: '/gateway-mappings', icon: Map, feature: 'mappings' },
-      { label: 'Economy', href: '/economy', icon: Boxes, feature: 'economy' },
       { label: 'MCP Config', href: '/mcp-config', icon: Bot, feature: 'mcp-config' },
       { label: 'Cookbook', href: '/cookbook', icon: Library },
     ],
@@ -81,6 +94,50 @@ const PLATFORM_NAV_ITEMS: NavItem[] = [
   { label: 'Platform Monitoring', href: '/platform', icon: Activity },
 ]
 
+function loadCollapsedGroups(): Set<string> {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) return new Set(JSON.parse(stored))
+  } catch { /* ignore malformed data */ }
+  return new Set()
+}
+
+function saveCollapsedGroups(collapsed: Set<string>): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsed]))
+  } catch { /* ignore storage write failures (quota, private browsing) */ }
+}
+
+function useCollapsedGroups(currentPath: string) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsedGroups)
+
+  const toggle = useCallback((label: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(label)) {
+        next.delete(label)
+      } else {
+        next.add(label)
+      }
+      saveCollapsedGroups(next)
+      return next
+    })
+  }, [])
+
+  // Derive effective collapsed state: auto-expand groups matching current path
+  const isCollapsed = useCallback((label: string) => {
+    if (!collapsed.has(label)) return false
+    // Auto-expand if current path matches a child of this group
+    const group = TENANT_NAV_GROUPS.find(g => g.label === label)
+    if (group?.collapsible && group.items.some(item => currentPath === item.href)) {
+      return false
+    }
+    return true
+  }, [collapsed, currentPath])
+
+  return { toggle, isCollapsed }
+}
+
 interface SidebarProps {
   lens: 'platform' | 'tenant'
   currentPath?: string
@@ -93,6 +150,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
   const showPlatformItems = lens === 'platform'
   const { isFeatureEnabled } = useTenantFeatures()
   const { isPlatformAdmin } = useTenantContext()
+  const { toggle, isCollapsed } = useCollapsedGroups(currentPath)
 
   useEffect(() => {
     if (!isOpen || !onClose) return
@@ -107,6 +165,13 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
     if (!item.feature) return true
     if (isPlatformAdmin) return true
     return isFeatureEnabled(item.feature)
+  }
+
+  function isGroupVisible(group: NavGroup): boolean {
+    if (group.feature) {
+      if (!isPlatformAdmin && !isFeatureEnabled(group.feature)) return false
+    }
+    return group.items.some(isItemVisible)
   }
 
   return (
@@ -131,37 +196,62 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
       <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto py-4">
         <ul role="list" className="px-2">
           {TENANT_NAV_GROUPS.reduce<{ elements: React.ReactNode[]; visibleIndex: number }>((acc, group) => {
+            if (!isGroupVisible(group)) return acc
+
             const visibleItems = group.items.filter(isItemVisible)
             if (visibleItems.length === 0) return acc
 
+            const groupCollapsed = group.collapsible && isCollapsed(group.label)
+
             acc.elements.push(
               <li key={group.label}>
-                <div className={cn('mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50', acc.visibleIndex > 0 && 'mt-4')}>
-                  {group.label}
-                </div>
-                <ul role="list" className="space-y-0.5">
-                  {visibleItems.map((item) => {
-                    const Icon = item.icon
-                    const isActive = currentPath === item.href
-                    return (
-                      <li key={item.href}>
-                        <Link
-                          to={item.href}
-                          aria-current={isActive ? 'page' : undefined}
-                          className={cn(
-                            'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                            isActive
-                              ? 'bg-sidebar-accent text-sidebar-foreground'
-                              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
-                          )}
-                        >
-                          <Icon className="size-4 shrink-0" />
-                          {item.label}
-                        </Link>
-                      </li>
-                    )
-                  })}
-                </ul>
+                {group.collapsible ? (
+                  <button
+                    type="button"
+                    onClick={() => toggle(group.label)}
+                    aria-expanded={!groupCollapsed}
+                    className={cn(
+                      'flex w-full items-center justify-between px-3 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50',
+                      'mb-1 hover:text-sidebar-foreground/70',
+                      acc.visibleIndex > 0 && 'mt-4',
+                    )}
+                  >
+                    {group.label}
+                    {groupCollapsed
+                      ? <ChevronRight className="size-3" />
+                      : <ChevronDown className="size-3" />
+                    }
+                  </button>
+                ) : (
+                  <div className={cn('mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50', acc.visibleIndex > 0 && 'mt-4')}>
+                    {group.label}
+                  </div>
+                )}
+                {!groupCollapsed && (
+                  <ul role="list" className={cn('space-y-0.5', group.collapsible && 'pl-2')}>
+                    {visibleItems.map((item) => {
+                      const Icon = item.icon
+                      const isActive = currentPath === item.href
+                      return (
+                        <li key={item.href}>
+                          <Link
+                            to={item.href}
+                            aria-current={isActive ? 'page' : undefined}
+                            className={cn(
+                              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                              isActive
+                                ? 'bg-sidebar-accent text-sidebar-foreground'
+                                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                            )}
+                          >
+                            <Icon className="size-4 shrink-0" />
+                            {item.label}
+                          </Link>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </li>
             )
             acc.visibleIndex++
