@@ -29,16 +29,12 @@ import { ReconciliationPage, ReconciliationDetailPage } from '@/features/reconci
 import { AuditLogPage } from '@/features/audit'
 import { StarlarkConfigPage, StarlarkDetailPage } from '@/features/sagas'
 import { MappingsPage, MappingDetailPage } from '@/features/mappings'
-import { ReferenceDataHubPage, InstrumentsPage, AccountTypesPage, NodesPage, ValuationRulesPage } from '@/features/reference-data'
 import { InternalAccountsPage, InternalAccountDetailPage } from '@/features/internal-accounts'
-import { MarketDataPage, DatasetDetailPage } from '@/features/market-data'
-import { ForecastingPage } from '@/features/forecasting'
 import { DashboardPage } from '@/features/dashboard'
 import { McpConfigPage } from '@/features/mcp-config'
 import { TransactionsPage } from '@/features/transactions'
 import { UsersListPage, UserDetailPage } from '@/features/identity'
 import { CookbookPage } from '@/features/cookbook'
-import { EconomyOverviewPage, EconomyCreatePage, EconomyEditPage, EconomyExplorePage, EconomyDraftPage } from '@/features/economy'
 
 const CookbookPatternsPage = lazy(() =>
   import('@/features/cookbook/pages/patterns').then((m) => ({ default: m.CookbookPatternsPage })),
@@ -51,6 +47,53 @@ const CookbookDetailPage = lazy(() =>
 )
 const CookbookGraphPage = lazy(() =>
   import('@/features/cookbook/pages/graph').then((m) => ({ default: m.CookbookGraphPage })),
+)
+
+// Economy pages (lazy-loaded: graph rendering with ELK/Cytoscape)
+const EconomyOverviewPage = lazy(() =>
+  import('@/features/economy/pages/economy-overview-page').then((m) => ({ default: m.EconomyOverviewPage })),
+)
+const EconomyCreatePage = lazy(() =>
+  import('@/features/economy/pages/economy-create-page').then((m) => ({ default: m.EconomyCreatePage })),
+)
+const EconomyEditPage = lazy(() =>
+  import('@/features/economy/pages/economy-edit-page').then((m) => ({ default: m.EconomyEditPage })),
+)
+const EconomyExplorePage = lazy(() =>
+  import('@/features/economy/pages/economy-explore-page').then((m) => ({ default: m.EconomyExplorePage })),
+)
+const EconomyDraftPage = lazy(() =>
+  import('@/features/economy/pages/economy-draft-page').then((m) => ({ default: m.EconomyDraftPage })),
+)
+
+// Market data pages (lazy-loaded: chart rendering)
+const MarketDataPage = lazy(() =>
+  import('@/features/market-data/pages/index').then((m) => ({ default: m.MarketDataPage })),
+)
+const DatasetDetailPage = lazy(() =>
+  import('@/features/market-data/pages/[datasetCode]').then((m) => ({ default: m.DatasetDetailPage })),
+)
+
+// Forecasting page (lazy-loaded: data visualization)
+const ForecastingPage = lazy(() =>
+  import('@/features/forecasting/pages/index').then((m) => ({ default: m.ForecastingPage })),
+)
+
+// Reference data pages (lazy-loaded: large component trees)
+const ReferenceDataHubPage = lazy(() =>
+  import('@/features/reference-data/pages/index').then((m) => ({ default: m.ReferenceDataHubPage })),
+)
+const InstrumentsPage = lazy(() =>
+  import('@/features/reference-data/pages/instruments/index').then((m) => ({ default: m.InstrumentsPage })),
+)
+const AccountTypesPage = lazy(() =>
+  import('@/features/reference-data/pages/account-types/index').then((m) => ({ default: m.AccountTypesPage })),
+)
+const NodesPage = lazy(() =>
+  import('@/features/reference-data/pages/nodes/index').then((m) => ({ default: m.NodesPage })),
+)
+const ValuationRulesPage = lazy(() =>
+  import('@/features/reference-data/pages/valuation-rules/index').then((m) => ({ default: m.ValuationRulesPage })),
 )
 import { ThemePreviewPanel } from '@/components/dev/theme-preview-panel'
 
@@ -302,21 +345,21 @@ function AppShellLayout() {
           element={<FeatureGuard feature="sagas">{guarded(<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />)}</FeatureGuard>}
         />
         <Route path="/starlark-config/:definitionId" element={<FeatureGuard feature="sagas">{guarded(<StarlarkDetailPage />)}</FeatureGuard>} />
-        <Route path="/market-data" element={<FeatureGuard feature="market-data">{guarded(<MarketDataPage />)}</FeatureGuard>} />
-        <Route path="/market-data/:datasetCode" element={<FeatureGuard feature="market-data">{guarded(<DatasetDetailPage />)}</FeatureGuard>} />
-        <Route path="/forecasting" element={<FeatureGuard feature="forecasting">{guarded(<ForecastingPage />)}</FeatureGuard>} />
-        <Route path="/reference-data" element={<FeatureGuard feature="reference-data">{guarded(<ReferenceDataHubPage />)}</FeatureGuard>} />
-        <Route path="/reference-data/instruments" element={<FeatureGuard feature="reference-data">{guarded(<InstrumentsPage />)}</FeatureGuard>} />
-        <Route path="/reference-data/account-types" element={<FeatureGuard feature="reference-data">{guarded(<AccountTypesPage />)}</FeatureGuard>} />
-        <Route path="/reference-data/nodes" element={<FeatureGuard feature="reference-data">{guarded(<NodesPage />)}</FeatureGuard>} />
-        <Route path="/reference-data/valuation-rules" element={<FeatureGuard feature="reference-data">{guarded(<ValuationRulesPage />)}</FeatureGuard>} />
+        <Route path="/market-data" element={<FeatureGuard feature="market-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<MarketDataPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/market-data/:datasetCode" element={<FeatureGuard feature="market-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<DatasetDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/forecasting" element={<FeatureGuard feature="forecasting"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ForecastingPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/reference-data" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ReferenceDataHubPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/reference-data/instruments" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<InstrumentsPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/reference-data/account-types" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<AccountTypesPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/reference-data/nodes" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<NodesPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/reference-data/valuation-rules" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ValuationRulesPage />)}</Suspense></FeatureGuard>} />
         <Route path="/gateway-mappings" element={<FeatureGuard feature="mappings">{guarded(<MappingsPage />)}</FeatureGuard>} />
         <Route path="/gateway-mappings/:mappingId" element={<FeatureGuard feature="mappings">{guarded(<MappingDetailPage />)}</FeatureGuard>} />
-        <Route path="/economy" element={<FeatureGuard feature="economy">{guarded(<EconomyOverviewPage />)}</FeatureGuard>} />
-        <Route path="/economy/create" element={<FeatureGuard feature="economy">{guarded(<EconomyCreatePage />)}</FeatureGuard>} />
-        <Route path="/economy/edit" element={<FeatureGuard feature="economy">{guarded(<EconomyEditPage />)}</FeatureGuard>} />
-        <Route path="/economy/explore" element={<FeatureGuard feature="economy">{guarded(<EconomyExplorePage />)}</FeatureGuard>} />
-        <Route path="/economy/draft" element={<FeatureGuard feature="economy">{guarded(<EconomyDraftPage />)}</FeatureGuard>} />
+        <Route path="/economy" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyOverviewPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/economy/create" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyCreatePage />)}</Suspense></FeatureGuard>} />
+        <Route path="/economy/edit" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyEditPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/economy/explore" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyExplorePage />)}</Suspense></FeatureGuard>} />
+        <Route path="/economy/draft" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyDraftPage />)}</Suspense></FeatureGuard>} />
         <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config">{guarded(<McpConfigPage />)}</FeatureGuard>} />
         <Route path="/cookbook" element={guarded(<CookbookPage />)} />
         <Route path="/cookbook/patterns" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookPatternsPage /></Suspense>)} />
