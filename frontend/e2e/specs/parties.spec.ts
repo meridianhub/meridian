@@ -120,11 +120,11 @@ test.describe('Party detail — 8-tab layout', () => {
     }
   })
 
-  test('tab list has 8-column grid layout', async ({ authenticatedPage: page }) => {
+  test('tab list uses line variant with horizontal scroll', async ({ authenticatedPage: page }) => {
     const tabList = page.getByRole('tablist')
     await expect(tabList).toBeVisible()
-    // Verify the CSS grid class from [partyId].tsx:34
-    await expect(tabList).toHaveClass(/grid-cols-8/)
+    // Verify the line-variant tab layout from [partyId].tsx:48
+    await expect(tabList).toHaveClass(/border-b/)
   })
 
   test('Overview tab is selected by default', async ({ authenticatedPage: page }) => {
