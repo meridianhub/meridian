@@ -16,7 +16,7 @@ import (
 )
 
 // ProtocolVersion is the MCP protocol version this server implements.
-const ProtocolVersion = "2024-11-05"
+const ProtocolVersion = "2025-03-26"
 
 // Info contains metadata about the MCP server.
 type Info struct {

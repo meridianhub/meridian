@@ -23,6 +23,13 @@ const (
 	// clientTTL is how long a dynamically registered client remains valid.
 	// MCP clients must re-register after this period.
 	clientTTL = 24 * time.Hour
+	// registrationBodyLimit is the maximum request body size for /oauth/register.
+	registrationBodyLimit = 64 << 10 // 64 KiB
+
+	// Supported OAuth 2.1 values for MCP.
+	supportedGrantType    = "authorization_code"
+	supportedResponseType = "code"
+	supportedAuthMethod   = "none"
 )
 
 var (
@@ -160,6 +167,33 @@ type registrationRequest struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 }
 
+// validateMetadata validates and defaults the registration metadata fields.
+// Returns the resolved values and an error description if validation fails.
+func (req registrationRequest) validateMetadata() (grantTypes, responseTypes []string, authMethod, errDesc string) {
+	grantTypes = req.GrantTypes
+	if len(grantTypes) == 0 {
+		grantTypes = []string{supportedGrantType}
+	} else if len(grantTypes) != 1 || grantTypes[0] != supportedGrantType {
+		return nil, nil, "", "unsupported grant_types: only authorization_code is supported"
+	}
+
+	responseTypes = req.ResponseTypes
+	if len(responseTypes) == 0 {
+		responseTypes = []string{supportedResponseType}
+	} else if len(responseTypes) != 1 || responseTypes[0] != supportedResponseType {
+		return nil, nil, "", "unsupported response_types: only code is supported"
+	}
+
+	authMethod = req.TokenEndpointAuthMethod
+	if authMethod == "" {
+		authMethod = supportedAuthMethod
+	} else if authMethod != supportedAuthMethod {
+		return nil, nil, "", "unsupported token_endpoint_auth_method: only none is supported"
+	}
+
+	return grantTypes, responseTypes, authMethod, ""
+}
+
 // RegistrationHandler handles POST /oauth/register for dynamic client
 // registration per RFC 7591.
 type RegistrationHandler struct {
@@ -183,7 +217,7 @@ func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req registrationRequest
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KiB
+	r.Body = http.MaxBytesReader(w, r.Body, registrationBodyLimit)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
@@ -199,7 +233,6 @@ func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate all redirect URIs.
 	for _, uri := range req.RedirectURIs {
 		if !isAllowedRedirectURI(uri) {
 			writeRegistrationError(w, fmt.Sprintf("%s: %s", errInvalidRedirectFn.Error(), uri))
@@ -207,18 +240,10 @@ func (h *RegistrationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Default grant/response types per MCP OAuth 2.1.
-	grantTypes := req.GrantTypes
-	if len(grantTypes) == 0 {
-		grantTypes = []string{"authorization_code"}
-	}
-	responseTypes := req.ResponseTypes
-	if len(responseTypes) == 0 {
-		responseTypes = []string{"code"}
-	}
-	authMethod := req.TokenEndpointAuthMethod
-	if authMethod == "" {
-		authMethod = "none"
+	grantTypes, responseTypes, authMethod, errDesc := req.validateMetadata()
+	if errDesc != "" {
+		writeRegistrationError(w, errDesc)
+		return
 	}
 
 	client, err := h.registry.Register(RegisteredClient{
