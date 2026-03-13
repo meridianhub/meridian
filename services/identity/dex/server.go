@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	dexconnector "github.com/dexidp/dex/connector"
 	dexserver "github.com/dexidp/dex/server"
+	"github.com/dexidp/dex/server/signer"
 	"github.com/dexidp/dex/storage"
 	"github.com/dexidp/dex/storage/memory"
 )
@@ -105,20 +107,35 @@ func (d *EmbeddedDex) Adapter() *ConnectorAdapter {
 	return d.adapter
 }
 
+// registerConnectorOnce guards the one-time mutation of dexserver.ConnectorsConfig,
+// which is a package-level map that is not safe for concurrent writes.
+var registerConnectorOnce sync.Once
+
 // StartServer creates the Dex OIDC HTTP server, registers the Meridian
 // connector type, and sets the handler. After this call, Handler() returns
 // the Dex server's http.Handler ready for mounting.
 func (d *EmbeddedDex) StartServer(ctx context.Context, issuer string, skipApproval bool) error {
 	// Register the "meridian" connector type so Dex can resolve it from storage.
 	adapter := d.adapter
-	dexserver.ConnectorsConfig[ConnectorType] = func() dexserver.ConnectorConfig {
-		return &connectorConfigAdapter{adapter: adapter}
+	registerConnectorOnce.Do(func() {
+		dexserver.ConnectorsConfig[ConnectorType] = func() dexserver.ConnectorConfig {
+			return &connectorConfigAdapter{adapter: adapter}
+		}
+	})
+
+	// Create a local signer backed by Dex storage for token signing and key rotation.
+	localSignerCfg := &signer.LocalConfig{KeysRotationPeriod: "6h"}
+	s, err := localSignerCfg.Open(ctx, d.storage, 24*time.Hour, time.Now, d.logger)
+	if err != nil {
+		return fmt.Errorf("dex: creating signer: %w", err)
 	}
+	s.Start(ctx)
 
 	srv, err := dexserver.NewServer(ctx, dexserver.Config{
 		Issuer:             issuer,
 		Storage:            d.storage,
 		Logger:             d.logger,
+		Signer:             s,
 		PasswordConnector:  ConnectorID,
 		SkipApprovalScreen: skipApproval,
 	})

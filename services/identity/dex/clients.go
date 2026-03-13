@@ -101,7 +101,7 @@ func registerClients(ctx context.Context, s storage.Storage, clients []ClientCon
 
 		if errors.Is(err, storage.ErrAlreadyExists) {
 			// Update the existing client to ensure config consistency.
-			if updateErr := s.UpdateClient(c.ID, func(_ storage.Client) (storage.Client, error) {
+			if updateErr := s.UpdateClient(ctx, c.ID, func(_ storage.Client) (storage.Client, error) {
 				return client, nil
 			}); updateErr != nil {
 				return fmt.Errorf("dex: updating existing client %q: %w", c.ID, updateErr)
