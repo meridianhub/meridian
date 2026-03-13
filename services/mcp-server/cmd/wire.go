@@ -57,7 +57,11 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 	}
 
 	// Manifest fix tool uses handler schema to convert deprecated calls.
-	schemaReg := schema.NewRegistry()
+	schemaReg, err := schema.NewRegistryWithHandlers()
+	if err != nil {
+		logger.Warn("failed to load handler schemas — manifest fix tool will have limited functionality", "error", err)
+		schemaReg = schema.NewRegistry()
+	}
 	tools.RegisterManifestFixTool(srv, schemaReg)
 
 	// Reference tools are static metadata (topics, starlark bindings, manifest schema,
