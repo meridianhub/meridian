@@ -55,7 +55,7 @@ export function TenantSelector() {
             aria-expanded={open}
             aria-label="Select tenant"
             aria-haspopup="listbox"
-            className="w-[200px] justify-between"
+            className="w-full sm:w-[200px] justify-between"
           >
             <span className="truncate">
               {resolvedTenant ? resolvedTenant.displayName ?? resolvedTenant.name : 'Select tenant...'}
