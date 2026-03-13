@@ -162,6 +162,7 @@ func TestOIDCHandler_Authorize_RedirectsToDex(t *testing.T) {
 
 	oauthCfg := auth.OAuthConfig{
 		ClientID:         "meridian-mcp",
+		RedirectURI:      "https://claude.ai/callback",
 		AuthorizationURL: "https://demo.meridianhub.cloud/oauth/authorize",
 		TokenURL:         "https://demo.meridianhub.cloud/oauth/token",
 	}
@@ -259,7 +260,8 @@ func TestOIDCHandler_Authorize_MissingPKCE(t *testing.T) {
 			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
 		},
 		OAuth: auth.OAuthConfig{
-			ClientID: "meridian-mcp",
+			ClientID:    "meridian-mcp",
+			RedirectURI: "https://claude.ai/callback",
 		},
 		StateStore: newTestOIDCStateStore(t),
 		CodeStore:  newTestStore(t),
@@ -280,6 +282,7 @@ func TestOIDCHandler_Authorize_MissingPKCE(t *testing.T) {
 }
 
 func TestOIDCHandler_Authorize_RejectsHTTPRedirect(t *testing.T) {
+	registry := newTestRegistry(t)
 	signer := newTestSigner(t)
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
 		OIDC: auth.OIDCConfig{
@@ -288,6 +291,7 @@ func TestOIDCHandler_Authorize_RejectsHTTPRedirect(t *testing.T) {
 			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
 		},
 		OAuth:      auth.OAuthConfig{ClientID: "meridian-mcp"},
+		Registry:   registry,
 		StateStore: newTestOIDCStateStore(t),
 		CodeStore:  newTestStore(t),
 		Signer:     signer,
@@ -295,9 +299,15 @@ func TestOIDCHandler_Authorize_RejectsHTTPRedirect(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Register a dynamic client with an HTTP redirect to test scheme validation.
+	client, err := registry.Register(auth.RegisteredClient{
+		RedirectURIs: []string{"http://evil.example.com/steal"},
+	})
+	require.NoError(t, err)
+
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
 		"response_type":         {"code"},
-		"client_id":             {"meridian-mcp"},
+		"client_id":             {client.ClientID},
 		"redirect_uri":          {"http://evil.example.com/steal"},
 		"code_challenge":        {"abc123"},
 		"code_challenge_method": {"S256"},
@@ -318,7 +328,10 @@ func TestOIDCHandler_Authorize_AllowsLocalhostHTTP(t *testing.T) {
 			ClientID:     "meridian-service",
 			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
 		},
-		OAuth:      auth.OAuthConfig{ClientID: "meridian-mcp"},
+		OAuth: auth.OAuthConfig{
+			ClientID:    "meridian-mcp",
+			RedirectURI: "http://localhost:3000/callback",
+		},
 		StateStore: newTestOIDCStateStore(t),
 		CodeStore:  newTestStore(t),
 		Signer:     signer,
@@ -493,6 +506,7 @@ func TestOIDCFlow_EndToEnd(t *testing.T) {
 
 	oauthCfg := auth.OAuthConfig{
 		ClientID:         "meridian-mcp",
+		RedirectURI:      "https://claude.ai/callback",
 		AuthorizationURL: "https://demo.meridianhub.cloud/oauth/authorize",
 		TokenURL:         "https://demo.meridianhub.cloud/oauth/token",
 	}
@@ -748,4 +762,41 @@ func TestNewOIDCHandler_MissingConfig(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestOIDCHandler_Authorize_RejectsStaticClientEvilRedirect(t *testing.T) {
+	dexSrv := fakeDexServer(t, "user@example.com")
+	signer := newTestSigner(t)
+
+	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
+		OIDC: auth.OIDCConfig{
+			DexIssuerURL: dexSrv.URL + "/dex",
+			ClientID:     "meridian-service",
+			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
+		},
+		OAuth: auth.OAuthConfig{
+			ClientID:    "meridian-mcp",
+			RedirectURI: "https://claude.ai/callback",
+		},
+		StateStore: newTestOIDCStateStore(t),
+		CodeStore:  newTestStore(t),
+		Signer:     signer,
+		Logger:     slog.Default(),
+	})
+	require.NoError(t, err)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://evil.example.com/cb"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "redirect_uri does not match registered value")
 }

@@ -190,6 +190,7 @@ type OIDCHandler struct {
 	oauthCfg   OAuthConfig
 	stateStore *OIDCStateStore
 	codeStore  *CodeStore
+	registry   *ClientRegistry
 	signer     *platformauth.JWTSigner
 	tokenTTL   time.Duration
 	baseDomain string
@@ -203,6 +204,7 @@ type OIDCHandlerConfig struct {
 	OAuth      OAuthConfig
 	StateStore *OIDCStateStore
 	CodeStore  *CodeStore
+	Registry   *ClientRegistry
 	Signer     *platformauth.JWTSigner
 	TokenTTL   time.Duration
 	BaseDomain string
@@ -264,6 +266,7 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 		oauthCfg:   cfg.OAuth,
 		stateStore: cfg.StateStore,
 		codeStore:  cfg.CodeStore,
+		registry:   cfg.Registry,
 		signer:     cfg.Signer,
 		tokenTTL:   ttl,
 		baseDomain: cfg.BaseDomain,
@@ -283,9 +286,36 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	clientID := q.Get("client_id")
-	if clientID != h.oauthCfg.ClientID {
-		http.Error(w, "invalid client_id", http.StatusBadRequest)
-		return
+	redirectURI := q.Get("redirect_uri")
+
+	// Validate client_id and redirect_uri for both static and dynamic clients.
+	if clientID == h.oauthCfg.ClientID {
+		// Static client: default to configured redirect_uri, reject mismatches.
+		if redirectURI == "" {
+			redirectURI = h.oauthCfg.RedirectURI
+		} else if redirectURI != h.oauthCfg.RedirectURI {
+			http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
+			return
+		}
+	} else {
+		// Dynamic client: must be in registry with a matching redirect_uri.
+		if h.registry == nil {
+			http.Error(w, "invalid client_id", http.StatusBadRequest)
+			return
+		}
+		client, ok := h.registry.Lookup(clientID)
+		if !ok {
+			http.Error(w, "invalid client_id", http.StatusBadRequest)
+			return
+		}
+		if redirectURI == "" {
+			http.Error(w, "redirect_uri is required for dynamic clients", http.StatusBadRequest)
+			return
+		}
+		if !client.HasRedirectURI(redirectURI) {
+			http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
+			return
+		}
 	}
 
 	if q.Get("response_type") != "code" {
@@ -305,16 +335,8 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURI := q.Get("redirect_uri")
-	if redirectURI == "" {
-		http.Error(w, "redirect_uri is required", http.StatusBadRequest)
-		return
-	}
-
 	// Validate redirect_uri scheme to prevent open-redirect attacks.
-	// MCP clients provide dynamic callback URIs, so we validate the scheme
-	// rather than matching a single registered URI: HTTPS is required for
-	// production; HTTP is allowed only for localhost (development).
+	// HTTPS is required for production; HTTP is allowed only for localhost.
 	if !isAllowedRedirectURI(redirectURI) {
 		http.Error(w, "redirect_uri must use https (or http://localhost for development)", http.StatusBadRequest)
 		return

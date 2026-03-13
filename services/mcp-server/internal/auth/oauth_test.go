@@ -114,7 +114,7 @@ func TestAuthorizationHandler_GeneratesCode(t *testing.T) {
 		TokenURL:         "https://auth.example.com/token",
 		RedirectURI:      "http://localhost:8090/oauth/callback",
 	}
-	handler := auth.NewAuthorizationHandler(cfg, store)
+	handler := auth.NewAuthorizationHandler(cfg, store, nil)
 
 	_, challenge := generatePKCEPair(t)
 
@@ -150,7 +150,7 @@ func TestAuthorizationHandler_MissingChallenge_ReturnsBadRequest(t *testing.T) {
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
 	}
-	handler := auth.NewAuthorizationHandler(cfg, store)
+	handler := auth.NewAuthorizationHandler(cfg, store, nil)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?response_type=code&client_id=meridian-mcp", nil)
 	w := httptest.NewRecorder()
@@ -165,7 +165,7 @@ func TestAuthorizationHandler_WrongClientID_ReturnsBadRequest(t *testing.T) {
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
 	}
-	handler := auth.NewAuthorizationHandler(cfg, store)
+	handler := auth.NewAuthorizationHandler(cfg, store, nil)
 
 	_, challenge := generatePKCEPair(t)
 
@@ -188,7 +188,7 @@ func TestAuthorizationHandler_WrongRedirectURI_ReturnsBadRequest(t *testing.T) {
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
 	}
-	handler := auth.NewAuthorizationHandler(cfg, store)
+	handler := auth.NewAuthorizationHandler(cfg, store, nil)
 
 	_, challenge := generatePKCEPair(t)
 
@@ -211,7 +211,7 @@ func TestAuthorizationHandler_NonGetMethod_ReturnsMethodNotAllowed(t *testing.T)
 		ClientID:    "meridian-mcp",
 		RedirectURI: "http://localhost:8090/oauth/callback",
 	}
-	handler := auth.NewAuthorizationHandler(cfg, store)
+	handler := auth.NewAuthorizationHandler(cfg, store, nil)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/authorize", nil)
 	w := httptest.NewRecorder()
