@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -66,11 +66,25 @@ interface PatternNodeData {
   [key: string]: unknown
 }
 
-function PatternNode({ data }: { data: PatternNodeData }) {
+const PatternNode = memo(function PatternNode({ data }: { data: PatternNodeData }) {
   const height = 40 + (data.complexity ?? 1) * 12
   const tooltipText = data.designPattern
     ? `${data.fullTitle} (${data.designPattern})`
     : data.fullTitle
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    height,
+    borderColor: data.color,
+    backgroundColor: `${data.color}18`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
+  }), [height, data.color, data.dimmed, data.highlighted])
+
+  const badgeStyle = useMemo(() => ({
+    backgroundColor: data.color, width: 16, height: 16,
+  }), [data.color])
+
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
@@ -78,14 +92,7 @@ function PatternNode({ data }: { data: PatternNodeData }) {
         <TooltipTrigger asChild>
           <div
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150"
-            style={{
-              width: 180,
-              height,
-              borderColor: data.color,
-              backgroundColor: `${data.color}18`,
-              opacity: data.dimmed ? 0.25 : 1,
-              boxShadow: data.highlighted ? `0 0 12px ${data.color}88` : undefined,
-            }}
+            style={containerStyle}
           >
             <span className="text-[10px] font-semibold leading-tight text-foreground truncate w-full">
               {data.label}
@@ -93,7 +100,7 @@ function PatternNode({ data }: { data: PatternNodeData }) {
             {data.complexity > 0 && (
               <span
                 className="mt-0.5 inline-flex items-center justify-center rounded-full text-[8px] font-bold text-white"
-                style={{ backgroundColor: data.color, width: 16, height: 16 }}
+                style={badgeStyle}
               >
                 {data.complexity}
               </span>
@@ -107,7 +114,7 @@ function PatternNode({ data }: { data: PatternNodeData }) {
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
-}
+})
 
 const nodeTypes = { pattern: PatternNode }
 
@@ -378,7 +385,7 @@ export function CompositionGraph({ patterns, className }: CompositionGraphProps)
   }, [])
 
   return (
-    <div className={className} style={{ width: '100%', height: '100%' }}>
+    <div className={`w-full h-full ${className ?? ''}`}>
       <TooltipProvider>
       <ReactFlow
         nodes={nodes}
