@@ -212,7 +212,7 @@ const DecisionNode = memo(function DecisionNode({ data }: { data: DecisionNodeDa
         className={`flex items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={DECISION_NODE_STYLE}
       >
-        <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-4 max-w-[90px]">
+        <span className="inline-block text-[10px] font-medium text-amber-700 dark:text-amber-300 text-center leading-tight px-4 max-w-[120px]">
           {data.label}
         </span>
       </div>
