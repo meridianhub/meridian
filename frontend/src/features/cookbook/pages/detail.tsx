@@ -224,7 +224,7 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
             id={`starlark-tab-${i}`}
             role="tab"
             aria-selected={i === activeIndex}
-            aria-controls={`starlark-panel-${i}`}
+            aria-controls="starlark-panel"
             tabIndex={i === activeIndex ? 0 : -1}
             onKeyDown={(e) => handleTabKeyDown(e, i)}
             onClick={() => setActiveFile(i)}
@@ -239,7 +239,7 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
         ))}
       </div>
       <div
-        id={`starlark-panel-${activeIndex}`}
+        id="starlark-panel"
         role="tabpanel"
         aria-labelledby={`starlark-tab-${activeIndex}`}
       >
