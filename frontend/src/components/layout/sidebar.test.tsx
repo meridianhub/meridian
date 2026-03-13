@@ -147,6 +147,95 @@ describe('Sidebar', () => {
     })
   })
 
+  describe('mobile focus trap', () => {
+    it('moves focus into sidebar when opened on mobile', async () => {
+      const onClose = vi.fn()
+      renderSidebar({ lens: 'tenant', isOpen: true, onClose })
+
+      // Focus should be inside the sidebar (complementary landmark)
+      const sidebar = screen.getByRole('complementary')
+      expect(sidebar.contains(document.activeElement)).toBe(true)
+    })
+
+    it('Tab key wraps from last focusable to first within sidebar', async () => {
+      const user = userEvent.setup()
+      const onClose = vi.fn()
+      renderSidebar({ lens: 'tenant', isOpen: true, onClose })
+
+      const sidebar = screen.getByRole('complementary')
+      const focusables = sidebar.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      const lastFocusable = focusables[focusables.length - 1]
+      lastFocusable.focus()
+      expect(lastFocusable).toHaveFocus()
+
+      await user.tab()
+
+      // Should have wrapped back to first focusable in sidebar
+      expect(sidebar.contains(document.activeElement)).toBe(true)
+      expect(document.activeElement).toBe(focusables[0])
+    })
+
+    it('Shift+Tab from first focusable wraps to last within sidebar', async () => {
+      const user = userEvent.setup()
+      const onClose = vi.fn()
+      renderSidebar({ lens: 'tenant', isOpen: true, onClose })
+
+      const sidebar = screen.getByRole('complementary')
+      const focusables = sidebar.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      focusables[0].focus()
+      expect(focusables[0]).toHaveFocus()
+
+      await user.tab({ shift: true })
+
+      // Should have wrapped to last focusable in sidebar
+      expect(document.activeElement).toBe(focusables[focusables.length - 1])
+    })
+
+    it('restores focus to previously focused element when sidebar closes', async () => {
+      const onClose = vi.fn()
+      const button = document.createElement('button')
+      button.textContent = 'Menu'
+      document.body.appendChild(button)
+      button.focus()
+
+      const { rerender } = render(
+        <MemoryRouter>
+          <Sidebar lens="tenant" isOpen={true} onClose={onClose} />
+        </MemoryRouter>,
+      )
+
+      // Re-render with closed state
+      rerender(
+        <MemoryRouter>
+          <Sidebar lens="tenant" isOpen={false} onClose={onClose} />
+        </MemoryRouter>,
+      )
+
+      expect(document.activeElement).toBe(button)
+      document.body.removeChild(button)
+    })
+
+    it('does not trap focus when sidebar has no onClose (desktop mode)', async () => {
+      const user = userEvent.setup()
+      // On desktop, sidebar renders without onClose — no focus trap
+      renderSidebar({ lens: 'tenant', isOpen: false })
+
+      const dashboardLink = screen.getByRole('link', { name: /dashboard/i })
+      dashboardLink.focus()
+      expect(dashboardLink).toHaveFocus()
+
+      // Tab should move to next element freely (no wrapping enforced)
+      await user.tab()
+      // Focus should have moved to some other element (not stuck in sidebar trap)
+      // We just verify no errors were thrown and focus moved
+      expect(document.activeElement).not.toBe(dashboardLink)
+    })
+  })
+
   describe('navigation label', () => {
     it('has an accessible nav landmark', () => {
       renderSidebar({ lens: 'tenant' })
