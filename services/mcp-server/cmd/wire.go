@@ -66,8 +66,6 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 
 	// Resources: embedded documentation is always available.
 	resources.RegisterEmbeddedDocs(srv)
-	// Manifest resource placeholder (no backend).
-	resources.RegisterManifestResource(srv, nil)
 
 	// Try to connect to the Meridian backend for remote tools.
 	var cleanup func()
@@ -75,19 +73,23 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 	authCfg, err := mcpauth.LoadFromEnv()
 	if err != nil {
 		logger.Warn("Meridian backend not configured — only local tools available", "error", err)
+		// Register manifest resource with nil client (placeholder).
+		resources.RegisterManifestResource(srv, nil)
 		return nil, nil //nolint:nilnil // partial availability is intentional
 	}
 
 	mc, err := clients.New(authCfg)
 	if err != nil {
 		logger.Warn("failed to create gRPC clients — only local tools available", "error", err)
+		// Register manifest resource with nil client (placeholder).
+		resources.RegisterManifestResource(srv, nil)
 		return nil, nil //nolint:nilnil // partial availability is intentional
 	}
 	cleanup = func() { _ = mc.Close() }
 
 	logger.Info("gRPC clients connected", "target", authCfg.APIUrl)
 
-	// -- Live manifest resource (replaces placeholder registered above) --
+	// Register manifest resource with live client (single registration).
 	resources.RegisterManifestResource(srv, &manifestResourceAdapter{c: mc.ManifestHistory})
 
 	// -- Reference data tools --
