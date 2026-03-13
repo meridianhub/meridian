@@ -14,7 +14,7 @@ ignore:
   - "**/*_grpc.pb.go"
   - "**/mocks/**"
   - "utilities/**"
-  - "frontend/**"
+  - "frontend/src/api/gen/**"
 
 comment:
   layout: "condensed_header, condensed_files, condensed_footer"
@@ -26,4 +26,13 @@ flags:
     paths:
       - "services/"
       - "shared/"
+    carryforward: true
+  integration:
+    paths:
+      - "services/"
+      - "shared/"
+    carryforward: true
+  frontend:
+    paths:
+      - "frontend/src/"
     carryforward: true

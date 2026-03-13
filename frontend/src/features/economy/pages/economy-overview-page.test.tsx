@@ -238,6 +238,18 @@ describe('EconomyOverviewPage', () => {
     expect(statsBar.querySelector('[data-testid="stat-instruments"]')).toBeInTheDocument()
   })
 
+  it('clicking Valuation Rules stat chip navigates to /reference-data/valuation-rules', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stat-valuation-rules')).toBeInTheDocument()
+    })
+
+    const chip = screen.getByTestId('stat-valuation-rules').closest('button')!
+    await userEvent.click(chip)
+    expect(mockNavigate).toHaveBeenCalledWith('/reference-data/valuation-rules')
+  })
+
   it('stat cards are clickable buttons', async () => {
     renderPage()
 

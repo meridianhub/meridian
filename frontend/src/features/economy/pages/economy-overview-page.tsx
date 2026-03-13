@@ -1,4 +1,3 @@
-import { useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { ConnectError, Code } from '@connectrpc/connect'
@@ -94,10 +93,6 @@ export function EconomyOverviewPage() {
     queryFn: () => manifestHistory.getCurrentManifest({}),
   })
 
-  const scrollToGraph = useCallback(() => {
-    document.getElementById('relationship-graph')?.scrollIntoView({ behavior: 'smooth' })
-  }, [])
-
   const isNotFound = error instanceof ConnectError && error.code === Code.NotFound
 
   const content = (() => {
@@ -149,7 +144,7 @@ export function EconomyOverviewPage() {
         <StatChip label="Instruments" value={instruments.length} testId="stat-instruments" onClick={() => navigate('/reference-data/instruments')} />
         <StatChip label="Account Types" value={accountTypes.length} testId="stat-account-types" onClick={() => navigate('/reference-data/account-types')} />
         <StatChip label="Sagas" value={sagas.length} testId="stat-sagas" onClick={() => navigate('/starlark-config')} />
-        <StatChip label="Valuation Rules" value={valuationRules.length} testId="stat-valuation-rules" onClick={scrollToGraph} />
+        <StatChip label="Valuation Rules" value={valuationRules.length} testId="stat-valuation-rules" onClick={() => navigate('/reference-data/valuation-rules')} />
       </div>
 
       {/* Relationship graph */}

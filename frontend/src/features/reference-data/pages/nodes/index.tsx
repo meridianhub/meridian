@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useApiClients } from '@/api/context'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { PageShell } from '@/shared/page-shell'
 import { PageHeader } from '@/shared/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -127,6 +128,12 @@ export function NodesPage() {
 
   return (
     <PageShell>
+      <Breadcrumbs items={[
+        { label: 'Economy', href: '/economy' },
+        { label: 'Reference Data', href: '/reference-data' },
+        { label: 'Nodes' },
+      ]} />
+
       <PageHeader
         title="Nodes"
         description="Hierarchical reference data node browser with bi-temporal query support."

@@ -3,6 +3,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useMutation } from '@tanstack/react-query'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { CELEditor } from '@/features/sagas/components/cel-editor'
 import { useApiClients } from '@/api/context'
 import { PageShell } from '@/shared/page-shell'
@@ -185,6 +186,12 @@ export function InstrumentsPage() {
 
   return (
     <PageShell>
+      <Breadcrumbs items={[
+        { label: 'Economy', href: '/economy' },
+        { label: 'Reference Data', href: '/reference-data' },
+        { label: 'Instruments' },
+      ]} />
+
       <PageHeader
         title="Instruments"
         description="Reference data instrument definitions with CEL validation expressions."

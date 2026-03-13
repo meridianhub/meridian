@@ -2,6 +2,7 @@ import * as React from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { CELEditor } from '@/features/sagas/components/cel-editor'
 import { useApiClients } from '@/api/context'
 import { PageShell } from '@/shared/page-shell'
@@ -107,6 +108,12 @@ export function AccountTypesPage() {
 
   return (
     <PageShell>
+      <Breadcrumbs items={[
+        { label: 'Economy', href: '/economy' },
+        { label: 'Reference Data', href: '/reference-data' },
+        { label: 'Account Types' },
+      ]} />
+
       <PageHeader
         title="Account Types"
         description="Account type registry with CEL policy configuration."

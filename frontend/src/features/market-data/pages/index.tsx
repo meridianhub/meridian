@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { PageShell } from '@/shared/page-shell'
 import { PageHeader } from '@/shared/page-header'
 import { Card } from '@/components/ui/card'
@@ -124,6 +125,11 @@ export function MarketDataPage() {
 
   return (
     <PageShell>
+      <Breadcrumbs items={[
+        { label: 'Economy', href: '/economy' },
+        { label: 'Market Data' },
+      ]} />
+
       <PageHeader
         title="Market Data"
         description="Market data sets with price observations for FX rates, interest rates, energy prices, and more."
