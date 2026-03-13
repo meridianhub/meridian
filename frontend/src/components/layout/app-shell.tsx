@@ -15,7 +15,7 @@ export function AppShell({ children, currentPath = '/' }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
+    <div className="flex h-screen overflow-hidden bg-muted">
       <Sidebar
         id={SIDEBAR_ID}
         lens={lens}

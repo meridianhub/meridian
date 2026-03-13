@@ -12,22 +12,22 @@ interface QualityConfig {
 const QUALITY_LEVELS: Record<QualityLevel, QualityConfig> = {
   ESTIMATE: {
     icon: Circle,
-    colorClass: 'text-yellow-600 bg-yellow-50 border-yellow-200',
+    colorClass: 'text-warning-foreground bg-warning-muted border-warning/30',
     label: 'Estimate',
   },
   COEFFICIENT: {
     icon: TrendingUp,
-    colorClass: 'text-blue-600 bg-blue-50 border-blue-200',
+    colorClass: 'text-info-foreground bg-info-muted border-info/30',
     label: 'Coefficient',
   },
   ACTUAL: {
     icon: CircleDot,
-    colorClass: 'text-green-600 bg-green-50 border-green-200',
+    colorClass: 'text-success-foreground bg-success-muted border-success/30',
     label: 'Actual',
   },
   REVISED: {
     icon: RefreshCw,
-    colorClass: 'text-purple-600 bg-purple-50 border-purple-200',
+    colorClass: 'text-info-foreground bg-info-muted border-info/30',
     label: 'Revised',
   },
 }

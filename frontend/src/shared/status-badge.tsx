@@ -40,11 +40,11 @@ const STATUS_MAP: Record<string, StatusVariant> = {
 }
 
 const VARIANT_STYLES: Record<StatusVariant, string> = {
-  success: 'bg-green-100 text-green-800 border-green-200',
-  warning: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  error: 'bg-red-100 text-red-800 border-red-200',
-  info: 'bg-blue-100 text-blue-800 border-blue-200',
-  neutral: 'bg-gray-100 text-gray-800 border-gray-200',
+  success: 'bg-success-muted text-success-foreground border-success/30',
+  warning: 'bg-warning-muted text-warning-foreground border-warning/30',
+  error: 'bg-destructive/10 text-destructive border-destructive/30',
+  info: 'bg-info-muted text-info-foreground border-info/30',
+  neutral: 'bg-muted text-muted-foreground border-border',
 }
 
 interface StatusBadgeProps {
@@ -57,7 +57,7 @@ export function StatusBadge({ status, loading }: StatusBadgeProps) {
     return (
       <span
         data-testid="status-badge-skeleton"
-        className="inline-flex h-5 w-16 animate-pulse rounded-full bg-gray-200"
+        className="inline-flex h-5 w-16 animate-pulse rounded-full bg-muted"
       />
     )
   }

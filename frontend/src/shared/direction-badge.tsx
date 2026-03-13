@@ -15,8 +15,8 @@ export function DirectionBadge({ direction }: DirectionBadgeProps) {
       className={cn(
         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
         isCredit
-          ? 'bg-green-50 text-green-700 border-green-200'
-          : 'bg-red-50 text-red-700 border-red-200',
+          ? 'bg-success-muted text-success-foreground border-success/30'
+          : 'bg-destructive/10 text-destructive border-destructive/30',
       )}
     >
       {isCredit ? (

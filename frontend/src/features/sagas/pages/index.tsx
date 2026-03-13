@@ -31,11 +31,11 @@ function sagaStatusLabel(status: SagaStatus): string {
 
 function SourceBadge({ isSystem }: { isSystem: boolean }) {
   return isSystem ? (
-    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 border-blue-200">
+    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-info-muted text-info-foreground border-info/30">
       Platform Default
     </span>
   ) : (
-    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-purple-50 text-purple-700 border-purple-200">
+    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-secondary text-secondary-foreground border-border">
       Tenant Override
     </span>
   )
@@ -65,7 +65,7 @@ export function StarlarkConfigPage({ isPlatformAdmin = false }: StarlarkConfigPa
         cell: (row) => (
           <Link
             to={`/starlark-config/${row.row.original.id}`}
-            className="font-mono text-sm text-blue-600 hover:underline"
+            className="font-mono text-sm text-primary hover:underline"
           >
             {row.row.original.name}
           </Link>

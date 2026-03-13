@@ -61,7 +61,7 @@ export function JsonDiffViewer({ oldValue, newValue }: JsonDiffViewerProps) {
       <pre
         data-testid="diff-inserted"
         className={cn(
-          'rounded-md bg-green-50 p-3 text-xs text-green-800',
+          'rounded-md bg-success-muted p-3 text-xs text-success-foreground',
           'max-h-48 overflow-auto whitespace-pre-wrap break-all',
         )}
       >
@@ -76,7 +76,7 @@ export function JsonDiffViewer({ oldValue, newValue }: JsonDiffViewerProps) {
       <pre
         data-testid="diff-deleted"
         className={cn(
-          'rounded-md bg-red-50 p-3 text-xs text-red-800',
+          'rounded-md bg-destructive/10 p-3 text-xs text-destructive',
           'max-h-48 overflow-auto whitespace-pre-wrap break-all',
         )}
       >
@@ -94,7 +94,7 @@ export function JsonDiffViewer({ oldValue, newValue }: JsonDiffViewerProps) {
           <pre
             data-testid="diff-before"
             className={cn(
-              'rounded-md bg-red-50 p-3 text-xs text-red-800',
+              'rounded-md bg-destructive/10 p-3 text-xs text-destructive',
               'max-h-48 overflow-auto whitespace-pre-wrap break-all',
             )}
           >
@@ -106,7 +106,7 @@ export function JsonDiffViewer({ oldValue, newValue }: JsonDiffViewerProps) {
           <pre
             data-testid="diff-after"
             className={cn(
-              'rounded-md bg-green-50 p-3 text-xs text-green-800',
+              'rounded-md bg-success-muted p-3 text-xs text-success-foreground',
               'max-h-48 overflow-auto whitespace-pre-wrap break-all',
             )}
           >
@@ -126,13 +126,13 @@ export function JsonDiffViewer({ oldValue, newValue }: JsonDiffViewerProps) {
 // ---------------------------------------------------------------------------
 
 const OPERATION_STYLES: Record<AuditOperation, string> = {
-  INSERT: 'bg-green-100 text-green-800 border-green-200',
-  UPDATE: 'bg-blue-100 text-blue-800 border-blue-200',
-  DELETE: 'bg-red-100 text-red-800 border-red-200',
+  INSERT: 'bg-success-muted text-success-foreground border-success/30',
+  UPDATE: 'bg-info-muted text-info-foreground border-info/30',
+  DELETE: 'bg-destructive/10 text-destructive border-destructive/30',
 };
 
 function OperationBadge({ operation }: { operation: string }) {
-  const style = OPERATION_STYLES[operation as AuditOperation] ?? 'bg-gray-100 text-gray-800 border-gray-200';
+  const style = OPERATION_STYLES[operation as AuditOperation] ?? 'bg-muted text-muted-foreground border-border';
   return (
     <span
       className={cn(

@@ -157,17 +157,17 @@ export function DeployWizard({
           {(plan.counts.add > 0 || plan.counts.modify > 0 || plan.counts.remove > 0) && (
             <div className="flex gap-2 text-xs">
               {plan.counts.add > 0 && (
-                <span className="rounded-full border border-green-500/40 bg-green-50/60 px-2 py-0.5 text-green-700 dark:bg-green-950/30 dark:text-green-400">
+                <span className="rounded-full border border-success/30 bg-success-muted px-2 py-0.5 text-success-foreground">
                   +{plan.counts.add} add
                 </span>
               )}
               {plan.counts.modify > 0 && (
-                <span className="rounded-full border border-amber-500/40 bg-amber-50/60 px-2 py-0.5 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+                <span className="rounded-full border border-warning/30 bg-warning-muted px-2 py-0.5 text-warning-foreground">
                   ~{plan.counts.modify} modify
                 </span>
               )}
               {plan.counts.remove > 0 && (
-                <span className="rounded-full border border-red-500/40 bg-red-50/60 px-2 py-0.5 text-red-700 dark:bg-red-950/30 dark:text-red-400">
+                <span className="rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-destructive">
                   -{plan.counts.remove} remove
                 </span>
               )}
@@ -188,7 +188,7 @@ export function DeployWizard({
 
           {/* Stale plan warning */}
           {isPlanStale && (
-            <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50/60 px-3 py-2 text-sm text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+            <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-muted px-3 py-2 text-sm text-warning-foreground">
               <TriangleAlert className="h-4 w-4 shrink-0" />
               <span>Manifest has changed since last plan. Re-plan before applying.</span>
             </div>
@@ -198,7 +198,7 @@ export function DeployWizard({
 
       {/* Success state */}
       {step === 'success' && (
-        <div className="flex items-center gap-2 rounded-md border border-green-500/40 bg-green-50/60 px-3 py-2 text-sm text-green-700 dark:bg-green-950/30 dark:text-green-400">
+        <div className="flex items-center gap-2 rounded-md border border-success/30 bg-success-muted px-3 py-2 text-sm text-success-foreground">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>Manifest applied successfully.</span>
         </div>
@@ -299,7 +299,7 @@ function StepIndicator({ step }: { step: DeployStep }) {
       {(step === 'planning' || step === 'applying') && (
         <Loader2 className="h-4 w-4 animate-spin" />
       )}
-      {step === 'success' && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+      {step === 'success' && <CheckCircle2 className="h-4 w-4 text-success" />}
       {step === 'error' && <AlertCircle className="h-4 w-4 text-destructive" />}
       <span data-testid="deploy-step-label">{STEP_LABELS[step]}</span>
     </div>

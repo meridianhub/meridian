@@ -21,14 +21,14 @@ export function BalanceIndicator({
     <div
       data-testid="balance-indicator"
       data-balanced={isBalanced.toString()}
-      className={cn('rounded-lg border p-4', isBalanced ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50', className)}
+      className={cn('rounded-lg border p-4', isBalanced ? 'border-success/30 bg-success-muted' : 'border-destructive/30 bg-destructive/10', className)}
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              'inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-white',
-              isBalanced ? 'bg-green-600' : 'bg-red-600',
+              'inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold text-destructive-foreground',
+              isBalanced ? 'bg-success' : 'bg-destructive',
             )}
           >
             {isBalanced ? '✓' : '✗'}
@@ -36,7 +36,7 @@ export function BalanceIndicator({
           <span
             className={cn(
               'text-sm font-semibold',
-              isBalanced ? 'text-green-800' : 'text-red-800',
+              isBalanced ? 'text-success-foreground' : 'text-destructive',
             )}
           >
             {isBalanced ? 'Balanced' : 'Unbalanced'}
@@ -46,7 +46,7 @@ export function BalanceIndicator({
         {!isBalanced && (
           <span
             data-testid="balance-difference"
-            className="text-sm text-red-700"
+            className="text-sm text-destructive"
           >
             Difference: <MoneyDisplay amount={difference} currency={currency} />
           </span>

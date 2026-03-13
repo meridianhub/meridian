@@ -33,11 +33,11 @@ function ActivitySkeleton() {
 }
 
 const TYPE_COLORS: Record<ActivityItem['type'], string> = {
-  payment: 'bg-blue-400',
-  account: 'bg-green-400',
-  reconciliation: 'bg-yellow-400',
-  saga: 'bg-purple-400',
-  system: 'bg-gray-400',
+  payment: 'bg-info',
+  account: 'bg-success',
+  reconciliation: 'bg-warning',
+  saga: 'bg-primary',
+  system: 'bg-muted-foreground',
 }
 
 export function ActivityFeed({ items, isLoading, className }: ActivityFeedProps) {
@@ -67,7 +67,7 @@ export function ActivityFeed({ items, isLoading, className }: ActivityFeedProps)
             <div
               className={cn(
                 'mt-2 h-2 w-2 flex-shrink-0 rounded-full',
-                TYPE_COLORS[item.type] ?? 'bg-gray-400',
+                TYPE_COLORS[item.type] ?? 'bg-muted-foreground',
               )}
             />
             <div className="min-w-0 flex-1">
