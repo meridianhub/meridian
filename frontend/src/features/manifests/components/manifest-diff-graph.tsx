@@ -193,7 +193,7 @@ async function layoutDiffGraph(
 function DiffLegendItem({ label, color, dashed }: { label: string; color: string; dashed?: boolean }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-3 h-3 rounded-sm border-2" style={{ borderColor: color, backgroundColor: `${color}18` }} />
+      <span className="w-3 h-3 rounded-sm border-2" style={{ borderColor: color, backgroundColor: `color-mix(in oklch, ${color} 10%, transparent)` }} />
       {dashed !== undefined && (
         <svg width="20" height="12">
           <line x1="0" y1="6" x2="20" y2="6" stroke={color} strokeWidth={2} strokeDasharray={dashed ? '4 4' : undefined} />
