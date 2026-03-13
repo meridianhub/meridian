@@ -116,7 +116,6 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
           aria-hidden="true"
           role="presentation"
-          tabIndex={-1}
           onClick={onClose}
         />
       )}
