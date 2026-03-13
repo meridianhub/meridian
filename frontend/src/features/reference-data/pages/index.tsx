@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, Layers, Tag, GitBranch } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Breadcrumbs } from '@/shared/breadcrumbs'
 import { useApiClients } from '@/api/context'
 import { referenceKeys } from '@/lib/query-keys'
 import { InstrumentStatus } from '@/api/gen/meridian/reference_data/v1/instrument_pb'
@@ -126,6 +127,11 @@ export function ReferenceDataHubPage() {
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[
+        { label: 'Economy', href: '/economy' },
+        { label: 'Reference Data' },
+      ]} />
+
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Reference Data</h1>
         <p className="mt-2 text-muted-foreground">

@@ -4,7 +4,7 @@ import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PageShell, PageHeader } from '@/shared'
+import { PageShell, PageHeader, Breadcrumbs } from '@/shared'
 import { useApiClients } from '@/api/context'
 import { usePageTitle } from '@/hooks/use-page-title'
 import { useTenantContext } from '@/contexts/tenant-context'
@@ -178,6 +178,11 @@ export function ForecastingPage() {
 
   return (
     <PageShell>
+      <Breadcrumbs items={[
+        { label: 'Economy', href: '/economy' },
+        { label: 'Forecasting' },
+      ]} />
+
       <PageHeader
         title="Forecasting"
         description="Compute forward curves by executing a forecasting strategy."

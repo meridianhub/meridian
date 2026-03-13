@@ -204,7 +204,10 @@ export function StarlarkDetailPage() {
   if (!sagaData) {
     return (
       <PageShell>
-        <Breadcrumbs items={[{ label: 'Starlark Config', href: '/starlark' }]} />
+        <Breadcrumbs items={[
+          { label: 'Economy', href: '/economy' },
+          { label: 'Starlark Config', href: '/starlark-config' },
+        ]} />
         <ErrorState title="Saga not found" message="This saga definition could not be found." />
       </PageShell>
     )
@@ -226,7 +229,8 @@ export function StarlarkDetailPage() {
       {/* Breadcrumb navigation */}
       <Breadcrumbs
         items={[
-          { label: 'Starlark Config', href: '/starlark' },
+          { label: 'Economy', href: '/economy' },
+          { label: 'Starlark Config', href: '/starlark-config' },
           { label: sagaData.name },
         ]}
       />
