@@ -91,6 +91,54 @@ func TestRegistrationHandler_AllowsLocalhostHTTP(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, rec.Code)
 }
 
+func TestRegistrationHandler_GrantTypeValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "accepts authorization_code only",
+			body:       `{"redirect_uris":["https://example.com/cb"],"grant_types":["authorization_code"]}`,
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "accepts authorization_code and refresh_token",
+			body:       `{"redirect_uris":["https://example.com/cb"],"grant_types":["authorization_code","refresh_token"]}`,
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "rejects unsupported grant type",
+			body:       `{"redirect_uris":["https://example.com/cb"],"grant_types":["client_credentials"]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "rejects mixed valid and invalid grant types",
+			body:       `{"redirect_uris":["https://example.com/cb"],"grant_types":["authorization_code","implicit"]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "defaults to authorization_code when omitted",
+			body:       `{"redirect_uris":["https://example.com/cb"]}`,
+			wantStatus: http.StatusCreated,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := newTestRegistry(t)
+			handler := auth.NewRegistrationHandler(registry, slog.Default())
+
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/register", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantStatus, rec.Code)
+		})
+	}
+}
+
 func TestRegistrationHandler_MethodNotAllowed(t *testing.T) {
 	registry := newTestRegistry(t)
 	handler := auth.NewRegistrationHandler(registry, slog.Default())
