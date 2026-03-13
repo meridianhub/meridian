@@ -42,7 +42,7 @@ const STATUS_MAP: Record<string, 0 | 1 | 2 | 3> = {
 }
 
 export function MappingsPage() {
-  usePageTitle('Mappings')
+  usePageTitle('Gateway Mappings')
   const navigate = useNavigate()
   const clients = useApiClients()
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false)

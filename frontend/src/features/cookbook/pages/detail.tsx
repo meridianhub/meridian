@@ -184,6 +184,22 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
   const [activeFile, setActiveFile] = useState(0)
   const activeIndex = activeFile >= starlarkFiles.length ? 0 : activeFile
 
+  function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setActiveFile((index + 1) % starlarkFiles.length)
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setActiveFile((index - 1 + starlarkFiles.length) % starlarkFiles.length)
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setActiveFile(0)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setActiveFile(starlarkFiles.length - 1)
+    }
+  }
+
   if (starlarkFiles.length === 0) {
     return <p className="text-sm text-muted-foreground">No Starlark file found.</p>
   }
@@ -194,13 +210,17 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-1 border-b" role="tablist">
+      <div className="flex gap-1 border-b" role="tablist" aria-label="Starlark files">
         {starlarkFiles.map((f, i) => (
           <button
             key={f.name}
             type="button"
+            id={`starlark-tab-${i}`}
             role="tab"
             aria-selected={i === activeIndex}
+            aria-controls={`starlark-panel-${i}`}
+            tabIndex={i === activeIndex ? 0 : -1}
+            onKeyDown={(e) => handleTabKeyDown(e, i)}
             onClick={() => setActiveFile(i)}
             className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
               i === activeIndex
@@ -212,7 +232,13 @@ function StarlarkTabContent({ starlarkFiles }: { starlarkFiles: StarlarkFile[] }
           </button>
         ))}
       </div>
-      <StarlarkEditor value={starlarkFiles[activeIndex].content} onChange={() => {}} readOnly />
+      <div
+        id={`starlark-panel-${activeIndex}`}
+        role="tabpanel"
+        aria-labelledby={`starlark-tab-${activeIndex}`}
+      >
+        <StarlarkEditor value={starlarkFiles[activeIndex].content} onChange={() => {}} readOnly />
+      </div>
     </div>
   )
 }
