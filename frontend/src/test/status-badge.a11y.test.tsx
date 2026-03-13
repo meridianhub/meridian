@@ -40,7 +40,7 @@ describe('StatusBadge accessibility', () => {
     expect(results).toHaveNoViolations()
   })
 
-  it('provides sufficient color contrast for all variants', () => {
+  it('applies semantic token classes for all variants', () => {
     const variants = [
       { status: 'ACTIVE', expectedColor: 'success' },
       { status: 'FROZEN', expectedColor: 'warning' },
