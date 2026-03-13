@@ -82,7 +82,7 @@ describe('EventChainPanel', () => {
 
     const badge = screen.getByTestId('filter-badge-pass')
     expect(badge.textContent).toBe('pass')
-    expect(badge.className).toContain('bg-emerald-100')
+    expect(badge.className).toContain('bg-success-muted')
   })
 
   it('shows fail filter badge with red styling', () => {
@@ -94,7 +94,7 @@ describe('EventChainPanel', () => {
 
     const badge = screen.getByTestId('filter-badge-fail')
     expect(badge.textContent).toBe('fail')
-    expect(badge.className).toContain('bg-red-100')
+    expect(badge.className).toContain('bg-destructive/10')
   })
 
   it('shows indeterminate filter badge with amber styling', () => {
@@ -106,7 +106,7 @@ describe('EventChainPanel', () => {
 
     const badge = screen.getByTestId('filter-badge-indeterminate')
     expect(badge.textContent).toBe('indeterminate')
-    expect(badge.className).toContain('bg-amber-100')
+    expect(badge.className).toContain('bg-warning-muted')
   })
 
   it('displays termination reason for filter_rejection', () => {
