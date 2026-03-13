@@ -374,14 +374,16 @@ func TestLeaseRenewer_StartIsIdempotent(t *testing.T) {
 	renewer.Start(ctx) // Should be ignored
 	renewer.Start(ctx) // Should be ignored
 
-	// Wait a bit for goroutine to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Should only have started one goroutine.
-	// Allow a margin of 5 to absorb runtime jitter (GC, timers, other test
-	// goroutines) that can fluctuate runtime.NumGoroutine() on busy CI runners.
-	currentGoroutines := runtime.NumGoroutine()
-	assert.LessOrEqual(t, currentGoroutines, initialGoroutines+5, "Multiple Start() calls should not spawn multiple goroutines")
+	// Poll until goroutine count settles. Using await tolerates transient
+	// runtime jitter (GC, timers, concurrent tests) while still catching a
+	// real leak — 3 unguarded Start() calls would add +3, exceeding +2.
+	err = await.New().
+		AtMost(1 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			return runtime.NumGoroutine() <= initialGoroutines+2
+		})
+	assert.NoError(t, err, "Multiple Start() calls should not spawn multiple goroutines")
 
 	renewer.Stop()
 }
