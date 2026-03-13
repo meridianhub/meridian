@@ -1,0 +1,29 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 50%
+        threshold: 2%
+    patch:
+      default:
+        target: 60%
+
+ignore:
+  - "**/*.pb.go"
+  - "**/*.pb.validate.go"
+  - "**/*_grpc.pb.go"
+  - "**/mocks/**"
+  - "utilities/**"
+  - "frontend/**"
+
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  behavior: default
+  require_changes: true
+
+flags:
+  unittests:
+    paths:
+      - "services/"
+      - "shared/"
+    carryforward: true
