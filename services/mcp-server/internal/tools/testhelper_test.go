@@ -1,10 +1,12 @@
 package tools_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,6 +19,7 @@ import (
 type testServer struct {
 	srv     *mcp.Server
 	t       *testing.T
+	once    sync.Once
 	session *mcp.ClientSession
 }
 
@@ -33,26 +36,26 @@ func (ts *testServer) Server() *mcp.Server {
 }
 
 // ensureConnected lazily creates the in-memory transport pair and connects.
+// Uses sync.Once to guard against concurrent callers.
 func (ts *testServer) ensureConnected(ctx context.Context) *mcp.ClientSession {
-	if ts.session != nil {
-		return ts.session
-	}
-	ct, st := mcp.NewInMemoryTransports()
-	ss, err := ts.srv.Connect(ctx, st, nil)
-	if err != nil {
-		ts.t.Fatalf("server connect: %v", err)
-	}
-	ts.t.Cleanup(func() { ss.Close() })
+	ts.once.Do(func() {
+		ct, st := mcp.NewInMemoryTransports()
+		ss, err := ts.srv.Connect(ctx, st, nil)
+		if err != nil {
+			ts.t.Fatalf("server connect: %v", err)
+		}
+		ts.t.Cleanup(func() { ss.Close() })
 
-	c := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
-	cs, err := c.Connect(ctx, ct, nil)
-	if err != nil {
-		ts.t.Fatalf("client connect: %v", err)
-	}
-	ts.t.Cleanup(func() { cs.Close() })
+		c := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+		cs, err := c.Connect(ctx, ct, nil)
+		if err != nil {
+			ts.t.Fatalf("client connect: %v", err)
+		}
+		ts.t.Cleanup(func() { cs.Close() })
 
-	ts.session = cs
-	return cs
+		ts.session = cs
+	})
+	return ts.session
 }
 
 // Call invokes the named tool with the given JSON params and returns the
@@ -61,7 +64,7 @@ func (ts *testServer) Call(ctx context.Context, name string, params json.RawMess
 	cs := ts.ensureConnected(ctx)
 
 	var args any
-	if params == nil || string(params) == "null" {
+	if params == nil || string(bytes.TrimSpace(params)) == "null" {
 		args = map[string]any{}
 	} else {
 		var m map[string]any
