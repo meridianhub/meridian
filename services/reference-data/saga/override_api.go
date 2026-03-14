@@ -20,9 +20,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -222,7 +224,7 @@ func (s *OverrideService) MigrateToPlatformRef(
 	logger := s.logger.With("tenant_id", tenantID.String(), "dry_run", dryRun)
 	logger.Info("starting platform reference migration")
 
-	// Get all platform sagas
+	// Get all platform sagas (read-only, outside the retryable transaction).
 	platformSagas, err := s.loadPlatformSagas(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load platform sagas: %w", err)
@@ -230,6 +232,42 @@ func (s *OverrideService) MigrateToPlatformRef(
 
 	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
 
+	var results []MigrationResult
+	err = withCRDBRetry(ctx, func() error {
+		var txErr error
+		results, txErr = s.runMigrationTx(ctx, schemaName, platformSagas, dryRun)
+		return txErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Log per-saga outcomes after the transaction has committed successfully,
+	// so retried transactions don't produce duplicate log entries.
+	for _, r := range results {
+		if r.Action == MigrationActionMigrated {
+			logger.Info("migrated saga to platform reference",
+				"saga_name", r.SagaName,
+				"saga_id", r.SagaID,
+				"platform_ref", r.PlatformRefID,
+				"similarity", r.SimilarityRatio)
+		}
+	}
+
+	logger.Info("platform reference migration completed",
+		"total", len(results),
+		"dry_run", dryRun)
+
+	return results, nil
+}
+
+// runMigrationTx executes the migration within a single transaction.
+func (s *OverrideService) runMigrationTx(
+	ctx context.Context,
+	schemaName string,
+	platformSagas map[string]PlatformSagaDefinition,
+	dryRun bool,
+) ([]MigrationResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -250,7 +288,7 @@ func (s *OverrideService) MigrateToPlatformRef(
 
 	results := make([]MigrationResult, 0, len(candidates))
 	for _, ts := range candidates {
-		result, migrateErr := s.evaluateCandidate(ctx, tx, ts, platformSagas, dryRun, logger)
+		result, migrateErr := s.evaluateCandidate(ctx, tx, ts, platformSagas, dryRun)
 		if migrateErr != nil {
 			return nil, migrateErr
 		}
@@ -258,16 +296,47 @@ func (s *OverrideService) MigrateToPlatformRef(
 	}
 
 	if !dryRun {
-		if err := tx.Commit(ctx); err != nil {
+		if err = tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit migration: %w", err)
 		}
 	}
 
-	logger.Info("platform reference migration completed",
-		"total", len(results),
-		"dry_run", dryRun)
-
 	return results, nil
+}
+
+// withCRDBRetry retries the provided function on CockroachDB serialization errors
+// (SQLSTATE 40001). These errors are expected under SERIALIZABLE isolation and are
+// safe to retry by re-executing the entire transaction.
+func withCRDBRetry(ctx context.Context, fn func() error) error {
+	const maxRetries = 5
+	backoff := 50 * time.Millisecond
+
+	for attempt := 0; ; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if attempt >= maxRetries || !isCRDBRetryError(err) {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > 2*time.Second {
+			backoff = 2 * time.Second
+		}
+	}
+}
+
+// isCRDBRetryError returns true if the error is a CockroachDB serialization conflict
+// (SQLSTATE 40001) that can be resolved by retrying the transaction.
+func isCRDBRetryError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40001"
 }
 
 // tenantSaga represents a tenant's saga definition candidate for migration.
@@ -312,13 +381,14 @@ func (s *OverrideService) loadTenantSagaCandidates(ctx context.Context, tx pgx.T
 }
 
 // evaluateCandidate determines the migration action for a single tenant saga.
+// Does not log outcomes — the caller logs after the transaction commits to avoid
+// duplicate entries on CockroachDB transaction retries.
 func (s *OverrideService) evaluateCandidate(
 	ctx context.Context,
 	tx pgx.Tx,
 	ts tenantSaga,
 	platformSagas map[string]PlatformSagaDefinition,
 	dryRun bool,
-	logger *slog.Logger,
 ) (MigrationResult, error) {
 	if ts.platformRef != nil {
 		return MigrationResult{
@@ -369,12 +439,6 @@ func (s *OverrideService) evaluateCandidate(
 	if err != nil {
 		return MigrationResult{}, fmt.Errorf("migrate saga %s: %w", ts.name, err)
 	}
-
-	logger.Info("migrated saga to platform reference",
-		"saga_name", ts.name,
-		"saga_id", ts.id,
-		"platform_ref", platformSaga.ID,
-		"similarity", simResult.Ratio)
 
 	return MigrationResult{
 		SagaName:        ts.name,
