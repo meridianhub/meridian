@@ -19,22 +19,87 @@ import { Toaster } from 'sonner'
 import { CallbackPage } from '@/pages/callback'
 import { ProviderButton } from '@/components/auth/provider-button'
 import { AuthDivider } from '@/components/auth/auth-divider'
-import { AccountsPage, AccountDetailPage } from '@/features/accounts'
-import { PaymentsPage, PaymentDetailPage } from '@/features/payments'
-import { LedgerPage, BookingLogDetailPage } from '@/features/ledger'
-import { PositionsPage, PositionDetailPage } from '@/features/positions'
-import { PartiesPage, PartyDetailPage } from '@/features/parties'
-import { TenantsPage, TenantDetailPage } from '@/features/tenants'
-import { ReconciliationPage, ReconciliationDetailPage } from '@/features/reconciliation'
-import { AuditLogPage } from '@/features/audit'
-import { StarlarkConfigPage, StarlarkDetailPage } from '@/features/sagas'
-import { MappingsPage, MappingDetailPage } from '@/features/mappings'
-import { InternalAccountsPage, InternalAccountDetailPage } from '@/features/internal-accounts'
 import { DashboardPage } from '@/features/dashboard'
-import { McpConfigPage } from '@/features/mcp-config'
-import { TransactionsPage } from '@/features/transactions'
-import { UsersListPage, UserDetailPage } from '@/features/identity'
-import { CookbookPage } from '@/features/cookbook'
+
+// Feature pages (lazy-loaded: split per route for faster initial load)
+const AccountsPage = lazy(() =>
+  import('@/features/accounts/pages/index').then((m) => ({ default: m.AccountsPage })),
+)
+const AccountDetailPage = lazy(() =>
+  import('@/features/accounts/pages/[accountId]').then((m) => ({ default: m.AccountDetailPage })),
+)
+const PaymentsPage = lazy(() =>
+  import('@/features/payments/pages/index').then((m) => ({ default: m.PaymentsPage })),
+)
+const PaymentDetailPage = lazy(() =>
+  import('@/features/payments/pages/payment-detail').then((m) => ({ default: m.PaymentDetailPage })),
+)
+const LedgerPage = lazy(() =>
+  import('@/features/ledger/pages/index').then((m) => ({ default: m.LedgerPage })),
+)
+const BookingLogDetailPage = lazy(() =>
+  import('@/features/ledger/pages/booking-log-detail').then((m) => ({ default: m.BookingLogDetailPage })),
+)
+const PositionsPage = lazy(() =>
+  import('@/features/positions/pages/index').then((m) => ({ default: m.PositionsPage })),
+)
+const PositionDetailPage = lazy(() =>
+  import('@/features/positions/pages/detail').then((m) => ({ default: m.PositionDetailPage })),
+)
+const PartiesPage = lazy(() =>
+  import('@/features/parties/pages/index').then((m) => ({ default: m.PartiesPage })),
+)
+const PartyDetailPage = lazy(() =>
+  import('@/features/parties/pages/[partyId]').then((m) => ({ default: m.PartyDetailPage })),
+)
+const TenantsPage = lazy(() =>
+  import('@/features/tenants/pages/index').then((m) => ({ default: m.TenantsPage })),
+)
+const TenantDetailPage = lazy(() =>
+  import('@/features/tenants/pages/[tenantId]').then((m) => ({ default: m.TenantDetailPage })),
+)
+const ReconciliationPage = lazy(() =>
+  import('@/features/reconciliation/pages/index').then((m) => ({ default: m.ReconciliationPage })),
+)
+const ReconciliationDetailPage = lazy(() =>
+  import('@/features/reconciliation/pages/detail').then((m) => ({ default: m.ReconciliationDetailPage })),
+)
+const AuditLogPage = lazy(() =>
+  import('@/features/audit/pages/index').then((m) => ({ default: m.AuditLogPage })),
+)
+const StarlarkConfigPage = lazy(() =>
+  import('@/features/sagas/pages/index').then((m) => ({ default: m.StarlarkConfigPage })),
+)
+const StarlarkDetailPage = lazy(() =>
+  import('@/features/sagas/pages/detail').then((m) => ({ default: m.StarlarkDetailPage })),
+)
+const MappingsPage = lazy(() =>
+  import('@/features/mappings/pages/index').then((m) => ({ default: m.MappingsPage })),
+)
+const MappingDetailPage = lazy(() =>
+  import('@/features/mappings/pages/[mappingId]').then((m) => ({ default: m.MappingDetailPage })),
+)
+const InternalAccountsPage = lazy(() =>
+  import('@/features/internal-accounts/pages/index').then((m) => ({ default: m.InternalAccountsPage })),
+)
+const InternalAccountDetailPage = lazy(() =>
+  import('@/features/internal-accounts/pages/[accountId]').then((m) => ({ default: m.InternalAccountDetailPage })),
+)
+const McpConfigPage = lazy(() =>
+  import('@/features/mcp-config/pages/index').then((m) => ({ default: m.McpConfigPage })),
+)
+const TransactionsPage = lazy(() =>
+  import('@/features/transactions/pages/index').then((m) => ({ default: m.TransactionsPage })),
+)
+const UsersListPage = lazy(() =>
+  import('@/features/identity/pages/users-list-page').then((m) => ({ default: m.UsersListPage })),
+)
+const UserDetailPage = lazy(() =>
+  import('@/features/identity/pages/user-detail-page').then((m) => ({ default: m.UserDetailPage })),
+)
+const CookbookPage = lazy(() =>
+  import('@/features/cookbook/pages/index').then((m) => ({ default: m.CookbookPage })),
+)
 
 const CookbookPatternsPage = lazy(() =>
   import('@/features/cookbook/pages/patterns').then((m) => ({ default: m.CookbookPatternsPage })),
@@ -325,26 +390,26 @@ function AppShellLayout() {
       <Routes>
         {/* Tenant-scoped routes */}
         <Route path="/" element={guarded(<DashboardPage />)} />
-        <Route path="/accounts" element={<FeatureGuard feature="accounts">{guarded(<AccountsPage />)}</FeatureGuard>} />
-        <Route path="/accounts/:accountId" element={<FeatureGuard feature="accounts">{guarded(<AccountDetailPage />)}</FeatureGuard>} />
-        <Route path="/internal-accounts" element={<FeatureGuard feature="internal-accounts">{guarded(<InternalAccountsPage />)}</FeatureGuard>} />
-        <Route path="/internal-accounts/:accountId" element={<FeatureGuard feature="internal-accounts">{guarded(<InternalAccountDetailPage />)}</FeatureGuard>} />
-        <Route path="/payments" element={<FeatureGuard feature="payments">{guarded(<PaymentsPage />)}</FeatureGuard>} />
-        <Route path="/payments/:paymentOrderId" element={<FeatureGuard feature="payments">{guarded(<PaymentDetailPage />)}</FeatureGuard>} />
-        <Route path="/transactions" element={guarded(<TransactionsPage />)} />
-        <Route path="/positions" element={<FeatureGuard feature="positions">{guarded(<PositionsPage />)}</FeatureGuard>} />
-        <Route path="/positions/:logId" element={<FeatureGuard feature="positions">{guarded(<PositionDetailPage />)}</FeatureGuard>} />
-        <Route path="/ledger" element={<FeatureGuard feature="ledger">{guarded(<LedgerPage />)}</FeatureGuard>} />
-        <Route path="/ledger/:bookingLogId" element={<FeatureGuard feature="ledger">{guarded(<BookingLogDetailPage />)}</FeatureGuard>} />
-        <Route path="/parties" element={<FeatureGuard feature="parties">{guarded(<PartiesPage />)}</FeatureGuard>} />
-        <Route path="/parties/:partyId" element={<FeatureGuard feature="parties">{guarded(<PartyDetailPage />)}</FeatureGuard>} />
-        <Route path="/reconciliation" element={<FeatureGuard feature="reconciliation">{guarded(<ReconciliationPage />)}</FeatureGuard>} />
-        <Route path="/reconciliation/:runId" element={<FeatureGuard feature="reconciliation">{guarded(<ReconciliationDetailPage />)}</FeatureGuard>} />
+        <Route path="/accounts" element={<FeatureGuard feature="accounts"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<AccountsPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/accounts/:accountId" element={<FeatureGuard feature="accounts"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<AccountDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/internal-accounts" element={<FeatureGuard feature="internal-accounts"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<InternalAccountsPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/internal-accounts/:accountId" element={<FeatureGuard feature="internal-accounts"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<InternalAccountDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/payments" element={<FeatureGuard feature="payments"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PaymentsPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/payments/:paymentOrderId" element={<FeatureGuard feature="payments"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PaymentDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/transactions" element={<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<TransactionsPage />)}</Suspense>} />
+        <Route path="/positions" element={<FeatureGuard feature="positions"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PositionsPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/positions/:logId" element={<FeatureGuard feature="positions"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PositionDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/ledger" element={<FeatureGuard feature="ledger"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<LedgerPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/ledger/:bookingLogId" element={<FeatureGuard feature="ledger"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<BookingLogDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/parties" element={<FeatureGuard feature="parties"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PartiesPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/parties/:partyId" element={<FeatureGuard feature="parties"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PartyDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/reconciliation" element={<FeatureGuard feature="reconciliation"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ReconciliationPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/reconciliation/:runId" element={<FeatureGuard feature="reconciliation"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ReconciliationDetailPage />)}</Suspense></FeatureGuard>} />
         <Route
           path="/starlark-config"
-          element={<FeatureGuard feature="sagas">{guarded(<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />)}</FeatureGuard>}
+          element={<FeatureGuard feature="sagas"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<StarlarkConfigPage isPlatformAdmin={isPlatformAdmin} />)}</Suspense></FeatureGuard>}
         />
-        <Route path="/starlark-config/:definitionId" element={<FeatureGuard feature="sagas">{guarded(<StarlarkDetailPage />)}</FeatureGuard>} />
+        <Route path="/starlark-config/:definitionId" element={<FeatureGuard feature="sagas"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<StarlarkDetailPage />)}</Suspense></FeatureGuard>} />
         <Route path="/market-data" element={<FeatureGuard feature="market-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<MarketDataPage />)}</Suspense></FeatureGuard>} />
         <Route path="/market-data/:datasetCode" element={<FeatureGuard feature="market-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<DatasetDetailPage />)}</Suspense></FeatureGuard>} />
         <Route path="/forecasting" element={<FeatureGuard feature="forecasting"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ForecastingPage />)}</Suspense></FeatureGuard>} />
@@ -353,27 +418,29 @@ function AppShellLayout() {
         <Route path="/reference-data/account-types" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<AccountTypesPage />)}</Suspense></FeatureGuard>} />
         <Route path="/reference-data/nodes" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<NodesPage />)}</Suspense></FeatureGuard>} />
         <Route path="/reference-data/valuation-rules" element={<FeatureGuard feature="reference-data"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ValuationRulesPage />)}</Suspense></FeatureGuard>} />
-        <Route path="/gateway-mappings" element={<FeatureGuard feature="mappings">{guarded(<MappingsPage />)}</FeatureGuard>} />
-        <Route path="/gateway-mappings/:mappingId" element={<FeatureGuard feature="mappings">{guarded(<MappingDetailPage />)}</FeatureGuard>} />
+        <Route path="/gateway-mappings" element={<FeatureGuard feature="mappings"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<MappingsPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/gateway-mappings/:mappingId" element={<FeatureGuard feature="mappings"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<MappingDetailPage />)}</Suspense></FeatureGuard>} />
         <Route path="/economy" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyOverviewPage />)}</Suspense></FeatureGuard>} />
         <Route path="/economy/create" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyCreatePage />)}</Suspense></FeatureGuard>} />
         <Route path="/economy/edit" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyEditPage />)}</Suspense></FeatureGuard>} />
         <Route path="/economy/explore" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyExplorePage />)}</Suspense></FeatureGuard>} />
         <Route path="/economy/draft" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyDraftPage />)}</Suspense></FeatureGuard>} />
-        <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config">{guarded(<McpConfigPage />)}</FeatureGuard>} />
-        <Route path="/cookbook" element={guarded(<CookbookPage />)} />
+        <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<McpConfigPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/cookbook" element={<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<CookbookPage />)}</Suspense>} />
         <Route path="/cookbook/patterns" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookPatternsPage /></Suspense>)} />
         <Route path="/cookbook/components" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookComponentsPage /></Suspense>)} />
         <Route path="/cookbook/graph" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookGraphPage /></Suspense>)} />
         <Route path="/cookbook/:name" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookDetailPage /></Suspense>)} />
-        <Route path="/audit-log" element={<FeatureGuard feature="audit">{guarded(<AuditLogPage />)}</FeatureGuard>} />
+        <Route path="/audit-log" element={<FeatureGuard feature="audit"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<AuditLogPage />)}</Suspense></FeatureGuard>} />
 
         {/* Admin-only routes */}
         <Route
           path="/users"
           element={
             <AdminOnlyRoute>
-              {guarded(<UsersListPage />)}
+              <Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>
+                {guarded(<UsersListPage />)}
+              </Suspense>
             </AdminOnlyRoute>
           }
         />
@@ -381,7 +448,9 @@ function AppShellLayout() {
           path="/users/:userId"
           element={
             <AdminOnlyRoute>
-              {guarded(<UserDetailPage />)}
+              <Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>
+                {guarded(<UserDetailPage />)}
+              </Suspense>
             </AdminOnlyRoute>
           }
         />
@@ -391,7 +460,9 @@ function AppShellLayout() {
           path="/tenants"
           element={
             <PlatformOnlyRoute>
-              {guarded(<TenantsPage />)}
+              <Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>
+                {guarded(<TenantsPage />)}
+              </Suspense>
             </PlatformOnlyRoute>
           }
         />
@@ -399,7 +470,9 @@ function AppShellLayout() {
           path="/tenants/:tenantId"
           element={
             <PlatformOnlyRoute>
-              {guarded(<TenantDetailPage />)}
+              <Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>
+                {guarded(<TenantDetailPage />)}
+              </Suspense>
             </PlatformOnlyRoute>
           }
         />
