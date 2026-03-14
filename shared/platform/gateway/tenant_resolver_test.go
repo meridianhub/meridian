@@ -938,6 +938,12 @@ func TestIsPlatformPath(t *testing.T) {
 	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/CreateTenant"))
 	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/GetTenant"))
 
+	// Dex OIDC identity provider paths
+	assert.True(t, IsPlatformPath("/dex/auth"))
+	assert.True(t, IsPlatformPath("/dex/callback"))
+	assert.True(t, IsPlatformPath("/dex/keys"))
+	assert.True(t, IsPlatformPath("/dex/token"))
+
 	// Non-platform paths
 	assert.False(t, IsPlatformPath("/v1/accounts"))
 	assert.False(t, IsPlatformPath("/v1/parties"))
