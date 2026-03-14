@@ -14,26 +14,26 @@ import Dagre from '@dagrejs/dagre'
 import type { SagaFlow } from '../lib/star-parser'
 import { parseTriggerService } from '../lib/star-parser'
 
-// Curated palette of visually distinct service colors
+// Curated palette of visually distinct service colors using CSS custom properties
 const SERVICE_PALETTE = [
-  { bg: 'hsl(220, 70%, 92%)', fg: 'hsl(220, 70%, 45%)' },  // Blue
-  { bg: 'hsl(150, 60%, 90%)', fg: 'hsl(150, 60%, 35%)' },  // Green
-  { bg: 'hsl(30, 80%, 92%)', fg: 'hsl(30, 80%, 45%)' },    // Orange
-  { bg: 'hsl(280, 60%, 92%)', fg: 'hsl(280, 60%, 45%)' },  // Purple
-  { bg: 'hsl(0, 70%, 92%)', fg: 'hsl(0, 70%, 45%)' },      // Red
-  { bg: 'hsl(180, 60%, 90%)', fg: 'hsl(180, 60%, 35%)' },  // Teal
-  { bg: 'hsl(50, 80%, 90%)', fg: 'hsl(50, 80%, 35%)' },    // Yellow
-  { bg: 'hsl(330, 60%, 92%)', fg: 'hsl(330, 60%, 45%)' },  // Pink
+  { bg: 'var(--saga-service-1-bg)', fg: 'var(--saga-service-1-fg)' },  // Blue
+  { bg: 'var(--saga-service-2-bg)', fg: 'var(--saga-service-2-fg)' },  // Green
+  { bg: 'var(--saga-service-3-bg)', fg: 'var(--saga-service-3-fg)' },  // Orange
+  { bg: 'var(--saga-service-4-bg)', fg: 'var(--saga-service-4-fg)' },  // Purple
+  { bg: 'var(--saga-service-5-bg)', fg: 'var(--saga-service-5-fg)' },  // Red
+  { bg: 'var(--saga-service-6-bg)', fg: 'var(--saga-service-6-fg)' },  // Teal
+  { bg: 'var(--saga-service-7-bg)', fg: 'var(--saga-service-7-fg)' },  // Yellow
+  { bg: 'var(--saga-service-8-bg)', fg: 'var(--saga-service-8-fg)' },  // Pink
 ]
 
 // Separate palette for saga highlighting (border/outline colors)
 const SAGA_PALETTE = [
-  'hsl(220, 70%, 50%)',   // Blue
-  'hsl(150, 60%, 40%)',   // Green
-  'hsl(30, 80%, 50%)',    // Orange
-  'hsl(280, 60%, 50%)',   // Purple
-  'hsl(0, 70%, 50%)',     // Red
-  'hsl(180, 60%, 40%)',   // Teal
+  'var(--saga-service-1-fg)',  // Blue
+  'var(--saga-service-2-fg)',  // Green
+  'var(--saga-service-3-fg)',  // Orange
+  'var(--saga-service-4-fg)',  // Purple
+  'var(--saga-service-5-fg)',  // Red
+  'var(--saga-service-6-fg)',  // Teal
 ]
 
 function buildServiceColorMap(flows: SagaFlow[]): Map<string, { bg: string; fg: string }> {
@@ -173,8 +173,8 @@ const StepNode = memo(function StepNode({ data }: { data: StepNodeData }) {
                   key={`${call.service}.${call.method}.${idx}`}
                   className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
                   style={{
-                    backgroundColor: colors?.bg ?? 'hsl(0, 0%, 92%)',
-                    color: colors?.fg ?? 'hsl(0, 0%, 45%)',
+                    backgroundColor: colors?.bg ?? 'var(--muted)',
+                    color: colors?.fg ?? 'var(--muted-foreground)',
                   }}
                 >
                   {call.service}.{call.method}
