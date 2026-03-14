@@ -37,12 +37,15 @@ export function ProviderButton({ provider, onClick }: ProviderButtonProps) {
         variant="outline"
         className="w-full"
         disabled={loading}
+        aria-busy={loading}
         onClick={() => void handleClick()}
       >
         <ProviderIcon providerId={provider.id} />
-        {loading ? 'Redirecting...' : `Sign in with ${provider.displayName}`}
+        <span aria-live="polite">
+          {loading ? 'Redirecting...' : `Sign in with ${provider.displayName}`}
+        </span>
       </Button>
-      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   )
 }

@@ -147,7 +147,7 @@ function VariancesTab({ runId }: { runId: string }) {
 
   if (isError) {
     return (
-      <div className="rounded-lg border border-destructive p-4 text-destructive text-sm">
+      <div role="alert" className="rounded-lg border border-destructive p-4 text-destructive text-sm">
         Failed to load variances.
       </div>
     )
@@ -301,7 +301,7 @@ function DisputeCard({
             ))}
           </div>
           {mutation.isError && (
-            <p className="text-xs text-destructive">Failed to update dispute.</p>
+            <p role="alert" className="text-xs text-destructive">Failed to update dispute.</p>
           )}
         </div>
       )}
@@ -344,7 +344,7 @@ function DisputesTab({ runId }: { runId: string }) {
 
   if (isError) {
     return (
-      <div className="rounded-lg border border-destructive p-4 text-destructive text-sm">
+      <div role="alert" className="rounded-lg border border-destructive p-4 text-destructive text-sm">
         Failed to load disputes.
       </div>
     )
@@ -358,12 +358,13 @@ function DisputesTab({ runId }: { runId: string }) {
             key={f}
             onClick={() => setFilter(f)}
             className={cn(
-              'rounded-md border px-3 py-1 text-sm transition-colors',
+              'rounded-md border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               filter === f
                 ? 'bg-primary text-primary-foreground border-primary'
                 : 'bg-background hover:bg-accent',
             )}
             aria-pressed={filter === f}
+            aria-label={f === 'ALL' ? 'Show all disputes' : `Show ${f.toLowerCase()} disputes`}
           >
             {f}
           </button>
@@ -467,7 +468,7 @@ function BalanceAssertionsTab({ runId }: { runId: string }) {
 
   if (isError) {
     return (
-      <div className="rounded-lg border border-destructive p-4 text-destructive text-sm">
+      <div role="alert" className="rounded-lg border border-destructive p-4 text-destructive text-sm">
         Failed to load balance assertions.
       </div>
     )
@@ -520,7 +521,7 @@ function BalanceAssertionsTab({ runId }: { runId: string }) {
             </p>
           </div>
           {saveError && (
-            <p data-testid="assertion-error" className="text-xs text-destructive">
+            <p role="alert" data-testid="assertion-error" className="text-xs text-destructive">
               {saveError}
             </p>
           )}

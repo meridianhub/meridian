@@ -392,7 +392,7 @@ describe('ReconciliationDetailPage - disputes tab', () => {
     })
 
     // Click OPEN filter
-    await userEvent.click(screen.getByRole('button', { name: 'OPEN' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Show open disputes' }))
     await waitFor(() => {
       expect(screen.getAllByTestId('dispute-card').length).toBe(1)
       expect(screen.getByText('disp-001')).toBeInTheDocument()
@@ -406,7 +406,7 @@ describe('ReconciliationDetailPage - disputes tab', () => {
     })
 
     // Click REJECTED filter - no disputes are REJECTED
-    await userEvent.click(screen.getByRole('button', { name: 'REJECTED' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Show rejected disputes' }))
     await waitFor(() => {
       expect(screen.getByTestId('disputes-empty')).toBeInTheDocument()
     })
