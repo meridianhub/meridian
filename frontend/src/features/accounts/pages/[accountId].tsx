@@ -24,9 +24,9 @@ import { useAccountDetail, useAccountPostings, useAccountLiens } from '../hooks'
 
 function AccountNotFound({ accountId }: { accountId?: string }) {
   return (
-    <div data-testid="account-not-found" className="p-6">
+    <PageShell>
       <Breadcrumbs items={[{ label: 'Accounts', href: '/accounts' }, { label: 'Not found' }]} />
-      <div className="mt-8 text-center">
+      <div data-testid="account-not-found" className="mt-8 text-center">
         <h2 className="text-xl font-semibold">Account not found</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           {accountId
@@ -34,7 +34,7 @@ function AccountNotFound({ accountId }: { accountId?: string }) {
             : 'The account you are looking for does not exist or has been removed.'}
         </p>
       </div>
-    </div>
+    </PageShell>
   )
 }
 
