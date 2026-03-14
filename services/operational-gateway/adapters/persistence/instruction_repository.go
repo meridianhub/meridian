@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -155,6 +156,10 @@ func (r *InstructionRepository) FetchDispatchable(ctx context.Context, params po
 
 	var entities []InstructionEntity
 
+	// Use READ COMMITTED isolation: CockroachDB's SERIALIZABLE default causes
+	// unpredictable behavior with FOR UPDATE SKIP LOCKED, where recently-committed
+	// rows may be skipped. READ COMMITTED matches PostgreSQL semantics and is the
+	// recommended isolation level for queue-like claim patterns.
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Step 1: Lock candidate IDs. RETRYING rows are only eligible when next_retry_at has passed.
 		lockSQL := `
@@ -195,7 +200,7 @@ func (r *InstructionRepository) FetchDispatchable(ctx context.Context, params po
 		return tx.Where("id IN ?", ids).
 			Order("priority DESC, scheduled_at ASC NULLS FIRST").
 			Find(&entities).Error
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
 	}

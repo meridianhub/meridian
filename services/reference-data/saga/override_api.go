@@ -20,9 +20,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -222,7 +224,7 @@ func (s *OverrideService) MigrateToPlatformRef(
 	logger := s.logger.With("tenant_id", tenantID.String(), "dry_run", dryRun)
 	logger.Info("starting platform reference migration")
 
-	// Get all platform sagas
+	// Get all platform sagas (read-only, outside the retryable transaction).
 	platformSagas, err := s.loadPlatformSagas(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load platform sagas: %w", err)
@@ -230,37 +232,46 @@ func (s *OverrideService) MigrateToPlatformRef(
 
 	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
+	var results []MigrationResult
+	err = withCRDBRetry(ctx, func() error {
+		tx, txErr := s.pool.Begin(ctx)
+		if txErr != nil {
+			return fmt.Errorf("begin transaction: %w", txErr)
+		}
+		defer func() {
+			_ = tx.Rollback(ctx)
+		}()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
-	if err != nil {
-		return nil, fmt.Errorf("set search_path: %w", err)
-	}
+		_, txErr = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
+		if txErr != nil {
+			return fmt.Errorf("set search_path: %w", txErr)
+		}
 
-	candidates, err := s.loadTenantSagaCandidates(ctx, tx)
+		candidates, txErr := s.loadTenantSagaCandidates(ctx, tx)
+		if txErr != nil {
+			return txErr
+		}
+
+		txResults := make([]MigrationResult, 0, len(candidates))
+		for _, ts := range candidates {
+			result, migrateErr := s.evaluateCandidate(ctx, tx, ts, platformSagas, dryRun, logger)
+			if migrateErr != nil {
+				return migrateErr
+			}
+			txResults = append(txResults, result)
+		}
+
+		if !dryRun {
+			if txErr = tx.Commit(ctx); txErr != nil {
+				return fmt.Errorf("commit migration: %w", txErr)
+			}
+		}
+
+		results = txResults
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	results := make([]MigrationResult, 0, len(candidates))
-	for _, ts := range candidates {
-		result, migrateErr := s.evaluateCandidate(ctx, tx, ts, platformSagas, dryRun, logger)
-		if migrateErr != nil {
-			return nil, migrateErr
-		}
-		results = append(results, result)
-	}
-
-	if !dryRun {
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("commit migration: %w", err)
-		}
 	}
 
 	logger.Info("platform reference migration completed",
@@ -268,6 +279,41 @@ func (s *OverrideService) MigrateToPlatformRef(
 		"dry_run", dryRun)
 
 	return results, nil
+}
+
+// withCRDBRetry retries the provided function on CockroachDB serialization errors
+// (SQLSTATE 40001). These errors are expected under SERIALIZABLE isolation and are
+// safe to retry by re-executing the entire transaction.
+func withCRDBRetry(ctx context.Context, fn func() error) error {
+	const maxRetries = 5
+	backoff := 50 * time.Millisecond
+
+	for attempt := 0; ; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if attempt >= maxRetries || !isCRDBRetryError(err) {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > 2*time.Second {
+			backoff = 2 * time.Second
+		}
+	}
+}
+
+// isCRDBRetryError returns true if the error is a CockroachDB serialization conflict
+// (SQLSTATE 40001) that can be resolved by retrying the transaction.
+func isCRDBRetryError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40001"
 }
 
 // tenantSaga represents a tenant's saga definition candidate for migration.
