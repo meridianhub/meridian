@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppShell } from '@/components/layout/app-shell'
 import { AuthProvider } from '@/contexts/auth-context'
 import { TenantProvider } from '@/contexts/tenant-context'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { createPlatformAdminToken, createTenantUserToken } from '@/test/jwt-helpers'
 
 // Mock TenantSelector to avoid dependency on ungenerated proto clients
@@ -23,9 +24,11 @@ function renderWithProviders(ui: React.ReactElement, token?: string) {
     <QueryClientProvider client={queryClient}>
       <AuthProvider initialToken={token}>
         <TenantProvider>
-          <MemoryRouter>
-            {ui}
-          </MemoryRouter>
+          <TooltipProvider>
+            <MemoryRouter>
+              {ui}
+            </MemoryRouter>
+          </TooltipProvider>
         </TenantProvider>
       </AuthProvider>
     </QueryClientProvider>
