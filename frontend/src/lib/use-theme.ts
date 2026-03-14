@@ -18,6 +18,7 @@ function getStoredTheme(): Theme {
 
 function getResolvedTheme(theme: Theme): "light" | "dark" {
   if (theme === "system") {
+    if (typeof window === "undefined") return "light"
     return window.matchMedia("(prefers-color-scheme: dark)").matches
       ? "dark"
       : "light"
@@ -26,6 +27,7 @@ function getResolvedTheme(theme: Theme): "light" | "dark" {
 }
 
 function applyTheme(theme: Theme): void {
+  if (typeof document === "undefined") return
   const resolved = getResolvedTheme(theme)
   document.documentElement.classList.toggle("dark", resolved === "dark")
 }
