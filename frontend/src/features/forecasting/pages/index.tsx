@@ -126,7 +126,7 @@ function CurveChart({ points, label }: CurveChartProps) {
         <path
           d={pathData}
           fill="none"
-          stroke="#f59e0b"
+          stroke="var(--chart-4)"
           strokeWidth={2}
           strokeDasharray="6 3"
           strokeLinejoin="round"
@@ -139,7 +139,7 @@ function CurveChart({ points, label }: CurveChartProps) {
             cx={toSvgX(p.x)}
             cy={toSvgY(p.y)}
             r={3}
-            fill="#f59e0b"
+            fill="var(--chart-4)"
           />
         ))}
       </svg>

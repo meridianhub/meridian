@@ -110,6 +110,24 @@
     --graph-diff-removed: oklch(0.577 0.245 27.325);
     --graph-diff-modified: oklch(0.75 0.15 85);
     --graph-diff-unchanged: oklch(0.554 0.046 257.417);
+
+    /* Saga service palette — rotating colors for dynamically assigned services */
+    --saga-service-1-bg: oklch(0.93 0.04 250);
+    --saga-service-1-fg: oklch(0.45 0.15 250);
+    --saga-service-2-bg: oklch(0.93 0.04 145);
+    --saga-service-2-fg: oklch(0.40 0.13 145);
+    --saga-service-3-bg: oklch(0.93 0.05 55);
+    --saga-service-3-fg: oklch(0.50 0.16 55);
+    --saga-service-4-bg: oklch(0.93 0.04 295);
+    --saga-service-4-fg: oklch(0.45 0.15 295);
+    --saga-service-5-bg: oklch(0.93 0.05 27);
+    --saga-service-5-fg: oklch(0.45 0.18 27);
+    --saga-service-6-bg: oklch(0.93 0.04 195);
+    --saga-service-6-fg: oklch(0.40 0.13 195);
+    --saga-service-7-bg: oklch(0.93 0.05 85);
+    --saga-service-7-fg: oklch(0.42 0.14 85);
+    --saga-service-8-bg: oklch(0.93 0.04 340);
+    --saga-service-8-fg: oklch(0.45 0.15 340);
 }
 
 .dark {
@@ -165,6 +183,24 @@
     --graph-diff-removed: oklch(0.704 0.191 22.216);
     --graph-diff-modified: oklch(0.75 0.18 85);
     --graph-diff-unchanged: oklch(0.704 0.04 256.788);
+
+    /* Saga service palette — rotating colors for dynamically assigned services */
+    --saga-service-1-bg: oklch(0.22 0.06 250);
+    --saga-service-1-fg: oklch(0.65 0.18 250);
+    --saga-service-2-bg: oklch(0.22 0.06 145);
+    --saga-service-2-fg: oklch(0.65 0.18 145);
+    --saga-service-3-bg: oklch(0.22 0.07 55);
+    --saga-service-3-fg: oklch(0.72 0.18 55);
+    --saga-service-4-bg: oklch(0.22 0.06 295);
+    --saga-service-4-fg: oklch(0.65 0.18 295);
+    --saga-service-5-bg: oklch(0.22 0.07 27);
+    --saga-service-5-fg: oklch(0.70 0.19 27);
+    --saga-service-6-bg: oklch(0.22 0.06 195);
+    --saga-service-6-fg: oklch(0.65 0.17 195);
+    --saga-service-7-bg: oklch(0.22 0.07 85);
+    --saga-service-7-fg: oklch(0.75 0.18 85);
+    --saga-service-8-bg: oklch(0.22 0.06 340);
+    --saga-service-8-fg: oklch(0.65 0.18 340);
 }
 
 @layer base {

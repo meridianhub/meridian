@@ -32,18 +32,18 @@ import type {
 import { filterSubgraph } from '@/features/reference-data/lib/filter-subgraph'
 
 const NODE_THEMES: Record<ManifestNodeType, { color: string }> = {
-  instrument: { color: '#3b82f6' },
-  account_type: { color: '#22c55e' },
-  valuation_rule: { color: '#f59e0b' },
-  saga: { color: '#8b5cf6' },
+  instrument: { color: 'var(--graph-instrument)' },
+  account_type: { color: 'var(--graph-account-type)' },
+  valuation_rule: { color: 'var(--graph-valuation-rule)' },
+  saga: { color: 'var(--graph-saga)' },
 }
 
 const EDGE_STYLES: Record<string, React.CSSProperties> = {
-  allowed_by: { stroke: '#3b82f6', strokeWidth: 2 },
-  converts_from: { stroke: '#f59e0b', strokeWidth: 1.5, strokeDasharray: '6 3' },
-  converts_to: { stroke: '#f59e0b', strokeWidth: 1.5 },
-  writes_to: { stroke: '#8b5cf6', strokeWidth: 1.5 },
-  uses_valuation: { stroke: '#f59e0b', strokeWidth: 1.5, strokeDasharray: '4 2' },
+  allowed_by: { stroke: 'var(--graph-instrument)', strokeWidth: 2 },
+  converts_from: { stroke: 'var(--graph-valuation-rule)', strokeWidth: 1.5, strokeDasharray: '6 3' },
+  converts_to: { stroke: 'var(--graph-valuation-rule)', strokeWidth: 1.5 },
+  writes_to: { stroke: 'var(--graph-saga)', strokeWidth: 1.5 },
+  uses_valuation: { stroke: 'var(--graph-valuation-rule)', strokeWidth: 1.5, strokeDasharray: '4 2' },
 }
 
 interface SubgraphNodeData {
@@ -123,7 +123,7 @@ export function ExecutionSubgraph({ graph, focusNodeId }: ExecutionSubgraphProps
       source: e.source,
       target: e.target,
       style: EDGE_STYLES[e.relationship] ?? {},
-      markerEnd: { type: 'arrowclosed' as const, color: (EDGE_STYLES[e.relationship]?.stroke as string) ?? '#999' },
+      markerEnd: { type: 'arrowclosed' as const, color: (EDGE_STYLES[e.relationship]?.stroke as string) ?? 'var(--graph-diff-unchanged)' },
     }))
 
     const nodeMap = new Map(subgraph.nodes.map((n) => [n.id, n]))
