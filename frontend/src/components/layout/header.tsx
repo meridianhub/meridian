@@ -9,6 +9,7 @@ import {
 import { useAuth } from '@/contexts/auth-context'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { TenantSelector } from '@/components/layout/tenant-selector'
+import { ThemeToggle } from '@/components/layout/theme-toggle'
 
 interface HeaderProps {
   onMenuToggle: () => void
@@ -40,6 +41,8 @@ export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
 
       <div className="ml-auto flex items-center gap-4">
         {isPlatformAdmin && <TenantSelector />}
+
+        <ThemeToggle />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
