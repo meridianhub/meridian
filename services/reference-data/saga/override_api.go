@@ -234,49 +234,72 @@ func (s *OverrideService) MigrateToPlatformRef(
 
 	var results []MigrationResult
 	err = withCRDBRetry(ctx, func() error {
-		tx, txErr := s.pool.Begin(ctx)
-		if txErr != nil {
-			return fmt.Errorf("begin transaction: %w", txErr)
-		}
-		defer func() {
-			_ = tx.Rollback(ctx)
-		}()
-
-		_, txErr = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
-		if txErr != nil {
-			return fmt.Errorf("set search_path: %w", txErr)
-		}
-
-		candidates, txErr := s.loadTenantSagaCandidates(ctx, tx)
-		if txErr != nil {
-			return txErr
-		}
-
-		txResults := make([]MigrationResult, 0, len(candidates))
-		for _, ts := range candidates {
-			result, migrateErr := s.evaluateCandidate(ctx, tx, ts, platformSagas, dryRun, logger)
-			if migrateErr != nil {
-				return migrateErr
-			}
-			txResults = append(txResults, result)
-		}
-
-		if !dryRun {
-			if txErr = tx.Commit(ctx); txErr != nil {
-				return fmt.Errorf("commit migration: %w", txErr)
-			}
-		}
-
-		results = txResults
-		return nil
+		var txErr error
+		results, txErr = s.runMigrationTx(ctx, schemaName, platformSagas, dryRun)
+		return txErr
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	// Log per-saga outcomes after the transaction has committed successfully,
+	// so retried transactions don't produce duplicate log entries.
+	for _, r := range results {
+		if r.Action == MigrationActionMigrated {
+			logger.Info("migrated saga to platform reference",
+				"saga_name", r.SagaName,
+				"saga_id", r.SagaID,
+				"platform_ref", r.PlatformRefID,
+				"similarity", r.SimilarityRatio)
+		}
+	}
+
 	logger.Info("platform reference migration completed",
 		"total", len(results),
 		"dry_run", dryRun)
+
+	return results, nil
+}
+
+// runMigrationTx executes the migration within a single transaction.
+func (s *OverrideService) runMigrationTx(
+	ctx context.Context,
+	schemaName string,
+	platformSagas map[string]PlatformSagaDefinition,
+	dryRun bool,
+) ([]MigrationResult, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
+	if err != nil {
+		return nil, fmt.Errorf("set search_path: %w", err)
+	}
+
+	candidates, err := s.loadTenantSagaCandidates(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]MigrationResult, 0, len(candidates))
+	for _, ts := range candidates {
+		result, migrateErr := s.evaluateCandidate(ctx, tx, ts, platformSagas, dryRun)
+		if migrateErr != nil {
+			return nil, migrateErr
+		}
+		results = append(results, result)
+	}
+
+	if !dryRun {
+		if err = tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit migration: %w", err)
+		}
+	}
 
 	return results, nil
 }
@@ -358,13 +381,14 @@ func (s *OverrideService) loadTenantSagaCandidates(ctx context.Context, tx pgx.T
 }
 
 // evaluateCandidate determines the migration action for a single tenant saga.
+// Does not log outcomes — the caller logs after the transaction commits to avoid
+// duplicate entries on CockroachDB transaction retries.
 func (s *OverrideService) evaluateCandidate(
 	ctx context.Context,
 	tx pgx.Tx,
 	ts tenantSaga,
 	platformSagas map[string]PlatformSagaDefinition,
 	dryRun bool,
-	logger *slog.Logger,
 ) (MigrationResult, error) {
 	if ts.platformRef != nil {
 		return MigrationResult{
@@ -415,12 +439,6 @@ func (s *OverrideService) evaluateCandidate(
 	if err != nil {
 		return MigrationResult{}, fmt.Errorf("migrate saga %s: %w", ts.name, err)
 	}
-
-	logger.Info("migrated saga to platform reference",
-		"saga_name", ts.name,
-		"saga_id", ts.id,
-		"platform_ref", platformSaga.ID,
-		"similarity", simResult.Ratio)
 
 	return MigrationResult{
 		SagaName:        ts.name,
