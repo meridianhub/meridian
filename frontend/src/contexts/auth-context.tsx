@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 
@@ -347,15 +347,18 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
     }
   }, [login])
 
-  const value: AuthContextValue = {
-    isAuthenticated,
-    claims,
-    accessToken,
-    lens,
-    login,
-    logout,
-    refreshToken,
-  }
+  const value: AuthContextValue = useMemo(
+    () => ({
+      isAuthenticated,
+      claims,
+      accessToken,
+      lens,
+      login,
+      logout,
+      refreshToken,
+    }),
+    [isAuthenticated, claims, accessToken, lens, login, logout, refreshToken],
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
 import { DEFAULT_UI_CONFIG, type TenantThemeConfig, type TenantUIConfig } from '@/lib/tenant-ui-config'
@@ -80,15 +80,18 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     ? selectedTenant?.slug ?? null
     : claims?.tenantId ?? getTenantSlugFromSubdomain(window.location.hostname)
 
-  const value: TenantContextValue = {
-    currentTenant: isPlatformAdmin ? selectedTenant : null,
-    tenantSlug,
-    isPlatformAdmin,
-    switchTenant,
-    clearTenant,
-    applyTheme,
-    tenantConfig: DEFAULT_UI_CONFIG,
-  }
+  const value: TenantContextValue = useMemo(
+    () => ({
+      currentTenant: isPlatformAdmin ? selectedTenant : null,
+      tenantSlug,
+      isPlatformAdmin,
+      switchTenant,
+      clearTenant,
+      applyTheme,
+      tenantConfig: DEFAULT_UI_CONFIG,
+    }),
+    [isPlatformAdmin, selectedTenant, tenantSlug, switchTenant, clearTenant, applyTheme],
+  )
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>
 }
