@@ -19,43 +19,57 @@ const STATUS_OPTIONS = [
   { label: 'Closed', value: String(AccountStatus.CLOSED) },
 ]
 
+const FILTER_CONFIGS = [
+  {
+    field: 'status',
+    label: 'Status',
+    type: 'select' as const,
+    options: STATUS_OPTIONS,
+  },
+  {
+    field: 'externalReference',
+    label: 'External Ref',
+    type: 'text' as const,
+  },
+]
+
+const columns: ColumnDef<CurrentAccount>[] = [
+  {
+    accessorKey: 'accountId',
+    header: 'Account ID',
+  },
+  {
+    accessorKey: 'externalReference',
+    header: 'External Ref',
+  },
+  {
+    accessorKey: 'status',
+    header: 'Status',
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
+  {
+    accessorKey: 'instrumentCode',
+    header: 'Instrument',
+  },
+  {
+    accessorKey: 'partyId',
+    header: 'Party',
+    cell: ({ row }) => row.original.partyId
+      ? <span onClick={(e) => e.stopPropagation()}><EntityLink type="party" id={row.original.partyId} /></span>
+      : <span className="text-muted-foreground">—</span>,
+  },
+  {
+    accessorKey: 'createdAt',
+    header: 'Created',
+    cell: ({ row }) => <TimeDisplay timestamp={row.original.createdAt} format="relative" />,
+  },
+]
+
 export function AccountsPage() {
   usePageTitle('Accounts')
   const navigate = useNavigate()
   const [createOpen, setCreateOpen] = React.useState(false)
   const { queryKey, queryFn } = useAccountsTable()
-
-  const columns: ColumnDef<CurrentAccount>[] = [
-    {
-      accessorKey: 'accountId',
-      header: 'Account ID',
-    },
-    {
-      accessorKey: 'externalReference',
-      header: 'External Ref',
-    },
-    {
-      accessorKey: 'status',
-      header: 'Status',
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
-    },
-    {
-      accessorKey: 'instrumentCode',
-      header: 'Instrument',
-    },
-    {
-      accessorKey: 'partyId',
-      header: 'Party',
-      cell: ({ row }) => row.original.partyId
-        ? <span onClick={(e) => e.stopPropagation()}><EntityLink type="party" id={row.original.partyId} /></span>
-        : <span className="text-muted-foreground">—</span>,
-    },
-    {
-      accessorKey: 'createdAt',
-      header: 'Created',
-      cell: ({ row }) => <TimeDisplay timestamp={row.original.createdAt} format="relative" />,
-    },
-  ]
 
   return (
     <PageShell>
@@ -70,19 +84,7 @@ export function AccountsPage() {
           queryKey={queryKey}
           queryFn={queryFn}
           columns={columns}
-          filters={[
-            {
-              field: 'status',
-              label: 'Status',
-              type: 'select',
-              options: STATUS_OPTIONS,
-            },
-            {
-              field: 'externalReference',
-              label: 'External Ref',
-              type: 'text',
-            },
-          ]}
+          filters={FILTER_CONFIGS}
           onRowClick={(row) => navigate(`/accounts/${row.accountId}`)}
         />
       </Card>

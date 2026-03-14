@@ -19,22 +19,87 @@ import { Toaster } from 'sonner'
 import { CallbackPage } from '@/pages/callback'
 import { ProviderButton } from '@/components/auth/provider-button'
 import { AuthDivider } from '@/components/auth/auth-divider'
-import { AccountsPage, AccountDetailPage } from '@/features/accounts'
-import { PaymentsPage, PaymentDetailPage } from '@/features/payments'
-import { LedgerPage, BookingLogDetailPage } from '@/features/ledger'
-import { PositionsPage, PositionDetailPage } from '@/features/positions'
-import { PartiesPage, PartyDetailPage } from '@/features/parties'
-import { TenantsPage, TenantDetailPage } from '@/features/tenants'
-import { ReconciliationPage, ReconciliationDetailPage } from '@/features/reconciliation'
-import { AuditLogPage } from '@/features/audit'
-import { StarlarkConfigPage, StarlarkDetailPage } from '@/features/sagas'
-import { MappingsPage, MappingDetailPage } from '@/features/mappings'
-import { InternalAccountsPage, InternalAccountDetailPage } from '@/features/internal-accounts'
 import { DashboardPage } from '@/features/dashboard'
-import { McpConfigPage } from '@/features/mcp-config'
-import { TransactionsPage } from '@/features/transactions'
-import { UsersListPage, UserDetailPage } from '@/features/identity'
-import { CookbookPage } from '@/features/cookbook'
+
+// Feature pages (lazy-loaded: split per route for faster initial load)
+const AccountsPage = lazy(() =>
+  import('@/features/accounts/pages/index').then((m) => ({ default: m.AccountsPage })),
+)
+const AccountDetailPage = lazy(() =>
+  import('@/features/accounts/pages/[accountId]').then((m) => ({ default: m.AccountDetailPage })),
+)
+const PaymentsPage = lazy(() =>
+  import('@/features/payments/pages/index').then((m) => ({ default: m.PaymentsPage })),
+)
+const PaymentDetailPage = lazy(() =>
+  import('@/features/payments/pages/payment-detail').then((m) => ({ default: m.PaymentDetailPage })),
+)
+const LedgerPage = lazy(() =>
+  import('@/features/ledger/pages/index').then((m) => ({ default: m.LedgerPage })),
+)
+const BookingLogDetailPage = lazy(() =>
+  import('@/features/ledger/pages/booking-log-detail').then((m) => ({ default: m.BookingLogDetailPage })),
+)
+const PositionsPage = lazy(() =>
+  import('@/features/positions/pages/index').then((m) => ({ default: m.PositionsPage })),
+)
+const PositionDetailPage = lazy(() =>
+  import('@/features/positions/pages/detail').then((m) => ({ default: m.PositionDetailPage })),
+)
+const PartiesPage = lazy(() =>
+  import('@/features/parties/pages/index').then((m) => ({ default: m.PartiesPage })),
+)
+const PartyDetailPage = lazy(() =>
+  import('@/features/parties/pages/[partyId]').then((m) => ({ default: m.PartyDetailPage })),
+)
+const TenantsPage = lazy(() =>
+  import('@/features/tenants/pages/index').then((m) => ({ default: m.TenantsPage })),
+)
+const TenantDetailPage = lazy(() =>
+  import('@/features/tenants/pages/[tenantId]').then((m) => ({ default: m.TenantDetailPage })),
+)
+const ReconciliationPage = lazy(() =>
+  import('@/features/reconciliation/pages/index').then((m) => ({ default: m.ReconciliationPage })),
+)
+const ReconciliationDetailPage = lazy(() =>
+  import('@/features/reconciliation/pages/detail').then((m) => ({ default: m.ReconciliationDetailPage })),
+)
+const AuditLogPage = lazy(() =>
+  import('@/features/audit/pages/index').then((m) => ({ default: m.AuditLogPage })),
+)
+const StarlarkConfigPage = lazy(() =>
+  import('@/features/sagas/pages/index').then((m) => ({ default: m.StarlarkConfigPage })),
+)
+const StarlarkDetailPage = lazy(() =>
+  import('@/features/sagas/pages/detail').then((m) => ({ default: m.StarlarkDetailPage })),
+)
+const MappingsPage = lazy(() =>
+  import('@/features/mappings/pages/index').then((m) => ({ default: m.MappingsPage })),
+)
+const MappingDetailPage = lazy(() =>
+  import('@/features/mappings/pages/[mappingId]').then((m) => ({ default: m.MappingDetailPage })),
+)
+const InternalAccountsPage = lazy(() =>
+  import('@/features/internal-accounts/pages/index').then((m) => ({ default: m.InternalAccountsPage })),
+)
+const InternalAccountDetailPage = lazy(() =>
+  import('@/features/internal-accounts/pages/[accountId]').then((m) => ({ default: m.InternalAccountDetailPage })),
+)
+const McpConfigPage = lazy(() =>
+  import('@/features/mcp-config/pages/index').then((m) => ({ default: m.McpConfigPage })),
+)
+const TransactionsPage = lazy(() =>
+  import('@/features/transactions/pages/index').then((m) => ({ default: m.TransactionsPage })),
+)
+const UsersListPage = lazy(() =>
+  import('@/features/identity/pages/users-list-page').then((m) => ({ default: m.UsersListPage })),
+)
+const UserDetailPage = lazy(() =>
+  import('@/features/identity/pages/user-detail-page').then((m) => ({ default: m.UserDetailPage })),
+)
+const CookbookPage = lazy(() =>
+  import('@/features/cookbook/pages/index').then((m) => ({ default: m.CookbookPage })),
+)
 
 const CookbookPatternsPage = lazy(() =>
   import('@/features/cookbook/pages/patterns').then((m) => ({ default: m.CookbookPatternsPage })),
@@ -322,6 +387,7 @@ function AppShellLayout() {
 
   return (
     <AppShell currentPath={pathname}>
+      <Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>
       <Routes>
         {/* Tenant-scoped routes */}
         <Route path="/" element={guarded(<DashboardPage />)} />
@@ -415,6 +481,7 @@ function AppShellLayout() {
         {/* 404 */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </Suspense>
     </AppShell>
   )
 }

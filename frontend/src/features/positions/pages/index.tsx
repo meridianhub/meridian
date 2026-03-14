@@ -59,68 +59,68 @@ export interface TransactionLogEntry {
   reference?: string
 }
 
+const columns: ColumnDef<FinancialPositionLog>[] = [
+  {
+    accessorKey: 'logId',
+    header: 'Log ID',
+    cell: ({ row }) => (
+      <span className="font-mono text-xs text-muted-foreground">
+        {row.original.logId.slice(0, 8)}…
+      </span>
+    ),
+  },
+  {
+    accessorKey: 'accountId',
+    header: 'Account',
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{row.original.accountId}</span>
+    ),
+  },
+  {
+    accessorKey: 'statusTracking',
+    header: 'Status',
+    cell: ({ row }) => {
+      const status = row.original.statusTracking?.currentStatus
+      const label = typeof status === 'number' ? TRANSACTION_STATUS_NAMES[status] : (typeof status === 'string' ? status.replace(/_/g, ' ') : null)
+      return <span className="text-sm">{label ?? '—'}</span>
+    },
+  },
+  {
+    accessorKey: 'createdAt',
+    header: 'Created',
+    cell: ({ row }) => <TimeDisplay timestamp={row.original.createdAt} />,
+  },
+  {
+    accessorKey: 'updatedAt',
+    header: 'Last Updated',
+    cell: ({ row }) => <TimeDisplay timestamp={row.original.updatedAt} />,
+  },
+]
+
+const FILTER_CONFIGS = [
+  {
+    field: 'accountId',
+    label: 'Account ID',
+    type: 'text' as const,
+  },
+  {
+    field: 'status',
+    label: 'Status',
+    type: 'select' as const,
+    options: [
+      { label: 'Pending', value: String(TransactionStatus.PENDING) },
+      { label: 'Posted', value: String(TransactionStatus.POSTED) },
+      { label: 'Failed', value: String(TransactionStatus.FAILED) },
+      { label: 'Cancelled', value: String(TransactionStatus.CANCELLED) },
+      { label: 'Reversed', value: String(TransactionStatus.REVERSED) },
+    ],
+  },
+]
+
 export function PositionsPage() {
   usePageTitle('Positions')
   const navigate = useNavigate()
   const { queryKey, queryFn } = usePositionLogsTable()
-
-  const columns: ColumnDef<FinancialPositionLog>[] = [
-    {
-      accessorKey: 'logId',
-      header: 'Log ID',
-      cell: ({ row }) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {row.original.logId.slice(0, 8)}…
-        </span>
-      ),
-    },
-    {
-      accessorKey: 'accountId',
-      header: 'Account',
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.accountId}</span>
-      ),
-    },
-    {
-      accessorKey: 'statusTracking',
-      header: 'Status',
-      cell: ({ row }) => {
-        const status = row.original.statusTracking?.currentStatus
-        const label = typeof status === 'number' ? TRANSACTION_STATUS_NAMES[status] : (typeof status === 'string' ? status.replace(/_/g, ' ') : null)
-        return <span className="text-sm">{label ?? '—'}</span>
-      },
-    },
-    {
-      accessorKey: 'createdAt',
-      header: 'Created',
-      cell: ({ row }) => <TimeDisplay timestamp={row.original.createdAt} />,
-    },
-    {
-      accessorKey: 'updatedAt',
-      header: 'Last Updated',
-      cell: ({ row }) => <TimeDisplay timestamp={row.original.updatedAt} />,
-    },
-  ]
-
-  const filters = [
-    {
-      field: 'accountId',
-      label: 'Account ID',
-      type: 'text' as const,
-    },
-    {
-      field: 'status',
-      label: 'Status',
-      type: 'select' as const,
-      options: [
-        { label: 'Pending', value: String(TransactionStatus.PENDING) },
-        { label: 'Posted', value: String(TransactionStatus.POSTED) },
-        { label: 'Failed', value: String(TransactionStatus.FAILED) },
-        { label: 'Cancelled', value: String(TransactionStatus.CANCELLED) },
-        { label: 'Reversed', value: String(TransactionStatus.REVERSED) },
-      ],
-    },
-  ]
 
   const handleRowClick = (log: FinancialPositionLog) => {
     navigate(`/positions/${log.logId}`)
@@ -139,7 +139,7 @@ export function PositionsPage() {
           queryFn={queryFn}
           columns={columns}
           pageSize={25}
-          filters={filters}
+          filters={FILTER_CONFIGS}
           onRowClick={handleRowClick}
         />
       </Card>
