@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ThemeToggle } from "./theme-toggle"
+import { _resetForTesting } from "@/lib/use-theme"
 
 function renderToggle() {
   return render(
@@ -16,6 +17,7 @@ describe("ThemeToggle", () => {
   beforeEach(() => {
     localStorage.clear()
     document.documentElement.classList.remove("dark")
+    _resetForTesting()
   })
 
   it("renders with system theme by default", () => {
@@ -73,13 +75,10 @@ describe("ThemeToggle", () => {
 
   it("restores theme from localStorage", () => {
     localStorage.setItem("meridian:theme", "dark")
+    _resetForTesting()
 
-    // Need to re-import the module to pick up localStorage.
-    // Since the module is already loaded, we simulate by setting and rendering.
-    // The useTheme hook reads localStorage on init.
     renderToggle()
 
-    // The hook should have applied dark class
     expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 

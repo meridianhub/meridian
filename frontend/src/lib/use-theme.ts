@@ -58,6 +58,12 @@ function setTheme(theme: Theme): void {
   }
 }
 
+/** Reset module state for test isolation. Not for production use. */
+export function _resetForTesting(): void {
+  currentTheme = getStoredTheme()
+  listeners = []
+}
+
 export function useTheme() {
   const theme = useSyncExternalStore(subscribe, getSnapshot)
 
