@@ -231,7 +231,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
     <>
       {isOpen && onClose && (
         <div
-          className="fixed inset-0 z-30 bg-overlay md:hidden"
+          className="fixed inset-0 top-14 z-30 bg-overlay md:hidden"
           aria-hidden="true"
           role="presentation"
           onClick={onClose}
@@ -243,7 +243,7 @@ export function Sidebar({ lens, currentPath = '/', isOpen = false, id, onClose }
       data-open={String(isOpen)}
       className={cn(
         'flex h-full w-64 flex-col bg-sidebar text-sidebar-foreground transition-transform duration-200',
-        'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40',
+        'max-md:fixed max-md:top-14 max-md:bottom-0 max-md:left-0 max-md:z-40',
         !isOpen && 'max-md:-translate-x-full',
       )}
     >
