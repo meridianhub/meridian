@@ -7,11 +7,11 @@
     <title>Meridian Operations Console</title>
     <script>
       // Prevent flash of wrong theme before React hydrates
-      (function() {
+      try {
         var t = localStorage.getItem('meridian:theme');
         var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
         if (dark) document.documentElement.classList.add('dark');
-      })();
+      } catch (_) {}
     </script>
   </head>
   <body>
