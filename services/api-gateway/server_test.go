@@ -12,7 +12,10 @@ import (
 
 	"github.com/meridianhub/meridian/services/api-gateway/auth"
 	gwhealth "github.com/meridianhub/meridian/services/api-gateway/health"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -833,6 +836,171 @@ func TestWithEventStreamHandler_HealthEndpointsUnaffected(t *testing.T) {
 		server.mux.ServeHTTP(rec, req)
 		assert.Equal(t, http.StatusOK, rec.Code, "health endpoint %s must still work", endpoint)
 	}
+}
+
+// stubSlugCache is a minimal in-memory slug cache for testing.
+// It satisfies the unexported slugCache interface used by NewTenantResolverMiddleware.
+type stubSlugCache struct {
+	entries map[string]tenant.TenantID
+}
+
+func newStubSlugCache() *stubSlugCache {
+	return &stubSlugCache{entries: make(map[string]tenant.TenantID)}
+}
+
+func (c *stubSlugCache) Get(_ context.Context, slug string) (tenant.TenantID, error) {
+	id, ok := c.entries[slug]
+	if !ok {
+		return "", nil // cache miss
+	}
+	return id, nil
+}
+
+func (c *stubSlugCache) Set(_ context.Context, slug string, tenantID tenant.TenantID) error {
+	c.entries[slug] = tenantID
+	return nil
+}
+
+// stubTenantRepo is a minimal tenant repository for testing.
+// It satisfies the unexported tenantRepository interface used by NewTenantResolverMiddleware.
+type stubTenantRepo struct {
+	tenants map[string]*domain.Tenant
+}
+
+func newStubTenantRepo() *stubTenantRepo {
+	return &stubTenantRepo{tenants: make(map[string]*domain.Tenant)}
+}
+
+func (r *stubTenantRepo) GetBySlug(_ context.Context, slug string) (*domain.Tenant, error) {
+	t, ok := r.tenants[slug]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return t, nil
+}
+
+// newTestTenantResolver creates a TenantResolverMiddleware for tests with a
+// pre-populated tenant. Uses local dev mode so X-Tenant-Slug header works.
+func newTestTenantResolver(t *testing.T, baseDomain string, slug string, tenantID tenant.TenantID) *platformgateway.TenantResolverMiddleware {
+	t.Helper()
+
+	cache := newStubSlugCache()
+	repo := newStubTenantRepo()
+	repo.tenants[slug] = &domain.Tenant{
+		ID:     tenantID,
+		Slug:   slug,
+		Status: domain.StatusActive,
+	}
+
+	resolver, err := platformgateway.NewTenantResolverMiddleware(
+		cache, repo, baseDomain, slog.New(slog.NewTextHandler(io.Discard, nil)), false,
+	)
+	require.NoError(t, err)
+	return resolver
+}
+
+// TestDexHandlerWithTenantSubdomain verifies that a request to a tenant subdomain
+// /dex/ path has tenant context injected by the optional tenant resolver.
+func TestDexHandlerWithTenantSubdomain(t *testing.T) {
+	const baseDomain = "api.example.com"
+	tenantID := tenant.MustNewTenantID("acme_corp")
+
+	resolver := newTestTenantResolver(t, baseDomain, "acme", tenantID)
+
+	var capturedTenantID tenant.TenantID
+	var tenantFound bool
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedTenantID, tenantFound = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("dex-ok"))
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  baseDomain,
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, resolver, WithDexHandler(fakeDex))
+
+	req := httptest.NewRequest(http.MethodGet, "/dex/auth", nil)
+	req.Host = "acme." + baseDomain
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "dex-ok", rec.Body.String())
+	assert.True(t, tenantFound, "tenant should be resolved from subdomain")
+	assert.Equal(t, tenantID, capturedTenantID)
+}
+
+// TestDexHandlerWithoutSubdomain verifies that a request to the bare domain
+// /dex/ path passes through without tenant context (optional resolution).
+func TestDexHandlerWithoutSubdomain(t *testing.T) {
+	const baseDomain = "api.example.com"
+	tenantID := tenant.MustNewTenantID("acme_corp")
+
+	resolver := newTestTenantResolver(t, baseDomain, "acme", tenantID)
+
+	var tenantFound bool
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, tenantFound = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("dex-keys"))
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  baseDomain,
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, resolver, WithDexHandler(fakeDex))
+
+	req := httptest.NewRequest(http.MethodGet, "/dex/keys", nil)
+	req.Host = baseDomain // bare domain, no subdomain
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "dex-keys", rec.Body.String())
+	assert.False(t, tenantFound, "no tenant should be resolved from bare domain")
+}
+
+// TestDexTokenEndpointWithoutTenant verifies that POST to /dex/token without a
+// tenant subdomain succeeds (optional tenant resolution does not block).
+func TestDexTokenEndpointWithoutTenant(t *testing.T) {
+	const baseDomain = "api.example.com"
+	tenantID := tenant.MustNewTenantID("acme_corp")
+
+	resolver := newTestTenantResolver(t, baseDomain, "acme", tenantID)
+
+	var tenantFound bool
+	fakeDex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, tenantFound = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"access_token":"tok"}`))
+	})
+
+	config := &Config{
+		Port:        8080,
+		BaseDomain:  baseDomain,
+		DatabaseURL: "postgres://localhost/test",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := NewServer(config, logger, resolver, WithDexHandler(fakeDex))
+
+	req := httptest.NewRequest(http.MethodPost, "/dex/token", nil)
+	req.Host = baseDomain // no subdomain
+	rec := httptest.NewRecorder()
+
+	server.mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "access_token")
+	assert.False(t, tenantFound, "no tenant should be resolved for bare domain token request")
 }
 
 // TestWithHealthChecker verifies the functional option works correctly.
