@@ -187,9 +187,35 @@ GetManifest           — current active manifest (full composite)
 GetManifestVersion    — specific historical version
 ListManifestVersions  — version history with metadata
 DiffManifestVersions  — diff between any two versions
+RollbackManifest      — revert to a previous version
 ExportManifest        — reconstruct manifest from live state
 ReconcileManifest     — compare DB manifest vs live state
 ```
+
+### Rollback
+
+Tenants can revert their economy to any previous manifest
+version:
+
+```text
+Tenant: "Something broke after the last change"
+  → ListManifestVersions → shows v1, v2, v3 (current)
+  → DiffManifestVersions(v2, v3) → shows what changed
+  → RollbackManifest(target_version=2, dry_run=true)
+  → Shows diff: what would change to go from v3 back to v2
+  → Tenant confirms
+  → RollbackManifest(target_version=2, dry_run=false)
+  → Creates v4 with v2's content, re-applies via saga
+  → Economy reverts to v2's structural state
+```
+
+Rollback is a forward-only operation — it creates a new
+manifest version (v4) with the target version's content and
+executes it through the normal `ApplyManifest` pipeline.
+This preserves the full audit trail (v3 is never deleted)
+and reuses the same saga compensation and idempotency
+guarantees. The `HistoryService.RollbackToVersion` method
+already exists and follows this pattern.
 
 ## Current Gaps
 
