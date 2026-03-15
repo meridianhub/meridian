@@ -95,6 +95,12 @@ stateDiagram-v2
 | [Org-Scoped Accounts](022-org-scoped-accounts.md) | Multi-party resource pooling following BIAN Syndicate Pattern |
 | [Product Directory](023-product-directory.md) | BIAN-aligned AccountTypeRegistry for runtime-configurable product catalog |
 | [Operations Console UI](026-operations-console-ui.md) | Meridian operations console frontend |
+| [Handler Schema Alignment](040-handler-schema-alignment.md) | Eliminate handlers.yaml; derive handler schemas from proto definitions |
+| [Economy Generator](041-economy-generator.md) | AI-assisted economy generation via MCP tool producing validated manifests |
+| [Economy IDE](042-economy-ide.md) | Conversational economy creation UI with manifest editor and deploy wizard |
+| [MCP Manifest Tenant Isolation](043-mcp-manifest-tenant-isolation.md) | Fix tenant leakage and create-vs-amend mode in MCP manifest validation |
+| [Auth Flow Architecture](044-auth-flow-architecture.md) | Authentication entry points (BFF, SSO, MCP OAuth) and tenant context flow |
+| [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) | Control plane owns all structural economy declarations, versioned in DB |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -232,6 +238,8 @@ material.
   Fourth saga trigger type (`event:`) for reactive workflows via domain events
 - [Meridian Economy Runtime](039-meridian-vm.md) -
   Formalise Meridian as programmable Economy Runtime with AI generator and IDE
+- [Handler Schema Alignment](040-handler-schema-alignment.md) -
+  Eliminate handlers.yaml; derive handler schemas from proto definitions
 
 ### Settlement & Reconciliation
 
@@ -265,6 +273,14 @@ material.
 - [Cookbook Browser](036-cookbook-browser.md) - Visual pattern and component explorer
 - [Manifest Business Model Visualization](038-manifest-business-model-visualization.md) -
   Interactive business model graph from live tenant manifest
+- [Economy Generator](041-economy-generator.md) -
+  AI-assisted economy generation via MCP tool producing validated manifests
+- [Economy IDE](042-economy-ide.md) -
+  Conversational economy creation UI with manifest editor and deploy wizard
+- [MCP Manifest Tenant Isolation](043-mcp-manifest-tenant-isolation.md) -
+  Fix tenant leakage and create-vs-amend mode in MCP manifest validation
+- [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) -
+  Control plane owns all structural economy declarations, versioned in DB
 
 ### Identity & Access Control
 
@@ -277,6 +293,9 @@ Meridian separates access control into two service domains:
 - [Identity and Access Management](031-identity-access-management.md) -
   **Staff/operator access control**: Dynamic user management, role assignment,
   JWT claims population (operational)
+- [Auth Flow Architecture](044-auth-flow-architecture.md) -
+  **Authentication entry points**: BFF password, BFF SSO, MCP OAuth, and
+  tenant context flow through each
 
 <!-- markdownlint-enable MD013 -->
 
