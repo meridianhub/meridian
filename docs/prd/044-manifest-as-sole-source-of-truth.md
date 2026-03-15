@@ -3,18 +3,20 @@
 ## Problem Statement
 
 Meridian currently has two paths to define an economy: the manifest
-(version-controlled, declarative) and direct gRPC calls (imperative,
-untracked). In practice, tenants like Volt Energy use both: the manifest
-declares instruments and account types, but seed-demo then re-registers
-them via gRPC because "the manifest executor is not wired yet." Market
-data definitions, data sources, and organizational parties are created
-entirely outside the manifest.
+(declarative, versioned in DB) and direct gRPC calls (imperative,
+untracked). In practice, tenants like Volt Energy use both: the
+manifest declares instruments and account types, but seed-demo then
+re-registers them via gRPC because "the manifest executor is not
+wired yet." Market data definitions, data sources, and organizational
+parties are created entirely outside the manifest.
 
-This dual-path architecture undermines Meridian's core value proposition:
-**declare your economy in a manifest and the platform operates it**. If
-half the economy lives in imperative gRPC calls, it isn't
-version-controlled, isn't reproducible, and can't be diffed or audited
-through the manifest pipeline.
+This dual-path architecture undermines Meridian's core value
+proposition: **declare your economy in a manifest and the platform
+operates it**. If half the economy lives in imperative gRPC calls,
+it isn't versioned, isn't reproducible, and can't be diffed or
+audited through the manifest pipeline. Tenants are created
+dynamically - each tenant's economy must be fully defined and
+versioned through their manifest, stored in the DB.
 
 ## Current State
 
@@ -228,72 +230,114 @@ Rewrite `cmd/seed-demo/main.go` to:
 
 This serves as both validation and documentation of the manifest-first approach.
 
-### R8: Manifest Export and Drift Reconciliation
+### R8: Manifest Persistence, Export, and Reconciliation
 
-Add `ExportManifest` RPC to the control plane that reconstructs a
-manifest from the current tenant state. This serves two purposes:
+**The database is the sole source of truth for every tenant's
+economy definition.** Tenants are created dynamically (via API,
+UI, onboarding flows). Each tenant's manifest is submitted via
+`ApplyManifest` and versioned in the DB. There is no assumption
+of a git workflow - the platform owns the version history.
 
-**Export**: Generates a manifest from live state, enabling:
+**Manifest version store**: Every `ApplyManifest` call persists
+the full manifest document to a `manifest_versions` table:
 
-- Migrating existing tenants to manifest-first
-- Backing up tenant configuration
+- `tenant_id`, `version` (monotonically increasing),
+  `manifest_document` (full JSON), `applied_by`,
+  `applied_at`, `diff_summary`, `checksum` (SHA-256)
+- The current active manifest is always queryable via
+  `GetManifest` RPC
+- Previous versions are retained for audit and rollback
+- The diff between any two versions is computable via
+  `DiffManifestVersions` RPC
+- Rollback to a previous version via
+  `ApplyManifest` with a prior version's document
 
-**Reconciliation**: Compare the last-applied manifest against
-live state to detect drift. Any resource that was created or
-modified outside the manifest pipeline is flagged.
+**Manifest lifecycle**:
 
-- `ReconcileManifest` RPC returns a drift report: resources
-  present in live state but absent from manifest, resources
-  whose live state differs from manifest-declared state
-- Operators can choose to either update the manifest to match
-  reality or re-apply the manifest to force convergence
-- Drift detection runs on-demand (via RPC) and optionally on
-  a schedule (e.g., daily reconciliation saga)
+```text
+Tenant created -> First ApplyManifest (v1) -> economy provisioned
+             -> ApplyManifest (v2) -> diff computed, changes applied
+             -> ApplyManifest (v3) -> ...
+             -> GetManifest -> returns current active manifest
+             -> ListManifestVersions -> full version history
+             -> DiffManifestVersions(v2, v3) -> what changed
+```
 
-This is the enforcement mechanism for R9 below. Even if a direct
-gRPC call somehow bypasses the write guard, reconciliation
-catches it.
+**Export** (`ExportManifest` RPC): Reconstructs a manifest from
+the current live state. Used for:
 
-### R9: Manifest-Only Write Path (Economy Lockdown)
+- Migrating existing tenants that were set up via direct gRPC
+  before this feature existed
+- Bootstrapping the first manifest version for a tenant
 
-**All structural changes to a tenant's economy MUST go through
-the manifest.** Direct gRPC mutations to structural resources
-are rejected at the service layer when a manifest is active.
+**Reconciliation** (`ReconcileManifest` RPC): Compares the
+last-applied manifest (from DB) against live resource state.
+Reports any drift. This is a safety net, not the primary
+enforcement (R9 removes the APIs that could cause drift).
 
-This means:
+### R9: Remove Public Structural Mutation APIs
 
-- `RegisterInstrument`, `CreateDraft` (account types),
-  `RegisterDataSet`, `RegisterDataSource`,
-  `RegisterParty` (organizational), `InitiateAccount` (internal),
-  `CreateSagaDraft`, `CreateMapping`,
-  `UpsertProviderConnection`, `UpsertInstructionRoute`
-  all return `FAILED_PRECONDITION` with message
-  "resource managed by manifest - update the manifest and
-  re-apply" when called directly for a manifest-managed tenant.
+**Don't guard the APIs - remove them from the public surface.**
+If the endpoints don't exist publicly, drift is impossible by
+construction rather than by runtime checks.
 
-- Runtime/operational endpoints remain open:
-  `RecordObservation`, `RegisterParty` (customer type),
-  `InitiateAccount` (customer accounts), saga execution, etc.
+The following RPCs are removed from the public gateway / HTTP
+routes and become **internal-only** (callable only by the
+manifest executor via internal service mesh):
 
-- Every `ApplyManifest` call increments the manifest version.
-  The version history provides a full audit trail of every
-  structural change to the economy.
+- `ReferenceDataService`: `RegisterInstrument`,
+  `UpdateInstrument`, `DeprecateInstrument`
+- `AccountTypeRegistryService`: `CreateDraft`,
+  `ActivateAccountType`
+- `MarketInformationService`: `RegisterDataSet`,
+  `ActivateDataSet`, `DeprecateDataSet`,
+  `RegisterDataSource`, `DeactivateDataSource`
+- `PartyService`: `RegisterParty` (organizational types only),
+  `UpdateSchema`
+- `InternalAccountService`: `InitiateAccount` (structural)
+- `SagaService`: `CreateSagaDraft`, `ActivateSaga`,
+  `DeprecateSaga`
+- `MappingService`: `CreateMapping`, `UpdateMapping`,
+  `DeprecateMapping`
+- `OperationalGatewayService`: `UpsertProviderConnection`,
+  `UpsertInstructionRoute`
+
+**What remains public** (runtime/operational endpoints):
+
+- `MarketInformationService`: `RecordObservation`,
+  `RecordObservationBatch`, `RetrieveObservation`,
+  `ListObservations`, `RetrieveDataSet`, `ListDataSets`
+  (read-only for data sets)
+- `PartyService`: `RegisterParty` (customer types),
+  all read/query endpoints
+- `CurrentAccountService`: all endpoints (customer accounts)
+- `InternalAccountService`: read/query endpoints
+- All saga execution endpoints
+- All read/query endpoints on every service
 
 **Implementation approach**:
 
-- Each structural service checks a `manifest_managed` flag on
-  the tenant. If true, reject direct writes for resource types
-  the manifest owns.
-- The manifest executor bypasses this guard via an internal
-  service credential / context flag.
+- Remove structural mutation routes from the gRPC gateway
+  HTTP annotations and public proto surface
+- Structural mutation RPCs become internal service methods
+  callable only via the manifest executor's internal gRPC
+  connection (no external exposure)
+- The manifest executor calls them on the internal service
+  mesh during `ApplyManifest`
 - Operational gateway changes (new ingest/egress routes,
-  provider connections) follow the same rule: modify the
-  manifest's `operationalGateway` section, re-apply.
+  provider connections) follow the same rule: update the
+  manifest, re-apply
 
-**Version control integration**: Because the manifest is a JSON
-file checked into the repo, every economy change flows through
-the normal PR/review/merge cycle. The git history IS the audit
-trail. No structural change happens without a commit.
+**Migration path**: Existing tenants using direct gRPC calls
+run `ExportManifest` to generate their initial manifest, then
+switch to manifest-only. A deprecation period warns on direct
+calls before removal.
+
+**How tenants update their economy**: Submit a new manifest via
+`ApplyManifest`. The control plane diffs it against the current
+version, computes the execution plan, and applies changes. The
+DB stores every version with full audit trail. Tenants can
+query their manifest history, diff versions, and rollback.
 
 ## Success Criteria
 
@@ -306,11 +350,15 @@ trail. No structural change happens without a commit.
    in the manifest
 5. The Volt Energy demo runs with manifest-only structural setup
 6. Existing manifests (v1.0) continue to work without modification
-7. Direct gRPC calls to structural endpoints return
-   `FAILED_PRECONDITION` for manifest-managed tenants
-8. `ReconcileManifest` detects resources created outside the manifest
+7. Structural mutation APIs are not exposed on the public gateway;
+   only the manifest executor can call them internally
+8. `ReconcileManifest` confirms zero drift between DB-stored
+   manifest and live resource state
 9. Every structural change is traceable to a manifest version
-   (and therefore a git commit)
+   stored in the DB with full audit metadata
+10. Full manifest version history is queryable per tenant
+    (`GetManifest`, `ListManifestVersions`,
+    `DiffManifestVersions`)
 
 ## Non-Goals
 
@@ -327,8 +375,8 @@ trail. No structural change happens without a commit.
 | Market data sets have complex lifecycle | Manifest apply targets ACTIVE; deprecation stays manual |
 | Organization references create ordering deps | Planner already handles phase ordering |
 | Large manifests become unwieldy | Future PRD for manifest composition / includes |
-| Write guards break existing integrations | Feature-flagged rollout per tenant; `manifest_managed` opt-in |
-| Emergency changes blocked by manifest flow | Escape hatch: admin `--force` flag with audit log entry |
+| Removing public APIs breaks existing integrations | Deprecation period with warnings before removal; `ExportManifest` for migration |
+| Emergency changes blocked by manifest flow | Escape hatch: admin `--force` flag on `ApplyManifest` with audit log entry |
 
 ## Implementation Notes
 
