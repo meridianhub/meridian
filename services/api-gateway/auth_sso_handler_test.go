@@ -692,6 +692,38 @@ func TestBuildTenantScopedDexURL_FallsBackWithoutBaseDomain(t *testing.T) {
 	assert.Equal(t, "/dex/auth/google", u.Path)
 }
 
+func TestHandleInitiate_PreservesPortInTenantScopedURL(t *testing.T) {
+	handler, err := gateway.NewSSOHandler(gateway.SSOHandlerConfig{
+		DexIssuerURL: "http://localhost:5556/dex",
+		ClientID:     "meridian-service",
+		CallbackURL:  "https://demo.meridianhub.cloud/api/auth/callback",
+		BaseDomain:   "localhost",
+		Signer:       newSSOTestSigner(t),
+		Resolver:     &stubResolver{},
+		Logger:       slog.Default(),
+		StateStore:   gateway.NewStateStore(5 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/meridian", nil)
+	tid, _ := tenant.NewTenantID("acme")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	req.SetPathValue("connector_id", "meridian")
+
+	rec := httptest.NewRecorder()
+	handler.HandleInitiate(rec, req)
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+
+	location := rec.Header().Get("Location")
+	u, err := url.Parse(location)
+	require.NoError(t, err)
+
+	assert.Equal(t, "acme.localhost:5556", u.Host,
+		"should preserve port from DexIssuerURL in tenant-scoped redirect")
+	assert.Equal(t, "/dex/auth/meridian", u.Path)
+}
+
 // --- Helpers ---
 
 // buildFakeIDToken creates a minimal unsigned JWT with an email claim.
