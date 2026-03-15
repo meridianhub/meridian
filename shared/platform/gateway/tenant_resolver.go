@@ -73,7 +73,6 @@ type tenantRepository interface {
 var platformPaths = []string{
 	"/v1/tenants",                        // REST transcoding path
 	"/meridian.tenant.v1.TenantService/", // Connect/gRPC path
-	"/dex/",                              // Embedded OIDC identity provider
 }
 
 // IsPlatformPath returns true if the request path is a platform-level endpoint
@@ -179,6 +178,70 @@ func (m *TenantResolverMiddleware) extractSlugFromRequest(w http.ResponseWriter,
 		return ""
 	}
 	return slug
+}
+
+// extractSlugFromRequestOptional extracts the tenant slug from the request
+// without writing HTTP errors. Returns the slug if found, or empty string
+// if no slug is present or the slug is invalid.
+func (m *TenantResolverMiddleware) extractSlugFromRequestOptional(r *http.Request) string {
+	// Check for X-Tenant-Slug header in local dev mode
+	if m.localDevMode {
+		slug := r.Header.Get(TenantSlugHeader)
+		if slug != "" {
+			if !isValidSlug(slug) {
+				m.logger.Debug("invalid slug in X-Tenant-Slug header (optional mode)",
+					slog.String("slug", slug),
+				)
+				return ""
+			}
+			m.logger.Debug("using X-Tenant-Slug header (LOCAL_DEV_MODE, optional mode)",
+				slog.String("slug", slug))
+			return slug
+		}
+	}
+
+	// Fall back to subdomain extraction
+	return m.extractSlug(r.Host)
+}
+
+// HandlerOptionalTenant returns an http.Handler that performs optional tenant resolution.
+// Unlike Handler, this method:
+//   - Does NOT skip resolution based on platformPaths
+//   - Does NOT return errors when no tenant can be resolved
+//   - Passes through to the next handler regardless of resolution outcome
+//
+// If a valid tenant subdomain is present, the tenant is resolved and injected
+// into the request context. Otherwise, the request proceeds without tenant context.
+func (m *TenantResolverMiddleware) HandlerOptionalTenant(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slug := m.extractSlugFromRequestOptional(r)
+		if slug == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		ctx := r.Context()
+		tenantID, err := m.resolveTenant(ctx, slug)
+		if err != nil {
+			m.logger.Debug("optional tenant resolution failed, proceeding without tenant",
+				slog.String("slug", slug),
+				slog.String("error", err.Error()),
+			)
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		m.logger.Debug("optional tenant resolved successfully",
+			slog.String("tenant_slug", slug),
+			slog.String("tenant_id", tenantID.String()),
+		)
+
+		r.Header.Set(tenant.TenantIDKey, string(tenantID))
+		ctx = tenant.WithTenant(ctx, tenantID)
+		r = r.WithContext(ctx)
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Handler returns an http.Handler that performs tenant resolution.
