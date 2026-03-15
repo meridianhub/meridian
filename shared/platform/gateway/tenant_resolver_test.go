@@ -938,11 +938,11 @@ func TestIsPlatformPath(t *testing.T) {
 	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/CreateTenant"))
 	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/GetTenant"))
 
-	// Dex OIDC identity provider paths
-	assert.True(t, IsPlatformPath("/dex/auth"))
-	assert.True(t, IsPlatformPath("/dex/callback"))
-	assert.True(t, IsPlatformPath("/dex/keys"))
-	assert.True(t, IsPlatformPath("/dex/token"))
+	// Dex OIDC paths are NOT platform paths (handled by HandlerOptionalTenant)
+	assert.False(t, IsPlatformPath("/dex/auth"))
+	assert.False(t, IsPlatformPath("/dex/callback"))
+	assert.False(t, IsPlatformPath("/dex/keys"))
+	assert.False(t, IsPlatformPath("/dex/token"))
 
 	// Non-platform paths
 	assert.False(t, IsPlatformPath("/v1/accounts"))
@@ -1250,4 +1250,181 @@ func TestLocalDevMode(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestHandlerOptionalTenant_WithValidSubdomain(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+	testSlug := "acme"
+	testHost := "acme.api.meridian.io"
+	testTenantID := tenant.MustNewTenantID("tenant_123")
+
+	mockCache := new(MockSlugCache)
+	mockRepo := new(MockTenantRepository)
+	logger := slog.Default()
+
+	mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+
+	middleware := &TenantResolverMiddleware{
+		slugCache:  mockCache,
+		tenantRepo: mockRepo,
+		baseDomain: baseDomain,
+		logger:     logger,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	var capturedTenantID tenant.TenantID
+	var capturedTenantOk bool
+	var capturedHeaderValue string
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaderValue = r.Header.Get(tenant.TenantIDKey)
+		capturedTenantID, capturedTenantOk = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := middleware.HandlerOptionalTenant(next)
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, capturedTenantOk, "tenant should be in context")
+	assert.Equal(t, testTenantID, capturedTenantID)
+	assert.Equal(t, string(testTenantID), capturedHeaderValue)
+	mockCache.AssertExpectations(t)
+}
+
+func TestHandlerOptionalTenant_WithoutSubdomain(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+
+	mockCache := new(MockSlugCache)
+	mockRepo := new(MockTenantRepository)
+	logger := slog.Default()
+
+	middleware := &TenantResolverMiddleware{
+		slugCache:  mockCache,
+		tenantRepo: mockRepo,
+		baseDomain: baseDomain,
+		logger:     logger,
+	}
+
+	// Request with base domain only (no subdomain)
+	req := httptest.NewRequest(http.MethodGet, "http://api.meridian.io/dex/auth", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	nextCalled := false
+	var capturedTenantOk bool
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		_, capturedTenantOk = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := middleware.HandlerOptionalTenant(next)
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, nextCalled, "next handler should be called")
+	assert.False(t, capturedTenantOk, "tenant should NOT be in context")
+	mockCache.AssertNotCalled(t, "Get")
+	mockRepo.AssertNotCalled(t, "GetBySlug")
+}
+
+func TestHandlerOptionalTenant_WithInvalidSubdomain(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+
+	mockCache := new(MockSlugCache)
+	mockRepo := new(MockTenantRepository)
+	logger := slog.Default()
+
+	middleware := &TenantResolverMiddleware{
+		slugCache:  mockCache,
+		tenantRepo: mockRepo,
+		baseDomain: baseDomain,
+		logger:     logger,
+	}
+
+	// Request with invalid subdomain (uppercase)
+	req := httptest.NewRequest(http.MethodGet, "http://INVALID.api.meridian.io/dex/auth", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	nextCalled := false
+	var capturedTenantOk bool
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		_, capturedTenantOk = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := middleware.HandlerOptionalTenant(next)
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, nextCalled, "next handler should be called even with invalid subdomain")
+	assert.False(t, capturedTenantOk, "tenant should NOT be in context")
+	mockCache.AssertNotCalled(t, "Get")
+}
+
+func TestHandlerOptionalTenant_TenantNotFoundInDB(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+	testSlug := "nonexistent"
+	testHost := "nonexistent.api.meridian.io"
+
+	mockCache := new(MockSlugCache)
+	mockRepo := new(MockTenantRepository)
+	logger := slog.Default()
+
+	// Cache miss, DB returns not found
+	mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+	mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, domain.ErrNotFound)
+
+	middleware := &TenantResolverMiddleware{
+		slugCache:  mockCache,
+		tenantRepo: mockRepo,
+		baseDomain: baseDomain,
+		logger:     logger,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/dex/auth", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	nextCalled := false
+	var capturedTenantOk bool
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		_, capturedTenantOk = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := middleware.HandlerOptionalTenant(next)
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "should pass through even when tenant not found")
+	assert.True(t, nextCalled, "next handler should be called")
+	assert.False(t, capturedTenantOk, "tenant should NOT be in context")
+	mockCache.AssertExpectations(t)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestPlatformPathsDoesNotIncludeDex(t *testing.T) {
+	assert.False(t, IsPlatformPath("/dex/auth"), "/dex/auth should not be a platform path")
+	assert.False(t, IsPlatformPath("/dex/callback"), "/dex/callback should not be a platform path")
+	assert.False(t, IsPlatformPath("/dex/keys"), "/dex/keys should not be a platform path")
+	assert.False(t, IsPlatformPath("/dex/token"), "/dex/token should not be a platform path")
+	assert.False(t, IsPlatformPath("/dex/"), "/dex/ should not be a platform path")
+
+	// Existing platform paths should still work
+	assert.True(t, IsPlatformPath("/v1/tenants"))
+	assert.True(t, IsPlatformPath("/meridian.tenant.v1.TenantService/ListTenants"))
 }
