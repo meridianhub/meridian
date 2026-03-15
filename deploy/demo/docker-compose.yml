@@ -125,6 +125,9 @@ services:
       MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
       MCP_BASE_DOMAIN: ${BASE_DOMAIN:-}
 
+      # --- Tenant defaults (single-tenant demo mode) ---
+      MCP_DEFAULT_TENANT_SLUG: ${MCP_DEFAULT_TENANT_SLUG:-}       # e.g. "volterra" — used when no tenant subdomain is present
+
       # --- Dex OIDC (delegates authentication to embedded Dex when MCP_OAUTH_ENABLED=true) ---
       MCP_DEX_ISSUER_URL: ${MCP_DEX_ISSUER_URL:-}                 # e.g. https://demo.meridianhub.cloud/dex (Dex is embedded in meridian binary)
       MCP_DEX_CLIENT_ID: ${MCP_DEX_CLIENT_ID:-meridian-service}   # Dex static client ID
