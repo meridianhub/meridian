@@ -124,16 +124,25 @@ Browser (on acme.demo.meridianhub.cloud)
 
 **Why it works:** Tenant context is captured on the subdomain during
 initiation and stored in the state parameter. The callback recovers it.
-Dex's connector is NOT called for credential validation in this flow
-— Dex only handles the OAuth redirect dance. Identity resolution
-happens in the callback handler with proper tenant context.
+Identity resolution happens in the BFF callback handler with proper
+tenant context — NOT inside Dex.
 
 **Key detail:** The SSO flow redirects to `/dex/auth/{connector_id}`
-(with connector ID in the path), which for external IdPs (Google, etc.)
-skips Dex's password form entirely. For the "meridian" password
-connector, Dex DOES show a login form, but after authentication Dex
-issues a code that comes back to the BFF callback — where tenant
-context is restored from state.
+(with connector ID in the path). Behavior depends on the connector:
+
+- **External IdPs (Google, GitHub, etc.):** Dex redirects to the
+  external provider. No Dex login form, no connector credential
+  validation. Dex only brokers the OAuth redirect.
+- **`meridian` password connector:** Dex DOES show its built-in login
+  form and calls `connector.Login()` for credential validation. This
+  path requires tenant context in `r.Context()`. **Note:** The BFF
+  SSO handler redirects to `{dexIssuerURL}/auth/meridian` which is
+  the bare domain (`demo.meridianhub.cloud/dex/auth/meridian`), NOT
+  a tenant subdomain. This means the `meridian` connector via BFF
+  SSO has the SAME tenant context issue as Flow 3 — it is currently
+  broken for the same reason. The fix in this PRD (Option A) resolves
+  both flows: the BFF SSO handler must also redirect to a
+  tenant-scoped Dex URL when using the `meridian` connector.
 
 ### Flow 3: MCP OAuth Login (BROKEN)
 
@@ -365,6 +374,7 @@ MCP Server → POST demo.meridianhub.cloud/dex/token
 |------|--------|
 | `shared/platform/gateway/tenant_resolver.go` | Add `HandlerOptionalTenant()` method; remove `/dex/` from `platformPaths` |
 | `services/api-gateway/server.go` | Mount Dex with optional tenant resolution |
+| `services/api-gateway/auth_sso_handler.go` | Redirect to tenant-scoped Dex URL (same fix as MCP) |
 | `services/mcp-server/internal/auth/oidc.go` | Redirect to tenant-scoped Dex URL; fail-closed when no tenant in multi-tenant mode; resolve slug → UUID in `HandleCallback` before signing JWT (R7) |
 | `services/mcp-server/cmd/main.go` | Add `MCP_DEFAULT_TENANT_SLUG` config (demo-only) |
 
