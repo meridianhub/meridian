@@ -140,23 +140,24 @@ either way.
 Every change (whether via `ApplyManifest` or `ApplyResource`)
 creates a new version:
 
-```text
-manifest_versions table:
-  tenant_id        — which tenant
-  sequence_number  — monotonically increasing BIGINT (1, 2, 3...)
-  schema_version   — manifest format version ("1.0", "1.1")
-  manifest         — full composite JSON document
-  diff             — what changed from previous version
-  phase_status     — per-phase execution status (JSON)
-  applied_by       — who/what made the change (user, AI, cookbook)
-  applied_at       — timestamp
-  apply_status     — APPLIED | PARTIAL | FAILED | ROLLED_BACK
-  checksum         — SHA-256 of the manifest document
-  source           — "apply_manifest" or "apply_resource"
-  resource_path    — if apply_resource: "instruments/KWH"
-```
+The `manifest_versions` table already exists. Phase 1 adds:
 
-Note: `sequence_number` is the DB revision counter (1, 2, 3...),
+| Column | Type | Purpose |
+|--------|------|---------|
+| `sequence_number` | BIGINT | Monotonic counter for optimistic locking |
+| `phase_status` | JSONB | Per-phase execution status |
+| `checksum` | VARCHAR(64) | SHA-256 of manifest document |
+| `source` | VARCHAR(20) | "apply_manifest" or "apply_resource" |
+| `resource_path` | VARCHAR(255) | For apply_resource: "instruments/KWH" |
+
+Also alter `apply_status` CHECK constraint to add `PARTIAL`.
+
+Note: CockroachDB cannot alter CHECK constraints in the same
+transaction as column additions. Split into separate migration
+files: one for new columns, one for constraint alteration
+(3-4 migration files total).
+
+`sequence_number` is the DB revision counter (1, 2, 3...),
 distinct from the manifest's own `version` field which tracks
 the schema format ("1.0", "1.1"). Both are stored.
 
@@ -164,7 +165,10 @@ the schema format ("1.0", "1.1"). Both are stored.
 `sequence_number`. Every write includes
 `WHERE sequence_number = $expected`. Concurrent writes fail
 with a conflict error and the caller retries with the latest
-version. This prevents the lost-update problem where two
+version. `ApplyManifestRequest` accepts an optional
+`expected_sequence_number` field so clients performing
+read-modify-write cycles can detect conflicts (ETag
+semantics). This prevents the lost-update problem where two
 concurrent changes silently overwrite each other.
 
 **Partial execution**: The `phase_status` field records which
@@ -300,19 +304,24 @@ The control plane executor dispatches changes in dependency
 order. Each phase completes before the next begins:
 
 ```text
-Phase 1:  Instruments          (register + activate)
-Phase 2:  Account Types        (draft + activate)
-Phase 3:  Market Data Sources  (register)
-Phase 4:  Market Data Sets     (register + activate)
-Phase 5:  Valuation Rules      (via reference-data service)
-Phase 6:  Party Types          (schema definitions)
-Phase 7:  Organizations        (register structural parties)
-Phase 8:  Internal Accounts    (initiate)
-Phase 9:  Sagas                (create + activate)
-Phase 10: Mappings
-Phase 11: Operational Gateway
-Phase 12: Payment Rails
+Phase 10:  Instruments          (register + activate)
+Phase 20:  Account Types        (draft + activate)
+Phase 30:  Market Data Sources  (register)
+Phase 35:  Market Data Sets     (register + activate)
+Phase 40:  Valuation Rules      (via reference-data service)
+Phase 50:  Party Types          (schema definitions)
+Phase 55:  Organizations        (register structural parties)
+Phase 60:  Internal Accounts    (initiate)
+Phase 70:  Sagas                (create + activate)
+Phase 80:  Mappings
+Phase 90:  Operational Gateway
+Phase 100: Payment Rails
 ```
+
+Non-contiguous numbering allows future phases to be inserted
+without renumbering existing constants or breaking tests.
+Current phases 1-8 are remapped to 10-90 in the same PR
+that adds the new phases.
 
 Valuation rules execute after market data sources/sets because
 rules can reference market data sources (e.g., `source:
@@ -322,6 +331,63 @@ current planner already maps them to `RegisterInstrument` /
 `UpdateInstrument`).
 
 `ApplyResource` skips phases that are unaffected by the change.
+
+### Execution architecture
+
+The control plane executes manifest changes via a versioned
+Starlark saga (`apply_manifest`), not direct phased gRPC
+dispatch. The planner produces a dependency-ordered
+`ExecutionPlan` used for:
+
+- **Validation**: Confirms all resource types have valid
+  gRPC method mappings
+- **Dry-run visualization**: Shows callers exactly what
+  would happen, grouped by phase
+- **Diff storage**: Records what changed in each manifest
+  version
+
+The `ManifestExecutor` runs the `apply_manifest` Starlark
+saga via `StarlarkSagaRunner`, which calls registered
+handlers (e.g., `reference_data.register_instrument`). The
+saga provides automatic LIFO compensation on failure,
+idempotency via correlation IDs, and step-level
+observability. Per ADR-0028, the saga script uses platform
+default fallback.
+
+Adding new resource types requires changes in both the
+planner (for preview) and the saga (for execution):
+
+1. Proto field additions on the `Manifest` message
+2. Differ extensions (`diff*` method + `ResourceType`)
+3. Planner phase mapping (for dry-run and visualization)
+4. Go handler implementation + service client interface
+5. Handler registration in `RegisterManifestHandlers`
+6. `buildExecutorInput()` conversion for new proto fields
+7. `apply_manifest` Starlark script update to call new
+   handlers in dependency order
+8. `ManifestValidator` cross-reference validation rules
+
+A conformance test should assert that planner phase ordering
+matches saga script execution order to prevent divergence.
+
+### Failure modes
+
+**Saga compensation**: If phase N fails, the saga engine
+compensates phases N-1 through 1 in LIFO order. The manifest
+version is persisted with `apply_status = PARTIAL` and
+`phase_status` detail showing which phases succeeded, failed,
+and were compensated.
+
+**Retry semantics**: A manifest with `apply_status = PARTIAL`
+can be retried by resubmitting the same manifest. Handlers
+are idempotent (register operations use upsert semantics).
+Already-provisioned resources are no-ops on retry.
+
+**Rollback scope**: `RollbackToVersion` creates a new manifest
+version with the target version's content and re-executes via
+`ApplyManifest`. It does not directly undo service state —
+the saga provisions the "rolled back" desired state as a new
+apply. This is consistent with the K8s desired-state model.
 
 ## Service API Surface
 
@@ -454,6 +520,14 @@ Error categories:
 - **INVALID_VALUE**: Field value fails proto validation
 - **CIRCULAR_DEPENDENCY**: Resource dependency cycle detected
 
+The control plane already provides a `ValidateAndFix` loop
+(used by the economy generator) with structured validation
+errors and LLM-based auto-correction. Phase 1 unifies the
+validation error format: both `ApplyManifest` responses and
+the generator's `ValidateAndFix` use the same
+`ValidationError` proto message. This prevents tenants and
+AI consumers from needing to handle two error schemas.
+
 AI receives these errors, fixes the manifest/resource, and
 resubmits. The dry_run flag lets AI validate before applying,
 creating a tight feedback loop without side effects.
@@ -490,30 +564,68 @@ before this feature) to the manifest-first model.
 Fix the existing pipeline so `ApplyManifest` provisions a
 fully operational economy with no workarounds.
 
-**Scope**:
+**Phase 1a: Make it work** (core value — one-call
+provisioning):
 
-1. Fix executor lifecycle for instruments (register +
-   activate) and account types (draft + activate). This is
-   the bug at seed-demo line 132: "manifest executor not
-   wired yet."
-2. Add 4 new resource types to manifest proto, differ,
-   planner, and executor: market data sources, market data
-   sets, organizations, internal accounts.
-3. Add concurrency control to `manifest_versions`:
-   `sequence_number BIGINT` with optimistic locking on write.
-4. Deepen diff to field-level comparison. Current
-   `CompareVersions` only checks top-level key
-   additions/removals; must detect field-level changes
-   within a resource (e.g., precision 2 → 4).
-5. Expose `DiffManifestVersions` as public RPC. The
+1. Fix instrument activation in the `apply_manifest`
+   Starlark saga script. Add
+   `reference_data.activate_instrument` handler call after
+   `register_instrument`. Verify account type handler
+   already performs draft + activate internally (handler
+   metadata indicates it does — confirm and remove from
+   scope if so).
+2. Add 4 new resource types to the manifest pipeline. For
+   each of market data sources, market data sets,
+   organizations, and internal accounts:
+   - Add typed proto fields to `Manifest` message
+   - Add `ResourceType` constant and `diff*` method to
+     differ
+   - Add phase constant and gRPC method mapping to planner
+     (use non-contiguous phase numbers: 10, 20, 30...)
+   - Add Go handler implementation + service client
+     interface (`MarketInformationServiceClient`,
+     `PartyServiceClient` in `HandlerDependencies`)
+   - Register handler in `RegisterManifestHandlers`
+   - Add input type and conversion to
+     `buildExecutorInput()`
+   - Update `apply_manifest` Starlark script (v1.3.0) to
+     call new handlers in dependency order
+   - Extend `ManifestValidator` with cross-reference
+     validation rules for the new type
+3. Replace shallow `diffManifests()` in HistoryService with
+   output from existing `ManifestDiffer`. The differ already
+   does field-level comparison via `proto.Equal` and has
+   `describe*Changes()` helpers. Store the differ's
+   `DiffPlan` summary as `diff_summary` in
+   `manifest_versions`, replacing `generateDiffSummary()`.
+4. Expose `DiffManifestVersions` as public RPC. The
    internal `CompareVersions` logic already exists in
    `HistoryService`; wire it to a proto RPC.
-6. Add partial execution tracking: `phase_status` and
-   `apply_status` fields on manifest versions so callers
-   can see what succeeded when a multi-phase apply fails.
-7. Rewrite seed-demo to use only `ApplyManifest` for
+5. Fix account type planner mapping. Remap account type
+   actions from `MethodInitiateAccount` (Internal Account
+   Service) to Reference Data methods
+   (`CreateDraft`/`ActivateAccountType`). Internal account
+   initiation moves to `ResourceInternalAccount`.
+6. Rewrite seed-demo to use only `ApplyManifest` for
    structural provisioning. Operational data (customer
    parties, accounts, observations) via service APIs.
+
+Ship resource types as independent PRs in dependency order:
+market data sources (leaf), organizations (leaf) — these
+two can be parallel — then market data sets (depends on
+sources), then internal accounts (depends on account types,
+instruments, and organizations — most complex).
+
+**Phase 1b: Make it safe** (concurrency + observability):
+
+1. Add `sequence_number BIGINT` to `manifest_versions` with
+   optimistic locking on write (`WHERE sequence_number =
+   $expected`). Add `expected_sequence_number` to
+   `ApplyManifestRequest` proto.
+2. Add `phase_status JSONB` and `apply_status = PARTIAL` to
+   manifest versions. Requires separate CockroachDB
+   migration files for column additions vs CHECK constraint
+   alteration.
 
 **Success criteria**:
 
@@ -612,6 +724,16 @@ lists for each - the parser skips them and the planner
 generates no actions for those phases. No migration
 required for existing manifests.
 
+The separation of `internalAccounts` from `accountTypes` is a
+behavioral change. Previously, the saga script auto-created an
+internal account for each account type. With separate manifest
+sections, this coupling is removed. For backward compatibility:
+a manifest without an `internalAccounts` section continues to
+auto-derive internal accounts from account types (the saga
+script checks `if len(internal_accounts) == 0` and falls back
+to the legacy behavior). Tenants opt into explicit internal
+accounts by adding the section.
+
 The existing `seed_data` field (`google.protobuf.Struct`,
 field 7) on the Manifest proto remains unchanged. This PRD
 graduates specific concepts (market data definitions,
@@ -644,28 +766,51 @@ that doesn't warrant its own typed section.
 | Partial execution failure | Per-phase status tracking; `apply_status = PARTIAL` with detail |
 | Large manifests degrade diff perf | Diff operates on structured sections, not raw JSON |
 | Removing public APIs breaks integrations | Phase 3 deprecation period; `ExportManifest` for migration |
-| Shallow diff misses field changes | Deepen `CompareVersions` to use `proto.Equal` per resource |
+| Shallow diff misses field changes | Replace `diffManifests()` with existing `ManifestDiffer` output |
+| Planner-executor divergence | Conformance test asserts planner phase order matches saga execution |
+| AccountType/InternalAccount conflation | Remap planner; backward-compat shim for manifests without `internalAccounts` |
 
 ## Implementation Notes
 
 - The differ, planner, executor, and history service already
   exist and are working. This PRD extends them, not replaces.
-- `manifest_versions` table already exists with
-  `HistoryService` providing store, retrieve, list, compare,
-  rollback. Needs `sequence_number` column and `phase_status`.
+- The executor runs a Starlark saga, not a direct phase
+  dispatcher. Each new resource type requires: Go handler,
+  service client interface in `HandlerDependencies`,
+  handler registration, `buildExecutorInput()` extension,
+  and Starlark script update (`v1.3.0.star`). Planner
+  extensions are also required but only drive dry-run and
+  visualization, not execution.
+- `manifest_versions` table already exists. Needs 3-4
+  migration files for CockroachDB: (1) add
+  `sequence_number`, `phase_status`, `checksum`, `source`,
+  `resource_path` columns, (2) alter `apply_status` CHECK
+  constraint to add `PARTIAL`, (3) backfill
+  `sequence_number` for existing rows.
 - Extend `differ` with `ResourceMarketDataSource`,
   `ResourceMarketDataSet`, `ResourceOrganization`,
   `ResourceInternalAccount`
-- Extend `planner` phase mapping and gRPC method mapping
+- Extend `planner` with non-contiguous phase constants
+  (10, 20, 30...) and gRPC method mappings
+- Fix account type planner mapping: remap from
+  `MethodInitiateAccount` to Reference Data methods.
+  Internal account initiation moves to
+  `ResourceInternalAccount`.
 - `ApplyResource` reuses the same differ/planner/executor
   pipeline as `ApplyManifest` - it just patches one resource
-  into the current manifest first
+  into the current manifest first. The saga already no-ops
+  on empty input sections, so phase skipping works
+  implicitly.
+- Replace shallow `diffManifests()` in HistoryService with
+  serialized `DiffPlan.Actions` from `ManifestDiffer` —
+  reuse, don't rebuild
 - Proto changes are additive (new repeated fields on the
   Manifest message)
 - Service structural mutation RPCs move from public to
   internal proto packages (or remove HTTP annotations)
-- Reuse the existing `differ.ManifestDiffer` output as the
-  user-facing diff rather than building a second diff engine
+- Unify validation error format: `ApplyManifest` responses
+  and the economy generator's `ValidateAndFix` should use
+  the same `ValidationError` proto message
 - ADR-0027 establishes Market Information Service as owner
   of DataSet lifecycle. Making structural APIs internal-only
   (Phase 3) does not change ownership - the service still
