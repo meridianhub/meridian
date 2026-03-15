@@ -396,9 +396,11 @@ func (h *SSOHandler) buildDexAuthURL(tenantID tenant.TenantID, connectorID strin
 	}
 
 	tenantSlug := strings.ToLower(tenantID.String())
-	tenantHost := tenantSlug + "." + h.baseDomain
-	// Preserve any explicit port from the Dex issuer URL (e.g., :5556 in dev).
-	if port := issuer.Port(); port != "" {
+	baseDomain := strings.TrimSuffix(strings.TrimSpace(h.baseDomain), ".")
+	tenantHost := tenantSlug + "." + baseDomain
+	// Preserve any explicit port from the Dex issuer URL (e.g., :5556 in dev),
+	// but only if the baseDomain doesn't already contain a port.
+	if port := issuer.Port(); port != "" && !strings.Contains(tenantHost, ":") {
 		tenantHost = tenantHost + ":" + port
 	}
 	issuer.Host = tenantHost
