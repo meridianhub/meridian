@@ -144,6 +144,7 @@ creates a new version:
 manifest_versions table:
   tenant_id        — which tenant
   sequence_number  — monotonically increasing BIGINT (1, 2, 3...)
+  schema_version   — manifest format version ("1.0", "1.1")
   manifest         — full composite JSON document
   diff             — what changed from previous version
   phase_status     — per-phase execution status (JSON)
@@ -154,6 +155,10 @@ manifest_versions table:
   source           — "apply_manifest" or "apply_resource"
   resource_path    — if apply_resource: "instruments/KWH"
 ```
+
+Note: `sequence_number` is the DB revision counter (1, 2, 3...),
+distinct from the manifest's own `version` field which tracks
+the schema format ("1.0", "1.1"). Both are stored.
 
 **Concurrency control**: Writes use optimistic locking via
 `sequence_number`. Every write includes
@@ -297,9 +302,9 @@ order. Each phase completes before the next begins:
 ```text
 Phase 1:  Instruments          (register + activate)
 Phase 2:  Account Types        (draft + activate)
-Phase 3:  Valuation Rules
-Phase 4:  Market Data Sources  (register)
-Phase 5:  Market Data Sets     (register + activate)
+Phase 3:  Market Data Sources  (register)
+Phase 4:  Market Data Sets     (register + activate)
+Phase 5:  Valuation Rules      (via reference-data service)
 Phase 6:  Party Types          (schema definitions)
 Phase 7:  Organizations        (register structural parties)
 Phase 8:  Internal Accounts    (initiate)
@@ -308,6 +313,13 @@ Phase 10: Mappings
 Phase 11: Operational Gateway
 Phase 12: Payment Rails
 ```
+
+Valuation rules execute after market data sources/sets because
+rules can reference market data sources (e.g., `source:
+"nordpool_spot"`). Valuation rules are registered via the
+reference-data service alongside instrument definitions (the
+current planner already maps them to `RegisterInstrument` /
+`UpdateInstrument`).
 
 `ApplyResource` skips phases that are unaffected by the change.
 
@@ -320,6 +332,8 @@ plane executor calls them on the internal service mesh:
 
 - **reference-data**: `RegisterInstrument`, `UpdateInstrument`,
   `DeprecateInstrument`, `CreateDraft`, `ActivateAccountType`
+  (valuation rules are registered via `RegisterInstrument` as
+  part of the instrument definition)
 - **market-information**: `RegisterDataSet`, `ActivateDataSet`,
   `DeprecateDataSet`, `RegisterDataSource`,
   `DeactivateDataSource`
@@ -589,6 +603,23 @@ compliance, drift detection, and tenant migration.
    any two versions
 10. Existing v1.0 manifests continue to work
 
+## Backward Compatibility
+
+New manifest sections (`marketData`, `organizations`,
+`internalAccounts`) are additive proto fields. A v1.0
+manifest missing these sections is treated as having empty
+lists for each - the parser skips them and the planner
+generates no actions for those phases. No migration
+required for existing manifests.
+
+The existing `seed_data` field (`google.protobuf.Struct`,
+field 7) on the Manifest proto remains unchanged. This PRD
+graduates specific concepts (market data definitions,
+organizations, internal accounts) from untyped seed_data
+to typed proto fields. The `seed_data` field continues to
+serve as a catch-all for tenant-specific reference data
+that doesn't warrant its own typed section.
+
 ## Non-Goals
 
 - Runtime/operational data in the manifest (observations,
@@ -635,3 +666,11 @@ compliance, drift detection, and tenant migration.
   internal proto packages (or remove HTTP annotations)
 - Reuse the existing `differ.ManifestDiffer` output as the
   user-facing diff rather than building a second diff engine
+- ADR-0027 establishes Market Information Service as owner
+  of DataSet lifecycle. Making structural APIs internal-only
+  (Phase 3) does not change ownership - the service still
+  owns the runtime lifecycle logic. The control plane
+  orchestrates when to call it, not how it works internally.
+  This is consistent with the K8s model where controllers
+  own reconciliation logic but the API server owns desired
+  state storage
