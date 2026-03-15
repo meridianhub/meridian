@@ -64,6 +64,7 @@ type SSOHandler struct {
 	dexIssuerURL string
 	clientID     string
 	callbackURL  string
+	baseDomain   string
 	stateStore   *StateStore
 	signer       *platformauth.JWTSigner
 	resolver     IdentityResolver
@@ -81,6 +82,10 @@ type SSOHandlerConfig struct {
 	// CallbackURL is the absolute URL for the BFF callback endpoint
 	// (e.g., "https://demo.meridianhub.cloud/api/auth/callback").
 	CallbackURL string
+	// BaseDomain is the base domain for subdomain-based tenant identification
+	// (e.g., "demo.meridianhub.cloud"). When set, the SSO initiate redirect builds
+	// a tenant-scoped Dex URL using the tenant slug as a subdomain prefix.
+	BaseDomain string
 	// Signer signs Meridian JWTs after SSO completes.
 	Signer *platformauth.JWTSigner
 	// Resolver looks up identities by email after SSO authentication.
@@ -157,6 +162,7 @@ func NewSSOHandler(cfg SSOHandlerConfig) (*SSOHandler, error) {
 		dexIssuerURL: strings.TrimRight(cfg.DexIssuerURL, "/"),
 		clientID:     cfg.ClientID,
 		callbackURL:  cfg.CallbackURL,
+		baseDomain:   cfg.BaseDomain,
 		stateStore:   stateStore,
 		signer:       cfg.Signer,
 		resolver:     cfg.Resolver,
@@ -221,9 +227,11 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build Dex authorization URL. Path-escape the connector ID to prevent
+	// Build Dex authorization URL. When baseDomain is configured, the redirect
+	// uses a tenant-scoped URL so that the Dex MeridianConnector receives tenant
+	// context via the subdomain. Path-escape the connector ID to prevent
 	// path traversal (e.g., "../../admin" → "%2E%2E%2Fadmin").
-	authURL := h.dexIssuerURL + "/auth/" + url.PathEscape(connectorID)
+	authURL := h.buildDexAuthURL(tenantID, connectorID)
 	params := url.Values{
 		"client_id":             {h.clientID},
 		"redirect_uri":          {h.callbackURL},
@@ -367,6 +375,36 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// buildDexAuthURL constructs the Dex authorization URL. When baseDomain is
+// configured, the URL includes the tenant slug as a subdomain prefix so that
+// the MeridianConnector can resolve tenant context from the request host.
+// Falls back to the bare dexIssuerURL when baseDomain is not set.
+func (h *SSOHandler) buildDexAuthURL(tenantID tenant.TenantID, connectorID string) string {
+	escapedConnector := url.PathEscape(connectorID)
+
+	if h.baseDomain == "" {
+		return h.dexIssuerURL + "/auth/" + escapedConnector
+	}
+
+	// Parse the Dex issuer URL to extract the scheme and path prefix.
+	issuer, err := url.Parse(h.dexIssuerURL)
+	if err != nil {
+		// Already validated in constructor; fall back to bare URL.
+		return h.dexIssuerURL + "/auth/" + escapedConnector
+	}
+
+	tenantSlug := strings.ToLower(tenantID.String())
+	baseDomain := strings.TrimSuffix(strings.TrimSpace(h.baseDomain), ".")
+	tenantHost := tenantSlug + "." + baseDomain
+	// Preserve any explicit port from the Dex issuer URL (e.g., :5556 in dev),
+	// but only if the baseDomain doesn't already contain a port.
+	if port := issuer.Port(); port != "" && !strings.Contains(tenantHost, ":") {
+		tenantHost = tenantHost + ":" + port
+	}
+	issuer.Host = tenantHost
+	return issuer.String() + "/auth/" + escapedConnector
 }
 
 // dexTokenResponse is the JSON response from Dex's token endpoint.
