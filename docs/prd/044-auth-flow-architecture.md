@@ -167,26 +167,38 @@ MCP Client
    don't need tenant context). But this also exempts `/dex/auth/*/login`
    where tenant IS needed.
 
-3. **Dex's internal routing is opaque** — When Dex renders the login
-   form and the user submits it, Dex's own HTTP handler processes
-   the POST. The connector adapter receives whatever context Dex's
-   handler created — which has no tenant information. There is no
-   hook to inject tenant context into Dex's internal request pipeline.
+3. **Dex preserves upstream context, but it never receives one** —
+   Dex's `handlePasswordLogin` passes `r.Context()` directly to the
+   connector. Context values from external middleware ARE preserved.
+   But the gateway's `platformPaths` bypass means tenant resolution
+   never runs, so the context arrives empty. The fix is at the
+   middleware layer, not inside Dex.
 
 ## Architectural Constraints
 
 These constraints are fixed — solutions must work within them.
 
-### C1: Dex Does Not Know About Tenants
+### C1: Dex Preserves Upstream Context (Verified)
 
-Dex is a general-purpose OIDC server. Its `PasswordConnector` interface
-receives a plain `context.Context` from Dex's own HTTP handler. There
-is no mechanism to inject custom middleware into Dex's internal request
-processing pipeline.
+Dex's `handlePasswordLogin` calls `pwConn.Login(r.Context(), ...)`
+using the HTTP request context directly. Dex's `handlerWithHeaders`
+middleware (the outermost internal layer) reads the incoming context
+via `r.Context()` and adds only `RequestID` and `RemoteIP` on top
+using `context.WithValue`. This means **context values set by
+external middleware wrapping the Dex `http.Handler` are preserved
+all the way to `connector.Login()`.**
 
-**Implication:** Tenant context cannot be added to the `ctx` that Dex
-passes to `connector.Login()` without modifying Dex itself (which we
-do not want to do — it's an upstream dependency).
+Verified in Dex source (`server/handlers.go:394`, `server/server.go:404-421`).
+
+Dex has no built-in middleware hooks, connector interceptors, or
+custom context fields in `dexserver.Config`. The `connector.Scopes`
+struct contains only `OfflineAccess` and `Groups` booleans. The
+`state` parameter is opaque to connectors. `ConnectorData` is set
+by the connector (not the caller) for refresh token support.
+
+**Implication:** Wrapping the Dex `http.Handler` with tenant
+resolution middleware WILL propagate tenant context to the connector.
+No Dex fork or custom interface extensions needed.
 
 ### C2: Some Dex Endpoints Are Platform-Level
 
@@ -269,21 +281,29 @@ deferred but the architecture must not preclude it.
 
 ## Proposed Solution
 
-### Option A: Tenant-Aware Dex Handler Wrapper (Recommended)
+### Option A: Optional Tenant Resolution for Dex (Recommended)
 
-Wrap the embedded Dex handler with middleware that injects tenant
-context based on available signals, without modifying Dex itself.
+The existing middleware chain already wraps Dex with tenant resolution
+(`wrapWithTenantOnly` → `tenantResolver.Handler()`). Research confirms
+that context values set by this middleware propagate through Dex's
+internal routing to the connector. The only reason it doesn't work
+today is the `platformPaths` bypass for `/dex/`.
+
+The fix is to make tenant resolution **optional** for Dex paths
+instead of skipping it entirely.
 
 **Mechanism:**
 
 1. Remove `/dex/` from `platformPaths`
-2. Add `OptionalTenantHandler` to tenant resolver — resolves tenant
-   from subdomain if present, passes through without error if not
-3. Mount Dex with `OptionalTenantHandler` instead of `wrapWithTenantOnly`
-4. Add a `DefaultTenantMiddleware` that injects a configured default
-   tenant when no tenant is in context (for demo single-tenant mode)
-5. MCP `HandleAuthorize` redirects to tenant-scoped Dex URL when
+2. Add `HandlerOptionalTenant` to `TenantResolverMiddleware` — resolves
+   tenant from subdomain if present, passes through without error if not
+   (unlike `Handler()` which returns 404 for missing/invalid subdomains)
+3. Mount Dex with `HandlerOptionalTenant` instead of current
+   `wrapWithTenantOnly`
+4. MCP `HandleAuthorize` redirects to tenant-scoped Dex URL when
    tenant slug is available (e.g., `acme.demo.meridianhub.cloud/dex/auth`)
+5. For demo single-tenant mode, MCP server config provides a default
+   tenant slug when no subdomain is present
 
 **Tenant context flow for MCP with this fix:**
 
@@ -318,9 +338,16 @@ MCP Server → POST demo.meridianhub.cloud/dex/token
 | `services/mcp-server/internal/auth/oidc.go` | Redirect to tenant-scoped Dex URL |
 | `services/mcp-server/cmd/main.go` | Add default tenant config for demo mode |
 
-**Risk:** Low. `OptionalTenantHandler` is additive — existing paths
+**Verified:** Dex source confirms `r.Context()` propagates to
+`connector.Login()` unchanged (except for `RequestID` and `RemoteIP`
+added by Dex's `handlerWithHeaders`). Tested by tracing the call chain:
+`handlerWithHeaders` (server.go:404) → router → `handlePasswordLogin`
+(handlers.go:394) → `pwConn.Login(r.Context(), ...)`.
+
+**Risk:** Low. `HandlerOptionalTenant` is additive — existing paths
 that provide subdomain continue working. Paths without subdomain
-get no tenant context (same as today's `platformPaths` behavior).
+get no tenant context (same as today's `platformPaths` behavior,
+but without a hardcoded path list).
 
 ### Option B: Bypass Dex for MCP Password Auth
 
@@ -335,9 +362,9 @@ for federated auth (Phase 3 of PRD 031).
 
 Fork Dex and add tenant-aware context propagation.
 
-**Rejected because:** Maintenance burden of a fork. Dex is an upstream
-dependency with active development. Meridian should not own Dex
-internals.
+**Rejected because:** Research confirms wrapping the handler works.
+No fork needed — the existing `http.Handler` wrapping pattern is
+sufficient.
 
 ## Test Plan
 
