@@ -2,78 +2,190 @@
 
 ## Problem Statement
 
-Meridian currently has two paths to define an economy: the manifest
-(declarative, versioned in DB) and direct gRPC calls (imperative,
-untracked). In practice, tenants like Volt Energy use both: the
-manifest declares instruments and account types, but seed-demo then
-re-registers them via gRPC because "the manifest executor is not
-wired yet." Market data definitions, data sources, and organizational
+Meridian has two paths to define an economy: the manifest
+(declarative) and direct gRPC calls (imperative). In practice,
+tenants like Volt Energy use both: the manifest declares
+instruments and account types, but seed-demo re-registers them
+via gRPC because the manifest executor doesn't fully activate
+them. Market data definitions, data sources, and organizational
 parties are created entirely outside the manifest.
 
-This dual-path architecture undermines Meridian's core value
-proposition: **declare your economy in a manifest and the platform
-operates it**. If half the economy lives in imperative gRPC calls,
-it isn't versioned, isn't reproducible, and can't be diffed or
-audited through the manifest pipeline. Tenants are created
-dynamically - each tenant's economy must be fully defined and
-versioned through their manifest, stored in the DB.
+This means economy state is scattered across services with no
+unified versioning, no diffs, and no audit trail. A tenant
+cannot answer "what changed in my economy last week?" or
+"roll back to yesterday's configuration."
 
-## Current State
+**The goal**: One declarative control plane that owns all
+structural economy state, versions every change, supports
+both full-manifest and granular resource mutations, and
+enables AI/cookbook-driven economy composition.
 
-### What the manifest handles today
+## Architecture: Control Plane Owns Declarations, Services Own Runtime
 
-| Resource | Manifest Section | Executor Wired | Notes |
-|----------|-----------------|---------------|-------|
-| Instruments | `instruments[]` | Partially | Manifest stores definition, but seed-demo re-registers via `ReferenceDataService.RegisterInstrument` because executor doesn't activate |
-| Account Types | `accountTypes[]` | Partially | Same issue - manifest stores, seed-demo activates via `AccountTypeRegistryService` |
-| Valuation Rules | `valuationRules[]` | Yes | Mapped to `RegisterInstrument` in planner |
-| Sagas | `sagas[]` | Yes | Full lifecycle support |
-| Party Types | `partyTypes[]` | Yes | Schema-level definitions |
-| Mappings | `mappings[]` | Yes | Bidirectional field mapping |
-| Operational Gateway | `operationalGateway` | Yes | Provider connections + instruction routes |
-| Payment Rails | `paymentRails[]` | No executor | Proto defined, no planner mapping |
+### The separation
 
-### What is NOT in the manifest at all
+```text
+┌─────────────────────────────────────────────┐
+│              Control Plane                   │
+│                                              │
+│  Owns: All structural resource declarations  │
+│  Stores: Composite manifest (versioned in DB)│
+│  Validates: Cross-service references         │
+│  Executes: Phased dispatch to services       │
+│                                              │
+│  Public APIs:                                │
+│    ApplyManifest  (full economy)             │
+│    ApplyResource  (single resource change)   │
+│    GetManifest    (current composite state)  │
+│    DiffManifest   (compare versions)         │
+│    ListVersions   (audit trail)              │
+│                                              │
+├──────────┬──────────┬──────────┬─────────────┤
+│ ref-data │ market   │ party    │ saga        │
+│          │ info     │          │             │
+│ Owns:    │ Owns:    │ Owns:    │ Owns:       │
+│ runtime  │ runtime  │ runtime  │ runtime     │
+│ state    │ state    │ state    │ state       │
+│          │          │          │             │
+│ Public:  │ Public:  │ Public:  │ Public:     │
+│ read/    │ read/    │ read/    │ read/       │
+│ query    │ query +  │ query +  │ query +     │
+│ only     │ observe  │ customer │ execute     │
+│          │          │ parties  │             │
+│ Internal:│ Internal:│ Internal:│ Internal:   │
+│ register │ register │ register │ create/     │
+│ activate │ activate │ org      │ activate    │
+└──────────┴──────────┴──────────┴─────────────┘
+```
 
-| Resource | Current Path | Why It Matters |
-|----------|-------------|---------------|
-| **Market Data Set Definitions** | `MarketInformationService.RegisterDataSet` | Defines what market data a tenant tracks (WHOLESALE_ENERGY_GBP_KWH, USD_EUR_FX). These are structural, not operational. |
-| **Market Data Sources** | `MarketInformationService.RegisterDataSource` | Defines where data comes from (NORDPOOL, BLOOMBERG). Structural reference data. |
-| **Organizational Parties** | `PartyService.RegisterParty` | DNOs, grid supply points, clearinghouses - structural entities that define the economy's topology. |
-| **Internal Accounts** | `InternalAccountService.InitiateAccount` | Inventory accounts, settlement accounts - the chart of accounts. |
+**Control plane owns declarations** because an economy is a
+coherent dependency graph. Instruments, account types, market
+data, sagas form cross-service references that require
+whole-graph validation:
 
-### What should STAY outside the manifest
+- Account type `ENERGY_TRADING` references instruments
+  `[GBP, KWH]` - must validate they exist
+- Valuation rule `KWH→GBP` references two instruments and
+  a market data source - must validate all three
+- Saga `process_settlement` references account types and
+  instruments - must validate the full chain
 
-| Resource | Why | Path |
-|----------|-----|------|
-| **Customer parties** | Runtime data - customers sign up dynamically | gRPC / API |
-| **Customer accounts** | Runtime data - opened per customer | gRPC / API |
-| **Market data observations** | Operational data - prices arrive continuously | gRPC / feeds |
-| **Transactions / ledger entries** | Operational data | Saga execution |
-| **Account balances** | Derived from transactions | Read-only queries |
+No single service can validate these. The control plane can.
 
-## Desired State
+**Services own runtime** - the actual registered instruments,
+active account types, recorded observations, customer accounts,
+running sagas. Services receive provisioning instructions from
+the control plane executor via internal APIs.
 
-The manifest becomes the **sole source of truth** for everything that defines an economy's structure. The distinction is:
+### Structural vs operational
 
-- **Manifest (structural)**: What *types* of things exist, how they relate, what rules govern them
-- **Runtime (operational)**: Individual *instances* of those types, created by users/systems/sagas
+| Structural (control plane) | Operational (services) |
+|---------------------------|----------------------|
+| Instrument definitions | Registered instrument state |
+| Account type definitions | Active account types, customer accounts |
+| Market data set/source definitions | Price observations |
+| Organizational parties (DNOs, GSPs) | Customer parties |
+| Internal accounts (chart of accounts) | Account balances, transactions |
+| Saga definitions | Saga executions |
+| Valuation rules | Computed valuations |
+| Mappings, operational gateway config | Dispatched instructions |
+| Payment rail config | Payment transactions |
 
-### New manifest sections
+## Two Write Paths, One Source of Truth
+
+### Path 1: ApplyManifest (full economy)
+
+For provisioning new tenants, cookbook-generated economies,
+or wholesale reconfiguration.
+
+```text
+Cookbook/AI/UI generates manifest
+  → ApplyManifest(manifest)
+  → Control plane diffs against current version
+  → Validates full dependency graph
+  → Persists new manifest version to DB
+  → Executes changes in dependency order (phases)
+  → Returns diff summary
+```
+
+### Path 2: ApplyResource (granular change)
+
+For adding one account type, updating a saga, adding a
+market data source. This is the shadcn-style "just add
+this one thing" path.
+
+```text
+Tenant/AI/UI submits one resource change
+  → ApplyResource(instrument_definition)
+  → Control plane reads current manifest from DB
+  → Patches the resource into the composite document
+  → Validates full dependency graph (cross-service refs)
+  → Computes diff (shown to caller if dry_run)
+  → Persists new manifest version to DB
+  → Executes only the affected phases
+  → Returns diff summary
+```
+
+Both paths produce the same result: a new manifest version
+in the DB with a computable diff. The composite manifest is
+always the full picture regardless of how it was assembled.
+
+### Manifest versioning in DB
+
+Every change (whether via `ApplyManifest` or `ApplyResource`)
+creates a new version:
+
+```text
+manifest_versions table:
+  tenant_id       — which tenant
+  version         — monotonically increasing (1, 2, 3...)
+  manifest        — full composite JSON document
+  diff            — what changed from previous version
+  applied_by      — who/what made the change (user, AI, cookbook)
+  applied_at      — timestamp
+  checksum        — SHA-256 of the manifest document
+  source          — "apply_manifest" or "apply_resource"
+  resource_path   — if apply_resource: "instruments/KWH"
+```
+
+### Control plane RPCs
+
+```text
+ApplyManifest         — submit full manifest, diff + apply
+ApplyResource         — submit single resource, patch + diff + apply
+GetManifest           — current active manifest (full composite)
+GetManifestVersion    — specific historical version
+ListManifestVersions  — version history with metadata
+DiffManifestVersions  — diff between any two versions
+ExportManifest        — reconstruct manifest from live state
+ReconcileManifest     — compare DB manifest vs live state
+```
+
+## Current Gaps
+
+### Resources missing from the manifest
+
+| Resource | Current Path | Action |
+|----------|-------------|--------|
+| Market data sets | `RegisterDataSet` | Add to manifest |
+| Market data sources | `RegisterDataSource` | Add to manifest |
+| Organizational parties | `RegisterParty` | Add to manifest |
+| Internal accounts | `InitiateAccount` | Add to manifest |
+
+### Executor gaps
+
+| Resource | Issue | Action |
+|----------|-------|--------|
+| Instruments | Executor doesn't fully activate | Fix lifecycle |
+| Account types | Executor doesn't fully activate | Fix lifecycle |
+| Payment rails | Proto defined, no planner mapping | Wire executor |
+
+## New Manifest Sections
+
+### Market data
 
 ```json
 {
-  "version": "1.1",
-  "metadata": { ... },
-  "instruments": [ ... ],
-  "accountTypes": [ ... ],
-  "valuationRules": [ ... ],
-  "sagas": [ ... ],
-  "partyTypes": [ ... ],
-  "mappings": [ ... ],
-  "operationalGateway": { ... },
-  "paymentRails": [ ... ],
-
   "marketData": {
     "sources": [
       {
@@ -81,12 +193,6 @@ The manifest becomes the **sole source of truth** for everything that defines an
         "name": "Nord Pool Spot Market",
         "description": "Nordic/Baltic electricity exchange",
         "trustLevel": 90
-      },
-      {
-        "code": "INTERNAL_TARIFF",
-        "name": "Internal Tariff Engine",
-        "description": "Internally computed retail tariffs",
-        "trustLevel": 100
       }
     ],
     "dataSets": [
@@ -94,15 +200,23 @@ The manifest becomes the **sole source of truth** for everything that defines an
         "code": "WHOLESALE_ENERGY_GBP_KWH",
         "category": "DATA_CATEGORY_ENERGY_PRICE",
         "unit": "GBP/kWh",
-        "displayName": "Wholesale Energy Price (GBP per kWh)",
-        "description": "Day-ahead wholesale electricity price",
+        "displayName": "Wholesale Energy Price",
         "resolutionKeyExpression": "'spot'",
         "validationExpression": "value > 0 && value < 10.0",
         "sourceCode": "NORDPOOL"
       }
     ]
-  },
+  }
+}
+```
 
+Observations (`RecordObservation`) remain operational - the
+manifest declares *what* you track, not the prices themselves.
+
+### Organizations
+
+```json
+{
   "organizations": [
     {
       "code": "UK_POWER_NETWORKS",
@@ -122,8 +236,17 @@ The manifest becomes the **sole source of truth** for everything that defines an
         "parent_dno": "UK_POWER_NETWORKS"
       }
     }
-  ],
+  ]
+}
+```
 
+Customer parties remain operational - organizations are the
+economy's topology, customers are runtime data.
+
+### Internal accounts (chart of accounts)
+
+```json
+{
   "internalAccounts": [
     {
       "code": "GSP_SOUTH_EAST_KWH_INVENTORY",
@@ -142,249 +265,254 @@ The manifest becomes the **sole source of truth** for everything that defines an
 }
 ```
 
-### Execution phases (updated planner)
+Customer accounts remain operational - internal accounts are
+the economy's plumbing.
+
+## Execution Phases
+
+The control plane executor dispatches changes in dependency
+order. Each phase completes before the next begins:
 
 ```text
-Phase 1: Instruments          (register + activate)
-Phase 2: Account Types        (draft + activate)
-Phase 3: Valuation Rules
-Phase 4: Market Data Sources  (register)
-Phase 5: Market Data Sets     (register + activate)
-Phase 6: Party Types          (schema definitions)
-Phase 7: Organizations        (register structural parties)
-Phase 8: Internal Accounts    (initiate)
-Phase 9: Sagas                (create + activate)
+Phase 1:  Instruments          (register + activate)
+Phase 2:  Account Types        (draft + activate)
+Phase 3:  Valuation Rules
+Phase 4:  Market Data Sources  (register)
+Phase 5:  Market Data Sets     (register + activate)
+Phase 6:  Party Types          (schema definitions)
+Phase 7:  Organizations        (register structural parties)
+Phase 8:  Internal Accounts    (initiate)
+Phase 9:  Sagas                (create + activate)
 Phase 10: Mappings
 Phase 11: Operational Gateway
 Phase 12: Payment Rails
 ```
 
-## Requirements
+`ApplyResource` skips phases that are unaffected by the change.
 
-### R1: Market Data Definitions in Manifest
+## Service API Surface
 
-Add `marketData` section to the Manifest proto with:
+### Structural mutation APIs become internal-only
 
-- `sources[]` - Data source definitions (code, name, trust level)
-- `dataSets[]` - Data set definitions (code, category, unit, CEL expressions)
+These RPCs are removed from the public gateway. The control
+plane executor calls them on the internal service mesh:
 
-**Executor behavior**: On `ApplyManifest`, register data sources first,
-then register and activate data sets. Diff against existing state -
-only create/update what changed.
-
-**What stays runtime**: Actual price observations (`RecordObservation`)
-remain gRPC-only. The manifest declares *what* you track, not
-*what the prices are*.
-
-### R2: Organizational Parties in Manifest
-
-Add `organizations[]` section for structural/institutional parties that define the economy's topology.
-
-**Distinction from customer parties**: Organizations are part of the
-economy's structure (a DNO, a clearinghouse, a grid supply point).
-They exist before any customer signs up. Customer parties are
-runtime data.
-
-**Executor behavior**: Register parties via
-`PartyService.RegisterParty` during manifest apply. Support UPDATE
-for attribute changes. No DELETE (organizations can be deactivated
-but not removed).
-
-### R3: Internal Accounts (Chart of Accounts) in Manifest
-
-Add `internalAccounts[]` section for the structural chart of accounts -
-inventory accounts, settlement accounts, clearing accounts.
-
-**Distinction from customer accounts**: Internal accounts are the
-economy's plumbing. Customer accounts are opened dynamically per
-customer.
-
-**Executor behavior**: Create via
-`InternalAccountService.InitiateAccount`. Support idempotent
-re-creation. Reference organizations by code.
-
-### R4: Fix Instrument and Account Type Executor Wiring
-
-The manifest planner already maps instruments and account types to
-gRPC methods, but the executor doesn't complete the full lifecycle
-(draft -> active). Fix this so `ApplyManifest` fully activates
-instruments and account types without needing seed-demo workarounds.
-
-### R5: Payment Rails Executor
-
-Payment rails are defined in the manifest proto but have no planner
-mapping. Add the mapping so `ApplyManifest` processes them.
-
-### R6: Manifest Version Bump
-
-Bump manifest schema version to `1.1` to signal the expanded schema.
-Maintain backwards compatibility - `1.0` manifests without the new
-sections continue to work.
-
-### R7: Update seed-demo to Manifest-Only
-
-Rewrite `cmd/seed-demo/main.go` to:
-
-1. Apply a single manifest that contains everything (instruments, account types, market data, organizations, internal accounts)
-2. Use gRPC only for runtime operational data (customer parties, customer accounts, meter reads, price observations)
-
-This serves as both validation and documentation of the manifest-first approach.
-
-### R8: Manifest Persistence, Export, and Reconciliation
-
-**The database is the sole source of truth for every tenant's
-economy definition.** Tenants are created dynamically (via API,
-UI, onboarding flows). Each tenant's manifest is submitted via
-`ApplyManifest` and versioned in the DB. There is no assumption
-of a git workflow - the platform owns the version history.
-
-**Manifest version store**: Every `ApplyManifest` call persists
-the full manifest document to a `manifest_versions` table:
-
-- `tenant_id`, `version` (monotonically increasing),
-  `manifest_document` (full JSON), `applied_by`,
-  `applied_at`, `diff_summary`, `checksum` (SHA-256)
-- The current active manifest is always queryable via
-  `GetManifest` RPC
-- Previous versions are retained for audit and rollback
-- The diff between any two versions is computable via
-  `DiffManifestVersions` RPC
-- Rollback to a previous version via
-  `ApplyManifest` with a prior version's document
-
-**Manifest lifecycle**:
-
-```text
-Tenant created -> First ApplyManifest (v1) -> economy provisioned
-             -> ApplyManifest (v2) -> diff computed, changes applied
-             -> ApplyManifest (v3) -> ...
-             -> GetManifest -> returns current active manifest
-             -> ListManifestVersions -> full version history
-             -> DiffManifestVersions(v2, v3) -> what changed
-```
-
-**Export** (`ExportManifest` RPC): Reconstructs a manifest from
-the current live state. Used for:
-
-- Migrating existing tenants that were set up via direct gRPC
-  before this feature existed
-- Bootstrapping the first manifest version for a tenant
-
-**Reconciliation** (`ReconcileManifest` RPC): Compares the
-last-applied manifest (from DB) against live resource state.
-Reports any drift. This is a safety net, not the primary
-enforcement (R9 removes the APIs that could cause drift).
-
-### R9: Remove Public Structural Mutation APIs
-
-**Don't guard the APIs - remove them from the public surface.**
-If the endpoints don't exist publicly, drift is impossible by
-construction rather than by runtime checks.
-
-The following RPCs are removed from the public gateway / HTTP
-routes and become **internal-only** (callable only by the
-manifest executor via internal service mesh):
-
-- `ReferenceDataService`: `RegisterInstrument`,
-  `UpdateInstrument`, `DeprecateInstrument`
-- `AccountTypeRegistryService`: `CreateDraft`,
-  `ActivateAccountType`
-- `MarketInformationService`: `RegisterDataSet`,
-  `ActivateDataSet`, `DeprecateDataSet`,
-  `RegisterDataSource`, `DeactivateDataSource`
-- `PartyService`: `RegisterParty` (organizational types only),
-  `UpdateSchema`
-- `InternalAccountService`: `InitiateAccount` (structural)
-- `SagaService`: `CreateSagaDraft`, `ActivateSaga`,
-  `DeprecateSaga`
-- `MappingService`: `CreateMapping`, `UpdateMapping`,
+- **reference-data**: `RegisterInstrument`, `UpdateInstrument`,
+  `DeprecateInstrument`, `CreateDraft`, `ActivateAccountType`
+- **market-information**: `RegisterDataSet`, `ActivateDataSet`,
+  `DeprecateDataSet`, `RegisterDataSource`,
+  `DeactivateDataSource`
+- **party**: `RegisterParty` (organizational), `UpdateSchema`
+- **internal-account**: `InitiateAccount` (structural)
+- **saga**: `CreateSagaDraft`, `ActivateSaga`, `DeprecateSaga`
+- **mapping**: `CreateMapping`, `UpdateMapping`,
   `DeprecateMapping`
-- `OperationalGatewayService`: `UpsertProviderConnection`,
+- **operational-gateway**: `UpsertProviderConnection`,
   `UpsertInstructionRoute`
 
-**What remains public** (runtime/operational endpoints):
+### Public APIs per service (read + operational)
 
-- `MarketInformationService`: `RecordObservation`,
-  `RecordObservationBatch`, `RetrieveObservation`,
-  `ListObservations`, `RetrieveDataSet`, `ListDataSets`
-  (read-only for data sets)
-- `PartyService`: `RegisterParty` (customer types),
-  all read/query endpoints
-- `CurrentAccountService`: all endpoints (customer accounts)
-- `InternalAccountService`: read/query endpoints
-- All saga execution endpoints
-- All read/query endpoints on every service
+Each service retains its own independent API surface for
+reads and operational data. No single monolithic swagger -
+the composite API is assembled from per-service specs:
 
-**Implementation approach**:
+- **reference-data**: Read/query instruments, account types
+- **market-information**: `RecordObservation`,
+  `RecordObservationBatch`, read/query observations and
+  data sets
+- **party**: `RegisterParty` (customer types), read/query
+- **current-account**: All endpoints (customer accounts)
+- **internal-account**: Read/query endpoints
+- **saga**: Execution endpoints, read/query
+- **position-keeping**: All endpoints (operational)
+- **control-plane**: All manifest management RPCs
 
-- Remove structural mutation routes from the gRPC gateway
-  HTTP annotations and public proto surface
-- Structural mutation RPCs become internal service methods
-  callable only via the manifest executor's internal gRPC
-  connection (no external exposure)
-- The manifest executor calls them on the internal service
-  mesh during `ApplyManifest`
-- Operational gateway changes (new ingest/egress routes,
-  provider connections) follow the same rule: update the
-  manifest, re-apply
+### Composite API specification
 
-**Migration path**: Existing tenants using direct gRPC calls
-run `ExportManifest` to generate their initial manifest, then
-switch to manifest-only. A deprecation period warns on direct
-calls before removal.
+The platform API is assembled from per-service specs, not
+maintained as a single monolithic document. Each service
+publishes its own OpenAPI/AsyncAPI spec. The gateway
+composes them under service-scoped paths:
 
-**How tenants update their economy**: Submit a new manifest via
-`ApplyManifest`. The control plane diffs it against the current
-version, computes the execution plan, and applies changes. The
-DB stores every version with full audit trail. Tenants can
-query their manifest history, diff versions, and rollback.
+```text
+/v1/reference-data/...      → reference-data spec
+/v1/market-information/...   → market-information spec
+/v1/parties/...              → party spec
+/v1/control-plane/...        → manifest management spec
+/v1/accounts/...             → current-account spec
+```
+
+## AI and Cookbook Integration
+
+### Economy creation (cookbook → ApplyManifest)
+
+```text
+AI: "What does your business do?"
+  → Selects cookbook recipes (energy trading, carbon, etc.)
+  → Composes recipes into a complete manifest
+  → ApplyManifest(manifest, dry_run=true)
+  → Shows diff to user: "This will create 3 instruments,
+    2 account types, 1 market data source..."
+  → User confirms
+  → ApplyManifest(manifest, dry_run=false)
+  → Economy provisioned
+```
+
+### Economy modification (AI → ApplyResource)
+
+```text
+AI: "Add a carbon credit instrument"
+  → ApplyResource(instrument: {code: "CARBON_CREDIT", ...},
+                   dry_run=true)
+  → Control plane patches into current manifest
+  → Validates: no broken references
+  → Shows diff: "+1 instrument: CARBON_CREDIT"
+  → User confirms
+  → ApplyResource(..., dry_run=false)
+  → New manifest version (v4)
+```
+
+The AI never needs the full manifest in context to make a
+safe change. `ApplyResource` handles the patching, validation,
+and versioning.
+
+### Structured validation errors
+
+Both `ApplyManifest` and `ApplyResource` return structured
+validation errors that humans and AI can act on:
+
+```json
+{
+  "validationErrors": [
+    {
+      "path": "accountTypes[0].allowedInstruments[1]",
+      "code": "REFERENCE_NOT_FOUND",
+      "message": "Instrument 'CARBON' not found. Did you mean 'CARBON_CREDIT'?",
+      "suggestion": "CARBON_CREDIT"
+    },
+    {
+      "path": "marketData.dataSets[0].sourceCode",
+      "code": "REFERENCE_NOT_FOUND",
+      "message": "Data source 'NORDPOOL' not defined in marketData.sources",
+      "suggestion": null
+    },
+    {
+      "path": "sagas[2].script",
+      "code": "STARLARK_SYNTAX_ERROR",
+      "message": "Line 14: undefined: position_keepng (did you mean position_keeping?)",
+      "line": 14,
+      "suggestion": "position_keeping"
+    }
+  ]
+}
+```
+
+Error categories:
+
+- **REFERENCE_NOT_FOUND**: Cross-resource reference to
+  something that doesn't exist (with fuzzy-match suggestions)
+- **DUPLICATE_CODE**: Two resources with the same code
+- **STARLARK_SYNTAX_ERROR**: Saga script compilation failure
+  (with line number)
+- **CEL_SYNTAX_ERROR**: Validation/bucketing expression error
+- **INVALID_VALUE**: Field value fails proto validation
+- **CIRCULAR_DEPENDENCY**: Resource dependency cycle detected
+- **BREAKING_CHANGE**: Change would break existing runtime
+  state (e.g., removing an instrument that has active accounts)
+
+AI receives these errors, fixes the manifest/resource, and
+resubmits. The dry_run flag lets AI validate before applying,
+creating a tight feedback loop without side effects.
+
+### Diff visibility
+
+Every change is diffable:
+
+```text
+DiffManifestVersions(v3, v4):
+  + instruments[2]: CARBON_CREDIT (COMMODITY, 4 decimals)
+
+DiffManifestVersions(v1, v4):
+  + instruments[2]: CARBON_CREDIT
+  ~ accountTypes[0].allowedInstruments: [GBP, KWH] → [GBP, KWH, CARBON_CREDIT]
+  + marketData.dataSets[1]: CARBON_PRICE_GBP
+```
+
+## Reconciliation and Export
+
+**ReconcileManifest**: Compares the DB-stored manifest against
+live resource state across services. Reports drift. With
+structural APIs removed from the public surface, drift should
+be impossible - reconciliation is a safety net.
+
+**ExportManifest**: Reconstructs a manifest from live state.
+Used to migrate existing tenants (set up via direct gRPC
+before this feature) to the manifest-first model.
+
+## Seed-Demo Migration
+
+Rewrite `cmd/seed-demo/main.go` to demonstrate the new model:
+
+1. Create tenant
+2. `ApplyManifest` with complete energy economy (instruments,
+   account types, market data, organizations, internal
+   accounts, sagas)
+3. Operational data via public service APIs (customer parties,
+   customer accounts, meter reads, price observations)
+
+No direct structural gRPC calls. The manifest handles all
+structural provisioning.
 
 ## Success Criteria
 
-1. A tenant's entire structural economy can be defined in a single
-   manifest file
-2. `ApplyManifest` with that file creates a fully operational economy
-   (no seed-demo workarounds needed)
-3. Market data set definitions are version-controlled in the manifest
-4. Organizational parties and internal accounts are version-controlled
-   in the manifest
-5. The Volt Energy demo runs with manifest-only structural setup
-6. Existing manifests (v1.0) continue to work without modification
-7. Structural mutation APIs are not exposed on the public gateway;
-   only the manifest executor can call them internally
-8. `ReconcileManifest` confirms zero drift between DB-stored
-   manifest and live resource state
-9. Every structural change is traceable to a manifest version
-   stored in the DB with full audit metadata
-10. Full manifest version history is queryable per tenant
-    (`GetManifest`, `ListManifestVersions`,
-    `DiffManifestVersions`)
+1. `ApplyManifest` provisions a fully operational economy
+   from a single document (no seed-demo workarounds)
+2. `ApplyResource` modifies a single resource with full
+   validation, diff, and versioning
+3. Every structural change produces a new manifest version
+   in the DB with computable diff
+4. Structural mutation APIs are internal-only; not exposed
+   on the public gateway
+5. Market data definitions, organizations, and internal
+   accounts are part of the manifest
+6. AI/cookbook can create economies via `ApplyManifest` and
+   modify them via `ApplyResource`
+7. `ReconcileManifest` confirms zero drift
+8. Each service retains its own independent API spec for
+   reads and operational endpoints
+9. `DiffManifestVersions` shows exactly what changed between
+   any two versions
+10. Existing v1.0 manifests continue to work
 
 ## Non-Goals
 
-- Migrating runtime/operational data into the manifest (observations, customer accounts, transactions)
-- Scheduled data ingestion configuration (future: operational gateway can handle this)
-- Multi-manifest composition (single manifest per tenant for now)
-- Manifest inheritance or templates (future PRD)
+- Runtime/operational data in the manifest (observations,
+  customer accounts, transactions)
+- Manifest inheritance or overlay merging at runtime
+- Scheduled data ingestion configuration
+- Multi-manifest per tenant
 
 ## Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Proto changes could break existing clients | Additive-only changes, version field gates parsing |
-| Market data sets have complex lifecycle | Manifest apply targets ACTIVE; deprecation stays manual |
-| Organization references create ordering deps | Planner already handles phase ordering |
-| Large manifests become unwieldy | Future PRD for manifest composition / includes |
-| Removing public APIs breaks existing integrations | Deprecation period with warnings before removal; `ExportManifest` for migration |
-| Emergency changes blocked by manifest flow | Escape hatch: admin `--force` flag on `ApplyManifest` with audit log entry |
+| Cross-service validation complexity | Control plane already has the differ/planner; extend it |
+| `ApplyResource` concurrent conflicts | Optimistic locking on manifest version; retry on conflict |
+| Large manifests degrade diff perf | Diff operates on structured sections, not raw JSON |
+| Removing public APIs breaks integrations | Deprecation period; `ExportManifest` for migration |
+| Emergency changes blocked | `ApplyResource` is fast for single changes; admin escape hatch |
 
 ## Implementation Notes
 
-- The `differ` package already supports resource types and action types;
-  extend with `ResourceMarketDataSource`, `ResourceMarketDataSet`,
-  `ResourceOrganization`, `ResourceInternalAccount`
-- The `planner` already maps resource types to phases and gRPC methods;
-  extend the maps
-- The executor dispatches planned calls to gRPC services; new resource
-  types follow the same pattern
-- Proto changes are additive (new repeated fields on Manifest message)
+- Extend `differ` with `ResourceMarketDataSource`,
+  `ResourceMarketDataSet`, `ResourceOrganization`,
+  `ResourceInternalAccount`
+- Extend `planner` phase mapping and gRPC method mapping
+- Add `manifest_versions` table to control-plane DB
+- `ApplyResource` reuses the same differ/planner/executor
+  pipeline as `ApplyManifest` - it just patches one resource
+  into the current manifest first
+- Proto changes are additive (new repeated fields on the
+  Manifest message)
+- Service structural mutation RPCs move from public to
+  internal proto packages (or remove HTTP annotations)
