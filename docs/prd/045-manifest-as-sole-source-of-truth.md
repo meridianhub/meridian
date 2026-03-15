@@ -768,6 +768,52 @@ to typed proto fields. The `seed_data` field continues to
 serve as a catch-all for tenant-specific reference data
 that doesn't warrant its own typed section.
 
+## Manifest Schema Migrations
+
+When the manifest schema evolves (new sections, renamed
+fields, restructured data), stored manifests in
+`manifest_versions` must remain usable for diffs, rollbacks,
+and display. This is the same problem Flyway solves with data
+migrations alongside schema migrations.
+
+**Approach: migrate on read, not on write.** Historical
+manifests are stored as-is, preserving the original document.
+When a stored manifest is read (for diff, rollback, or
+display), a `ManifestMigrator` applies a chain of transforms
+to bring it to the current schema version:
+
+```text
+ManifestMigrator:
+  v1.0 → v1.1: If no internalAccounts section, derive
+                from accountTypes (legacy auto-creation)
+  v1.0 → v1.1: If no marketData section, treat as empty
+  v1.1 → v1.2: (future) If valuationRules reference
+                source by name, resolve to sourceCode
+```
+
+Each transform is:
+
+- **Registered explicitly** — a function that takes a
+  manifest at version N and returns version N+1
+- **Chained** — reading a v1.0 manifest on a v1.2 system
+  applies v1.0→v1.1 then v1.1→v1.2
+- **Idempotent** — running the same transform twice
+  produces the same result
+- **Tested** — each transform has a test with a fixture
+  manifest at the old version
+
+**Rollback with schema evolution**: When a tenant rolls back
+to v2 (stored as schema v1.0), the migrator transforms it
+to the current schema before applying. The saga sees a valid
+current-schema manifest. The historical document is
+preserved — the diff shows what the tenant intended at the
+time, not what it looks like after migration.
+
+**Why not migrate in place**: Batch-updating stored manifests
+mutates the audit trail. Regulators and compliance teams need
+to see the original document as it was applied. Migrate-on-read
+preserves this while keeping the system functional.
+
 ## Non-Goals
 
 - Runtime/operational data in the manifest (observations,
