@@ -590,6 +590,108 @@ func TestSSOHandler_InitiateAcceptsRelativeReturnURL(t *testing.T) {
 	assert.Contains(t, callbackLocation, "/dashboard/overview")
 }
 
+// --- Tenant-scoped Dex redirect tests ---
+
+func TestHandleInitiate_RedirectsTenantScopedDexURL(t *testing.T) {
+	handler, err := gateway.NewSSOHandler(gateway.SSOHandlerConfig{
+		DexIssuerURL: "https://demo.meridianhub.cloud/dex",
+		ClientID:     "meridian-service",
+		CallbackURL:  "https://demo.meridianhub.cloud/api/auth/callback",
+		BaseDomain:   "demo.meridianhub.cloud",
+		Signer:       newSSOTestSigner(t),
+		Resolver:     &stubResolver{},
+		Logger:       slog.Default(),
+		StateStore:   gateway.NewStateStore(5 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/google", nil)
+	tid, _ := tenant.NewTenantID("acme")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	req.SetPathValue("connector_id", "google")
+
+	rec := httptest.NewRecorder()
+	handler.HandleInitiate(rec, req)
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+
+	location := rec.Header().Get("Location")
+	require.NotEmpty(t, location)
+
+	u, err := url.Parse(location)
+	require.NoError(t, err)
+
+	assert.Equal(t, "https", u.Scheme)
+	assert.Equal(t, "acme.demo.meridianhub.cloud", u.Host,
+		"redirect should include tenant subdomain")
+	assert.Equal(t, "/dex/auth/google", u.Path)
+}
+
+func TestHandleInitiate_MeridianConnector_HasTenantInRedirect(t *testing.T) {
+	handler, err := gateway.NewSSOHandler(gateway.SSOHandlerConfig{
+		DexIssuerURL: "https://demo.meridianhub.cloud/dex",
+		ClientID:     "meridian-service",
+		CallbackURL:  "https://demo.meridianhub.cloud/api/auth/callback",
+		BaseDomain:   "demo.meridianhub.cloud",
+		Signer:       newSSOTestSigner(t),
+		Resolver:     &stubResolver{},
+		Logger:       slog.Default(),
+		StateStore:   gateway.NewStateStore(5 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/meridian", nil)
+	tid, _ := tenant.NewTenantID("volterra")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	req.SetPathValue("connector_id", "meridian")
+
+	rec := httptest.NewRecorder()
+	handler.HandleInitiate(rec, req)
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+
+	location := rec.Header().Get("Location")
+	u, err := url.Parse(location)
+	require.NoError(t, err)
+
+	assert.Equal(t, "volterra.demo.meridianhub.cloud", u.Host,
+		"meridian connector redirect should include tenant subdomain")
+	assert.Equal(t, "/dex/auth/meridian", u.Path)
+}
+
+func TestBuildTenantScopedDexURL_FallsBackWithoutBaseDomain(t *testing.T) {
+	// When BaseDomain is not set, redirect should use the bare DexIssuerURL
+	handler, err := gateway.NewSSOHandler(gateway.SSOHandlerConfig{
+		DexIssuerURL: "https://demo.meridianhub.cloud/dex",
+		ClientID:     "meridian-service",
+		CallbackURL:  "https://demo.meridianhub.cloud/api/auth/callback",
+		// No BaseDomain
+		Signer:     newSSOTestSigner(t),
+		Resolver:   &stubResolver{},
+		Logger:     slog.Default(),
+		StateStore: gateway.NewStateStore(5 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/google", nil)
+	tid, _ := tenant.NewTenantID("acme")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	req.SetPathValue("connector_id", "google")
+
+	rec := httptest.NewRecorder()
+	handler.HandleInitiate(rec, req)
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+
+	location := rec.Header().Get("Location")
+	u, err := url.Parse(location)
+	require.NoError(t, err)
+
+	assert.Equal(t, "demo.meridianhub.cloud", u.Host,
+		"without BaseDomain, redirect should use bare DexIssuerURL host")
+	assert.Equal(t, "/dex/auth/google", u.Path)
+}
+
 // --- Helpers ---
 
 // buildFakeIDToken creates a minimal unsigned JWT with an email claim.
