@@ -262,7 +262,7 @@ func NewAuthorizationHandler(cfg OAuthConfig, store *CodeStore, registry *Client
 func (h *AuthorizationHandler) resolveClient(clientID, redirectURI string) (string, string) {
 	if clientID == h.cfg.ClientID {
 		if redirectURI != "" && redirectURI != h.cfg.RedirectURI {
-			return "", "redirect_uri does not match registered value"
+			return "", errMsgRedirectURIMismatch
 		}
 		if redirectURI == "" {
 			return h.cfg.RedirectURI, ""
@@ -272,17 +272,17 @@ func (h *AuthorizationHandler) resolveClient(clientID, redirectURI string) (stri
 	if h.registry != nil {
 		client, ok := h.registry.Lookup(clientID)
 		if !ok {
-			return "", "invalid client_id"
+			return "", errMsgInvalidClientID
 		}
 		if redirectURI == "" {
-			return "", "redirect_uri is required for dynamic clients"
+			return "", errMsgRedirectURIRequired
 		}
 		if !client.HasRedirectURI(redirectURI) {
-			return "", "redirect_uri does not match registered value"
+			return "", errMsgRedirectURIMismatch
 		}
 		return redirectURI, ""
 	}
-	return "", "invalid client_id"
+	return "", errMsgInvalidClientID
 }
 
 // ServeHTTP implements http.Handler.

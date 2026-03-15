@@ -243,20 +243,23 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 			oidcStateStore := mcpauth.NewOIDCStateStore()
 			defer oidcStateStore.Close()
 
+			defaultTenantSlug := env.GetEnvOrDefault("MCP_DEFAULT_TENANT_SLUG", "")
+
 			oidcHandler, err := mcpauth.NewOIDCHandler(mcpauth.OIDCHandlerConfig{
 				OIDC: mcpauth.OIDCConfig{
 					DexIssuerURL: dexIssuerURL,
 					ClientID:     dexClientID,
 					CallbackURL:  dexCallbackURL,
 				},
-				OAuth:      oauthCfg,
-				StateStore: oidcStateStore,
-				CodeStore:  codeStore,
-				Registry:   clientRegistry,
-				Signer:     signer,
-				BaseURL:    baseURL,
-				BaseDomain: baseDomain,
-				Logger:     logger,
+				OAuth:             oauthCfg,
+				StateStore:        oidcStateStore,
+				CodeStore:         codeStore,
+				Registry:          clientRegistry,
+				Signer:            signer,
+				DefaultTenantSlug: defaultTenantSlug,
+				BaseURL:           baseURL,
+				BaseDomain:        baseDomain,
+				Logger:            logger,
 			})
 			if err != nil {
 				return fmt.Errorf("oidc handler: %w", err)

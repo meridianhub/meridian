@@ -51,6 +51,8 @@ var (
 	errOIDCStateFull          = errors.New("oidc state store is full")
 	errInvalidJWTFormat       = errors.New("invalid JWT format")
 	errEmailClaimMissing      = errors.New("email claim missing from ID token")
+	errTenantRequired         = errors.New("tenant identification required: use a tenant subdomain or configure MCP_DEFAULT_TENANT_SLUG")
+	errTenantResolutionFailed = errors.New("tenant slug resolution failed")
 )
 
 const (
@@ -75,6 +77,11 @@ const (
 
 	schemeHTTP  = "http"
 	schemeHTTPS = "https"
+
+	// Shared OAuth error messages used by both static and dynamic client validation.
+	errMsgInvalidClientID     = "invalid client_id"
+	errMsgRedirectURIMismatch = "redirect_uri does not match registered value"
+	errMsgRedirectURIRequired = "redirect_uri is required for dynamic clients"
 )
 
 // OIDCConfig holds configuration for the Dex OIDC integration.
@@ -184,19 +191,28 @@ func (s *OIDCStateStore) Consume(key string) (OIDCFlowState, bool) {
 	return entry, true
 }
 
+// TenantSlugResolver resolves a tenant slug (e.g., "acme") to its canonical
+// UUID. This ensures the x-tenant-id JWT claim contains a UUID consistent
+// with BFF-issued tokens, not the raw slug string.
+type TenantSlugResolver interface {
+	ResolveSlug(ctx context.Context, slug string) (string, error)
+}
+
 // OIDCHandler manages the OIDC authorization flow with Dex.
 type OIDCHandler struct {
-	cfg            OIDCConfig
-	oauthCfg       OAuthConfig
-	stateStore     *OIDCStateStore
-	codeStore      *CodeStore
-	registry       *ClientRegistry
-	signer         *platformauth.JWTSigner
-	tokenTTL       time.Duration
-	baseDomain     string
-	dexAuthBaseURL string // External Dex base URL for browser redirects (derived from BaseURL + DexIssuerURL path).
-	httpClient     *http.Client
-	logger         *slog.Logger
+	cfg               OIDCConfig
+	oauthCfg          OAuthConfig
+	stateStore        *OIDCStateStore
+	codeStore         *CodeStore
+	registry          *ClientRegistry
+	signer            *platformauth.JWTSigner
+	tenantResolver    TenantSlugResolver
+	tokenTTL          time.Duration
+	defaultTenantSlug string
+	baseDomain        string
+	dexAuthBaseURL    string // External Dex base URL for browser redirects (derived from BaseURL + DexIssuerURL path).
+	httpClient        *http.Client
+	logger            *slog.Logger
 }
 
 // OIDCHandlerConfig holds configuration for creating an OIDCHandler.
@@ -207,7 +223,15 @@ type OIDCHandlerConfig struct {
 	CodeStore  *CodeStore
 	Registry   *ClientRegistry
 	Signer     *platformauth.JWTSigner
-	TokenTTL   time.Duration
+	// TenantResolver resolves tenant slugs to UUIDs for JWT claims.
+	// When nil, the raw slug is used as-is (dev/test fallback).
+	TenantResolver TenantSlugResolver
+	TokenTTL       time.Duration
+	// DefaultTenantSlug is used when no tenant subdomain is present in the
+	// request. In single-tenant deployments (e.g., demo), set this to the
+	// tenant's slug so bare-domain requests work. When empty in multi-tenant
+	// mode, bare-domain requests fail closed with HTTP 400.
+	DefaultTenantSlug string
 	// BaseURL is the public-facing base URL of the MCP server
 	// (e.g., "https://demo.meridianhub.cloud"). Used to construct browser-facing
 	// Dex redirect URLs when DexIssuerURL is an internal Docker hostname.
@@ -269,17 +293,19 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 	}
 
 	return &OIDCHandler{
-		cfg:            cfg.OIDC,
-		oauthCfg:       cfg.OAuth,
-		stateStore:     cfg.StateStore,
-		codeStore:      cfg.CodeStore,
-		registry:       cfg.Registry,
-		signer:         cfg.Signer,
-		tokenTTL:       ttl,
-		baseDomain:     cfg.BaseDomain,
-		dexAuthBaseURL: dexAuthBaseURL,
-		httpClient:     httpClient,
-		logger:         cfg.Logger,
+		cfg:               cfg.OIDC,
+		oauthCfg:          cfg.OAuth,
+		stateStore:        cfg.StateStore,
+		codeStore:         cfg.CodeStore,
+		registry:          cfg.Registry,
+		signer:            cfg.Signer,
+		tenantResolver:    cfg.TenantResolver,
+		tokenTTL:          ttl,
+		defaultTenantSlug: cfg.DefaultTenantSlug,
+		baseDomain:        cfg.BaseDomain,
+		dexAuthBaseURL:    dexAuthBaseURL,
+		httpClient:        httpClient,
+		logger:            cfg.Logger,
 	}, nil
 }
 
@@ -305,6 +331,35 @@ func resolveDexAuthBaseURL(publicBaseURL string, issuerURL *url.URL, dexIssuerUR
 	return result
 }
 
+// validateAuthorizeClient validates the client_id and redirect_uri parameters
+// for an authorize request. Returns the resolved redirect URI or an error message.
+func (h *OIDCHandler) validateAuthorizeClient(clientID, redirectURI string) (string, string) {
+	if clientID == h.oauthCfg.ClientID {
+		if redirectURI == "" {
+			return h.oauthCfg.RedirectURI, ""
+		}
+		if redirectURI != h.oauthCfg.RedirectURI {
+			return "", errMsgRedirectURIMismatch
+		}
+		return redirectURI, ""
+	}
+
+	if h.registry == nil {
+		return "", errMsgInvalidClientID
+	}
+	client, ok := h.registry.Lookup(clientID)
+	if !ok {
+		return "", errMsgInvalidClientID
+	}
+	if redirectURI == "" {
+		return "", errMsgRedirectURIRequired
+	}
+	if !client.HasRedirectURI(redirectURI) {
+		return "", errMsgRedirectURIMismatch
+	}
+	return redirectURI, ""
+}
+
 // HandleAuthorize handles GET /oauth/authorize from the MCP client.
 // It stores the MCP client's PKCE state and redirects to Dex for authentication.
 func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
@@ -316,36 +371,10 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	clientID := q.Get("client_id")
-	redirectURI := q.Get("redirect_uri")
-
-	// Validate client_id and redirect_uri for both static and dynamic clients.
-	if clientID == h.oauthCfg.ClientID {
-		// Static client: default to configured redirect_uri, reject mismatches.
-		if redirectURI == "" {
-			redirectURI = h.oauthCfg.RedirectURI
-		} else if redirectURI != h.oauthCfg.RedirectURI {
-			http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
-			return
-		}
-	} else {
-		// Dynamic client: must be in registry with a matching redirect_uri.
-		if h.registry == nil {
-			http.Error(w, "invalid client_id", http.StatusBadRequest)
-			return
-		}
-		client, ok := h.registry.Lookup(clientID)
-		if !ok {
-			http.Error(w, "invalid client_id", http.StatusBadRequest)
-			return
-		}
-		if redirectURI == "" {
-			http.Error(w, "redirect_uri is required for dynamic clients", http.StatusBadRequest)
-			return
-		}
-		if !client.HasRedirectURI(redirectURI) {
-			http.Error(w, "redirect_uri does not match registered value", http.StatusBadRequest)
-			return
-		}
+	redirectURI, errMsg := h.validateAuthorizeClient(clientID, q.Get("redirect_uri"))
+	if errMsg != "" {
+		http.Error(w, errMsg, http.StatusBadRequest)
+		return
 	}
 
 	if q.Get("response_type") != "code" {
@@ -372,8 +401,17 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract tenant slug from request subdomain.
+	// Extract tenant slug from request subdomain, falling back to default.
 	tenantSlug := extractSubdomain(r.Host, h.baseDomain)
+	if tenantSlug == "" && h.defaultTenantSlug != "" {
+		tenantSlug = h.defaultTenantSlug
+		h.logger.Debug("oidc: using default tenant slug", "slug", tenantSlug)
+	}
+	if tenantSlug == "" {
+		h.logger.Warn("oidc: no tenant subdomain and no default configured — fail closed")
+		http.Error(w, errTenantRequired.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// Generate PKCE code verifier for the Dex exchange.
 	dexVerifier, err := generateRandomToken(oidcCodeVerifierBytes)
@@ -403,7 +441,9 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Redirect to Dex authorization endpoint via the external URL so the
 	// browser can reach Dex through the reverse proxy, even when the internal
 	// DexIssuerURL points to a Docker-internal hostname.
-	dexAuthURL := h.dexAuthBaseURL + "/auth"
+	// When a base domain is configured, build a tenant-scoped Dex URL so the
+	// browser hits the correct tenant subdomain (e.g., acme.demo.meridianhub.cloud/dex/auth).
+	dexAuthURL := BuildTenantScopedDexURL(h.dexAuthBaseURL, tenantSlug, h.baseDomain) + "/auth"
 	params := url.Values{
 		"client_id":             {h.cfg.ClientID},
 		"redirect_uri":          {h.cfg.CallbackURL},
@@ -476,11 +516,24 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve tenant slug to UUID for JWT consistency with BFF-issued tokens.
+	tenantID := flowState.TenantSlug
+	if h.tenantResolver != nil && tenantID != "" {
+		resolved, resolveErr := h.tenantResolver.ResolveSlug(ctx, tenantID)
+		if resolveErr != nil {
+			h.logger.Error("oidc: tenant slug resolution failed",
+				"tenant_slug", tenantID, "error", resolveErr)
+			http.Error(w, errTenantResolutionFailed.Error(), http.StatusInternalServerError)
+			return
+		}
+		tenantID = resolved
+	}
+
 	// Sign Meridian JWT with tenant context.
 	claims := map[string]interface{}{
 		"sub":         email, // Use email as subject until identity resolution is wired
 		"email":       email,
-		"x-tenant-id": flowState.TenantSlug,
+		"x-tenant-id": tenantID,
 	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
@@ -617,6 +670,31 @@ func generateRandomToken(n int) (string, error) {
 func computeS256Challenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// BuildTenantScopedDexURL inserts the tenant subdomain into the Dex base URL.
+// Given "https://demo.meridianhub.cloud/dex" and tenant "acme" with baseDomain
+// "demo.meridianhub.cloud", it returns "https://acme.demo.meridianhub.cloud/dex".
+// When baseDomain is empty or the URL can't be parsed, the original URL is returned.
+func BuildTenantScopedDexURL(dexBaseURL, tenantSlug, baseDomain string) string {
+	if baseDomain == "" || tenantSlug == "" {
+		return dexBaseURL
+	}
+	parsed, err := url.Parse(dexBaseURL)
+	if err != nil {
+		return dexBaseURL
+	}
+	// Only scope if the host matches or ends with the base domain.
+	host := parsed.Hostname()
+	if host != baseDomain && !strings.HasSuffix(host, "."+baseDomain) {
+		return dexBaseURL
+	}
+	// Replace the host with tenant-scoped subdomain.
+	parsed.Host = tenantSlug + "." + baseDomain
+	if parsed.Port() != "" {
+		parsed.Host = tenantSlug + "." + baseDomain + ":" + parsed.Port()
+	}
+	return parsed.String()
 }
 
 // isAllowedRedirectURI validates that a redirect URI is safe to redirect to.
