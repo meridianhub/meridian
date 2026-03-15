@@ -292,12 +292,13 @@ func (s *Server) wrapWithAuthChain(inner http.Handler) http.Handler {
 	return handler
 }
 
-// wrapWithTenantOnly wraps a handler with tenant resolution only (no auth, no
-// tenant-authz). Used for Dex endpoints where the handler manages its own
-// authentication but needs tenant context for credential lookups.
+// wrapWithTenantOnly wraps a handler with optional tenant resolution (no auth,
+// no tenant-authz). Used for Dex endpoints where the handler manages its own
+// authentication but needs tenant context for credential lookups when available.
+// Requests without a tenant subdomain pass through without error.
 func (s *Server) wrapWithTenantOnly(inner http.Handler) http.Handler {
 	if s.tenantResolver != nil {
-		return s.tenantResolver.Handler(inner)
+		return s.tenantResolver.HandlerOptionalTenant(inner)
 	}
 	return inner
 }
