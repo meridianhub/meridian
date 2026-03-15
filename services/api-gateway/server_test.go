@@ -880,7 +880,7 @@ func (r *stubTenantRepo) GetBySlug(_ context.Context, slug string) (*domain.Tena
 }
 
 // newTestTenantResolver creates a TenantResolverMiddleware for tests with a
-// pre-populated tenant. Uses local dev mode so X-Tenant-Slug header works.
+// pre-populated tenant. Uses subdomain-based resolution (production mode).
 func newTestTenantResolver(t *testing.T, baseDomain string, slug string, tenantID tenant.TenantID) *platformgateway.TenantResolverMiddleware {
 	t.Helper()
 
