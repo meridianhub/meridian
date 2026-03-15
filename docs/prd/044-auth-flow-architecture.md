@@ -363,11 +363,9 @@ MCP Server → POST demo.meridianhub.cloud/dex/token
 
 | File | Change |
 |------|--------|
-| `shared/platform/gateway/tenant_resolver.go` | Add `HandlerOptionalTenant()` method |
-| `shared/platform/gateway/tenant_resolver.go` | Remove `/dex/` from `platformPaths` |
+| `shared/platform/gateway/tenant_resolver.go` | Add `HandlerOptionalTenant()` method; remove `/dex/` from `platformPaths` |
 | `services/api-gateway/server.go` | Mount Dex with optional tenant resolution |
-| `services/mcp-server/internal/auth/oidc.go` | Redirect to tenant-scoped Dex URL; fail-closed when no tenant in multi-tenant mode |
-| `services/mcp-server/internal/auth/oidc.go` | Resolve slug → UUID in `HandleCallback` before signing JWT (R7) |
+| `services/mcp-server/internal/auth/oidc.go` | Redirect to tenant-scoped Dex URL; fail-closed when no tenant in multi-tenant mode; resolve slug → UUID in `HandleCallback` before signing JWT (R7) |
 | `services/mcp-server/cmd/main.go` | Add `MCP_DEFAULT_TENANT_SLUG` config (demo-only) |
 
 <!-- markdownlint-enable MD013 -->
