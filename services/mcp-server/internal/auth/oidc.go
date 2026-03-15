@@ -689,10 +689,11 @@ func BuildTenantScopedDexURL(dexBaseURL, tenantSlug, baseDomain string) string {
 	if host != baseDomain && !strings.HasSuffix(host, "."+baseDomain) {
 		return dexBaseURL
 	}
-	// Replace the host with tenant-scoped subdomain.
+	// Replace the host with tenant-scoped subdomain, preserving any port.
+	port := parsed.Port()
 	parsed.Host = tenantSlug + "." + baseDomain
-	if parsed.Port() != "" {
-		parsed.Host = tenantSlug + "." + baseDomain + ":" + parsed.Port()
+	if port != "" {
+		parsed.Host = tenantSlug + "." + baseDomain + ":" + port
 	}
 	return parsed.String()
 }

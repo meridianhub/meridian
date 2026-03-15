@@ -1022,6 +1022,13 @@ func TestBuildTenantScopedDexURL(t *testing.T) {
 			want:       "https://demo.meridianhub.cloud/dex",
 		},
 		{
+			name:       "preserves port in URL",
+			dexBaseURL: "https://demo.meridianhub.cloud:8443/dex",
+			tenant:     "acme",
+			baseDomain: "demo.meridianhub.cloud",
+			want:       "https://acme.demo.meridianhub.cloud:8443/dex",
+		},
+		{
 			name:       "non-matching host returns original",
 			dexBaseURL: "http://dex:5556/dex",
 			tenant:     "acme",
