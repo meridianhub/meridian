@@ -1,4 +1,4 @@
-# PRD 044: Manifest as Sole Source of Truth
+# PRD 045: Manifest as Sole Source of Truth
 
 ## Problem Statement
 
