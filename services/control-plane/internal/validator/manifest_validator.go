@@ -145,6 +145,14 @@ const (
 	SeverityWarning Severity = "warning"
 )
 
+// Starlark validation error codes.
+const (
+	// CodeStarlarkSyntaxError is used when a Starlark script has a syntax error.
+	CodeStarlarkSyntaxError = "STARLARK_SYNTAX_ERROR"
+	// CodeStarlarkCompilationError is used when a Starlark script fails to compile.
+	CodeStarlarkCompilationError = "STARLARK_COMPILATION_ERROR"
+)
+
 // ValidationError represents a single validation finding with structured
 // location information and optional suggestions for AI feedback.
 type ValidationError struct {
@@ -171,6 +179,14 @@ type ValidationError struct {
 
 	// AvailableFields lists valid field names when an unknown field is referenced.
 	AvailableFields []string `json:"available_fields,omitempty"`
+
+	// ResourceType is the manifest section type where the error occurred
+	// (e.g., "instrument", "account_type", "saga", "valuation_rule").
+	ResourceType string `json:"resource_type,omitempty"`
+
+	// ResourceID is the identifier of the specific resource that caused the error
+	// (e.g., the instrument code, account type code, or saga name).
+	ResourceID string `json:"resource_id,omitempty"`
 }
 
 // Error implements the error interface.
@@ -506,10 +522,12 @@ func (v *ManifestValidator) validateDuplicates(
 	for i, inst := range manifest.GetInstruments() {
 		if prev, exists := instrumentCodes[inst.GetCode()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("instruments[%d].code", i),
-				Code:     "DUPLICATE_CODE",
-				Message:  fmt.Sprintf("duplicate instrument code %q (first defined at instruments[%d])", inst.GetCode(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("instruments[%d].code", i),
+				Code:         "DUPLICATE_CODE",
+				Message:      fmt.Sprintf("duplicate instrument code %q (first defined at instruments[%d])", inst.GetCode(), prev),
+				ResourceType: "instrument",
+				ResourceID:   inst.GetCode(),
 			})
 		} else {
 			instrumentCodes[inst.GetCode()] = i
@@ -521,10 +539,12 @@ func (v *ManifestValidator) validateDuplicates(
 	for i, acct := range manifest.GetAccountTypes() {
 		if prev, exists := accountTypeCodes[acct.GetCode()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("account_types[%d].code", i),
-				Code:     "DUPLICATE_CODE",
-				Message:  fmt.Sprintf("duplicate account type code %q (first defined at account_types[%d])", acct.GetCode(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("account_types[%d].code", i),
+				Code:         "DUPLICATE_CODE",
+				Message:      fmt.Sprintf("duplicate account type code %q (first defined at account_types[%d])", acct.GetCode(), prev),
+				ResourceType: "account_type",
+				ResourceID:   acct.GetCode(),
 			})
 		} else {
 			accountTypeCodes[acct.GetCode()] = i
@@ -536,10 +556,12 @@ func (v *ManifestValidator) validateDuplicates(
 	for i, saga := range manifest.GetSagas() {
 		if prev, exists := sagaNames[saga.GetName()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("sagas[%d].name", i),
-				Code:     "DUPLICATE_NAME",
-				Message:  fmt.Sprintf("duplicate saga name %q (first defined at sagas[%d])", saga.GetName(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("sagas[%d].name", i),
+				Code:         "DUPLICATE_NAME",
+				Message:      fmt.Sprintf("duplicate saga name %q (first defined at sagas[%d])", saga.GetName(), prev),
+				ResourceType: "saga",
+				ResourceID:   saga.GetName(),
 			})
 		} else {
 			sagaNames[saga.GetName()] = i
@@ -547,11 +569,13 @@ func (v *ManifestValidator) validateDuplicates(
 		// Warn when an event-triggered saga has no filter; all events will trigger the saga
 		if strings.HasPrefix(saga.GetTrigger(), "event:") && saga.Filter == nil {
 			addError(result, ValidationError{
-				Severity:   SeverityWarning,
-				Path:       fmt.Sprintf("sagas[%d].filter", i),
-				Code:       "MISSING_EVENT_FILTER",
-				Message:    fmt.Sprintf("saga %q subscribes to event trigger %q without a filter; the saga will execute for every matching event", saga.GetName(), saga.GetTrigger()),
-				Suggestion: `Add a CEL filter expression, e.g. filter: 'event.amount > 0'`,
+				Severity:     SeverityWarning,
+				Path:         fmt.Sprintf("sagas[%d].filter", i),
+				Code:         "MISSING_EVENT_FILTER",
+				Message:      fmt.Sprintf("saga %q subscribes to event trigger %q without a filter; the saga will execute for every matching event", saga.GetName(), saga.GetTrigger()),
+				Suggestion:   `Add a CEL filter expression, e.g. filter: 'event.amount > 0'`,
+				ResourceType: "saga",
+				ResourceID:   saga.GetName(),
 			})
 		}
 	}
@@ -566,10 +590,12 @@ func (v *ManifestValidator) validateDuplicates(
 		key := mappingKey{name: mp.GetName(), version: mp.GetVersion()}
 		if prev, exists := mappingKeys[key]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("mappings[%d]", i),
-				Code:     "DUPLICATE_MAPPING",
-				Message:  fmt.Sprintf("duplicate mapping name=%q version=%d (first defined at mappings[%d])", mp.GetName(), mp.GetVersion(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("mappings[%d]", i),
+				Code:         "DUPLICATE_MAPPING",
+				Message:      fmt.Sprintf("duplicate mapping name=%q version=%d (first defined at mappings[%d])", mp.GetName(), mp.GetVersion(), prev),
+				ResourceType: "mapping",
+				ResourceID:   mp.GetName(),
 			})
 		} else {
 			mappingKeys[key] = i
@@ -593,10 +619,12 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 	for i, src := range manifest.GetMarketData().GetSources() {
 		if prev, exists := mdSourceCodes[src.GetCode()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("market_data.sources[%d].code", i),
-				Code:     "DUPLICATE_CODE",
-				Message:  fmt.Sprintf("duplicate market data source code %q (first defined at market_data.sources[%d])", src.GetCode(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("market_data.sources[%d].code", i),
+				Code:         "DUPLICATE_CODE",
+				Message:      fmt.Sprintf("duplicate market data source code %q (first defined at market_data.sources[%d])", src.GetCode(), prev),
+				ResourceType: "market_data_source",
+				ResourceID:   src.GetCode(),
 			})
 		} else {
 			mdSourceCodes[src.GetCode()] = i
@@ -608,10 +636,12 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 	for i, ds := range manifest.GetMarketData().GetDatasets() {
 		if prev, exists := mdSetCodes[ds.GetCode()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("market_data.datasets[%d].code", i),
-				Code:     "DUPLICATE_CODE",
-				Message:  fmt.Sprintf("duplicate market data set code %q (first defined at market_data.datasets[%d])", ds.GetCode(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("market_data.datasets[%d].code", i),
+				Code:         "DUPLICATE_CODE",
+				Message:      fmt.Sprintf("duplicate market data set code %q (first defined at market_data.datasets[%d])", ds.GetCode(), prev),
+				ResourceType: "market_data_dataset",
+				ResourceID:   ds.GetCode(),
 			})
 		} else {
 			mdSetCodes[ds.GetCode()] = i
@@ -623,10 +653,12 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 	for i, org := range manifest.GetOrganizations() {
 		if prev, exists := orgCodes[org.GetCode()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("organizations[%d].code", i),
-				Code:     "DUPLICATE_CODE",
-				Message:  fmt.Sprintf("duplicate organization code %q (first defined at organizations[%d])", org.GetCode(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("organizations[%d].code", i),
+				Code:         "DUPLICATE_CODE",
+				Message:      fmt.Sprintf("duplicate organization code %q (first defined at organizations[%d])", org.GetCode(), prev),
+				ResourceType: "organization",
+				ResourceID:   org.GetCode(),
 			})
 		} else {
 			orgCodes[org.GetCode()] = i
@@ -648,10 +680,12 @@ func (v *ManifestValidator) validateOperationalGatewayDuplicates(
 	for i, conn := range gw.GetProviderConnections() {
 		if prev, exists := connectionIDs[conn.GetConnectionId()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("operational_gateway.provider_connections[%d].connection_id", i),
-				Code:     "DUPLICATE_CONNECTION_ID",
-				Message:  fmt.Sprintf("duplicate connection_id %q (first defined at provider_connections[%d])", conn.GetConnectionId(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("operational_gateway.provider_connections[%d].connection_id", i),
+				Code:         "DUPLICATE_CONNECTION_ID",
+				Message:      fmt.Sprintf("duplicate connection_id %q (first defined at provider_connections[%d])", conn.GetConnectionId(), prev),
+				ResourceType: "provider_connection",
+				ResourceID:   conn.GetConnectionId(),
 			})
 		} else {
 			connectionIDs[conn.GetConnectionId()] = i
@@ -662,10 +696,12 @@ func (v *ManifestValidator) validateOperationalGatewayDuplicates(
 	for i, route := range gw.GetInstructionRoutes() {
 		if prev, exists := instructionTypes[route.GetInstructionType()]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     fmt.Sprintf("operational_gateway.instruction_routes[%d].instruction_type", i),
-				Code:     "DUPLICATE_INSTRUCTION_TYPE",
-				Message:  fmt.Sprintf("duplicate instruction_type %q (first defined at instruction_routes[%d])", route.GetInstructionType(), prev),
+				Severity:     SeverityError,
+				Path:         fmt.Sprintf("operational_gateway.instruction_routes[%d].instruction_type", i),
+				Code:         "DUPLICATE_INSTRUCTION_TYPE",
+				Message:      fmt.Sprintf("duplicate instruction_type %q (first defined at instruction_routes[%d])", route.GetInstructionType(), prev),
+				ResourceType: "instruction_route",
+				ResourceID:   route.GetInstructionType(),
 			})
 		} else {
 			instructionTypes[route.GetInstructionType()] = i
@@ -692,6 +728,8 @@ func (v *ManifestValidator) validateCELExpressions(
 				v.celEnv,
 				celBalanceFields,
 				result,
+				"account_type",
+				acctType.GetCode(),
 			)
 		}
 
@@ -703,26 +741,33 @@ func (v *ManifestValidator) validateCELExpressions(
 				v.bucketCelEnv,
 				[]string{"instrument_code", "attributes"},
 				result,
+				"account_type",
+				acctType.GetCode(),
 			)
 		}
 	}
 }
 
 // validateCELExpression compiles a single CEL expression and produces structured errors.
+// resourceType and resourceID are optional context identifiers (e.g., "account_type", "SETTLEMENT").
 func (v *ManifestValidator) validateCELExpression(
 	expression string,
 	path string,
 	env *cel.Env,
 	availableFields []string,
 	result *ValidationResult,
+	resourceType string,
+	resourceID string,
 ) {
 	// Check length constraint
 	if len(expression) > 4096 {
 		addError(result, ValidationError{
-			Severity: SeverityError,
-			Path:     path,
-			Code:     "CEL_EXPRESSION_TOO_LONG",
-			Message:  fmt.Sprintf("CEL expression exceeds maximum length of 4096 bytes (got %d)", len(expression)),
+			Severity:     SeverityError,
+			Path:         path,
+			Code:         "CEL_EXPRESSION_TOO_LONG",
+			Message:      fmt.Sprintf("CEL expression exceeds maximum length of 4096 bytes (got %d)", len(expression)),
+			ResourceType: resourceType,
+			ResourceID:   resourceID,
 		})
 		return
 	}
@@ -753,15 +798,19 @@ func (v *ManifestValidator) validateCELExpression(
 			Message:         errMsg,
 			Suggestion:      suggestion,
 			AvailableFields: availableFields,
+			ResourceType:    resourceType,
+			ResourceID:      resourceID,
 		})
 		return
 	}
 
 	addError(result, ValidationError{
-		Severity: SeverityError,
-		Path:     path,
-		Code:     "CEL_COMPILATION_ERROR",
-		Message:  errMsg,
+		Severity:     SeverityError,
+		Path:         path,
+		Code:         "CEL_COMPILATION_ERROR",
+		Message:      errMsg,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
 	})
 }
 
@@ -793,42 +842,52 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 	path string,
 	result *ValidationResult,
 ) []schema.HandlerCallInfo {
+	sagaName := saga.GetName()
 	if len(script) > 65536 {
 		addError(result, ValidationError{
-			Severity: SeverityError,
-			Path:     path,
-			Code:     "STARLARK_SCRIPT_TOO_LARGE",
-			Message:  fmt.Sprintf("Starlark script exceeds maximum size of 65536 bytes (got %d)", len(script)),
+			Severity:     SeverityError,
+			Path:         path,
+			Code:         "STARLARK_SCRIPT_TOO_LARGE",
+			Message:      fmt.Sprintf("Starlark script exceeds maximum size of 65536 bytes (got %d)", len(script)),
+			ResourceType: "saga",
+			ResourceID:   sagaName,
 		})
 		return nil
 	}
 
 	fileOpts := &syntax.FileOptions{}
-	_, parseErr := fileOpts.Parse(saga.GetName()+".star", script, 0)
+	_, parseErr := fileOpts.Parse(sagaName+".star", script, 0)
 	if parseErr != nil {
-		addError(result, parseStarlarkError(parseErr, path))
+		ve := parseStarlarkError(parseErr, path)
+		ve.ResourceType = "saga"
+		ve.ResourceID = sagaName
+		addError(result, ve)
 		return nil
 	}
 
 	predeclared, callLog, deprecationWarnings, err := v.buildStarlarkPredeclared()
 	if err != nil {
 		addError(result, ValidationError{
-			Severity: SeverityError,
-			Path:     path,
-			Code:     "STARLARK_MODULE_BUILD_ERROR",
-			Message:  fmt.Sprintf("failed to build typed service modules: %v", err),
+			Severity:     SeverityError,
+			Path:         path,
+			Code:         "STARLARK_MODULE_BUILD_ERROR",
+			Message:      fmt.Sprintf("failed to build typed service modules: %v", err),
+			ResourceType: "saga",
+			ResourceID:   sagaName,
 		})
 		return nil
 	}
 
 	thread := &starlark.Thread{
-		Name:  saga.GetName(),
+		Name:  sagaName,
 		Print: func(_ *starlark.Thread, _ string) {},
 	}
 
-	_, execErr := starlark.ExecFileOptions(fileOpts, thread, saga.GetName()+".star", script, predeclared)
+	_, execErr := starlark.ExecFileOptions(fileOpts, thread, sagaName+".star", script, predeclared)
 	if execErr != nil {
 		ve := parseStarlarkError(execErr, path)
+		ve.ResourceType = "saga"
+		ve.ResourceID = sagaName
 
 		// Enrich with structured error codes from handler validation failures
 		if v.enrichHandlerValidationError(execErr, &ve) {
@@ -845,11 +904,13 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 	if deprecationWarnings != nil {
 		for _, w := range *deprecationWarnings {
 			addError(result, ValidationError{
-				Severity:   SeverityWarning,
-				Path:       path,
-				Code:       w.Code,
-				Message:    w.Message,
-				Suggestion: w.Suggestion,
+				Severity:     SeverityWarning,
+				Path:         path,
+				Code:         w.Code,
+				Message:      w.Message,
+				Suggestion:   w.Suggestion,
+				ResourceType: "saga",
+				ResourceID:   sagaName,
 			})
 		}
 	}
@@ -892,6 +953,8 @@ func (v *ManifestValidator) validateCrossReferences(
 				instrCode, instrumentCodes, codeList,
 				fmt.Sprintf("account_types[%d].allowed_instruments[%d]", i, j),
 				result,
+				"account_type",
+				acctType.GetCode(),
 			)
 		}
 	}
@@ -901,11 +964,15 @@ func (v *ManifestValidator) validateCrossReferences(
 			rule.GetFromInstrument(), instrumentCodes, codeList,
 			fmt.Sprintf("valuation_rules[%d].from_instrument", i),
 			result,
+			"valuation_rule",
+			fmt.Sprintf("%s->%s", rule.GetFromInstrument(), rule.GetToInstrument()),
 		)
 		checkInstrumentRef(
 			rule.GetToInstrument(), instrumentCodes, codeList,
 			fmt.Sprintf("valuation_rules[%d].to_instrument", i),
 			result,
+			"valuation_rule",
+			fmt.Sprintf("%s->%s", rule.GetFromInstrument(), rule.GetToInstrument()),
 		)
 	}
 
@@ -927,6 +994,8 @@ func (v *ManifestValidator) validateCrossReferences(
 				Code:            "INVALID_REFERENCE",
 				Message:         fmt.Sprintf("market data set %q references unknown source code %q", ds.GetCode(), sourceCode),
 				AvailableFields: mdSourceCodeList,
+				ResourceType:    "market_data_dataset",
+				ResourceID:      ds.GetCode(),
 			}
 			if suggestion := findClosestMatch(sourceCode, mdSourceCodeList); suggestion != "" {
 				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
@@ -964,6 +1033,8 @@ func (v *ManifestValidator) validateOrganizationCrossRefs(
 				Code:            "INVALID_REFERENCE",
 				Message:         fmt.Sprintf("organization %q references unknown party type %q", org.GetCode(), partyType),
 				AvailableFields: partyTypeList,
+				ResourceType:    "organization",
+				ResourceID:      org.GetCode(),
 			}
 			if suggestion := findClosestMatch(partyType, partyTypeList); suggestion != "" {
 				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
@@ -1604,12 +1675,15 @@ func (v *ManifestValidator) validatePlatformFee(
 }
 
 // checkInstrumentRef validates that a referenced instrument code exists in the manifest.
+// resourceType and resourceID identify the referencing resource (e.g., "account_type", "SETTLEMENT").
 func checkInstrumentRef(
 	code string,
 	validCodes map[string]bool,
 	codeList []string,
 	path string,
 	result *ValidationResult,
+	resourceType string,
+	resourceID string,
 ) {
 	if validCodes[code] {
 		return
@@ -1620,6 +1694,8 @@ func checkInstrumentRef(
 		Code:            "UNDEFINED_INSTRUMENT_REFERENCE",
 		Message:         fmt.Sprintf("instrument code %q is not defined in instruments[]", code),
 		AvailableFields: codeList,
+		ResourceType:    resourceType,
+		ResourceID:      resourceID,
 	}
 	if suggestion := findClosestMatch(code, codeList); suggestion != "" {
 		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
@@ -1659,13 +1735,13 @@ func (v *ManifestValidator) validatePartyTypes(
 
 		// Validate CEL expressions
 		if expr := pt.GetValidationCel(); expr != "" {
-			v.validateCELExpression(expr, basePath+".validation_cel", v.partyTypeCelEnv, celPartyTypeFields, result)
+			v.validateCELExpression(expr, basePath+".validation_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", pt.GetPartyType())
 		}
 		if expr := pt.GetEligibilityCel(); expr != "" {
-			v.validateCELExpression(expr, basePath+".eligibility_cel", v.partyTypeCelEnv, celPartyTypeFields, result)
+			v.validateCELExpression(expr, basePath+".eligibility_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", pt.GetPartyType())
 		}
 		if expr := pt.GetErrorMessageCel(); expr != "" {
-			v.validateCELExpression(expr, basePath+".error_message_cel", v.partyTypeCelEnv, celPartyTypeFields, result)
+			v.validateCELExpression(expr, basePath+".error_message_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", pt.GetPartyType())
 		}
 	}
 }
@@ -2457,7 +2533,7 @@ func parseStarlarkError(err error, basePath string) ValidationError {
 	ve := ValidationError{
 		Severity: SeverityError,
 		Path:     basePath,
-		Code:     "STARLARK_COMPILATION_ERROR",
+		Code:     CodeStarlarkCompilationError,
 		Message:  err.Error(),
 	}
 
@@ -2476,7 +2552,7 @@ func parseStarlarkError(err error, basePath string) ValidationError {
 
 	// Detect syntax errors vs execution errors
 	if strings.Contains(errStr, "syntax") || strings.Contains(errStr, "got ") {
-		ve.Code = "STARLARK_SYNTAX_ERROR"
+		ve.Code = CodeStarlarkSyntaxError
 	}
 
 	return ve

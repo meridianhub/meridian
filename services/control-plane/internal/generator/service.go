@@ -320,10 +320,12 @@ func toProtoValidationErrors(errs []ValidationError) []*controlplanev1.Validatio
 	out := make([]*controlplanev1.ValidationError, len(errs))
 	for i, e := range errs {
 		out[i] = &controlplanev1.ValidationError{
-			Code:       e.Code,
-			Path:       e.Path,
-			Message:    e.Message,
-			Suggestion: e.Suggestion,
+			Code:         e.Code,
+			Path:         e.Path,
+			Message:      e.Message,
+			Suggestion:   e.Suggestion,
+			ResourceType: e.ResourceType,
+			ResourceId:   e.ResourceID,
 		}
 	}
 	return out

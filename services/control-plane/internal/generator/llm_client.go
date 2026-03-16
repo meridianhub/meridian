@@ -68,6 +68,14 @@ type ValidationError struct {
 	// AvailableFields lists valid field names when an unknown field is referenced.
 	// This mirrors validator.ValidationError.AvailableFields for a straight copy.
 	AvailableFields []string
+
+	// ResourceType is the manifest section type where the error occurred
+	// (e.g., "instrument", "account_type", "saga", "valuation_rule").
+	ResourceType string
+
+	// ResourceID is the identifier of the specific resource that caused the error
+	// (e.g., the instrument code, account type code, or saga name).
+	ResourceID string
 }
 
 // LLMClient abstracts LLM interactions for manifest generation.
