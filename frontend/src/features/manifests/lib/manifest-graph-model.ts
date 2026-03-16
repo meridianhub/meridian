@@ -298,7 +298,8 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   // Collect channels from saga triggers
   for (const saga of sagas) {
     if (saga.trigger?.startsWith('event:')) {
-      eventChannels.add(saga.trigger.slice('event:'.length))
+      const channel = saga.trigger.slice('event:'.length)
+      if (channel) eventChannels.add(channel)
     }
   }
 
@@ -331,6 +332,7 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   for (const saga of sagas) {
     if (saga.trigger?.startsWith('event:')) {
       const channel = saga.trigger.slice('event:'.length)
+      if (!channel) continue
       edges.push({
         id: `triggered_by:${saga.name}:${channel}`,
         source: `saga:${saga.name}`,
