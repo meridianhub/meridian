@@ -167,12 +167,13 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 	}
 
 	// Validate mode parameter.
-	var forceSkipImmutability bool
+	var skipImmutabilityChecks bool
 	switch p.Mode {
 	case "", "create":
 		// Create mode: schema-only validation, skip tenant state comparison.
-		// TODO: Replace Force with SkipImmutabilityChecks once proto field is added (task 2).
-		forceSkipImmutability = true
+		// SkipImmutabilityChecks bypasses immutability enforcement so a new manifest
+		// can be validated without comparing against any existing tenant state.
+		skipImmutabilityChecks = true
 	case "amend":
 		if p.TenantID == "" {
 			return map[string]interface{}{
@@ -205,10 +206,10 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 	}
 
 	resp, err := client.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
-		Manifest:  manifest,
-		DryRun:    true,
-		Force:     forceSkipImmutability,
-		AppliedBy: "mcp-server-validate",
+		Manifest:               manifest,
+		DryRun:                 true,
+		SkipImmutabilityChecks: skipImmutabilityChecks,
+		AppliedBy:              "mcp-server-validate",
 	})
 	if err != nil {
 		formatted := mcperrors.FormatGRPCError(err)
