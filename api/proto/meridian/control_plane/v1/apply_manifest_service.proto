@@ -6,6 +6,8 @@ import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "meridian/control_plane/v1/manifest.proto";
 import "meridian/control_plane/v1/manifest_history_service.proto";
+import "meridian/mapping/v1/mapping.proto";
+import "meridian/party/v1/party.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
 
@@ -17,6 +19,18 @@ service ApplyManifestService {
   rpc ApplyManifest(ApplyManifestRequest) returns (ApplyManifestResponse) {
     option (google.api.http) = {
       post: "/v1/manifests/apply"
+      body: "*"
+    };
+  }
+
+  // ApplyResource applies a granular mutation to a single resource within the manifest.
+  // It reads the current manifest from the database, patches the specified resource into
+  // the composite manifest, validates the full dependency graph, computes a diff, and
+  // executes only the affected phases. A new manifest version is created on success.
+  // In dry_run mode, returns the diff without applying changes.
+  rpc ApplyResource(ApplyResourceRequest) returns (ApplyResourceResponse) {
+    option (google.api.http) = {
+      post: "/v1/manifests/apply-resource"
       body: "*"
     };
   }
@@ -159,4 +173,139 @@ message ValidationError {
   // resource_id is the identifier of the specific resource that caused the error
   // (e.g., the instrument code, account type code, or saga name).
   string resource_id = 7;
+}
+
+// ManifestResourceType identifies a category of resource within the manifest.
+// Used by ApplyResource to specify which resource type is being mutated.
+enum ManifestResourceType {
+  // MANIFEST_RESOURCE_TYPE_UNSPECIFIED is the default zero value.
+  MANIFEST_RESOURCE_TYPE_UNSPECIFIED = 0;
+
+  // MANIFEST_RESOURCE_TYPE_INSTRUMENT targets an InstrumentDefinition.
+  MANIFEST_RESOURCE_TYPE_INSTRUMENT = 1;
+
+  // MANIFEST_RESOURCE_TYPE_ACCOUNT_TYPE targets an AccountTypeDefinition.
+  MANIFEST_RESOURCE_TYPE_ACCOUNT_TYPE = 2;
+
+  // MANIFEST_RESOURCE_TYPE_VALUATION_RULE targets a ValuationRule.
+  MANIFEST_RESOURCE_TYPE_VALUATION_RULE = 3;
+
+  // MANIFEST_RESOURCE_TYPE_SAGA targets a SagaDefinition.
+  MANIFEST_RESOURCE_TYPE_SAGA = 4;
+
+  // MANIFEST_RESOURCE_TYPE_PARTY_TYPE targets a PartyTypeDefinition.
+  MANIFEST_RESOURCE_TYPE_PARTY_TYPE = 5;
+
+  // MANIFEST_RESOURCE_TYPE_MAPPING targets a MappingDefinition.
+  MANIFEST_RESOURCE_TYPE_MAPPING = 6;
+
+  // MANIFEST_RESOURCE_TYPE_PROVIDER_CONNECTION targets a ProviderConnectionConfig.
+  MANIFEST_RESOURCE_TYPE_PROVIDER_CONNECTION = 7;
+
+  // MANIFEST_RESOURCE_TYPE_INSTRUCTION_ROUTE targets an InstructionRouteConfig.
+  MANIFEST_RESOURCE_TYPE_INSTRUCTION_ROUTE = 8;
+
+  // MANIFEST_RESOURCE_TYPE_MARKET_DATA_SOURCE targets a MarketDataSourceDefinition.
+  MANIFEST_RESOURCE_TYPE_MARKET_DATA_SOURCE = 9;
+
+  // MANIFEST_RESOURCE_TYPE_MARKET_DATA_SET targets a MarketDataSetDefinition.
+  MANIFEST_RESOURCE_TYPE_MARKET_DATA_SET = 10;
+
+  // MANIFEST_RESOURCE_TYPE_ORGANIZATION targets an OrganizationDefinition.
+  MANIFEST_RESOURCE_TYPE_ORGANIZATION = 11;
+
+  // MANIFEST_RESOURCE_TYPE_INTERNAL_ACCOUNT targets an InternalAccountDefinition.
+  MANIFEST_RESOURCE_TYPE_INTERNAL_ACCOUNT = 12;
+}
+
+// ApplyResourceRequest contains the resource to apply and apply options.
+// The caller specifies the resource type and provides the resource payload
+// as a oneof. The server reads the current manifest, patches the resource
+// into it, validates the full dependency graph, diffs, and executes only
+// the affected phases.
+message ApplyResourceRequest {
+  // resource_type identifies which manifest section is being mutated.
+  ManifestResourceType resource_type = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // resource is the resource payload to apply. Exactly one must be set,
+  // and it must match the resource_type field.
+  oneof resource {
+    option (buf.validate.oneof).required = true;
+
+    // instrument is an InstrumentDefinition to create or update.
+    InstrumentDefinition instrument = 2;
+
+    // account_type is an AccountTypeDefinition to create or update.
+    AccountTypeDefinition account_type = 3;
+
+    // valuation_rule is a ValuationRule to create or update.
+    ValuationRule valuation_rule = 4;
+
+    // saga is a SagaDefinition to create or update.
+    SagaDefinition saga = 5;
+
+    // party_type is a PartyTypeDefinition to create or update.
+    meridian.party.v1.PartyTypeDefinition party_type = 6;
+
+    // mapping is a MappingDefinition to create or update.
+    meridian.mapping.v1.MappingDefinition mapping = 7;
+
+    // provider_connection is a ProviderConnectionConfig to create or update.
+    ProviderConnectionConfig provider_connection = 8;
+
+    // instruction_route is an InstructionRouteConfig to create or update.
+    InstructionRouteConfig instruction_route = 9;
+
+    // market_data_source is a MarketDataSourceDefinition to create or update.
+    MarketDataSourceDefinition market_data_source = 10;
+
+    // market_data_set is a MarketDataSetDefinition to create or update.
+    MarketDataSetDefinition market_data_set = 11;
+
+    // organization is an OrganizationDefinition to create or update.
+    OrganizationDefinition organization = 12;
+
+    // internal_account is an InternalAccountDefinition to create or update.
+    InternalAccountDefinition internal_account = 13;
+  }
+
+  // dry_run when true performs validation and planning without committing changes.
+  bool dry_run = 14;
+
+  // applied_by identifies who is applying this resource (e.g., user email, API key ID).
+  string applied_by = 15 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // expected_sequence_number is the sequence number the caller expects the
+  // current manifest to have. If it does not match the actual current sequence
+  // number, the apply is rejected with ABORTED status (ETag semantics).
+  // Set to 0 to skip the check (first apply or "overwrite" mode).
+  int64 expected_sequence_number = 16;
+}
+
+// ApplyResourceResponse contains the result of a single-resource application.
+message ApplyResourceResponse {
+  // status is the outcome of the apply operation.
+  ApplyManifestStatus status = 1;
+
+  // step_results contains the result of each execution step.
+  repeated StepResult step_results = 2;
+
+  // validation_errors contains structured validation errors if the manifest is invalid.
+  repeated ValidationError validation_errors = 3;
+
+  // diff_summary is a human-readable summary of changes detected.
+  string diff_summary = 4;
+
+  // sequence_number is the sequence number assigned to the new manifest version.
+  // Callers should use this value as expected_sequence_number in subsequent applies.
+  int64 sequence_number = 5;
+
+  // snapshot is the manifest version record created by this apply, if successful.
+  ManifestVersion snapshot = 6;
 }
