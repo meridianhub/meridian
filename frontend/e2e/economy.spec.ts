@@ -47,32 +47,25 @@ test.describe('Economy Overview', () => {
   })
 
   test('empty state has Configure Economy button', async ({ authenticatedPage: page }) => {
-    const emptyState = page.getByTestId('overview-empty')
-    const isVisible = await emptyState.isVisible().catch(() => false)
+    const isVisible = await page.getByTestId('overview-empty').isVisible().catch(() => false)
+    test.skip(!isVisible, 'Requires overview-empty state (no backend returns NotFound)')
 
-    // Only assert the button if we're in empty state (NotFound response)
-    if (isVisible) {
-      await expect(page.getByRole('button', { name: 'Configure Economy' })).toBeVisible()
-    }
+    await expect(page.getByRole('button', { name: 'Configure Economy' })).toBeVisible()
   })
 
   test('Configure Economy button navigates to /economy/edit', async ({ authenticatedPage: page }) => {
-    const emptyState = page.getByTestId('overview-empty')
-    const isVisible = await emptyState.isVisible().catch(() => false)
+    const isVisible = await page.getByTestId('overview-empty').isVisible().catch(() => false)
+    test.skip(!isVisible, 'Requires overview-empty state to validate Configure Economy CTA')
 
-    if (isVisible) {
-      await page.getByRole('button', { name: 'Configure Economy' }).click()
-      await expect(page).toHaveURL('/economy/edit')
-    }
+    await page.getByRole('button', { name: 'Configure Economy' }).click()
+    await expect(page).toHaveURL('/economy/edit')
   })
 
   test('error state has Retry button', async ({ authenticatedPage: page }) => {
-    const errorState = page.getByTestId('overview-error')
-    const isVisible = await errorState.isVisible().catch(() => false)
+    const isVisible = await page.getByTestId('overview-error').isVisible().catch(() => false)
+    test.skip(!isVisible, 'Requires overview-error state to validate Retry button')
 
-    if (isVisible) {
-      await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
-    }
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
   })
 })
 
@@ -89,6 +82,7 @@ test.describe('Economy Explorer', () => {
   test('shows breadcrumbs with Economy and Explore', async ({ authenticatedPage: page }) => {
     // Breadcrumbs: Economy > Explore
     await expect(page.getByText('Economy', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Explore', { exact: true }).first()).toBeVisible()
   })
 
   test('renders empty state or explorer content', async ({ authenticatedPage: page }) => {
@@ -104,36 +98,24 @@ test.describe('Economy Explorer', () => {
     expect(isEmpty || isError).toBe(true)
   })
 
-  test('shows tab triggers when content loads', async ({ authenticatedPage: page }) => {
-    // If explorer renders content (not empty/error), tabs should be visible.
-    // Since we have no backend, we check for empty/error states instead.
-    const emptyState = page.getByTestId('explorer-empty')
-    const isEmpty = await emptyState.isVisible().catch(() => false)
+  test('shows tab triggers when manifest data is present', async ({ authenticatedPage: page }) => {
+    const isEmpty = await page.getByTestId('explorer-empty').isVisible().catch(() => false)
+    const isError = await page.getByTestId('explorer-error').isVisible().catch(() => false)
+    test.skip(isEmpty || isError, 'Requires manifest data to validate tab triggers')
 
-    if (!isEmpty) {
-      // Check that tab triggers exist (they only render when manifest data is present)
-      const errorState = page.getByTestId('explorer-error')
-      const isError = await errorState.isVisible().catch(() => false)
-
-      if (!isError) {
-        // Content loaded — verify tab structure
-        await expect(page.getByRole('tab', { name: 'Event Channels' })).toBeVisible()
-        await expect(page.getByRole('tab', { name: 'Sagas' })).toBeVisible()
-        await expect(page.getByRole('tab', { name: 'API Endpoints' })).toBeVisible()
-        await expect(page.getByRole('tab', { name: 'Resources' })).toBeVisible()
-        await expect(page.getByRole('tab', { name: 'Gateway' })).toBeVisible()
-        await expect(page.getByRole('tab', { name: 'Config' })).toBeVisible()
-      }
-    }
+    await expect(page.getByRole('tab', { name: 'Event Channels' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Sagas' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'API Endpoints' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Resources' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Gateway' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Config' })).toBeVisible()
   })
 
   test('empty state shows guidance message', async ({ authenticatedPage: page }) => {
-    const emptyState = page.getByTestId('explorer-empty')
-    const isVisible = await emptyState.isVisible().catch(() => false)
+    const isVisible = await page.getByTestId('explorer-empty').isVisible().catch(() => false)
+    test.skip(!isVisible, 'Requires explorer-empty state to validate guidance message')
 
-    if (isVisible) {
-      await expect(page.getByText('No economy configured')).toBeVisible()
-    }
+    await expect(page.getByText('No economy configured')).toBeVisible()
   })
 })
 
