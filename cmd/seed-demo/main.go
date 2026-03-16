@@ -329,16 +329,27 @@ func findInternalAccountByCode(ctx context.Context, client internalaccountv1.Int
 // ─── DNO Party Resolution ─────────────────────────────────────────────────────
 
 // resolveOrganizationPartyID finds the party ID for an organization provisioned by
-// ApplyManifest, identified by external reference.
+// ApplyManifest, identified by external reference. Paginates through all parties
+// to ensure the organization is found even in tenants with many parties.
 func resolveOrganizationPartyID(ctx context.Context, conn *grpc.ClientConn, externalRef string) (string, error) {
 	client := partyv1.NewPartyServiceClient(conn)
-	listResp, err := client.ListParties(ctx, &partyv1.ListPartiesRequest{PageSize: 100})
-	if err != nil {
-		return "", fmt.Errorf("list parties to find %q: %w", externalRef, err)
-	}
-	for _, p := range listResp.GetParties() {
-		if p.GetExternalReference() == externalRef {
-			return p.GetPartyId(), nil
+	var pageToken string
+	for {
+		listResp, err := client.ListParties(ctx, &partyv1.ListPartiesRequest{
+			PageSize:  100,
+			PageToken: pageToken,
+		})
+		if err != nil {
+			return "", fmt.Errorf("list parties to find %q: %w", externalRef, err)
+		}
+		for _, p := range listResp.GetParties() {
+			if p.GetExternalReference() == externalRef {
+				return p.GetPartyId(), nil
+			}
+		}
+		pageToken = listResp.GetNextPageToken()
+		if pageToken == "" {
+			break
 		}
 	}
 	return "", fmt.Errorf("%w: external_reference=%q", errPartyNotFoundInListing, externalRef)
