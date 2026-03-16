@@ -846,6 +846,68 @@ func TestForecastContextToStarlark(t *testing.T) {
 	assert.Equal(t, starlarklib.String(now.Format(time.RFC3339)), nowVal)
 }
 
+// --- Security hardening tests ---
+
+func TestExecuteStrategy_ScriptSizeLimit(t *testing.T) {
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	// Create a script that exceeds MaxScriptSize (64KB)
+	largeScript := "def compute_forecast(ctx):\n    return []\n" + strings.Repeat("# padding\n", 7000)
+	require.Greater(t, len(largeScript), MaxScriptSize, "test script must exceed MaxScriptSize")
+
+	_, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            largeScript,
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      1,
+		GranularityHours:  1,
+		Now:               baseTime(),
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrScriptTooLarge)
+	assert.Contains(t, err.Error(), "exceeds maximum")
+}
+
+func TestExecuteStrategy_StepLimitEnforced(t *testing.T) {
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	// Script with a loop that exceeds MaxStepsPerExecution (1M steps)
+	script := `
+def compute_forecast(ctx):
+    result = 0
+    for i in range(2000000):
+        result = result + i
+    return []
+`
+
+	_, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            script,
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      1,
+		GranularityHours:  1,
+		Now:               baseTime(),
+	})
+
+	require.Error(t, err)
+	// Step limit exceeded produces either a timeout or execution error
+	assert.True(t,
+		strings.Contains(err.Error(), "too many steps") ||
+			strings.Contains(err.Error(), "exceeded") ||
+			errors.Is(err, saga.ErrExecution) ||
+			errors.Is(err, saga.ErrTimeout),
+		"expected step limit or execution error, got: %v", err)
+}
+
+func TestDefaultTimeout_Is10Seconds(t *testing.T) {
+	assert.Equal(t, 10*time.Second, DefaultTimeout, "DefaultTimeout should be 10s")
+}
+
 func TestForecastContextToStarlark_NilReferenceData(t *testing.T) {
 	fc := &ForecastContext{
 		Observations:  map[string][]Observation{},

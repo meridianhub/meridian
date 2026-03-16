@@ -21,7 +21,9 @@ import (
 
 // Default execution constraints.
 const (
-	DefaultTimeout = 30 * time.Second
+	DefaultTimeout       = 10 * time.Second // Reduced from 30s to match saga/valuation security posture
+	MaxScriptSize        = 64 * 1024        // 64KB, matching saga
+	MaxStepsPerExecution = 1_000_000        // Matching saga
 )
 
 // Runner errors.
@@ -34,6 +36,7 @@ var (
 	ErrTimestampOutOfRange = errors.New("forecast point timestamp is outside the horizon")
 	ErrNonMonotonic        = errors.New("forecast point timestamps must be monotonically increasing")
 	ErrGranularityMismatch = errors.New("forecast point timestamp is not aligned to granularity")
+	ErrScriptTooLarge      = errors.New("script exceeds maximum size")
 	ErrValidation          = errors.New("script validation error")
 	ErrInvalidInput        = errors.New("invalid strategy input")
 )
@@ -166,6 +169,9 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 	if input.Script == "" {
 		return nil, ErrScriptRequired
 	}
+	if len(input.Script) > MaxScriptSize {
+		return nil, fmt.Errorf("%w: size %d exceeds maximum %d bytes", ErrScriptTooLarge, len(input.Script), MaxScriptSize)
+	}
 
 	now := input.Now
 	if now.IsZero() {
@@ -270,6 +276,7 @@ func (r *ForecastRunner) executeScript(ctx context.Context, script string, forec
 		},
 	}
 	thread.SetLocal("ctx", ctx)
+	thread.SetMaxExecutionSteps(MaxStepsPerExecution)
 
 	// Execute script in a goroutine for timeout support
 	done := make(chan struct{})
