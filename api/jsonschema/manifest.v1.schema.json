@@ -16,7 +16,8 @@
                 "mappings",
                 "operationalGateway",
                 "marketData",
-                "organizations"
+                "organizations",
+                "internalAccounts"
             ],
             "properties": {
                 "version": {
@@ -106,6 +107,14 @@
                     "additionalProperties": false,
                     "type": "array",
                     "description": "organizations defines the organization entities (parties) for this tenant."
+                },
+                "internalAccounts": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.InternalAccountDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "internal_accounts defines the chart of accounts — structural accounts owned by the economy. Each internal account references an account type, an instrument, and optionally an owner organization."
                 }
             },
             "additionalProperties": false,
@@ -486,6 +495,41 @@
             "type": "object",
             "title": "Instrument Dimensions",
             "description": "InstrumentDimensions describes the unit and precision of an instrument's quantities."
+        },
+        "meridian.control_plane.v1.InternalAccountDefinition": {
+            "required": [
+                "code",
+                "accountType",
+                "instrument",
+                "ownerOrganization",
+                "description"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "code is the unique identifier for this internal account (e.g., \"REVENUE_GBP\", \"SETTLEMENT_KWH\"). Must be uppercase alphanumeric with underscores."
+                },
+                "accountType": {
+                    "type": "string",
+                    "description": "account_type references the account type classification for this account. Must match a code from the manifest's account_types list."
+                },
+                "instrument": {
+                    "type": "string",
+                    "description": "instrument references the instrument (asset type) this account holds. Must match a code from the manifest's instruments list."
+                },
+                "ownerOrganization": {
+                    "type": "string",
+                    "description": "owner_organization optionally references the organization that owns this account. If set, must match a code from the manifest's organizations list."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "description provides additional context about this internal account's purpose."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Internal Account Definitions\n ========================================",
+            "description": "======================================== Internal Account Definitions ========================================  InternalAccountDefinition declares a structural account in the chart of accounts. Internal accounts are owned by the economy (not by external parties) and are provisioned via the Internal Account Service. The code field is the immutable primary key."
         },
         "meridian.control_plane.v1.MTLSAuthConfig": {
             "required": [

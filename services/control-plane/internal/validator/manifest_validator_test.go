@@ -3305,3 +3305,135 @@ func TestValidationError_CELError_ResourceTypeAndID(t *testing.T) {
 	}
 	assert.True(t, found, "expected CEL error with resource context")
 }
+
+// --- Internal Account validation tests ---
+
+func TestValidate_DuplicateInternalAccountCodes(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "SETTLEMENT", Instrument: "GBP"},
+		{Code: "REVENUE_GBP", AccountType: "SETTLEMENT", Instrument: "KWH"},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DUPLICATE_CODE" && strings.Contains(e.Path, "internal_accounts") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected DUPLICATE_CODE error for internal_accounts")
+}
+
+func TestValidate_InternalAccountReferencesInvalidAccountType(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "NONEXISTENT", Instrument: "GBP"},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "internal_accounts[0].account_type") {
+			found = true
+			assert.Contains(t, e.Message, "NONEXISTENT")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_REFERENCE error for invalid account_type")
+}
+
+func TestValidate_InternalAccountReferencesInvalidInstrument(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_XYZ", AccountType: "SETTLEMENT", Instrument: "XYZ"},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "internal_accounts[0].instrument") {
+			found = true
+			assert.Contains(t, e.Message, "XYZ")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_REFERENCE error for invalid instrument")
+}
+
+func TestValidate_InternalAccountReferencesInvalidOrganization(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "SETTLEMENT", Instrument: "GBP", OwnerOrganization: "UNKNOWN_ORG"},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "internal_accounts[0].owner_organization") {
+			found = true
+			assert.Contains(t, e.Message, "UNKNOWN_ORG")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_REFERENCE error for invalid owner_organization")
+}
+
+func TestValidate_InternalAccountValidReferences(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME", Name: "Acme Corp", PartyType: "ORGANIZATION"},
+	}
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "SETTLEMENT", Instrument: "GBP", OwnerOrganization: "ACME"},
+		{Code: "REVENUE_KWH", AccountType: "SETTLEMENT", Instrument: "KWH"},
+	}
+
+	result := v.Validate(manifest, nil)
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "internal_accounts") {
+			t.Errorf("unexpected INVALID_REFERENCE error: %s", e.Message)
+		}
+	}
+}
+
+func TestValidate_InternalAccountNoOwnerOrganization(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "SETTLEMENT", Instrument: "GBP"},
+	}
+
+	result := v.Validate(manifest, nil)
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "internal_accounts[0].owner_organization") {
+			t.Errorf("unexpected INVALID_REFERENCE error for empty owner_organization: %s", e.Message)
+		}
+	}
+}

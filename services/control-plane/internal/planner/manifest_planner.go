@@ -121,6 +121,8 @@ func phaseForResource(rt differ.ResourceType) Phase {
 		return PhaseMarketDataSets
 	case differ.ResourceOrganization:
 		return PhaseOrganizations
+	case differ.ResourceInternalAccount:
+		return PhaseInternalAccounts
 	default:
 		return PhaseSeedData
 	}
@@ -208,6 +210,11 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceOrganization, differ.ActionCreate}: MethodRegisterOrganization,
 	{differ.ResourceOrganization, differ.ActionUpdate}: MethodRegisterOrganization,
 	// No delete method: organizations are deactivated, not deleted.
+
+	// Internal Accounts
+	{differ.ResourceInternalAccount, differ.ActionCreate}: MethodInitiateAccount,
+	{differ.ResourceInternalAccount, differ.ActionUpdate}: MethodUpdateInternalAccount,
+	{differ.ResourceInternalAccount, differ.ActionDelete}: MethodControlInternalAccount,
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.

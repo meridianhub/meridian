@@ -664,6 +664,21 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 			orgCodes[org.GetCode()] = i
 		}
 	}
+
+	// Check duplicate internal account codes
+	iaCodes := make(map[string]int)
+	for i, ia := range manifest.GetInternalAccounts() {
+		if prev, exists := iaCodes[ia.GetCode()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("internal_accounts[%d].code", i),
+				Code:     "DUPLICATE_CODE",
+				Message:  fmt.Sprintf("duplicate internal account code %q (first defined at internal_accounts[%d])", ia.GetCode(), prev),
+			})
+		} else {
+			iaCodes[ia.GetCode()] = i
+		}
+	}
 }
 
 // validateOperationalGatewayDuplicates checks for duplicate connection_ids and instruction_types.
@@ -1006,6 +1021,9 @@ func (v *ManifestValidator) validateCrossReferences(
 
 	// Validate organization party_type references
 	v.validateOrganizationCrossRefs(manifest, result)
+
+	// Validate internal account cross-references
+	v.validateInternalAccountCrossRefs(manifest, result)
 }
 
 // validateOrganizationCrossRefs validates that organizations reference valid party types.
@@ -1042,6 +1060,63 @@ func (v *ManifestValidator) validateOrganizationCrossRefs(
 			addError(result, ve)
 		}
 	}
+}
+
+// validateInternalAccountCrossRefs validates that internal accounts reference valid
+// account types, instruments, and organizations.
+func (v *ManifestValidator) validateInternalAccountCrossRefs(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	accountTypeCodes := make(map[string]bool)
+	for _, at := range manifest.GetAccountTypes() {
+		accountTypeCodes[at.GetCode()] = true
+	}
+
+	instrumentCodes := make(map[string]bool)
+	for _, inst := range manifest.GetInstruments() {
+		instrumentCodes[inst.GetCode()] = true
+	}
+
+	orgCodes := make(map[string]bool)
+	for _, org := range manifest.GetOrganizations() {
+		orgCodes[org.GetCode()] = true
+	}
+
+	for i, ia := range manifest.GetInternalAccounts() {
+		code := ia.GetCode()
+		checkRef(ia.GetAccountType(), accountTypeCodes,
+			fmt.Sprintf("internal_accounts[%d].account_type", i),
+			fmt.Sprintf("internal account %q references unknown account type", code),
+			result)
+		checkRef(ia.GetInstrument(), instrumentCodes,
+			fmt.Sprintf("internal_accounts[%d].instrument", i),
+			fmt.Sprintf("internal account %q references unknown instrument", code),
+			result)
+		checkRef(ia.GetOwnerOrganization(), orgCodes,
+			fmt.Sprintf("internal_accounts[%d].owner_organization", i),
+			fmt.Sprintf("internal account %q references unknown organization", code),
+			result)
+	}
+}
+
+// checkRef validates that value exists in validCodes. If value is empty, no check is performed.
+func checkRef(value string, validCodes map[string]bool, path, msgPrefix string, result *ValidationResult) {
+	if value == "" || validCodes[value] {
+		return
+	}
+	codeList := mapKeys(validCodes)
+	ve := ValidationError{
+		Severity:        SeverityError,
+		Path:            path,
+		Code:            "INVALID_REFERENCE",
+		Message:         fmt.Sprintf("%s %q", msgPrefix, value),
+		AvailableFields: codeList,
+	}
+	if suggestion := findClosestMatch(value, codeList); suggestion != "" {
+		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+	}
+	addError(result, ve)
 }
 
 // validateOperationalGatewayCrossRefs validates referential integrity for the operational_gateway section.

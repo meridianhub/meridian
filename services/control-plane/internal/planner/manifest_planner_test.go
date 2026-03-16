@@ -754,6 +754,74 @@ func TestPlan_PhaseOrdering_MarketDataBeforeOrganizations(t *testing.T) {
 	assert.Equal(t, PhaseOrganizations, plan.Calls[2].Phase)
 }
 
+// --- Internal Account planner tests ---
+
+func TestPlan_InternalAccountsInPhase12(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceInternalAccount, ResourceCode: "REVENUE_GBP", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+
+	assert.Equal(t, PhaseInternalAccounts, plan.Calls[0].Phase)
+	assert.Equal(t, MethodInitiateAccount, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_InternalAccountUpdate(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceInternalAccount, ResourceCode: "REVENUE_GBP", Action: differ.ActionUpdate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+
+	assert.Equal(t, MethodUpdateInternalAccount, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_InternalAccountDelete(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceInternalAccount, ResourceCode: "REVENUE_GBP", Action: differ.ActionDelete},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+
+	assert.Equal(t, MethodControlInternalAccount, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_PhaseOrdering_InternalAccountsAfterOrganizations(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceInternalAccount, ResourceCode: "ACCT", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourceOrganization, ResourceCode: "ORG", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourceAccountType, ResourceCode: "AT", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 3)
+
+	// Verify phase ordering: account types (2) < organizations (11) < internal accounts (12)
+	assert.Equal(t, PhaseAccountTypes, plan.Calls[0].Phase)
+	assert.Equal(t, PhaseOrganizations, plan.Calls[1].Phase)
+	assert.Equal(t, PhaseInternalAccounts, plan.Calls[2].Phase)
+}
+
 // --- Test helpers ---
 
 func indexCallsByResourceID(calls []PlannedCall) map[string]PlannedCall {

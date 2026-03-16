@@ -1222,3 +1222,78 @@ func TestDiff_OrganizationUnchanged_NoChange(t *testing.T) {
 	assert.Len(t, noChanges, 1)
 	assert.Equal(t, "ACME_ENERGY", noChanges[0].ResourceCode)
 }
+
+// --- Internal Account differ tests ---
+
+func TestDiff_InternalAccountAdded_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "REVENUE", Instrument: "GBP"},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourceInternalAccount)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "REVENUE_GBP", creates[0].ResourceCode)
+	assert.Contains(t, creates[0].Description, "REVENUE")
+	assert.Contains(t, creates[0].Description, "GBP")
+}
+
+func TestDiff_InternalAccountRemoved_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "SETTLEMENT_KWH", AccountType: "SETTLEMENT", Instrument: "KWH"},
+	}
+
+	newManifest := testManifest()
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceInternalAccount)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "SETTLEMENT_KWH", deletes[0].ResourceCode)
+}
+
+func TestDiff_InternalAccountModified_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "REVENUE", Instrument: "GBP"},
+	}
+
+	newManifest := testManifest()
+	newManifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "CURRENT", Instrument: "GBP", OwnerOrganization: "ACME"},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceInternalAccount)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "REVENUE_GBP", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "account_type:")
+	assert.Contains(t, updates[0].Description, "owner_organization:")
+}
+
+func TestDiff_InternalAccountUnchanged_NoChange(t *testing.T) {
+	d := New(nil, nil)
+	manifest := testManifest()
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "REVENUE", Instrument: "GBP"},
+	}
+
+	plan, err := d.Diff(context.Background(), manifest, manifest)
+	require.NoError(t, err)
+
+	noChanges := filterActionsByResource(plan.Actions, ActionNoChange, ResourceInternalAccount)
+	assert.Len(t, noChanges, 1)
+	assert.Equal(t, "REVENUE_GBP", noChanges[0].ResourceCode)
+}
