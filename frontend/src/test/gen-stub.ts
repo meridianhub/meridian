@@ -29,6 +29,8 @@ export const ForecastingService = serviceStub
 export const MappingService = serviceStub
 export const ManifestHistoryService = serviceStub
 export const ApplyManifestService = serviceStub
+export const AuditService = serviceStub
+export const IdentityService = serviceStub
 
 // Enum exports (from types_pb.ts and other shared proto files)
 // Names match what Connect-ES generates from proto enums (short names without prefix).
