@@ -13,6 +13,10 @@ vi.mock('@/api/clients', () => ({
   createServiceClients: vi.fn(() => ({})),
 }))
 
+vi.mock('@/features/economy/components/apply-resource-modal', () => ({
+  ApplyResourceModal: () => null,
+}))
+
 vi.mock('@/components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,

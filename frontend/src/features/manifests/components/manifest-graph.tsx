@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useNavigate } from 'react-router-dom'
-import { Maximize2, X } from 'lucide-react'
+import { Maximize2, Pencil, X } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,8 @@ import { NODE_TYPE_REGISTRY, getNodeThemes, getLayerPriority } from '../lib/node
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import { useEventChain } from '../hooks/use-event-chain'
 import { EventChainPanel } from './event-chain-panel'
+import { ApplyResourceModal } from '@/features/economy/components/apply-resource-modal'
+import { getResourceSchema } from '@/features/economy/lib/resource-schema-registry'
 
 const NODE_THEMES = getNodeThemes()
 
@@ -625,6 +627,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [showEventChain, setShowEventChain] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
+  const [editModalOpen, setEditModalOpen] = useState(false)
   const [visibleTypes, setVisibleTypes] = useState<Set<ManifestNodeType>>(
     () => new Set<ManifestNodeType>(Object.keys(NODE_TYPE_REGISTRY) as ManifestNodeType[]),
   )
@@ -643,6 +646,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
   )
 
   const canShowEventChain = selectedManifestNode?.type === 'instrument' || selectedManifestNode?.type === 'account_type'
+  const canEditResource = selectedManifestNode ? getResourceSchema(selectedManifestNode.type) !== undefined : false
 
   const eventChainNodeId = showEventChain ? effectiveSelectedNode : null
   const eventChain = useEventChain(graph, eventChainNodeId)
@@ -890,6 +894,18 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
           <span className="text-xs font-medium text-foreground px-1">
             {selectedManifestNode.label}
           </span>
+          {canEditResource && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-7"
+              onClick={() => setEditModalOpen(true)}
+              data-testid="edit-resource-button"
+            >
+              <Pencil className="h-3 w-3 mr-1" />
+              Edit
+            </Button>
+          )}
           {canShowEventChain && (
             <Button
               size="sm"
@@ -966,6 +982,16 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
             </div>
           </DialogContent>
         </Dialog>
+      )}
+
+      {selectedManifestNode && canEditResource && (
+        <ApplyResourceModal
+          key={selectedManifestNode.id}
+          open={editModalOpen}
+          onOpenChange={setEditModalOpen}
+          nodeType={selectedManifestNode.type}
+          initialData={selectedManifestNode.data}
+        />
       )}
     </div>
   )
