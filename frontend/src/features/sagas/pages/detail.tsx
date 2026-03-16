@@ -57,6 +57,10 @@ function isReadOnly(saga: SagaDefinition): boolean {
 
 export function StarlarkDetailPage() {
   const { sagaName } = useParams<{ sagaName: string }>()
+  return <StarlarkDetailPageInner key={sagaName} sagaName={sagaName} />
+}
+
+function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined }) {
   usePageTitle(sagaName ? `Saga ${sagaName}` : 'Saga')
   const { sagaRegistry } = useApiClients()
   const qc = useQueryClient()
