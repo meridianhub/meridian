@@ -80,6 +80,7 @@ const DiffInstrumentNode = memo(function DiffInstrumentNode({ data }: { data: Di
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -107,6 +108,7 @@ const DiffAccountTypeNode = memo(function DiffAccountTypeNode({ data }: { data: 
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -134,6 +136,7 @@ const DiffValuationRuleNode = memo(function DiffValuationRuleNode({ data }: { da
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -160,6 +163,7 @@ const DiffSagaNode = memo(function DiffSagaNode({ data }: { data: DiffNodeData }
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -188,6 +192,7 @@ const DiffMarketDataNode = memo(function DiffMarketDataNode({ data }: { data: Di
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -214,6 +219,7 @@ const DiffOrganizationNode = memo(function DiffOrganizationNode({ data }: { data
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -241,6 +247,7 @@ const DiffInternalAccountNode = memo(function DiffInternalAccountNode({ data }: 
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -267,6 +274,7 @@ const DiffMappingNode = memo(function DiffMappingNode({ data }: { data: DiffNode
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -292,6 +300,7 @@ const DiffPaymentRailNode = memo(function DiffPaymentRailNode({ data }: { data: 
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -317,6 +326,7 @@ const DiffOperationalGatewayNode = memo(function DiffOperationalGatewayNode({ da
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -342,6 +352,7 @@ const DiffProviderConnectionNode = memo(function DiffProviderConnectionNode({ da
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -368,6 +379,7 @@ const DiffInstructionRouteNode = memo(function DiffInstructionRouteNode({ data }
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
@@ -393,6 +405,7 @@ const DiffPartyTypeNode = memo(function DiffPartyTypeNode({ data }: { data: Diff
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            tabIndex={0}
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
             style={containerStyle}
             data-testid={`diff-node-${data.diffStatus}`}
