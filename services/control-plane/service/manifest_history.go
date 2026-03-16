@@ -51,7 +51,11 @@ func RegisterManifestHistoryService(server *grpc.Server, cfg ManifestHistoryServ
 		if exportErr != nil {
 			return fmt.Errorf("manifest export service: %w", exportErr)
 		}
-		handler, err = manifest.NewHistoryHandlerWithExport(historySvc, exporter, cfg.Logger)
+		reconciler, reconcileErr := manifest.NewReconcileService(historySvc, exporter, nil)
+		if reconcileErr != nil {
+			return fmt.Errorf("manifest reconcile service: %w", reconcileErr)
+		}
+		handler, err = manifest.NewHistoryHandlerWithReconcile(historySvc, exporter, reconciler, cfg.Logger)
 	} else {
 		handler, err = manifest.NewHistoryHandler(historySvc, cfg.Logger)
 	}

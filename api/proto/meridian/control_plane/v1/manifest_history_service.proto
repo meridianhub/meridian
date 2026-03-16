@@ -60,6 +60,16 @@ service ManifestHistoryService {
       get: "/v1/manifests/export"
     };
   }
+
+  // ReconcileManifest compares a stored manifest version against live service
+  // state and reports any drift. This is a read-only safety-net operation —
+  // no auto-repair is performed. With structural APIs removed from the public
+  // surface, drift should be impossible; reconciliation validates that invariant.
+  rpc ReconcileManifest(ReconcileManifestRequest) returns (ReconcileManifestResponse) {
+    option (google.api.http) = {
+      get: "/v1/manifests/reconcile"
+    };
+  }
 }
 
 // ========================================
@@ -313,4 +323,100 @@ message ExportManifestResponse {
   // warnings contains non-fatal issues encountered during export
   // (e.g., a service was unreachable, partial data returned).
   repeated string warnings = 5;
+}
+
+// ========================================
+// Reconcile Manifest
+// ========================================
+
+// ReconcileManifestRequest specifies which stored manifest version to compare
+// against live service state.
+message ReconcileManifestRequest {
+  // version is the manifest version string to reconcile (e.g., "1.0").
+  // If empty, the most recently applied manifest version is used.
+  string version = 1 [(buf.validate.field).string.max_len = 50];
+
+  // include_sections filters which manifest sections to reconcile.
+  // If empty, all sections are reconciled. Valid values match ExportManifestRequest.
+  repeated string include_sections = 2 [(buf.validate.field).repeated = {
+    max_items: 20
+    items: {
+      string: {
+        min_len: 1
+        max_len: 64
+      }
+    }
+  }];
+}
+
+// ReconcileManifestResponse contains the drift report between the stored
+// manifest and live service state.
+message ReconcileManifestResponse {
+  // drift_items lists individual resource-level discrepancies found.
+  repeated DriftItem drift_items = 1;
+
+  // summary contains aggregate counts of the reconciliation.
+  ReconcileSummary summary = 2;
+
+  // reconciled_version is the manifest version string that was reconciled.
+  string reconciled_version = 3;
+
+  // reconciled_at is the timestamp when reconciliation was performed.
+  google.protobuf.Timestamp reconciled_at = 4;
+
+  // warnings contains non-fatal issues encountered during reconciliation
+  // (e.g., a live service was unreachable).
+  repeated string warnings = 5;
+}
+
+// DriftType classifies the nature of a drift discrepancy.
+enum DriftType {
+  // DRIFT_TYPE_UNSPECIFIED is the default zero value.
+  DRIFT_TYPE_UNSPECIFIED = 0;
+
+  // DRIFT_TYPE_MISSING indicates a resource exists in the stored manifest
+  // but is absent from live service state.
+  DRIFT_TYPE_MISSING = 1;
+
+  // DRIFT_TYPE_MODIFIED indicates a resource exists in both the stored manifest
+  // and live state but their definitions differ.
+  DRIFT_TYPE_MODIFIED = 2;
+
+  // DRIFT_TYPE_EXTRA indicates a resource exists in live service state
+  // but is absent from the stored manifest.
+  DRIFT_TYPE_EXTRA = 3;
+}
+
+// DriftItem represents a single resource-level discrepancy between the
+// stored manifest and live service state.
+message DriftItem {
+  // resource_type is the category of the resource (e.g., "instrument", "saga").
+  string resource_type = 1;
+
+  // resource_code is the unique identifier of the resource within its type.
+  string resource_code = 2;
+
+  // drift_type classifies the nature of the discrepancy.
+  DriftType drift_type = 3;
+
+  // description is a human-readable summary of the drift.
+  string description = 4;
+}
+
+// ReconcileSummary contains aggregate statistics about a reconciliation run.
+message ReconcileSummary {
+  // total_checked is the total number of resources compared.
+  int32 total_checked = 1;
+
+  // total_drifted is the number of resources with discrepancies.
+  int32 total_drifted = 2;
+
+  // missing is the number of resources in the manifest but absent live.
+  int32 missing = 3;
+
+  // modified is the number of resources present in both but differing.
+  int32 modified = 4;
+
+  // extra is the number of resources live but absent from the manifest.
+  int32 extra = 5;
 }

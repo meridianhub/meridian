@@ -18,9 +18,10 @@ var ErrHistoryServiceRequired = errors.New("history service is required")
 type HistoryHandler struct {
 	controlplanev1.UnimplementedManifestHistoryServiceServer
 
-	history  *HistoryService
-	exporter *ExportService
-	logger   *slog.Logger
+	history    *HistoryService
+	exporter   *ExportService
+	reconciler *ReconcileService
+	logger     *slog.Logger
 }
 
 // NewHistoryHandler creates a new HistoryHandler.
@@ -45,6 +46,17 @@ func NewHistoryHandlerWithExport(history *HistoryService, exporter *ExportServic
 		return nil, err
 	}
 	h.exporter = exporter
+	return h, nil
+}
+
+// NewHistoryHandlerWithReconcile creates a HistoryHandler with export and reconcile support.
+// The reconciler enables the ReconcileManifest RPC; when nil, the RPC returns Unimplemented.
+func NewHistoryHandlerWithReconcile(history *HistoryService, exporter *ExportService, reconciler *ReconcileService, logger *slog.Logger) (*HistoryHandler, error) {
+	h, err := NewHistoryHandlerWithExport(history, exporter, logger)
+	if err != nil {
+		return nil, err
+	}
+	h.reconciler = reconciler
 	return h, nil
 }
 
@@ -213,6 +225,31 @@ func (h *HistoryHandler) ExportManifest(
 		}
 		h.logger.Error("failed to export manifest", "error", err)
 		return nil, status.Error(codes.Internal, "failed to export manifest")
+	}
+
+	return result.ToProtoResponse(), nil
+}
+
+// ReconcileManifest compares a stored manifest against live service state
+// and reports any drift as structured output.
+func (h *HistoryHandler) ReconcileManifest(
+	ctx context.Context,
+	req *controlplanev1.ReconcileManifestRequest,
+) (*controlplanev1.ReconcileManifestResponse, error) {
+	if h.reconciler == nil {
+		return nil, status.Error(codes.Unimplemented, "reconcile manifest not configured")
+	}
+
+	result, err := h.reconciler.Reconcile(ctx, req.GetVersion(), req.GetIncludeSections())
+	if err != nil {
+		if errors.Is(err, ErrVersionNotFound) {
+			return nil, status.Error(codes.NotFound, "manifest version not found")
+		}
+		h.logger.Error("failed to reconcile manifest",
+			"version", req.GetVersion(),
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to reconcile manifest")
 	}
 
 	return result.ToProtoResponse(), nil
