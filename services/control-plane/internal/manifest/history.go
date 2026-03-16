@@ -196,13 +196,14 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	}
 
 	mv := &controlplanev1.ManifestVersion{
-		Id:          entity.ID.String(),
-		Version:     entity.Version,
-		Manifest:    manifest,
-		AppliedAt:   timestamppb.New(entity.AppliedAt),
-		AppliedBy:   entity.AppliedBy,
-		ApplyStatus: toProtoApplyStatus(entity.ApplyStatus),
-		CreatedAt:   timestamppb.New(entity.CreatedAt),
+		Id:             entity.ID.String(),
+		Version:        entity.Version,
+		Manifest:       manifest,
+		AppliedAt:      timestamppb.New(entity.AppliedAt),
+		AppliedBy:      entity.AppliedBy,
+		ApplyStatus:    toProtoApplyStatus(entity.ApplyStatus),
+		CreatedAt:      timestamppb.New(entity.CreatedAt),
+		SequenceNumber: entity.SequenceNumber,
 	}
 
 	if entity.ApplyJobID != nil {
@@ -214,6 +215,15 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	}
 	if entity.RelationshipGraph != nil {
 		mv.RelationshipGraph = entity.RelationshipGraph
+	}
+	if entity.Checksum != nil {
+		mv.Checksum = entity.Checksum
+	}
+	if entity.Source != nil {
+		mv.Source = entity.Source
+	}
+	if entity.ResourcePath != nil {
+		mv.ResourcePath = entity.ResourcePath
 	}
 
 	return mv, nil

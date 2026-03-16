@@ -23,6 +23,10 @@ const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_versions (
 	apply_job_id UUID,
 	diff_summary TEXT,
 	relationship_graph JSONB,
+	sequence_number BIGINT NOT NULL DEFAULT 0,
+	checksum VARCHAR(64),
+	source VARCHAR(20),
+	resource_path VARCHAR(255),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 	CONSTRAINT valid_apply_status CHECK (apply_status IN ('APPLIED', 'FAILED', 'ROLLED_BACK'))
 )`
@@ -256,4 +260,80 @@ func TestRepository_GetPreviousApplied_NotFound(t *testing.T) {
 	// No version before the earliest one
 	_, err = repo.GetPreviousApplied(tc.Ctx, entity.AppliedAt)
 	assert.ErrorIs(t, err, manifest.ErrVersionNotFound)
+}
+
+func TestRepository_Store_SequenceNumberIncrements(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	// First store should get sequence_number = 1
+	entity1 := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err := repo.Store(tc.Ctx, entity1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), entity1.SequenceNumber)
+
+	// Second store should get sequence_number = 2
+	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err = repo.Store(tc.Ctx, entity2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), entity2.SequenceNumber)
+
+	// Third store should get sequence_number = 3
+	entity3 := newTestEntity("3.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err = repo.Store(tc.Ctx, entity3)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), entity3.SequenceNumber)
+}
+
+func TestRepository_GetCurrentSequenceNumber(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	// No versions yet: should return 0
+	seq, err := repo.GetCurrentSequenceNumber(tc.Ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), seq)
+
+	// Store a version
+	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err = repo.Store(tc.Ctx, entity)
+	require.NoError(t, err)
+
+	seq, err = repo.GetCurrentSequenceNumber(tc.Ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), seq)
+
+	// Store another
+	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err = repo.Store(tc.Ctx, entity2)
+	require.NoError(t, err)
+
+	seq, err = repo.GetCurrentSequenceNumber(tc.Ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), seq)
+}
+
+func TestRepository_Store_NewColumnsPopulated(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	checksum := "abc123def456"
+	source := "api"
+	resourcePath := "/manifests/tenant-1.yaml"
+
+	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	entity.Checksum = &checksum
+	entity.Source = &source
+	entity.ResourcePath = &resourcePath
+
+	err := repo.Store(tc.Ctx, entity)
+	require.NoError(t, err)
+
+	// Retrieve and verify
+	found, err := repo.GetByVersion(tc.Ctx, "1.0")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), found.SequenceNumber)
+	require.NotNil(t, found.Checksum)
+	assert.Equal(t, "abc123def456", *found.Checksum)
+	require.NotNil(t, found.Source)
+	assert.Equal(t, "api", *found.Source)
+	require.NotNil(t, found.ResourcePath)
+	assert.Equal(t, "/manifests/tenant-1.yaml", *found.ResourcePath)
 }

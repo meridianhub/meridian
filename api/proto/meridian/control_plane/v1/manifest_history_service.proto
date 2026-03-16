@@ -143,4 +143,16 @@ message ManifestVersion {
   // validation. Contains nodes (instruments, account_types, sagas, handlers)
   // and edges (denominated_in, converts, triggers_on, calls_handler, etc.).
   optional string relationship_graph = 10;
+
+  // sequence_number is the optimistic locking sequence for this version.
+  int64 sequence_number = 11;
+
+  // checksum is the SHA-256 hash of the manifest content.
+  optional string checksum = 12;
+
+  // source indicates how this manifest was applied (e.g., "api", "cli", "gitops").
+  optional string source = 13;
+
+  // resource_path is the file path or URL of the manifest source.
+  optional string resource_path = 14;
 }

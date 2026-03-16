@@ -44,6 +44,12 @@ message ApplyManifestRequest {
   // that is intended for a new tenant (create mode) without comparing against
   // existing tenant state. Has no effect when dry_run=false.
   bool skip_immutability_checks = 5;
+
+  // expected_sequence_number is the sequence number the caller expects the
+  // current manifest to have. If it does not match the actual current sequence
+  // number, the apply is rejected with ABORTED status (ETag semantics).
+  // Set to 0 to skip the check (first apply or "overwrite" mode).
+  int64 expected_sequence_number = 6;
 }
 
 // ApplyManifestResponse contains the result of a manifest application.
@@ -65,6 +71,10 @@ message ApplyManifestResponse {
 
   // diff_summary is a human-readable summary of changes detected.
   string diff_summary = 6;
+
+  // sequence_number is the sequence number assigned to this manifest version.
+  // Callers should use this value as expected_sequence_number in subsequent applies.
+  int64 sequence_number = 7;
 }
 
 // ApplyManifestStatus represents the outcome of an apply operation.

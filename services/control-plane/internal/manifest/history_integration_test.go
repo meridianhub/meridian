@@ -277,3 +277,51 @@ func TestHistoryService_EntityToProto(t *testing.T) {
 	assert.Equal(t, "admin@meridian.io", proto.AppliedBy)
 	assert.Equal(t, controlplanev1.ApplyStatus_APPLY_STATUS_APPLIED, proto.ApplyStatus)
 }
+
+func TestHistoryService_EntityToProto_IncludesSequenceNumber(t *testing.T) {
+	svc, tc := setupHistoryService(t)
+
+	m := testManifestProto("1.0")
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	require.NoError(t, err)
+
+	proto, err := manifest.EntityToProto(stored)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), proto.SequenceNumber)
+
+	// Store second version
+	m2 := testManifestProto("2.0")
+	stored2, err := svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	require.NoError(t, err)
+
+	proto2, err := manifest.EntityToProto(stored2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), proto2.SequenceNumber)
+}
+
+func TestHistoryService_EntityToProto_IncludesNewFields(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	checksum := "sha256:abc123"
+	source := "cli"
+	resourcePath := "/path/to/manifest.yaml"
+
+	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	entity.Checksum = &checksum
+	entity.Source = &source
+	entity.ResourcePath = &resourcePath
+
+	err := repo.Store(tc.Ctx, entity)
+	require.NoError(t, err)
+
+	proto, err := manifest.EntityToProto(entity)
+	require.NoError(t, err)
+
+	require.NotNil(t, proto.Checksum)
+	assert.Equal(t, "sha256:abc123", *proto.Checksum)
+	require.NotNil(t, proto.Source)
+	assert.Equal(t, "cli", *proto.Source)
+	require.NotNil(t, proto.ResourcePath)
+	assert.Equal(t, "/path/to/manifest.yaml", *proto.ResourcePath)
+}

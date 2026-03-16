@@ -36,6 +36,7 @@ type ApplyManifestHandler struct {
 	planner        *planner.ManifestPlanner
 	executor       *ManifestExecutor
 	historyService *manifest.HistoryService
+	historyRepo    *manifest.Repository
 	versionStore   differ.ManifestVersionStore
 	postApplyHooks []PostApplyHook
 	logger         *slog.Logger
@@ -53,6 +54,7 @@ type ApplyManifestHandlerConfig struct {
 	Planner        *planner.ManifestPlanner
 	Executor       *ManifestExecutor
 	HistoryService *manifest.HistoryService
+	HistoryRepo    *manifest.Repository
 	VersionStore   differ.ManifestVersionStore
 	Logger         *slog.Logger
 
@@ -82,6 +84,7 @@ func NewApplyManifestHandler(cfg ApplyManifestHandlerConfig) (*ApplyManifestHand
 		planner:        cfg.Planner,
 		executor:       cfg.Executor,
 		historyService: cfg.HistoryService,
+		historyRepo:    cfg.HistoryRepo,
 		versionStore:   cfg.VersionStore,
 		postApplyHooks: cfg.PostApplyHooks,
 		logger:         cfg.Logger.With("component", "apply_manifest_handler"),
@@ -107,6 +110,11 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	)
 
 	response := &controlplanev1.ApplyManifestResponse{}
+
+	// Optimistic locking check
+	if err := h.checkSequenceNumber(ctx, req.GetExpectedSequenceNumber(), logger); err != nil {
+		return nil, err
+	}
 
 	// Determine whether to skip immutability/safety checks.
 	// Only respected during dry-run; ignored for real applies.
@@ -190,6 +198,7 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	snapshot := h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusApplied, validationResult.graph)
 	if snapshot != nil {
 		response.Snapshot = snapshot
+		response.SequenceNumber = snapshot.SequenceNumber
 	}
 
 	// Save to version store for future diffs
@@ -221,6 +230,30 @@ func (h *ApplyManifestHandler) runPostApplyHooks(ctx context.Context, tenantID s
 			hook(ctx, tenantID)
 		}()
 	}
+}
+
+// checkSequenceNumber verifies the expected sequence number against the current
+// value. Returns a gRPC ABORTED error on mismatch. Skips the check when
+// expectedSeq is 0 (first apply or overwrite mode) or when historyRepo is nil.
+func (h *ApplyManifestHandler) checkSequenceNumber(ctx context.Context, expectedSeq int64, logger *slog.Logger) error {
+	if expectedSeq == 0 || h.historyRepo == nil {
+		return nil
+	}
+	currentSeq, err := h.historyRepo.GetCurrentSequenceNumber(ctx)
+	if err != nil {
+		logger.Error("failed to get current sequence number", "error", err)
+		return status.Errorf(codes.Internal, "failed to check sequence number: %v", err)
+	}
+	if currentSeq != expectedSeq {
+		logger.Warn("sequence number mismatch",
+			"expected", expectedSeq,
+			"actual", currentSeq,
+		)
+		return status.Errorf(codes.Aborted,
+			"sequence number mismatch: expected %d but current is %d",
+			expectedSeq, currentSeq)
+	}
+	return nil
 }
 
 // checkBlockedDeletions returns a StepResult if the plan contains blocked deletions
