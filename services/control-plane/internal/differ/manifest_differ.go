@@ -958,8 +958,24 @@ func describeOrganizationChanges(code string, prev, updated *controlplanev1.Orga
 	if prev.GetPartyType() != updated.GetPartyType() {
 		changes = append(changes, fmt.Sprintf("party_type: %q -> %q", prev.GetPartyType(), updated.GetPartyType()))
 	}
+	if !attributesEqual(prev.GetAttributes(), updated.GetAttributes()) {
+		changes = append(changes, "attributes changed")
+	}
 	if len(changes) == 0 {
 		return fmt.Sprintf("Update organization %s", code)
 	}
 	return fmt.Sprintf("Update organization %s (%s)", code, strings.Join(changes, "; "))
+}
+
+// attributesEqual compares two string-keyed maps for equality.
+func attributesEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
