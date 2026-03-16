@@ -215,19 +215,52 @@ func TestMethodRBACInterceptor_AuditLog(t *testing.T) {
 
 	_, _ = interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/GetItem"}, noopHandler)
 
-	// Denied access
+	// Denied access (insufficient role)
 	claims2 := &Claims{UserID: "user-2", Roles: []string{"auditor"}}
 	ctx2 := context.WithValue(context.Background(), ClaimsContextKey, claims2)
 
 	_, _ = interceptor(ctx2, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/GetItem"}, noopHandler)
 
-	if len(logged) != 2 {
-		t.Fatalf("expected 2 audit log entries, got %d", len(logged))
+	// Denied access (unmapped method, fail-closed)
+	claims3 := &Claims{UserID: "user-3", Roles: []string{"admin"}}
+	ctx3 := context.WithValue(context.Background(), ClaimsContextKey, claims3)
+
+	_, _ = interceptor(ctx3, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Unknown"}, noopHandler)
+
+	if len(logged) != 3 {
+		t.Fatalf("expected 3 audit log entries, got %d: %v", len(logged), logged)
 	}
 	if logged[0] != "/some.Service/GetItem:user-1:allowed" {
 		t.Errorf("unexpected audit log entry: %s", logged[0])
 	}
 	if logged[1] != "/some.Service/GetItem:user-2:denied" {
 		t.Errorf("unexpected audit log entry: %s", logged[1])
+	}
+	if logged[2] != "/some.Service/Unknown:user-3:denied_unmapped" {
+		t.Errorf("unexpected audit log entry: %s", logged[2])
+	}
+}
+
+func TestMethodRBACInterceptor_AuditLog_AllowUnmapped(t *testing.T) {
+	var logged []string
+	logger := func(method, userID, decision string) {
+		logged = append(logged, method+":"+userID+":"+decision)
+	}
+
+	interceptor := NewMethodRBACInterceptorWithAudit(MethodRBACConfig{
+		Permissions:   map[string]MethodPermission{},
+		AllowUnmapped: true,
+	}, logger)
+
+	claims := &Claims{UserID: "user-1", Roles: []string{"admin"}}
+	ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
+
+	_, _ = interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Any"}, noopHandler)
+
+	if len(logged) != 1 {
+		t.Fatalf("expected 1 audit log entry, got %d: %v", len(logged), logged)
+	}
+	if logged[0] != "/some.Service/Any:user-1:allowed_unmapped" {
+		t.Errorf("unexpected audit log entry: %s", logged[0])
 	}
 }

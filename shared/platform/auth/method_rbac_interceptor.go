@@ -52,11 +52,25 @@ func newMethodRBACInterceptor(cfg MethodRBACConfig, audit AuditFunc) grpc.UnaryS
 		// Fail-closed: unmapped methods are denied unless AllowUnmapped is set
 		if !mapped {
 			if cfg.AllowUnmapped {
+				if audit != nil {
+					userID := ""
+					if claims, ok := GetClaimsFromContext(ctx); ok {
+						userID = claims.EffectiveUserID()
+					}
+					audit(info.FullMethod, userID, "allowed_unmapped")
+				}
 				return handler(ctx, req)
 			}
 			slog.Warn("RBAC denied unmapped method",
 				"method", info.FullMethod,
 			)
+			if audit != nil {
+				userID := ""
+				if claims, ok := GetClaimsFromContext(ctx); ok {
+					userID = claims.EffectiveUserID()
+				}
+				audit(info.FullMethod, userID, "denied_unmapped")
+			}
 			return nil, status.Errorf(codes.PermissionDenied,
 				"method %s is not configured in RBAC policy", info.FullMethod)
 		}
