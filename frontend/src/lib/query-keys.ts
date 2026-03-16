@@ -116,6 +116,7 @@ export const manifestKeys = {
   current: () => [...manifestKeys.all, 'current'] as const,
   history: () => [...manifestKeys.all, 'history'] as const,
   version: (version: string) => [...manifestKeys.all, 'version', version] as const,
+  diff: (baseSeq: number, targetSeq: number) => [...manifestKeys.all, 'diff', baseSeq, targetSeq] as const,
 } as const
 
 export const referenceKeys = {

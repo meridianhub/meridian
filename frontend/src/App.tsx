@@ -108,6 +108,9 @@ const EconomyExplorePage = lazy(() =>
 const EconomyDraftPage = lazy(() =>
   import('@/features/economy/pages/economy-draft-page').then((m) => ({ default: m.EconomyDraftPage })),
 )
+const ManifestDiffPage = lazy(() =>
+  import('@/features/manifests/pages/manifest-diff-page').then((m) => ({ default: m.ManifestDiffPage })),
+)
 
 // Market data pages (lazy-loaded: chart rendering)
 const MarketDataPage = lazy(() =>
@@ -403,6 +406,7 @@ function AppShellLayout() {
         <Route path="/economy/edit" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyEditPage />)}</Suspense></FeatureGuard>} />
         <Route path="/economy/explore" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyExplorePage />)}</Suspense></FeatureGuard>} />
         <Route path="/economy/draft" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<EconomyDraftPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/economy/manifests/diff/:v1/:v2" element={<FeatureGuard feature="economy"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<ManifestDiffPage />)}</Suspense></FeatureGuard>} />
         <Route path="/mcp-config" element={<FeatureGuard feature="mcp-config"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<McpConfigPage />)}</Suspense></FeatureGuard>} />
         <Route path="/cookbook" element={<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<CookbookPage />)}</Suspense>} />
         <Route path="/cookbook/patterns" element={guarded(<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}><CookbookPatternsPage /></Suspense>)} />
