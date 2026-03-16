@@ -6,6 +6,12 @@
 
 ## Date: 2026-03-16
 
+## Related Documents
+
+- [PRD-044: Auth Flow Architecture](044-auth-flow-architecture.md)
+- [PRD-043: MCP Manifest Tenant Isolation](
+  043-mcp-manifest-tenant-isolation.md)
+
 ---
 
 ## 1. Executive Summary
@@ -61,7 +67,7 @@ but didn't complete the wiring:
 | Control | Status | Gap |
 |---------|--------|-----|
 | TenantGuard | Implemented, tested (240 LOC tests) | Not registered in bootstrap |
-| RBAC (7-role) | Fully implemented | 1 of 11 services checks roles |
+| RBAC (7-role) | Fully implemented | 1 of 19 services checks roles |
 | Saga step limit | Constant defined (1M) | Never applied to thread |
 | Memory threshold | Constant defined (10MB) | Dead code — never referenced |
 | OPA Gatekeeper | Deployed, blocks `LOCAL_DEV_MODE` | No `AUTH_ENABLED` rule |
@@ -73,7 +79,7 @@ but didn't complete the wiring:
 
 **Description**: The RBAC framework (`shared/platform/auth/rbac.go`)
 defines 7 roles with a resource-type permission matrix, delegation
-hierarchy, and tested helper functions. However, only 1 of 11
+hierarchy, and tested helper functions. However, only 1 of 19
 services calls any RBAC check
 (`reconciliation/service/finalizer.go:295`). All other handlers
 accept any authenticated request regardless of role.
@@ -301,7 +307,7 @@ should build on:
 |---|------|--------|
 | 1.1 | Add `SetMaxExecutionSteps(MaxStepsPerExecution)` to saga runtime | HIGH-1 |
 | 1.2 | Add `SetMaxExecutionSteps(1M)` to forecasting runtime | HIGH-2 |
-| 1.3 | Register TenantGuard: `db.Use(NewTenantGuard())` in bootstrap | CRITICAL-2 |
+| 1.3 | Register TenantGuard in bootstrap (GORM only; pgx gap in 3.12) | CRITICAL-2 |
 | 1.4 | Change AUTH_ENABLED default to `true` in API Gateway + pos-keeping | CRITICAL-3 |
 | 1.5 | Set `AUTH_ENABLED: "true"` in all 11 K8s configmaps | HIGH-3 |
 | 1.6 | Remove `continue-on-error` from Trivy, `\|\| true` from gosec | MEDIUM-3 |
@@ -315,7 +321,7 @@ should build on:
 | # | Task | Closes |
 |---|------|--------|
 | 2.1 | Create `NewMethodRBACInterceptor` — fail-closed permission map | CRITICAL-1 |
-| 2.2 | Define permission maps for all 11 services | CRITICAL-1 |
+| 2.2 | Define permission maps for all 19 services (~1 week) | CRITICAL-1 |
 | 2.3 | Migrate hand-rolled interceptor chains to GrpcServerBuilder | Consistency |
 | 2.4 | Add script size limit + static validation to forecasting | HIGH-2 |
 | 2.5 | Reduce forecasting `DefaultTimeout` from 30s to 10s | HIGH-2 |
@@ -366,7 +372,9 @@ should build on:
 
 - None for Wave 1 (all self-contained)
 - Wave 2.1-2.2 depends on agreement on the permission map per
-  service (requires product input on role-endpoint mappings)
+  service (requires product input on role-endpoint mappings).
+  Start stakeholder discussions during Wave 1 to avoid blocking.
+  Effort estimate: ~1 week for 19 services
 - Wave 3.3 depends on service mesh or certificate infrastructure
 
 ## 9. Risks
