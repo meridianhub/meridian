@@ -160,11 +160,8 @@ test.describe('Economy Edit', () => {
   })
 
   test('loading resolves to editor or error state', async ({ authenticatedPage: page }) => {
-    const loadingState = page.getByTestId('edit-page-loading')
-    const errorState = page.getByTestId('edit-page-error')
-
     // Loading should eventually resolve
-    await expect(loadingState).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByTestId('edit-page-loading')).toHaveCount(0, { timeout: 15_000 })
 
     // After loading, either the editor renders or error state shows.
     // The heading is always visible (outside the loading/error conditional).
