@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 const (
@@ -531,6 +533,11 @@ func NewBearerMiddleware(validator BearerValidator, fallbackBaseURL string) *Bea
 }
 
 // Handler wraps an http.Handler, enforcing Bearer token authentication.
+// When the validator implements ClaimsBearerValidator (JWKS mode), the
+// authenticated tenant ID from the JWT's x-tenant-id claim is injected
+// into the request context via tenant.WithTenant. This allows downstream
+// tool handlers to make tenant-scoped gRPC calls without requiring the
+// caller to pass a tenant_id parameter explicitly.
 func (m *BearerMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, err := extractBearerFromHeader(r)
@@ -539,7 +546,20 @@ func (m *BearerMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		if err := m.validator.ValidateBearer(token); err != nil {
+		// If the validator supports claims extraction, use it to get tenant context.
+		if claimsValidator, ok := m.validator.(ClaimsBearerValidator); ok {
+			tenantID, validateErr := claimsValidator.ValidateBearerWithTenant(token)
+			if validateErr != nil {
+				m.logger.Debug("bearer token validation failed",
+					"error", validateErr, "path", r.URL.Path)
+				m.writeAuthRequired(w, r)
+				return
+			}
+			if tenantID != "" {
+				ctx := tenant.WithTenant(r.Context(), tenant.TenantID(tenantID))
+				r = r.WithContext(ctx)
+			}
+		} else if err := m.validator.ValidateBearer(token); err != nil {
 			m.logger.Debug("bearer token validation failed",
 				"error", err, "path", r.URL.Path)
 			m.writeAuthRequired(w, r)
