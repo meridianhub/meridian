@@ -75,14 +75,11 @@ func TestAuthMetadata_JSON(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestMetadataHandler_ServesRFC8414(t *testing.T) {
-	cfg := auth.OAuthConfig{
-		ClientID:         "meridian-mcp",
-		AuthorizationURL: "https://mcp.example.com/oauth/authorize",
-		TokenURL:         "https://mcp.example.com/oauth/token",
-	}
+	handler := auth.NewMetadataHandler("https://mcp.example.com")
 
-	handler := auth.NewMetadataHandler("https://mcp.example.com", cfg)
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	req.Host = "mcp.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -100,6 +97,41 @@ func TestMetadataHandler_ServesRFC8414(t *testing.T) {
 	assert.Equal(t, []string{"authorization_code"}, meta.GrantTypesSupported)
 	assert.Equal(t, []string{"S256"}, meta.CodeChallengeMethodsSupported)
 	assert.Equal(t, []string{"none"}, meta.TokenEndpointAuthMethodsSupported)
+}
+
+func TestMetadataHandler_DerivesTenantScopedURLs(t *testing.T) {
+	handler := auth.NewMetadataHandler("https://demo.meridianhub.cloud")
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	req.Host = "volterra-energy.demo.meridianhub.cloud"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var meta auth.AuthorizationServerMetadata
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &meta))
+
+	assert.Equal(t, "https://volterra-energy.demo.meridianhub.cloud", meta.Issuer)
+	assert.Equal(t, "https://volterra-energy.demo.meridianhub.cloud/oauth/authorize", meta.AuthorizationEndpoint)
+	assert.Equal(t, "https://volterra-energy.demo.meridianhub.cloud/oauth/token", meta.TokenEndpoint)
+}
+
+func TestMetadataHandler_UsesFallbackWhenNoHost(t *testing.T) {
+	handler := auth.NewMetadataHandler("https://fallback.example.com")
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	req.Host = "" // Explicitly clear the default Host set by httptest
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var meta auth.AuthorizationServerMetadata
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &meta))
+
+	assert.Equal(t, "https://fallback.example.com", meta.Issuer)
 }
 
 // -----------------------------------------------------------------------
@@ -492,18 +524,16 @@ func TestAuthCodeStore_ConsumeOnlyOnce(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestBearerMiddleware_RejectsUnauthenticated(t *testing.T) {
-	meta := auth.Metadata{
-		AuthorizationURL: "https://auth.example.com/authorize",
-		TokenURL:         "https://auth.example.com/token",
-	}
 	validator := &alwaysFailValidator{}
-	mw := auth.NewBearerMiddleware(validator, meta)
+	mw := auth.NewBearerMiddleware(validator, "https://auth.example.com")
 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/mcp", nil)
+	req.Host = "auth.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
 	w := httptest.NewRecorder()
 	mw.Handler(inner).ServeHTTP(w, req)
 
@@ -511,17 +541,35 @@ func TestBearerMiddleware_RejectsUnauthenticated(t *testing.T) {
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	assert.Equal(t, "https://auth.example.com/authorize", body["authorization_url"])
-	assert.Equal(t, "https://auth.example.com/token", body["token_url"])
+	assert.Equal(t, "https://auth.example.com/oauth/authorize", body["authorization_url"])
+	assert.Equal(t, "https://auth.example.com/oauth/token", body["token_url"])
+}
+
+func TestBearerMiddleware_RejectsUnauthenticated_TenantScoped(t *testing.T) {
+	validator := &alwaysFailValidator{}
+	mw := auth.NewBearerMiddleware(validator, "https://demo.meridianhub.cloud")
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/mcp", nil)
+	req.Host = "volterra-energy.demo.meridianhub.cloud"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	mw.Handler(inner).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "https://volterra-energy.demo.meridianhub.cloud/oauth/authorize", body["authorization_url"])
+	assert.Equal(t, "https://volterra-energy.demo.meridianhub.cloud/oauth/token", body["token_url"])
 }
 
 func TestBearerMiddleware_AcceptsValidToken(t *testing.T) {
-	meta := auth.Metadata{
-		AuthorizationURL: "https://auth.example.com/authorize",
-		TokenURL:         "https://auth.example.com/token",
-	}
 	validator := &alwaysOKValidator{}
-	mw := auth.NewBearerMiddleware(validator, meta)
+	mw := auth.NewBearerMiddleware(validator, "https://auth.example.com")
 
 	reached := false
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
