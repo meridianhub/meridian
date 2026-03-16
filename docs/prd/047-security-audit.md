@@ -67,7 +67,7 @@ but didn't complete the wiring:
 | Control | Status | Gap |
 |---------|--------|-----|
 | TenantGuard | Implemented, tested (240 LOC tests) | Not registered in bootstrap |
-| RBAC (7-role) | Fully implemented | 1 of 19 services checks roles |
+| RBAC (7-role) | Fully implemented | 15 of 19 services lack checks |
 | Saga step limit | Constant defined (1M) | Never applied to thread |
 | Memory threshold | Constant defined (10MB) | Dead code — never referenced |
 | OPA Gatekeeper | Deployed, blocks `LOCAL_DEV_MODE` | No `AUTH_ENABLED` rule |
@@ -79,12 +79,14 @@ but didn't complete the wiring:
 
 **Description**: The RBAC framework (`shared/platform/auth/rbac.go`)
 defines 7 roles with a resource-type permission matrix, delegation
-hierarchy, and tested helper functions. However, only 1 of 19
-services calls any RBAC check
-(`reconciliation/service/finalizer.go:295`). All other handlers
-accept any authenticated request regardless of role.
+hierarchy, and tested helper functions. However, only 4 of 19
+services enforce any RBAC checks (reconciliation, control-plane,
+tenant, api-gateway). The remaining 15 services — including
+current-account, payment-order, financial-accounting, and
+position-keeping — accept any authenticated request regardless
+of role.
 
-**Evidence**:
+**Evidence** (services without RBAC):
 
 - `ExecuteDeposit` (`grpc_deposit_endpoints.go:28`) — No role check
 - `InitiatePaymentOrder` (`grpc_initiate.go:26`) — No role check
@@ -93,8 +95,8 @@ accept any authenticated request regardless of role.
 - `InitiateWithdrawal`, `InitiateLien`, `ExecuteLien` — No checks
 
 **Impact**: An `auditor`-role JWT (intended read-only) can create
-accounts, initiate payments, freeze accounts, execute deposits, and
-create liens. The 7-role hierarchy provides zero runtime protection.
+accounts, initiate payments, freeze accounts, and execute deposits
+on the 15 unprotected services.
 
 **Exploitability**: Trivial — any valid JWT grants full access.
 
