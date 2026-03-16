@@ -6,14 +6,13 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { StarlarkEditor, type ValidationError, type ComplexityMetrics } from '@/features/sagas/components/starlark-editor'
-import { Breadcrumbs, DetailSkeleton, ErrorState, PageShell } from '@/shared'
+import { Breadcrumbs, DetailSkeleton, ErrorState, PageShell, PageHeader } from '@/shared'
 import { useApiClients } from '@/api/context'
-import { useTenantSlug } from '@/hooks/use-tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
+import { referenceKeys } from '@/lib/query-keys'
 import { SagaStatus, ErrorCategory } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { usePageTitle } from '@/hooks/use-page-title'
-import { useSagaDetail, useActiveSaga } from '../hooks'
+import { useActiveSaga } from '../hooks'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,82 +52,26 @@ function isReadOnly(saga: SagaDefinition): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Split Pane - platform default vs tenant override diff
-// ---------------------------------------------------------------------------
-
-interface SplitPaneProps {
-  platformSaga: SagaDefinition
-  tenantSaga: SagaDefinition
-  tenantScript: string
-  onTenantScriptChange: (value: string) => void
-  validationErrors: ValidationError[]
-  complexityMetrics?: ComplexityMetrics
-}
-
-function SplitPane({
-  platformSaga,
-  tenantSaga,
-  tenantScript,
-  onTenantScriptChange,
-  validationErrors,
-  complexityMetrics,
-}: SplitPaneProps) {
-  return (
-    <div data-testid="split-pane" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-muted-foreground">Platform Default</span>
-          <StatusBadge status={sagaStatusLabel(platformSaga.status)} />
-        </div>
-        <StarlarkEditor
-          value={platformSaga.script}
-          onChange={() => {}}
-          readOnly={true}
-          className="min-h-[400px]"
-        />
-      </div>
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-muted-foreground">Tenant Override</span>
-          <StatusBadge status={sagaStatusLabel(tenantSaga.status)} />
-        </div>
-        <StarlarkEditor
-          value={tenantScript}
-          onChange={onTenantScriptChange}
-          readOnly={isReadOnly(tenantSaga)}
-          errors={validationErrors}
-          complexityMetrics={complexityMetrics}
-          className="min-h-[400px]"
-        />
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Main Detail Page
 // ---------------------------------------------------------------------------
 
 export function StarlarkDetailPage() {
-  const { definitionId } = useParams<{ definitionId: string }>()
-  usePageTitle(definitionId ? `Saga ${definitionId}` : 'Saga')
+  const { sagaName } = useParams<{ sagaName: string }>()
+  return <StarlarkDetailPageInner key={sagaName} sagaName={sagaName} />
+}
+
+function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined }) {
+  usePageTitle(sagaName ? `Saga ${sagaName}` : 'Saga')
   const { sagaRegistry } = useApiClients()
-  const tenantSlug = useTenantSlug()
   const qc = useQueryClient()
-  const sagaQueryRoot = tenantSlug
-    ? [...tenantKeys.sagas(tenantSlug), definitionId]
-    : ['starlark-config', definitionId]
 
   const [script, setScript] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [complexityMetrics, setComplexityMetrics] = useState<ComplexityMetrics | undefined>(undefined)
 
-  const { data: sagaData, isLoading } = useSagaDetail(definitionId)
+  const { data: activeSagaResponse, isLoading } = useActiveSaga(sagaName)
 
-  const { data: activeSagaData } = useActiveSaga(
-    sagaData?.name,
-    !!sagaData?.name && !sagaData.isSystem,
-  )
+  const sagaData = activeSagaResponse?.saga
 
   const effectiveScript = script ?? sagaData?.script ?? ''
 
@@ -171,7 +114,7 @@ export function StarlarkDetailPage() {
       return sagaRegistry.activateSaga({ id: sagaData.id })
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: sagaQueryRoot })
+      void qc.invalidateQueries({ queryKey: referenceKeys.activeSaga(sagaName ?? '') })
     },
   })
 
@@ -182,7 +125,7 @@ export function StarlarkDetailPage() {
       return sagaRegistry.deprecateSaga({ id: sagaData.id, successorId: '' })
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: sagaQueryRoot })
+      void qc.invalidateQueries({ queryKey: referenceKeys.activeSaga(sagaName ?? '') })
     },
   })
 
@@ -213,16 +156,42 @@ export function StarlarkDetailPage() {
     )
   }
 
-  // Determine if we should show split pane:
-  // - The current saga is NOT a system saga (it's a tenant override or draft)
-  // - There's an active system saga with the same name
-  const platformDefault = activeSagaData?.saga
-  const showSplitPane =
-    !sagaData.isSystem &&
-    platformDefault != null &&
-    platformDefault.id !== sagaData.id
-
   const readOnly = isReadOnly(sagaData)
+
+  const actionButtons = (
+    <>
+      {!readOnly && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => validateMutation.mutate()}
+          disabled={validateMutation.isPending}
+        >
+          Validate
+        </Button>
+      )}
+      {sagaData.status === SagaStatus.DRAFT && (
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => activateMutation.mutate()}
+          disabled={activateMutation.isPending}
+        >
+          Activate
+        </Button>
+      )}
+      {sagaData.status === SagaStatus.ACTIVE && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => deprecateMutation.mutate()}
+          disabled={deprecateMutation.isPending}
+        >
+          Deprecate
+        </Button>
+      )}
+    </>
+  )
 
   return (
     <PageShell>
@@ -236,86 +205,35 @@ export function StarlarkDetailPage() {
       />
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight font-mono">
-              {sagaData.name}
-            </h1>
-            <StatusBadge status={sagaStatusLabel(sagaData.status)} />
-          </div>
-          {sagaData.displayName && (
-            <p className="text-muted-foreground">{sagaData.displayName}</p>
-          )}
-          {sagaData.description && (
-            <p className="text-sm text-muted-foreground">{sagaData.description}</p>
-          )}
-          <div className="flex items-center gap-4 text-sm text-muted-foreground pt-1">
-            <span>Version {sagaData.version}</span>
-            {sagaData.updatedAt && (
-              <span>
-                Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
-              </span>
-            )}
-          </div>
-        </div>
+      <PageHeader
+        title={sagaData.name}
+        description={sagaData.description || undefined}
+        actions={actionButtons}
+      />
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 shrink-0">
-          {(!readOnly || showSplitPane) && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => validateMutation.mutate()}
-              disabled={validateMutation.isPending}
-            >
-              Validate
-            </Button>
-          )}
-          {sagaData.status === SagaStatus.DRAFT && (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => activateMutation.mutate()}
-              disabled={activateMutation.isPending}
-            >
-              Activate
-            </Button>
-          )}
-          {sagaData.status === SagaStatus.ACTIVE && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => deprecateMutation.mutate()}
-              disabled={deprecateMutation.isPending}
-            >
-              Deprecate
-            </Button>
-          )}
-        </div>
+      <div className="flex items-center gap-3">
+        <StatusBadge status={sagaStatusLabel(sagaData.status)} />
+        {sagaData.displayName && (
+          <span className="text-muted-foreground">{sagaData.displayName}</span>
+        )}
+        <span className="text-sm text-muted-foreground">Version {sagaData.version}</span>
+        {sagaData.updatedAt && (
+          <span className="text-sm text-muted-foreground">
+            Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
+          </span>
+        )}
       </div>
 
       {/* Editor area */}
       <Card className="p-6">
-        {showSplitPane ? (
-          <SplitPane
-            platformSaga={platformDefault}
-            tenantSaga={sagaData}
-            tenantScript={effectiveScript}
-            onTenantScriptChange={handleScriptChange}
-            validationErrors={validationErrors}
-            complexityMetrics={complexityMetrics}
-          />
-        ) : (
-          <StarlarkEditor
-            value={effectiveScript}
-            onChange={handleScriptChange}
-            readOnly={readOnly}
-            errors={validationErrors}
-            complexityMetrics={complexityMetrics}
-            className="min-h-[400px]"
-          />
-        )}
+        <StarlarkEditor
+          value={effectiveScript}
+          onChange={handleScriptChange}
+          readOnly={readOnly}
+          errors={validationErrors}
+          complexityMetrics={complexityMetrics}
+          className="min-h-[400px]"
+        />
       </Card>
     </PageShell>
   )
