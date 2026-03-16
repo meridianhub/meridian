@@ -169,7 +169,7 @@ const ValuationRuleNode = memo(function ValuationRuleNode({ data }: { data: Mani
       <Tooltip>
         <TooltipTrigger asChild>
           <div
-            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150"
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
             style={containerStyle}
           >
             <span className="text-[10px] font-semibold text-foreground">{from} &rarr; {to}</span>
