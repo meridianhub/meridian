@@ -306,14 +306,14 @@ should build on:
 | # | Task | Closes |
 |---|------|--------|
 | 1.1 | Add `SetMaxExecutionSteps(MaxStepsPerExecution)` to saga runtime | HIGH-1 |
-| 1.2 | Add `SetMaxExecutionSteps(1M)` to forecasting runtime | HIGH-2 |
+| 1.2 | Add `SetMaxExecutionSteps(1M)` to forecasting runtime | HIGH-2 (partial) |
 | 1.3 | Register TenantGuard in bootstrap (GORM only; pgx gap in 3.12) | CRITICAL-2 |
 | 1.4 | Change AUTH_ENABLED default to `true` in API Gateway + pos-keeping | CRITICAL-3 |
 | 1.5 | Set `AUTH_ENABLED: "true"` in all 11 K8s configmaps | HIGH-3 |
 | 1.6 | Remove `continue-on-error` from Trivy, `\|\| true` from gosec | MEDIUM-3 |
 | 1.7 | SHA-pin `appleboy/ssh-action` and `appleboy/scp-action` | HIGH-5 |
 | 1.8 | Add container resource limits to demo docker-compose | MEDIUM-4 |
-| 1.9 | Delete dead `MemoryWarningThreshold` constant | HIGH-4 |
+| 1.9 | Delete dead `MemoryWarningThreshold` constant | Cleanup |
 | 1.10 | Add OPA Gatekeeper constraint for `AUTH_ENABLED=false` | HIGH-3 |
 
 ### Wave 2: RBAC Interceptor + Sandbox Hardening (~1 week)
@@ -354,7 +354,8 @@ should build on:
 - All CRITICAL findings resolved (Wave 1 + Wave 2)
 - All HIGH findings resolved (Wave 1 + Wave 2)
 - Security scanning blocks PR merges on CRITICAL/HIGH vulnerabilities
-- TenantGuard active in production — cross-tenant queries fail-closed
+- TenantGuard active on GORM path — cross-tenant queries fail-closed
+  (pgx path tracked separately in Wave 3 task 3.12)
 - RBAC enforced on all gRPC endpoints via method permission
   interceptor
 - No K8s manifest can deploy with `AUTH_ENABLED=false` (OPA + CI)
