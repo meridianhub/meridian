@@ -360,9 +360,6 @@ function guarded(element: ReactNode) {
  */
 function AppShellLayout() {
   const { pathname } = useLocation()
-  const { lens } = useAuth()
-  const isPlatformAdmin = lens === 'platform'
-
   return (
     <AppShell currentPath={pathname}>
       <Routes>
