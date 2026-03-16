@@ -12,6 +12,15 @@ describe('NODE_TYPE_REGISTRY', () => {
     'account_type',
     'valuation_rule',
     'saga',
+    'payment_rail',
+    'party_type',
+    'mapping',
+    'operational_gateway',
+    'provider_connection',
+    'instruction_route',
+    'market_data',
+    'organization',
+    'internal_account',
   ]
 
   it('has entries for all current ManifestNodeType values', () => {

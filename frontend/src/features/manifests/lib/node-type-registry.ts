@@ -64,6 +64,21 @@ export const NODE_TYPE_REGISTRY: Record<ManifestNodeType, NodeTypeConfig> = {
     label: 'Instruction Routes',
     layerPriority: '4',
   },
+  market_data: {
+    color: 'var(--graph-market-data)',
+    label: 'Market Data',
+    layerPriority: '3',
+  },
+  organization: {
+    color: 'var(--graph-organization)',
+    label: 'Organizations',
+    layerPriority: '2',
+  },
+  internal_account: {
+    color: 'var(--graph-internal-account)',
+    label: 'Internal Accounts',
+    layerPriority: '1',
+  },
 }
 
 /** Derived view: { color, label } per node type, compatible with existing NODE_THEMES usage. */

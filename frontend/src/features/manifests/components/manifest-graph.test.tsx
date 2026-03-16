@@ -226,6 +226,15 @@ describe('ManifestGraph', () => {
       expect(screen.getByLabelText('Show Account Types')).toBeInTheDocument()
       expect(screen.getByLabelText('Show Valuation Rules')).toBeInTheDocument()
       expect(screen.getByLabelText('Show Sagas')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Payment Rails')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Party Types')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Mappings')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Operational Gateway')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Provider Connections')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Instruction Routes')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Market Data')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Organizations')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Internal Accounts')).toBeInTheDocument()
     })
 
     it('shows node counts per type', async () => {
