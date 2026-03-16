@@ -595,7 +595,7 @@ func (v *ManifestValidator) validateDuplicates(
 				Code:         "DUPLICATE_MAPPING",
 				Message:      fmt.Sprintf("duplicate mapping name=%q version=%d (first defined at mappings[%d])", mp.GetName(), mp.GetVersion(), prev),
 				ResourceType: "mapping",
-				ResourceID:   mp.GetName(),
+				ResourceID:   fmt.Sprintf("%s:v%d", mp.GetName(), mp.GetVersion()),
 			})
 		} else {
 			mappingKeys[key] = i
@@ -1432,6 +1432,8 @@ func (v *ManifestValidator) validateEventTrigger(
 			Code:            "INVALID_EVENT_CHANNEL",
 			Message:         fmt.Sprintf("unknown event channel %q; must be a registered topic", channel),
 			AvailableFields: availableChans,
+			ResourceType:    "saga",
+			ResourceID:      saga.GetName(),
 		}
 		if suggestion := findClosestMatch(channel, availableChans); suggestion != "" {
 			ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
@@ -1536,6 +1538,8 @@ func (v *ManifestValidator) validateWebhookTriggers(
 				Code:            "UNKNOWN_WEBHOOK_SOURCE",
 				Message:         fmt.Sprintf("webhook source %q does not match any provider connection in operational_gateway.provider_connections", source),
 				AvailableFields: availableIDs,
+				ResourceType:    "saga",
+				ResourceID:      saga.GetName(),
 			}
 			if suggestion := findClosestMatch(source, availableIDs); suggestion != "" {
 				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
@@ -1605,16 +1609,20 @@ func (v *ManifestValidator) validatePaymentRails(
 				Code:            "INVALID_PAYMENT_PROVIDER",
 				Message:         fmt.Sprintf("unsupported payment provider %q", rail.GetProvider()),
 				AvailableFields: providerList,
+				ResourceType:    "payment_rail",
+				ResourceID:      rail.GetProvider(),
 			})
 		}
 
 		// Validate account_id format
 		if rail.GetAccountId() != "" && !accountIDPattern.MatchString(rail.GetAccountId()) {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     basePath + ".account_id",
-				Code:     "INVALID_ACCOUNT_ID_FORMAT",
-				Message:  fmt.Sprintf("account_id %q does not match expected format acct_[A-Za-z0-9]{16,}", rail.GetAccountId()),
+				Severity:     SeverityError,
+				Path:         basePath + ".account_id",
+				Code:         "INVALID_ACCOUNT_ID_FORMAT",
+				Message:      fmt.Sprintf("account_id %q does not match expected format acct_[A-Za-z0-9]{16,}", rail.GetAccountId()),
+				ResourceType: "payment_rail",
+				ResourceID:   rail.GetProvider(),
 			})
 		}
 
@@ -1633,6 +1641,8 @@ func (v *ManifestValidator) validatePaymentRails(
 					Code:            "UNKNOWN_PAYMENT_METHOD",
 					Message:         fmt.Sprintf("payment method %q is not a recognized method", method),
 					AvailableFields: methodList,
+					ResourceType:    "payment_rail",
+					ResourceID:      rail.GetProvider(),
 				}
 				if suggestion := findClosestMatch(method, methodList); suggestion != "" {
 					ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
@@ -1735,13 +1745,13 @@ func (v *ManifestValidator) validatePartyTypes(
 
 		// Validate CEL expressions
 		if expr := pt.GetValidationCel(); expr != "" {
-			v.validateCELExpression(expr, basePath+".validation_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", pt.GetPartyType())
+			v.validateCELExpression(expr, basePath+".validation_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", fmt.Sprintf("%s:%s", pt.GetTenantId(), pt.GetPartyType()))
 		}
 		if expr := pt.GetEligibilityCel(); expr != "" {
-			v.validateCELExpression(expr, basePath+".eligibility_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", pt.GetPartyType())
+			v.validateCELExpression(expr, basePath+".eligibility_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", fmt.Sprintf("%s:%s", pt.GetTenantId(), pt.GetPartyType()))
 		}
 		if expr := pt.GetErrorMessageCel(); expr != "" {
-			v.validateCELExpression(expr, basePath+".error_message_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", pt.GetPartyType())
+			v.validateCELExpression(expr, basePath+".error_message_cel", v.partyTypeCelEnv, celPartyTypeFields, result, "party_type", fmt.Sprintf("%s:%s", pt.GetTenantId(), pt.GetPartyType()))
 		}
 	}
 }
@@ -2067,11 +2077,13 @@ func (v *ManifestValidator) validateAPITriggers(
 		// Validate format: must start with '/'
 		if !apiPathPattern.MatchString(path) {
 			addError(result, ValidationError{
-				Severity:   SeverityError,
-				Path:       sagaPath,
-				Code:       "INVALID_API_PATH_FORMAT",
-				Message:    fmt.Sprintf("API trigger path %q must start with '/'", path),
-				Suggestion: "API paths should follow the format '/v1/resource'",
+				Severity:     SeverityError,
+				Path:         sagaPath,
+				Code:         "INVALID_API_PATH_FORMAT",
+				Message:      fmt.Sprintf("API trigger path %q must start with '/'", path),
+				Suggestion:   "API paths should follow the format '/v1/resource'",
+				ResourceType: "saga",
+				ResourceID:   saga.GetName(),
 			})
 			continue
 		}
@@ -2079,10 +2091,12 @@ func (v *ManifestValidator) validateAPITriggers(
 		// Check uniqueness
 		if prevIdx, exists := seenPaths[path]; exists {
 			addError(result, ValidationError{
-				Severity: SeverityError,
-				Path:     sagaPath,
-				Code:     "DUPLICATE_API_TRIGGER",
-				Message:  fmt.Sprintf("API path %q already bound to saga at sagas[%d]", path, prevIdx),
+				Severity:     SeverityError,
+				Path:         sagaPath,
+				Code:         "DUPLICATE_API_TRIGGER",
+				Message:      fmt.Sprintf("API path %q already bound to saga at sagas[%d]", path, prevIdx),
+				ResourceType: "saga",
+				ResourceID:   saga.GetName(),
 			})
 		} else {
 			seenPaths[path] = i
@@ -2096,6 +2110,8 @@ func (v *ManifestValidator) validateAPITriggers(
 				Code:            "UNKNOWN_API_ENDPOINT",
 				Message:         fmt.Sprintf("API path %q is not defined in the OpenAPI spec", path),
 				AvailableFields: availablePaths,
+				ResourceType:    "saga",
+				ResourceID:      saga.GetName(),
 			}
 			if suggestion := findClosestMatch(path, availablePaths); suggestion != "" {
 				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
@@ -2432,10 +2448,12 @@ func (v *ManifestValidator) detectOrphanProviderConnections(
 		cid := conn.GetConnectionId()
 		if !usedConnections[cid] {
 			addError(result, ValidationError{
-				Severity: SeverityWarning,
-				Path:     fmt.Sprintf("operational_gateway.provider_connections[%d].connection_id", i),
-				Code:     "ORPHAN_PROVIDER_CONNECTION",
-				Message:  fmt.Sprintf("provider connection %q is not referenced by any instruction route or webhook trigger", cid),
+				Severity:     SeverityWarning,
+				Path:         fmt.Sprintf("operational_gateway.provider_connections[%d].connection_id", i),
+				Code:         "ORPHAN_PROVIDER_CONNECTION",
+				Message:      fmt.Sprintf("provider connection %q is not referenced by any instruction route or webhook trigger", cid),
+				ResourceType: "provider_connection",
+				ResourceID:   cid,
 			})
 		}
 	}
@@ -2458,10 +2476,12 @@ func (v *ManifestValidator) detectOrphanInstructionRoutes(
 		instrType := route.GetInstructionType()
 		if !usedInstructionTypes[instrType] {
 			addError(result, ValidationError{
-				Severity: SeverityWarning,
-				Path:     fmt.Sprintf("operational_gateway.instruction_routes[%d].instruction_type", i),
-				Code:     "ORPHAN_INSTRUCTION_ROUTE",
-				Message:  fmt.Sprintf("instruction type %q is not dispatched by any saga script", instrType),
+				Severity:     SeverityWarning,
+				Path:         fmt.Sprintf("operational_gateway.instruction_routes[%d].instruction_type", i),
+				Code:         "ORPHAN_INSTRUCTION_ROUTE",
+				Message:      fmt.Sprintf("instruction type %q is not dispatched by any saga script", instrType),
+				ResourceType: "instruction_route",
+				ResourceID:   instrType,
 			})
 		}
 	}
