@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -15,20 +16,32 @@ func TestNewHistoryService_NilRepository(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNilRepository)
 }
 
-func TestDiffManifests_NoChanges(t *testing.T) {
-	m := testManifest("1.0")
-	result := diffManifests(m, m)
-	assert.Equal(t, "No changes detected", result)
+func TestNewHistoryServiceWithDiffer_NilRepository(t *testing.T) {
+	_, err := NewHistoryServiceWithDiffer(nil, differ.New(nil, nil))
+	assert.ErrorIs(t, err, ErrNilRepository)
 }
 
-func TestDiffManifests_MetadataChange(t *testing.T) {
-	old := testManifest("1.0")
-	updated := testManifest("1.0")
-	updated.Metadata.Name = "Updated Name"
+func TestNewHistoryServiceWithDiffer_NilDifferUsesDefault(t *testing.T) {
+	repo := &Repository{}
+	svc, err := NewHistoryServiceWithDiffer(repo, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, svc.differ)
+}
 
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Metadata name changed")
-	assert.Contains(t, result, "Updated Name")
+// diffManifestsHelper calls the method-based diffManifests for unit tests.
+func diffManifestsHelper(t *testing.T, prev, next *controlplanev1.Manifest) string {
+	t.Helper()
+	svc, err := NewHistoryService(&Repository{})
+	require.NoError(t, err)
+	result, err := svc.diffManifests(context.Background(), prev, next)
+	require.NoError(t, err)
+	return result
+}
+
+func TestDiffManifests_NoChanges(t *testing.T) {
+	m := testManifest("1.0")
+	result := diffManifestsHelper(t, m, m)
+	assert.Equal(t, "No changes detected", result)
 }
 
 func TestDiffManifests_InstrumentAdded(t *testing.T) {
@@ -44,8 +57,9 @@ func TestDiffManifests_InstrumentAdded(t *testing.T) {
 		},
 	})
 
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Instrument added: EUR")
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Create instrument EUR")
+	assert.Contains(t, result, "Euro")
 }
 
 func TestDiffManifests_InstrumentRemoved(t *testing.T) {
@@ -53,8 +67,25 @@ func TestDiffManifests_InstrumentRemoved(t *testing.T) {
 	updated := testManifest("1.0")
 	updated.Instruments = updated.Instruments[:1] // Remove KWH
 
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Instrument removed: KWH")
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Delete instrument KWH")
+}
+
+func TestDiffManifests_InstrumentNameUpdated(t *testing.T) {
+	old := testManifest("1.0")
+	updated := testManifest("1.0")
+	updated.Instruments[0].Name = "Pound Sterling"
+
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Update instrument GBP")
+	assert.Contains(t, result, "name:")
+}
+
+func TestDiffManifests_InstrumentUnchanged(t *testing.T) {
+	m := testManifest("1.0")
+	result := diffManifestsHelper(t, m, m)
+	assert.Equal(t, "No changes detected", result)
+	assert.NotContains(t, result, "GBP")
 }
 
 func TestDiffManifests_SagaAdded(t *testing.T) {
@@ -66,36 +97,18 @@ func TestDiffManifests_SagaAdded(t *testing.T) {
 		Script:  "def execute(ctx):\n    return {}\n",
 	})
 
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Saga added: new_saga")
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Create saga new_saga")
 }
 
-func TestDiffManifests_VersionChange(t *testing.T) {
+func TestDiffManifests_SagaScriptUpdated(t *testing.T) {
 	old := testManifest("1.0")
-	updated := testManifest("2.0")
+	updated := testManifest("1.0")
+	updated.Sagas[0].Script = "def execute(ctx):\n    return {'changed': True}\n"
 
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Schema version changed: 1.0 -> 2.0")
-}
-
-func TestDiffManifests_MultipleChanges(t *testing.T) {
-	old := testManifest("1.0")
-	updated := testManifest("2.0")
-	updated.Metadata.Name = "New Name"
-	updated.Instruments = append(updated.Instruments, &controlplanev1.InstrumentDefinition{
-		Code: "USD",
-		Name: "US Dollar",
-		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
-		Dimensions: &controlplanev1.InstrumentDimensions{
-			Unit:      "USD",
-			Precision: 2,
-		},
-	})
-
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Metadata name changed")
-	assert.Contains(t, result, "Instrument added: USD")
-	assert.Contains(t, result, "Schema version changed")
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Update saga process_settlement")
+	assert.Contains(t, result, "script changed")
 }
 
 func TestDiffManifests_AccountTypeAdded(t *testing.T) {
@@ -107,11 +120,11 @@ func TestDiffManifests_AccountTypeAdded(t *testing.T) {
 		NormalBalance: controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT,
 	})
 
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Account type added: SAVINGS")
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Create account type SAVINGS")
 }
 
-func TestDiffManifests_ValuationRuleCountChange(t *testing.T) {
+func TestDiffManifests_ValuationRuleAdded(t *testing.T) {
 	old := testManifest("1.0")
 	updated := testManifest("1.0")
 	updated.ValuationRules = append(updated.ValuationRules, &controlplanev1.ValuationRule{
@@ -121,8 +134,26 @@ func TestDiffManifests_ValuationRuleCountChange(t *testing.T) {
 		Source:         "admin",
 	})
 
-	result := diffManifests(old, updated)
-	assert.Contains(t, result, "Valuation rules: 1 -> 2")
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Create valuation rule")
+	assert.Contains(t, result, "USD")
+}
+
+func TestDiffManifests_MultipleChanges(t *testing.T) {
+	old := testManifest("1.0")
+	updated := testManifest("2.0")
+	updated.Instruments = append(updated.Instruments, &controlplanev1.InstrumentDefinition{
+		Code: "USD",
+		Name: "US Dollar",
+		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Dimensions: &controlplanev1.InstrumentDimensions{
+			Unit:      "USD",
+			Precision: 2,
+		},
+	})
+
+	result := diffManifestsHelper(t, old, updated)
+	assert.Contains(t, result, "Create instrument USD")
 }
 
 func TestUnmarshalManifest_RoundTrip(t *testing.T) {
@@ -170,7 +201,7 @@ func TestEntityToProto(t *testing.T) {
 	jsonBytes, err := marshaler.Marshal(original)
 	require.NoError(t, err)
 
-	diffSummary := "Instrument added: GBP"
+	diffSummary := "Create instrument GBP (British Pound Sterling)"
 	entity := &VersionEntity{
 		ID:           [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Version:      "1.0",
@@ -188,7 +219,7 @@ func TestEntityToProto(t *testing.T) {
 	assert.Equal(t, "admin@meridian.io", proto.AppliedBy)
 	assert.Equal(t, controlplanev1.ApplyStatus_APPLY_STATUS_APPLIED, proto.ApplyStatus)
 	require.NotNil(t, proto.DiffSummary)
-	assert.Equal(t, "Instrument added: GBP", *proto.DiffSummary)
+	assert.Equal(t, "Create instrument GBP (British Pound Sterling)", *proto.DiffSummary)
 	assert.NotNil(t, proto.Manifest)
 	assert.Equal(t, "1.0", proto.Manifest.Version)
 }

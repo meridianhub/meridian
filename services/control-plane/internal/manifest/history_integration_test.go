@@ -85,8 +85,8 @@ func TestHistoryService_DiffSummaryGeneration(t *testing.T) {
 	stored, err := svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
 	require.NoError(t, err)
 	require.NotNil(t, stored.DiffSummary)
-	assert.Contains(t, *stored.DiffSummary, "Instrument added: EUR")
-	assert.Contains(t, *stored.DiffSummary, "Schema version changed: 1.0 -> 2.0")
+	assert.Contains(t, *stored.DiffSummary, "Create instrument EUR")
+	assert.Contains(t, *stored.DiffSummary, "Euro")
 }
 
 func TestHistoryService_NoDiffForFirstVersion(t *testing.T) {
@@ -186,8 +186,8 @@ func TestHistoryService_CompareVersions(t *testing.T) {
 
 	diff, err := svc.CompareVersions(tc.Ctx, "1.0", "2.0")
 	require.NoError(t, err)
-	assert.Contains(t, diff, "Instrument added: USD")
-	assert.Contains(t, diff, "Schema version changed: 1.0 -> 2.0")
+	assert.Contains(t, diff, "Create instrument USD")
+	assert.Contains(t, diff, "US Dollar")
 }
 
 func TestHistoryService_CompareVersions_NotFound(t *testing.T) {
