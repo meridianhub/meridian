@@ -132,6 +132,77 @@ func (s *HistoryService) StoreManifestVersion(
 	return entity, nil
 }
 
+// StoreManifestVersionWithPhaseStatus saves a manifest snapshot with phase-level execution status.
+// Phase status is included in the initial entity creation (single atomic write).
+func (s *HistoryService) StoreManifestVersionWithPhaseStatus(
+	ctx context.Context,
+	mf *controlplanev1.Manifest,
+	appliedBy string,
+	applyJobID *uuid.UUID,
+	applyStatus ApplyStatus,
+	graph *validator.RelationshipGraph,
+	expectedSeq int64,
+	phaseStatus PhaseStatusMap,
+) (*VersionEntity, error) {
+	if mf == nil {
+		return nil, ErrNilManifest
+	}
+	if appliedBy == "" {
+		return nil, ErrEmptyAppliedBy
+	}
+
+	marshaler := protojson.MarshalOptions{UseProtoNames: true}
+	jsonBytes, err := marshaler.Marshal(mf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal manifest to JSON: %w", err)
+	}
+
+	var diffSummary *string
+	if applyStatus == ApplyStatusApplied {
+		summary, diffErr := s.generateDiffSummary(ctx, mf)
+		if diffErr != nil && !errors.Is(diffErr, ErrVersionNotFound) {
+			return nil, fmt.Errorf("failed to generate diff summary: %w", diffErr)
+		}
+		if summary != "" {
+			diffSummary = &summary
+		}
+	}
+
+	var graphJSON *string
+	if graph != nil {
+		if graphBytes, graphErr := json.Marshal(graph); graphErr == nil {
+			s := string(graphBytes)
+			graphJSON = &s
+		}
+	}
+
+	now := time.Now().UTC()
+	entity := &VersionEntity{
+		ID:                uuid.New(),
+		Version:           mf.Version,
+		ManifestJSON:      string(jsonBytes),
+		AppliedAt:         now,
+		AppliedBy:         appliedBy,
+		ApplyStatus:       applyStatus,
+		ApplyJobID:        applyJobID,
+		DiffSummary:       diffSummary,
+		RelationshipGraph: graphJSON,
+		CreatedAt:         now,
+	}
+
+	if phaseStatus != nil {
+		if err := entity.SetPhaseStatus(phaseStatus); err != nil {
+			return nil, fmt.Errorf("failed to serialize phase_status: %w", err)
+		}
+	}
+
+	if err := s.repo.Store(ctx, entity, expectedSeq); err != nil {
+		return nil, err
+	}
+
+	return entity, nil
+}
+
 // GetCurrentManifest retrieves the latest applied manifest version.
 func (s *HistoryService) GetCurrentManifest(ctx context.Context) (*VersionEntity, error) {
 	return s.repo.GetLatestApplied(ctx)
@@ -293,7 +364,38 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 		mv.ResourcePath = entity.ResourcePath
 	}
 
+	// Populate phase_status from the JSONB column.
+	phaseStatus, phaseErr := entity.GetPhaseStatus()
+	if phaseErr != nil {
+		return nil, fmt.Errorf("failed to unmarshal phase_status: %w", phaseErr)
+	}
+	if phaseStatus != nil {
+		mv.PhaseStatus = phaseStatusMapToProto(phaseStatus)
+	}
+
 	return mv, nil
+}
+
+// phaseStatusMapToProto converts a PhaseStatusMap to the proto map representation.
+func phaseStatusMapToProto(m PhaseStatusMap) map[string]*controlplanev1.PhaseStatusDetail {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]*controlplanev1.PhaseStatusDetail, len(m))
+	for key, entry := range m {
+		detail := &controlplanev1.PhaseStatusDetail{
+			Status: string(entry.Status),
+			Error:  entry.Error,
+		}
+		if entry.StartedAt != nil {
+			detail.StartedAt = timestamppb.New(*entry.StartedAt)
+		}
+		if entry.CompletedAt != nil {
+			detail.CompletedAt = timestamppb.New(*entry.CompletedAt)
+		}
+		result[key] = detail
+	}
+	return result
 }
 
 // generateDiffSummary creates a diff summary comparing the given manifest
@@ -352,6 +454,8 @@ func toProtoApplyStatus(status ApplyStatus) controlplanev1.ApplyStatus {
 		return controlplanev1.ApplyStatus_APPLY_STATUS_FAILED
 	case ApplyStatusRolledBack:
 		return controlplanev1.ApplyStatus_APPLY_STATUS_ROLLED_BACK
+	case ApplyStatusPartial:
+		return controlplanev1.ApplyStatus_APPLY_STATUS_PARTIAL
 	default:
 		return controlplanev1.ApplyStatus_APPLY_STATUS_UNSPECIFIED
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -17,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Sentinel errors for handler configuration validation.
@@ -178,10 +180,14 @@ func (h *ApplyManifestHandler) ApplyManifest(
 
 	if execResult.err != nil {
 		logger.Error("execution failed", "error", execResult.err)
-		response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED
 
-		// Record failed apply in history (no graph for failed applies, no optimistic lock)
-		_, _ = h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusFailed, nil, 0)
+		// Determine if this is a partial failure (some phases succeeded)
+		applyStatus, responseStatus := classifyFailure(execResult.phaseStatus)
+		response.Status = responseStatus
+		response.PhaseStatus = phaseStatusMapToResponseProto(execResult.phaseStatus)
+
+		// Record history with phase status
+		_, _ = h.recordHistoryWithPhaseStatus(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, applyStatus, nil, 0, execResult.phaseStatus)
 		return response, nil //nolint:nilerr // error conveyed via response status, not gRPC error
 	}
 
@@ -207,6 +213,7 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	}
 
 	response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED
+	response.PhaseStatus = phaseStatusMapToResponseProto(execResult.phaseStatus)
 	logger.Info("manifest applied successfully", "job_id", execResult.jobID)
 
 	// Invoke post-apply hooks (e.g., cache invalidation)
@@ -412,9 +419,10 @@ func (h *ApplyManifestHandler) plan(
 
 // executeOutput holds the results of manifest execution.
 type executeOutput struct {
-	jobID      string
-	stepResult *controlplanev1.StepResult
-	err        error
+	jobID       string
+	stepResult  *controlplanev1.StepResult
+	err         error
+	phaseStatus manifest.PhaseStatusMap
 }
 
 // execute runs the manifest apply via the executor.
@@ -424,8 +432,6 @@ func (h *ApplyManifestHandler) execute(
 	execPlan *planner.ExecutionPlan,
 ) executeOutput {
 	if h.executor == nil {
-		// No executor configured - reject non-dry-run applies to prevent
-		// acknowledging applies without actually executing them.
 		return executeOutput{
 			err: ErrExecutorNotConfigured,
 			stepResult: &controlplanev1.StepResult{
@@ -440,15 +446,23 @@ func (h *ApplyManifestHandler) execute(
 	input := buildExecutorInput(req.GetManifest())
 	input.TenantID = execPlan.TenantID
 
+	// Derive phase status from execution plan phases
+	phaseStatus := buildInitialPhaseStatus(execPlan)
+
 	result, err := h.executor.Apply(ctx, input)
+
+	// Update phase status based on execution outcome
+	updatePhaseStatus(phaseStatus, execPlan, result, err)
+
 	if err != nil {
 		jobID := ""
 		if result != nil {
 			jobID = result.JobID.String()
 		}
 		return executeOutput{
-			jobID: jobID,
-			err:   err,
+			jobID:       jobID,
+			err:         err,
+			phaseStatus: phaseStatus,
 			stepResult: &controlplanev1.StepResult{
 				StepName: "execute",
 				Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
@@ -458,7 +472,8 @@ func (h *ApplyManifestHandler) execute(
 	}
 
 	return executeOutput{
-		jobID: result.JobID.String(),
+		jobID:       result.JobID.String(),
+		phaseStatus: phaseStatus,
 		stepResult: &controlplanev1.StepResult{
 			StepName: "execute",
 			Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_SUCCESS,
@@ -468,6 +483,107 @@ func (h *ApplyManifestHandler) execute(
 			},
 		},
 	}
+}
+
+// buildInitialPhaseStatus creates a PhaseStatusMap with PENDING entries for each
+// phase present in the execution plan.
+func buildInitialPhaseStatus(plan *planner.ExecutionPlan) manifest.PhaseStatusMap {
+	phases := plan.Phases()
+	m := make(manifest.PhaseStatusMap, len(phases))
+	for _, p := range phases {
+		key := fmt.Sprintf("phase_%d", p)
+		m[key] = manifest.PhaseStatusEntry{
+			Status: manifest.PhaseStatusPending,
+		}
+	}
+	return m
+}
+
+// updatePhaseStatus updates phase entries based on the execution result.
+// On success, all phases are marked COMPLETED.
+// On failure, phases are marked based on step results: completed phases get COMPLETED,
+// the phase containing the failing step gets FAILED, and remaining phases get SKIPPED.
+func updatePhaseStatus(
+	phaseStatus manifest.PhaseStatusMap,
+	plan *planner.ExecutionPlan,
+	result *ApplyManifestResult,
+	execErr error,
+) {
+	now := time.Now().UTC()
+	phases := plan.Phases()
+
+	if execErr == nil && result != nil {
+		// All phases completed successfully
+		for _, p := range phases {
+			key := fmt.Sprintf("phase_%d", p)
+			entry := phaseStatus[key]
+			entry.Status = manifest.PhaseStatusCompleted
+			entry.StartedAt = &now
+			entry.CompletedAt = &now
+			phaseStatus[key] = entry
+		}
+		return
+	}
+
+	// On failure: mark phases based on step results.
+	// Steps are executed in phase order. We mark phases as COMPLETED until we
+	// find a failed step, then the containing phase is FAILED and the rest are SKIPPED.
+	failedPhase := findFailedPhase(plan, result)
+
+	for _, p := range phases {
+		key := fmt.Sprintf("phase_%d", p)
+		entry := phaseStatus[key]
+		entry.StartedAt = &now
+
+		if failedPhase > 0 && p < failedPhase {
+			entry.Status = manifest.PhaseStatusCompleted
+			entry.CompletedAt = &now
+		} else if failedPhase > 0 && p == failedPhase {
+			entry.Status = manifest.PhaseStatusFailed
+			entry.CompletedAt = &now
+			if result != nil {
+				entry.Error = result.Error
+			} else if execErr != nil {
+				entry.Error = execErr.Error()
+			}
+		} else if failedPhase > 0 {
+			entry.Status = manifest.PhaseStatusSkipped
+			entry.StartedAt = nil
+		} else {
+			// No phase-level info available; mark all as failed
+			entry.Status = manifest.PhaseStatusFailed
+			entry.CompletedAt = &now
+			if execErr != nil {
+				entry.Error = execErr.Error()
+			}
+		}
+		phaseStatus[key] = entry
+	}
+}
+
+// findFailedPhase returns the phase number of the first failed step, or 0 if
+// it cannot be determined from step results.
+//
+// Step results are ordered by execution sequence, matching the call order in
+// the execution plan. We use positional correlation: step result at index i
+// corresponds to planned call at index i. This avoids the naming mismatch
+// between saga handler names (e.g. "reference_data.register_instrument") and
+// gRPC method paths in the execution plan.
+func findFailedPhase(plan *planner.ExecutionPlan, result *ApplyManifestResult) planner.Phase {
+	if result == nil || len(result.StepResults) == 0 {
+		return 0
+	}
+
+	for i, step := range result.StepResults {
+		if !step.Success {
+			if i < len(plan.Calls) {
+				return plan.Calls[i].Phase
+			}
+			return 0
+		}
+	}
+
+	return 0
 }
 
 // recordHistory stores the manifest version in the history service.
@@ -501,6 +617,91 @@ func (h *ApplyManifestHandler) recordHistory(
 			return nil, err
 		}
 		h.logger.Error("failed to record manifest history", "error", err)
+		return nil, nil //nolint:nilnil // non-conflict errors are logged but non-fatal
+	}
+
+	proto, err := manifest.EntityToProto(entity)
+	if err != nil {
+		h.logger.Error("failed to convert history entity to proto", "error", err)
+		return nil, nil //nolint:nilnil // conversion errors are logged but non-fatal
+	}
+
+	return proto, nil
+}
+
+// classifyFailure examines phase statuses to determine if this is a partial
+// or complete failure. Returns both the internal ApplyStatus and proto status.
+func classifyFailure(ps manifest.PhaseStatusMap) (manifest.ApplyStatus, controlplanev1.ApplyManifestStatus) {
+	if ps == nil {
+		return manifest.ApplyStatusFailed, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED
+	}
+	hasCompleted := false
+	hasFailed := false
+	for _, entry := range ps {
+		switch entry.Status { //nolint:exhaustive // only COMPLETED/FAILED affect classification
+		case manifest.PhaseStatusCompleted:
+			hasCompleted = true
+		case manifest.PhaseStatusFailed:
+			hasFailed = true
+		}
+	}
+	if hasCompleted && hasFailed {
+		return manifest.ApplyStatusPartial, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_PARTIAL
+	}
+	return manifest.ApplyStatusFailed, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED
+}
+
+// phaseStatusMapToResponseProto converts a PhaseStatusMap to proto map for the response.
+func phaseStatusMapToResponseProto(ps manifest.PhaseStatusMap) map[string]*controlplanev1.PhaseStatusDetail {
+	if ps == nil {
+		return nil
+	}
+	result := make(map[string]*controlplanev1.PhaseStatusDetail, len(ps))
+	for key, entry := range ps {
+		detail := &controlplanev1.PhaseStatusDetail{
+			Status: string(entry.Status),
+			Error:  entry.Error,
+		}
+		if entry.StartedAt != nil {
+			detail.StartedAt = timestamppb.New(*entry.StartedAt)
+		}
+		if entry.CompletedAt != nil {
+			detail.CompletedAt = timestamppb.New(*entry.CompletedAt)
+		}
+		result[key] = detail
+	}
+	return result
+}
+
+// recordHistoryWithPhaseStatus stores the manifest version in history with phase status.
+func (h *ApplyManifestHandler) recordHistoryWithPhaseStatus(
+	ctx context.Context,
+	mf *controlplanev1.Manifest,
+	appliedBy string,
+	jobID string,
+	applyStatus manifest.ApplyStatus,
+	graph *validator.RelationshipGraph,
+	expectedSeq int64,
+	phaseStatus manifest.PhaseStatusMap,
+) (*controlplanev1.ManifestVersion, error) {
+	if h.historyService == nil {
+		return nil, nil //nolint:nilnil // history recording is optional
+	}
+
+	var jobUUID *uuid.UUID
+	if jobID != "" {
+		parsed, err := uuid.Parse(jobID)
+		if err == nil {
+			jobUUID = &parsed
+		}
+	}
+
+	entity, err := h.historyService.StoreManifestVersionWithPhaseStatus(ctx, mf, appliedBy, jobUUID, applyStatus, graph, expectedSeq, phaseStatus)
+	if err != nil {
+		if errors.Is(err, manifest.ErrSequenceConflict) {
+			return nil, err
+		}
+		h.logger.Error("failed to record manifest history with phase status", "error", err)
 		return nil, nil //nolint:nilnil // non-conflict errors are logged but non-fatal
 	}
 

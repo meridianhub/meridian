@@ -3,6 +3,7 @@ package manifest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -29,7 +30,32 @@ const (
 	ApplyStatusApplied    ApplyStatus = "APPLIED"
 	ApplyStatusFailed     ApplyStatus = "FAILED"
 	ApplyStatusRolledBack ApplyStatus = "ROLLED_BACK"
+	ApplyStatusPartial    ApplyStatus = "PARTIAL"
 )
+
+// PhaseExecutionStatus represents the outcome of a single execution phase.
+type PhaseExecutionStatus string
+
+// Phase execution status values.
+const (
+	PhaseStatusPending   PhaseExecutionStatus = "PENDING"
+	PhaseStatusRunning   PhaseExecutionStatus = "RUNNING"
+	PhaseStatusCompleted PhaseExecutionStatus = "COMPLETED"
+	PhaseStatusFailed    PhaseExecutionStatus = "FAILED"
+	PhaseStatusSkipped   PhaseExecutionStatus = "SKIPPED"
+)
+
+// PhaseStatusEntry records the execution result for a single phase.
+type PhaseStatusEntry struct {
+	Status      PhaseExecutionStatus `json:"status"`
+	StartedAt   *time.Time           `json:"started_at,omitempty"`
+	CompletedAt *time.Time           `json:"completed_at,omitempty"`
+	Error       string               `json:"error,omitempty"`
+}
+
+// PhaseStatusMap is the top-level phase_status JSONB structure, keyed by phase label
+// (e.g., "phase_1", "phase_2").
+type PhaseStatusMap map[string]PhaseStatusEntry
 
 // VersionEntity represents a row in the manifest_versions table.
 type VersionEntity struct {
@@ -46,7 +72,36 @@ type VersionEntity struct {
 	Checksum          *string     `gorm:"column:checksum;type:varchar(64)"`
 	Source            *string     `gorm:"column:source;type:varchar(20)"`
 	ResourcePath      *string     `gorm:"column:resource_path;type:varchar(255)"`
+	PhaseStatus       *string     `gorm:"column:phase_status;type:jsonb"`
 	CreatedAt         time.Time   `gorm:"column:created_at;not null"`
+}
+
+// GetPhaseStatus deserializes the phase_status JSON column into a PhaseStatusMap.
+// Returns nil if phase_status is not set.
+func (e *VersionEntity) GetPhaseStatus() (PhaseStatusMap, error) {
+	if e.PhaseStatus == nil {
+		return nil, nil //nolint:nilnil // nil phase_status is a valid empty state
+	}
+	var m PhaseStatusMap
+	if err := json.Unmarshal([]byte(*e.PhaseStatus), &m); err != nil {
+		return nil, fmt.Errorf("unmarshal phase_status: %w", err)
+	}
+	return m, nil
+}
+
+// SetPhaseStatus serializes a PhaseStatusMap into the phase_status JSON column.
+func (e *VersionEntity) SetPhaseStatus(m PhaseStatusMap) error {
+	if m == nil {
+		e.PhaseStatus = nil
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal phase_status: %w", err)
+	}
+	s := string(b)
+	e.PhaseStatus = &s
+	return nil
 }
 
 // TableName returns the table name for GORM.
@@ -204,6 +259,20 @@ func (r *Repository) List(ctx context.Context, limit, offset int) ([]VersionEnti
 	}
 
 	return entities, int(totalCount), nil
+}
+
+// UpdatePhaseStatus updates the phase_status JSONB column for a manifest version.
+func (r *Repository) UpdatePhaseStatus(ctx context.Context, id uuid.UUID, phaseStatusJSON *string) error {
+	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		result := tx.Model(&VersionEntity{}).Where("id = ?", id).Update("phase_status", phaseStatusJSON)
+		if result.Error != nil {
+			return fmt.Errorf("update phase_status: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return ErrVersionNotFound
+		}
+		return nil
+	})
 }
 
 // GetBySequenceNumber retrieves a manifest version by its sequence number.
