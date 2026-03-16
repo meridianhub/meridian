@@ -23,6 +23,7 @@ const APPLY_STATUS_LABEL: Record<number, string> = {
   [ApplyStatus.APPLIED]: 'APPLIED',
   [ApplyStatus.FAILED]: 'FAILED',
   [ApplyStatus.ROLLED_BACK]: 'ROLLED_BACK',
+  [ApplyStatus.PARTIAL]: 'PARTIAL',
 }
 
 function buildColumns(
