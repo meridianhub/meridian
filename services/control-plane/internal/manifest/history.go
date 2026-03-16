@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/meridianhub/meridian/services/control-plane/internal/validator"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -28,15 +28,35 @@ var (
 // HistoryService provides manifest version history operations including
 // storage, retrieval, diff generation, and rollback.
 type HistoryService struct {
-	repo *Repository
+	repo   *Repository
+	differ *differ.ManifestDiffer
 }
 
 // NewHistoryService creates a new history service.
+// It uses a no-op ManifestDiffer (no safety checks, no drift detection) for diff generation.
 func NewHistoryService(repo *Repository) (*HistoryService, error) {
 	if repo == nil {
 		return nil, ErrNilRepository
 	}
-	return &HistoryService{repo: repo}, nil
+	return &HistoryService{
+		repo:   repo,
+		differ: differ.New(nil, nil),
+	}, nil
+}
+
+// NewHistoryServiceWithDiffer creates a new history service with a custom ManifestDiffer.
+// Use this when you want safety checks or drift detection during diff generation.
+func NewHistoryServiceWithDiffer(repo *Repository, d *differ.ManifestDiffer) (*HistoryService, error) {
+	if repo == nil {
+		return nil, ErrNilRepository
+	}
+	if d == nil {
+		d = differ.New(nil, nil)
+	}
+	return &HistoryService{
+		repo:   repo,
+		differ: d,
+	}, nil
 }
 
 // StoreManifestVersion saves a manifest snapshot with audit metadata.
@@ -155,7 +175,7 @@ func (s *HistoryService) CompareVersions(ctx context.Context, v1, v2 string) (st
 		return "", fmt.Errorf("failed to unmarshal version %s: %w", v2, err)
 	}
 
-	return diffManifests(manifest1, manifest2), nil
+	return s.diffManifests(ctx, manifest1, manifest2)
 }
 
 // RollbackToVersion creates a new manifest version with the content from a previous version.
@@ -220,7 +240,7 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 }
 
 // generateDiffSummary creates a diff summary comparing the given manifest
-// against the previous applied version.
+// against the previous applied version using the ManifestDiffer for field-level comparison.
 func (s *HistoryService) generateDiffSummary(ctx context.Context, newManifest *controlplanev1.Manifest) (string, error) {
 	previous, err := s.repo.GetLatestApplied(ctx)
 	if err != nil {
@@ -232,7 +252,29 @@ func (s *HistoryService) generateDiffSummary(ctx context.Context, newManifest *c
 		return "", fmt.Errorf("failed to unmarshal previous manifest: %w", err)
 	}
 
-	return diffManifests(oldManifest, newManifest), nil
+	return s.diffManifests(ctx, oldManifest, newManifest)
+}
+
+// diffManifests produces a human-readable diff between two manifests using
+// the ManifestDiffer for field-level comparison via proto.Equal.
+func (s *HistoryService) diffManifests(ctx context.Context, prev, next *controlplanev1.Manifest) (string, error) {
+	plan, err := s.differ.Diff(ctx, prev, next, differ.WithSkipSafetyChecks())
+	if err != nil {
+		return "", fmt.Errorf("diff failed: %w", err)
+	}
+
+	var descriptions []string
+	for _, action := range plan.Actions {
+		if action.Action != differ.ActionNoChange {
+			descriptions = append(descriptions, action.Description)
+		}
+	}
+
+	if len(descriptions) == 0 {
+		return "No changes detected", nil
+	}
+
+	return strings.Join(descriptions, "; "), nil
 }
 
 // unmarshalManifest deserializes a Manifest from its JSON representation.
@@ -255,102 +297,5 @@ func toProtoApplyStatus(status ApplyStatus) controlplanev1.ApplyStatus {
 		return controlplanev1.ApplyStatus_APPLY_STATUS_ROLLED_BACK
 	default:
 		return controlplanev1.ApplyStatus_APPLY_STATUS_UNSPECIFIED
-	}
-}
-
-// diffManifests generates a human-readable diff between two manifests.
-func diffManifests(prev, next *controlplanev1.Manifest) string {
-	var changes []string
-
-	// Compare metadata
-	if prev.GetMetadata().GetName() != next.GetMetadata().GetName() {
-		changes = append(changes, fmt.Sprintf("Metadata name changed: %q -> %q",
-			prev.GetMetadata().GetName(), next.GetMetadata().GetName()))
-	}
-	if prev.GetMetadata().GetIndustry() != next.GetMetadata().GetIndustry() {
-		changes = append(changes, fmt.Sprintf("Metadata industry changed: %q -> %q",
-			prev.GetMetadata().GetIndustry(), next.GetMetadata().GetIndustry()))
-	}
-
-	// Compare instruments
-	prevInstruments := instrumentMap(prev.GetInstruments())
-	nextInstruments := instrumentMap(next.GetInstruments())
-	diffItems("Instrument", prevInstruments, nextInstruments, &changes)
-
-	// Compare account types
-	prevAccounts := accountTypeMap(prev.GetAccountTypes())
-	nextAccounts := accountTypeMap(next.GetAccountTypes())
-	diffItems("Account type", prevAccounts, nextAccounts, &changes)
-
-	// Compare valuation rules
-	prevRuleCount := len(prev.GetValuationRules())
-	nextRuleCount := len(next.GetValuationRules())
-	if prevRuleCount != nextRuleCount {
-		changes = append(changes, fmt.Sprintf("Valuation rules: %d -> %d", prevRuleCount, nextRuleCount))
-	}
-
-	// Compare sagas
-	prevSagas := sagaMap(prev.GetSagas())
-	nextSagas := sagaMap(next.GetSagas())
-	diffItems("Saga", prevSagas, nextSagas, &changes)
-
-	// Compare version
-	if prev.GetVersion() != next.GetVersion() {
-		changes = append(changes, fmt.Sprintf("Schema version changed: %s -> %s",
-			prev.GetVersion(), next.GetVersion()))
-	}
-
-	if len(changes) == 0 {
-		return "No changes detected"
-	}
-
-	return strings.Join(changes, "; ")
-}
-
-func instrumentMap(instruments []*controlplanev1.InstrumentDefinition) map[string]string {
-	m := make(map[string]string, len(instruments))
-	for _, inst := range instruments {
-		m[inst.GetCode()] = inst.GetName()
-	}
-	return m
-}
-
-func accountTypeMap(accounts []*controlplanev1.AccountTypeDefinition) map[string]string {
-	m := make(map[string]string, len(accounts))
-	for _, acct := range accounts {
-		m[acct.GetCode()] = acct.GetName()
-	}
-	return m
-}
-
-func sagaMap(sagas []*controlplanev1.SagaDefinition) map[string]string {
-	m := make(map[string]string, len(sagas))
-	for _, s := range sagas {
-		m[s.GetName()] = s.GetTrigger()
-	}
-	return m
-}
-
-func diffItems(itemType string, prev, next map[string]string, changes *[]string) {
-	var added []string
-	for key := range next {
-		if _, exists := prev[key]; !exists {
-			added = append(added, key)
-		}
-	}
-	sort.Strings(added)
-	for _, key := range added {
-		*changes = append(*changes, fmt.Sprintf("%s added: %s", itemType, key))
-	}
-
-	var removed []string
-	for key := range prev {
-		if _, exists := next[key]; !exists {
-			removed = append(removed, key)
-		}
-	}
-	sort.Strings(removed)
-	for _, key := range removed {
-		*changes = append(*changes, fmt.Sprintf("%s removed: %s", itemType, key))
 	}
 }
