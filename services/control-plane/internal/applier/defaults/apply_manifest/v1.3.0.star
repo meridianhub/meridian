@@ -201,6 +201,7 @@ def execute_apply_manifest():
             account_type=ia.get("account_type", "CLEARING"),
             instrument_code=ia.get("instrument_code", ""),
             description=ia.get("description", ""),
+            owner_organization=ia.get("owner_organization", ""),
         )
         registered_internal_accounts.append({
             "account_code": ia["code"],
