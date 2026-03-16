@@ -42,17 +42,12 @@ import {
   type ManifestNodeType,
   type ManifestGraph as ManifestGraphModel,
 } from '../lib/manifest-graph-model'
+import { NODE_TYPE_REGISTRY, getNodeThemes, getLayerPriority } from '../lib/node-type-registry'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import { useEventChain } from '../hooks/use-event-chain'
 import { EventChainPanel } from './event-chain-panel'
 
-// Theme colors per node type — uses CSS variables for dark mode support
-const NODE_THEMES: Record<ManifestNodeType, { color: string; label: string }> = {
-  instrument: { color: 'var(--graph-instrument)', label: 'Instruments' },
-  account_type: { color: 'var(--graph-account-type)', label: 'Account Types' },
-  valuation_rule: { color: 'var(--graph-valuation-rule)', label: 'Valuation Rules' },
-  saga: { color: 'var(--graph-saga)', label: 'Sagas' },
-}
+const NODE_THEMES = getNodeThemes()
 
 // Edge styles per relationship type
 const MANIFEST_EDGE_STYLES: Record<string, React.CSSProperties> = {
@@ -67,13 +62,7 @@ const EDGE_LEGEND: { label: string; color: string; dashed?: boolean }[] = [
   { label: 'Converts to', color: 'var(--graph-valuation-rule)' },
 ]
 
-// ELK layer priority: higher values are placed earlier (top in DOWN direction)
-const LAYER_PRIORITY: Record<ManifestNodeType, string> = {
-  instrument: '40',
-  account_type: '30',
-  valuation_rule: '20',
-  saga: '10',
-}
+const LAYER_PRIORITY = getLayerPriority()
 
 // Trigger type display
 function getTriggerBadge(trigger: string): { label: string; variant: string } {
@@ -288,7 +277,7 @@ async function layoutManifestGraph(
     rfEdges,
     (id, position) => {
       const mn = nodeMap.get(id)!
-      const color = NODE_THEMES[mn.type].color
+      const color = NODE_TYPE_REGISTRY[mn.type].color
       return {
         id,
         type: mn.type,
