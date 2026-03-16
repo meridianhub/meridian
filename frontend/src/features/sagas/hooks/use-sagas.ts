@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
-import { manifestKeys, referenceKeys } from '@/lib/query-keys'
+import { tenantKeys, manifestKeys, referenceKeys } from '@/lib/query-keys'
 import type { DataTableQueryParams, DataTableResult } from '@/shared/data-table'
 import type { SagaDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 
@@ -13,7 +13,7 @@ export function useSagasTable() {
   const { manifestHistory } = useApiClients()
   const tenantSlug = useTenantSlug()
 
-  const queryKey = manifestKeys.current()
+  const queryKey = [...manifestKeys.current(), tenantSlug ?? '']
 
   async function queryFn(
     _params: DataTableQueryParams,
@@ -37,7 +37,7 @@ export function useSagaDetail(definitionId: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: ['tenant', tenantSlug ?? '', 'saga', definitionId ?? ''],
+    queryKey: tenantKeys.saga(tenantSlug ?? '', definitionId ?? ''),
     queryFn: async () => {
       const response = await sagaRegistry.getSaga({ id: definitionId ?? '' })
       return response.saga
