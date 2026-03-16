@@ -36,6 +36,9 @@ const (
 	ResourceMapping            ResourceType = "mapping"
 	ResourceProviderConnection ResourceType = "provider_connection"
 	ResourceInstructionRoute   ResourceType = "instruction_route"
+	ResourceMarketDataSource   ResourceType = "market_data_source"
+	ResourceMarketDataSet      ResourceType = "market_data_set"
+	ResourceOrganization       ResourceType = "organization"
 )
 
 // PlannedAction represents a single action in the diff plan.

@@ -19,6 +19,10 @@ var ErrNoMethodMapping = errors.New("no gRPC method mapping")
 // Party types are managed through schema updates; deletion via manifest apply is not supported.
 var ErrDeleteNotSupportedForPartyType = errors.New("delete not supported for party types: update the schema instead")
 
+// ErrDeleteNotSupportedForOrganization is returned when a DELETE action is attempted on an organization.
+// Organizations are deactivated through the Party Service; deletion via manifest apply is not supported.
+var ErrDeleteNotSupportedForOrganization = errors.New("delete not supported for organizations: deactivate the party instead")
+
 // ManifestPlanner transforms a DiffPlan into a dependency-ordered
 // ExecutionPlan of gRPC calls. It assigns each action to a phase
 // based on resource type dependencies and maps actions to the
@@ -111,6 +115,12 @@ func phaseForResource(rt differ.ResourceType) Phase {
 		return PhaseOperationalGateway
 	case differ.ResourceInstructionRoute:
 		return PhaseOperationalGateway
+	case differ.ResourceMarketDataSource:
+		return PhaseMarketDataSources
+	case differ.ResourceMarketDataSet:
+		return PhaseMarketDataSets
+	case differ.ResourceOrganization:
+		return PhaseOrganizations
 	default:
 		return PhaseSeedData
 	}
@@ -120,6 +130,9 @@ func phaseForResource(rt differ.ResourceType) Phase {
 func grpcMethodFor(rt differ.ResourceType, action differ.ActionType) (GRPCMethod, error) {
 	if rt == differ.ResourcePartyType && action == differ.ActionDelete {
 		return "", ErrDeleteNotSupportedForPartyType
+	}
+	if rt == differ.ResourceOrganization && action == differ.ActionDelete {
+		return "", ErrDeleteNotSupportedForOrganization
 	}
 	key := methodKey{rt, action}
 	method, ok := grpcMethodMap[key]
@@ -180,6 +193,21 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceInstructionRoute, differ.ActionCreate}: MethodUpsertInstructionRoute,
 	{differ.ResourceInstructionRoute, differ.ActionUpdate}: MethodUpsertInstructionRoute,
 	// No delete method: proto does not define DeleteRoute RPC.
+
+	// Market Data Sources
+	{differ.ResourceMarketDataSource, differ.ActionCreate}: MethodRegisterDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionUpdate}: MethodUpdateDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionDelete}: MethodDeactivateDataSource,
+
+	// Market Data Sets
+	{differ.ResourceMarketDataSet, differ.ActionCreate}: MethodRegisterDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionUpdate}: MethodUpdateDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionDelete}: MethodDeprecateDataSet,
+
+	// Organizations
+	{differ.ResourceOrganization, differ.ActionCreate}: MethodRegisterOrganization,
+	{differ.ResourceOrganization, differ.ActionUpdate}: MethodRegisterOrganization,
+	// No delete method: organizations are deactivated, not deleted.
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.

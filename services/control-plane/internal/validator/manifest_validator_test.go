@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/stretchr/testify/assert"
@@ -2984,4 +2985,196 @@ func TestWithoutSkipImmutabilityChecks_StillEnforcesImmutability(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "expected IMMUTABLE_FIELD_CHANGED error without skip option")
+}
+
+// --- Market Data validation tests ---
+
+func TestValidate_DuplicateMarketDataSourceCodes(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "BLOOMBERG", Name: "Bloomberg 1", TrustLevel: 90},
+			{Code: "BLOOMBERG", Name: "Bloomberg 2", TrustLevel: 80},
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DUPLICATE_CODE" && strings.Contains(e.Path, "market_data.sources") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected DUPLICATE_CODE error for market data sources")
+}
+
+func TestValidate_DuplicateMarketDataSetCodes(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "ECB", Name: "ECB", TrustLevel: 95},
+		},
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{Code: "USD_EUR_FX", Category: marketinformationv1.DataCategory_DATA_CATEGORY_FX_RATE, Unit: "USD/EUR", SourceCode: "ECB"},
+			{Code: "USD_EUR_FX", Category: marketinformationv1.DataCategory_DATA_CATEGORY_FX_RATE, Unit: "EUR/USD", SourceCode: "ECB"},
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DUPLICATE_CODE" && strings.Contains(e.Path, "market_data.datasets") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected DUPLICATE_CODE error for market data sets")
+}
+
+func TestValidate_MarketDataSetReferencesInvalidSource(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "ECB", Name: "ECB", TrustLevel: 95},
+		},
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{Code: "USD_EUR_FX", Category: marketinformationv1.DataCategory_DATA_CATEGORY_FX_RATE, Unit: "USD/EUR", SourceCode: "BLOOMBERG"},
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "market_data.datasets[0].source_code") {
+			found = true
+			assert.Contains(t, e.Message, "BLOOMBERG")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_REFERENCE error for invalid source_code")
+}
+
+func TestValidate_MarketDataSetValidSourceReference(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "ECB", Name: "European Central Bank", TrustLevel: 95},
+		},
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{Code: "USD_EUR_FX", Category: marketinformationv1.DataCategory_DATA_CATEGORY_FX_RATE, Unit: "USD/EUR", SourceCode: "ECB"},
+		},
+	}
+
+	result := v.Validate(manifest, nil)
+	// No INVALID_REFERENCE errors expected for the market data section
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "market_data") {
+			t.Errorf("unexpected INVALID_REFERENCE error: %s", e.Message)
+		}
+	}
+}
+
+// --- Organization validation tests ---
+
+func TestValidate_DuplicateOrganizationCodes(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME", Name: "Acme Energy 1", PartyType: "ORGANIZATION"},
+		{Code: "ACME", Name: "Acme Energy 2", PartyType: "ORGANIZATION"},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DUPLICATE_CODE" && strings.Contains(e.Path, "organizations") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected DUPLICATE_CODE error for organizations")
+}
+
+func TestValidate_OrganizationReferencesInvalidPartyType(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME", Name: "Acme Corp", PartyType: "UNKNOWN_TYPE"},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "organizations[0].party_type") {
+			found = true
+			assert.Contains(t, e.Message, "UNKNOWN_TYPE")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_REFERENCE error for invalid party_type")
+}
+
+func TestValidate_OrganizationReferencesBuiltInPartyType(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME", Name: "Acme Corp", PartyType: "ORGANIZATION"},
+		{Code: "BOB", Name: "Bob Smith", PartyType: "PERSON"},
+	}
+
+	result := v.Validate(manifest, nil)
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "organizations") {
+			t.Errorf("unexpected INVALID_REFERENCE error: %s", e.Message)
+		}
+	}
+}
+
+func TestValidate_OrganizationReferencesManifestDefinedPartyType(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{TenantId: "test", PartyType: "COUNTERPARTY", AttributeSchema: `{"type":"object"}`},
+	}
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "PARTNER", Name: "Trading Partner", PartyType: "COUNTERPARTY"},
+	}
+
+	result := v.Validate(manifest, nil)
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "organizations") {
+			t.Errorf("unexpected INVALID_REFERENCE error: %s", e.Message)
+		}
+	}
 }

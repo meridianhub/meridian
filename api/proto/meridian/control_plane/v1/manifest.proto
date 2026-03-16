@@ -5,6 +5,7 @@ package meridian.control_plane.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/struct.proto";
 import "meridian/mapping/v1/mapping.proto";
+import "meridian/market_information/v1/market_information.proto";
 import "meridian/party/v1/party.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1;controlplanev1";
@@ -63,6 +64,12 @@ message Manifest {
 
   // operational_gateway defines external system integrations for this tenant.
   OperationalGatewayConfig operational_gateway = 11;
+
+  // market_data defines market data sources and data sets for this tenant.
+  MarketDataConfig market_data = 12;
+
+  // organizations defines the organization entities (parties) for this tenant.
+  repeated OrganizationDefinition organizations = 13;
 }
 
 // ========================================
@@ -765,4 +772,120 @@ message InboundRouteConfig {
   // payload before passing it to the handler saga.
   // Must match a name in the manifest's mappings list. If empty, the payload is passed as-is.
   string mapping_id = 3 [(buf.validate.field).string.max_len = 255];
+}
+
+// ========================================
+// Market Data Config
+// ========================================
+
+// MarketDataConfig declares market data sources and data sets for a tenant.
+// Sources represent providers of market data (e.g., Bloomberg, ECB).
+// Data sets define the types of market data that can be tracked (e.g., FX rates, commodity prices).
+message MarketDataConfig {
+  // sources defines the market data providers for this tenant.
+  repeated MarketDataSourceDefinition sources = 1;
+
+  // datasets defines the market data set definitions for this tenant.
+  repeated MarketDataSetDefinition datasets = 2;
+}
+
+// MarketDataSourceDefinition declares a market data source (provider) within the manifest.
+// The code field is the immutable primary key.
+message MarketDataSourceDefinition {
+  // code is the unique identifier for this data source (e.g., "BLOOMBERG", "ECB", "NORDPOOL").
+  // Must be uppercase alphanumeric with underscores.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // name is the human-readable display name (e.g., "Bloomberg Terminal", "European Central Bank").
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  // description provides additional context about this data source.
+  string description = 3 [(buf.validate.field).string.max_len = 1024];
+
+  // trust_level indicates the reliability of this source (0-100).
+  // Higher values indicate more trusted sources for conflict resolution.
+  int32 trust_level = 4 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+}
+
+// MarketDataSetDefinition declares a type of market data that can be tracked within the manifest.
+// The code field is the immutable primary key.
+message MarketDataSetDefinition {
+  // code is the unique data set code within the tenant (e.g., "USD_EUR_FX", "BRENT_CRUDE").
+  // Must be uppercase alphanumeric with underscores.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // category is the type of market data this set represents.
+  meridian.market_information.v1.DataCategory category = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // unit describes the unit of measurement for observations (e.g., "USD", "USD/EUR", "USD/BBL").
+  string unit = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
+
+  // source_code identifies the market data source that provides this data set.
+  // Must match a code in market_data.sources.
+  string source_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // display_name is the human-readable name for this data set.
+  string display_name = 5 [(buf.validate.field).string.max_len = 128];
+
+  // description provides additional context about this data set.
+  string description = 6 [(buf.validate.field).string.max_len = 1024];
+}
+
+// ========================================
+// Organization Definitions
+// ========================================
+
+// OrganizationDefinition declares an organization entity (party) within the manifest.
+// Organizations are registered as parties via the Party Service.
+// The code field is the immutable primary key.
+message OrganizationDefinition {
+  // code is the unique identifier for this organization (e.g., "ACME_ENERGY", "GRID_OPS").
+  // Must be uppercase alphanumeric with underscores.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // name is the legal or display name of the organization.
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // party_type is the party classification (e.g., "ORGANIZATION", "COUNTERPARTY").
+  // Must match a party type code from the manifest's party_types or a built-in type.
+  string party_type = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+
+  // attributes contains additional metadata for this organization as key-value pairs.
+  // Keys and values are validated against the party type's attribute_schema if defined.
+  map<string, string> attributes = 4;
 }

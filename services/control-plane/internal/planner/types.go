@@ -41,6 +41,18 @@ const (
 	// PhaseOperationalGateway configures provider connections and instruction routes
 	// in the Operational Gateway service (can run after mappings are registered).
 	PhaseOperationalGateway Phase = 8
+
+	// PhaseMarketDataSources registers market data sources with the Market Information service
+	// (no dependencies on other manifest sections).
+	PhaseMarketDataSources Phase = 9
+
+	// PhaseMarketDataSets registers market data set definitions with the Market Information service
+	// (depends on market data sources being registered first).
+	PhaseMarketDataSets Phase = 10
+
+	// PhaseOrganizations registers organization entities with the Party service
+	// (depends on party types being registered first).
+	PhaseOrganizations Phase = 11
 )
 
 // PhaseLabel returns a human-readable label for a phase.
@@ -62,6 +74,12 @@ func PhaseLabel(p Phase) string {
 		return "Party Types"
 	case PhaseOperationalGateway:
 		return "Operational Gateway"
+	case PhaseMarketDataSources:
+		return "Market Data Sources"
+	case PhaseMarketDataSets:
+		return "Market Data Sets"
+	case PhaseOrganizations:
+		return "Organizations"
 	default:
 		return fmt.Sprintf("Phase(%d)", p)
 	}
@@ -104,6 +122,17 @@ const (
 	// Operational Gateway Service
 	MethodUpsertProviderConnection GRPCMethod = "meridian.operational_gateway.v1.ProviderConnectionService/UpsertConnection"
 	MethodUpsertInstructionRoute   GRPCMethod = "meridian.operational_gateway.v1.InstructionRouteService/UpsertRoute"
+
+	// Market Information Service
+	MethodRegisterDataSource   GRPCMethod = "meridian.market_information.v1.MarketInformationService/RegisterDataSource"
+	MethodUpdateDataSource     GRPCMethod = "meridian.market_information.v1.MarketInformationService/UpdateDataSource"
+	MethodDeactivateDataSource GRPCMethod = "meridian.market_information.v1.MarketInformationService/DeactivateDataSource"
+	MethodRegisterDataSet      GRPCMethod = "meridian.market_information.v1.MarketInformationService/RegisterDataSet"
+	MethodUpdateDataSet        GRPCMethod = "meridian.market_information.v1.MarketInformationService/UpdateDataSet"
+	MethodDeprecateDataSet     GRPCMethod = "meridian.market_information.v1.MarketInformationService/DeprecateDataSet"
+
+	// Party Service (Organizations)
+	MethodRegisterOrganization GRPCMethod = "meridian.party.v1.PartyService/RegisterParty"
 )
 
 // PlannedCall represents a single gRPC call in the execution plan.
@@ -207,7 +236,7 @@ func (p *ExecutionPlan) Visualize() string {
 	fmt.Fprintf(&b, "Total calls: %d\n\n", len(p.Calls))
 
 	byPhase := p.ByPhase()
-	for phase := PhaseInstruments; phase <= PhaseOperationalGateway; phase++ { //nolint:intrange
+	for phase := PhaseInstruments; phase <= PhaseOrganizations; phase++ { //nolint:intrange
 		calls, ok := byPhase[phase]
 		if !ok {
 			continue
