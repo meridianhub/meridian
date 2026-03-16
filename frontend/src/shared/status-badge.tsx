@@ -31,6 +31,7 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   LOCKED: 'error',
   // Manifest apply statuses
   APPLIED: 'success',
+  PARTIAL: 'warning',
   ROLLED_BACK: 'warning',
   // Position quality ladder
   ESTIMATE: 'warning',
