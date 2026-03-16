@@ -3,23 +3,24 @@
 ## Problem Statement
 
 The Operations Console's economy visualization is incomplete and
-partially broken. The economy graph only renders 4 of 12 manifest
+partially broken. The economy graph renders 4 of 12 manifest
 resource types. Saga navigation is broken (404 on detail links,
-empty list page). The 4 new resource types added in PRD 045
-(market data sources/sets, organizations, internal accounts) don't
-appear anywhere in the UI. Gateway mappings exist as a standalone
-page but aren't connected to the manifest or economy graph. And
-the new control-plane RPCs (ApplyResource, ExportManifest,
-ReconcileManifest, DiffManifestVersions) have no frontend surface.
+empty list page). The Economy Explorer page (`/economy/explore`)
+is similarly incomplete — showing only instruments, account
+types, sagas, and mappings out of 12 types. Gateway mappings
+exist as a standalone page but aren't connected to the manifest
+or economy graph. The new control-plane RPCs from PRD 045
+(ApplyResource, ExportManifest, ReconcileManifest,
+DiffManifestVersions) have no frontend surface.
 
 **The core user story**: A human designs an economy via AI
-conversation (MCP). The AI drafts or applies a manifest. The human
-needs to see the complete picture — every resource, every
-relationship — to verify the AI did what they intended. Today the
-graph shows instruments, account types, valuation rules, and sagas.
-It's missing market data, organizations, internal accounts,
-mappings, payment rails, and operational gateway config. The human
-can't verify what they can't see.
+conversation (MCP). The AI drafts or applies a manifest. The
+human needs to see the complete picture — every resource, every
+relationship — to verify the AI did what they intended. Today
+the graph shows instruments, account types, valuation rules, and
+sagas. It's missing market data, organizations, internal
+accounts, mappings, payment rails, and operational gateway
+config. The human can't verify what they can't see.
 
 ## Current State
 
@@ -40,28 +41,40 @@ can't verify what they can't see.
    `manifestHistory.getCurrentManifest()`. Two different data
    sources, out of sync.
 
-2. **Saga detail 404**: Economy graph links to
+2. **Saga detail 404**: Economy graph navigates to
    `/starlark-config/{sagaName}` (e.g.,
    `energy_purchase_settlement`). The detail page calls
-   `sagaRegistry.getSaga({ id: definitionId })` which expects a
-   UUID, not a name. Always 404.
+   `sagaRegistry.getSaga({ id: definitionId })` expecting a
+   UUID. The manifest doesn't store saga UUIDs. An existing
+   `getActiveSaga({ name })` hook resolves by name — use this.
 
-3. **Valuation rules have no click navigation**: Double-clicking a
-   valuation rule node in the graph does nothing — no case in the
-   navigation handler.
+3. **Valuation rules have no click navigation**: Double-clicking
+   a valuation rule node in the graph does nothing — no case in
+   the `onNodeDoubleClick` handler.
+
+4. **Economy Explorer incomplete**: `/economy/explore` reads
+   from the manifest but only extracts instruments, account
+   types, sagas, and mappings. The Resources tab ignores market
+   data, organizations, internal accounts, payment rails, party
+   types, and operational gateway config.
 
 ### What's missing from the graph
 
-| Resource Type | In Manifest | In Graph | Detail Page |
-|---------------|-------------|----------|-------------|
-| Market Data Sources | Yes (PRD 045) | No | /market-data (not manifest-aware) |
-| Market Data Sets | Yes (PRD 045) | No | /market-data (not manifest-aware) |
-| Organizations | Yes (PRD 045) | No | /parties (not manifest-aware) |
-| Internal Accounts | Yes (PRD 045) | No | /internal-accounts |
-| Mappings | Yes | No | /gateway-mappings (not manifest-aware) |
-| Operational Gateway | Yes | No | None |
-| Payment Rails | Yes | No | None |
-| Party Types | Yes | No | None |
+| Resource Type | Manifest Field | In Graph | In Explorer |
+|---------------|----------------|----------|-------------|
+| Market Data Sources | `market_data.sources[]` (nested) | No | No |
+| Market Data Sets | `market_data.datasets[]` (nested) | No | No |
+| Organizations | `organizations[]` | No | No |
+| Internal Accounts | `internal_accounts[]` | No | No |
+| Mappings | `mappings[]` | No | Partial |
+| Provider Connections | `operational_gateway.provider_connections[]` (nested) | No | No |
+| Instruction Routes | `operational_gateway.instruction_routes[]` (nested) | No | No |
+| Payment Rails | `payment_rails[]` | No | No |
+| Party Types | `party_types[]` | No | No |
+
+Note: `market_data` and `operational_gateway` are wrapper
+messages containing sub-arrays, not flat repeated fields. The
+graph model extraction must navigate this nesting.
 
 ### What's missing from the platform
 
@@ -70,241 +83,390 @@ can't verify what they can't see.
 | Granular resource mutation | ApplyResource | None |
 | Drift detection | ReconcileManifest | None |
 | Manifest reconstruction | ExportManifest | None |
-| Version comparison | DiffManifestVersions | Exists (client-side diff) — should use backend |
-| Per-phase execution status | phase_status field | None |
+| Version comparison | DiffManifestVersions | Client-side only |
+| Per-phase execution status | phase_status field | None (PARTIAL status unlabeled) |
 | Optimistic locking feedback | sequence_number | None |
+
+### Two visualization surfaces
+
+The frontend has **two** economy visualization surfaces that
+both need updating:
+
+1. **Economy Overview** (`/economy`): Graph + stat chips +
+   version history. The graph is the primary AI verification
+   surface. Currently shows 4 types.
+
+2. **Economy Explorer** (`/economy/explore`): Tab-based detailed
+   browse with event channels, sagas, mappings, resources. Reads
+   from the manifest. Currently shows 4 types in Resources tab.
+
+These serve complementary roles:
+- **Overview** = visual map + high-level summary (graph-first)
+- **Explorer** = detailed browse by resource type (list-first)
+
+Both must show all 12 resource types.
 
 ## Solution
 
+### Phase 0: Prerequisites
+
+Before any frontend work begins:
+
+1. **Regenerate TypeScript types**: Run `buf generate api/proto`
+   from repo root. The proto source has all new fields
+   (manifest.proto fields 12-14: `market_data`,
+   `organizations`, `internal_accounts`) and all new RPCs
+   (`ApplyResource`, `DiffManifestVersions`, `ExportManifest`,
+   `ReconcileManifest`), but the generated TypeScript in
+   `frontend/src/api/gen/` is stale. Verify the new fields and
+   RPC methods appear in the regenerated output.
+
+2. **Backend: Add `force` to ApplyResourceRequest**: The
+   `ApplyManifestRequest` has `force: bool` for bypassing
+   breaking-change checks, but `ApplyResourceRequest` does not.
+   Without it, deletions and breaking changes via single-resource
+   UI are impossible. Add the field to the proto and regenerate.
+
 ### Phase 1: Fix Broken Pages
 
-Fix the three broken navigation/data issues so existing
-functionality works.
+Ship independently — no dependencies on other phases.
 
 **1a. Saga list page**: Change data source from
 `sagaRegistry.listSagas()` to
-`manifestHistory.getCurrentManifest()` → extract `sagas[]`. This
-aligns with how the economy overview already works. The saga
-registry service may not have sagas if they were provisioned via
-manifest (which is now the primary path per PRD 045).
+`manifestHistory.getCurrentManifest()` → extract `sagas[]`.
+Aligns with how the economy overview already works.
 
-**1b. Saga detail page**: Support lookup by both UUID and name.
-When `definitionId` doesn't look like a UUID, resolve it by
-fetching the current manifest and finding the saga by name. Update
-the manifest graph's double-click handler to use a consistent
-identifier.
+**1b. Saga detail page**: Use the existing `getActiveSaga({
+name })` hook (at `use-sagas.ts:54-73`) when `definitionId`
+doesn't look like a UUID. This resolves by name without
+requiring a backend change. Update the manifest graph's
+double-click handler to use a consistent approach.
 
-**1c. Valuation rule navigation**: Add a `valuation_rule` case to
-the graph's double-click handler, navigating to
+**1c. Valuation rule navigation**: Add a `valuation_rule` case
+to the graph's `onNodeDoubleClick` handler, navigating to
 `/reference-data/valuation-rules`.
+
+**1d. PARTIAL status label**: Add `PARTIAL` to the
+`ManifestHistoryTable` status label map (currently only maps
+APPLIED, FAILED, ROLLED_BACK).
 
 ### Phase 2: Complete the Economy Graph
 
-Add the 8 missing resource types to the graph model, renderer,
-and diff algorithm.
+#### 2a. Data-driven node type registry (prerequisite refactor)
 
-**Graph model changes** (`manifest-graph-model.ts`):
+Before adding new types, consolidate the 10+ scattered
+`Record<ManifestNodeType, ...>` locations into a single
+`NODE_TYPE_REGISTRY` configuration object. Currently, adding one
+node type requires updates in:
 
-Add node types:
-- `market_data_source` — leaf node (no edges to other types)
-- `market_data_set` — edge to its source via `sourceCode`
-- `organization` — leaf node (hierarchical via `parent_dno`
-  attribute if present)
-- `internal_account` — edges to account_type, instrument, and
-  owner organization
-- `mapping` — edges to target service/RPC
-- `operational_gateway_connection` — leaf node (provider endpoint)
-- `instruction_route` — edges to connection and mapping(s)
-- `payment_rail` — leaf node (provider config)
+- `ManifestNodeType` union (`manifest-graph-model.ts`)
+- `ManifestInput` interface (remove — use proto type directly)
+- `NODE_THEMES` record (`manifest-graph.tsx`)
+- `LAYER_PRIORITY` record (`manifest-graph.tsx`)
+- `LAYER_PRIORITY` duplicate (`manifest-diff-graph.tsx`)
+- `nodeCountByType` initializer
+- `visibleTypes` default set
+- `nodeTypes` registration
+- CSS variables (`index.css`, both light and dark themes)
+- `execution-subgraph.tsx` theme map
 
-Add edge types:
+Create a single registry that drives all of these. This makes
+adding the 8 new types a one-place-per-type change and
+eliminates the duplicate `LAYER_PRIORITY` between the main
+graph and diff graph. TypeScript's `Record` exhaustiveness
+checking is preserved.
+
+#### 2b. Color palette (accessibility-first)
+
+The existing 4 types use hues spaced ~55-70 degrees apart in
+oklch. With 10 distinct hues needed, minimum 36-degree
+separation is required. Proposed palette (verify with
+colorblind simulator before implementing):
+
+| Type Group | Hue | Existing? |
+|------------|-----|-----------|
+| Instruments | 250 (blue) | Existing |
+| Account Types | 145 (green) | Existing |
+| Valuation Rules | 85 (amber) | Existing |
+| Sagas | 295 (purple) | Existing |
+| Market Data | 180 (teal) | New |
+| Organizations | 35 (orange) | New |
+| Internal Accounts | 215 (steel blue) | New |
+| Mappings | 340 (rose) | New |
+| Gateway/Routes | 115 (lime) | New |
+| Payment Rails | 325 (magenta) | New |
+
+All colors need CSS custom properties for both light and dark
+themes. Do not use inline oklch values.
+
+#### 2c. Graph model extension
+
+Add node types to `manifest-graph-model.ts`. Note the nested
+extraction paths:
+
+- `market_data_source` — from `manifest.marketData.sources[]`
+- `market_data_set` — from `manifest.marketData.datasets[]`,
+  edge to source via `sourceCode`
+- `organization` — from `manifest.organizations[]`
+- `internal_account` — from `manifest.internalAccounts[]`,
+  edges to account_type, instrument, and owner organization
+- `mapping` — from `manifest.mappings[]`
+- `provider_connection` — from
+  `manifest.operationalGateway.providerConnections[]`
+- `instruction_route` — from
+  `manifest.operationalGateway.instructionRoutes[]`, edges to
+  connection and mapping(s) via `outboundMappingId`/
+  `inboundMappingId`
+- `payment_rail` — from `manifest.paymentRails[]`, use
+  `provider` as node ID (no `code` field exists)
+- `party_type` — from `manifest.partyTypes[]`
+
+Edge types:
 - `sourced_by` — market_data_set → market_data_source
 - `typed_as` — internal_account → account_type
 - `denominated_in` — internal_account → instrument
 - `owned_by` — internal_account → organization
-- `maps_to` — mapping → target service (conceptual)
-- `routes_via` — instruction_route → connection
+- `routes_via` — instruction_route → provider_connection
 - `transforms_with` — instruction_route → mapping
 
-**Graph renderer changes** (`manifest-graph.tsx`):
+#### 2d. Graph renderer and layout
 
-Add node components with distinct colors:
-- Market Data: teal (`oklch(0.59 0.15 185)`)
-- Organizations: amber (`oklch(0.75 0.15 70)`)
-- Internal Accounts: cyan (`oklch(0.65 0.15 210)`)
-- Mappings: rose (`oklch(0.65 0.15 350)`)
-- Gateway/Routes: slate (`oklch(0.55 0.10 260)`)
-- Payment Rails: emerald (`oklch(0.65 0.15 160)`)
+Add node components following the existing `memo()` pattern
+(`InstrumentNode`, `AccountTypeNode`, etc.).
 
-Add double-click navigation for all new types:
+**ELK layer priorities** (lower = higher in graph):
+- Instruments: 50
+- Market Data Sources: 45
+- Market Data Sets: 40
+- Account Types: 35
+- Valuation Rules: 30
+- Organizations: 25
+- Internal Accounts: 20
+- Sagas: 15
+- Mappings: 10
+- Provider Connections: 8
+- Instruction Routes: 5
+- Payment Rails: 3
+- Party Types: 48 (near instruments — schema definitions)
+
+**Default visibility**: Core types (instruments, account_types,
+valuation_rules, sagas, internal_accounts) visible by default.
+Infrastructure types (mappings, gateway, payment rails, party
+types, market data) hidden by default — toggled on via filter.
+
+**Grouped filter panel**: Group toggles into 6 categories
+instead of 12+ individual checkboxes:
+- Financial Core (instruments, account types, valuation rules)
+- Workflows (sagas)
+- Market Data (sources, sets)
+- Structure (organizations, internal accounts)
+- Integration (mappings, gateway connections, routes)
+- Config (payment rails, party types)
+
+**Disconnected subgraph handling**: Market data sources,
+organizations, and payment rails are leaf nodes with few/no
+edges. Rather than floating as isolated islands, consider:
+- Grouping leaf nodes in a designated graph region (ELK
+  partitioning)
+- Or keeping them in the Explorer only (not the graph) and
+  noting this decision explicitly
+
+#### 2e. Economy overview stat chips
+
+Keep stat chips to 4-6 key metrics (instruments, account types,
+sagas, internal accounts, organizations, market data sets).
+Don't add 12 chips — that's a wall of numbers. Link "View all"
+to the Explorer page for the full breakdown.
+
+#### 2f. Double-click navigation
+
+Add navigation targets for all new types:
 - market_data_source/set → `/market-data`
 - organization → `/parties`
 - internal_account → `/internal-accounts`
 - mapping → `/gateway-mappings`
-- operational_gateway → new page or section
-- payment_rail → new page or section
+- provider_connection/instruction_route → Economy Explorer
+  (Gateway tab)
+- payment_rail → Economy Explorer (Config tab)
+- party_type → Economy Explorer (Config tab)
 
-Add type visibility toggles in the filter sidebar.
+#### 2g. Diff algorithm
 
-**Diff algorithm changes** (`manifest-diff.ts`):
+The client-side `computeManifestDiff` in `manifest-diff.ts` is
+already generic — it diffs by node ID and edge ID. New types
+added to `buildManifestGraph` are automatically diffed. No
+algorithm changes needed, just the model extension.
 
-Extend `computeManifestDiff` to handle all new node/edge types
-with the same added/removed/modified semantics.
+#### 2h. Event chain updates
 
-**Economy overview changes** (`economy-overview-page.tsx`):
+Update `canShowEventChain` guard to include
+`internal_account` nodes (they connect to instruments and
+account types). Update `analyzeSagaOutputs` if saga scripts
+reference new handler types.
 
-Add stat chips for all new resource types with counts and links.
+#### 2i. Tests
 
-### Phase 3: Connect Existing Pages to Manifest
+- Node extraction tests for each new type
+- Edge creation tests (especially nested
+  operationalGateway → instructionRoutes → mappings)
+- Filter toggle behavior with grouped categories
+- Double-click navigation for each new type
+- ELK layout stability with 40-60 nodes
 
-The `/market-data`, `/parties`, `/gateway-mappings`, and
-`/internal-accounts` pages exist but show data from their
-respective services, not from the manifest. Add manifest context.
+### Phase 3: Complete Economy Explorer
 
-**3a. Market data page**: Show which datasets/sources are
-manifest-declared vs ad-hoc. Badge or filter: "Manifest-managed"
-vs "Runtime". Link back to economy graph.
+Replace the original Phase 3 (manifest-managed badges on
+service pages) with extending the Economy Explorer as the
+unified manifest-first browse view.
 
-**3b. Parties page**: Filter or section for manifest-declared
-organizations (structural) vs customer parties (operational).
+**Rationale**: Adding manifest-managed badges to `/market-data`,
+`/parties`, `/gateway-mappings` creates a dual-source-of-truth
+problem. The manifest says resource X exists; the service might
+disagree (apply in progress, drift, etc.). Badges pretend the
+two sources agree, which they may not. The Explorer reads only
+from the manifest — clean, consistent, no dual-source confusion.
 
-**3c. Gateway mappings page**: Show which mappings are declared
-in the manifest. Show which instruction routes reference each
-mapping. Badge: "Manifest-managed".
+Service pages remain as operational views (live service state).
+Explorer is the manifest view (declared state).
 
-**3d. Internal accounts page**: Show manifest-declared accounts
-vs runtime accounts. Show the account type and instrument
-relationships from the manifest.
+**3a. Extend Resources tab**: Show all 12 manifest types with
+expandable sections per type. Each section shows a table of
+resources with key fields (code, name, status, relationships).
+
+**3b. Add Gateway tab**: Show provider connections, instruction
+routes, and their relationships to mappings. This replaces the
+need for a separate gateway page in the economy context.
+
+**3c. Add Config tab**: Show payment rails, party types, and
+seed data summary.
+
+**3d. Link from Overview**: The "View all" link from stat chips
+navigates to the Explorer.
 
 ### Phase 4: Surface New Control-Plane RPCs
 
-**4a. ApplyResource UI**: On each resource detail page (or via
-the economy graph), add an "Edit Resource" action that opens a
-form/editor for that single resource. Submits via
-`ApplyResource` RPC. Shows structured validation errors with
-fuzzy-match suggestions inline. Supports `dry_run` preview.
+**4a. ApplyResource UI**: Add "Edit Resource" as a YAML editor
+with `dry_run` preview — not 12 typed forms. The YAML editor
+already exists. On submission, call `ApplyResource` RPC. Show
+structured `ValidationError` responses with path, code, message,
+and fuzzy-match suggestions inline. Typed forms per resource
+type can follow in later PRDs.
 
-**4b. Reconcile dashboard**: New page or section under Economy
-showing the output of `ReconcileManifest`. Drift items displayed
-as a table: resource type, code, drift type (MISSING, MODIFIED,
-EXTRA), with expand to show expected vs actual values. "Run
-Reconciliation" button triggers the RPC.
+**4b. Reconcile dashboard**: New section under Economy showing
+`ReconcileManifest` output. Drift items as a DataTable:
+resource_type, code, drift_type (MISSING, MODIFIED, EXTRA),
+description. "Run Reconciliation" button with:
+- Loading state during RPC (can take 5-30 seconds)
+- Warning display when services are unreachable
+- "No manifest applied" message for pre-045 tenants
+- Auto-refresh option
 
 **4c. Export manifest**: Button on economy overview: "Export from
-Live State". Calls `ExportManifest`, shows the reconstructed
-manifest in the YAML editor. User can diff against the current
-stored manifest. Useful for tenants migrating to manifest-first.
+Live State". Calls `ExportManifest`, shows reconstructed
+manifest in YAML editor. Diff against stored manifest. Show
+`section_sources` (which service provided each section) and
+`warnings` for partial failures.
 
-**4d. Phase execution status**: On the manifest version history
+**4d. Phase execution status**: On manifest version history
 table, add expandable row detail showing per-phase execution
 status (COMPLETED, FAILED, SKIPPED) with timestamps and error
-messages. Highlight PARTIAL status versions.
+messages. The `phase_status` JSONB field is already stored on
+every `ManifestVersion`.
 
-**4e. Optimistic locking UX**: When `ApplyManifest` returns
-ABORTED (concurrent modification), show a conflict dialog:
-"Another change was applied while you were editing. Current
-version: N. Your base version: M." Options: "Reload and retry"
-or "Force apply".
+**4e. Optimistic locking UX**: When `ApplyManifest` or
+`ApplyResource` returns ABORTED (concurrent modification), show
+a conflict dialog that includes the **diff between current and
+base version** (via `DiffManifestVersions`). Options: "Reload
+and merge" or "Cancel". Do NOT offer blind "Force apply" — show
+what changed first.
 
-**4f. Backend diff for version comparison**: Replace the
-client-side `computeManifestDiff` with the backend
-`DiffManifestVersions` RPC in the history table's compare
-feature. The backend diff is authoritative and handles all
-resource types including the new ones.
+**4f. Backend diff (tabular view)**: Add a tabular diff view
+using the `DiffManifestVersions` RPC alongside the existing
+visual graph diff. The backend returns `DiffAction[]`
+(resource_type, action, resource_code, description, breaking)
+which maps to a DataTable with status badges. Keep the existing
+graph diff for visual comparison — these serve different
+purposes. Do NOT replace the graph diff.
 
-## Economy Graph: Full Resource Map
+### Investigating: relationship_graph field
 
-```text
-                    ┌─────────────────┐
-                    │   Instruments    │
-                    │  (GBP, KWH...)  │
-                    └────────┬────────┘
-          ┌─────────────────┼──────────────────┐
-          │                 │                  │
-          ▼                 ▼                  ▼
-┌─────────────────┐ ┌──────────────┐  ┌───────────────┐
-│  Account Types  │ │  Valuation   │  │  Market Data  │
-│ (SETTLEMENT...) │ │    Rules     │  │   Sources     │
-└────────┬────────┘ │ (KWH→GBP)   │  └───────┬───────┘
-         │          └──────────────┘          │
-         │                                    ▼
-         │                           ┌───────────────┐
-         │                           │  Market Data  │
-         │                           │    Sets       │
-         │                           └───────────────┘
-         ▼
-┌─────────────────┐      ┌──────────────────┐
-│   Internal      │─────▶│  Organizations   │
-│   Accounts      │      │ (DNOs, GSPs)     │
-│ (GSP_KWH_INV)  │      └──────────────────┘
-└─────────────────┘
-         │
-         ▼
-┌─────────────────┐      ┌──────────────────┐
-│     Sagas       │─────▶│    Mappings      │
-│ (settlement...) │      │ (stripe_req...)  │
-└─────────────────┘      └────────┬─────────┘
-                                  │
-                    ┌─────────────┼──────────────┐
-                    ▼                            ▼
-           ┌──────────────┐            ┌──────────────┐
-           │  Instruction │            │   Provider   │
-           │   Routes     │            │ Connections  │
-           └──────────────┘            └──────────────┘
-                    │
-                    ▼
-           ┌──────────────┐
-           │ Payment Rails│
-           └──────────────┘
-```
+`ManifestVersion.relationship_graph` (field 10) stores a
+pre-computed JSON graph during validation. If populated, the
+frontend could render it directly instead of re-extracting from
+manifest fields — reducing Phase 2 scope. Investigate whether
+this field is populated, what its schema is, and whether it
+contains enough information (node types, edges, labels) for
+graph rendering. If viable, this replaces 2c (model extension)
+with "render backend graph."
 
 ## Success Criteria
 
-1. Economy graph renders all 12 manifest resource types with
-   correct relationships
-2. Saga navigation works end-to-end (list, detail, graph click)
-3. All resource types have click-through navigation from graph
-   to their detail page
-4. Existing pages (/market-data, /parties, /gateway-mappings)
-   show manifest-managed vs runtime resources
-5. ApplyResource available from resource detail pages with
+1. Economy graph renders all manifest resource types with
+   correct relationships and accessible color palette
+2. Economy Explorer shows all 12 manifest types in browsable
+   tabs
+3. Saga navigation works end-to-end (list, detail, graph click)
+4. All resource types have click-through navigation from graph
+5. ReconcileManifest accessible from economy dashboard with
+   drift items table
+6. ApplyResource available via YAML editor with dry_run and
    validation feedback
-6. ReconcileManifest accessible from economy dashboard
 7. Manifest version history shows per-phase execution status
-8. Backend DiffManifestVersions used for version comparison
+   and PARTIAL status
+8. Backend DiffManifestVersions available as tabular diff
+   alongside existing graph diff
+9. Optimistic locking conflicts show diff before allowing
+   action
 
 ## Non-Goals
 
+- Typed forms for all 12 resource types in ApplyResource
+  (YAML editor is sufficient for v1)
+- Manifest-managed badges on service pages (Explorer replaces
+  this — clean separation of manifest vs operational views)
 - Redesigning the economy graph layout algorithm (ELK works)
-- Adding new backend RPCs (all exist from PRD 045)
+- Adding new backend RPCs beyond the `force` field on
+  `ApplyResourceRequest`
 - Manifest YAML editor changes (already functional)
-- Real-time manifest change notifications (polling is sufficient)
+- Real-time manifest change notifications (polling is
+  sufficient)
 - Mobile-responsive graph (desktop-only is acceptable)
+- `inbound_routes` visualization (Phase 5 placeholder in proto)
 
 ## Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Graph becomes visually cluttered with 12 types | Type visibility toggles already exist; extend to new types. Default to showing core types (instruments, accounts, sagas) with others opt-in. |
-| Performance with large manifests (many nodes) | ELK handles hundreds of nodes. Lazy-load edge detail on hover. |
-| Proto types not generated for new fields | Run `buf generate` — types already exist from PRD 045 proto changes |
-| Market data / parties pages show mixed data | Clear badge/filter distinguishing manifest-declared vs runtime |
+| Graph cluttered with 12 types (40-60 nodes) | Grouped visibility toggles; default infrastructure types to hidden; keep overview graph for core types, Explorer for full detail |
+| Color palette inaccessible | Minimum 36-degree hue separation; verify with colorblind simulator; CSS custom properties for light/dark themes |
+| Disconnected leaf nodes look like bugs | Group leaf nodes in designated region, or show only in Explorer. Explicit design decision before implementation. |
+| DiffManifestVersions format mismatch | Keep existing graph diff + add tabular diff. Two complementary views, not a replacement. |
+| ApplyResource can't handle breaking changes | Phase 0 adds `force` to proto. Until then, YAML editor fallback to full ApplyManifest. |
+| Generated TS stale | Phase 0 runs `buf generate`. Verify output before Phase 2 begins. |
+| 10+ location maintenance burden per type | Phase 2a data-driven registry refactor. One config object drives all locations. |
+| Navigation scatter from graph clicks | Use Explorer as target for types without dedicated pages. Breadcrumb back to economy. |
+| Event chain breaks with new types | Phase 2h explicitly updates event chain guards. |
+| Pre-045 tenants hit errors on reconcile/export | Phase 4b specifies "no manifest" graceful handling. |
+| `payment_rails` has no stable code field | Use `provider` as node ID. Document convention. |
 
 ## Implementation Notes
 
-- Proto-generated TypeScript types for the 4 new resource types
-  already exist in `api/gen/` from PRD 045's proto changes and
-  `buf generate`.
-- The `manifestHistory` and `manifestApplier` Connect RPC clients
-  are already wired in `api/clients.ts`.
-- The `ManifestGraph` component uses React Flow + ELK — adding
+- The graph model (`manifest-graph-model.ts`) currently casts
+  the manifest to a local `ManifestInput` interface that only
+  declares 4 fields. This cast should be removed in Phase 2a —
+  use the proto type directly so missing fields are caught at
+  compile time.
+- The `manifestHistory` and `manifestApplier` Connect RPC
+  clients are already wired in `api/clients.ts`.
+- The `ManifestGraph` component uses React Flow + ELK. Adding
   node types follows the existing `InstrumentNode`,
-  `AccountTypeNode` pattern.
-- The graph model (`manifest-graph-model.ts`) extracts nodes from
-  the manifest proto. Adding new types means adding extraction
-  logic for the new repeated fields.
-- The diff graph (`manifest-diff-graph.tsx`) reuses the same node
-  components with status-based coloring.
-- Phase 1 (bug fixes) and Phase 2 (graph completeness) can be
-  developed in parallel with Phase 3 (page connections) and
-  Phase 4 (new RPC surfaces).
+  `AccountTypeNode` `memo()` component pattern.
+- The diff graph (`manifest-diff-graph.tsx`) has its own
+  `LAYER_PRIORITY` duplicate — Phase 2a consolidates this.
+- The client-side diff algorithm (`manifest-diff.ts`) is
+  already generic. New types are automatically diffed once
+  added to the graph model.
+- Phase 1 (bug fixes) can ship independently and immediately.
+- Phase 2a (registry refactor) must complete before 2c-2i.
+- Phases 2 and 3 (graph + Explorer) can develop in parallel
+  with Phase 4 (RPC surfaces).
