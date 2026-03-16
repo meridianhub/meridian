@@ -18,13 +18,18 @@ type ManifestHistoryServiceConfig struct {
 
 	// Logger is the structured logger. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
+
+	// ExportCollectors provides live service collectors for ExportManifest.
+	// When nil, the ExportManifest RPC returns Unimplemented.
+	ExportCollectors *manifest.ExportCollectors
 }
 
 // ErrDBRequired is returned when DB is nil during service registration.
 var ErrDBRequired = errors.New("manifest history service: database connection is required")
 
 // RegisterManifestHistoryService creates and registers the ManifestHistoryService
-// on the given gRPC server.
+// on the given gRPC server. When ExportCollectors is provided, the ExportManifest
+// RPC is enabled; otherwise it returns Unimplemented.
 func RegisterManifestHistoryService(server *grpc.Server, cfg ManifestHistoryServiceConfig) error {
 	if cfg.DB == nil {
 		return ErrDBRequired
@@ -40,7 +45,16 @@ func RegisterManifestHistoryService(server *grpc.Server, cfg ManifestHistoryServ
 		return fmt.Errorf("manifest history service: %w", err)
 	}
 
-	handler, err := manifest.NewHistoryHandler(historySvc, cfg.Logger)
+	var handler *manifest.HistoryHandler
+	if cfg.ExportCollectors != nil {
+		exporter, exportErr := manifest.NewExportService(historySvc, cfg.ExportCollectors)
+		if exportErr != nil {
+			return fmt.Errorf("manifest export service: %w", exportErr)
+		}
+		handler, err = manifest.NewHistoryHandlerWithExport(historySvc, exporter, cfg.Logger)
+	} else {
+		handler, err = manifest.NewHistoryHandler(historySvc, cfg.Logger)
+	}
 	if err != nil {
 		return fmt.Errorf("manifest history handler: %w", err)
 	}
