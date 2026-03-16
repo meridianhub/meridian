@@ -2,29 +2,27 @@ import { useQuery } from '@tanstack/react-query'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
-import { tenantKeys, referenceKeys } from '@/lib/query-keys'
+import { manifestKeys, referenceKeys } from '@/lib/query-keys'
 import type { DataTableQueryParams, DataTableResult } from '@/shared/data-table'
-import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
+import type { SagaDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 
 /**
- * Fetches a paginated list of saga definitions for use with DataTable.
+ * Fetches saga definitions from the current manifest for use with DataTable.
  */
 export function useSagasTable() {
-  const { sagaRegistry } = useApiClients()
+  const { manifestHistory } = useApiClients()
   const tenantSlug = useTenantSlug()
 
-  const queryKey = tenantKeys.sagas(tenantSlug ?? '')
+  const queryKey = manifestKeys.current()
 
   async function queryFn(
-    params: DataTableQueryParams,
+    _params: DataTableQueryParams,
   ): Promise<DataTableResult<SagaDefinition>> {
-    const response = await sagaRegistry.listSagas({
-      pageSize: params.pageSize,
-      pageToken: params.pageToken,
-    })
+    const response = await manifestHistory.getCurrentManifest({})
+    const sagas = response.version?.manifest?.sagas ?? []
     return {
-      items: response.sagas ?? [],
-      nextPageToken: response.nextPageToken || undefined,
+      items: sagas,
+      nextPageToken: undefined,
     }
   }
 
@@ -39,7 +37,7 @@ export function useSagaDetail(definitionId: string | undefined) {
   const tenantSlug = useTenantSlug()
 
   return useQuery({
-    queryKey: tenantKeys.saga(tenantSlug ?? '', definitionId ?? ''),
+    queryKey: ['tenant', tenantSlug ?? '', 'saga', definitionId ?? ''],
     queryFn: async () => {
       const response = await sagaRegistry.getSaga({ id: definitionId ?? '' })
       return response.saga
