@@ -23,9 +23,6 @@ const (
 	// MaxLoopNestingDepth is the maximum allowed loop nesting level.
 	MaxLoopNestingDepth = 3
 
-	// MemoryWarningThreshold is the memory allocation threshold that triggers a warning.
-	MemoryWarningThreshold = 10 * 1024 * 1024 // 10MB
-
 	// MaxStepsPerExecution limits the number of steps to prevent infinite loops.
 	MaxStepsPerExecution = 1_000_000
 )
@@ -201,6 +198,9 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	if execInput.ThreadSetup != nil {
 		execInput.ThreadSetup(thread)
 	}
+
+	// Enforce CPU step limit to prevent tenant scripts from exhausting compute resources.
+	thread.SetMaxExecutionSteps(MaxStepsPerExecution)
 
 	// Set up cancellation checking
 	done := make(chan struct{})
