@@ -25,9 +25,9 @@ import type {
   ManifestNode,
   ManifestEdge,
   ManifestGraph,
-  ManifestNodeType,
 } from '../lib/manifest-graph-model'
 import { computeManifestDiff, type ManifestDiff } from '../lib/manifest-diff'
+import { getLayerPriority } from '../lib/node-type-registry'
 
 type DiffStatus = 'added' | 'removed' | 'modified' | 'unchanged'
 
@@ -38,12 +38,7 @@ const DIFF_COLORS: Record<DiffStatus, { border: string; bg: string }> = {
   unchanged: { border: 'var(--graph-diff-unchanged)', bg: 'color-mix(in oklch, var(--graph-diff-unchanged) 6%, transparent)' },
 }
 
-const LAYER_PRIORITY: Record<ManifestNodeType, string> = {
-  instrument: '40',
-  account_type: '30',
-  valuation_rule: '20',
-  saga: '10',
-}
+const LAYER_PRIORITY = getLayerPriority()
 
 interface DiffNodeData {
   manifestNode: ManifestNode

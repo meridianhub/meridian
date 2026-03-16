@@ -3,7 +3,6 @@ import {
   NODE_TYPE_REGISTRY,
   getNodeThemes,
   getLayerPriority,
-  type NodeTypeConfig,
 } from './node-type-registry'
 import type { ManifestNodeType } from './manifest-graph-model'
 
