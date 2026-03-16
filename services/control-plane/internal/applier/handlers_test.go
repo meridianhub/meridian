@@ -150,6 +150,10 @@ func TestRegisterManifestHandlers(t *testing.T) {
 		"internal_account.initiate",
 		"operational_gateway.upsert_connection",
 		"operational_gateway.upsert_route",
+		"market_information.register_data_source",
+		"market_information.register_data_set",
+		"market_information.activate_data_set",
+		"party.register_organization",
 	}
 
 	for _, name := range expectedHandlers {
@@ -623,6 +627,268 @@ func TestUpsertRouteHandler(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "payment.initiate", resultMap["instruction_type"])
 	assert.Equal(t, "UPSERTED", resultMap["status"])
+}
+
+// mockMarketInformation implements MarketInformationService for testing.
+type mockMarketInformation struct {
+	registerDataSourceFn func(*saga.StarlarkContext, map[string]any) (any, error)
+	registerDataSetFn    func(*saga.StarlarkContext, map[string]any) (any, error)
+	activateDataSetFn    func(*saga.StarlarkContext, map[string]any) (any, error)
+}
+
+func (m *mockMarketInformation) RegisterDataSource(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.registerDataSourceFn != nil {
+		return m.registerDataSourceFn(ctx, params)
+	}
+	return map[string]any{"code": params["code"], "status": "REGISTERED"}, nil
+}
+
+func (m *mockMarketInformation) RegisterDataSet(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.registerDataSetFn != nil {
+		return m.registerDataSetFn(ctx, params)
+	}
+	return map[string]any{"code": params["code"], "status": "DRAFT"}, nil
+}
+
+func (m *mockMarketInformation) ActivateDataSet(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.activateDataSetFn != nil {
+		return m.activateDataSetFn(ctx, params)
+	}
+	return map[string]any{"code": params["code"], "status": "ACTIVE"}, nil
+}
+
+// mockParty implements PartyService for testing.
+type mockParty struct {
+	registerOrganizationFn func(*saga.StarlarkContext, map[string]any) (any, error)
+}
+
+func (m *mockParty) RegisterOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.registerOrganizationFn != nil {
+		return m.registerOrganizationFn(ctx, params)
+	}
+	return map[string]any{"party_id": params["party_id"], "status": "ACTIVE"}, nil
+}
+
+// TestRegisterDataSourceHandler verifies the handler delegates to MarketInformationService.
+func TestRegisterDataSourceHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:     &mockReferenceData{},
+		InternalAccount:   &mockInternalAccount{},
+		MarketInformation: &mockMarketInformation{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("market_information.register_data_source")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"code":        "BLOOMBERG",
+		"name":        "Bloomberg Financial Data",
+		"trust_level": int64(90),
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "BLOOMBERG", resultMap["code"])
+	assert.Equal(t, "REGISTERED", resultMap["status"])
+}
+
+// TestRegisterDataSourceHandler_Error verifies errors are propagated.
+func TestRegisterDataSourceHandler_Error(t *testing.T) {
+	expectedErr := errors.New("data source registration failed")
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+		MarketInformation: &mockMarketInformation{
+			registerDataSourceFn: func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("market_information.register_data_source")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{"code": "FAIL"})
+	assert.ErrorIs(t, err, expectedErr)
+}
+
+// TestRegisterDataSetHandler verifies the handler delegates to MarketInformationService.
+func TestRegisterDataSetHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:     &mockReferenceData{},
+		InternalAccount:   &mockInternalAccount{},
+		MarketInformation: &mockMarketInformation{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("market_information.register_data_set")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"code":     "USD_EUR_FX",
+		"category": "DATA_CATEGORY_FX_RATE",
+		"unit":     "USD/EUR",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "USD_EUR_FX", resultMap["code"])
+	assert.Equal(t, "DRAFT", resultMap["status"])
+}
+
+// TestActivateDataSetHandler verifies the handler delegates to MarketInformationService.
+func TestActivateDataSetHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:     &mockReferenceData{},
+		InternalAccount:   &mockInternalAccount{},
+		MarketInformation: &mockMarketInformation{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("market_information.activate_data_set")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"code":    "USD_EUR_FX",
+		"version": int64(1),
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "USD_EUR_FX", resultMap["code"])
+	assert.Equal(t, "ACTIVE", resultMap["status"])
+}
+
+// TestMarketInformationHandlers_NilService verifies error when MarketInformation is nil.
+func TestMarketInformationHandlers_NilService(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:     &mockReferenceData{},
+		InternalAccount:   &mockInternalAccount{},
+		MarketInformation: nil,
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+
+	for _, handlerName := range []string{
+		"market_information.register_data_source",
+		"market_information.register_data_set",
+		"market_information.activate_data_set",
+	} {
+		t.Run(handlerName, func(t *testing.T) {
+			handler, err := registry.Get(handlerName)
+			require.NoError(t, err)
+			_, err = handler(ctx, map[string]any{"code": "TEST"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "market_information service not configured")
+		})
+	}
+}
+
+// TestRegisterOrganizationHandler verifies the handler delegates to PartyService.
+func TestRegisterOrganizationHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+		Party:           &mockParty{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.register_organization")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"party_id":   "acme-corp",
+		"legal_name": "Acme Corporation Ltd",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "acme-corp", resultMap["party_id"])
+	assert.Equal(t, "ACTIVE", resultMap["status"])
+}
+
+// TestRegisterOrganizationHandler_Error verifies errors are propagated.
+func TestRegisterOrganizationHandler_Error(t *testing.T) {
+	expectedErr := errors.New("organization registration failed")
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+		Party: &mockParty{
+			registerOrganizationFn: func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.register_organization")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{"party_id": "acme-corp"})
+	assert.ErrorIs(t, err, expectedErr)
+}
+
+// TestRegisterOrganizationHandler_NilService verifies error when Party service is nil.
+func TestRegisterOrganizationHandler_NilService(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+		Party:           nil,
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.register_organization")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{"party_id": "acme-corp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "party service not configured")
 }
 
 // TestUpsertRouteHandler_NilService verifies error when service is nil.
