@@ -113,7 +113,7 @@ func TestOutboxToDomainEvent_FieldMapping(t *testing.T) {
 	assert.Equal(t, "cause-789", got.CausationID)
 	assert.Equal(t, payload, got.Payload)
 	assert.Equal(t, entry.CreatedAt.UTC(), got.Timestamp)
-	assert.Empty(t, got.TenantID, "TenantID is not stored in EventOutbox")
+	assert.Empty(t, got.TenantID, "TenantID should be empty when not set on outbox entry")
 }
 
 func TestOutboxToDomainEvent_ChannelDerivation(t *testing.T) {

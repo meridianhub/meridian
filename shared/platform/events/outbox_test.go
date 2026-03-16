@@ -44,6 +44,7 @@ func TestNewEventOutbox(t *testing.T) {
 		"test-topic",
 		"test-service",
 		"correlation-456",
+		"tenant-1",
 	)
 
 	assert.NotEqual(t, uuid.Nil, entry.ID)
@@ -54,6 +55,7 @@ func TestNewEventOutbox(t *testing.T) {
 	assert.Equal(t, "test-topic", entry.Topic)
 	assert.Equal(t, "test-service", entry.ServiceName)
 	assert.Equal(t, "correlation-456", entry.CorrelationID)
+	assert.Equal(t, "tenant-1", entry.TenantID)
 	assert.Equal(t, StatusPending, entry.Status)
 	assert.Equal(t, "aggregate-123", entry.PartitionKey) // Default to aggregate ID
 	assert.False(t, entry.CreatedAt.IsZero())
@@ -73,6 +75,7 @@ func TestPostgresOutboxRepository_Insert(t *testing.T) {
 			"test-topic",
 			"test-service",
 			"corr-1",
+			"tenant-1",
 		)
 
 		err := db.Transaction(func(tx *gorm.DB) error {
@@ -99,6 +102,7 @@ func TestPostgresOutboxRepository_Insert(t *testing.T) {
 			"test-topic",
 			"test-service",
 			"corr-rollback",
+			"tenant-1",
 		)
 
 		err := db.Transaction(func(tx *gorm.DB) error {
@@ -127,6 +131,7 @@ func TestPostgresOutboxRepository_Insert(t *testing.T) {
 			"test-topic",
 			"test-service",
 			"",
+			"tenant-1",
 		)
 
 		err := repo.Insert(ctx, nil, entry)
@@ -141,9 +146,9 @@ func TestPostgresOutboxRepository_FetchUnprocessed(t *testing.T) {
 
 	// Create test entries with different services and statuses
 	entries := []EventOutbox{
-		*NewEventOutbox("event.type.1", "agg-1", "Type", []byte(`{}`), "topic", "service-a", ""),
-		*NewEventOutbox("event.type.2", "agg-2", "Type", []byte(`{}`), "topic", "service-a", ""),
-		*NewEventOutbox("event.type.3", "agg-3", "Type", []byte(`{}`), "topic", "service-b", ""),
+		*NewEventOutbox("event.type.1", "agg-1", "Type", []byte(`{}`), "topic", "service-a", "", ""),
+		*NewEventOutbox("event.type.2", "agg-2", "Type", []byte(`{}`), "topic", "service-a", "", ""),
+		*NewEventOutbox("event.type.3", "agg-3", "Type", []byte(`{}`), "topic", "service-b", "", ""),
 	}
 
 	// Insert entries
@@ -167,7 +172,7 @@ func TestPostgresOutboxRepository_FetchUnprocessed(t *testing.T) {
 	t.Run("respects limit", func(t *testing.T) {
 		// Add more entries
 		for i := 0; i < 5; i++ {
-			entry := NewEventOutbox("event.type.batch", "agg-batch", "Type", []byte(`{}`), "topic", "service-c", "")
+			entry := NewEventOutbox("event.type.batch", "agg-batch", "Type", []byte(`{}`), "topic", "service-c", "", "")
 			db.Create(entry)
 		}
 
@@ -193,9 +198,9 @@ func TestPostgresOutboxRepository_MarkProcessing(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test entries
-	entry1 := NewEventOutbox("event.1", "agg-1", "Type", []byte(`{}`), "topic", "service", "")
-	entry2 := NewEventOutbox("event.2", "agg-2", "Type", []byte(`{}`), "topic", "service", "")
-	entry3 := NewEventOutbox("event.3", "agg-3", "Type", []byte(`{}`), "topic", "service", "")
+	entry1 := NewEventOutbox("event.1", "agg-1", "Type", []byte(`{}`), "topic", "service", "", "")
+	entry2 := NewEventOutbox("event.2", "agg-2", "Type", []byte(`{}`), "topic", "service", "", "")
+	entry3 := NewEventOutbox("event.3", "agg-3", "Type", []byte(`{}`), "topic", "service", "", "")
 
 	db.Create(entry1)
 	db.Create(entry2)
@@ -233,7 +238,7 @@ func TestPostgresOutboxRepository_MarkCompleted(t *testing.T) {
 	repo := NewPostgresOutboxRepository(db)
 	ctx := context.Background()
 
-	entry := NewEventOutbox("event.1", "agg-1", "Type", []byte(`{}`), "topic", "service", "")
+	entry := NewEventOutbox("event.1", "agg-1", "Type", []byte(`{}`), "topic", "service", "", "")
 	db.Create(entry)
 
 	t.Run("marks entry as completed with timestamp", func(t *testing.T) {
@@ -264,7 +269,7 @@ func TestPostgresOutboxRepository_MarkFailed(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("increments retry count and resets to pending", func(t *testing.T) {
-		entry := NewEventOutbox("event.1", "agg-1", "Type", []byte(`{}`), "topic", "service", "")
+		entry := NewEventOutbox("event.1", "agg-1", "Type", []byte(`{}`), "topic", "service", "", "")
 		db.Create(entry)
 
 		err := repo.MarkFailed(ctx, entry.ID, errTestError, 5)
@@ -281,7 +286,7 @@ func TestPostgresOutboxRepository_MarkFailed(t *testing.T) {
 	})
 
 	t.Run("marks as failed when retries exhausted", func(t *testing.T) {
-		entry := NewEventOutbox("event.2", "agg-2", "Type", []byte(`{}`), "topic", "service", "")
+		entry := NewEventOutbox("event.2", "agg-2", "Type", []byte(`{}`), "topic", "service", "", "")
 		entry.RetryCount = 4 // Already tried 4 times
 		db.Create(entry)
 
@@ -309,7 +314,7 @@ func TestPostgresOutboxRepository_GetPendingCount(t *testing.T) {
 
 	// Create entries with different services and statuses
 	for i := 0; i < 5; i++ {
-		entry := NewEventOutbox("event", "agg", "Type", []byte(`{}`), "topic", "service-count", "")
+		entry := NewEventOutbox("event", "agg", "Type", []byte(`{}`), "topic", "service-count", "", "")
 		db.Create(entry)
 	}
 
@@ -331,12 +336,12 @@ func TestPostgresOutboxRepository_ResetStuckEntries(t *testing.T) {
 	ctx := context.Background()
 
 	// Create entries
-	oldEntry := NewEventOutbox("event.old", "agg-old", "Type", []byte(`{}`), "topic", "service-stuck", "")
+	oldEntry := NewEventOutbox("event.old", "agg-old", "Type", []byte(`{}`), "topic", "service-stuck", "", "")
 	oldEntry.Status = StatusProcessing
 	oldEntry.CreatedAt = time.Now().Add(-10 * time.Minute) // 10 minutes ago
 	db.Create(oldEntry)
 
-	newEntry := NewEventOutbox("event.new", "agg-new", "Type", []byte(`{}`), "topic", "service-stuck", "")
+	newEntry := NewEventOutbox("event.new", "agg-new", "Type", []byte(`{}`), "topic", "service-stuck", "", "")
 	newEntry.Status = StatusProcessing
 	newEntry.CreatedAt = time.Now() // Just now
 	db.Create(newEntry)

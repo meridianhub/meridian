@@ -113,6 +113,7 @@ func TestNewEventOutbox_Defaults(t *testing.T) {
 		"topic",
 		"service",
 		"corr-123",
+		"tenant-1",
 	)
 
 	assert.NotEqual(t, uuid.Nil, entry.ID)
@@ -286,6 +287,7 @@ func BenchmarkNewEventOutbox(b *testing.B) {
 			"benchmark-topic",
 			"benchmark-service",
 			"correlation-id",
+			"tenant-1",
 		)
 	}
 }
@@ -294,7 +296,7 @@ func BenchmarkNewEventOutbox(b *testing.B) {
 func TestTimeHandling(t *testing.T) {
 	t.Run("CreatedAt is set to current time", func(t *testing.T) {
 		before := time.Now().Add(-time.Second)
-		entry := NewEventOutbox("type", "id", "aggregate", nil, "topic", "service", "")
+		entry := NewEventOutbox("type", "id", "aggregate", nil, "topic", "service", "", "")
 		after := time.Now().Add(time.Second)
 
 		assert.True(t, entry.CreatedAt.After(before))
@@ -302,7 +304,7 @@ func TestTimeHandling(t *testing.T) {
 	})
 
 	t.Run("ProcessedAt is nil for new entries", func(t *testing.T) {
-		entry := NewEventOutbox("type", "id", "aggregate", nil, "topic", "service", "")
+		entry := NewEventOutbox("type", "id", "aggregate", nil, "topic", "service", "", "")
 		assert.Nil(t, entry.ProcessedAt)
 	})
 }

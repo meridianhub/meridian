@@ -72,6 +72,7 @@ type EventOutbox struct {
 	RetryCount    int        `gorm:"not null" json:"retry_count"`
 	LastError     *string    `gorm:"type:text" json:"last_error,omitempty"`
 	ServiceName   string     `gorm:"size:100;not null;index" json:"service_name"`
+	TenantID      string     `gorm:"size:100;not null;index" json:"tenant_id"`
 }
 
 // TableName returns the table name for EventOutbox.
@@ -317,6 +318,7 @@ func NewEventOutbox(
 	topic string,
 	serviceName string,
 	correlationID string,
+	tenantID string,
 ) *EventOutbox {
 	return &EventOutbox{
 		ID:            uuid.New(),
@@ -328,6 +330,7 @@ func NewEventOutbox(
 		PartitionKey:  aggregateID, // Use aggregate ID as partition key by default
 		ServiceName:   serviceName,
 		CorrelationID: correlationID,
+		TenantID:      tenantID,
 		Status:        StatusPending,
 		CreatedAt:     time.Now(),
 	}

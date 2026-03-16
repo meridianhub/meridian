@@ -1,2 +1,4 @@
-h1:KoQwAmxjoc/PMGH48WMdyaHkKO/8Hde1OXtI8zLmF7A=
+h1:NqEYTrXumhcA1BQvUKDWsUo6lPw/XKHeljcfxa8VNME=
 20260304000001_create_event_outbox.sql h1:3qowbd0HiVAqH+82GdkX5/FN4Z1XoiGAGxmK6wXGXLA=
+20260316000001_add_event_outbox_tenant_id.sql h1:1cjH2Ap7fK1MdyU60qo/EOzd9DhDCd/w0S5Wqgr1nuw=
+20260316000002_add_event_outbox_tenant_id_index.sql h1:iyDT812dNOtCRSHmTv/LdyytpDnOJtXW7DEUePgek+E=
