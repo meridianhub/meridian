@@ -39,7 +39,7 @@ export function useSagaDetail(definitionId: string | undefined) {
   return useQuery({
     queryKey: tenantKeys.saga(tenantSlug ?? '', definitionId ?? ''),
     queryFn: async () => {
-      const response = await sagaRegistry.getSaga({ id: definitionId ?? '' })
+      const response = await sagaRegistry.getSaga({ name: definitionId ?? '' })
       return response.saga
     },
     enabled: Boolean(definitionId),
