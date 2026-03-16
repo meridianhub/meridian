@@ -167,6 +167,8 @@ func writeSubdomainError(w http.ResponseWriter, r *http.Request, fallbackBaseURL
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", `Bearer realm="meridian-mcp"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Vary", "Host, X-Forwarded-Host, X-Forwarded-Proto")
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(meta)
 }
