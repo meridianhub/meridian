@@ -13,6 +13,8 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 const (
@@ -65,7 +67,8 @@ func LoadFromEnv() (*Config, error) {
 }
 
 // UnaryInterceptor returns a gRPC UnaryClientInterceptor that injects the API
-// key as a Bearer token in the outgoing metadata of every request.
+// key as a Bearer token and propagates tenant context in the outgoing metadata
+// of every request.
 func (a *Config) UnaryInterceptor() grpc.UnaryClientInterceptor {
 	return func(
 		ctx context.Context,
@@ -76,6 +79,9 @@ func (a *Config) UnaryInterceptor() grpc.UnaryClientInterceptor {
 		opts ...grpc.CallOption,
 	) error {
 		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+a.APIKey)
+		if tenantID, ok := tenant.FromContext(ctx); ok && !tenantID.IsEmpty() {
+			ctx = metadata.AppendToOutgoingContext(ctx, tenant.TenantIDKey, string(tenantID))
+		}
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
