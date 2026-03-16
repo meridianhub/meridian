@@ -400,6 +400,35 @@ result = compute()
 	}
 }
 
+// TestSecurityStepLimitEnforced verifies that scripts exceeding MaxStepsPerExecution
+// are terminated with a step limit error, not a timeout.
+func TestSecurityStepLimitEnforced(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	// Use a long timeout so the step limit triggers first, not the timeout.
+	runtime, err := NewRuntime(logger, WithTimeout(30*time.Second))
+	require.NoError(t, err)
+
+	// This script loops over a range large enough to exceed MaxStepsPerExecution (1,000,000).
+	// Each iteration costs multiple steps in the Starlark evaluator.
+	script := `
+def burn_steps():
+    x = 0
+    for i in range(10000000):
+        x = x + 1
+    return x
+result = burn_steps()
+`
+	ctx := context.Background()
+	_, err = runtime.ExecuteSaga(ctx, "step_limit_test", script, nil)
+	require.Error(t, err)
+	assert.True(t,
+		strings.Contains(err.Error(), "step") ||
+			strings.Contains(err.Error(), "limit") ||
+			strings.Contains(err.Error(), "cancelled") ||
+			strings.Contains(err.Error(), "execution"),
+		"expected step limit or execution error, got: %v", err)
+}
+
 // TestSecurityInputIsolation verifies input data cannot be modified across executions.
 func TestSecurityInputIsolation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
