@@ -116,6 +116,50 @@ func TestOutboxToDomainEvent_FieldMapping(t *testing.T) {
 	assert.Empty(t, got.TenantID, "TenantID should be empty when not set on outbox entry")
 }
 
+func TestOutboxToDomainEvent_TenantIDPropagation(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	entry := events.EventOutbox{
+		ID:            uuid.New(),
+		EventType:     "payment_order.reserved.v1",
+		AggregateID:   "agg-tenant",
+		AggregateType: "PaymentOrder",
+		EventPayload:  []byte(`{}`),
+		Topic:         "payment-order.reserved.v1",
+		ServiceName:   "payment-order",
+		TenantID:      "acme_bank",
+		Status:        events.StatusCompleted,
+		CreatedAt:     time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}
+	insertOutboxEntry(t, db, entry)
+
+	source := adapters.NewOutboxEventSource(db, 50*time.Millisecond, newTestLogger(t))
+
+	var received []eventstream.DomainEvent
+	var mu sync.Mutex
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	go func() {
+		_ = source.Start(ctx, func(_ context.Context, ev eventstream.DomainEvent) error {
+			mu.Lock()
+			received = append(received, ev)
+			mu.Unlock()
+			cancel()
+			return nil
+		})
+	}()
+
+	<-ctx.Done()
+	mu.Lock()
+	defer mu.Unlock()
+
+	require.Len(t, received, 1)
+	assert.Equal(t, "acme_bank", received[0].TenantID)
+}
+
 func TestOutboxToDomainEvent_ChannelDerivation(t *testing.T) {
 	tests := []struct {
 		topic           string
