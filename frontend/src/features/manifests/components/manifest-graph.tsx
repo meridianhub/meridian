@@ -749,6 +749,29 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
         case 'saga':
           navigate(`/starlark-config/${mn.label}`)
           break
+        case 'market_data': {
+          const code = mn.data.code as string | undefined
+          navigate(code ? `/market-data/${code}` : '/market-data')
+          break
+        }
+        case 'organization':
+          navigate('/reference-data/nodes')
+          break
+        case 'internal_account':
+          navigate('/internal-accounts')
+          break
+        case 'mapping':
+          navigate('/gateway-mappings')
+          break
+        case 'payment_rail':
+        case 'operational_gateway':
+        case 'provider_connection':
+        case 'instruction_route':
+          navigate('/reference-data')
+          break
+        case 'party_type':
+          navigate('/parties')
+          break
       }
     },
     [navigate],
