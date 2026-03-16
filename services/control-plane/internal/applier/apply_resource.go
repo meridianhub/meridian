@@ -204,6 +204,11 @@ func (h *ApplyManifestHandler) applyResourceExecute(
 	// Save to version store for future diffs
 	if err := h.versionStore.Save(ctx, patchedManifest, req.GetAppliedBy()); err != nil {
 		logger.Error("failed to save manifest version to differ store", "error", err)
+		response.StepResults = append(response.StepResults, &controlplanev1.StepResult{
+			StepName: "persist_baseline",
+			Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
+			Message:  "Warning: failed to update diff baseline; future diffs may be stale",
+		})
 	}
 
 	response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED

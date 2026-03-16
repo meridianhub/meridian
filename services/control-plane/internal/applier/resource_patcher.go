@@ -5,6 +5,7 @@ package applier
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
@@ -61,8 +62,9 @@ func resourceID(req *controlplanev1.ApplyResourceRequest) string {
 
 // valRuleKey produces a stable identifier for a valuation rule (from->to pair).
 // Mirrors differ.valRuleKey — kept local to avoid an import cycle.
+// Applies strings.ToUpper to match differ's normalization.
 func valRuleKey(from, to string) string {
-	return from + "->" + to
+	return strings.ToUpper(from) + "->" + strings.ToUpper(to)
 }
 
 // partyTypeKey produces a stable identifier for a party type definition.
