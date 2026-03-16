@@ -103,22 +103,34 @@ type ApplyManifestInput struct {
 	// ManifestVersion is the version being applied.
 	ManifestVersion string
 
-	// Instruments to register in Phase 1.
+	// Instruments to register in Phase 10.
 	Instruments []InstrumentInput
 
-	// AccountTypes to register and provision in Phase 2.
+	// AccountTypes to register in Phase 20.
 	AccountTypes []AccountTypeInput
 
-	// ValuationRules to register in Phase 3.
+	// MarketDataSources to register in Phase 30.
+	MarketDataSources []MarketDataSourceInput
+
+	// MarketDataSets to register and activate in Phase 35.
+	MarketDataSets []MarketDataSetInput
+
+	// ValuationRules to register in Phase 40.
 	ValuationRules []ValuationRuleInput
 
-	// SagaDefinitions to register in Phase 4.
+	// Organizations to register in Phase 55.
+	Organizations []OrganizationInput
+
+	// InternalAccounts to initiate in Phase 60.
+	InternalAccounts []InternalAccountInput
+
+	// SagaDefinitions to register in Phase 70.
 	SagaDefinitions []SagaDefinitionInput
 
-	// ProviderConnections to upsert in Phase 5 (Operational Gateway).
+	// ProviderConnections to upsert in Phase 90 (Operational Gateway).
 	ProviderConnections []ProviderConnectionInput
 
-	// InstructionRoutes to upsert in Phase 5 (Operational Gateway).
+	// InstructionRoutes to upsert in Phase 90 (Operational Gateway).
 	InstructionRoutes []InstructionRouteInput
 
 	// TenantID is the tenant for cross-tenant execution.
@@ -197,6 +209,41 @@ type InstructionRouteInput struct {
 	InboundMapping       string
 	HTTPMethod           string
 	PathTemplate         string
+}
+
+// MarketDataSourceInput represents a market data source to register.
+type MarketDataSourceInput struct {
+	Code        string
+	Name        string
+	Description string
+	TrustLevel  int
+}
+
+// MarketDataSetInput represents a market data set to register and activate.
+type MarketDataSetInput struct {
+	Code        string
+	Category    string
+	Unit        string
+	SourceCode  string
+	DisplayName string
+	Description string
+}
+
+// OrganizationInput represents an organization to register.
+type OrganizationInput struct {
+	Code       string
+	Name       string
+	PartyType  string
+	Attributes map[string]string
+}
+
+// InternalAccountInput represents an internal account to initiate.
+type InternalAccountInput struct {
+	Code              string
+	AccountType       string
+	InstrumentCode    string
+	OwnerOrganization string
+	Description       string
 }
 
 // ApplyManifestResult contains the result of a manifest application.
@@ -421,6 +468,32 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 	}
 	sagaInput["account_types"] = accountTypes
 
+	// Convert market data sources
+	marketSources := make([]interface{}, len(input.MarketDataSources))
+	for i, src := range input.MarketDataSources {
+		marketSources[i] = map[string]interface{}{
+			"code":        src.Code,
+			"name":        src.Name,
+			"description": src.Description,
+			"trust_level": src.TrustLevel,
+		}
+	}
+	sagaInput["market_data_sources"] = marketSources
+
+	// Convert market data sets
+	marketDataSets := make([]interface{}, len(input.MarketDataSets))
+	for i, ds := range input.MarketDataSets {
+		marketDataSets[i] = map[string]interface{}{
+			"code":         ds.Code,
+			"category":     ds.Category,
+			"unit":         ds.Unit,
+			"source_code":  ds.SourceCode,
+			"display_name": ds.DisplayName,
+			"description":  ds.Description,
+		}
+	}
+	sagaInput["market_data_sets"] = marketDataSets
+
 	// Convert valuation rules
 	valuationRules := make([]interface{}, len(input.ValuationRules))
 	for i, vr := range input.ValuationRules {
@@ -433,6 +506,35 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 		}
 	}
 	sagaInput["valuation_rules"] = valuationRules
+
+	// Convert organizations
+	organizations := make([]interface{}, len(input.Organizations))
+	for i, org := range input.Organizations {
+		attrs := make(map[string]interface{}, len(org.Attributes))
+		for k, v := range org.Attributes {
+			attrs[k] = v
+		}
+		organizations[i] = map[string]interface{}{
+			"code":       org.Code,
+			"name":       org.Name,
+			"party_type": org.PartyType,
+			"attributes": attrs,
+		}
+	}
+	sagaInput["organizations"] = organizations
+
+	// Convert internal accounts
+	internalAccounts := make([]interface{}, len(input.InternalAccounts))
+	for i, ia := range input.InternalAccounts {
+		internalAccounts[i] = map[string]interface{}{
+			"code":               ia.Code,
+			"account_type":       ia.AccountType,
+			"instrument_code":    ia.InstrumentCode,
+			"owner_organization": ia.OwnerOrganization,
+			"description":        ia.Description,
+		}
+	}
+	sagaInput["internal_accounts"] = internalAccounts
 
 	// Convert saga definitions
 	sagaDefs := make([]interface{}, len(input.SagaDefinitions))

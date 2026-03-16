@@ -29,6 +29,7 @@ func (m *mockValuationMethod) ResolveMethod(ctx *saga.StarlarkContext, name stri
 // mockReferenceData implements ReferenceDataService for testing.
 type mockReferenceData struct {
 	registerInstrumentFn     func(*saga.StarlarkContext, map[string]any) (any, error)
+	activateInstrumentFn     func(*saga.StarlarkContext, map[string]any) (any, error)
 	deleteInstrumentFn       func(*saga.StarlarkContext, map[string]any) (any, error)
 	registerAccountTypeFn    func(*saga.StarlarkContext, map[string]any) (any, error)
 	deleteAccountTypeFn      func(*saga.StarlarkContext, map[string]any) (any, error)
@@ -41,6 +42,13 @@ func (m *mockReferenceData) RegisterInstrument(ctx *saga.StarlarkContext, params
 		return m.registerInstrumentFn(ctx, params)
 	}
 	return map[string]any{"instrument_code": params["instrument_code"], "status": "REGISTERED"}, nil
+}
+
+func (m *mockReferenceData) ActivateInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.activateInstrumentFn != nil {
+		return m.activateInstrumentFn(ctx, params)
+	}
+	return map[string]any{"instrument_code": params["instrument_code"], "status": "ACTIVE"}, nil
 }
 
 func (m *mockReferenceData) DeleteInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
@@ -142,6 +150,7 @@ func TestRegisterManifestHandlers(t *testing.T) {
 
 	expectedHandlers := []string{
 		"reference_data.register_instrument",
+		"reference_data.activate_instrument",
 		"reference_data.delete_instrument",
 		"reference_data.register_account_type",
 		"reference_data.delete_account_type",
@@ -191,6 +200,56 @@ func TestRegisterInstrumentHandler(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "USD", resultMap["instrument_code"])
 	assert.Equal(t, "REGISTERED", resultMap["status"])
+}
+
+func TestActivateInstrumentHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("reference_data.activate_instrument")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"instrument_code": "USD",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "USD", resultMap["instrument_code"])
+	assert.Equal(t, "ACTIVE", resultMap["status"])
+}
+
+func TestActivateInstrumentHandler_Error(t *testing.T) {
+	expectedErr := errors.New("activation failed")
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData: &mockReferenceData{
+			activateInstrumentFn: func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+				return nil, expectedErr
+			},
+		},
+		InternalAccount: &mockInternalAccount{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("reference_data.activate_instrument")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{"instrument_code": "FAIL"})
+	assert.ErrorIs(t, err, expectedErr)
 }
 
 func TestRegisterInstrumentHandler_Error(t *testing.T) {

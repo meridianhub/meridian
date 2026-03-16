@@ -746,6 +746,9 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 		})
 	}
 
+	extractMarketData(mf, input)
+	extractPartyAndAccounts(mf, input)
+
 	for _, saga := range mf.GetSagas() {
 		input.SagaDefinitions = append(input.SagaDefinitions, SagaDefinitionInput{
 			Name:   saga.GetName(),
@@ -753,47 +756,101 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 		})
 	}
 
-	if gw := mf.GetOperationalGateway(); gw != nil {
-		for _, conn := range gw.GetProviderConnections() {
-			pc := ProviderConnectionInput{
-				ConnectionID: conn.GetConnectionId(),
-				ProviderName: conn.GetProviderName(),
-				ProviderType: conn.GetProviderType(),
-				Protocol:     conn.GetProtocol().String(),
-				BaseURL:      conn.GetBaseUrl(),
-			}
-			pc.AuthType, pc.AuthConfig = extractAuthConfig(conn.GetAuth())
-			if rp := conn.GetRetryPolicy(); rp != nil {
-				pc.RetryPolicy = map[string]any{
-					"max_attempts":            rp.GetMaxAttempts(),
-					"initial_backoff_seconds": rp.GetInitialBackoffSeconds(),
-					"max_backoff_seconds":     rp.GetMaxBackoffSeconds(),
-					"backoff_multiplier":      rp.GetBackoffMultiplier(),
-				}
-			}
-			if rl := conn.GetRateLimit(); rl != nil {
-				pc.RateLimitConfig = map[string]any{
-					"requests_per_second": rl.GetRequestsPerSecond(),
-					"burst_size":          rl.GetBurstSize(),
-				}
-			}
-			input.ProviderConnections = append(input.ProviderConnections, pc)
-		}
-
-		for _, route := range gw.GetInstructionRoutes() {
-			input.InstructionRoutes = append(input.InstructionRoutes, InstructionRouteInput{
-				InstructionType:      route.GetInstructionType(),
-				ConnectionID:         route.GetConnectionId(),
-				FallbackConnectionID: route.GetFallbackConnectionId(),
-				OutboundMapping:      route.GetOutboundMappingId(),
-				InboundMapping:       route.GetInboundMappingId(),
-				HTTPMethod:           route.GetHttpMethod(),
-				PathTemplate:         route.GetPathTemplate(),
-			})
-		}
-	}
+	extractOperationalGateway(mf, input)
 
 	return input
+}
+
+// extractMarketData converts market data sources and data sets from the manifest proto.
+func extractMarketData(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
+	md := mf.GetMarketData()
+	if md == nil {
+		return
+	}
+	for _, src := range md.GetSources() {
+		input.MarketDataSources = append(input.MarketDataSources, MarketDataSourceInput{
+			Code:        src.GetCode(),
+			Name:        src.GetName(),
+			Description: src.GetDescription(),
+			TrustLevel:  int(src.GetTrustLevel()),
+		})
+	}
+	for _, ds := range md.GetDatasets() {
+		input.MarketDataSets = append(input.MarketDataSets, MarketDataSetInput{
+			Code:        ds.GetCode(),
+			Category:    ds.GetCategory().String(),
+			Unit:        ds.GetUnit(),
+			SourceCode:  ds.GetSourceCode(),
+			DisplayName: ds.GetDisplayName(),
+			Description: ds.GetDescription(),
+		})
+	}
+}
+
+// extractPartyAndAccounts converts organizations and internal accounts from the manifest proto.
+func extractPartyAndAccounts(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
+	for _, org := range mf.GetOrganizations() {
+		input.Organizations = append(input.Organizations, OrganizationInput{
+			Code:       org.GetCode(),
+			Name:       org.GetName(),
+			PartyType:  org.GetPartyType(),
+			Attributes: org.GetAttributes(),
+		})
+	}
+	for _, ia := range mf.GetInternalAccounts() {
+		input.InternalAccounts = append(input.InternalAccounts, InternalAccountInput{
+			Code:              ia.GetCode(),
+			AccountType:       ia.GetAccountType(),
+			InstrumentCode:    ia.GetInstrument(),
+			OwnerOrganization: ia.GetOwnerOrganization(),
+			Description:       ia.GetDescription(),
+		})
+	}
+}
+
+// extractOperationalGateway converts operational gateway config from the manifest proto.
+func extractOperationalGateway(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
+	gw := mf.GetOperationalGateway()
+	if gw == nil {
+		return
+	}
+	for _, conn := range gw.GetProviderConnections() {
+		pc := ProviderConnectionInput{
+			ConnectionID: conn.GetConnectionId(),
+			ProviderName: conn.GetProviderName(),
+			ProviderType: conn.GetProviderType(),
+			Protocol:     conn.GetProtocol().String(),
+			BaseURL:      conn.GetBaseUrl(),
+		}
+		pc.AuthType, pc.AuthConfig = extractAuthConfig(conn.GetAuth())
+		if rp := conn.GetRetryPolicy(); rp != nil {
+			pc.RetryPolicy = map[string]any{
+				"max_attempts":            rp.GetMaxAttempts(),
+				"initial_backoff_seconds": rp.GetInitialBackoffSeconds(),
+				"max_backoff_seconds":     rp.GetMaxBackoffSeconds(),
+				"backoff_multiplier":      rp.GetBackoffMultiplier(),
+			}
+		}
+		if rl := conn.GetRateLimit(); rl != nil {
+			pc.RateLimitConfig = map[string]any{
+				"requests_per_second": rl.GetRequestsPerSecond(),
+				"burst_size":          rl.GetBurstSize(),
+			}
+		}
+		input.ProviderConnections = append(input.ProviderConnections, pc)
+	}
+
+	for _, route := range gw.GetInstructionRoutes() {
+		input.InstructionRoutes = append(input.InstructionRoutes, InstructionRouteInput{
+			InstructionType:      route.GetInstructionType(),
+			ConnectionID:         route.GetConnectionId(),
+			FallbackConnectionID: route.GetFallbackConnectionId(),
+			OutboundMapping:      route.GetOutboundMappingId(),
+			InboundMapping:       route.GetInboundMappingId(),
+			HTTPMethod:           route.GetHttpMethod(),
+			PathTemplate:         route.GetPathTemplate(),
+		})
+	}
 }
 
 // extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).
