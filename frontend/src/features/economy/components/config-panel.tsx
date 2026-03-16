@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { toJson } from '@bufbuild/protobuf'
+import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import { ManifestSchema } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import type { ManifestVersion } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
 import { ApplyStatus } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
@@ -25,6 +26,16 @@ function formatTimestamp(ts?: { seconds: bigint; nanos: number }): string {
   return new Date(Number(ts.seconds) * 1000).toLocaleString()
 }
 
+function serializeManifest(manifest: Manifest): string {
+  try {
+    return JSON.stringify(toJson(ManifestSchema, manifest), null, 2)
+  } catch {
+    // Fallback for plain objects (e.g. in tests)
+    return JSON.stringify(manifest, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value, 2)
+  }
+}
+
 export function ConfigPanel({ version }: { version: ManifestVersion }) {
   const format = 'json'
 
@@ -33,7 +44,7 @@ export function ConfigPanel({ version }: { version: ManifestVersion }) {
 
   function handleDownload() {
     if (!manifest) return
-    const json = JSON.stringify(toJson(ManifestSchema, manifest), null, 2)
+    const json = serializeManifest(manifest)
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -99,7 +110,7 @@ export function ConfigPanel({ version }: { version: ManifestVersion }) {
           <Card>
             <CardContent className="px-4 py-3">
               <pre className="text-xs font-mono overflow-auto max-h-96 whitespace-pre-wrap" data-testid="config-raw-manifest">
-                {JSON.stringify(toJson(ManifestSchema, manifest), null, 2)}
+                {serializeManifest(manifest)}
               </pre>
             </CardContent>
           </Card>
