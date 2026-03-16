@@ -2,9 +2,14 @@
 //
 // It connects to the Meridian gRPC server and seeds:
 //   - An energy company tenant ("volterra-energy")
-//   - The energy manifest (instruments: GBP, KWH, CARBON_CREDIT)
-//   - A DNO organization (UK Power Networks) with 4 Grid Supply Points
-//   - 4 GSP KWH inventory internal accounts (one per grid supply point)
+//   - The Volterra Energy demo manifest via ApplyManifest (structural provisioning):
+//   - Instruments: GBP, KWH, CARBON_CREDIT
+//   - Account types: ENERGY_TRADING, INVENTORY_KWH, CARBON_INVENTORY, SETTLEMENT
+//   - Market data source: SEED_DEMO
+//   - Market data set: WHOLESALE_ENERGY_GBP_KWH
+//   - Valuation rules: KWH→GBP, CARBON_CREDIT→GBP
+//   - Organizations: UK Power Networks (DNO) + 4 Grid Supply Points
+//   - Internal accounts: 4 GSP KWH inventory accounts (one per GSP)
 //   - 10 residential customers each with:
 //   - A GBP billing account (charges in pounds sterling)
 //   - A KWH consumption tracking account (meter reading credits)
@@ -13,6 +18,14 @@
 //   - DEBIT GSP KWH inventory account (liability: energy owed to grid)
 //   - 30 days of GBP billing at fixed retail tariff (24.5p/kWh)
 //   - A wholesale energy price dataset with 30 days of historical prices
+//
+// Structural provisioning (instruments, account types, market data, organizations,
+// and internal accounts) is handled entirely via ApplyManifest. This ensures
+// idempotent reapply returns NO_CHANGE for structural resources without separate
+// gRPC calls.
+//
+// Operational seeding (customer parties, accounts, deposits, and price observations)
+// continues via direct gRPC calls since these are runtime data, not structural config.
 //
 // All operations are idempotent — safe to run multiple times.
 //
@@ -31,7 +44,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -40,7 +52,6 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	marketv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
-	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -120,67 +131,69 @@ func run() error {
 		return fmt.Errorf("create tenant: %w", err)
 	}
 
-	// 4. Apply energy manifest
-	fmt.Println("\n=== Step 2: Apply Energy Manifest ===")
-	if err := applyManifest(ctx, conn); err != nil {
+	// 4. Apply demo manifest (structural provisioning via ApplyManifest).
+	// This provisions all structural resources: instruments, account types,
+	// market data sources/sets, valuation rules, organizations (DNO + GSPs),
+	// and GSP KWH inventory internal accounts.
+	// Re-running is idempotent: unchanged resources return NO_CHANGE status.
+	fmt.Println("\n=== Step 2: Apply Demo Manifest (structural provisioning) ===")
+	tCtx := withTenant(ctx)
+	if err := applyManifest(tCtx, conn); err != nil {
 		return fmt.Errorf("apply manifest: %w", err)
 	}
 
-	// Tenant-scoped context for all subsequent calls
-	tCtx := withTenant(ctx)
-
-	// 4.1 Register instruments directly (manifest executor not wired yet in unified binary)
-	fmt.Println("\n=== Step 2.1: Register Instruments ===")
-	if err := registerInstruments(tCtx, conn); err != nil {
-		return fmt.Errorf("register instruments: %w", err)
-	}
-
-	// 4.5 Register product types (account type definitions)
-	fmt.Println("\n=== Step 2.5: Register Product Types ===")
-	if err := registerProductTypes(tCtx, conn); err != nil {
-		return fmt.Errorf("register product types: %w", err)
-	}
-
-	// 5. Register parties
-	fmt.Println("\n=== Step 3: Register Parties ===")
-	dnoPartyID, gspPartyIDs, customerPartyIDs, err := registerParties(tCtx, conn)
+	// 5. Resolve GSP KWH internal account IDs provisioned by the manifest.
+	// Accounts are identified by the codes defined in volterra-energy-demo.json.
+	fmt.Println("\n=== Step 3: Resolve GSP Internal Account IDs ===")
+	gspKwhAccountIDs, err := resolveGSPInternalAccountIDs(tCtx, conn)
 	if err != nil {
-		return fmt.Errorf("register parties: %w", err)
+		return fmt.Errorf("resolve GSP internal accounts: %w", err)
 	}
 
-	// 6. Create GSP internal accounts (KWH inventory — debit side of meter read double-entry)
-	fmt.Println("\n=== Step 4: Create GSP Internal Accounts ===")
-	gspKwhAccountIDs, err := createGSPInternalAccounts(tCtx, conn, gspPartyIDs)
+	// 6. Register customer parties (operational data — not in manifest).
+	fmt.Println("\n=== Step 4: Register Customer Parties ===")
+	customerPartyIDs, err := registerCustomerParties(tCtx, conn)
 	if err != nil {
-		return fmt.Errorf("create GSP internal accounts: %w", err)
+		return fmt.Errorf("register customer parties: %w", err)
 	}
 
-	// 7. Create customer accounts
-	fmt.Println("\n=== Step 5: Create Current Accounts ===")
+	// 7. Resolve the DNO party ID for the manifest-provisioned UKPN organization.
+	// Customer current accounts reference the owning org via OrgPartyId.
+	fmt.Println("\n=== Step 5: Resolve DNO Party ID ===")
+	dnoPartyID, err := resolveOrganizationPartyID(tCtx, conn, "UKPNDNO001")
+	if err != nil {
+		return fmt.Errorf("resolve DNO party ID: %w", err)
+	}
+	fmt.Printf("  DNO party ID: %s\n", dnoPartyID)
+
+	// 8. Create customer current accounts (operational data — not in manifest).
+	fmt.Println("\n=== Step 6: Create Customer Accounts ===")
 	customerAccounts, err := createAccounts(tCtx, conn, dnoPartyID, customerPartyIDs, gspKwhAccountIDs)
 	if err != nil {
 		return fmt.Errorf("create accounts: %w", err)
 	}
 
-	// 8. Deposit initial balances (KWH meter reads target GSP clearing accounts)
-	fmt.Println("\n=== Step 6: Seed Account Balances ===")
+	// 9. Deposit meter reads and billing amounts (operational data — not in manifest).
+	fmt.Println("\n=== Step 7: Seed Account Balances ===")
 	if err := seedBalances(tCtx, conn, customerAccounts); err != nil {
 		return fmt.Errorf("seed balances: %w", err)
 	}
 
-	// 9. Seed market data
-	fmt.Println("\n=== Step 7: Seed Wholesale Energy Prices ===")
-	if err := seedMarketData(tCtx, conn); err != nil {
-		return fmt.Errorf("seed market data: %w", err)
+	// 10. Record wholesale energy price observations (operational data — not in manifest).
+	// The WHOLESALE_ENERGY_GBP_KWH dataset was provisioned by ApplyManifest;
+	// only observations are recorded here.
+	fmt.Println("\n=== Step 8: Record Wholesale Energy Prices ===")
+	if err := recordWholesalePrices(tCtx, conn); err != nil {
+		return fmt.Errorf("record wholesale prices: %w", err)
 	}
 
 	fmt.Println("\n=== Demo Seed Complete ===")
-	fmt.Printf("Tenant:     %s (slug: %s)\n", tenantID, tenantSlug)
-	fmt.Printf("DNO:        %s\n", dnoPartyID)
-	fmt.Printf("GSPs:       %d grid supply points with KWH inventory accounts\n", len(gspPartyIDs))
-	fmt.Printf("Customers:  %d customers with GBP billing + KWH consumption accounts\n", len(customerPartyIDs))
-	fmt.Printf("Double-entry: Each KWH meter read DEBITs GSP inventory, CREDITs customer account\n")
-	fmt.Printf("Market:     30 days of wholesale energy prices\n")
+	fmt.Printf("Tenant:       %s (slug: %s)\n", tenantID, tenantSlug)
+	fmt.Printf("Manifest:     structural resources applied via ApplyManifest\n")
+	fmt.Printf("GSPs:         %d grid supply points with KWH inventory accounts\n", len(gspKwhAccountIDs))
+	fmt.Printf("Customers:    %d customers with GBP billing + KWH consumption accounts\n", len(customerPartyIDs))
+	fmt.Printf("Double-entry: each KWH meter read DEBITs GSP inventory, CREDITs customer account\n")
+	fmt.Printf("Market:       30 days of wholesale energy prices\n")
 	return nil
 }
 
@@ -209,13 +222,23 @@ func createTenant(ctx context.Context, conn *grpc.ClientConn) error {
 
 // ─── Manifest Application ────────────────────────────────────────────────────
 
+// applyManifest loads the Volterra Energy demo manifest and submits it to
+// ApplyManifestService. This provisions all structural resources:
+//   - Instruments (GBP, KWH, CARBON_CREDIT)
+//   - Account types (ENERGY_TRADING, INVENTORY_KWH, CARBON_INVENTORY, SETTLEMENT)
+//   - Market data source (SEED_DEMO) and dataset (WHOLESALE_ENERGY_GBP_KWH)
+//   - Valuation rules (KWH→GBP, CARBON_CREDIT→GBP)
+//   - Organizations (UK Power Networks DNO, 4 Grid Supply Points)
+//   - Internal accounts (4 GSP KWH inventory accounts)
+//
+// Re-running is idempotent: unchanged resources return NO_CHANGE status.
 func applyManifest(ctx context.Context, conn *grpc.ClientConn) error {
-	data, err := os.ReadFile("examples/manifests/energy.json")
+	data, err := os.ReadFile("examples/manifests/volterra-energy-demo.json")
 	if err != nil {
-		// Try relative to binary location
-		data, err = os.ReadFile("/app/examples/manifests/energy.json")
+		// Try path relative to binary location (container deployments).
+		data, err = os.ReadFile("/app/examples/manifests/volterra-energy-demo.json")
 		if err != nil {
-			return fmt.Errorf("read manifest: %w (tried ./examples/manifests/energy.json and /app/examples/manifests/energy.json)", err)
+			return fmt.Errorf("read manifest: %w (tried ./examples/manifests/volterra-energy-demo.json and /app/examples/manifests/volterra-energy-demo.json)", err)
 		}
 	}
 
@@ -225,9 +248,8 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn) error {
 	}
 
 	client := controlplanev1.NewApplyManifestServiceClient(conn)
-	tCtx := withTenant(ctx)
 
-	resp, err := client.ApplyManifest(tCtx, &controlplanev1.ApplyManifestRequest{
+	resp, err := client.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
 		Manifest:  &manifest,
 		DryRun:    false,
 		AppliedBy: "seed-demo",
@@ -249,208 +271,84 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn) error {
 	return nil
 }
 
-// ─── Instrument Registration ─────────────────────────────────────────────────
+// ─── GSP Internal Account Resolution ─────────────────────────────────────────
 
-// instrumentDef defines an instrument to register.
-type instrumentDef struct {
-	code        string
-	displayName string
-	dimension   referencedatav1.Dimension
-	precision   int32
-	description string
+// gspAccountCodes maps GSP region codes to their manifest-defined internal account codes.
+// These codes must match the internalAccounts[].code values in volterra-energy-demo.json.
+var gspAccountCodes = []struct {
+	region      string
+	accountCode string
+}{
+	{region: "SEEB", accountCode: "GSP_KWH_SEEB"},
+	{region: "EELC", accountCode: "GSP_KWH_EELC"},
+	{region: "LOND", accountCode: "GSP_KWH_LOND"},
+	{region: "SOUT", accountCode: "GSP_KWH_SOUT"},
 }
 
-var instrumentDefs = []instrumentDef{
-	{
-		code:        "GBP",
-		displayName: "British Pound Sterling",
-		dimension:   referencedatav1.Dimension_DIMENSION_CURRENCY,
-		precision:   2,
-		description: "Fiat currency — British Pound Sterling",
-	},
-	{
-		code:        "KWH",
-		displayName: "Kilowatt Hour",
-		dimension:   referencedatav1.Dimension_DIMENSION_ENERGY,
-		precision:   3,
-		description: "Energy unit — Kilowatt Hour",
-	},
-	{
-		code:        "CARBON_CREDIT",
-		displayName: "Carbon Credit",
-		dimension:   referencedatav1.Dimension_DIMENSION_CARBON,
-		precision:   4,
-		description: "Carbon offset — Tonne CO2 Equivalent",
-	},
-}
+// resolveGSPInternalAccountIDs looks up the account IDs for the GSP KWH inventory
+// accounts provisioned by ApplyManifest. Returns IDs in GSP region order
+// (SEEB, EELC, LOND, SOUT) matching the gspAccountCodes slice used by createAccounts.
+func resolveGSPInternalAccountIDs(ctx context.Context, conn *grpc.ClientConn) ([]string, error) {
+	client := internalaccountv1.NewInternalAccountServiceClient(conn)
 
-// registerInstruments creates and activates instruments via the ReferenceDataService.
-// Workaround: the manifest executor is not yet wired in the unified binary,
-// so we register instruments directly to unblock product type activation.
-func registerInstruments(ctx context.Context, conn *grpc.ClientConn) error {
-	client := referencedatav1.NewReferenceDataServiceClient(conn)
-	for _, inst := range instrumentDefs {
-		if err := ensureInstrumentActive(ctx, client, inst); err != nil {
-			return err
+	accountIDs := make([]string, len(gspAccountCodes))
+	for i, gsp := range gspAccountCodes {
+		accountID, err := findInternalAccountByCode(ctx, client, gsp.accountCode)
+		if err != nil {
+			return nil, fmt.Errorf("resolve GSP KWH account %s (%s): %w", gsp.accountCode, gsp.region, err)
 		}
-	}
-	return nil
-}
-
-func ensureInstrumentActive(ctx context.Context, client referencedatav1.ReferenceDataServiceClient, inst instrumentDef) error {
-	existing, err := client.RetrieveInstrument(ctx, &referencedatav1.RetrieveInstrumentRequest{
-		Code: inst.code,
-	})
-	if err == nil {
-		if existing.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
-			fmt.Printf("  Instrument: %s (already active)\n", inst.code)
-			return nil
-		}
-	} else {
-		st, ok := status.FromError(err)
-		if !ok || st.Code() != codes.NotFound {
-			return fmt.Errorf("retrieve instrument %s: %w", inst.code, err)
-		}
+		accountIDs[i] = accountID
+		fmt.Printf("  GSP-KWH-%s: %s (account_code=%s)\n", gsp.region, accountID, gsp.accountCode)
 	}
 
-	// Register (creates DRAFT) — idempotent
-	_, err = client.RegisterInstrument(ctx, &referencedatav1.RegisterInstrumentRequest{
-		Code:            inst.code,
-		DisplayName:     inst.displayName,
-		Dimension:       inst.dimension,
-		Precision:       inst.precision,
-		Description:     inst.description,
-		AttributeSchema: "{}", // empty JSON object — column is jsonb, empty string is invalid
-	})
-	if err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-			fmt.Printf("  Instrument: %s (draft exists)\n", inst.code)
-		} else {
-			return fmt.Errorf("register instrument %s: %w", inst.code, err)
-		}
-	}
-
-	// Activate (DRAFT → ACTIVE)
-	_, err = client.ActivateInstrument(ctx, &referencedatav1.ActivateInstrumentRequest{
-		Code:    inst.code,
-		Version: 1,
-	})
-	if err != nil {
-		if st, ok := status.FromError(err); ok && (st.Code() == codes.FailedPrecondition || st.Code() == codes.AlreadyExists) {
-			fmt.Printf("  Instrument: %s (already active)\n", inst.code)
-			return nil
-		}
-		return fmt.Errorf("activate instrument %s: %w", inst.code, err)
-	}
-	fmt.Printf("  Instrument: %s (registered and activated)\n", inst.code)
-	return nil
+	return accountIDs, nil
 }
 
-// ─── Product Type Registration ───────────────────────────────────────────────
-
-// productTypeDef defines a product type to register.
-type productTypeDef struct {
-	code           string
-	displayName    string
-	description    string
-	normalBalance  referencedatav1.NormalBalance
-	behaviorClass  referencedatav1.BehaviorClass
-	instrumentCode string
-	validationCEL  string
-}
-
-var productTypes = []productTypeDef{
-	{
-		code:           "INVENTORY_KWH",
-		displayName:    "KWH Inventory Account",
-		description:    "Inventory account for tracking kilowatt-hour energy assets at grid supply points",
-		normalBalance:  referencedatav1.NormalBalance_NORMAL_BALANCE_DEBIT,
-		behaviorClass:  referencedatav1.BehaviorClass_BEHAVIOR_CLASS_INVENTORY,
-		instrumentCode: "KWH",
-		validationCEL:  "parse_decimal(amount) > 0.0",
-	},
-	{
-		code:           "ENERGY_TRADING",
-		displayName:    "Energy Trading Account",
-		description:    "Customer-facing account for energy trading in GBP and KWH",
-		normalBalance:  referencedatav1.NormalBalance_NORMAL_BALANCE_DEBIT,
-		behaviorClass:  referencedatav1.BehaviorClass_BEHAVIOR_CLASS_CUSTOMER,
-		instrumentCode: "GBP",
-		validationCEL:  "parse_decimal(amount) > 0.0",
-	},
-}
-
-// registerProductTypes creates and activates account type definitions via the
-// AccountTypeRegistryService. Each product type is created as a DRAFT then activated.
-// Idempotent: skips types that already exist.
-func registerProductTypes(ctx context.Context, conn *grpc.ClientConn) error {
-	client := referencedatav1.NewAccountTypeRegistryServiceClient(conn)
-
-	for _, pt := range productTypes {
-		// Check if already active
-		_, err := client.GetActiveDefinition(ctx, &referencedatav1.GetActiveDefinitionRequest{
-			Code: pt.code,
-		})
-		if err == nil {
-			fmt.Printf("  Product type: %s (already active)\n", pt.code)
-			continue
-		}
-		if st, ok := status.FromError(err); !ok || st.Code() != codes.NotFound {
-			return fmt.Errorf("check product type %s: %w", pt.code, err)
-		}
-
-		// Create draft (idempotent: ON CONFLICT returns existing draft)
-		draftResp, err := client.CreateDraft(ctx, &referencedatav1.CreateDraftRequest{
-			Code:           pt.code,
-			DisplayName:    pt.displayName,
-			Description:    pt.description,
-			NormalBalance:  pt.normalBalance,
-			BehaviorClass:  pt.behaviorClass,
-			InstrumentCode: pt.instrumentCode,
-			ValidationCel:  pt.validationCEL,
+func findInternalAccountByCode(ctx context.Context, client internalaccountv1.InternalAccountServiceClient, accountCode string) (string, error) {
+	var pageToken string
+	for {
+		listResp, err := client.ListInternalAccounts(ctx, &internalaccountv1.ListInternalAccountsRequest{
+			Pagination: &commonv1.Pagination{PageSize: 100, PageToken: pageToken},
 		})
 		if err != nil {
-			return fmt.Errorf("create draft %s: %w", pt.code, err)
+			return "", fmt.Errorf("list internal accounts to find %q: %w", accountCode, err)
 		}
-
-		// Activate using the ID from the draft response
-		defID := draftResp.GetDefinition().GetId()
-		fmt.Printf("  Product type: %s (draft id=%s, activating...)\n", pt.code, defID)
-
-		_, err = client.ActivateAccountType(ctx, &referencedatav1.ActivateAccountTypeRequest{
-			Id: defID,
-		})
-		if err != nil {
-			if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-				fmt.Printf("  Product type: %s (already active)\n", pt.code)
-				continue
+		for _, a := range listResp.GetFacilities() {
+			if a.GetAccountCode() == accountCode {
+				return a.GetAccountId(), nil
 			}
-			return fmt.Errorf("activate %s (id=%s): %w", pt.code, defID, err)
 		}
-		fmt.Printf("  Product type: %s (activated)\n", pt.code)
+		pageToken = listResp.GetPagination().GetNextPageToken()
+		if pageToken == "" {
+			break
+		}
 	}
-
-	return nil
+	return "", fmt.Errorf("%w: account_code=%q", errAccountNotFoundInListing, accountCode)
 }
 
-// ─── Party Registration ──────────────────────────────────────────────────────
+// ─── DNO Party Resolution ─────────────────────────────────────────────────────
 
-type gspInfo struct {
-	name    string
-	region  string
-	partyID string
+// resolveOrganizationPartyID finds the party ID for an organization provisioned by
+// ApplyManifest, identified by external reference.
+func resolveOrganizationPartyID(ctx context.Context, conn *grpc.ClientConn, externalRef string) (string, error) {
+	client := partyv1.NewPartyServiceClient(conn)
+	listResp, err := client.ListParties(ctx, &partyv1.ListPartiesRequest{PageSize: 100})
+	if err != nil {
+		return "", fmt.Errorf("list parties to find %q: %w", externalRef, err)
+	}
+	for _, p := range listResp.GetParties() {
+		if p.GetExternalReference() == externalRef {
+			return p.GetPartyId(), nil
+		}
+	}
+	return "", fmt.Errorf("%w: external_reference=%q", errPartyNotFoundInListing, externalRef)
 }
 
-var gspDefinitions = []gspInfo{
-	{name: "South East England GSP", region: "SEEB"},
-	{name: "Eastern England GSP", region: "EELC"},
-	{name: "London Power GSP", region: "LOND"},
-	{name: "Southern England GSP", region: "SOUT"},
-}
+// ─── Customer Party Registration ─────────────────────────────────────────────
 
 type customerInfo struct {
 	legalName string
-	gspIndex  int // which GSP region they belong to
+	gspIndex  int // index into gspAccountCodes (0=SEEB, 1=EELC, 2=LOND, 3=SOUT)
 }
 
 var customerDefinitions = []customerInfo{
@@ -466,43 +364,12 @@ var customerDefinitions = []customerInfo{
 	{legalName: "Olivia Hughes", gspIndex: 3},
 }
 
-func registerParties(ctx context.Context, conn *grpc.ClientConn) (string, []string, []string, error) {
+func registerCustomerParties(ctx context.Context, conn *grpc.ClientConn) ([]string, error) {
 	client := partyv1.NewPartyServiceClient(conn)
 
-	// Register DNO (Distribution Network Operator)
-	dnoPartyID, err := registerParty(ctx, client, &partyv1.RegisterPartyRequest{
-		PartyType:             partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
-		LegalName:             "UK Power Networks",
-		DisplayName:           "UKPN",
-		ExternalReference:     "UKPNDNO001",
-		ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
-	})
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("register DNO: %w", err)
-	}
-	fmt.Printf("  DNO: %s (UK Power Networks)\n", dnoPartyID)
-
-	// Register GSPs (Grid Supply Points)
-	gspPartyIDs := make([]string, len(gspDefinitions))
-	for i, gsp := range gspDefinitions {
-		gspPartyIDs[i], err = registerParty(ctx, client, &partyv1.RegisterPartyRequest{
-			PartyType:             partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
-			LegalName:             gsp.name,
-			DisplayName:           gsp.region,
-			ExternalReference:     "GSP" + gsp.region,
-			ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
-		})
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("register GSP %s: %w", gsp.region, err)
-		}
-		gspDefinitions[i].partyID = gspPartyIDs[i]
-		fmt.Printf("  GSP: %s (%s - %s)\n", gspPartyIDs[i], gsp.region, gsp.name)
-	}
-
-	// Register customers
 	customerPartyIDs := make([]string, len(customerDefinitions))
 	for i, cust := range customerDefinitions {
-		customerPartyIDs[i], err = registerParty(ctx, client, &partyv1.RegisterPartyRequest{
+		partyID, err := registerParty(ctx, client, &partyv1.RegisterPartyRequest{
 			PartyType:             partyv1.PartyType_PARTY_TYPE_PERSON,
 			LegalName:             cust.legalName,
 			DisplayName:           cust.legalName,
@@ -510,13 +377,14 @@ func registerParties(ctx context.Context, conn *grpc.ClientConn) (string, []stri
 			ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
 		})
 		if err != nil {
-			return "", nil, nil, fmt.Errorf("register customer %s: %w", cust.legalName, err)
+			return nil, fmt.Errorf("register customer %s: %w", cust.legalName, err)
 		}
-		gspRegion := gspDefinitions[cust.gspIndex].region
-		fmt.Printf("  Customer: %s (%s, GSP: %s)\n", customerPartyIDs[i], cust.legalName, gspRegion)
+		customerPartyIDs[i] = partyID
+		gspRegion := gspAccountCodes[cust.gspIndex].region
+		fmt.Printf("  Customer: %s (%s, GSP: %s)\n", partyID, cust.legalName, gspRegion)
 	}
 
-	return dnoPartyID, gspPartyIDs, customerPartyIDs, nil
+	return customerPartyIDs, nil
 }
 
 func registerParty(ctx context.Context, client partyv1.PartyServiceClient, req *partyv1.RegisterPartyRequest) (string, error) {
@@ -543,66 +411,6 @@ func findPartyByExternalRef(ctx context.Context, client partyv1.PartyServiceClie
 	return "", fmt.Errorf("%w: external_reference=%q", errPartyNotFoundInListing, extRef)
 }
 
-// ─── GSP Internal Account Creation ──────────────────────────────────────────
-
-// createGSPInternalAccounts creates KWH inventory internal accounts for each GSP.
-// These are the debit side of the meter read double-entry: when a customer consumes
-// energy, the GSP's inventory account is debited (liability to the grid).
-func createGSPInternalAccounts(ctx context.Context, conn *grpc.ClientConn, gspPartyIDs []string) ([]string, error) {
-	client := internalaccountv1.NewInternalAccountServiceClient(conn)
-
-	gspKwhAccountIDs := make([]string, len(gspDefinitions))
-	for i, gsp := range gspDefinitions {
-		accountCode := fmt.Sprintf("GSP-KWH-%s", gsp.region)
-
-		// Check if account already exists first — InitiateInternalAccount
-		// does not return AlreadyExists for duplicate codes, it creates duplicates.
-		if existingID, err := findInternalAccountByCode(ctx, client, accountCode); err == nil && existingID != "" {
-			gspKwhAccountIDs[i] = existingID
-			fmt.Printf("  GSP-KWH: %s (%s, existing)\n", existingID, gsp.region)
-			continue
-		}
-
-		resp, err := client.InitiateInternalAccount(ctx, &internalaccountv1.InitiateInternalAccountRequest{
-			AccountCode:     accountCode,
-			Name:            fmt.Sprintf("%s KWH Inventory", gsp.name),
-			InstrumentCode:  "KWH",
-			Description:     fmt.Sprintf("KWH inventory for %s — tracks energy owed to the grid", gsp.region),
-			OrgPartyId:      gspPartyIDs[i],
-			ProductTypeCode: "INVENTORY_KWH",
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create GSP KWH account for %s: %w", gsp.region, err)
-		}
-		gspKwhAccountIDs[i] = resp.GetAccountId()
-		fmt.Printf("  GSP-KWH: %s (%s)\n", resp.GetAccountId(), gsp.region)
-	}
-
-	return gspKwhAccountIDs, nil
-}
-
-func findInternalAccountByCode(ctx context.Context, client internalaccountv1.InternalAccountServiceClient, accountCode string) (string, error) {
-	var pageToken string
-	for {
-		listResp, err := client.ListInternalAccounts(ctx, &internalaccountv1.ListInternalAccountsRequest{
-			Pagination: &commonv1.Pagination{PageSize: 100, PageToken: pageToken},
-		})
-		if err != nil {
-			return "", fmt.Errorf("list internal accounts to find %q: %w", accountCode, err)
-		}
-		for _, a := range listResp.GetFacilities() {
-			if a.GetAccountCode() == accountCode {
-				return a.GetAccountId(), nil
-			}
-		}
-		pageToken = listResp.GetPagination().GetNextPageToken()
-		if pageToken == "" {
-			break
-		}
-	}
-	return "", fmt.Errorf("%w: account_code=%q", errAccountNotFoundInListing, accountCode)
-}
-
 // ─── Account Creation ────────────────────────────────────────────────────────
 
 type customerAccountPair struct {
@@ -622,7 +430,7 @@ func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID strin
 		cust := customerDefinitions[i]
 		accounts[i].customerName = cust.legalName
 		accounts[i].partyID = partyID
-		accounts[i].gspRegion = gspDefinitions[cust.gspIndex].region
+		accounts[i].gspRegion = gspAccountCodes[cust.gspIndex].region
 		accounts[i].gspKwhAccountID = gspKwhAccountIDs[cust.gspIndex]
 
 		// GBP billing account — charges in pounds sterling
@@ -664,7 +472,7 @@ func createAccountIdempotent(ctx context.Context, client currentaccountv1.Curren
 		ProductTypeCode:    "ENERGY_TRADING",
 	})
 	if err != nil {
-		if st, ok := status.FromError(err); ok && (st.Code() == codes.AlreadyExists || strings.Contains(st.Message(), "version conflict")) {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
 			return findAccountByExternalID(ctx, client, extID)
 		}
 		return "", err
@@ -762,81 +570,21 @@ func depositIdempotent(ctx context.Context, client currentaccountv1.CurrentAccou
 	return nil
 }
 
-// ─── Market Data Seeding ─────────────────────────────────────────────────────
+// ─── Market Data Observations ─────────────────────────────────────────────────
 
-func seedMarketData(ctx context.Context, conn *grpc.ClientConn) error {
+// recordWholesalePrices seeds 30 days of synthetic wholesale energy prices into the
+// WHOLESALE_ENERGY_GBP_KWH dataset provisioned by ApplyManifest.
+// The data source (SEED_DEMO) and dataset are already registered by the manifest;
+// this function only records observations (operational data).
+func recordWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 	client := marketv1.NewMarketInformationServiceClient(conn)
 
-	// Register wholesale energy price dataset
-	_, err := client.RegisterDataSet(ctx, &marketv1.RegisterDataSetRequest{
-		Code:                    "WHOLESALE_ENERGY_GBP_KWH",
-		Category:                marketv1.DataCategory_DATA_CATEGORY_ENERGY_PRICE,
-		Unit:                    "GBP/kWh",
-		DisplayName:             "UK Wholesale Electricity Price",
-		ResolutionKeyExpression: "'spot'",
-		ValidationExpression:    "value > 0 && value < 100",
-		EffectiveFrom:           timestamppb.New(time.Now().AddDate(0, -1, 0)),
-	})
-	if err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-			fmt.Println("  Dataset WHOLESALE_ENERGY_GBP_KWH already exists")
-		} else {
-			return fmt.Errorf("register dataset: %w", err)
-		}
-	} else {
-		fmt.Println("  Registered dataset: WHOLESALE_ENERGY_GBP_KWH")
-	}
-
-	// Activate dataset so observations can be recorded
-	_, err = client.ActivateDataSet(ctx, &marketv1.ActivateDataSetRequest{
-		Code:    "WHOLESALE_ENERGY_GBP_KWH",
-		Version: 1,
-	})
-	if err == nil {
-		fmt.Println("  Activated dataset: WHOLESALE_ENERGY_GBP_KWH")
-	} else if st, ok := status.FromError(err); ok && (st.Code() == codes.FailedPrecondition || st.Code() == codes.NotFound) {
-		// Already active or dataset not found in current tenant scope — proceed
-		fmt.Printf("  Dataset activation skipped (%s)\n", st.Code())
-	} else {
-		return fmt.Errorf("activate dataset: %w", err)
-	}
-
-	// Register data source for seed observations
 	const sourceCode = "SEED_DEMO"
-	_, err = client.RegisterDataSource(ctx, &marketv1.RegisterDataSourceRequest{
-		Code:        sourceCode,
-		Name:        "Seed Demo Data Source",
-		Description: "Synthetic data generated by seed-demo for demonstration purposes",
-		TrustLevel:  80,
-	})
-	if err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-			fmt.Println("  Data source SEED_DEMO already exists")
-		} else {
-			return fmt.Errorf("register data source: %w", err)
-		}
-	} else {
-		fmt.Println("  Registered data source: SEED_DEMO")
-	}
-
-	// Seed 30 days of wholesale prices
-	if err := recordWholesalePrices(ctx, client, sourceCode); err != nil {
-		return err
-	}
-
-	fmt.Println("  Recorded 30 days of wholesale energy prices")
-	fmt.Printf("  Fixed retail tariff: 24.5p/kWh\n")
-	fmt.Printf("  Wholesale range: ~15-27p/kWh (margin visible in account data)\n")
-
-	return nil
-}
-
-// recordWholesalePrices seeds 30 days of synthetic wholesale energy prices.
-func recordWholesalePrices(ctx context.Context, client marketv1.MarketInformationServiceClient, sourceCode string) error {
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec
 	now := time.Now().UTC()
 	basePrice := 0.22 // 22p/kWh base wholesale price
 
+	observationsRecorded := 0
 	for day := 30; day >= 1; day-- {
 		date := now.AddDate(0, 0, -day)
 		dailyPrice := basePrice + (rng.Float64()-0.5)*0.10 // ±5p variation
@@ -862,7 +610,12 @@ func recordWholesalePrices(ctx context.Context, client marketv1.MarketInformatio
 			}
 			return fmt.Errorf("record observation day %d: %w", day, err)
 		}
+		observationsRecorded++
 	}
+
+	fmt.Printf("  Recorded %d wholesale energy price observations (WHOLESALE_ENERGY_GBP_KWH)\n", observationsRecorded)
+	fmt.Printf("  Fixed retail tariff: 24.5p/kWh\n")
+	fmt.Printf("  Wholesale range: ~15-27p/kWh (margin visible in account data)\n")
 
 	return nil
 }
