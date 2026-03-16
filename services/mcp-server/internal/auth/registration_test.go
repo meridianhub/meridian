@@ -183,14 +183,10 @@ func TestRegistrationHandler_RejectsOversizedBody(t *testing.T) {
 }
 
 func TestMetadataHandler_IncludesRegistrationEndpoint(t *testing.T) {
-	cfg := auth.OAuthConfig{
-		ClientID:         "meridian-mcp",
-		AuthorizationURL: "https://mcp.example.com/oauth/authorize",
-		TokenURL:         "https://mcp.example.com/oauth/token",
-	}
-
-	handler := auth.NewMetadataHandler("https://mcp.example.com", cfg)
+	handler := auth.NewMetadataHandler("https://mcp.example.com")
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	req.Host = "mcp.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 

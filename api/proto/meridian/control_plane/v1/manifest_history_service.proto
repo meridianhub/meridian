@@ -38,6 +38,15 @@ service ManifestHistoryService {
       get: "/v1/manifests/versions"
     };
   }
+
+  // DiffManifestVersions compares two manifest versions by sequence number and
+  // returns a structured diff with per-resource actions and summary statistics.
+  // This is a read-only operation.
+  rpc DiffManifestVersions(DiffManifestVersionsRequest) returns (DiffManifestVersionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/manifests/diff"
+    };
+  }
 }
 
 // ========================================
@@ -155,4 +164,68 @@ message ManifestVersion {
 
   // resource_path is the file path or URL of the manifest source.
   optional string resource_path = 14;
+}
+
+// DiffManifestVersionsRequest compares two manifest versions by sequence number.
+message DiffManifestVersionsRequest {
+  // base_sequence_number is the base version to compare from.
+  // If 0 or omitted, defaults to the version immediately before target.
+  int64 base_sequence_number = 1;
+
+  // target_sequence_number is the target version to compare to (required, must be > 0).
+  int64 target_sequence_number = 2 [(buf.validate.field).int64.gt = 0];
+}
+
+// DiffManifestVersionsResponse contains the structured diff between two manifest versions.
+message DiffManifestVersionsResponse {
+  // base_sequence_number is the sequence number used as the base for comparison.
+  int64 base_sequence_number = 1;
+
+  // target_sequence_number is the sequence number used as the target for comparison.
+  int64 target_sequence_number = 2;
+
+  // actions is the list of per-resource diff actions.
+  repeated DiffAction actions = 3;
+
+  // summary contains aggregate statistics about the diff.
+  DiffSummary summary = 4;
+}
+
+// DiffAction represents a single resource-level change between two manifest versions.
+message DiffAction {
+  // resource_type is the category of the resource (e.g., "instrument", "account_type", "saga").
+  string resource_type = 1;
+
+  // action is the type of change: "CREATE", "UPDATE", "DELETE", or "NO_CHANGE".
+  string action = 2;
+
+  // resource_code is the unique identifier of the resource within its type.
+  string resource_code = 3;
+
+  // description is a human-readable summary of the change.
+  string description = 4;
+
+  // breaking indicates whether this change is a breaking change (e.g., a deletion).
+  bool breaking = 5;
+}
+
+// DiffSummary contains aggregate counts of actions in a manifest diff.
+message DiffSummary {
+  // total_actions is the total number of resource-level actions.
+  int32 total_actions = 1;
+
+  // creates is the number of new resources.
+  int32 creates = 2;
+
+  // updates is the number of modified resources.
+  int32 updates = 3;
+
+  // deletes is the number of removed resources.
+  int32 deletes = 4;
+
+  // no_changes is the number of unchanged resources.
+  int32 no_changes = 5;
+
+  // has_breaking_changes indicates whether any action is a breaking change.
+  bool has_breaking_changes = 6;
 }

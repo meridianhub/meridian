@@ -614,7 +614,7 @@ func TestValidateStarlark_SyntaxError(t *testing.T) {
 
 	found := false
 	for _, e := range result.Errors {
-		if e.Code == "STARLARK_SYNTAX_ERROR" || e.Code == "STARLARK_COMPILATION_ERROR" {
+		if e.Code == CodeStarlarkSyntaxError || e.Code == CodeStarlarkCompilationError {
 			found = true
 			if e.Line == 0 && e.Column == 0 {
 				// Line info may not always be extractable, but let's not fail on this
@@ -3177,6 +3177,133 @@ func TestValidate_OrganizationReferencesManifestDefinedPartyType(t *testing.T) {
 			t.Errorf("unexpected INVALID_REFERENCE error: %s", e.Message)
 		}
 	}
+}
+
+func TestValidationError_ResourceTypeAndID_DuplicateCode(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Instruments = append(manifest.Instruments, &controlplanev1.InstrumentDefinition{
+		Code: "GBP",
+		Name: "Duplicate GBP",
+		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Dimensions: &controlplanev1.InstrumentDimensions{
+			Unit:      "GBP",
+			Precision: 2,
+		},
+	})
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "DUPLICATE_CODE" && strings.Contains(e.Path, "instruments") {
+			found = true
+			assert.Equal(t, "instrument", e.ResourceType, "expected resource_type=instrument")
+			assert.Equal(t, "GBP", e.ResourceID, "expected resource_id=GBP")
+			break
+		}
+	}
+	assert.True(t, found, "expected DUPLICATE_CODE error for instruments")
+}
+
+func TestValidationError_ResourceTypeAndID_UndefinedInstrumentRef(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	// "GBX" is a typo for "GBP" — should produce a suggestion
+	manifest.AccountTypes[0].AllowedInstruments = []string{"GBX"}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "UNDEFINED_INSTRUMENT_REFERENCE" {
+			found = true
+			assert.Equal(t, "account_type", e.ResourceType, "expected resource_type=account_type")
+			assert.Equal(t, "SETTLEMENT", e.ResourceID, "expected resource_id=SETTLEMENT")
+			assert.NotEmpty(t, e.Suggestion, "expected suggestion for unknown instrument reference")
+			assert.Contains(t, e.Suggestion, "GBP", "expected suggestion to contain GBP")
+			break
+		}
+	}
+	assert.True(t, found, "expected UNDEFINED_INSTRUMENT_REFERENCE error")
+}
+
+func TestValidationError_ResourceTypeAndID_StarlarkSyntaxError(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Sagas[0].Script = "def execute(ctx)\n    return {}\n" // Missing colon
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == CodeStarlarkSyntaxError || e.Code == CodeStarlarkCompilationError {
+			found = true
+			assert.Equal(t, "saga", e.ResourceType, "expected resource_type=saga")
+			assert.Equal(t, "process_settlement", e.ResourceID, "expected resource_id=process_settlement")
+			break
+		}
+	}
+	assert.True(t, found, "expected STARLARK_SYNTAX_ERROR with resource context")
+}
+
+func TestValidationError_AggregatesAllErrors(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	// Introduce multiple errors: duplicate instrument + bad cross-reference
+	manifest.Instruments = append(manifest.Instruments, &controlplanev1.InstrumentDefinition{
+		Code:       "GBP",
+		Name:       "Duplicate GBP",
+		Type:       controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Dimensions: &controlplanev1.InstrumentDimensions{Unit: "GBP", Precision: 2},
+	})
+	manifest.AccountTypes = append(manifest.AccountTypes, &controlplanev1.AccountTypeDefinition{
+		Code:               "CASH",
+		Name:               "Cash Account",
+		NormalBalance:      controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT,
+		AllowedInstruments: []string{"UNKNOWN_INSTRUMENT"},
+	})
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+	// Must have at least 2 errors - aggregation not fail-fast
+	assert.GreaterOrEqual(t, len(result.Errors), 2,
+		"expected multiple errors aggregated, got: %v", result.Errors)
+}
+
+func TestValidationError_CELError_ResourceTypeAndID(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.AccountTypes[0].Policies = &controlplanev1.AccountTypePolicies{
+		Validation: "nonexistent_field > 0",
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "CEL_UNDECLARED_REFERENCE" || e.Code == "CEL_COMPILATION_ERROR" {
+			found = true
+			assert.Equal(t, "account_type", e.ResourceType, "expected resource_type=account_type")
+			assert.Equal(t, "SETTLEMENT", e.ResourceID, "expected resource_id=SETTLEMENT")
+			break
+		}
+	}
+	assert.True(t, found, "expected CEL error with resource context")
 }
 
 // --- Internal Account validation tests ---

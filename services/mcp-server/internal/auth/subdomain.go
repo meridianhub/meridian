@@ -70,7 +70,9 @@ func NewTenantSubdomainMiddleware(baseDomain string, logger *slog.Logger) *Tenan
 
 // Handler wraps an http.Handler, enforcing that the subdomain tenant matches
 // the JWT tenant claim. If baseDomain is not configured, validation is skipped.
-func (m *TenantSubdomainMiddleware) Handler(validator ClaimsBearerValidator, meta Metadata, next http.Handler) http.Handler {
+// fallbackBaseURL is used when the request Host cannot be determined, to build
+// dynamic 401 metadata responses.
+func (m *TenantSubdomainMiddleware) Handler(validator ClaimsBearerValidator, fallbackBaseURL string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// If no base domain configured, skip subdomain validation (dev mode)
 		if m.baseDomain == "" {
@@ -92,7 +94,7 @@ func (m *TenantSubdomainMiddleware) Handler(validator ClaimsBearerValidator, met
 		token, err := extractBearerFromHeader(r)
 		if err != nil {
 			m.logger.Debug("subdomain validation: no bearer token", "host", r.Host)
-			writeSubdomainError(w, meta)
+			writeSubdomainError(w, r, fallbackBaseURL)
 			return
 		}
 
@@ -100,7 +102,7 @@ func (m *TenantSubdomainMiddleware) Handler(validator ClaimsBearerValidator, met
 		if err != nil {
 			m.logger.Debug("subdomain validation: token validation failed",
 				"error", err, "host", r.Host)
-			writeSubdomainError(w, meta)
+			writeSubdomainError(w, r, fallbackBaseURL)
 			return
 		}
 
@@ -156,10 +158,17 @@ func extractSubdomain(hostHeader, baseDomain string) string {
 	return slug
 }
 
-// writeSubdomainError writes a 401 with auth metadata for subdomain validation failures.
-func writeSubdomainError(w http.ResponseWriter, meta Metadata) {
+// writeSubdomainError writes a 401 with auth metadata derived from the request.
+func writeSubdomainError(w http.ResponseWriter, r *http.Request, fallbackBaseURL string) {
+	base := baseURLFromRequest(r, fallbackBaseURL)
+	meta := Metadata{
+		AuthorizationURL: base + "/oauth/authorize",
+		TokenURL:         base + "/oauth/token",
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", `Bearer realm="meridian-mcp"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Vary", "Host, X-Forwarded-Host, X-Forwarded-Proto")
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(meta)
 }

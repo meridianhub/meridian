@@ -204,31 +204,75 @@ type AuthorizationServerMetadata struct {
 // Authorization Server Metadata document (RFC 8414) at
 // /.well-known/oauth-authorization-server.
 //
-// The response is pre-serialized at construction time for efficiency.
-func NewMetadataHandler(baseURL string, cfg OAuthConfig) http.HandlerFunc {
-	meta := AuthorizationServerMetadata{
-		Issuer:                            baseURL,
-		AuthorizationEndpoint:             cfg.AuthorizationURL,
-		TokenEndpoint:                     cfg.TokenURL,
-		RegistrationEndpoint:              baseURL + "/oauth/register",
-		ResponseTypesSupported:            []string{"code"},
-		GrantTypesSupported:               []string{"authorization_code"},
-		CodeChallengeMethodsSupported:     []string{"S256"},
-		TokenEndpointAuthMethodsSupported: []string{"none"},
+// URLs are derived from the request's Host header at runtime so that
+// tenant-scoped subdomains (e.g., acme.demo.meridianhub.cloud) receive
+// metadata pointing back to their own origin.
+func NewMetadataHandler(fallbackBaseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		base := baseURLFromRequest(r, fallbackBaseURL)
+		meta := AuthorizationServerMetadata{
+			Issuer:                            base,
+			AuthorizationEndpoint:             base + "/oauth/authorize",
+			TokenEndpoint:                     base + "/oauth/token",
+			RegistrationEndpoint:              base + "/oauth/register",
+			ResponseTypesSupported:            []string{"code"},
+			GrantTypesSupported:               []string{"authorization_code"},
+			CodeChallengeMethodsSupported:     []string{"S256"},
+			TokenEndpointAuthMethodsSupported: []string{"none"},
+		}
+
+		body, err := json.Marshal(meta)
+		if err != nil {
+			http.Error(w, "internal error: failed to serialize metadata", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Vary", "Host, X-Forwarded-Host, X-Forwarded-Proto")
+		_, _ = w.Write(body)
+	}
+}
+
+// baseURLFromRequest derives the base URL (scheme + host) from the incoming
+// request. It checks X-Forwarded-Host and X-Forwarded-Proto headers first
+// (set by reverse proxies like Caddy), then falls back to r.Host.
+// If the host cannot be determined, fallback is returned.
+//
+// Security: This function trusts X-Forwarded-Host/Proto headers. In production
+// these are set by Caddy which overwrites (not appends) forwarded headers,
+// preventing client spoofing. The MCP server must NOT be exposed directly
+// to the internet without a reverse proxy that sanitizes these headers.
+func baseURLFromRequest(r *http.Request, fallback string) string {
+	host := firstCSV(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = r.Host
+	}
+	if host == "" {
+		return fallback
 	}
 
-	body, err := json.Marshal(meta)
-	if err != nil {
-		return func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "internal error: failed to serialize metadata", http.StatusInternalServerError)
+	scheme := firstCSV(r.Header.Get("X-Forwarded-Proto"))
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
 		}
 	}
 
-	return func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		_, _ = w.Write(body)
+	return scheme + "://" + host
+}
+
+// firstCSV returns the first value from a potentially comma-separated header.
+// In multi-hop proxy setups, X-Forwarded-Host and X-Forwarded-Proto may
+// contain multiple values (e.g., "client-host, proxy-host"). The first
+// value is the original client-facing value.
+func firstCSV(v string) string {
+	if i := strings.IndexByte(v, ','); i >= 0 {
+		return strings.TrimSpace(v[:i])
 	}
+	return strings.TrimSpace(v)
 }
 
 // -----------------------------------------------------------------------
@@ -468,19 +512,21 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // BearerMiddleware enforces Bearer token authentication on HTTP handlers.
 // Unauthenticated requests receive a 401 with Metadata so MCP clients
-// can start the OAuth flow.
+// can start the OAuth flow. The metadata URLs are derived from the request's
+// Host header so that tenant-scoped subdomains receive correct endpoints.
 type BearerMiddleware struct {
-	validator BearerValidator
-	meta      Metadata
-	logger    *slog.Logger
+	validator       BearerValidator
+	fallbackBaseURL string
+	logger          *slog.Logger
 }
 
-// NewBearerMiddleware creates a new BearerMiddleware.
-func NewBearerMiddleware(validator BearerValidator, meta Metadata) *BearerMiddleware {
+// NewBearerMiddleware creates a new BearerMiddleware. The fallbackBaseURL is
+// used when the request's Host header cannot be determined.
+func NewBearerMiddleware(validator BearerValidator, fallbackBaseURL string) *BearerMiddleware {
 	return &BearerMiddleware{
-		validator: validator,
-		meta:      meta,
-		logger:    slog.Default(),
+		validator:       validator,
+		fallbackBaseURL: fallbackBaseURL,
+		logger:          slog.Default(),
 	}
 }
 
@@ -489,14 +535,14 @@ func (m *BearerMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, err := extractBearerFromHeader(r)
 		if err != nil {
-			m.writeAuthRequired(w)
+			m.writeAuthRequired(w, r)
 			return
 		}
 
 		if err := m.validator.ValidateBearer(token); err != nil {
 			m.logger.Debug("bearer token validation failed",
 				"error", err, "path", r.URL.Path)
-			m.writeAuthRequired(w)
+			m.writeAuthRequired(w, r)
 			return
 		}
 
@@ -504,12 +550,19 @@ func (m *BearerMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
-// writeAuthRequired writes a 401 response with auth metadata.
-func (m *BearerMiddleware) writeAuthRequired(w http.ResponseWriter) {
+// writeAuthRequired writes a 401 response with auth metadata derived from the request.
+func (m *BearerMiddleware) writeAuthRequired(w http.ResponseWriter, r *http.Request) {
+	base := baseURLFromRequest(r, m.fallbackBaseURL)
+	meta := Metadata{
+		AuthorizationURL: base + "/oauth/authorize",
+		TokenURL:         base + "/oauth/token",
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", `Bearer realm="meridian-mcp"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Vary", "Host, X-Forwarded-Host, X-Forwarded-Proto")
 	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(m.meta)
+	_ = json.NewEncoder(w).Encode(meta)
 }
 
 // -----------------------------------------------------------------------
