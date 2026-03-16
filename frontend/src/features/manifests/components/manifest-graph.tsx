@@ -217,11 +217,304 @@ const SagaNode = memo(function SagaNode({ data }: { data: ManifestNodeData }) {
   )
 })
 
+const MarketDataNode = memo(function MarketDataNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const OrganizationNode = memo(function OrganizationNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const InternalAccountNode = memo(function InternalAccountNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+  const accountType = node.data.accountType as string | undefined
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+            {accountType && <span className="text-[9px] text-muted-foreground">{accountType}</span>}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const MappingNode = memo(function MappingNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Mapping: {node.label}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const PaymentRailNode = memo(function PaymentRailNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+  const provider = node.data.provider as string
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{provider}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Payment Rail: {provider}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const OperationalGatewayNode = memo(function OperationalGatewayNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const ProviderConnectionNode = memo(function ProviderConnectionNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+  const connectionId = node.data.connectionId as string
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+            <span className="text-[9px] text-muted-foreground font-mono">{connectionId}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({connectionId})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const InstructionRouteNode = memo(function InstructionRouteNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+  const connectionId = node.data.connectionId as string
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+            <span className="text-[9px] text-muted-foreground font-mono">{connectionId}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} via {connectionId}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const PartyTypeNode = memo(function PartyTypeNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Party Type: {node.label}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
 const nodeTypes = {
   instrument: InstrumentNode,
   account_type: AccountTypeNode,
   valuation_rule: ValuationRuleNode,
   saga: SagaNode,
+  market_data: MarketDataNode,
+  organization: OrganizationNode,
+  internal_account: InternalAccountNode,
+  mapping: MappingNode,
+  payment_rail: PaymentRailNode,
+  operational_gateway: OperationalGatewayNode,
+  provider_connection: ProviderConnectionNode,
+  instruction_route: InstructionRouteNode,
+  party_type: PartyTypeNode,
 }
 
 function buildReactFlowEdges(manifestEdges: ManifestEdge[]): Edge[] {
@@ -333,7 +626,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
   const [showEventChain, setShowEventChain] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [visibleTypes, setVisibleTypes] = useState<Set<ManifestNodeType>>(
-    () => new Set<ManifestNodeType>(['instrument', 'account_type', 'valuation_rule', 'saga']),
+    () => new Set<ManifestNodeType>(Object.keys(NODE_TYPE_REGISTRY) as ManifestNodeType[]),
   )
 
   const graph = useMemo(() => buildManifestGraph(manifest), [manifest])
@@ -355,12 +648,9 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
   const eventChain = useEventChain(graph, eventChainNodeId)
 
   const nodeCountByType = useMemo(() => {
-    const counts: Record<ManifestNodeType, number> = {
-      instrument: 0,
-      account_type: 0,
-      valuation_rule: 0,
-      saga: 0,
-    }
+    const counts = Object.fromEntries(
+      (Object.keys(NODE_TYPE_REGISTRY) as ManifestNodeType[]).map((t) => [t, 0]),
+    ) as Record<ManifestNodeType, number>
     for (const n of graph.nodes) {
       counts[n.type]++
     }

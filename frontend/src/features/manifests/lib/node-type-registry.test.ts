@@ -18,10 +18,13 @@ describe('NODE_TYPE_REGISTRY', () => {
     'operational_gateway',
     'provider_connection',
     'instruction_route',
+    'market_data',
+    'organization',
+    'internal_account',
   ]
 
-  it('has entries for all 10 ManifestNodeType values', () => {
-    expect(Object.keys(NODE_TYPE_REGISTRY)).toHaveLength(10)
+  it('has entries for all 13 ManifestNodeType values', () => {
+    expect(Object.keys(NODE_TYPE_REGISTRY)).toHaveLength(13)
     for (const type of ALL_TYPES) {
       expect(NODE_TYPE_REGISTRY[type]).toBeDefined()
     }
@@ -50,6 +53,9 @@ describe('NODE_TYPE_REGISTRY', () => {
     expect(NODE_TYPE_REGISTRY.operational_gateway.color).toBe('var(--graph-operational-gateway)')
     expect(NODE_TYPE_REGISTRY.provider_connection.color).toBe('var(--graph-provider-connection)')
     expect(NODE_TYPE_REGISTRY.instruction_route.color).toBe('var(--graph-instruction-route)')
+    expect(NODE_TYPE_REGISTRY.market_data.color).toBe('var(--graph-market-data)')
+    expect(NODE_TYPE_REGISTRY.organization.color).toBe('var(--graph-organization)')
+    expect(NODE_TYPE_REGISTRY.internal_account.color).toBe('var(--graph-internal-account)')
   })
 
   it('preserves original labels', () => {
@@ -66,6 +72,9 @@ describe('NODE_TYPE_REGISTRY', () => {
     expect(NODE_TYPE_REGISTRY.operational_gateway.label).toBe('Operational Gateway')
     expect(NODE_TYPE_REGISTRY.provider_connection.label).toBe('Provider Connections')
     expect(NODE_TYPE_REGISTRY.instruction_route.label).toBe('Instruction Routes')
+    expect(NODE_TYPE_REGISTRY.market_data.label).toBe('Market Data')
+    expect(NODE_TYPE_REGISTRY.organization.label).toBe('Organizations')
+    expect(NODE_TYPE_REGISTRY.internal_account.label).toBe('Internal Accounts')
   })
 
   it('preserves original layer priorities', () => {
@@ -82,6 +91,9 @@ describe('NODE_TYPE_REGISTRY', () => {
     expect(NODE_TYPE_REGISTRY.operational_gateway.layerPriority).toBe('6')
     expect(NODE_TYPE_REGISTRY.provider_connection.layerPriority).toBe('5')
     expect(NODE_TYPE_REGISTRY.instruction_route.layerPriority).toBe('4')
+    expect(NODE_TYPE_REGISTRY.market_data.layerPriority).toBe('3')
+    expect(NODE_TYPE_REGISTRY.organization.layerPriority).toBe('2')
+    expect(NODE_TYPE_REGISTRY.internal_account.layerPriority).toBe('1')
   })
 
   it('layer priorities are in descending order from instrument to instruction_route', () => {
@@ -93,9 +105,9 @@ describe('NODE_TYPE_REGISTRY', () => {
 })
 
 describe('getNodeThemes', () => {
-  it('returns a Record<ManifestNodeType, { color, label }> for all 10 types', () => {
+  it('returns a Record<ManifestNodeType, { color, label }> for all 13 types', () => {
     const themes = getNodeThemes()
-    expect(Object.keys(themes)).toHaveLength(10)
+    expect(Object.keys(themes)).toHaveLength(13)
     expect(themes.instrument).toEqual({
       color: 'var(--graph-instrument)',
       label: 'Instruments',
@@ -116,6 +128,18 @@ describe('getNodeThemes', () => {
       color: 'var(--graph-instruction-route)',
       label: 'Instruction Routes',
     })
+    expect(themes.market_data).toEqual({
+      color: 'var(--graph-market-data)',
+      label: 'Market Data',
+    })
+    expect(themes.organization).toEqual({
+      color: 'var(--graph-organization)',
+      label: 'Organizations',
+    })
+    expect(themes.internal_account).toEqual({
+      color: 'var(--graph-internal-account)',
+      label: 'Internal Accounts',
+    })
   })
 
   it('returns the same reference on repeated calls (memoized)', () => {
@@ -126,9 +150,9 @@ describe('getNodeThemes', () => {
 })
 
 describe('getLayerPriority', () => {
-  it('returns a Record<ManifestNodeType, string> for all 10 types', () => {
+  it('returns a Record<ManifestNodeType, string> for all 13 types', () => {
     const priority = getLayerPriority()
-    expect(Object.keys(priority)).toHaveLength(10)
+    expect(Object.keys(priority)).toHaveLength(13)
     expect(priority.instrument).toBe('40')
     expect(priority.account_type).toBe('30')
     expect(priority.valuation_rule).toBe('20')
@@ -139,6 +163,9 @@ describe('getLayerPriority', () => {
     expect(priority.operational_gateway).toBe('6')
     expect(priority.provider_connection).toBe('5')
     expect(priority.instruction_route).toBe('4')
+    expect(priority.market_data).toBe('3')
+    expect(priority.organization).toBe('2')
+    expect(priority.internal_account).toBe('1')
   })
 
   it('returns the same reference on repeated calls (memoized)', () => {

@@ -65,6 +65,25 @@ interface ManifestOperationalGateway {
   [key: string]: unknown
 }
 
+interface ManifestMarketData {
+  code: string
+  name: string
+  [key: string]: unknown
+}
+
+interface ManifestOrganization {
+  code: string
+  name: string
+  [key: string]: unknown
+}
+
+interface ManifestInternalAccount {
+  code: string
+  name: string
+  accountType?: string
+  [key: string]: unknown
+}
+
 interface ManifestInput {
   instruments?: ManifestInstrument[]
   accountTypes?: ManifestAccountType[]
@@ -74,6 +93,9 @@ interface ManifestInput {
   partyTypes?: ManifestPartyType[]
   mappings?: ManifestMapping[]
   operationalGateway?: ManifestOperationalGateway
+  marketData?: ManifestMarketData[]
+  organizations?: ManifestOrganization[]
+  internalAccounts?: ManifestInternalAccount[]
 }
 
 export type ManifestNodeType =
@@ -87,6 +109,9 @@ export type ManifestNodeType =
   | 'operational_gateway'
   | 'provider_connection'
   | 'instruction_route'
+  | 'market_data'
+  | 'organization'
+  | 'internal_account'
 
 export interface SagaTriggerMetadata {
   channel: string
@@ -151,6 +176,9 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   const partyTypes = m.partyTypes ?? []
   const mappings = m.mappings ?? []
   const operationalGateway = m.operationalGateway
+  const marketDataItems = m.marketData ?? []
+  const organizations = m.organizations ?? []
+  const internalAccounts = m.internalAccounts ?? []
 
   const instrumentCodes = new Set(instruments.map((i) => i.code))
 
@@ -401,6 +429,36 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
         })
       }
     }
+  }
+
+  // Market data
+  for (const md of marketDataItems) {
+    nodes.push({
+      id: `market_data:${md.code}`,
+      type: 'market_data',
+      label: md.name,
+      data: { ...md },
+    })
+  }
+
+  // Organizations
+  for (const org of organizations) {
+    nodes.push({
+      id: `organization:${org.code}`,
+      type: 'organization',
+      label: org.name,
+      data: { ...org },
+    })
+  }
+
+  // Internal accounts
+  for (const ia of internalAccounts) {
+    nodes.push({
+      id: `internal_account:${ia.code}`,
+      type: 'internal_account',
+      label: ia.name,
+      data: { ...ia },
+    })
   }
 
   return { nodes, edges }
