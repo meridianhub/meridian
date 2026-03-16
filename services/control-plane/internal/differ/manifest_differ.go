@@ -973,7 +973,8 @@ func attributesEqual(a, b map[string]string) bool {
 		return false
 	}
 	for k, v := range a {
-		if b[k] != v {
+		bv, ok := b[k]
+		if !ok || bv != v {
 			return false
 		}
 	}
