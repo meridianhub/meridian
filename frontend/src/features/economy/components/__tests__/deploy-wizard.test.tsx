@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { ApplyManifestStatus, StepResultStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '@/test/test-utils'
@@ -433,6 +434,79 @@ describe('DeployWizard', () => {
       await waitFor(() => {
         expect(screen.getByTestId('deploy-apply-button')).not.toBeDisabled()
       })
+    })
+  })
+
+  // Subtask 5 (Task 21): Phase stepper integration
+  describe('phase stepper', () => {
+    async function planAndApplyWith(applyResponse: Record<string, unknown>) {
+      const user = userEvent.setup()
+      const plan = makePlan()
+      const planManifestAsync = vi.fn().mockResolvedValue(plan)
+      vi.mocked(useManifestPlan)
+        .mockReturnValueOnce({
+          plan: null,
+          planManifest: vi.fn(),
+          planManifestAsync,
+          isPlanning: false,
+          error: null,
+        } as unknown as ReturnType<typeof useManifestPlan>)
+        .mockReturnValue({
+          plan,
+          planManifest: vi.fn(),
+          planManifestAsync,
+          isPlanning: false,
+          error: null,
+        } as unknown as ReturnType<typeof useManifestPlan>)
+
+      const applyManifest = vi.fn().mockResolvedValue(applyResponse)
+      mockApiClients(applyManifest)
+
+      renderWizard()
+      await user.click(screen.getByRole('button', { name: /^plan$/i }))
+      await waitFor(() => screen.getByTestId('deploy-apply-button'))
+      await user.click(screen.getByTestId('deploy-apply-button'))
+      await user.click(screen.getByTestId('confirm-apply-button'))
+
+      return { user }
+    }
+
+    it('shows phase stepper after successful apply with step results', async () => {
+      await planAndApplyWith({
+        status: ApplyManifestStatus.APPLIED,
+        stepResults: [
+          { $typeName: 'meridian.control_plane.v1.StepResult', stepName: 'validate', status: StepResultStatus.SUCCESS, message: '', details: {} },
+          { $typeName: 'meridian.control_plane.v1.StepResult', stepName: 'execute', status: StepResultStatus.SUCCESS, message: '', details: {} },
+        ],
+        validationErrors: [],
+        diffSummary: '',
+      })
+
+      await waitFor(() => {
+        expect(screen.getByTestId('deploy-step-label')).toHaveTextContent('Applied')
+      })
+      expect(screen.getByTestId('apply-phases-stepper')).toBeInTheDocument()
+      expect(screen.getByTestId('phase-step-validate')).toBeInTheDocument()
+      expect(screen.getByTestId('phase-step-execute')).toBeInTheDocument()
+    })
+
+    it('shows phase stepper with error for PARTIAL completion', async () => {
+      await planAndApplyWith({
+        status: ApplyManifestStatus.FAILED,
+        stepResults: [
+          { $typeName: 'meridian.control_plane.v1.StepResult', stepName: 'validate', status: StepResultStatus.SUCCESS, message: '', details: {} },
+          { $typeName: 'meridian.control_plane.v1.StepResult', stepName: 'execute', status: StepResultStatus.FAILED, message: 'Resource conflict', details: {} },
+        ],
+        validationErrors: [],
+        diffSummary: '',
+      })
+
+      await waitFor(() => {
+        expect(screen.getByTestId('deploy-step-label')).toHaveTextContent('Failed')
+      })
+      expect(screen.getByTestId('apply-phases-stepper')).toBeInTheDocument()
+      expect(screen.getByText('Resource conflict')).toBeInTheDocument()
+      expect(screen.getByText(/partial failures/i)).toBeInTheDocument()
     })
   })
 })
