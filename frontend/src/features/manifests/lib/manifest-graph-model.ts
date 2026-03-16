@@ -29,14 +29,64 @@ interface ManifestSaga {
   [key: string]: unknown
 }
 
+interface ManifestPaymentRail {
+  provider: string
+  [key: string]: unknown
+}
+
+interface ManifestPartyType {
+  partyType: string
+  [key: string]: unknown
+}
+
+interface ManifestMapping {
+  name: string
+  [key: string]: unknown
+}
+
+interface ManifestProviderConnection {
+  connectionId: string
+  providerName: string
+  [key: string]: unknown
+}
+
+interface ManifestInstructionRoute {
+  instructionType: string
+  connectionId: string
+  fallbackConnectionId?: string
+  outboundMappingId?: string
+  inboundMappingId?: string
+  [key: string]: unknown
+}
+
+interface ManifestOperationalGateway {
+  providerConnections?: ManifestProviderConnection[]
+  instructionRoutes?: ManifestInstructionRoute[]
+  [key: string]: unknown
+}
+
 interface ManifestInput {
   instruments?: ManifestInstrument[]
   accountTypes?: ManifestAccountType[]
   valuationRules?: ManifestValuationRule[]
   sagas?: ManifestSaga[]
+  paymentRails?: ManifestPaymentRail[]
+  partyTypes?: ManifestPartyType[]
+  mappings?: ManifestMapping[]
+  operationalGateway?: ManifestOperationalGateway
 }
 
-export type ManifestNodeType = 'instrument' | 'account_type' | 'valuation_rule' | 'saga'
+export type ManifestNodeType =
+  | 'instrument'
+  | 'account_type'
+  | 'valuation_rule'
+  | 'saga'
+  | 'payment_rail'
+  | 'party_type'
+  | 'mapping'
+  | 'operational_gateway'
+  | 'provider_connection'
+  | 'instruction_route'
 
 export interface SagaTriggerMetadata {
   channel: string
@@ -58,6 +108,10 @@ export type ManifestRelationship =
   | 'converts_to'
   | 'writes_to'
   | 'uses_valuation'
+  | 'belongs_to'
+  | 'routes_to'
+  | 'fallback_to'
+  | 'uses_mapping'
 
 export interface ManifestEdge {
   id: string
@@ -93,6 +147,10 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   const accountTypes = m.accountTypes ?? []
   const valuationRules = m.valuationRules ?? []
   const sagas = m.sagas ?? []
+  const paymentRails = m.paymentRails ?? []
+  const partyTypes = m.partyTypes ?? []
+  const mappings = m.mappings ?? []
+  const operationalGateway = m.operationalGateway
 
   const instrumentCodes = new Set(instruments.map((i) => i.code))
 
@@ -229,6 +287,120 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
     }
 
     nodes.push(sagaNode)
+  }
+
+  // Payment rails
+  for (const rail of paymentRails) {
+    nodes.push({
+      id: `payment_rail:${rail.provider}`,
+      type: 'payment_rail',
+      label: rail.provider,
+      data: { ...rail },
+    })
+  }
+
+  // Party types
+  for (const pt of partyTypes) {
+    nodes.push({
+      id: `party_type:${pt.partyType}`,
+      type: 'party_type',
+      label: pt.partyType,
+      data: { ...pt },
+    })
+  }
+
+  // Mappings
+  const mappingNames = new Set<string>()
+  for (const mapping of mappings) {
+    mappingNames.add(mapping.name)
+    nodes.push({
+      id: `mapping:${mapping.name}`,
+      type: 'mapping',
+      label: mapping.name,
+      data: { ...mapping },
+    })
+  }
+
+  // Operational gateway and its children
+  if (operationalGateway) {
+    const gwNodeId = 'operational_gateway:default'
+    nodes.push({
+      id: gwNodeId,
+      type: 'operational_gateway',
+      label: 'Operational Gateway',
+      data: { ...operationalGateway },
+    })
+
+    const providerConnections = operationalGateway.providerConnections ?? []
+    const connectionIds = new Set(providerConnections.map((c) => c.connectionId))
+
+    for (const conn of providerConnections) {
+      const connNodeId = `provider_connection:${conn.connectionId}`
+      nodes.push({
+        id: connNodeId,
+        type: 'provider_connection',
+        label: conn.providerName,
+        data: { ...conn },
+      })
+
+      edges.push({
+        id: `belongs_to:${conn.connectionId}:${gwNodeId}`,
+        source: connNodeId,
+        target: gwNodeId,
+        relationship: 'belongs_to',
+      })
+    }
+
+    const instructionRoutes = operationalGateway.instructionRoutes ?? []
+    for (const route of instructionRoutes) {
+      const routeNodeId = `instruction_route:${route.instructionType}`
+      nodes.push({
+        id: routeNodeId,
+        type: 'instruction_route',
+        label: route.instructionType,
+        data: { ...route },
+      })
+
+      // routes_to: instruction route -> primary provider connection
+      if (connectionIds.has(route.connectionId)) {
+        edges.push({
+          id: `routes_to:${route.instructionType}:${route.connectionId}`,
+          source: routeNodeId,
+          target: `provider_connection:${route.connectionId}`,
+          relationship: 'routes_to',
+        })
+      }
+
+      // fallback_to: instruction route -> fallback provider connection
+      if (route.fallbackConnectionId && connectionIds.has(route.fallbackConnectionId)) {
+        edges.push({
+          id: `fallback_to:${route.instructionType}:${route.fallbackConnectionId}`,
+          source: routeNodeId,
+          target: `provider_connection:${route.fallbackConnectionId}`,
+          relationship: 'fallback_to',
+        })
+      }
+
+      // uses_mapping: instruction route -> outbound mapping
+      if (route.outboundMappingId && mappingNames.has(route.outboundMappingId)) {
+        edges.push({
+          id: `uses_mapping:${route.instructionType}:outbound:${route.outboundMappingId}`,
+          source: routeNodeId,
+          target: `mapping:${route.outboundMappingId}`,
+          relationship: 'uses_mapping',
+        })
+      }
+
+      // uses_mapping: instruction route -> inbound mapping
+      if (route.inboundMappingId && mappingNames.has(route.inboundMappingId)) {
+        edges.push({
+          id: `uses_mapping:${route.instructionType}:inbound:${route.inboundMappingId}`,
+          source: routeNodeId,
+          target: `mapping:${route.inboundMappingId}`,
+          relationship: 'uses_mapping',
+        })
+      }
+    }
   }
 
   return { nodes, edges }
