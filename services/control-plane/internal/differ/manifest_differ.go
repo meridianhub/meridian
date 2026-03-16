@@ -81,6 +81,7 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 	d.diffMarketDataSources(lastApplied, newManifest, plan)
 	d.diffMarketDataSets(lastApplied, newManifest, plan)
 	d.diffOrganizations(lastApplied, newManifest, plan)
+	d.diffInternalAccounts(lastApplied, newManifest, plan)
 
 	// Run safety checks on all DELETE actions (skip when validating for a new tenant)
 	if !cfg.skipSafetyChecks {
@@ -361,7 +362,8 @@ func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) er
 			ResourceInstructionRoute,
 			ResourceMarketDataSource,
 			ResourceMarketDataSet,
-			ResourceOrganization:
+			ResourceOrganization,
+			ResourceInternalAccount:
 			// No downstream dependency checks for these resource types.
 		}
 		if err != nil {
@@ -643,6 +645,50 @@ func (d *ManifestDiffer) diffOrganizations(lastApplied, newManifest *controlplan
 	}
 }
 
+func (d *ManifestDiffer) diffInternalAccounts(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := internalAccountMap(getInternalAccounts(lastApplied))
+	newMap := internalAccountMap(newManifest.GetInternalAccounts())
+
+	for code, updated := range newMap {
+		prev, exists := oldMap[code]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInternalAccount,
+				ResourceCode: code,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create internal account %s (type: %s, instrument: %s)", code, updated.GetAccountType(), updated.GetInstrument()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInternalAccount,
+				ResourceCode: code,
+				Action:       ActionUpdate,
+				Description:  describeInternalAccountChanges(code, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInternalAccount,
+				ResourceCode: code,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Internal account %s unchanged", code),
+			})
+		}
+	}
+
+	for code := range oldMap {
+		if _, exists := newMap[code]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceInternalAccount,
+				ResourceCode: code,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete internal account %s", code),
+			})
+		}
+	}
+}
+
 // Helper functions to safely extract slices from possibly-nil manifests.
 
 func getInstruments(m *controlplanev1.Manifest) []*controlplanev1.InstrumentDefinition {
@@ -823,6 +869,21 @@ func organizationMap(orgs []*controlplanev1.OrganizationDefinition) map[string]*
 	return m
 }
 
+func getInternalAccounts(m *controlplanev1.Manifest) []*controlplanev1.InternalAccountDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetInternalAccounts()
+}
+
+func internalAccountMap(accounts []*controlplanev1.InternalAccountDefinition) map[string]*controlplanev1.InternalAccountDefinition {
+	m := make(map[string]*controlplanev1.InternalAccountDefinition, len(accounts))
+	for _, a := range accounts {
+		m[a.GetCode()] = a
+	}
+	return m
+}
+
 // Change description helpers.
 
 func describeInstrumentChanges(code string, prev, updated *controlplanev1.InstrumentDefinition) string {
@@ -965,6 +1026,26 @@ func describeOrganizationChanges(code string, prev, updated *controlplanev1.Orga
 		return fmt.Sprintf("Update organization %s", code)
 	}
 	return fmt.Sprintf("Update organization %s (%s)", code, strings.Join(changes, "; "))
+}
+
+func describeInternalAccountChanges(code string, prev, updated *controlplanev1.InternalAccountDefinition) string {
+	var changes []string
+	if prev.GetAccountType() != updated.GetAccountType() {
+		changes = append(changes, fmt.Sprintf("account_type: %q -> %q", prev.GetAccountType(), updated.GetAccountType()))
+	}
+	if prev.GetInstrument() != updated.GetInstrument() {
+		changes = append(changes, fmt.Sprintf("instrument: %q -> %q", prev.GetInstrument(), updated.GetInstrument()))
+	}
+	if prev.GetOwnerOrganization() != updated.GetOwnerOrganization() {
+		changes = append(changes, fmt.Sprintf("owner_organization: %q -> %q", prev.GetOwnerOrganization(), updated.GetOwnerOrganization()))
+	}
+	if prev.GetDescription() != updated.GetDescription() {
+		changes = append(changes, "description changed")
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update internal account %s", code)
+	}
+	return fmt.Sprintf("Update internal account %s (%s)", code, strings.Join(changes, "; "))
 }
 
 // attributesEqual compares two string-keyed maps for equality.

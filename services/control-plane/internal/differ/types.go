@@ -39,6 +39,7 @@ const (
 	ResourceMarketDataSource   ResourceType = "market_data_source"
 	ResourceMarketDataSet      ResourceType = "market_data_set"
 	ResourceOrganization       ResourceType = "organization"
+	ResourceInternalAccount    ResourceType = "internal_account"
 )
 
 // PlannedAction represents a single action in the diff plan.

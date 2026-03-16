@@ -53,6 +53,10 @@ const (
 	// PhaseOrganizations registers organization entities with the Party service
 	// (depends on party types being registered first).
 	PhaseOrganizations Phase = 11
+
+	// PhaseInternalAccounts provisions internal accounts via the Internal Account service
+	// (depends on account types, instruments, and organizations being registered first).
+	PhaseInternalAccounts Phase = 12
 )
 
 // PhaseLabel returns a human-readable label for a phase.
@@ -80,6 +84,8 @@ func PhaseLabel(p Phase) string {
 		return "Market Data Sets"
 	case PhaseOrganizations:
 		return "Organizations"
+	case PhaseInternalAccounts:
+		return "Internal Accounts"
 	default:
 		return fmt.Sprintf("Phase(%d)", p)
 	}
@@ -102,7 +108,9 @@ const (
 	MethodDeprecateAccountType        GRPCMethod = "meridian.reference_data.v1.AccountTypeRegistryService/DeprecateAccountType"
 
 	// Internal Account Service
-	MethodInitiateAccount GRPCMethod = "meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount"
+	MethodInitiateAccount        GRPCMethod = "meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount"
+	MethodUpdateInternalAccount  GRPCMethod = "meridian.internal_account.v1.InternalAccountService/UpdateInternalAccount"
+	MethodControlInternalAccount GRPCMethod = "meridian.internal_account.v1.InternalAccountService/ControlInternalAccount"
 
 	// Saga Registry Service
 	MethodCreateSagaDraft      GRPCMethod = "meridian.saga.v1.SagaRegistryService/CreateSagaDraft"
@@ -236,7 +244,7 @@ func (p *ExecutionPlan) Visualize() string {
 	fmt.Fprintf(&b, "Total calls: %d\n\n", len(p.Calls))
 
 	byPhase := p.ByPhase()
-	for phase := PhaseInstruments; phase <= PhaseOrganizations; phase++ { //nolint:intrange
+	for phase := PhaseInstruments; phase <= PhaseInternalAccounts; phase++ { //nolint:intrange
 		calls, ok := byPhase[phase]
 		if !ok {
 			continue
