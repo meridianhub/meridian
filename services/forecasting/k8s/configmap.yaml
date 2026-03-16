@@ -28,4 +28,4 @@ data:
   REDIS_ADDR: "redis:6379"
 
   # Authentication configuration
-  AUTH_ENABLED: "false"
+  AUTH_ENABLED: "true"

@@ -25,7 +25,7 @@ data:
   OTEL_SAMPLING_RATE: "0.1"
 
   # Authentication configuration
-  AUTH_ENABLED: "false"
+  AUTH_ENABLED: "true"
 
   # KYC/AML verification - mock provider for local development
   VERIFICATION_PROVIDER: "mock"
