@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -113,4 +114,73 @@ func (h *HistoryHandler) ListManifestVersions(
 		Versions:   versions,
 		TotalCount: int32(totalCount),
 	}, nil
+}
+
+// DiffManifestVersions compares two manifest versions by sequence number and
+// returns a structured diff with per-resource actions and summary statistics.
+func (h *HistoryHandler) DiffManifestVersions(
+	ctx context.Context,
+	req *controlplanev1.DiffManifestVersionsRequest,
+) (*controlplanev1.DiffManifestVersionsResponse, error) {
+	if req.GetTargetSequenceNumber() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "target_sequence_number must be greater than 0")
+	}
+
+	plan, baseSeq, targetSeq, err := h.history.DiffVersionsBySequence(
+		ctx, req.GetBaseSequenceNumber(), req.GetTargetSequenceNumber(),
+	)
+	if err != nil {
+		if errors.Is(err, ErrVersionNotFound) {
+			return nil, status.Error(codes.NotFound, "manifest version not found")
+		}
+		h.logger.Error("failed to diff manifest versions",
+			"base_seq", req.GetBaseSequenceNumber(),
+			"target_seq", req.GetTargetSequenceNumber(),
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to diff manifest versions")
+	}
+
+	return &controlplanev1.DiffManifestVersionsResponse{
+		BaseSequenceNumber:   baseSeq,
+		TargetSequenceNumber: targetSeq,
+		Actions:              diffPlanToProtoActions(plan),
+		Summary:              diffPlanToProtoSummary(plan),
+	}, nil
+}
+
+// diffPlanToProtoActions converts differ.DiffPlan actions to proto DiffAction messages.
+func diffPlanToProtoActions(plan *differ.DiffPlan) []*controlplanev1.DiffAction {
+	actions := make([]*controlplanev1.DiffAction, 0, len(plan.Actions))
+	for _, a := range plan.Actions {
+		actions = append(actions, &controlplanev1.DiffAction{
+			ResourceType: string(a.ResourceType),
+			Action:       string(a.Action),
+			ResourceCode: a.ResourceCode,
+			Description:  a.Description,
+			Breaking:     a.Breaking,
+		})
+	}
+	return actions
+}
+
+// diffPlanToProtoSummary converts a differ.DiffPlan to a proto DiffSummary.
+func diffPlanToProtoSummary(plan *differ.DiffPlan) *controlplanev1.DiffSummary {
+	summary := &controlplanev1.DiffSummary{
+		TotalActions:       int32(len(plan.Actions)),
+		HasBreakingChanges: plan.HasBreakingChanges,
+	}
+	for _, a := range plan.Actions {
+		switch a.Action {
+		case differ.ActionCreate:
+			summary.Creates++
+		case differ.ActionUpdate:
+			summary.Updates++
+		case differ.ActionDelete:
+			summary.Deletes++
+		case differ.ActionNoChange:
+			summary.NoChanges++
+		}
+	}
+	return summary
 }
