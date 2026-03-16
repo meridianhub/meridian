@@ -181,6 +181,49 @@ func (s *HistoryService) CompareVersions(ctx context.Context, v1, v2 string) (st
 	return s.diffManifests(ctx, manifest1, manifest2)
 }
 
+// DiffVersionsBySequence computes a structured diff between two manifest versions
+// identified by sequence number. If baseSeq is 0, defaults to targetSeq-1.
+func (s *HistoryService) DiffVersionsBySequence(ctx context.Context, baseSeq, targetSeq int64) (*differ.DiffPlan, int64, int64, error) {
+	if baseSeq == 0 {
+		if targetSeq <= 1 {
+			// Target is the first version; diff against empty manifest.
+			baseSeq = 0
+		} else {
+			baseSeq = targetSeq - 1
+		}
+	}
+
+	// Load target version.
+	targetEntity, err := s.repo.GetBySequenceNumber(ctx, targetSeq)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("target sequence %d: %w", targetSeq, err)
+	}
+	targetManifest, err := unmarshalManifest(targetEntity.ManifestJSON)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to unmarshal target sequence %d: %w", targetSeq, err)
+	}
+
+	// Load base version (nil manifest if baseSeq is 0).
+	var baseManifest *controlplanev1.Manifest
+	if baseSeq > 0 {
+		baseEntity, err := s.repo.GetBySequenceNumber(ctx, baseSeq)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("base sequence %d: %w", baseSeq, err)
+		}
+		baseManifest, err = unmarshalManifest(baseEntity.ManifestJSON)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to unmarshal base sequence %d: %w", baseSeq, err)
+		}
+	}
+
+	plan, err := s.differ.Diff(ctx, baseManifest, targetManifest, differ.WithSkipSafetyChecks())
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("diff failed: %w", err)
+	}
+
+	return plan, baseSeq, targetSeq, nil
+}
+
 // RollbackToVersion creates a new manifest version with the content from a previous version.
 // This maintains the forward-only audit trail: rollback from v1.2 to v1.1 creates
 // a new record with v1.1's content, not an in-place revert.
