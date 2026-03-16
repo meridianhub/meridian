@@ -1,4 +1,4 @@
-h1:+ZQjoD33FV9uGdAtXZ3TzG/+iTyeORrIC1jp1qw8do0=
+h1:klxmOQ/55SYc4RT8nlztQMC42zTDD9kNNEbOJYB2rK8=
 20251216000001_initial.sql h1:9Pt9iC/k1YkmfjyO/F0ioNbPswzzgCP2aHtFlFHnSMY=
 20251217000001_audit_system.sql h1:YD9HdFm+NRTihCM/PBU7EYEmdttWjvGPCIE408A8HFg=
 20251223000001_fix_audit_schema_compatibility.sql h1:QxqR4DwdQ5cNXHCxTvtHgQmhSnD8xptkoFnxNcZ5ehY=
@@ -10,3 +10,5 @@ h1:+ZQjoD33FV9uGdAtXZ3TzG/+iTyeORrIC1jp1qw8do0=
 20260211000002_billing_dunning_index.sql h1:6cHeAxZHCdmKuN463rzokl10thO8ZRhmYU532Hvn+8U=
 20260212000001_saga_executions.sql h1:5lIitWin7Ka3BcEuTwD1gmOGD1/x/IrmhmM9gJoRtj0=
 20260213000001_scheduler_execution.sql h1:P1bhiHpqWI9xLrBEmaNSFyYJJZHmzpWGIIxlYux85M4=
+20260316000001_add_event_outbox_tenant_id.sql h1:3knfGoJVdnnuBQI/3PveT2VieJJFeWNi32eCa4bQxMk=
+20260316000002_add_event_outbox_tenant_id_index.sql h1:pysrkfYkWgoV6VuTgTAjmfNBLxoC9C0DA2qtpSO3Hk0=

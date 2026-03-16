@@ -377,6 +377,12 @@ func (w *Worker) publishToKafka(ctx context.Context, entry *EventOutbox) error {
 			Value: []byte(entry.CausationID),
 		})
 	}
+	if entry.TenantID != "" {
+		headers = append(headers, kgo.RecordHeader{
+			Key:   "X-Tenant-ID",
+			Value: []byte(entry.TenantID),
+		})
+	}
 
 	// Create Kafka record
 	record := &kgo.Record{

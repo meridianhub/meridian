@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // PgxOutboxRepository implements OutboxRepository using PostgreSQL via pgx.
@@ -47,18 +49,18 @@ func (r *PgxOutboxRepository) InsertWithPgxTx(ctx context.Context, tx pgx.Tx, en
 		INSERT INTO event_outbox (
 			id, event_type, aggregate_id, aggregate_type, event_payload,
 			correlation_id, causation_id, status, topic, partition_key,
-			created_at, retry_count, service_name
+			created_at, retry_count, service_name, tenant_id
 		) VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10,
-			$11, $12, $13
+			$11, $12, $13, $14
 		)`
 
 	_, err := tx.Exec(ctx, query,
 		entry.ID, entry.EventType, entry.AggregateID, entry.AggregateType, entry.EventPayload,
 		nullableString(entry.CorrelationID), nullableString(entry.CausationID),
 		entry.Status, entry.Topic, nullableString(entry.PartitionKey),
-		entry.CreatedAt, entry.RetryCount, entry.ServiceName,
+		entry.CreatedAt, entry.RetryCount, entry.ServiceName, entry.TenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert outbox entry: %w", err)
@@ -73,7 +75,7 @@ func (r *PgxOutboxRepository) FetchUnprocessed(ctx context.Context, serviceName 
 	query := `
 		SELECT id, event_type, aggregate_id, aggregate_type, event_payload,
 			correlation_id, causation_id, status, topic, partition_key,
-			created_at, processed_at, retry_count, last_error, service_name
+			created_at, processed_at, retry_count, last_error, service_name, tenant_id
 		FROM event_outbox
 		WHERE status = $1 AND service_name = $2
 		ORDER BY created_at ASC
@@ -94,7 +96,7 @@ func (r *PgxOutboxRepository) FetchUnprocessed(ctx context.Context, serviceName 
 		err := rows.Scan(
 			&entry.ID, &entry.EventType, &entry.AggregateID, &entry.AggregateType, &entry.EventPayload,
 			&correlationID, &causationID, &entry.Status, &entry.Topic, &partitionKey,
-			&entry.CreatedAt, &processedAt, &entry.RetryCount, &lastError, &entry.ServiceName,
+			&entry.CreatedAt, &processedAt, &entry.RetryCount, &lastError, &entry.ServiceName, &entry.TenantID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan outbox entry: %w", err)
@@ -144,7 +146,7 @@ func (r *PgxOutboxRepository) FetchAndLockForProcessing(ctx context.Context, ser
 	selectQuery := `
 		SELECT id, event_type, aggregate_id, aggregate_type, event_payload,
 			correlation_id, causation_id, status, topic, partition_key,
-			created_at, processed_at, retry_count, last_error, service_name
+			created_at, processed_at, retry_count, last_error, service_name, tenant_id
 		FROM event_outbox
 		WHERE status = $1 AND service_name = $2
 		ORDER BY created_at ASC
@@ -166,7 +168,7 @@ func (r *PgxOutboxRepository) FetchAndLockForProcessing(ctx context.Context, ser
 		scanErr := rows.Scan(
 			&entry.ID, &entry.EventType, &entry.AggregateID, &entry.AggregateType, &entry.EventPayload,
 			&correlationID, &causationID, &entry.Status, &entry.Topic, &partitionKey,
-			&entry.CreatedAt, &processedAt, &entry.RetryCount, &lastError, &entry.ServiceName,
+			&entry.CreatedAt, &processedAt, &entry.RetryCount, &lastError, &entry.ServiceName, &entry.TenantID,
 		)
 		if scanErr != nil {
 			return nil, fmt.Errorf("failed to scan outbox entry: %w", scanErr)
@@ -371,6 +373,12 @@ func (p *PgxOutboxPublisher) Publish(
 		partitionKey = config.AggregateID
 	}
 
+	// Extract tenant ID from context
+	var tenantID string
+	if tid, ok := tenant.FromContext(ctx); ok {
+		tenantID = string(tid)
+	}
+
 	// Create outbox entry
 	entry := NewEventOutbox(
 		config.EventType,
@@ -380,6 +388,7 @@ func (p *PgxOutboxPublisher) Publish(
 		config.Topic,
 		p.serviceName,
 		config.CorrelationID,
+		tenantID,
 	)
 	entry.CausationID = config.CausationID
 	entry.PartitionKey = partitionKey
@@ -389,18 +398,18 @@ func (p *PgxOutboxPublisher) Publish(
 		INSERT INTO event_outbox (
 			id, event_type, aggregate_id, aggregate_type, event_payload,
 			correlation_id, causation_id, status, topic, partition_key,
-			created_at, retry_count, service_name
+			created_at, retry_count, service_name, tenant_id
 		) VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10,
-			$11, $12, $13
+			$11, $12, $13, $14
 		)`
 
 	_, err = tx.Exec(ctx, query,
 		entry.ID, entry.EventType, entry.AggregateID, entry.AggregateType, entry.EventPayload,
 		nullableString(entry.CorrelationID), nullableString(entry.CausationID),
 		entry.Status, entry.Topic, nullableString(entry.PartitionKey),
-		entry.CreatedAt, entry.RetryCount, entry.ServiceName,
+		entry.CreatedAt, entry.RetryCount, entry.ServiceName, entry.TenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert outbox entry: %w", err)
