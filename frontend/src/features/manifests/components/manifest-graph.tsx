@@ -670,6 +670,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
 
       {selectedManifestNode && canEditResource && (
         <ApplyResourceModal
+          key={selectedManifestNode.id}
           open={editModalOpen}
           onOpenChange={setEditModalOpen}
           nodeType={selectedManifestNode.type}
