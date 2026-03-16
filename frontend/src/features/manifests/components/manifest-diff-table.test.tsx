@@ -56,10 +56,10 @@ describe('ManifestDiffTable', () => {
   it('renders all diff rows', () => {
     renderComponent()
 
-    expect(screen.getByTestId('diff-row-GBP')).toBeInTheDocument()
-    expect(screen.getByTestId('diff-row-USD')).toBeInTheDocument()
-    expect(screen.getByTestId('diff-row-SAVINGS')).toBeInTheDocument()
-    expect(screen.getByTestId('diff-row-settle_payment')).toBeInTheDocument()
+    expect(screen.getByTestId('diff-row-instrument-GBP')).toBeInTheDocument()
+    expect(screen.getByTestId('diff-row-instrument-USD')).toBeInTheDocument()
+    expect(screen.getByTestId('diff-row-account_type-SAVINGS')).toBeInTheDocument()
+    expect(screen.getByTestId('diff-row-saga-settle_payment')).toBeInTheDocument()
   })
 
   it('renders summary statistics', () => {
@@ -91,16 +91,16 @@ describe('ManifestDiffTable', () => {
   it('renders change type badges in table rows', () => {
     renderComponent()
 
-    const gbpRow = screen.getByTestId('diff-row-GBP')
+    const gbpRow = screen.getByTestId('diff-row-instrument-GBP')
     expect(within(gbpRow).getByText('Added')).toBeInTheDocument()
 
-    const savingsRow = screen.getByTestId('diff-row-SAVINGS')
+    const savingsRow = screen.getByTestId('diff-row-account_type-SAVINGS')
     expect(within(savingsRow).getByText('Modified')).toBeInTheDocument()
 
-    const sagaRow = screen.getByTestId('diff-row-settle_payment')
+    const sagaRow = screen.getByTestId('diff-row-saga-settle_payment')
     expect(within(sagaRow).getByText('Removed')).toBeInTheDocument()
 
-    const usdRow = screen.getByTestId('diff-row-USD')
+    const usdRow = screen.getByTestId('diff-row-instrument-USD')
     expect(within(usdRow).getByText('Unchanged')).toBeInTheDocument()
   })
 
@@ -116,7 +116,7 @@ describe('ManifestDiffTable', () => {
   it('marks breaking changes with Yes', () => {
     renderComponent()
 
-    const sagaRow = screen.getByTestId('diff-row-settle_payment')
+    const sagaRow = screen.getByTestId('diff-row-saga-settle_payment')
     expect(within(sagaRow).getByText('Yes')).toBeInTheDocument()
   })
 
@@ -132,9 +132,9 @@ describe('ManifestDiffTable', () => {
 
     await user.selectOptions(screen.getByTestId('resource-type-filter'), 'saga')
 
-    expect(screen.getByTestId('diff-row-settle_payment')).toBeInTheDocument()
-    expect(screen.queryByTestId('diff-row-GBP')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('diff-row-SAVINGS')).not.toBeInTheDocument()
+    expect(screen.getByTestId('diff-row-saga-settle_payment')).toBeInTheDocument()
+    expect(screen.queryByTestId('diff-row-instrument-GBP')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('diff-row-account_type-SAVINGS')).not.toBeInTheDocument()
   })
 
   it('filters by change type', async () => {
@@ -143,9 +143,9 @@ describe('ManifestDiffTable', () => {
 
     await user.selectOptions(screen.getByTestId('change-type-filter'), 'CREATE')
 
-    expect(screen.getByTestId('diff-row-GBP')).toBeInTheDocument()
-    expect(screen.queryByTestId('diff-row-USD')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('diff-row-SAVINGS')).not.toBeInTheDocument()
+    expect(screen.getByTestId('diff-row-instrument-GBP')).toBeInTheDocument()
+    expect(screen.queryByTestId('diff-row-instrument-USD')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('diff-row-account_type-SAVINGS')).not.toBeInTheDocument()
   })
 
   it('renders without summary', () => {

@@ -11,10 +11,19 @@ export function ManifestDiffPage() {
 
   const baseSeq = Number(v1 ?? '0')
   const targetSeq = Number(v2 ?? '0')
+  const hasValidParams =
+    Boolean(v1 && v2) &&
+    Number.isInteger(baseSeq) &&
+    Number.isInteger(targetSeq) &&
+    baseSeq >= 0 &&
+    targetSeq > 0
 
-  const { data, isLoading, error } = useManifestDiff(baseSeq, targetSeq)
+  const { data, isLoading, error } = useManifestDiff(
+    hasValidParams ? baseSeq : 0,
+    hasValidParams ? targetSeq : 0,
+  )
 
-  if (!v1 || !v2 || Number.isNaN(baseSeq) || Number.isNaN(targetSeq) || targetSeq <= 0) {
+  if (!hasValidParams) {
     return (
       <PageShell>
         <PageHeader title="Manifest Diff" />

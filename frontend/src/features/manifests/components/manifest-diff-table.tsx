@@ -189,7 +189,7 @@ export function ManifestDiffTable({ actions, summary }: ManifestDiffTableProps) 
                 <tr
                   key={`${action.resourceType}-${action.resourceCode}-${idx}`}
                   className="border-b last:border-b-0 hover:bg-muted/50"
-                  data-testid={`diff-row-${action.resourceCode}`}
+                  data-testid={`diff-row-${action.resourceType}-${action.resourceCode}`}
                 >
                   {columns.map((col) => {
                     const CellFn = col.cell
