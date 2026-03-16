@@ -453,6 +453,9 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
         case 'account_type':
           navigate('/reference-data/account-types')
           break
+        case 'valuation_rule':
+          navigate('/reference-data/valuation-rules')
+          break
         case 'saga':
           navigate(`/starlark-config/${mn.label}`)
           break
