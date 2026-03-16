@@ -200,8 +200,8 @@ func HasPermission(claims *Claims, resourceType ResourceType, permission Permiss
 		return false
 	}
 
-	// Check each role in the claims
-	for _, roleStr := range claims.Roles {
+	// Check each effective role (supports Groups fallback for OIDC providers like Dex)
+	for _, roleStr := range claims.EffectiveRoles() {
 		role := Role(roleStr)
 		if !role.IsValid() {
 			continue

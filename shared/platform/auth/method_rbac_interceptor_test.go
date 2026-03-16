@@ -197,6 +197,30 @@ func TestMethodRBACInterceptor_GroupsFallback(t *testing.T) {
 	}
 }
 
+func TestMethodRBACInterceptor_PermissionBased_GroupsFallback(t *testing.T) {
+	interceptor := NewMethodRBACInterceptor(MethodRBACConfig{
+		Permissions: map[string]MethodPermission{
+			"/some.Service/ReadAccount": {
+				ResourceType: ResourceTypeAccount,
+				Permission:   PermissionRead,
+			},
+		},
+	})
+
+	// Claims with Groups instead of Roles (OIDC provider like Dex)
+	// Auditor role has read permission on accounts
+	claims := &Claims{Groups: []string{"auditor"}}
+	ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
+
+	resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/ReadAccount"}, noopHandler)
+	if err != nil {
+		t.Fatalf("expected no error for permission-based check with groups fallback, got %v", err)
+	}
+	if resp != "ok" {
+		t.Errorf("expected handler response 'ok', got %v", resp)
+	}
+}
+
 func TestMethodRBACInterceptor_AuditLog(t *testing.T) {
 	var logged []string
 	logger := func(method, userID, decision string) {
