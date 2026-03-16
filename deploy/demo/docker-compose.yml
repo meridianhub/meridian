@@ -61,6 +61,14 @@ services:
       # Per-service databases are created by init-databases.sql on first Postgres boot.
       DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
+      # --- JWT Signing (shared with MCP server for token interoperability) ---
+      # Both the gateway (BFF auth + JWKS endpoint) and MCP server must use the
+      # same RSA key. Without this, MCP-signed tokens fail JWKS validation because
+      # the gateway generates a random key on startup when JWT_SIGNING_KEY is empty.
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
+      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-1}
+      JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian}
+
       # --- Authentication (embedded Dex OIDC server) ---
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
       DEX_ISSUER: ${DEX_ISSUER:-https://${BASE_DOMAIN:-demo.meridianhub.cloud}/dex}
