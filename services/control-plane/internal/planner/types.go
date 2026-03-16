@@ -78,6 +78,11 @@ const (
 	MethodDeprecateInstrument GRPCMethod = "meridian.reference_data.v1.ReferenceDataService/DeprecateInstrument"
 	MethodActivateInstrument  GRPCMethod = "meridian.reference_data.v1.ReferenceDataService/ActivateInstrument"
 
+	// Account Type Registry Service (Reference Data)
+	MethodCreateAccountTypeDraft      GRPCMethod = "meridian.reference_data.v1.AccountTypeRegistryService/CreateDraft"
+	MethodUpdateAccountTypeDefinition GRPCMethod = "meridian.reference_data.v1.AccountTypeRegistryService/UpdateDefinition"
+	MethodDeprecateAccountType        GRPCMethod = "meridian.reference_data.v1.AccountTypeRegistryService/DeprecateAccountType"
+
 	// Internal Account Service
 	MethodInitiateAccount GRPCMethod = "meridian.internal_account.v1.InternalAccountService/InitiateInternalAccount"
 

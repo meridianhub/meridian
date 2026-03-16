@@ -148,6 +148,8 @@ func TestPlan_GRPCMethodMapping_AccountTypes(t *testing.T) {
 	diffPlan := &differ.DiffPlan{
 		Actions: []differ.PlannedAction{
 			{ResourceType: differ.ResourceAccountType, ResourceCode: "CURRENT", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourceAccountType, ResourceCode: "SAVINGS", Action: differ.ActionUpdate},
+			{ResourceType: differ.ResourceAccountType, ResourceCode: "LEGACY", Action: differ.ActionDelete},
 		},
 	}
 
@@ -155,7 +157,28 @@ func TestPlan_GRPCMethodMapping_AccountTypes(t *testing.T) {
 	require.NoError(t, err)
 
 	callsByCode := indexCallsByResourceID(plan.Calls)
-	assert.Equal(t, MethodInitiateAccount, callsByCode["CURRENT"].GRPCMethod)
+	// CREATE maps to Reference Data CreateDraft (handler will call Activate internally)
+	assert.Equal(t, MethodCreateAccountTypeDraft, callsByCode["CURRENT"].GRPCMethod)
+	// UPDATE maps to Reference Data UpdateDefinition
+	assert.Equal(t, MethodUpdateAccountTypeDefinition, callsByCode["SAVINGS"].GRPCMethod)
+	// DELETE maps to Reference Data DeprecateAccountType
+	assert.Equal(t, MethodDeprecateAccountType, callsByCode["LEGACY"].GRPCMethod)
+}
+
+func TestPlan_AccountType_NotMappedToInternalAccount(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceAccountType, ResourceCode: "CURRENT", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+
+	assert.NotEqual(t, MethodInitiateAccount, plan.Calls[0].GRPCMethod,
+		"account type CREATE must not map to Internal Account service")
 }
 
 func TestPlan_GRPCMethodMapping_Sagas(t *testing.T) {
@@ -407,7 +430,7 @@ func TestExecutionPlan_Visualize(t *testing.T) {
 		ManifestVersion: "1.0",
 		Calls: []PlannedCall{
 			{Phase: PhaseInstruments, ResourceType: differ.ResourceInstrument, ResourceID: "GBP", Action: differ.ActionCreate, GRPCMethod: MethodRegisterInstrument, Description: "Create instrument GBP"},
-			{Phase: PhaseAccountTypes, ResourceType: differ.ResourceAccountType, ResourceID: "CURRENT", Action: differ.ActionCreate, GRPCMethod: MethodInitiateAccount, Description: "Create account type CURRENT"},
+			{Phase: PhaseAccountTypes, ResourceType: differ.ResourceAccountType, ResourceID: "CURRENT", Action: differ.ActionCreate, GRPCMethod: MethodCreateAccountTypeDraft, Description: "Create account type CURRENT"},
 			{Phase: PhaseSagas, ResourceType: differ.ResourceSaga, ResourceID: "deposit", Action: differ.ActionUpdate, GRPCMethod: MethodUpdateSagaDefinition, Description: "Update saga deposit"},
 		},
 	}
