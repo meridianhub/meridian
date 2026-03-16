@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Edit, Compass } from 'lucide-react'
+import { DriftWarningBanner } from '@/features/economy/components/drift-warning-banner'
 
 function LoadingSkeleton() {
   return (
@@ -109,6 +110,9 @@ export function EconomyOverviewPage() {
 
     return (
       <>
+      {/* Drift Detection */}
+      <DriftWarningBanner />
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">

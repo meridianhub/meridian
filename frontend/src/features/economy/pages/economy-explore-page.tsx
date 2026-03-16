@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
-import type { SagaDefinition, InstrumentDefinition, AccountTypeDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+import type { SagaDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import type { MappingDefinition } from '@/api/gen/meridian/mapping/v1/mapping_pb'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +11,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+import { ResourcesPanel } from '@/features/economy/components/resources-panel'
+import { GatewayPanel } from '@/features/economy/components/gateway-panel'
+import { ConfigPanel } from '@/features/economy/components/config-panel'
 
 // ── Loading / empty / error states ────────────────────────────────────────────
 
@@ -162,60 +165,6 @@ function ApiEndpointsPanel({ mappings }: { mappings: MappingDefinition[] }) {
   )
 }
 
-// ── ResourcesPanel ────────────────────────────────────────────────────────────
-
-function ResourcesPanel({
-  instruments,
-  accountTypes,
-}: {
-  instruments: InstrumentDefinition[]
-  accountTypes: AccountTypeDefinition[]
-}) {
-  if (instruments.length === 0 && accountTypes.length === 0) {
-    return (
-      <div className="py-8 text-center text-muted-foreground text-sm">
-        No instruments or account types defined in this manifest.
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      {instruments.length > 0 && (
-        <section>
-          <h3 className="text-sm font-medium text-muted-foreground mb-2">Instruments</h3>
-          <div className="space-y-2">
-            {instruments.map((inst) => (
-              <Card key={inst.code}>
-                <CardContent className="flex items-center justify-between px-4 py-3">
-                  <span className="text-sm font-medium">{inst.name}</span>
-                  <Badge variant="outline" className="font-mono">{inst.code}</Badge>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {accountTypes.length > 0 && (
-        <section>
-          <h3 className="text-sm font-medium text-muted-foreground mb-2">Account Types</h3>
-          <div className="space-y-2">
-            {accountTypes.map((at) => (
-              <Card key={at.code}>
-                <CardContent className="flex items-center justify-between px-4 py-3">
-                  <span className="text-sm font-medium">{at.name}</span>
-                  <Badge variant="outline" className="font-mono">{at.code}</Badge>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
-  )
-}
-
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export function EconomyExplorePage() {
@@ -234,10 +183,9 @@ export function EconomyExplorePage() {
     if (isNotFound || !data?.version?.manifest) return <EmptyState />
 
     const manifest: Manifest = data.version.manifest
+    const version = data.version
     const sagas = manifest.sagas ?? []
     const mappings = manifest.mappings ?? []
-    const instruments = manifest.instruments ?? []
-    const accountTypes = manifest.accountTypes ?? []
 
     return (
       <>
@@ -254,6 +202,8 @@ export function EconomyExplorePage() {
             <TabsTrigger value="sagas">Sagas</TabsTrigger>
             <TabsTrigger value="api-endpoints">API Endpoints</TabsTrigger>
             <TabsTrigger value="resources">Resources</TabsTrigger>
+            <TabsTrigger value="gateway">Gateway</TabsTrigger>
+            <TabsTrigger value="config">Config</TabsTrigger>
           </TabsList>
 
           <TabsContent value="event-channels" className="mt-4">
@@ -269,7 +219,15 @@ export function EconomyExplorePage() {
           </TabsContent>
 
           <TabsContent value="resources" className="mt-4">
-            <ResourcesPanel instruments={instruments} accountTypes={accountTypes} />
+            <ResourcesPanel manifest={manifest} />
+          </TabsContent>
+
+          <TabsContent value="gateway" className="mt-4">
+            <GatewayPanel gateway={manifest.operationalGateway} />
+          </TabsContent>
+
+          <TabsContent value="config" className="mt-4">
+            <ConfigPanel version={version} />
           </TabsContent>
         </Tabs>
       </>

@@ -44,8 +44,36 @@ const mockManifestVersion = {
       { name: 'meter_reading_mapping', targetService: 'meridian.energy.v1.EnergyService', targetRpc: 'RecordMeterReading' },
     ],
     seedData: undefined,
-    paymentRails: [],
-    partyTypes: [],
+    paymentRails: [
+      { provider: 'stripe_connect', mode: 1, accountId: 'acct_123', webhookEndpointSecret: 'sm://stripe/webhook' },
+    ],
+    partyTypes: [
+      { id: 'pt-1', tenantId: 't-1', partyType: 'PERSON', attributeSchema: '{}' },
+    ],
+    operationalGateway: {
+      providerConnections: [
+        {
+          connectionId: 'stripe-payments',
+          providerName: 'Stripe',
+          providerType: 'payment_gateway',
+          protocol: 1,
+          baseUrl: 'https://api.stripe.com',
+          retryPolicy: { maxAttempts: 3, initialBackoffSeconds: 1, maxBackoffSeconds: 30, backoffMultiplier: 2 },
+        },
+      ],
+      instructionRoutes: [
+        {
+          instructionType: 'payment.initiate',
+          connectionId: 'stripe-payments',
+          fallbackConnectionId: '',
+          outboundMappingId: '',
+          inboundMappingId: '',
+          httpMethod: 'POST',
+          pathTemplate: '/v1/payments',
+        },
+      ],
+      inboundRoutes: [],
+    },
   },
   appliedAt: { seconds: BigInt(1700000000), nanos: 0 },
   appliedBy: 'admin@example.com',
@@ -235,6 +263,111 @@ describe('EconomyExplorePage', () => {
       })
       expect(screen.getByText('Kilowatt Hour')).toBeInTheDocument()
       expect(screen.getByText('Current Account')).toBeInTheDocument()
+    })
+  })
+
+  describe('Gateway tab', () => {
+    it('renders Gateway tab', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /gateway/i })).toBeInTheDocument()
+      })
+    })
+
+    it('shows provider connections after clicking Gateway tab', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /gateway/i })).toBeInTheDocument()
+      })
+      await userEvent.click(screen.getByRole('tab', { name: /gateway/i }))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('gateway-panel')).toBeInTheDocument()
+      })
+      expect(screen.getByText('Stripe')).toBeInTheDocument()
+      expect(screen.getAllByText('stripe-payments').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('shows instruction routes after clicking Gateway tab', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /gateway/i })).toBeInTheDocument()
+      })
+      await userEvent.click(screen.getByRole('tab', { name: /gateway/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText('payment.initiate')).toBeInTheDocument()
+      })
+    })
+
+    it('shows empty state when no gateway configured', async () => {
+      const noGatewayManifest = {
+        ...mockManifestVersion,
+        manifest: {
+          ...mockManifestVersion.manifest,
+          operationalGateway: undefined,
+        },
+      }
+      mockApiClients({
+        getCurrentManifest: vi.fn().mockResolvedValue({ version: noGatewayManifest }),
+      })
+
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /gateway/i })).toBeInTheDocument()
+      })
+      await userEvent.click(screen.getByRole('tab', { name: /gateway/i }))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('gateway-empty')).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('Config tab', () => {
+    it('renders Config tab', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /config/i })).toBeInTheDocument()
+      })
+    })
+
+    it('shows manifest version and applied by after clicking Config tab', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /config/i })).toBeInTheDocument()
+      })
+      await userEvent.click(screen.getByRole('tab', { name: /config/i }))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-panel')).toBeInTheDocument()
+      })
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+      expect(screen.getByText('Applied')).toBeInTheDocument()
+    })
+
+    it('shows raw manifest JSON', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /config/i })).toBeInTheDocument()
+      })
+      await userEvent.click(screen.getByRole('tab', { name: /config/i }))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-raw-manifest')).toBeInTheDocument()
+      })
+    })
+
+    it('shows download button', async () => {
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: /config/i })).toBeInTheDocument()
+      })
+      await userEvent.click(screen.getByRole('tab', { name: /config/i }))
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument()
+      })
     })
   })
 

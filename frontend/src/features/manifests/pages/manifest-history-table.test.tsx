@@ -7,6 +7,10 @@ import { createTenantUserToken } from '@/test/jwt-helpers'
 import { ManifestHistoryTable } from './manifest-history-table'
 import { ApplyStatus } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
 
+// Mock URL.createObjectURL for download tests
+global.URL.createObjectURL = vi.fn(() => 'blob:mock')
+global.URL.revokeObjectURL = vi.fn()
+
 vi.mock('@/api/context', () => ({
   useApiClients: vi.fn(),
   ApiClientProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -230,6 +234,123 @@ describe('ManifestHistoryTable', () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId('compare-toolbar')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Export', () => {
+    const mockManifest = {
+      version: '1.0',
+      metadata: { name: 'Test', industry: 'finance', description: 'desc' },
+      instruments: [],
+      accountTypes: [],
+      valuationRules: [],
+      sagas: [],
+      seedData: undefined,
+      paymentRails: [],
+      partyTypes: [],
+      mappings: [],
+      operationalGateway: undefined,
+    }
+
+    function mockApiClientsWithExport() {
+      vi.mocked(useApiClients).mockReturnValue({
+        manifestHistory: {
+          getCurrentManifest: vi.fn(),
+          listManifestVersions: vi.fn().mockResolvedValue({
+            versions: mockVersions,
+            totalCount: 3,
+          }),
+          getManifestVersion: vi.fn(),
+          exportManifest: vi.fn().mockResolvedValue({
+            manifest: mockManifest,
+            checksum: 'abc123',
+            sectionSources: {},
+            warnings: [],
+          }),
+        },
+      } as unknown as ReturnType<typeof useApiClients>)
+    }
+
+    it('renders export button', async () => {
+      renderComponent()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('export-button')).toBeInTheDocument()
+      })
+    })
+
+    it('shows YAML and JSON format options in dropdown', async () => {
+      mockApiClientsWithExport()
+      renderComponent()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('export-button')).toBeInTheDocument()
+      })
+
+      await userEvent.click(screen.getByTestId('export-button'))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('export-yaml')).toBeInTheDocument()
+        expect(screen.getByTestId('export-json')).toBeInTheDocument()
+      })
+    })
+
+    it('calls exportManifest and triggers download for YAML format', async () => {
+      const exportManifestMock = vi.fn().mockResolvedValue({
+        manifest: mockManifest,
+        checksum: 'abc123',
+        sectionSources: {},
+        warnings: [],
+      })
+      vi.mocked(useApiClients).mockReturnValue({
+        manifestHistory: {
+          getCurrentManifest: vi.fn(),
+          listManifestVersions: vi.fn().mockResolvedValue({ versions: mockVersions, totalCount: 3 }),
+          getManifestVersion: vi.fn(),
+          exportManifest: exportManifestMock,
+        },
+      } as unknown as ReturnType<typeof useApiClients>)
+
+      renderComponent()
+
+      await waitFor(() => expect(screen.getByTestId('export-button')).toBeInTheDocument())
+      await userEvent.click(screen.getByTestId('export-button'))
+      await waitFor(() => expect(screen.getByTestId('export-yaml')).toBeInTheDocument())
+      await userEvent.click(screen.getByTestId('export-yaml'))
+
+      await waitFor(() => {
+        expect(exportManifestMock).toHaveBeenCalledWith({})
+        expect(URL.createObjectURL).toHaveBeenCalled()
+      })
+    })
+
+    it('calls exportManifest and triggers download for JSON format', async () => {
+      const exportManifestMock = vi.fn().mockResolvedValue({
+        manifest: mockManifest,
+        checksum: 'abc123',
+        sectionSources: {},
+        warnings: [],
+      })
+      vi.mocked(useApiClients).mockReturnValue({
+        manifestHistory: {
+          getCurrentManifest: vi.fn(),
+          listManifestVersions: vi.fn().mockResolvedValue({ versions: mockVersions, totalCount: 3 }),
+          getManifestVersion: vi.fn(),
+          exportManifest: exportManifestMock,
+        },
+      } as unknown as ReturnType<typeof useApiClients>)
+
+      renderComponent()
+
+      await waitFor(() => expect(screen.getByTestId('export-button')).toBeInTheDocument())
+      await userEvent.click(screen.getByTestId('export-button'))
+      await waitFor(() => expect(screen.getByTestId('export-json')).toBeInTheDocument())
+      await userEvent.click(screen.getByTestId('export-json'))
+
+      await waitFor(() => {
+        expect(exportManifestMock).toHaveBeenCalledWith({})
+        expect(URL.createObjectURL).toHaveBeenCalled()
+      })
     })
   })
 })

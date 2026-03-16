@@ -6,12 +6,20 @@ import { StatusBadge } from '@/shared/status-badge'
 import { TimeDisplay } from '@/shared/time-display'
 import { Button } from '@/components/ui/button'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { ChevronDown } from 'lucide-react'
+import yaml from 'js-yaml'
 import { manifestKeys } from '@/lib/query-keys'
 import type { ManifestVersion } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
 import { ApplyStatus } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
@@ -87,11 +95,14 @@ function buildColumns(
   ]
 }
 
+type ExportFormat = 'yaml' | 'json'
+
 export function ManifestHistoryTable() {
   const { manifestHistory } = useApiClients()
   const [selectedVersion, setSelectedVersion] = useState<ManifestVersion | null>(null)
   const [compareVersions, setCompareVersions] = useState<ManifestVersion[]>([])
   const [showDiff, setShowDiff] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
 
   const compareSet = useMemo(
     () => new Set(compareVersions.map((v) => v.id ?? v.version)),
@@ -137,6 +148,41 @@ export function ManifestHistoryTable() {
     setShowDiff(false)
   }
 
+  async function handleExport(format: ExportFormat) {
+    setIsExporting(true)
+    try {
+      const response = await manifestHistory.exportManifest({})
+      const manifest = response.manifest
+      if (!manifest) return
+
+      let content: string
+      let mimeType: string
+      let extension: string
+
+      if (format === 'yaml') {
+        content = yaml.dump(manifest, { lineWidth: 120 })
+        mimeType = 'application/x-yaml'
+        extension = 'yaml'
+      } else {
+        content = JSON.stringify(manifest, null, 2)
+        mimeType = 'application/json'
+        extension = 'json'
+      }
+
+      const version = manifest.version || 'current'
+      const filename = `manifest-v${version}.${extension}`
+      const blob = new Blob([content], { type: mimeType })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   const diffGraphs = useMemo(() => {
     if (!showDiff || compareVersions.length !== 2) return null
     // Sort by appliedAt so earlier version is always "before"
@@ -155,6 +201,29 @@ export function ManifestHistoryTable() {
   return (
     <>
       <div data-testid="manifest-history-table">
+        <div className="flex items-center justify-end pb-3">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isExporting}
+                data-testid="export-button"
+              >
+                {isExporting ? 'Exporting...' : 'Export'}
+                <ChevronDown className="ml-1 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('yaml')} data-testid="export-yaml">
+                Export as YAML
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('json')} data-testid="export-json">
+                Export as JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
         {compareVersions.length > 0 && (
           <div className="flex items-center gap-3 pb-3" data-testid="compare-toolbar">
             <span className="text-sm text-muted-foreground">

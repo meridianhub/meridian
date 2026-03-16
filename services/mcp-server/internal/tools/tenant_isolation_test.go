@@ -53,9 +53,9 @@ func TestManifestValidate_YAMLInput_AmendMode_PropagatesTenantContext(t *testing
 		t.Errorf("expected tenant_id=acme-corp, got %q", tenantID)
 	}
 
-	// Verify amend mode does NOT set Force (immutability checks apply)
-	if capturedReq.Force {
-		t.Error("expected Force=false in amend mode with YAML input")
+	// Verify amend mode does NOT set SkipImmutabilityChecks (immutability checks apply)
+	if capturedReq.SkipImmutabilityChecks {
+		t.Error("expected SkipImmutabilityChecks=false in amend mode with YAML input")
 	}
 
 	// Verify the manifest was parsed from YAML correctly
@@ -94,8 +94,8 @@ func TestManifestValidate_YAMLInput_CreateMode_SkipsImmutabilityChecks(t *testin
 	}
 
 	// Create mode should skip immutability checks
-	if !capturedReq.Force {
-		t.Error("expected Force=true in create mode with YAML input")
+	if !capturedReq.SkipImmutabilityChecks {
+		t.Error("expected SkipImmutabilityChecks=true in create mode with YAML input")
 	}
 
 	// Create mode should NOT inject tenant context

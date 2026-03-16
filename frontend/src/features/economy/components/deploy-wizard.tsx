@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, CheckCircle2, Loader2, TriangleAlert } from 'lucide-react'
 import { useManifestPlan } from '../hooks/use-manifest-plan'
 import { ValidationPanel } from './validation-panel'
+import { ApplyPhasesStepper } from './apply-phases-stepper'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -16,7 +17,14 @@ import { useApiClients } from '@/api/context'
 import { useAuth } from '@/contexts/auth-context'
 import { manifestKeys } from '@/lib/query-keys'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
-import type { ValidationError } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+import type {
+  StepResult,
+  ValidationError,
+} from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+import {
+  ApplyManifestStatus,
+  StepResultStatus,
+} from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 import type { ManifestPlan } from '../hooks/use-manifest-plan'
 
 // ── Step state machine ──────────────────────────────────────────────────────
@@ -60,6 +68,7 @@ export function DeployWizard({
   const [step, setStep] = useState<DeployStep>('idle')
   const [applyError, setApplyError] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [applyStepResults, setApplyStepResults] = useState<StepResult[]>([])
 
   // Track plan hash to detect manifest edits after planning
   const [planHash, setPlanHash] = useState<string | null>(null)
@@ -101,9 +110,17 @@ export function DeployWizard({
         appliedBy: claims?.userId ?? '',
       })
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
+      setApplyStepResults(response.stepResults ?? [])
+      const isPartial = response.status === ApplyManifestStatus.FAILED &&
+        (response.stepResults ?? []).some((s) => s.status === StepResultStatus.SUCCESS)
       void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
-      setStep('success')
+      if (isPartial) {
+        setApplyError('Apply completed with partial failures. Some phases did not succeed.')
+        setStep('error')
+      } else {
+        setStep('success')
+      }
       setConfirmOpen(false)
     },
     onError: (err: unknown) => {
@@ -133,6 +150,7 @@ export function DeployWizard({
   const handleRetry = useCallback(() => {
     setStep('idle')
     setApplyError(null)
+    setApplyStepResults([])
   }, [])
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -193,6 +211,16 @@ export function DeployWizard({
               <span>Manifest has changed since last plan. Re-plan before applying.</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Apply phases stepper — shown while applying or after apply completes */}
+      {(step === 'applying' || step === 'success' || (step === 'error' && applyStepResults.length > 0)) && (
+        <div className="rounded-md border bg-muted/40 px-4 py-3">
+          <ApplyPhasesStepper
+            steps={applyStepResults}
+            isApplying={step === 'applying'}
+          />
         </div>
       )}
 

@@ -292,10 +292,9 @@ func TestManifestValidate_CreateModeSkipsImmutabilityChecks(t *testing.T) {
 	if capturedReq == nil {
 		t.Fatal("expected ApplyManifest to be called")
 	}
-	// Create mode should set Force=true to skip immutability/tenant-comparison checks
-	// TODO: Replace Force with SkipImmutabilityChecks once proto field is added (task 2)
-	if !capturedReq.Force {
-		t.Error("expected Force=true in create mode to skip immutability checks")
+	// Create mode should set SkipImmutabilityChecks=true to skip tenant-comparison checks
+	if !capturedReq.SkipImmutabilityChecks {
+		t.Error("expected SkipImmutabilityChecks=true in create mode to skip immutability checks")
 	}
 }
 
@@ -328,9 +327,9 @@ func TestManifestValidate_AmendModeWithTenantID(t *testing.T) {
 	if capturedReq == nil {
 		t.Fatal("expected ApplyManifest to be called")
 	}
-	// Amend mode should NOT set Force (immutability checks apply)
-	if capturedReq.Force {
-		t.Error("expected Force=false in amend mode")
+	// Amend mode should NOT set SkipImmutabilityChecks (immutability checks apply)
+	if capturedReq.SkipImmutabilityChecks {
+		t.Error("expected SkipImmutabilityChecks=false in amend mode")
 	}
 	// Verify tenant context was propagated
 	tenantID, ok := tenant.FromContext(capturedCtx)
