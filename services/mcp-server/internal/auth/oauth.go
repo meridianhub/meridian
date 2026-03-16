@@ -244,7 +244,7 @@ func NewMetadataHandler(fallbackBaseURL string) http.HandlerFunc {
 // preventing client spoofing. The MCP server must NOT be exposed directly
 // to the internet without a reverse proxy that sanitizes these headers.
 func baseURLFromRequest(r *http.Request, fallback string) string {
-	host := r.Header.Get("X-Forwarded-Host")
+	host := firstCSV(r.Header.Get("X-Forwarded-Host"))
 	if host == "" {
 		host = r.Host
 	}
@@ -252,7 +252,7 @@ func baseURLFromRequest(r *http.Request, fallback string) string {
 		return fallback
 	}
 
-	scheme := r.Header.Get("X-Forwarded-Proto")
+	scheme := firstCSV(r.Header.Get("X-Forwarded-Proto"))
 	if scheme == "" {
 		if r.TLS != nil {
 			scheme = "https"
@@ -262,6 +262,17 @@ func baseURLFromRequest(r *http.Request, fallback string) string {
 	}
 
 	return scheme + "://" + host
+}
+
+// firstCSV returns the first value from a potentially comma-separated header.
+// In multi-hop proxy setups, X-Forwarded-Host and X-Forwarded-Proto may
+// contain multiple values (e.g., "client-host, proxy-host"). The first
+// value is the original client-facing value.
+func firstCSV(v string) string {
+	if i := strings.IndexByte(v, ','); i >= 0 {
+		return strings.TrimSpace(v[:i])
+	}
+	return strings.TrimSpace(v)
 }
 
 // -----------------------------------------------------------------------
