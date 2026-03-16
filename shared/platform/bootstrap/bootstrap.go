@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	dbpkg "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
@@ -87,6 +88,14 @@ func NewDatabase(ctx context.Context, cfg DatabaseConfig) (*gorm.DB, error) {
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database instance: %w", err)
+	}
+
+	// Register TenantGuard to enforce tenant scoping on all queries.
+	// Any query executed without WithGormTenantScope will fail with ErrTenantScopeRequired.
+	// Use WithTenantGuardBypass for migrations, health checks, and tenant provisioning.
+	if err := db.Use(dbpkg.NewTenantGuard()); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("failed to register tenant guard: %w", err)
 	}
 
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
