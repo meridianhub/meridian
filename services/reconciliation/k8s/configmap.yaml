@@ -33,7 +33,7 @@ data:
 
   # Authentication configuration
   AUTH_ENABLED: "true"
-  # AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"
+  AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"
 
   # OpenTelemetry configuration
   OTEL_SERVICE_NAME: "reconciliation-service"

@@ -27,4 +27,4 @@ data:
   # Authentication configuration
   # Set to "true" to require JWT validation on gRPC calls
   AUTH_ENABLED: "true"
-  # AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"
+  AUTH_JWKS_URL: "http://keycloak:8080/realms/meridian/protocol/openid-connect/certs"
