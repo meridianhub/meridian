@@ -13,7 +13,10 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
+  Tooltip,
+  TooltipContent,
   TooltipProvider,
+  TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
   layoutWithELK,
@@ -46,35 +49,392 @@ interface DiffNodeData {
   [key: string]: unknown
 }
 
-const DiffNode = memo(function DiffNode({ data }: { data: DiffNodeData }) {
-  const node = data.manifestNode
-  const colors = DIFF_COLORS[data.diffStatus]
+// Trigger badge helper (mirrors manifest-graph.tsx)
+function getTriggerBadge(trigger: string): { label: string; variant: string } {
+  if (trigger.startsWith('event:')) return { label: 'event', variant: 'bg-accent text-accent-foreground' }
+  if (trigger.startsWith('scheduled:')) return { label: 'scheduled', variant: 'bg-info-muted text-info-foreground' }
+  if (trigger.startsWith('api:')) return { label: 'api', variant: 'bg-success-muted text-success-foreground' }
+  return { label: 'unknown', variant: 'bg-muted text-muted-foreground' }
+}
 
-  const containerStyle = useMemo(() => ({
+// Shared container style builder for all diff nodes
+function useDiffContainerStyle(diffStatus: DiffStatus) {
+  const colors = DIFF_COLORS[diffStatus]
+  return useMemo(() => ({
     width: 180,
     borderColor: colors.border,
     backgroundColor: colors.bg,
-    textDecoration: data.diffStatus === 'removed' ? 'line-through' as const : undefined,
-  }), [colors.border, colors.bg, data.diffStatus])
+    textDecoration: diffStatus === 'removed' ? 'line-through' as const : undefined,
+  }), [colors.border, colors.bg, diffStatus])
+}
+
+const DiffInstrumentNode = memo(function DiffInstrumentNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+  const unit = (node.data.dimensions as Record<string, unknown> | undefined)?.unit as string | undefined
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
 
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
-      <div
-        className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
-        style={containerStyle}
-        data-testid={`diff-node-${data.diffStatus}`}
-      >
-        <span className="text-[11px] font-bold font-mono text-foreground">{node.label}</span>
-        <span className="text-[9px] text-muted-foreground">{node.type.replace('_', ' ')}</span>
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+            {unit && <span className="text-[9px] text-muted-foreground">({unit})</span>}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
       <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
 
+const DiffAccountTypeNode = memo(function DiffAccountTypeNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffValuationRuleNode = memo(function DiffValuationRuleNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const from = node.data.fromInstrument as string
+  const to = node.data.toInstrument as string
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[10px] font-semibold text-foreground">{from} &rarr; {to}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Valuation: {from} to {to}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffSagaNode = memo(function DiffSagaNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const trigger = node.data.trigger as string
+  const badge = getTriggerBadge(trigger)
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+            <span className={`mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full ${badge.variant}`}>
+              {badge.label}
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({trigger})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffMarketDataNode = memo(function DiffMarketDataNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffOrganizationNode = memo(function DiffOrganizationNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffInternalAccountNode = memo(function DiffInternalAccountNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const code = node.data.code as string
+  const accountType = node.data.accountType as string | undefined
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{code}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+            {accountType && <span className="text-[9px] text-muted-foreground">{accountType}</span>}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({code})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffMappingNode = memo(function DiffMappingNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Mapping: {node.label}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffPaymentRailNode = memo(function DiffPaymentRailNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const provider = node.data.provider as string
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground">{provider}</span>
+            <span className="text-[10px] text-muted-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Payment Rail: {provider}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffOperationalGatewayNode = memo(function DiffOperationalGatewayNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffProviderConnectionNode = memo(function DiffProviderConnectionNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const connectionId = node.data.connectionId as string
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+            <span className="text-[9px] text-muted-foreground font-mono">{connectionId}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} ({connectionId})</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffInstructionRouteNode = memo(function DiffInstructionRouteNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const connectionId = node.data.connectionId as string
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+            <span className="text-[9px] text-muted-foreground font-mono">{connectionId}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{node.label} via {connectionId}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+const DiffPartyTypeNode = memo(function DiffPartyTypeNode({ data }: { data: DiffNodeData }) {
+  const node = data.manifestNode
+  const containerStyle = useDiffContainerStyle(data.diffStatus)
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center"
+            style={containerStyle}
+            data-testid={`diff-node-${data.diffStatus}`}
+          >
+            <span className="text-[11px] font-bold text-foreground truncate w-full">{node.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Party Type: {node.label}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
+// Prefix diff_ to avoid conflicts with main graph node types when composed in the same React tree
 const nodeTypes = {
-  diff_node: DiffNode,
+  diff_instrument: DiffInstrumentNode,
+  diff_account_type: DiffAccountTypeNode,
+  diff_valuation_rule: DiffValuationRuleNode,
+  diff_saga: DiffSagaNode,
+  diff_market_data: DiffMarketDataNode,
+  diff_organization: DiffOrganizationNode,
+  diff_internal_account: DiffInternalAccountNode,
+  diff_mapping: DiffMappingNode,
+  diff_payment_rail: DiffPaymentRailNode,
+  diff_operational_gateway: DiffOperationalGatewayNode,
+  diff_provider_connection: DiffProviderConnectionNode,
+  diff_instruction_route: DiffInstructionRouteNode,
+  diff_party_type: DiffPartyTypeNode,
 }
 
 function buildDiffEdgeStyle(status: DiffStatus): React.CSSProperties {
@@ -167,7 +527,7 @@ async function layoutDiffGraph(
       const status = nodeStatusMap.get(id) ?? 'unchanged'
       return {
         id,
-        type: 'diff_node',
+        type: `diff_${mn.type}`,
         position,
         data: {
           manifestNode: mn,

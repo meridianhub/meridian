@@ -258,8 +258,8 @@ func TestWorker_ProcessBatch_Success(t *testing.T) {
 	worker := NewWorker(repo, publisher, config, nil)
 
 	// Add test entries
-	entry1 := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{"test":1}`), "test-topic", "test-service", "corr-1")
-	entry2 := NewEventOutbox("event.type.2", "agg-2", "Aggregate", []byte(`{"test":2}`), "test-topic", "test-service", "corr-2")
+	entry1 := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{"test":1}`), "test-topic", "test-service", "corr-1", "tenant-1")
+	entry2 := NewEventOutbox("event.type.2", "agg-2", "Aggregate", []byte(`{"test":2}`), "test-topic", "test-service", "corr-2", "tenant-1")
 	repo.addEntry(entry1)
 	repo.addEntry(entry2)
 
@@ -299,7 +299,7 @@ func TestWorker_ProcessBatch_RetryOnFailure(t *testing.T) {
 	worker := NewWorker(repo, publisher, config, nil)
 
 	// Add test entry
-	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "")
+	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "", "tenant-1")
 	repo.addEntry(entry)
 
 	// Set produce to fail initially
@@ -349,7 +349,7 @@ func TestWorker_ProcessBatch_DLQAfterMaxRetries(t *testing.T) {
 	worker := NewWorker(repo, publisher, config, nil)
 
 	// Add test entry
-	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "")
+	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "", "tenant-1")
 	repo.addEntry(entry)
 
 	// Make produce always fail
@@ -461,6 +461,7 @@ func TestWorker_PublishWithHeaders(t *testing.T) {
 		"test-topic",
 		"test-service",
 		"correlation-123",
+		"tenant-1",
 	)
 	entry.CausationID = "causation-456"
 	repo.addEntry(entry)
@@ -498,6 +499,7 @@ func TestWorker_PublishWithHeaders(t *testing.T) {
 	assert.Equal(t, "agg-1", headerMap["aggregate_id"])
 	assert.Equal(t, "correlation-123", headerMap["correlation_id"])
 	assert.Equal(t, "causation-456", headerMap["causation_id"])
+	assert.Equal(t, "tenant-1", headerMap["X-Tenant-ID"])
 }
 
 func TestWorker_ProduceError(t *testing.T) {
@@ -513,7 +515,7 @@ func TestWorker_ProduceError(t *testing.T) {
 
 	worker := NewWorker(repo, publisher, config, nil)
 
-	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "")
+	entry := NewEventOutbox("event.type.1", "agg-1", "Aggregate", []byte(`{}`), "test-topic", "test-service", "", "tenant-1")
 	repo.addEntry(entry)
 
 	ctx, cancel := context.WithCancel(context.Background())

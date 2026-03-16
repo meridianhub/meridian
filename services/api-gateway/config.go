@@ -205,7 +205,7 @@ func LoadConfig() (*Config, error) {
 // LoadAuthConfig loads authentication configuration from environment variables.
 //
 // Environment variables:
-//   - AUTH_ENABLED: Enable authentication (default: false)
+//   - AUTH_ENABLED: Enable authentication (default: true)
 //   - JWKS_URL: JWKS endpoint URL for JWT validation (defaults to DEX_ISSUER/keys when DEX_ISSUER is set)
 //   - JWKS_CACHE_TTL: Cache duration for JWKS keys (default: 24h)
 //   - JWKS_REFRESH_TTL: Background refresh interval (default: 1h)
@@ -218,7 +218,7 @@ func LoadAuthConfig() AuthConfig {
 	jwksURL, jwtIssuer := resolveAuthEndpoints()
 
 	config := AuthConfig{
-		Enabled:            env.GetEnvAsBool("AUTH_ENABLED", false),
+		Enabled:            env.GetEnvAsBool("AUTH_ENABLED", true),
 		JWKSURL:            jwksURL,
 		JWKSCacheTTL:       getEnvAsDurationOrDefault("JWKS_CACHE_TTL", 24*time.Hour),
 		JWKSRefreshTTL:     getEnvAsDurationOrDefault("JWKS_REFRESH_TTL", 1*time.Hour),

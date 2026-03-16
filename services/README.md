@@ -364,7 +364,7 @@ The Gateway provides a multi-tenant API gateway for authenticated access to back
 |----------|----------|-------------|
 | `BASE_DOMAIN` | Yes | Base domain for subdomain-based tenant identification |
 | `DATABASE_URL` | Yes | PostgreSQL connection string for tenant lookups |
-| `AUTH_ENABLED` | No | Enable JWT/API key authentication (default: false) |
+| `AUTH_ENABLED` | No | Enable JWT/API key authentication (default: true) |
 | `JWKS_URL` | When AUTH_ENABLED | JWKS endpoint URL for JWT validation |
 | `BACKENDS` | No | JSON array of backend route mappings |
 

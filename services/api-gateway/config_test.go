@@ -18,6 +18,7 @@ func TestLoadConfig_Success(t *testing.T) {
 		"DATABASE_URL":   "postgres://user@localhost/db",
 		"REDIS_URL":      "redis://localhost:6379",
 		"BACKENDS":       `[{"prefix":"/v1/party","target":"party:50055"}]`,
+		"AUTH_ENABLED":   "false",
 	})
 	defer cleanup()
 
@@ -38,6 +39,7 @@ func TestLoadConfig_DefaultPort(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
 		"BASE_DOMAIN":  "api.example.com",
 		"DATABASE_URL": "postgres://user@localhost/db",
+		"AUTH_ENABLED": "false",
 	})
 	defer cleanup()
 
@@ -51,6 +53,7 @@ func TestLoadConfig_LocalDevModeDefaultsFalse(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
 		"BASE_DOMAIN":  "api.example.com",
 		"DATABASE_URL": "postgres://user@localhost/db",
+		"AUTH_ENABLED": "false",
 	})
 	defer cleanup()
 
@@ -134,6 +137,7 @@ func TestLoadConfig_EmptyBackendRoutes(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
 		"BASE_DOMAIN":  "api.example.com",
 		"DATABASE_URL": "postgres://user@localhost/db",
+		"AUTH_ENABLED": "false",
 	})
 	defer cleanup()
 
@@ -147,6 +151,7 @@ func TestLoadConfig_MultipleBackendRoutes(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
 		"BASE_DOMAIN":  "api.example.com",
 		"DATABASE_URL": "postgres://user@localhost/db",
+		"AUTH_ENABLED": "false",
 		"BACKENDS": `[
 			{"prefix":"/v1/party","target":"party:50055"},
 			{"prefix":"/v1/accounts","target":"current-account:50051"},
@@ -196,6 +201,7 @@ func TestLoadConfig_LocalDevModeVariations(t *testing.T) {
 				"BASE_DOMAIN":    "api.example.com",
 				"DATABASE_URL":   "postgres://user@localhost/db",
 				"LOCAL_DEV_MODE": tc.value,
+				"AUTH_ENABLED":   "false",
 			})
 			defer cleanup()
 
@@ -418,6 +424,7 @@ func setEnvVars(t *testing.T, vars map[string]string) func() {
 	envsToClear := []string{
 		"PORT", "BASE_DOMAIN", "LOCAL_DEV_MODE",
 		"DATABASE_URL", "REDIS_URL", "BACKENDS",
+		"AUTH_ENABLED", "JWKS_URL",
 	}
 	for _, key := range envsToClear {
 		if val, ok := os.LookupEnv(key); ok {
@@ -520,7 +527,7 @@ func TestLoadAuthConfig_Defaults(t *testing.T) {
 
 	config := LoadAuthConfig()
 
-	assert.False(t, config.Enabled)
+	assert.True(t, config.Enabled)
 	assert.Empty(t, config.JWKSURL)
 	assert.Equal(t, 24*time.Hour, config.JWKSCacheTTL)
 	assert.Equal(t, 1*time.Hour, config.JWKSRefreshTTL)
@@ -661,6 +668,7 @@ func TestLoadConfig_EventStreamDefaults(t *testing.T) {
 	cleanup := setEnvVars(t, map[string]string{
 		"BASE_DOMAIN":  "api.example.com",
 		"DATABASE_URL": "postgres://user@localhost/db",
+		"AUTH_ENABLED": "false",
 	})
 	defer cleanup()
 

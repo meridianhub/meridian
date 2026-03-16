@@ -228,12 +228,6 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 }
 
 // outboxToDomainEvent converts an EventOutbox entry to a DomainEvent.
-//
-// Note: EventOutbox does not carry a TenantID field. In dev/CI mode all
-// services share a single CockroachDB instance and tenant context is not
-// stored directly in the outbox. TenantID is left empty; callers that require
-// tenant-scoped delivery must populate it from the payload or application context.
-// This is an acceptable limitation for the dev/CI adapter.
 func (s *OutboxEventSource) outboxToDomainEvent(entry events.EventOutbox) eventstream.DomainEvent {
 	channel, err := eventstream.DeriveChannel(entry.Topic)
 	if err != nil {
@@ -253,7 +247,7 @@ func (s *OutboxEventSource) outboxToDomainEvent(entry events.EventOutbox) events
 		Channel:       channel,
 		AggregateID:   entry.AggregateID,
 		AggregateType: entry.AggregateType,
-		TenantID:      "", // Not stored in EventOutbox; see function comment.
+		TenantID:      entry.TenantID,
 		CorrelationID: entry.CorrelationID,
 		CausationID:   entry.CausationID,
 		Timestamp:     entry.CreatedAt.UTC(),

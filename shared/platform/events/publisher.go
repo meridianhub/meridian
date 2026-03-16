@@ -7,6 +7,8 @@ import (
 	"buf.build/go/protovalidate"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
+
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // OutboxPublisher provides methods for publishing events through the transactional outbox pattern.
@@ -127,6 +129,12 @@ func (p *OutboxPublisher) Publish(
 		partitionKey = config.AggregateID
 	}
 
+	// Extract tenant ID from context
+	var tenantID string
+	if tid, ok := tenant.FromContext(ctx); ok {
+		tenantID = string(tid)
+	}
+
 	// Create outbox entry
 	entry := NewEventOutbox(
 		config.EventType,
@@ -136,6 +144,7 @@ func (p *OutboxPublisher) Publish(
 		config.Topic,
 		p.serviceName,
 		config.CorrelationID,
+		tenantID,
 	)
 	entry.CausationID = config.CausationID
 	entry.PartitionKey = partitionKey

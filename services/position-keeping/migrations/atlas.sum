@@ -1,4 +1,4 @@
-h1:6JQqW7Pkun8NZbwT8+nyXduXASAhU6u5Nu4qPp4ykSU=
+h1:IycnBr9Evbn/d+uA/i6LOzwGQoV0iD+rCTacDbL7Nwk=
 20251216000001_initial.sql h1:4EgK5DDjh15OYo42dfUlBrTzhBlS4CJb8JntemJZxhU=
 20251217000001_audit_system.sql h1:f4dmYIvuu7PO3v7Vhcpb05RNo+EQEakHJ0mMv2tbZ6I=
 20251223000001_event_outbox.sql h1:NgNG789HKYeLuHhlb96LuVXEv2L4m/tRUfk03kZOXj4=
@@ -12,3 +12,5 @@ h1:6JQqW7Pkun8NZbwT8+nyXduXASAhU6u5Nu4qPp4ykSU=
 20260207000001_reservations.sql h1:7cxZtdmNaGYYX2GeHvwbZ3KMQe90NX0seBrrtD+BUaI=
 20260306000001_widen_currency_columns.sql h1:YmxJ/gvexkIMRulFRnWGOp/DjLHtpUmswzcCG/9UOb4=
 20260309000001_add_account_service_domain.sql h1:2rQ5DTmdIEU2MCQD5uRBfSi6EtLLtrgGj/E104GBXEs=
+20260316000001_add_event_outbox_tenant_id.sql h1:4Oh2ajCB8tbR3SdOGRUISCXfKPkJHEQbZPCScmM+FtE=
+20260316000002_add_event_outbox_tenant_id_index.sql h1:JBskwzl2+Ako6rRRP3ifyZ5wthcKfDEGXCv55Mj8hMs=

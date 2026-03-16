@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // ErrOutboxPublishNotSupported is returned when attempting to publish without a transaction.
@@ -89,6 +90,11 @@ func (p *OutboxEventPublisher) publishWithTx(ctx context.Context, tx pgx.Tx, eve
 		return fmt.Errorf("failed to serialize event %s: %w", event.EventType(), err)
 	}
 
+	var tenantID string
+	if tid, ok := tenant.FromContext(ctx); ok {
+		tenantID = string(tid)
+	}
+
 	entry := &events.EventOutbox{
 		EventType:     event.EventType(),
 		AggregateID:   event.AggregateID(),
@@ -97,6 +103,7 @@ func (p *OutboxEventPublisher) publishWithTx(ctx context.Context, tx pgx.Tx, eve
 		Topic:         topic,
 		PartitionKey:  event.AggregateID(),
 		ServiceName:   p.serviceName,
+		TenantID:      tenantID,
 	}
 
 	if err := p.outboxRepo.InsertWithPgxTx(ctx, tx, entry); err != nil {

@@ -860,6 +860,42 @@ func TestLoadConfig_AccountValidation_EnabledNoURL_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_AuthEnabledDefaultsTrue verifies that AUTH_ENABLED defaults to true
+// when the environment variable is not set, preventing authentication bypass.
+func TestLoadConfig_AuthEnabledDefaultsTrue(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
+	// AUTH_ENABLED intentionally not set - should default to true
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	if !config.Auth.Enabled {
+		t.Error("Auth.Enabled = false, want true (default must be secure)")
+	}
+}
+
+// TestLoadConfig_AuthEnabledFalseWhenExplicitlyDisabled verifies that AUTH_ENABLED=false
+// still disables auth when explicitly set (local dev scenario).
+func TestLoadConfig_AuthEnabledFalseWhenExplicitlyDisabled(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/testdb")
+	t.Setenv("ACCOUNT_VALIDATION_ENABLED", "false")
+	t.Setenv("AUTH_ENABLED", "false")
+
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, want nil", err)
+	}
+
+	if config.Auth.Enabled {
+		t.Error("Auth.Enabled = true, want false when AUTH_ENABLED=false")
+	}
+}
+
 // clearEnv clears environment variables used in tests
 func clearEnv(t *testing.T) {
 	t.Helper()
@@ -877,6 +913,7 @@ func clearEnv(t *testing.T) {
 		"ACCOUNT_VALIDATION_ENABLED", "CURRENT_ACCOUNT_SERVICE_URL",
 		"INTERNAL_ACCOUNT_SERVICE_URL", "ACCOUNT_VALIDATION_CACHE_TTL",
 		"ACCOUNT_VALIDATION_CONNECTION_TIMEOUT",
+		"AUTH_ENABLED",
 	}
 	for _, key := range envVars {
 		_ = os.Unsetenv(key)

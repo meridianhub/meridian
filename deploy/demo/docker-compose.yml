@@ -37,6 +37,14 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     # Not exposed to host — accessed only by meridian on the internal network
 
   # Dex OIDC is embedded in the meridian binary (no sidecar container needed).
@@ -101,6 +109,14 @@ services:
       DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
       DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
       DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
     # Note: The meridian image uses gcr.io/distroless/static-debian12 (no shell,
     # no wget), so a CMD-SHELL healthcheck cannot run. Health is monitored via
     # the gRPC health check service on port 50051. Caddy uses service_started
@@ -148,6 +164,14 @@ services:
 
       # --- Bearer token validation ---
       MCP_JWKS_URL: ${MCP_JWKS_URL:-}                             # e.g. https://demo.meridianhub.cloud/api/auth/jwks
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
     # Not exposed to host — accessed only by caddy on the internal network
     # Caddy proxies /mcp to this container
 
@@ -166,6 +190,14 @@ services:
       - /opt/meridian/frontend:/var/www/html:ro
       - caddy_data:/data
       - caddy_config:/config
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
 volumes:
   postgres_data:
