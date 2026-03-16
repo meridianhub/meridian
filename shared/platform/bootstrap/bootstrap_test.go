@@ -7,9 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
+	dbpkg "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func TestDefaultDatabaseConfig(t *testing.T) {
@@ -281,6 +285,76 @@ func TestNewRedisClient_PasswordOverride(t *testing.T) {
 		_, err := NewRedisClient(ctx, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to ping Redis")
+	})
+}
+
+// newMockGormDB creates a gorm.DB backed by sqlmock for unit testing.
+func newMockGormDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = mockDB.Close() })
+
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	return gormDB, mock
+}
+
+// testEntity is a minimal GORM model for bootstrap tests.
+type testEntity struct {
+	ID uint `gorm:"primarykey"`
+}
+
+func (testEntity) TableName() string { return "test_entities" }
+
+func TestNewDatabase_TenantGuardRegistered(t *testing.T) {
+	t.Parallel()
+
+	t.Run("guard plugin is registered on gorm db", func(t *testing.T) {
+		t.Parallel()
+		gormDB, _ := newMockGormDB(t)
+
+		// Simulate what NewDatabase does: register the TenantGuard
+		err := gormDB.Use(dbpkg.NewTenantGuard())
+		require.NoError(t, err)
+
+		_, ok := gormDB.Plugins["meridian:tenant_guard"]
+		assert.True(t, ok, "expected TenantGuard plugin to be registered")
+	})
+
+	t.Run("query without tenant scope returns ErrTenantScopeRequired", func(t *testing.T) {
+		t.Parallel()
+		gormDB, _ := newMockGormDB(t)
+
+		err := gormDB.Use(dbpkg.NewTenantGuard())
+		require.NoError(t, err)
+
+		var entities []testEntity
+		err = gormDB.WithContext(context.Background()).Find(&entities).Error
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, dbpkg.ErrTenantScopeRequired)
+	})
+
+	t.Run("query with bypass context is allowed", func(t *testing.T) {
+		t.Parallel()
+		gormDB, mock := newMockGormDB(t)
+
+		err := gormDB.Use(dbpkg.NewTenantGuard())
+		require.NoError(t, err)
+
+		ctx := dbpkg.WithTenantGuardBypass(context.Background())
+		mock.ExpectQuery(`SELECT \* FROM "test_entities"`).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+		var entities []testEntity
+		err = gormDB.WithContext(ctx).Find(&entities).Error
+
+		require.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }
 
