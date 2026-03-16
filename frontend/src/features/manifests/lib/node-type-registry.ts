@@ -64,6 +64,11 @@ export const NODE_TYPE_REGISTRY: Record<ManifestNodeType, NodeTypeConfig> = {
     label: 'Instruction Routes',
     layerPriority: '4',
   },
+  event_channel: {
+    color: 'var(--graph-event-channel)',
+    label: 'Event Channels',
+    layerPriority: '15',
+  },
   market_data: {
     color: 'var(--graph-market-data)',
     label: 'Market Data',

@@ -115,6 +115,7 @@
     --graph-provider-connection: oklch(0.59 0.15 230);
     --graph-instruction-route: oklch(0.59 0.15 275);
     --graph-party-type: oklch(0.63 0.15 105);
+    --graph-event-channel: oklch(0.65 0.15 55);
     --graph-diff-added: oklch(0.59 0.15 145);
     --graph-diff-removed: oklch(0.577 0.245 27.325);
     --graph-diff-modified: oklch(0.75 0.15 85);
@@ -197,6 +198,7 @@
     --graph-provider-connection: oklch(0.65 0.18 230);
     --graph-instruction-route: oklch(0.65 0.18 275);
     --graph-party-type: oklch(0.69 0.18 105);
+    --graph-event-channel: oklch(0.72 0.18 55);
     --graph-diff-added: oklch(0.65 0.18 145);
     --graph-diff-removed: oklch(0.704 0.191 22.216);
     --graph-diff-modified: oklch(0.75 0.18 85);

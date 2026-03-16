@@ -183,7 +183,7 @@ describe('ManifestGraph', () => {
       renderGraph(energyManifest)
       const flow = await screen.findByTestId('react-flow')
       expect(flow).toBeInTheDocument()
-      expect(flow).toHaveAttribute('data-node-count', '6')
+      expect(flow).toHaveAttribute('data-node-count', '7')
     })
 
     it('renders controls and minimap', async () => {
@@ -243,16 +243,16 @@ describe('ManifestGraph', () => {
 
     it('shows node counts per type', async () => {
       renderGraph(energyManifest)
-      // 2 instruments, 1 account type, 1 valuation rule, 2 sagas
+      // 2 instruments, 1 account type, 1 valuation rule, 2 sagas, 1 event channel
       const counts = await screen.findAllByText('(2)')
       expect(counts).toHaveLength(2) // instruments and sagas both have 2
       const ones = screen.getAllByText('(1)')
-      expect(ones).toHaveLength(2) // account type and valuation rule both have 1
+      expect(ones).toHaveLength(3) // account type, valuation rule, and event channel each have 1
     })
 
     it('shows total visible count', async () => {
       renderGraph(energyManifest)
-      expect(await screen.findByText('6 nodes visible')).toBeInTheDocument()
+      expect(await screen.findByText('7 nodes visible')).toBeInTheDocument()
     })
 
     it('unchecking a type filters nodes', async () => {
@@ -261,8 +261,8 @@ describe('ManifestGraph', () => {
       fireEvent.click(sagaCheckbox)
       // After unchecking sagas, saga nodes should be removed from the flow
       const flow = await screen.findByTestId('react-flow')
-      // The node count should decrease (6 - 2 sagas = 4)
-      expect(flow).toHaveAttribute('data-node-count', '4')
+      // The node count should decrease (7 - 2 sagas = 5)
+      expect(flow).toHaveAttribute('data-node-count', '5')
     })
   })
 

@@ -109,6 +109,7 @@ export type ManifestNodeType =
   | 'operational_gateway'
   | 'provider_connection'
   | 'instruction_route'
+  | 'event_channel'
   | 'market_data'
   | 'organization'
   | 'internal_account'
@@ -137,6 +138,8 @@ export type ManifestRelationship =
   | 'routes_to'
   | 'fallback_to'
   | 'uses_mapping'
+  | 'triggered_by'
+  | 'produces'
 
 export interface ManifestEdge {
   id: string
@@ -315,6 +318,68 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
     }
 
     nodes.push(sagaNode)
+  }
+
+  // Event channel virtual nodes and edges
+  const eventChannels = new Set<string>()
+
+  // Collect channels from saga triggers
+  for (const saga of sagas) {
+    if (saga.trigger?.startsWith('event:')) {
+      const channel = saga.trigger.slice('event:'.length)
+      if (channel) eventChannels.add(channel)
+    }
+  }
+
+  // Collect channels from saga outputs (position_keeping.initiate_log produces on this channel)
+  const sagaProducedChannels = new Map<string, Set<string>>()
+  for (const saga of sagas) {
+    if (saga.script) {
+      const outputs = analyzeSagaOutputs(saga.script)
+      if (outputs.producedEvents.length > 0) {
+        const channel = 'position-keeping.transaction-captured.v1'
+        eventChannels.add(channel)
+        const channels = sagaProducedChannels.get(saga.name) ?? new Set<string>()
+        channels.add(channel)
+        sagaProducedChannels.set(saga.name, channels)
+      }
+    }
+  }
+
+  // Create event_channel nodes
+  for (const channel of eventChannels) {
+    nodes.push({
+      id: `event_channel:${channel}`,
+      type: 'event_channel',
+      label: channel,
+      data: { channel },
+    })
+  }
+
+  // Create triggered_by edges: saga -> event_channel (saga listens on this channel)
+  for (const saga of sagas) {
+    if (saga.trigger?.startsWith('event:')) {
+      const channel = saga.trigger.slice('event:'.length)
+      if (!channel) continue
+      edges.push({
+        id: `triggered_by:${saga.name}:${channel}`,
+        source: `saga:${saga.name}`,
+        target: `event_channel:${channel}`,
+        relationship: 'triggered_by',
+      })
+    }
+  }
+
+  // Create produces edges: saga -> event_channel (saga emits events on this channel)
+  for (const [sagaName, channels] of sagaProducedChannels) {
+    for (const channel of channels) {
+      edges.push({
+        id: `produces:${sagaName}:${channel}`,
+        source: `saga:${sagaName}`,
+        target: `event_channel:${channel}`,
+        relationship: 'produces',
+      })
+    }
   }
 
   // Payment rails
