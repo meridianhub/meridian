@@ -12,13 +12,18 @@ func TestLoadEmbeddedApplyManifest(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, script)
-	assert.Equal(t, "1.2.0", version)
+	assert.Equal(t, "1.3.0", version)
 	assert.Contains(t, script, "apply_manifest")
 	assert.Contains(t, script, "execute_apply_manifest")
 	assert.Contains(t, script, "reference_data.register_instrument")
+	assert.Contains(t, script, "reference_data.activate_instrument")
 	assert.Contains(t, script, "internal_account.initiate")
 	assert.Contains(t, script, "operational_gateway.upsert_connection")
 	assert.Contains(t, script, "operational_gateway.upsert_route")
+	assert.Contains(t, script, "market_information.register_data_source")
+	assert.Contains(t, script, "market_information.register_data_set")
+	assert.Contains(t, script, "market_information.activate_data_set")
+	assert.Contains(t, script, "party.register_organization")
 }
 
 func TestIsSemverGreater(t *testing.T) {

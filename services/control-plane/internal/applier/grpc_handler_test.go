@@ -373,6 +373,69 @@ func TestBuildExecutorInput(t *testing.T) {
 	assert.Equal(t, "test_saga", input.SagaDefinitions[0].Name)
 }
 
+func TestBuildExecutorInput_NewResourceTypes(t *testing.T) {
+	manifest := newTestManifest()
+	manifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{
+				Code:        "BLOOMBERG",
+				Name:        "Bloomberg Financial Data",
+				Description: "FX rates and indices",
+				TrustLevel:  90,
+			},
+		},
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{
+				Code:        "USD_EUR_FX",
+				Unit:        "USD/EUR",
+				SourceCode:  "BLOOMBERG",
+				DisplayName: "USD/EUR Spot Rate",
+			},
+		},
+	}
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{
+			Code:      "ACME_ENERGY",
+			Name:      "Acme Energy Corp",
+			PartyType: "ORGANIZATION",
+			Attributes: map[string]string{
+				"industry": "energy",
+			},
+		},
+	}
+	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{
+			Code:              "REVENUE_GBP",
+			AccountType:       "REVENUE",
+			Instrument:        "GBP",
+			OwnerOrganization: "ACME_ENERGY",
+			Description:       "Revenue clearing account",
+		},
+	}
+
+	input := buildExecutorInput(manifest)
+
+	require.Len(t, input.MarketDataSources, 1)
+	assert.Equal(t, "BLOOMBERG", input.MarketDataSources[0].Code)
+	assert.Equal(t, "Bloomberg Financial Data", input.MarketDataSources[0].Name)
+	assert.Equal(t, 90, input.MarketDataSources[0].TrustLevel)
+
+	require.Len(t, input.MarketDataSets, 1)
+	assert.Equal(t, "USD_EUR_FX", input.MarketDataSets[0].Code)
+	assert.Equal(t, "BLOOMBERG", input.MarketDataSets[0].SourceCode)
+
+	require.Len(t, input.Organizations, 1)
+	assert.Equal(t, "ACME_ENERGY", input.Organizations[0].Code)
+	assert.Equal(t, "ORGANIZATION", input.Organizations[0].PartyType)
+	assert.Equal(t, "energy", input.Organizations[0].Attributes["industry"])
+
+	require.Len(t, input.InternalAccounts, 1)
+	assert.Equal(t, "REVENUE_GBP", input.InternalAccounts[0].Code)
+	assert.Equal(t, "REVENUE", input.InternalAccounts[0].AccountType)
+	assert.Equal(t, "GBP", input.InternalAccounts[0].InstrumentCode)
+	assert.Equal(t, "ACME_ENERGY", input.InternalAccounts[0].OwnerOrganization)
+}
+
 // --- skip_immutability_checks tests ---
 
 // mockVersionStore returns a fixed manifest as the latest applied version.

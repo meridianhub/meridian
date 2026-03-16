@@ -52,6 +52,19 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:             1,
 			},
 		},
+		// Reference Data - Instrument activation (DRAFT → ACTIVE)
+		"reference_data.activate_instrument": {
+			handler: activateInstrumentHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Activate an instrument definition (DRAFT → ACTIVE)",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*referencedatav1.ActivateInstrumentRequest)(nil),
+				ProtoResponseType:    (*referencedatav1.ActivateInstrumentResponse)(nil),
+				Version:              1,
+			},
+		},
 		// Reference Data - Account type registration (idempotent: CreateDraft + Activate)
 		"reference_data.register_account_type": {
 			handler: registerAccountTypeHandler(deps),
@@ -234,6 +247,7 @@ type HandlerDependencies struct {
 // ReferenceDataService abstracts the Reference Data gRPC client for testing.
 type ReferenceDataService interface {
 	RegisterInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+	ActivateInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 	DeleteInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 	// RegisterAccountType creates an account type draft (idempotent via ON CONFLICT DO NOTHING)
 	// and then activates it. Returns the registered code and version.
@@ -288,6 +302,13 @@ type PartyService interface {
 func registerInstrumentHandler(deps *HandlerDependencies) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		return deps.ReferenceData.RegisterInstrument(ctx, params)
+	}
+}
+
+// activateInstrumentHandler creates a handler that activates an instrument (DRAFT → ACTIVE).
+func activateInstrumentHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		return deps.ReferenceData.ActivateInstrument(ctx, params)
 	}
 }
 

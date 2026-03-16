@@ -106,6 +106,102 @@ func TestBuildSagaInput_Empty(t *testing.T) {
 	accountTypes, ok := sagaInput["account_types"].([]interface{})
 	require.True(t, ok)
 	assert.Empty(t, accountTypes)
+
+	marketSources, ok := sagaInput["market_data_sources"].([]interface{})
+	require.True(t, ok)
+	assert.Empty(t, marketSources)
+
+	marketSets, ok := sagaInput["market_data_sets"].([]interface{})
+	require.True(t, ok)
+	assert.Empty(t, marketSets)
+
+	orgs, ok := sagaInput["organizations"].([]interface{})
+	require.True(t, ok)
+	assert.Empty(t, orgs)
+
+	internalAccts, ok := sagaInput["internal_accounts"].([]interface{})
+	require.True(t, ok)
+	assert.Empty(t, internalAccts)
+}
+
+func TestBuildSagaInput_NewResourceTypes(t *testing.T) {
+	executor := &ManifestExecutor{}
+
+	input := &ApplyManifestInput{
+		ManifestVersion: "2",
+		TenantID:        "org_test",
+		MarketDataSources: []MarketDataSourceInput{
+			{
+				Code:        "BLOOMBERG",
+				Name:        "Bloomberg Financial Data",
+				Description: "FX and commodity data",
+				TrustLevel:  90,
+			},
+		},
+		MarketDataSets: []MarketDataSetInput{
+			{
+				Code:        "USD_EUR_FX",
+				Category:    "DATA_CATEGORY_FX_RATE",
+				Unit:        "USD/EUR",
+				SourceCode:  "BLOOMBERG",
+				DisplayName: "USD/EUR Spot Rate",
+				Description: "Spot FX rate",
+			},
+		},
+		Organizations: []OrganizationInput{
+			{
+				Code:       "ACME_ENERGY",
+				Name:       "Acme Energy Corp",
+				PartyType:  "ORGANIZATION",
+				Attributes: map[string]string{"industry": "energy"},
+			},
+		},
+		InternalAccounts: []InternalAccountInput{
+			{
+				Code:              "REVENUE_GBP",
+				AccountType:       "REVENUE",
+				InstrumentCode:    "GBP",
+				OwnerOrganization: "ACME_ENERGY",
+				Description:       "Revenue account",
+			},
+		},
+	}
+
+	sagaInput := executor.buildSagaInput(input)
+
+	sources, ok := sagaInput["market_data_sources"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, sources, 1)
+	firstSrc, ok := sources[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "BLOOMBERG", firstSrc["code"])
+	assert.Equal(t, 90, firstSrc["trust_level"])
+
+	datasets, ok := sagaInput["market_data_sets"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, datasets, 1)
+	firstDS, ok := datasets[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "USD_EUR_FX", firstDS["code"])
+	assert.Equal(t, "BLOOMBERG", firstDS["source_code"])
+
+	orgs, ok := sagaInput["organizations"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, orgs, 1)
+	firstOrg, ok := orgs[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ACME_ENERGY", firstOrg["code"])
+	attrs, ok := firstOrg["attributes"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "energy", attrs["industry"])
+
+	ias, ok := sagaInput["internal_accounts"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, ias, 1)
+	firstIA, ok := ias[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "REVENUE_GBP", firstIA["code"])
+	assert.Equal(t, "ACME_ENERGY", firstIA["owner_organization"])
 }
 
 func TestParseManifestVersion(t *testing.T) {
@@ -148,7 +244,7 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 	// Step 1: Load embedded saga script (simulates platform default fallback)
 	script, version, err := loadEmbeddedApplyManifest()
 	require.NoError(t, err, "embedded apply_manifest saga must be loadable")
-	assert.Equal(t, "1.2.0", version)
+	assert.Equal(t, "1.3.0", version)
 	assert.Contains(t, script, "execute_apply_manifest")
 
 	// Step 2: Set up handler registry with mock handlers
@@ -162,6 +258,13 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 			return map[string]any{
 				"instrument_code": params["instrument_code"],
 				"status":          "REGISTERED",
+			}, nil
+		},
+		activateInstrumentFn: func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
+			handlerCalls = append(handlerCalls, "activate_instrument:"+params["instrument_code"].(string))
+			return map[string]any{
+				"instrument_code": params["instrument_code"],
+				"status":          "ACTIVE",
 			}, nil
 		},
 		registerAccountTypeFn: func(_ *saga.StarlarkContext, params map[string]any) (any, error) {
@@ -284,26 +387,30 @@ func TestApplyManifestSaga_ZeroLocalSagaDefinitions(t *testing.T) {
 	assert.True(t, output.Success, "saga must succeed; error: %s", output.Error)
 
 	// Step 7: Verify phased execution order
-	// Phase 1: Instruments (2 instruments)
-	// Phase 2: Account types (1 register + 1 initiate)
-	// Phase 3: Valuation rules (1 rule)
-	// Phase 4: Saga definitions (1 definition)
+	// Phase 10: Instruments (2 register + 2 activate = 4 steps)
+	// Phase 20: Account types (1 register)
+	// Phase 40: Valuation rules (1 rule)
+	// Phase 60: Internal accounts (1 auto-derived from account types)
+	// Phase 70: Saga definitions (1 definition)
 	expectedCalls := []string{
-		// Phase 1
+		// Phase 10
 		"register_instrument:USD",
+		"activate_instrument:USD",
 		"register_instrument:KWH",
-		// Phase 2
+		"activate_instrument:KWH",
+		// Phase 20
 		"register_account_type:CLEARING_USD",
-		"initiate_account:CLEARING_USD",
-		// Phase 3
+		// Phase 40
 		"register_valuation_rule:KWH_GBP",
-		// Phase 4
+		// Phase 60 (auto-derived from account types since no explicit internal_accounts)
+		"initiate_account:CLEARING_USD",
+		// Phase 70
 		"register_saga_definition:deposit",
 	}
 	assert.Equal(t, expectedCalls, handlerCalls, "handlers must be called in phased order")
 
 	// Step 8: Verify step results
-	assert.Len(t, output.StepResults, 6, "must have 6 step results (2+2+1+1)")
+	assert.Len(t, output.StepResults, 8, "must have 8 step results (4+1+1+1+1)")
 	for _, step := range output.StepResults {
 		assert.True(t, step.Success, "step %s must succeed", step.StepName)
 	}
