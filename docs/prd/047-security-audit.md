@@ -195,7 +195,7 @@ plus ability to inject malicious code into built images.
 
 #### MEDIUM-1: No Rate Limiting on Financial API Endpoints
 
-**Description**: No rate limiting middleware in the gRPC interceptor
+**Description**: No rate-limiting middleware in the gRPC interceptor
 chain for any service. Rate limiting only exists for outbound
 provider connections and MCP sessions.
 
@@ -327,7 +327,7 @@ should build on:
 | 2.5 | Reduce forecasting `DefaultTimeout` from 30s to 10s | HIGH-2 |
 | 2.6 | Replicate NetworkPolicy to all services | MEDIUM-2 |
 | 2.7 | Add CI "Security Defaults Gate" job | Regression |
-| 2.8 | Add rate limiting middleware to gRPC interceptor chain | MEDIUM-1 |
+| 2.8 | Add rate-limiting middleware to gRPC interceptor chain | MEDIUM-1 |
 | 2.9 | Make `GrpcServerBuilder.Build()` fail-closed on auth | MEDIUM-6 |
 
 ### Wave 3: Defense in Depth (~2-3 weeks)
