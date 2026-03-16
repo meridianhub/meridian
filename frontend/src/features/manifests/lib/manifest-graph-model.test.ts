@@ -458,6 +458,258 @@ describe('buildManifestGraph', () => {
     })
   })
 
+  describe('payment rail nodes', () => {
+    it('creates a node for each payment rail', () => {
+      const manifest = createMockManifest({
+        paymentRails: [
+          { provider: 'stripe_connect', mode: 1, accountId: 'acct_ABC123456789012345', webhookEndpointSecret: 'whsec_test', platformFee: { type: 1, value: '2.5' }, payoutSchedule: 1, supportedMethods: ['card'] },
+          { provider: 'wise', mode: 2, accountId: 'acct_XYZ987654321098765', webhookEndpointSecret: 'whsec_prod', platformFee: { type: 2, value: '1.00' }, payoutSchedule: 2, supportedMethods: ['bank_transfer'] },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const railNodes = graph.nodes.filter((n) => n.type === 'payment_rail')
+
+      expect(railNodes).toHaveLength(2)
+      expect(railNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'payment_rail:stripe_connect', label: 'stripe_connect' }),
+          expect.objectContaining({ id: 'payment_rail:wise', label: 'wise' }),
+        ]),
+      )
+    })
+  })
+
+  describe('party type nodes', () => {
+    it('creates a node for each party type', () => {
+      const manifest = createMockManifest({
+        partyTypes: [
+          { id: 'pt-1', tenantId: 't-1', partyType: 'PERSON', attributeSchema: '{}' },
+          { id: 'pt-2', tenantId: 't-1', partyType: 'ORGANIZATION', attributeSchema: '{}' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const ptNodes = graph.nodes.filter((n) => n.type === 'party_type')
+
+      expect(ptNodes).toHaveLength(2)
+      expect(ptNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'party_type:PERSON', label: 'PERSON' }),
+          expect.objectContaining({ id: 'party_type:ORGANIZATION', label: 'ORGANIZATION' }),
+        ]),
+      )
+    })
+  })
+
+  describe('mapping nodes', () => {
+    it('creates a node for each mapping definition', () => {
+      const manifest = createMockManifest({
+        mappings: [
+          { id: 'm-1', tenantId: 't-1', name: 'Stripe Webhook -> Payment Order', targetService: 'payment_order.v1' },
+          { id: 'm-2', tenantId: 't-1', name: 'KYC Response -> Party Update', targetService: 'party.v1' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const mappingNodes = graph.nodes.filter((n) => n.type === 'mapping')
+
+      expect(mappingNodes).toHaveLength(2)
+      expect(mappingNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'mapping:Stripe Webhook -> Payment Order', label: 'Stripe Webhook -> Payment Order' }),
+          expect.objectContaining({ id: 'mapping:KYC Response -> Party Update', label: 'KYC Response -> Party Update' }),
+        ]),
+      )
+    })
+  })
+
+  describe('operational gateway nodes', () => {
+    it('creates an operational_gateway node when present', () => {
+      const manifest = createMockManifest({
+        operationalGateway: {
+          providerConnections: [],
+          instructionRoutes: [],
+          inboundRoutes: [],
+        },
+      })
+      const graph = buildManifestGraph(manifest)
+      const gwNodes = graph.nodes.filter((n) => n.type === 'operational_gateway')
+
+      expect(gwNodes).toHaveLength(1)
+      expect(gwNodes[0]).toMatchObject({
+        id: 'operational_gateway:default',
+        label: 'Operational Gateway',
+      })
+    })
+
+    it('does not create operational_gateway node when absent', () => {
+      const manifest = createMockManifest({
+        operationalGateway: undefined,
+      })
+      const graph = buildManifestGraph(manifest)
+      const gwNodes = graph.nodes.filter((n) => n.type === 'operational_gateway')
+
+      expect(gwNodes).toHaveLength(0)
+    })
+  })
+
+  describe('provider connection nodes and edges', () => {
+    it('creates a node for each provider connection', () => {
+      const manifest = createMockManifest({
+        operationalGateway: {
+          providerConnections: [
+            { connectionId: 'stripe-primary', providerName: 'Stripe', providerType: 'payment_gateway', protocol: 1, baseUrl: 'https://api.stripe.com' },
+            { connectionId: 'kyc-provider', providerName: 'Onfido', providerType: 'kyc_provider', protocol: 1, baseUrl: 'https://api.onfido.com' },
+          ],
+          instructionRoutes: [],
+          inboundRoutes: [],
+        },
+      })
+      const graph = buildManifestGraph(manifest)
+      const connNodes = graph.nodes.filter((n) => n.type === 'provider_connection')
+
+      expect(connNodes).toHaveLength(2)
+      expect(connNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'provider_connection:stripe-primary', label: 'Stripe' }),
+          expect.objectContaining({ id: 'provider_connection:kyc-provider', label: 'Onfido' }),
+        ]),
+      )
+    })
+
+    it('creates belongs_to edges from provider connections to operational gateway', () => {
+      const manifest = createMockManifest({
+        operationalGateway: {
+          providerConnections: [
+            { connectionId: 'stripe-primary', providerName: 'Stripe', providerType: 'payment_gateway', protocol: 1, baseUrl: 'https://api.stripe.com' },
+          ],
+          instructionRoutes: [],
+          inboundRoutes: [],
+        },
+      })
+      const graph = buildManifestGraph(manifest)
+      const belongsToEdges = graph.edges.filter((e) => e.relationship === 'belongs_to')
+
+      expect(belongsToEdges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'provider_connection:stripe-primary',
+            target: 'operational_gateway:default',
+            relationship: 'belongs_to',
+          }),
+        ]),
+      )
+    })
+  })
+
+  describe('instruction route nodes and edges', () => {
+    it('creates a node for each instruction route', () => {
+      const manifest = createMockManifest({
+        operationalGateway: {
+          providerConnections: [
+            { connectionId: 'stripe-primary', providerName: 'Stripe', providerType: 'payment_gateway', protocol: 1, baseUrl: 'https://api.stripe.com' },
+          ],
+          instructionRoutes: [
+            { instructionType: 'payment.initiate', connectionId: 'stripe-primary', fallbackConnectionId: '', outboundMappingId: 'stripe-outbound', inboundMappingId: '', httpMethod: 'POST', pathTemplate: '/v1/charges' },
+            { instructionType: 'kyc.verify', connectionId: 'stripe-primary', fallbackConnectionId: '', outboundMappingId: '', inboundMappingId: '', httpMethod: 'POST', pathTemplate: '/v1/identity' },
+          ],
+          inboundRoutes: [],
+        },
+      })
+      const graph = buildManifestGraph(manifest)
+      const routeNodes = graph.nodes.filter((n) => n.type === 'instruction_route')
+
+      expect(routeNodes).toHaveLength(2)
+      expect(routeNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'instruction_route:payment.initiate', label: 'payment.initiate' }),
+          expect.objectContaining({ id: 'instruction_route:kyc.verify', label: 'kyc.verify' }),
+        ]),
+      )
+    })
+
+    it('creates routes_to edges from instruction routes to provider connections', () => {
+      const manifest = createMockManifest({
+        operationalGateway: {
+          providerConnections: [
+            { connectionId: 'stripe-primary', providerName: 'Stripe', providerType: 'payment_gateway', protocol: 1, baseUrl: 'https://api.stripe.com' },
+          ],
+          instructionRoutes: [
+            { instructionType: 'payment.initiate', connectionId: 'stripe-primary', fallbackConnectionId: '', outboundMappingId: '', inboundMappingId: '', httpMethod: 'POST', pathTemplate: '/v1/charges' },
+          ],
+          inboundRoutes: [],
+        },
+      })
+      const graph = buildManifestGraph(manifest)
+      const routesToEdges = graph.edges.filter((e) => e.relationship === 'routes_to')
+
+      expect(routesToEdges).toHaveLength(1)
+      expect(routesToEdges[0]).toMatchObject({
+        source: 'instruction_route:payment.initiate',
+        target: 'provider_connection:stripe-primary',
+        relationship: 'routes_to',
+      })
+    })
+
+    it('creates uses_mapping edges from instruction routes to mappings', () => {
+      const manifest = createMockManifest({
+        mappings: [
+          { id: 'm-1', tenantId: 't-1', name: 'stripe-outbound', targetService: 'payment_order.v1' },
+          { id: 'm-2', tenantId: 't-1', name: 'stripe-inbound', targetService: 'payment_order.v1' },
+        ],
+        operationalGateway: {
+          providerConnections: [
+            { connectionId: 'stripe-primary', providerName: 'Stripe', providerType: 'payment_gateway', protocol: 1, baseUrl: 'https://api.stripe.com' },
+          ],
+          instructionRoutes: [
+            { instructionType: 'payment.initiate', connectionId: 'stripe-primary', fallbackConnectionId: '', outboundMappingId: 'stripe-outbound', inboundMappingId: 'stripe-inbound', httpMethod: 'POST', pathTemplate: '/v1/charges' },
+          ],
+          inboundRoutes: [],
+        },
+      })
+      const graph = buildManifestGraph(manifest)
+      const usesMappingEdges = graph.edges.filter((e) => e.relationship === 'uses_mapping')
+
+      expect(usesMappingEdges).toHaveLength(2)
+      expect(usesMappingEdges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'instruction_route:payment.initiate',
+            target: 'mapping:stripe-outbound',
+            relationship: 'uses_mapping',
+          }),
+          expect.objectContaining({
+            source: 'instruction_route:payment.initiate',
+            target: 'mapping:stripe-inbound',
+            relationship: 'uses_mapping',
+          }),
+        ]),
+      )
+    })
+
+    it('creates fallback_to edges when fallback connection is set', () => {
+      const manifest = createMockManifest({
+        operationalGateway: {
+          providerConnections: [
+            { connectionId: 'stripe-primary', providerName: 'Stripe', providerType: 'payment_gateway', protocol: 1, baseUrl: 'https://api.stripe.com' },
+            { connectionId: 'stripe-backup', providerName: 'Stripe Backup', providerType: 'payment_gateway', protocol: 1, baseUrl: 'https://api.stripe.com' },
+          ],
+          instructionRoutes: [
+            { instructionType: 'payment.initiate', connectionId: 'stripe-primary', fallbackConnectionId: 'stripe-backup', outboundMappingId: '', inboundMappingId: '', httpMethod: 'POST', pathTemplate: '/v1/charges' },
+          ],
+          inboundRoutes: [],
+        },
+      })
+      const graph = buildManifestGraph(manifest)
+      const fallbackEdges = graph.edges.filter((e) => e.relationship === 'fallback_to')
+
+      expect(fallbackEdges).toHaveLength(1)
+      expect(fallbackEdges[0]).toMatchObject({
+        source: 'instruction_route:payment.initiate',
+        target: 'provider_connection:stripe-backup',
+        relationship: 'fallback_to',
+      })
+    })
+  })
+
   describe('edge cases', () => {
     it('returns empty graph for empty manifest', () => {
       const manifest = createMockManifest()

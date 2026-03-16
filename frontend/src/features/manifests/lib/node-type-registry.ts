@@ -34,6 +34,36 @@ export const NODE_TYPE_REGISTRY: Record<ManifestNodeType, NodeTypeConfig> = {
     label: 'Sagas',
     layerPriority: '10',
   },
+  payment_rail: {
+    color: 'var(--graph-payment-rail)',
+    label: 'Payment Rails',
+    layerPriority: '9',
+  },
+  party_type: {
+    color: 'var(--graph-party-type)',
+    label: 'Party Types',
+    layerPriority: '8',
+  },
+  mapping: {
+    color: 'var(--graph-mapping)',
+    label: 'Mappings',
+    layerPriority: '7',
+  },
+  operational_gateway: {
+    color: 'var(--graph-operational-gateway)',
+    label: 'Operational Gateway',
+    layerPriority: '6',
+  },
+  provider_connection: {
+    color: 'var(--graph-provider-connection)',
+    label: 'Provider Connections',
+    layerPriority: '5',
+  },
+  instruction_route: {
+    color: 'var(--graph-instruction-route)',
+    label: 'Instruction Routes',
+    layerPriority: '4',
+  },
 }
 
 /** Derived view: { color, label } per node type, compatible with existing NODE_THEMES usage. */
