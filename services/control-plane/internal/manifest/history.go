@@ -62,6 +62,8 @@ func NewHistoryServiceWithDiffer(repo *Repository, d *differ.ManifestDiffer) (*H
 // StoreManifestVersion saves a manifest snapshot with audit metadata.
 // It generates a diff summary by comparing to the previous applied version.
 // If graph is non-nil, it is serialized as JSON into the relationship_graph column.
+// expectedSeq controls optimistic locking: non-zero values are checked
+// atomically against the current sequence number; 0 skips the check.
 func (s *HistoryService) StoreManifestVersion(
 	ctx context.Context,
 	manifest *controlplanev1.Manifest,
@@ -69,6 +71,7 @@ func (s *HistoryService) StoreManifestVersion(
 	applyJobID *uuid.UUID,
 	status ApplyStatus,
 	graph *validator.RelationshipGraph,
+	expectedSeq int64,
 ) (*VersionEntity, error) {
 	if manifest == nil {
 		return nil, ErrNilManifest
@@ -122,7 +125,7 @@ func (s *HistoryService) StoreManifestVersion(
 		CreatedAt:         now,
 	}
 
-	if err := s.repo.Store(ctx, entity); err != nil {
+	if err := s.repo.Store(ctx, entity, expectedSeq); err != nil {
 		return nil, err
 	}
 
@@ -204,8 +207,9 @@ func (s *HistoryService) RollbackToVersion(
 	}
 
 	// Store as a new version (forward-only audit trail)
-	// Rollbacks don't re-validate, so no graph is available
-	return s.StoreManifestVersion(ctx, manifest, appliedBy, applyJobID, ApplyStatusApplied, nil)
+	// Rollbacks don't re-validate, so no graph is available.
+	// expectedSeq=0: rollbacks always overwrite (no optimistic lock check).
+	return s.StoreManifestVersion(ctx, manifest, appliedBy, applyJobID, ApplyStatusApplied, nil, 0)
 }
 
 // EntityToProto converts a VersionEntity to its protobuf representation.
@@ -216,13 +220,14 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	}
 
 	mv := &controlplanev1.ManifestVersion{
-		Id:          entity.ID.String(),
-		Version:     entity.Version,
-		Manifest:    manifest,
-		AppliedAt:   timestamppb.New(entity.AppliedAt),
-		AppliedBy:   entity.AppliedBy,
-		ApplyStatus: toProtoApplyStatus(entity.ApplyStatus),
-		CreatedAt:   timestamppb.New(entity.CreatedAt),
+		Id:             entity.ID.String(),
+		Version:        entity.Version,
+		Manifest:       manifest,
+		AppliedAt:      timestamppb.New(entity.AppliedAt),
+		AppliedBy:      entity.AppliedBy,
+		ApplyStatus:    toProtoApplyStatus(entity.ApplyStatus),
+		CreatedAt:      timestamppb.New(entity.CreatedAt),
+		SequenceNumber: entity.SequenceNumber,
 	}
 
 	if entity.ApplyJobID != nil {
@@ -234,6 +239,15 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	}
 	if entity.RelationshipGraph != nil {
 		mv.RelationshipGraph = entity.RelationshipGraph
+	}
+	if entity.Checksum != nil {
+		mv.Checksum = entity.Checksum
+	}
+	if entity.Source != nil {
+		mv.Source = entity.Source
+	}
+	if entity.ResourcePath != nil {
+		mv.ResourcePath = entity.ResourcePath
 	}
 
 	return mv, nil

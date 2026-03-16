@@ -17,6 +17,8 @@ var (
 	ErrNilDatabase = errors.New("database connection cannot be nil")
 	// ErrVersionNotFound is returned when a manifest version is not found.
 	ErrVersionNotFound = errors.New("manifest version not found")
+	// ErrSequenceConflict is returned when optimistic locking detects a concurrent modification.
+	ErrSequenceConflict = errors.New("sequence number conflict: manifest was modified concurrently")
 )
 
 // ApplyStatus represents the outcome of applying a manifest.
@@ -40,6 +42,10 @@ type VersionEntity struct {
 	ApplyJobID        *uuid.UUID  `gorm:"column:apply_job_id;type:uuid"`
 	DiffSummary       *string     `gorm:"column:diff_summary;type:text"`
 	RelationshipGraph *string     `gorm:"column:relationship_graph;type:jsonb"`
+	SequenceNumber    int64       `gorm:"column:sequence_number;not null;default:0"`
+	Checksum          *string     `gorm:"column:checksum;type:varchar(64)"`
+	Source            *string     `gorm:"column:source;type:varchar(20)"`
+	ResourcePath      *string     `gorm:"column:resource_path;type:varchar(255)"`
 	CreatedAt         time.Time   `gorm:"column:created_at;not null"`
 }
 
@@ -61,14 +67,55 @@ func NewRepository(database *gorm.DB) (*Repository, error) {
 	return &Repository{db: database}, nil
 }
 
-// Store saves a new manifest version record.
-func (r *Repository) Store(ctx context.Context, entity *VersionEntity) error {
+// Store saves a new manifest version record, atomically assigning the next
+// sequence number. The entity's SequenceNumber field is updated in place.
+//
+// If expectedSeq is non-zero, the current sequence number must match it
+// (optimistic locking). A mismatch returns ErrSequenceConflict.
+// Pass 0 to skip the check (first apply or overwrite mode).
+func (r *Repository) Store(ctx context.Context, entity *VersionEntity, expectedSeq int64) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		// Atomically compute the next sequence number.
+		var maxSeq *int64
+		if err := tx.Model(&VersionEntity{}).Select("MAX(sequence_number)").Scan(&maxSeq).Error; err != nil {
+			return fmt.Errorf("failed to get max sequence number: %w", err)
+		}
+
+		var currentSeq int64
+		if maxSeq != nil {
+			currentSeq = *maxSeq
+		}
+
+		// Optimistic locking: verify expected sequence within the same transaction.
+		if expectedSeq != 0 && currentSeq != expectedSeq {
+			return fmt.Errorf("%w: expected %d but current is %d",
+				ErrSequenceConflict, expectedSeq, currentSeq)
+		}
+
+		entity.SequenceNumber = currentSeq + 1
+
 		if err := tx.Create(entity).Error; err != nil {
 			return fmt.Errorf("failed to store manifest version: %w", err)
 		}
 		return nil
 	})
+}
+
+// GetCurrentSequenceNumber returns the highest sequence_number across all
+// manifest versions for the tenant, or 0 if no versions exist.
+func (r *Repository) GetCurrentSequenceNumber(ctx context.Context) (int64, error) {
+	var result int64
+	err := db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		var maxSeq *int64
+		if err := tx.Model(&VersionEntity{}).Select("MAX(sequence_number)").Scan(&maxSeq).Error; err != nil {
+			return fmt.Errorf("failed to get current sequence number: %w", err)
+		}
+		if maxSeq != nil {
+			result = *maxSeq
+		}
+		return nil
+	})
+	return result, err
 }
 
 // GetLatestApplied retrieves the most recently applied manifest version.

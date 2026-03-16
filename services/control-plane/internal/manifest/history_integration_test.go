@@ -39,7 +39,7 @@ func TestHistoryService_StoreAndRetrieve(t *testing.T) {
 	svc, tc := setupHistoryService(t)
 
 	m := testManifestProto("1.0")
-	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 	assert.Equal(t, "1.0", stored.Version)
 	assert.Equal(t, "admin@meridian.io", stored.AppliedBy)
@@ -56,7 +56,7 @@ func TestHistoryService_StoreWithJobID(t *testing.T) {
 
 	m := testManifestProto("1.0")
 	jobID := uuid.New()
-	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "system", &jobID, manifest.ApplyStatusApplied, nil)
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "system", &jobID, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 	require.NotNil(t, stored.ApplyJobID)
 	assert.Equal(t, jobID, *stored.ApplyJobID)
@@ -67,7 +67,7 @@ func TestHistoryService_DiffSummaryGeneration(t *testing.T) {
 
 	// Store first version
 	m1 := testManifestProto("1.0")
-	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	// Store second version with changes
@@ -82,7 +82,7 @@ func TestHistoryService_DiffSummaryGeneration(t *testing.T) {
 		},
 	})
 
-	stored, err := svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 	require.NotNil(t, stored.DiffSummary)
 	assert.Contains(t, *stored.DiffSummary, "Create instrument EUR")
@@ -93,7 +93,7 @@ func TestHistoryService_NoDiffForFirstVersion(t *testing.T) {
 	svc, tc := setupHistoryService(t)
 
 	m := testManifestProto("1.0")
-	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 	// First version has no previous to diff against, so diff_summary should be nil
 	assert.Nil(t, stored.DiffSummary)
@@ -104,12 +104,12 @@ func TestHistoryService_NoDiffForFailedStatus(t *testing.T) {
 
 	// Store a successful version first
 	m1 := testManifestProto("1.0")
-	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	// Store a failed version - should not attempt diff
 	m2 := testManifestProto("2.0")
-	stored, err := svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusFailed, nil)
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusFailed, nil, 0)
 	require.NoError(t, err)
 	assert.Nil(t, stored.DiffSummary)
 }
@@ -118,7 +118,7 @@ func TestHistoryService_GetManifestVersion(t *testing.T) {
 	svc, tc := setupHistoryService(t)
 
 	m := testManifestProto("3.0")
-	_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	found, err := svc.GetManifestVersion(tc.Ctx, "3.0")
@@ -139,7 +139,7 @@ func TestHistoryService_ListManifestVersions(t *testing.T) {
 	// Store 3 versions
 	for _, v := range []string{"1.0", "1.1", "2.0"} {
 		m := testManifestProto(v)
-		_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+		_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 		require.NoError(t, err)
 	}
 
@@ -153,7 +153,7 @@ func TestHistoryService_ListManifestVersions_DefaultLimit(t *testing.T) {
 	svc, tc := setupHistoryService(t)
 
 	m := testManifestProto("1.0")
-	_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	// Zero limit should default to 20
@@ -167,7 +167,7 @@ func TestHistoryService_CompareVersions(t *testing.T) {
 
 	// Store v1
 	m1 := testManifestProto("1.0")
-	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	// Store v2 with changes
@@ -181,7 +181,7 @@ func TestHistoryService_CompareVersions(t *testing.T) {
 			Precision: 2,
 		},
 	})
-	_, err = svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err = svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	diff, err := svc.CompareVersions(tc.Ctx, "1.0", "2.0")
@@ -202,7 +202,7 @@ func TestHistoryService_RollbackToVersion(t *testing.T) {
 
 	// Store v1.0
 	m1 := testManifestProto("1.0")
-	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(tc.Ctx, m1, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	// Store v2.0
@@ -216,7 +216,7 @@ func TestHistoryService_RollbackToVersion(t *testing.T) {
 			Precision: 2,
 		},
 	})
-	_, err = svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err = svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	// Verify current is v2.0
@@ -254,7 +254,7 @@ func TestHistoryService_RollbackToVersion_EmptyAppliedBy(t *testing.T) {
 	svc, tc := setupHistoryService(t)
 
 	m := testManifestProto("1.0")
-	_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	_, err = svc.RollbackToVersion(tc.Ctx, "1.0", "", nil)
@@ -265,7 +265,7 @@ func TestHistoryService_EntityToProto(t *testing.T) {
 	svc, tc := setupHistoryService(t)
 
 	m := testManifestProto("1.0")
-	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil)
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
 	require.NoError(t, err)
 
 	proto, err := manifest.EntityToProto(stored)
@@ -276,4 +276,52 @@ func TestHistoryService_EntityToProto(t *testing.T) {
 	assert.NotNil(t, proto.Manifest)
 	assert.Equal(t, "admin@meridian.io", proto.AppliedBy)
 	assert.Equal(t, controlplanev1.ApplyStatus_APPLY_STATUS_APPLIED, proto.ApplyStatus)
+}
+
+func TestHistoryService_EntityToProto_IncludesSequenceNumber(t *testing.T) {
+	svc, tc := setupHistoryService(t)
+
+	m := testManifestProto("1.0")
+	stored, err := svc.StoreManifestVersion(tc.Ctx, m, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
+	require.NoError(t, err)
+
+	proto, err := manifest.EntityToProto(stored)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), proto.SequenceNumber)
+
+	// Store second version
+	m2 := testManifestProto("2.0")
+	stored2, err := svc.StoreManifestVersion(tc.Ctx, m2, "admin@meridian.io", nil, manifest.ApplyStatusApplied, nil, 0)
+	require.NoError(t, err)
+
+	proto2, err := manifest.EntityToProto(stored2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), proto2.SequenceNumber)
+}
+
+func TestHistoryService_EntityToProto_IncludesNewFields(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	checksum := "sha256:abc123"
+	source := "cli"
+	resourcePath := "/path/to/manifest.yaml"
+
+	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	entity.Checksum = &checksum
+	entity.Source = &source
+	entity.ResourcePath = &resourcePath
+
+	err := repo.Store(tc.Ctx, entity, 0)
+	require.NoError(t, err)
+
+	proto, err := manifest.EntityToProto(entity)
+	require.NoError(t, err)
+
+	require.NotNil(t, proto.Checksum)
+	assert.Equal(t, "sha256:abc123", *proto.Checksum)
+	require.NotNil(t, proto.Source)
+	assert.Equal(t, "cli", *proto.Source)
+	require.NotNil(t, proto.ResourcePath)
+	assert.Equal(t, "/path/to/manifest.yaml", *proto.ResourcePath)
 }

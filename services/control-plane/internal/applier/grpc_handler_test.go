@@ -436,6 +436,37 @@ func TestApplyManifest_SkipImmutabilityChecks_DryRun_SkipsImmutabilityErrors(t *
 	}
 }
 
+func TestApplyManifest_ExpectedSequenceNumberZero_SkipsCheck(t *testing.T) {
+	handler := newTestHandler(t)
+
+	// expected_sequence_number=0 should skip the check (overwrite mode)
+	resp, err := handler.ApplyManifest(context.Background(), &controlplanev1.ApplyManifestRequest{
+		Manifest:               newTestManifest(),
+		DryRun:                 true,
+		ExpectedSequenceNumber: 0,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN, resp.Status)
+}
+
+func TestApplyManifest_ExpectedSequenceNumber_NoHistoryService_SkipsCheck(t *testing.T) {
+	// Without a historyService, the optimistic lock check is skipped
+	// (recordHistory returns nil, nil when historyService is nil)
+	handler := newTestHandler(t)
+
+	resp, err := handler.ApplyManifest(context.Background(), &controlplanev1.ApplyManifestRequest{
+		Manifest:               newTestManifest(),
+		DryRun:                 true,
+		ExpectedSequenceNumber: 42,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN, resp.Status)
+}
+
 func TestApplyManifest_SkipImmutabilityChecks_NotDryRun_StillEnforces(t *testing.T) {
 	prev := newTestManifest()
 	handler := newTestHandlerWithVersionStore(t, prev)

@@ -180,16 +180,23 @@ func (h *ApplyManifestHandler) ApplyManifest(
 		logger.Error("execution failed", "error", execResult.err)
 		response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED
 
-		// Record failed apply in history (no graph for failed applies)
-		h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusFailed, nil)
+		// Record failed apply in history (no graph for failed applies, no optimistic lock)
+		_, _ = h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusFailed, nil, 0)
 		return response, nil //nolint:nilerr // error conveyed via response status, not gRPC error
 	}
 
-	// Step 5: Record history
+	// Step 5: Record history (with optimistic locking check)
 	logger.Info("step 5: recording manifest history")
-	snapshot := h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusApplied, validationResult.graph)
+	expectedSeq := req.GetExpectedSequenceNumber()
+	snapshot, seqErr := h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusApplied, validationResult.graph, expectedSeq)
+	if seqErr != nil {
+		// Sequence conflict detected atomically during store
+		logger.Warn("sequence number conflict during history recording", "error", seqErr)
+		return nil, status.Errorf(codes.Aborted, "%v", seqErr)
+	}
 	if snapshot != nil {
 		response.Snapshot = snapshot
+		response.SequenceNumber = snapshot.SequenceNumber
 	}
 
 	// Save to version store for future diffs
@@ -462,6 +469,9 @@ func (h *ApplyManifestHandler) execute(
 }
 
 // recordHistory stores the manifest version in the history service.
+// expectedSeq is passed through for atomic optimistic locking; 0 skips the check.
+// Returns (nil, nil) if historyService is not configured.
+// Returns a non-nil error only for sequence conflicts (ErrSequenceConflict).
 func (h *ApplyManifestHandler) recordHistory(
 	ctx context.Context,
 	mf *controlplanev1.Manifest,
@@ -469,9 +479,10 @@ func (h *ApplyManifestHandler) recordHistory(
 	jobID string,
 	applyStatus manifest.ApplyStatus,
 	graph *validator.RelationshipGraph,
-) *controlplanev1.ManifestVersion {
+	expectedSeq int64,
+) (*controlplanev1.ManifestVersion, error) {
 	if h.historyService == nil {
-		return nil
+		return nil, nil //nolint:nilnil // history recording is optional
 	}
 
 	var jobUUID *uuid.UUID
@@ -482,19 +493,22 @@ func (h *ApplyManifestHandler) recordHistory(
 		}
 	}
 
-	entity, err := h.historyService.StoreManifestVersion(ctx, mf, appliedBy, jobUUID, applyStatus, graph)
+	entity, err := h.historyService.StoreManifestVersion(ctx, mf, appliedBy, jobUUID, applyStatus, graph, expectedSeq)
 	if err != nil {
+		if errors.Is(err, manifest.ErrSequenceConflict) {
+			return nil, err
+		}
 		h.logger.Error("failed to record manifest history", "error", err)
-		return nil
+		return nil, nil //nolint:nilnil // non-conflict errors are logged but non-fatal
 	}
 
 	proto, err := manifest.EntityToProto(entity)
 	if err != nil {
 		h.logger.Error("failed to convert history entity to proto", "error", err)
-		return nil
+		return nil, nil //nolint:nilnil // conversion errors are logged but non-fatal
 	}
 
-	return proto
+	return proto, nil
 }
 
 // buildExecutorInput converts a Manifest proto into the ApplyManifestInput
