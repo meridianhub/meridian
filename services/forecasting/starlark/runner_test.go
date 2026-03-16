@@ -846,6 +846,72 @@ func TestForecastContextToStarlark(t *testing.T) {
 	assert.Equal(t, starlarklib.String(now.Format(time.RFC3339)), nowVal)
 }
 
+// --- Security hardening tests ---
+
+func TestExecuteStrategy_ScriptSizeLimit(t *testing.T) {
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	// Create a script that exceeds MaxScriptSize (64KB)
+	largeScript := "def compute_forecast(ctx):\n    return []\n" + strings.Repeat("# padding\n", 7000)
+	require.Greater(t, len(largeScript), MaxScriptSize, "test script must exceed MaxScriptSize")
+
+	_, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            largeScript,
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      1,
+		GranularityHours:  1,
+		Now:               baseTime(),
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrScriptTooLarge)
+	assert.Contains(t, err.Error(), "exceeds maximum")
+}
+
+func TestExecuteStrategy_StepLimitEnforced(t *testing.T) {
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+
+	// Use a long timeout so the step limit fires before the timeout
+	runner, err := NewForecastRunner(ForecastRunnerConfig{
+		MISClient: mis,
+		RefData:   ref,
+		Timeout:   30 * time.Second,
+		Logger:    newTestLogger(),
+	})
+	require.NoError(t, err)
+
+	// Script with a loop that exceeds MaxStepsPerExecution (1M steps)
+	script := `
+def compute_forecast(ctx):
+    result = 0
+    for i in range(2000000):
+        result = result + i
+    return []
+`
+
+	_, err = runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            script,
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      1,
+		GranularityHours:  1,
+		Now:               baseTime(),
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, saga.ErrExecution)
+	assert.NotErrorIs(t, err, saga.ErrTimeout)
+	assert.Contains(t, err.Error(), "too many steps")
+}
+
+func TestDefaultTimeout_Is10Seconds(t *testing.T) {
+	assert.Equal(t, 10*time.Second, DefaultTimeout, "DefaultTimeout should be 10s")
+}
+
 func TestForecastContextToStarlark_NilReferenceData(t *testing.T) {
 	fc := &ForecastContext{
 		Observations:  map[string][]Observation{},
