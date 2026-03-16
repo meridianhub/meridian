@@ -8,8 +8,7 @@ import { TimeDisplay } from '@/shared/time-display'
 import { StarlarkEditor, type ValidationError, type ComplexityMetrics } from '@/features/sagas/components/starlark-editor'
 import { Breadcrumbs, DetailSkeleton, ErrorState, PageShell, PageHeader } from '@/shared'
 import { useApiClients } from '@/api/context'
-import { useTenantSlug } from '@/hooks/use-tenant-context'
-import { tenantKeys } from '@/lib/query-keys'
+import { referenceKeys } from '@/lib/query-keys'
 import { SagaStatus, ErrorCategory } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { usePageTitle } from '@/hooks/use-page-title'
@@ -60,11 +59,7 @@ export function StarlarkDetailPage() {
   const { sagaName } = useParams<{ sagaName: string }>()
   usePageTitle(sagaName ? `Saga ${sagaName}` : 'Saga')
   const { sagaRegistry } = useApiClients()
-  const tenantSlug = useTenantSlug()
   const qc = useQueryClient()
-  const sagaQueryRoot = tenantSlug
-    ? [...tenantKeys.sagas(tenantSlug), sagaName]
-    : ['starlark-config', sagaName]
 
   const [script, setScript] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
@@ -115,7 +110,7 @@ export function StarlarkDetailPage() {
       return sagaRegistry.activateSaga({ id: sagaData.id })
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: sagaQueryRoot })
+      void qc.invalidateQueries({ queryKey: referenceKeys.activeSaga(sagaName ?? '') })
     },
   })
 
@@ -126,7 +121,7 @@ export function StarlarkDetailPage() {
       return sagaRegistry.deprecateSaga({ id: sagaData.id, successorId: '' })
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: sagaQueryRoot })
+      void qc.invalidateQueries({ queryKey: referenceKeys.activeSaga(sagaName ?? '') })
     },
   })
 
