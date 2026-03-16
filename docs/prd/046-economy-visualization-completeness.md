@@ -195,6 +195,7 @@ colorblind simulator before implementing):
 | Mappings | 340 (rose) | New |
 | Gateway/Routes | 115 (lime) | New |
 | Payment Rails | 325 (magenta) | New |
+| Party Types | 0 (red-orange) | New |
 
 All colors need CSS custom properties for both light and dark
 themes. Do not use inline oklch values.
