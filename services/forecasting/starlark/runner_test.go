@@ -874,7 +874,15 @@ func TestExecuteStrategy_ScriptSizeLimit(t *testing.T) {
 func TestExecuteStrategy_StepLimitEnforced(t *testing.T) {
 	mis := &mockMISClient{observations: map[string][]Observation{}}
 	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
-	runner := newTestRunner(t, mis, ref)
+
+	// Use a long timeout so the step limit fires before the timeout
+	runner, err := NewForecastRunner(ForecastRunnerConfig{
+		MISClient: mis,
+		RefData:   ref,
+		Timeout:   30 * time.Second,
+		Logger:    newTestLogger(),
+	})
+	require.NoError(t, err)
 
 	// Script with a loop that exceeds MaxStepsPerExecution (1M steps)
 	script := `
@@ -885,7 +893,7 @@ def compute_forecast(ctx):
     return []
 `
 
-	_, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+	_, err = runner.ExecuteStrategy(context.Background(), StrategyInput{
 		Script:            script,
 		InputDatasetCodes: []string{},
 		OutputDatasetCode: "TEST",
@@ -895,13 +903,9 @@ def compute_forecast(ctx):
 	})
 
 	require.Error(t, err)
-	// Step limit exceeded produces either a timeout or execution error
-	assert.True(t,
-		strings.Contains(err.Error(), "too many steps") ||
-			strings.Contains(err.Error(), "exceeded") ||
-			errors.Is(err, saga.ErrExecution) ||
-			errors.Is(err, saga.ErrTimeout),
-		"expected step limit or execution error, got: %v", err)
+	assert.ErrorIs(t, err, saga.ErrExecution)
+	assert.NotErrorIs(t, err, saga.ErrTimeout)
+	assert.Contains(t, err.Error(), "too many steps")
 }
 
 func TestDefaultTimeout_Is10Seconds(t *testing.T) {
