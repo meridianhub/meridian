@@ -3,11 +3,11 @@
 ## Problem Statement
 
 The Operations Console's economy visualization is incomplete and
-partially broken. The economy graph renders 4 of 12 manifest
+partially broken. The economy graph renders 4 of 13 manifest
 resource types. Saga navigation is broken (404 on detail links,
 empty list page). The Economy Explorer page (`/economy/explore`)
 is similarly incomplete — showing only instruments, account
-types, sagas, and mappings out of 12 types. Gateway mappings
+types, sagas, and mappings out of 13 types. Gateway mappings
 exist as a standalone page but aren't connected to the manifest
 or economy graph. The new control-plane RPCs from PRD 045
 (ApplyResource, ExportManifest, ReconcileManifest,
@@ -104,7 +104,7 @@ These serve complementary roles:
 - **Overview** = visual map + high-level summary (graph-first)
 - **Explorer** = detailed browse by resource type (list-first)
 
-Both must show all 12 resource types.
+Both must show all 13 resource types.
 
 ## Solution
 
@@ -218,7 +218,9 @@ extraction paths:
   connection and mapping(s) via `outboundMappingId`/
   `inboundMappingId`
 - `payment_rail` — from `manifest.paymentRails[]`, use
-  `provider` as node ID (no `code` field exists)
+  composite key `provider:account_id` as node ID (no `code`
+  field exists; `provider` alone is not unique if multiple
+  accounts exist for the same provider)
 - `party_type` — from `manifest.partyTypes[]`
 
 Edge types:
@@ -228,6 +230,15 @@ Edge types:
 - `owned_by` — internal_account → organization
 - `routes_via` — instruction_route → provider_connection
 - `transforms_with` — instruction_route → mapping
+- `defines_schema` — party_type → (no target — leaf node,
+  but used as a schema definition for parties)
+
+Note: `market_data_source`, `organization`, `payment_rail`,
+and `party_type` are leaf nodes with no outbound edges. They
+are included in the graph model for completeness (propagates
+to all 22 graph consumers) but are **hidden by default** in
+the graph view. They appear prominently in the Economy
+Explorer's list-based tabs where lack of edges is natural.
 
 #### 2d. Graph renderer and layout
 
@@ -255,7 +266,7 @@ Infrastructure types (mappings, gateway, payment rails, party
 types, market data) hidden by default — toggled on via filter.
 
 **Grouped filter panel**: Group toggles into 6 categories
-instead of 12+ individual checkboxes:
+instead of 13 individual checkboxes:
 - Financial Core (instruments, account types, valuation rules)
 - Workflows (sagas)
 - Market Data (sources, sets)
@@ -263,19 +274,21 @@ instead of 12+ individual checkboxes:
 - Integration (mappings, gateway connections, routes)
 - Config (payment rails, party types)
 
-**Disconnected subgraph handling**: Market data sources,
-organizations, and payment rails are leaf nodes with few/no
-edges. Rather than floating as isolated islands, consider:
-- Grouping leaf nodes in a designated graph region (ELK
-  partitioning)
-- Or keeping them in the Explorer only (not the graph) and
-  noting this decision explicitly
+**Disconnected subgraph handling (DECISION)**: Market data
+sources, organizations, payment rails, and party types are
+leaf nodes with no outbound edges. Floating isolated boxes in
+a relationship graph look broken, not intentional. Decision:
+**leaf-only types are hidden by default in the graph view but
+included in the graph model** (so all 22 consumers benefit).
+They appear in the Economy Explorer's list-based tabs where
+lack of edges is natural. Users can toggle them on in the
+graph filter panel if they want the complete picture.
 
 #### 2e. Economy overview stat chips
 
 Keep stat chips to 4-6 key metrics (instruments, account types,
 sagas, internal accounts, organizations, market data sets).
-Don't add 12 chips — that's a wall of numbers. Link "View all"
+Don't add 13 chips — that's a wall of numbers. Link "View all"
 to the Explorer page for the full breakdown.
 
 #### 2f. Double-click navigation
@@ -329,7 +342,7 @@ from the manifest — clean, consistent, no dual-source confusion.
 Service pages remain as operational views (live service state).
 Explorer is the manifest view (declared state).
 
-**3a. Extend Resources tab**: Show all 12 manifest types with
+**3a. Extend Resources tab**: Show all 13 manifest types with
 expandable sections per type. Each section shows a table of
 resources with key fields (code, name, status, relationships).
 
@@ -346,7 +359,7 @@ navigates to the Explorer.
 ### Phase 4: Surface New Control-Plane RPCs
 
 **4a. ApplyResource UI**: Add "Edit Resource" as a YAML editor
-with `dry_run` preview — not 12 typed forms. The YAML editor
+with `dry_run` preview — not 13 typed forms. The YAML editor
 already exists. On submission, call `ApplyResource` RPC. Show
 structured `ValidationError` responses with path, code, message,
 and fuzzy-match suggestions inline. Typed forms per resource
@@ -403,7 +416,7 @@ with "render backend graph."
 
 1. Economy graph renders all manifest resource types with
    correct relationships and accessible color palette
-2. Economy Explorer shows all 12 manifest types in browsable
+2. Economy Explorer shows all 13 manifest types in browsable
    tabs
 3. Saga navigation works end-to-end (list, detail, graph click)
 4. All resource types have click-through navigation from graph
@@ -420,7 +433,7 @@ with "render backend graph."
 
 ## Non-Goals
 
-- Typed forms for all 12 resource types in ApplyResource
+- Typed forms for all 13 resource types in ApplyResource
   (YAML editor is sufficient for v1)
 - Manifest-managed badges on service pages (Explorer replaces
   this — clean separation of manifest vs operational views)
@@ -437,7 +450,7 @@ with "render backend graph."
 
 | Risk | Mitigation |
 |------|------------|
-| Graph cluttered with 12 types (40-60 nodes) | Grouped visibility toggles; default infrastructure types to hidden; keep overview graph for core types, Explorer for full detail |
+| Graph cluttered with 13 types (40-60 nodes) | Grouped visibility toggles; default infrastructure types to hidden; keep overview graph for core types, Explorer for full detail |
 | Color palette inaccessible | Minimum 36-degree hue separation; verify with colorblind simulator; CSS custom properties for light/dark themes |
 | Disconnected leaf nodes look like bugs | Group leaf nodes in designated region, or show only in Explorer. Explicit design decision before implementation. |
 | DiffManifestVersions format mismatch | Keep existing graph diff + add tabular diff. Two complementary views, not a replacement. |
