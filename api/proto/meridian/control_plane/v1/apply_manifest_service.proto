@@ -144,4 +144,12 @@ message ValidationError {
 
   // suggestion is a "Did you mean...?" hint for typos.
   string suggestion = 5;
+
+  // resource_type is the manifest section type where the error occurred
+  // (e.g., "instrument", "account_type", "saga", "valuation_rule").
+  string resource_type = 6;
+
+  // resource_id is the identifier of the specific resource that caused the error
+  // (e.g., the instrument code, account type code, or saga name).
+  string resource_id = 7;
 }
