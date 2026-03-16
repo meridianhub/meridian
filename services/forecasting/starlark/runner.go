@@ -21,7 +21,7 @@ import (
 
 // Default execution constraints.
 const (
-	DefaultTimeout       = 10 * time.Second // Reduced from 30s to match saga/valuation security posture
+	DefaultTimeout       = 10 * time.Second // Reduced from 30s; 2x saga's 5s to allow observation fetching overhead
 	MaxScriptSize        = 64 * 1024        // 64KB, matching saga
 	MaxStepsPerExecution = 1_000_000        // Matching saga
 )
