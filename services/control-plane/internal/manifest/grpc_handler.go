@@ -18,8 +18,9 @@ var ErrHistoryServiceRequired = errors.New("history service is required")
 type HistoryHandler struct {
 	controlplanev1.UnimplementedManifestHistoryServiceServer
 
-	history *HistoryService
-	logger  *slog.Logger
+	history  *HistoryService
+	exporter *ExportService
+	logger   *slog.Logger
 }
 
 // NewHistoryHandler creates a new HistoryHandler.
@@ -34,6 +35,17 @@ func NewHistoryHandler(history *HistoryService, logger *slog.Logger) (*HistoryHa
 		history: history,
 		logger:  logger.With("component", "manifest_history_handler"),
 	}, nil
+}
+
+// NewHistoryHandlerWithExport creates a HistoryHandler with export support.
+// The exporter enables the ExportManifest RPC; when nil, the RPC returns Unimplemented.
+func NewHistoryHandlerWithExport(history *HistoryService, exporter *ExportService, logger *slog.Logger) (*HistoryHandler, error) {
+	h, err := NewHistoryHandler(history, logger)
+	if err != nil {
+		return nil, err
+	}
+	h.exporter = exporter
+	return h, nil
 }
 
 // GetCurrentManifest retrieves the most recently applied manifest for the tenant.
@@ -183,4 +195,25 @@ func diffPlanToProtoSummary(plan *differ.DiffPlan) *controlplanev1.DiffSummary {
 		}
 	}
 	return summary
+}
+
+// ExportManifest reconstructs a manifest from live service state.
+func (h *HistoryHandler) ExportManifest(
+	ctx context.Context,
+	req *controlplanev1.ExportManifestRequest,
+) (*controlplanev1.ExportManifestResponse, error) {
+	if h.exporter == nil {
+		return nil, status.Error(codes.Unimplemented, "export manifest not configured")
+	}
+
+	result, err := h.exporter.Export(ctx, req.GetIncludeSections(), req.GetManifestVersion())
+	if err != nil {
+		if errors.Is(err, ErrVersionNotFound) {
+			return nil, status.Error(codes.NotFound, "fallback manifest version not found")
+		}
+		h.logger.Error("failed to export manifest", "error", err)
+		return nil, status.Error(codes.Internal, "failed to export manifest")
+	}
+
+	return result.ToProtoResponse(), nil
 }

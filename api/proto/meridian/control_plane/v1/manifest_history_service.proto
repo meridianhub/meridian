@@ -47,6 +47,19 @@ service ManifestHistoryService {
       get: "/v1/manifests/diff"
     };
   }
+
+  // ExportManifest reconstructs a manifest from live service state.
+  // Queries each downstream service (reference-data, market-information, party,
+  // operational-gateway, internal-account) for their current resources and
+  // assembles them into a complete Manifest proto. Used to migrate existing
+  // tenants (set up via direct gRPC before the manifest-first model) into the
+  // manifest-first workflow. This is a read-only operation — no mutations and
+  // no manifest version is created.
+  rpc ExportManifest(ExportManifestRequest) returns (ExportManifestResponse) {
+    option (google.api.http) = {
+      get: "/v1/manifests/export"
+    };
+  }
 }
 
 // ========================================
@@ -250,4 +263,54 @@ message DiffSummary {
 
   // has_breaking_changes indicates whether any action is a breaking change.
   bool has_breaking_changes = 6;
+}
+
+// ========================================
+// Export Manifest
+// ========================================
+
+// ExportManifestRequest requests a manifest reconstructed from live service state.
+// All fields are optional filters to control which sections are included.
+message ExportManifestRequest {
+  // include_sections filters which manifest sections to include in the export.
+  // If empty, all sections are included. Valid values:
+  //   "instruments", "account_types", "valuation_rules", "sagas",
+  //   "market_data", "organizations", "internal_accounts",
+  //   "operational_gateway", "mappings", "party_types", "payment_rails"
+  repeated string include_sections = 1 [(buf.validate.field).repeated = {
+    max_items: 20
+    items: {
+      string: {
+        min_len: 1
+        max_len: 64
+      }
+    }
+  }];
+
+  // manifest_version filters the export to match a specific previously applied
+  // manifest version string. When set, metadata and sections not backed by live
+  // services (e.g., valuation_rules, seed_data) are sourced from this version.
+  // When empty, the most recently applied manifest version is used as fallback.
+  string manifest_version = 2 [(buf.validate.field).string.max_len = 50];
+}
+
+// ExportManifestResponse contains the reconstructed manifest and export metadata.
+message ExportManifestResponse {
+  // manifest is the reconstructed manifest from live service state.
+  Manifest manifest = 1;
+
+  // exported_at is the timestamp when the export was generated.
+  google.protobuf.Timestamp exported_at = 2;
+
+  // checksum is the SHA-256 hash of the reconstructed manifest content.
+  string checksum = 3;
+
+  // section_sources documents where each section's data was sourced from.
+  // Keys are section names, values describe the source (e.g., "live:reference-data",
+  // "fallback:manifest-v1.0").
+  map<string, string> section_sources = 4;
+
+  // warnings contains non-fatal issues encountered during export
+  // (e.g., a service was unreachable, partial data returned).
+  repeated string warnings = 5;
 }

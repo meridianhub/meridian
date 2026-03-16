@@ -166,3 +166,36 @@ func TestDiffPlanToProtoSummary_Empty(t *testing.T) {
 	assert.Equal(t, int32(0), summary.Creates)
 	assert.False(t, summary.HasBreakingChanges)
 }
+
+func TestExportManifest_NilExporter_ReturnsUnimplemented(t *testing.T) {
+	repo := &Repository{}
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
+
+	handler, err := NewHistoryHandler(svc, nil)
+	require.NoError(t, err)
+
+	_, err = handler.ExportManifest(context.Background(), &controlplanev1.ExportManifestRequest{})
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unimplemented, st.Code())
+}
+
+func TestNewHistoryHandlerWithExport(t *testing.T) {
+	repo := &Repository{}
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
+
+	exporter, err := NewExportService(svc, nil)
+	require.NoError(t, err)
+
+	handler, err := NewHistoryHandlerWithExport(svc, exporter, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, handler)
+	assert.NotNil(t, handler.exporter)
+}
+
+func TestNewHistoryHandlerWithExport_NilHistory(t *testing.T) {
+	_, err := NewHistoryHandlerWithExport(nil, nil, nil)
+	assert.ErrorIs(t, err, ErrHistoryServiceRequired)
+}
