@@ -217,7 +217,7 @@ func loadRedisConfig() RedisConfig {
 
 // loadAuthConfig loads JWT authentication configuration from environment variables
 func loadAuthConfig() AuthConfig {
-	enabled := env.GetEnvAsBool("AUTH_ENABLED", false)
+	enabled := env.GetEnvAsBool("AUTH_ENABLED", true)
 
 	return AuthConfig{
 		Enabled:        enabled,

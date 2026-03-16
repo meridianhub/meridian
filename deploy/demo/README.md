@@ -242,7 +242,7 @@ Example values for the demo environment:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `AUTH_ENABLED` | No | `false` | Enforce JWT validation on API routes |
+| `AUTH_ENABLED` | No | `true` | Enforce JWT validation on API routes |
 | `JWKS_URL` | Yes (when `AUTH_ENABLED=true`) | `{DEX_ISSUER}/keys` | JWKS endpoint for JWT validation |
 | `JWT_ISSUER` | No | — | Expected `iss` claim; validation skipped if empty |
 | `JWT_AUDIENCE` | No | — | Expected `aud` claim; validation skipped if empty |
