@@ -3,11 +3,13 @@ package applier
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ErrUnknownDataCategory is returned when an unrecognized data category string is provided.
@@ -73,6 +75,14 @@ func (c *MarketInformationClient) RegisterDataSet(ctx *saga.StarlarkContext, par
 		return nil, fmt.Errorf("register data set: %w", err)
 	}
 	req.Category = category
+
+	if effectiveFromStr, ok := params["effective_from"].(string); ok && effectiveFromStr != "" {
+		t, parseErr := time.Parse(time.RFC3339, effectiveFromStr)
+		if parseErr != nil {
+			return nil, fmt.Errorf("register data set: invalid effective_from %q: %w", effectiveFromStr, parseErr)
+		}
+		req.EffectiveFrom = timestamppb.New(t)
+	}
 
 	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
 	resp, err := c.client.RegisterDataSet(callCtx, req)
