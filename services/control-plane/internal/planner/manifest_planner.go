@@ -141,11 +141,13 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceInstrument, differ.ActionUpdate}: MethodUpdateInstrument,
 	{differ.ResourceInstrument, differ.ActionDelete}: MethodDeprecateInstrument,
 
-	// Account Types: CREATE maps to InitiateAccount on Internal Account Service.
-	// Account types are registered as reference data AND provisioned as internal accounts.
-	{differ.ResourceAccountType, differ.ActionCreate}: MethodInitiateAccount,
-	{differ.ResourceAccountType, differ.ActionUpdate}: MethodInitiateAccount,
-	{differ.ResourceAccountType, differ.ActionDelete}: MethodInitiateAccount,
+	// Account Types: mapped to Reference Data AccountTypeRegistryService.
+	// CREATE → CreateDraft (the handler calls Activate internally for idempotent flow).
+	// UPDATE → UpdateDefinition.
+	// DELETE → DeprecateAccountType.
+	{differ.ResourceAccountType, differ.ActionCreate}: MethodCreateAccountTypeDraft,
+	{differ.ResourceAccountType, differ.ActionUpdate}: MethodUpdateAccountTypeDefinition,
+	{differ.ResourceAccountType, differ.ActionDelete}: MethodDeprecateAccountType,
 
 	// Valuation Rules: mapped to Reference Data Service instrument operations
 	// (valuation rules are registered alongside instrument definitions).
