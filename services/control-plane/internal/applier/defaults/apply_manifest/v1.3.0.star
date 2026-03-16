@@ -132,7 +132,7 @@ def execute_apply_manifest():
     # Phase 35: Register and activate market data sets (depends on data sources from Phase 30)
     for dataset in market_data_sets:
         step(name="register_data_set_" + dataset["code"])
-        market_information.register_data_set(
+        ds_result = market_information.register_data_set(
             code=dataset["code"],
             category=dataset.get("category", ""),
             unit=dataset.get("unit", ""),
@@ -144,6 +144,7 @@ def execute_apply_manifest():
         step(name="activate_data_set_" + dataset["code"])
         market_information.activate_data_set(
             code=dataset["code"],
+            version=ds_result.get("version", 1),
         )
 
         registered_market_data_sets.append({
