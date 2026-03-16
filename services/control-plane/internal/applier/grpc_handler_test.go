@@ -2,12 +2,16 @@ package applier
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
+	"github.com/meridianhub/meridian/services/control-plane/internal/manifest"
 	"github.com/meridianhub/meridian/services/control-plane/internal/planner"
 	"github.com/meridianhub/meridian/services/control-plane/internal/validator"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -498,4 +502,142 @@ func TestApplyManifest_SkipImmutabilityChecks_NotDryRun_StillEnforces(t *testing
 		}
 	}
 	assert.True(t, found, "expected IMMUTABLE_FIELD_CHANGED error when dry_run=false, regardless of skip flag")
+}
+
+// --- Phase Status Tests ---
+
+func TestClassifyFailure_NilPhaseStatus(t *testing.T) {
+	applyStatus, protoStatus := classifyFailure(nil)
+	assert.Equal(t, manifest.ApplyStatusFailed, applyStatus)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED, protoStatus)
+}
+
+func TestClassifyFailure_AllFailed(t *testing.T) {
+	ps := manifest.PhaseStatusMap{
+		"phase_1": {Status: manifest.PhaseStatusFailed},
+		"phase_2": {Status: manifest.PhaseStatusSkipped},
+	}
+	applyStatus, protoStatus := classifyFailure(ps)
+	assert.Equal(t, manifest.ApplyStatusFailed, applyStatus)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED, protoStatus)
+}
+
+func TestClassifyFailure_Partial(t *testing.T) {
+	ps := manifest.PhaseStatusMap{
+		"phase_1": {Status: manifest.PhaseStatusCompleted},
+		"phase_2": {Status: manifest.PhaseStatusFailed},
+		"phase_3": {Status: manifest.PhaseStatusSkipped},
+	}
+	applyStatus, protoStatus := classifyFailure(ps)
+	assert.Equal(t, manifest.ApplyStatusPartial, applyStatus)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_PARTIAL, protoStatus)
+}
+
+func TestBuildInitialPhaseStatus(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments, ResourceID: "GBP"},
+			{Phase: planner.PhaseAccountTypes, ResourceID: "CURRENT"},
+			{Phase: planner.PhaseSagas, ResourceID: "test_saga"},
+		},
+	}
+
+	ps := buildInitialPhaseStatus(plan)
+
+	assert.Len(t, ps, 3)
+	assert.Equal(t, manifest.PhaseStatusPending, ps["phase_1"].Status)
+	assert.Equal(t, manifest.PhaseStatusPending, ps["phase_2"].Status)
+	assert.Equal(t, manifest.PhaseStatusPending, ps["phase_4"].Status)
+}
+
+func TestUpdatePhaseStatus_AllSuccess(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments},
+			{Phase: planner.PhaseAccountTypes},
+		},
+	}
+	ps := buildInitialPhaseStatus(plan)
+
+	result := &ApplyManifestResult{Status: "applied"}
+	updatePhaseStatus(ps, plan, result, nil)
+
+	assert.Equal(t, manifest.PhaseStatusCompleted, ps["phase_1"].Status)
+	assert.Equal(t, manifest.PhaseStatusCompleted, ps["phase_2"].Status)
+}
+
+func TestUpdatePhaseStatus_PartialFailure(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments, GRPCMethod: "RegisterInstrument"},
+			{Phase: planner.PhaseAccountTypes, GRPCMethod: "CreateDraft"},
+			{Phase: planner.PhaseSagas, GRPCMethod: "CreateSagaDraft"},
+		},
+	}
+	ps := buildInitialPhaseStatus(plan)
+
+	result := &ApplyManifestResult{
+		Status: "failed",
+		Error:  "account type creation failed",
+		StepResults: []saga.StepResult{
+			{StepName: "RegisterInstrument", Success: true},
+			{StepName: "CreateDraft", Success: false, Error: "account type creation failed"},
+		},
+	}
+	updatePhaseStatus(ps, plan, result, fmt.Errorf("saga failed"))
+
+	assert.Equal(t, manifest.PhaseStatusCompleted, ps["phase_1"].Status)
+	assert.Equal(t, manifest.PhaseStatusFailed, ps["phase_2"].Status)
+	assert.Equal(t, "account type creation failed", ps["phase_2"].Error)
+	assert.Equal(t, manifest.PhaseStatusSkipped, ps["phase_4"].Status)
+}
+
+func TestFindFailedPhase_NoResult(t *testing.T) {
+	plan := &planner.ExecutionPlan{}
+	assert.Equal(t, planner.Phase(0), findFailedPhase(plan, nil))
+}
+
+func TestFindFailedPhase_WithResult(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments, GRPCMethod: "RegisterInstrument"},
+			{Phase: planner.PhaseAccountTypes, GRPCMethod: "CreateDraft"},
+		},
+	}
+	result := &ApplyManifestResult{
+		StepResults: []saga.StepResult{
+			{StepName: "RegisterInstrument", Success: true},
+			{StepName: "CreateDraft", Success: false},
+		},
+	}
+	assert.Equal(t, planner.PhaseAccountTypes, findFailedPhase(plan, result))
+}
+
+func TestPhaseStatusMapToResponseProto_Nil(t *testing.T) {
+	assert.Nil(t, phaseStatusMapToResponseProto(nil))
+}
+
+func TestPhaseStatusMapToResponseProto_Populated(t *testing.T) {
+	now := time.Now().UTC()
+	ps := manifest.PhaseStatusMap{
+		"phase_1": {
+			Status:      manifest.PhaseStatusCompleted,
+			StartedAt:   &now,
+			CompletedAt: &now,
+		},
+		"phase_2": {
+			Status: manifest.PhaseStatusFailed,
+			Error:  "something failed",
+		},
+	}
+
+	proto := phaseStatusMapToResponseProto(ps)
+	require.Len(t, proto, 2)
+
+	assert.Equal(t, "COMPLETED", proto["phase_1"].Status)
+	assert.NotNil(t, proto["phase_1"].StartedAt)
+	assert.NotNil(t, proto["phase_1"].CompletedAt)
+
+	assert.Equal(t, "FAILED", proto["phase_2"].Status)
+	assert.Equal(t, "something failed", proto["phase_2"].Error)
 }

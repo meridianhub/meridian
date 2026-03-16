@@ -132,6 +132,34 @@ func (s *HistoryService) StoreManifestVersion(
 	return entity, nil
 }
 
+// StoreManifestVersionWithPhaseStatus saves a manifest snapshot with phase-level execution status.
+// It delegates to StoreManifestVersion and then sets the phase_status field.
+func (s *HistoryService) StoreManifestVersionWithPhaseStatus(
+	ctx context.Context,
+	mf *controlplanev1.Manifest,
+	appliedBy string,
+	applyJobID *uuid.UUID,
+	status ApplyStatus,
+	graph *validator.RelationshipGraph,
+	expectedSeq int64,
+	phaseStatus PhaseStatusMap,
+) (*VersionEntity, error) {
+	entity, err := s.StoreManifestVersion(ctx, mf, appliedBy, applyJobID, status, graph, expectedSeq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update with phase status if provided.
+	// Serialization or update failure is non-blocking: the core entity is already stored.
+	if phaseStatus != nil {
+		if setErr := entity.SetPhaseStatus(phaseStatus); setErr == nil {
+			_ = s.repo.UpdatePhaseStatus(ctx, entity.ID, entity.PhaseStatus)
+		}
+	}
+
+	return entity, nil
+}
+
 // GetCurrentManifest retrieves the latest applied manifest version.
 func (s *HistoryService) GetCurrentManifest(ctx context.Context) (*VersionEntity, error) {
 	return s.repo.GetLatestApplied(ctx)
@@ -250,7 +278,35 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 		mv.ResourcePath = entity.ResourcePath
 	}
 
+	// Populate phase_status from the JSONB column.
+	phaseStatus, err := entity.GetPhaseStatus()
+	if err == nil && phaseStatus != nil {
+		mv.PhaseStatus = phaseStatusMapToProto(phaseStatus)
+	}
+
 	return mv, nil
+}
+
+// phaseStatusMapToProto converts a PhaseStatusMap to the proto map representation.
+func phaseStatusMapToProto(m PhaseStatusMap) map[string]*controlplanev1.PhaseStatusDetail {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]*controlplanev1.PhaseStatusDetail, len(m))
+	for key, entry := range m {
+		detail := &controlplanev1.PhaseStatusDetail{
+			Status: string(entry.Status),
+			Error:  entry.Error,
+		}
+		if entry.StartedAt != nil {
+			detail.StartedAt = timestamppb.New(*entry.StartedAt)
+		}
+		if entry.CompletedAt != nil {
+			detail.CompletedAt = timestamppb.New(*entry.CompletedAt)
+		}
+		result[key] = detail
+	}
+	return result
 }
 
 // generateDiffSummary creates a diff summary comparing the given manifest
@@ -309,6 +365,8 @@ func toProtoApplyStatus(status ApplyStatus) controlplanev1.ApplyStatus {
 		return controlplanev1.ApplyStatus_APPLY_STATUS_FAILED
 	case ApplyStatusRolledBack:
 		return controlplanev1.ApplyStatus_APPLY_STATUS_ROLLED_BACK
+	case ApplyStatusPartial:
+		return controlplanev1.ApplyStatus_APPLY_STATUS_PARTIAL
 	default:
 		return controlplanev1.ApplyStatus_APPLY_STATUS_UNSPECIFIED
 	}

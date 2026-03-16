@@ -107,6 +107,24 @@ enum ApplyStatus {
 
   // APPLY_STATUS_ROLLED_BACK indicates this version was rolled back to a previous state.
   APPLY_STATUS_ROLLED_BACK = 3;
+
+  // APPLY_STATUS_PARTIAL indicates some phases succeeded but at least one failed.
+  APPLY_STATUS_PARTIAL = 4;
+}
+
+// PhaseStatusDetail records the execution result for a single phase.
+message PhaseStatusDetail {
+  // status is the phase execution outcome (e.g., "COMPLETED", "FAILED", "SKIPPED").
+  string status = 1;
+
+  // started_at is when this phase began executing.
+  optional google.protobuf.Timestamp started_at = 2;
+
+  // completed_at is when this phase finished executing.
+  optional google.protobuf.Timestamp completed_at = 3;
+
+  // error contains the error message if the phase failed.
+  string error = 4;
 }
 
 // ManifestVersion represents a stored manifest snapshot with audit metadata.
@@ -155,4 +173,8 @@ message ManifestVersion {
 
   // resource_path is the file path or URL of the manifest source.
   optional string resource_path = 14;
+
+  // phase_status contains per-phase execution status for partial failure recovery.
+  // Keys are phase identifiers (e.g., "phase_1", "phase_2").
+  map<string, PhaseStatusDetail> phase_status = 15;
 }

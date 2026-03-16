@@ -207,7 +207,7 @@ type ApplyManifestResult struct {
 	// SagaExecutionID is the saga execution identifier.
 	SagaExecutionID uuid.UUID
 
-	// Status is the result status ("applied" or "failed").
+	// Status is the result status ("applied", "failed", or "partial").
 	Status string
 
 	// Version is the manifest version that was applied.

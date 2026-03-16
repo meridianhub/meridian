@@ -27,8 +27,9 @@ const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_versions (
 	checksum VARCHAR(64),
 	source VARCHAR(20),
 	resource_path VARCHAR(255),
+	phase_status JSONB,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-	CONSTRAINT valid_apply_status CHECK (apply_status IN ('APPLIED', 'FAILED', 'ROLLED_BACK'))
+	CONSTRAINT valid_apply_status CHECK (apply_status IN ('APPLIED', 'FAILED', 'ROLLED_BACK', 'PARTIAL'))
 )`
 
 func setupTestRepo(t *testing.T) (*manifest.Repository, *testdb.TenantTestContext) {
@@ -358,4 +359,101 @@ func TestRepository_Store_NewColumnsPopulated(t *testing.T) {
 	assert.Equal(t, "api", *found.Source)
 	require.NotNil(t, found.ResourcePath)
 	assert.Equal(t, "/manifests/tenant-1.yaml", *found.ResourcePath)
+}
+
+func TestRepository_Store_PartialApplyStatus(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusPartial)
+	err := repo.Store(tc.Ctx, entity, 0)
+	require.NoError(t, err)
+
+	found, err := repo.GetByVersion(tc.Ctx, "1.0")
+	require.NoError(t, err)
+	assert.Equal(t, manifest.ApplyStatusPartial, found.ApplyStatus)
+}
+
+func TestRepository_UpdatePhaseStatus(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusPartial)
+	err := repo.Store(tc.Ctx, entity, 0)
+	require.NoError(t, err)
+
+	// Set phase status
+	now := time.Now().UTC()
+	phaseMap := manifest.PhaseStatusMap{
+		"phase_1": {
+			Status:      manifest.PhaseStatusCompleted,
+			StartedAt:   &now,
+			CompletedAt: &now,
+		},
+		"phase_2": {
+			Status:    manifest.PhaseStatusFailed,
+			StartedAt: &now,
+			Error:     "instrument registration failed",
+		},
+		"phase_3": {
+			Status: manifest.PhaseStatusSkipped,
+		},
+	}
+	err = entity.SetPhaseStatus(phaseMap)
+	require.NoError(t, err)
+
+	err = repo.UpdatePhaseStatus(tc.Ctx, entity.ID, entity.PhaseStatus)
+	require.NoError(t, err)
+
+	// Retrieve and verify
+	found, err := repo.GetByVersion(tc.Ctx, "1.0")
+	require.NoError(t, err)
+	require.NotNil(t, found.PhaseStatus)
+
+	ps, err := found.GetPhaseStatus()
+	require.NoError(t, err)
+	require.Len(t, ps, 3)
+
+	assert.Equal(t, manifest.PhaseStatusCompleted, ps["phase_1"].Status)
+	assert.Equal(t, manifest.PhaseStatusFailed, ps["phase_2"].Status)
+	assert.Equal(t, "instrument registration failed", ps["phase_2"].Error)
+	assert.Equal(t, manifest.PhaseStatusSkipped, ps["phase_3"].Status)
+}
+
+func TestVersionEntity_GetPhaseStatus_Nil(t *testing.T) {
+	entity := &manifest.VersionEntity{}
+	ps, err := entity.GetPhaseStatus()
+	require.NoError(t, err)
+	assert.Nil(t, ps)
+}
+
+func TestVersionEntity_SetPhaseStatus_RoundTrip(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	original := manifest.PhaseStatusMap{
+		"phase_1": {
+			Status:      manifest.PhaseStatusCompleted,
+			StartedAt:   &now,
+			CompletedAt: &now,
+		},
+		"phase_2": {
+			Status:    manifest.PhaseStatusFailed,
+			StartedAt: &now,
+			Error:     "something went wrong",
+		},
+	}
+
+	entity := &manifest.VersionEntity{}
+	err := entity.SetPhaseStatus(original)
+	require.NoError(t, err)
+	require.NotNil(t, entity.PhaseStatus)
+
+	roundTripped, err := entity.GetPhaseStatus()
+	require.NoError(t, err)
+	assert.Equal(t, original["phase_1"].Status, roundTripped["phase_1"].Status)
+	assert.Equal(t, original["phase_2"].Error, roundTripped["phase_2"].Error)
+}
+
+func TestVersionEntity_SetPhaseStatus_Nil(t *testing.T) {
+	entity := &manifest.VersionEntity{}
+	err := entity.SetPhaseStatus(nil)
+	require.NoError(t, err)
+	assert.Nil(t, entity.PhaseStatus)
 }

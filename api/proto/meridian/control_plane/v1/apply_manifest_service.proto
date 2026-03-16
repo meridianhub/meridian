@@ -75,6 +75,10 @@ message ApplyManifestResponse {
   // sequence_number is the sequence number assigned to this manifest version.
   // Callers should use this value as expected_sequence_number in subsequent applies.
   int64 sequence_number = 7;
+
+  // phase_status contains per-phase execution status for partial failure recovery.
+  // Populated when status is PARTIAL or FAILED, showing which phases succeeded/failed.
+  map<string, PhaseStatusDetail> phase_status = 8;
 }
 
 // ApplyManifestStatus represents the outcome of an apply operation.
@@ -96,6 +100,9 @@ enum ApplyManifestStatus {
 
   // APPLY_MANIFEST_STATUS_BLOCKED indicates the operation was blocked by safety checks.
   APPLY_MANIFEST_STATUS_BLOCKED = 5;
+
+  // APPLY_MANIFEST_STATUS_PARTIAL indicates some phases succeeded but at least one failed.
+  APPLY_MANIFEST_STATUS_PARTIAL = 6;
 }
 
 // StepResult represents the outcome of a single execution step.
