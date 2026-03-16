@@ -111,6 +111,12 @@ func phaseForResource(rt differ.ResourceType) Phase {
 		return PhaseOperationalGateway
 	case differ.ResourceInstructionRoute:
 		return PhaseOperationalGateway
+	case differ.ResourceMarketDataSource:
+		return PhaseMarketDataSources
+	case differ.ResourceMarketDataSet:
+		return PhaseMarketDataSets
+	case differ.ResourceOrganization:
+		return PhaseOrganizations
 	default:
 		return PhaseSeedData
 	}
@@ -178,6 +184,21 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	{differ.ResourceInstructionRoute, differ.ActionCreate}: MethodUpsertInstructionRoute,
 	{differ.ResourceInstructionRoute, differ.ActionUpdate}: MethodUpsertInstructionRoute,
 	// No delete method: proto does not define DeleteRoute RPC.
+
+	// Market Data Sources
+	{differ.ResourceMarketDataSource, differ.ActionCreate}: MethodRegisterDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionUpdate}: MethodUpdateDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionDelete}: MethodDeactivateDataSource,
+
+	// Market Data Sets
+	{differ.ResourceMarketDataSet, differ.ActionCreate}: MethodRegisterDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionUpdate}: MethodUpdateDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionDelete}: MethodDeprecateDataSet,
+
+	// Organizations
+	{differ.ResourceOrganization, differ.ActionCreate}: MethodRegisterOrganization,
+	{differ.ResourceOrganization, differ.ActionUpdate}: MethodRegisterOrganization,
+	// No delete method: organizations are deactivated, not deleted.
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.

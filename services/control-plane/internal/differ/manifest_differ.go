@@ -78,6 +78,9 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 	d.diffPartyTypes(lastApplied, newManifest, plan)
 	d.diffMappings(lastApplied, newManifest, plan)
 	d.diffOperationalGateway(lastApplied, newManifest, plan)
+	d.diffMarketDataSources(lastApplied, newManifest, plan)
+	d.diffMarketDataSets(lastApplied, newManifest, plan)
+	d.diffOrganizations(lastApplied, newManifest, plan)
 
 	// Run safety checks on all DELETE actions (skip when validating for a new tenant)
 	if !cfg.skipSafetyChecks {
@@ -351,18 +354,16 @@ func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) er
 			blocked, err = d.safety.CheckInstrumentDeletion(ctx, action.ResourceCode)
 		case ResourceSaga:
 			blocked, err = d.safety.CheckSagaDeletion(ctx, action.ResourceCode)
-		case ResourceValuationRule:
-			// Valuation rules have no downstream dependencies to check
-		case ResourcePartyType:
-			// Party types have no downstream dependencies to check via safety checker
-		case ResourceMapping:
-			// Mappings have no downstream dependencies to check
-		case ResourceProviderConnection:
-			// Provider connections may have active instructions but deletions are allowed
-		case ResourceInstructionRoute:
-			// Instruction routes have no downstream dependencies to check
+		case ResourceValuationRule,
+			ResourcePartyType,
+			ResourceMapping,
+			ResourceProviderConnection,
+			ResourceInstructionRoute,
+			ResourceMarketDataSource,
+			ResourceMarketDataSet,
+			ResourceOrganization:
+			// No downstream dependency checks for these resource types.
 		}
-
 		if err != nil {
 			return fmt.Errorf("safety check for %s %s: %w", action.ResourceType, action.ResourceCode, err)
 		}
@@ -510,6 +511,138 @@ func (d *ManifestDiffer) diffInstructionRoutes(lastApplied, newManifest *control
 	}
 }
 
+func (d *ManifestDiffer) diffMarketDataSources(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := marketDataSourceMap(getMarketDataSources(lastApplied))
+	newMap := marketDataSourceMap(newManifest.GetMarketData().GetSources())
+
+	for code, updated := range newMap {
+		prev, exists := oldMap[code]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSource,
+				ResourceCode: code,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create market data source %s (%s)", code, updated.GetName()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSource,
+				ResourceCode: code,
+				Action:       ActionUpdate,
+				Description:  describeMarketDataSourceChanges(code, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSource,
+				ResourceCode: code,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Market data source %s unchanged", code),
+			})
+		}
+	}
+
+	for code := range oldMap {
+		if _, exists := newMap[code]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSource,
+				ResourceCode: code,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete market data source %s", code),
+			})
+		}
+	}
+}
+
+func (d *ManifestDiffer) diffMarketDataSets(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := marketDataSetMap(getMarketDataSets(lastApplied))
+	newMap := marketDataSetMap(newManifest.GetMarketData().GetDatasets())
+
+	for code, updated := range newMap {
+		prev, exists := oldMap[code]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSet,
+				ResourceCode: code,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create market data set %s (%s)", code, updated.GetUnit()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSet,
+				ResourceCode: code,
+				Action:       ActionUpdate,
+				Description:  describeMarketDataSetChanges(code, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSet,
+				ResourceCode: code,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Market data set %s unchanged", code),
+			})
+		}
+	}
+
+	for code := range oldMap {
+		if _, exists := newMap[code]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceMarketDataSet,
+				ResourceCode: code,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete market data set %s", code),
+			})
+		}
+	}
+}
+
+func (d *ManifestDiffer) diffOrganizations(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
+	oldMap := organizationMap(getOrganizations(lastApplied))
+	newMap := organizationMap(newManifest.GetOrganizations())
+
+	for code, updated := range newMap {
+		prev, exists := oldMap[code]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceOrganization,
+				ResourceCode: code,
+				Action:       ActionCreate,
+				Description:  fmt.Sprintf("Create organization %s (%s)", code, updated.GetName()),
+			})
+			continue
+		}
+		if !proto.Equal(prev, updated) {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceOrganization,
+				ResourceCode: code,
+				Action:       ActionUpdate,
+				Description:  describeOrganizationChanges(code, prev, updated),
+			})
+		} else {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceOrganization,
+				ResourceCode: code,
+				Action:       ActionNoChange,
+				Description:  fmt.Sprintf("Organization %s unchanged", code),
+			})
+		}
+	}
+
+	for code := range oldMap {
+		if _, exists := newMap[code]; !exists {
+			plan.Actions = append(plan.Actions, PlannedAction{
+				ResourceType: ResourceOrganization,
+				ResourceCode: code,
+				Action:       ActionDelete,
+				Description:  fmt.Sprintf("Delete organization %s", code),
+			})
+		}
+	}
+}
+
 // Helper functions to safely extract slices from possibly-nil manifests.
 
 func getInstruments(m *controlplanev1.Manifest) []*controlplanev1.InstrumentDefinition {
@@ -645,6 +778,51 @@ func instructionRouteMap(routes []*controlplanev1.InstructionRouteConfig) map[st
 	return m
 }
 
+func getMarketDataSources(m *controlplanev1.Manifest) []*controlplanev1.MarketDataSourceDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetMarketData().GetSources()
+}
+
+func getMarketDataSets(m *controlplanev1.Manifest) []*controlplanev1.MarketDataSetDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetMarketData().GetDatasets()
+}
+
+func getOrganizations(m *controlplanev1.Manifest) []*controlplanev1.OrganizationDefinition {
+	if m == nil {
+		return nil
+	}
+	return m.GetOrganizations()
+}
+
+func marketDataSourceMap(sources []*controlplanev1.MarketDataSourceDefinition) map[string]*controlplanev1.MarketDataSourceDefinition {
+	m := make(map[string]*controlplanev1.MarketDataSourceDefinition, len(sources))
+	for _, s := range sources {
+		m[s.GetCode()] = s
+	}
+	return m
+}
+
+func marketDataSetMap(datasets []*controlplanev1.MarketDataSetDefinition) map[string]*controlplanev1.MarketDataSetDefinition {
+	m := make(map[string]*controlplanev1.MarketDataSetDefinition, len(datasets))
+	for _, ds := range datasets {
+		m[ds.GetCode()] = ds
+	}
+	return m
+}
+
+func organizationMap(orgs []*controlplanev1.OrganizationDefinition) map[string]*controlplanev1.OrganizationDefinition {
+	m := make(map[string]*controlplanev1.OrganizationDefinition, len(orgs))
+	for _, o := range orgs {
+		m[o.GetCode()] = o
+	}
+	return m
+}
+
 // Change description helpers.
 
 func describeInstrumentChanges(code string, prev, updated *controlplanev1.InstrumentDefinition) string {
@@ -733,4 +911,55 @@ func describeMappingChanges(key string, prev, updated *mappingv1.MappingDefiniti
 		return fmt.Sprintf("Update mapping %s", key)
 	}
 	return fmt.Sprintf("Update mapping %s (%s)", key, strings.Join(changes, "; "))
+}
+
+func describeMarketDataSourceChanges(code string, prev, updated *controlplanev1.MarketDataSourceDefinition) string {
+	var changes []string
+	if prev.GetName() != updated.GetName() {
+		changes = append(changes, fmt.Sprintf("name: %q -> %q", prev.GetName(), updated.GetName()))
+	}
+	if prev.GetTrustLevel() != updated.GetTrustLevel() {
+		changes = append(changes, fmt.Sprintf("trust_level: %d -> %d", prev.GetTrustLevel(), updated.GetTrustLevel()))
+	}
+	if prev.GetDescription() != updated.GetDescription() {
+		changes = append(changes, "description changed")
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update market data source %s", code)
+	}
+	return fmt.Sprintf("Update market data source %s (%s)", code, strings.Join(changes, "; "))
+}
+
+func describeMarketDataSetChanges(code string, prev, updated *controlplanev1.MarketDataSetDefinition) string {
+	var changes []string
+	if prev.GetCategory() != updated.GetCategory() {
+		changes = append(changes, fmt.Sprintf("category: %s -> %s", prev.GetCategory(), updated.GetCategory()))
+	}
+	if prev.GetUnit() != updated.GetUnit() {
+		changes = append(changes, fmt.Sprintf("unit: %q -> %q", prev.GetUnit(), updated.GetUnit()))
+	}
+	if prev.GetSourceCode() != updated.GetSourceCode() {
+		changes = append(changes, fmt.Sprintf("source_code: %q -> %q", prev.GetSourceCode(), updated.GetSourceCode()))
+	}
+	if prev.GetDisplayName() != updated.GetDisplayName() {
+		changes = append(changes, fmt.Sprintf("display_name: %q -> %q", prev.GetDisplayName(), updated.GetDisplayName()))
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update market data set %s", code)
+	}
+	return fmt.Sprintf("Update market data set %s (%s)", code, strings.Join(changes, "; "))
+}
+
+func describeOrganizationChanges(code string, prev, updated *controlplanev1.OrganizationDefinition) string {
+	var changes []string
+	if prev.GetName() != updated.GetName() {
+		changes = append(changes, fmt.Sprintf("name: %q -> %q", prev.GetName(), updated.GetName()))
+	}
+	if prev.GetPartyType() != updated.GetPartyType() {
+		changes = append(changes, fmt.Sprintf("party_type: %q -> %q", prev.GetPartyType(), updated.GetPartyType()))
+	}
+	if len(changes) == 0 {
+		return fmt.Sprintf("Update organization %s", code)
+	}
+	return fmt.Sprintf("Update organization %s (%s)", code, strings.Join(changes, "; "))
 }

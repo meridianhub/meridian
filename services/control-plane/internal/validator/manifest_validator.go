@@ -578,6 +578,60 @@ func (v *ManifestValidator) validateDuplicates(
 
 	// Check duplicate operational_gateway connection_ids and instruction_types
 	v.validateOperationalGatewayDuplicates(manifest, result)
+
+	// Check duplicate market data and organization codes
+	v.validateMarketDataAndOrgDuplicates(manifest, result)
+}
+
+// validateMarketDataAndOrgDuplicates checks for duplicate codes in market data and organization sections.
+func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Check duplicate market data source codes
+	mdSourceCodes := make(map[string]int)
+	for i, src := range manifest.GetMarketData().GetSources() {
+		if prev, exists := mdSourceCodes[src.GetCode()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("market_data.sources[%d].code", i),
+				Code:     "DUPLICATE_CODE",
+				Message:  fmt.Sprintf("duplicate market data source code %q (first defined at market_data.sources[%d])", src.GetCode(), prev),
+			})
+		} else {
+			mdSourceCodes[src.GetCode()] = i
+		}
+	}
+
+	// Check duplicate market data set codes
+	mdSetCodes := make(map[string]int)
+	for i, ds := range manifest.GetMarketData().GetDatasets() {
+		if prev, exists := mdSetCodes[ds.GetCode()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("market_data.datasets[%d].code", i),
+				Code:     "DUPLICATE_CODE",
+				Message:  fmt.Sprintf("duplicate market data set code %q (first defined at market_data.datasets[%d])", ds.GetCode(), prev),
+			})
+		} else {
+			mdSetCodes[ds.GetCode()] = i
+		}
+	}
+
+	// Check duplicate organization codes
+	orgCodes := make(map[string]int)
+	for i, org := range manifest.GetOrganizations() {
+		if prev, exists := orgCodes[org.GetCode()]; exists {
+			addError(result, ValidationError{
+				Severity: SeverityError,
+				Path:     fmt.Sprintf("organizations[%d].code", i),
+				Code:     "DUPLICATE_CODE",
+				Message:  fmt.Sprintf("duplicate organization code %q (first defined at organizations[%d])", org.GetCode(), prev),
+			})
+		} else {
+			orgCodes[org.GetCode()] = i
+		}
+	}
 }
 
 // validateOperationalGatewayDuplicates checks for duplicate connection_ids and instruction_types.
@@ -857,6 +911,29 @@ func (v *ManifestValidator) validateCrossReferences(
 
 	// Validate operational_gateway cross-references
 	v.validateOperationalGatewayCrossRefs(manifest, result)
+
+	// Validate market data set source_code references valid market data source
+	mdSourceCodes := make(map[string]bool)
+	for _, src := range manifest.GetMarketData().GetSources() {
+		mdSourceCodes[src.GetCode()] = true
+	}
+	mdSourceCodeList := mapKeys(mdSourceCodes)
+	for i, ds := range manifest.GetMarketData().GetDatasets() {
+		sourceCode := ds.GetSourceCode()
+		if sourceCode != "" && !mdSourceCodes[sourceCode] {
+			ve := ValidationError{
+				Severity:        SeverityError,
+				Path:            fmt.Sprintf("market_data.datasets[%d].source_code", i),
+				Code:            "INVALID_REFERENCE",
+				Message:         fmt.Sprintf("market data set %q references unknown source code %q", ds.GetCode(), sourceCode),
+				AvailableFields: mdSourceCodeList,
+			}
+			if suggestion := findClosestMatch(sourceCode, mdSourceCodeList); suggestion != "" {
+				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+			}
+			addError(result, ve)
+		}
+	}
 }
 
 // validateOperationalGatewayCrossRefs validates referential integrity for the operational_gateway section.

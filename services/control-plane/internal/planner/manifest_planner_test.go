@@ -577,6 +577,147 @@ func TestPlan_PartyType_Delete_NotSupported(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDeleteNotSupportedForPartyType)
 }
 
+// --- Market Data Source planner tests ---
+
+func TestPlan_MarketDataSourcesInPhase9(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceMarketDataSource, ResourceCode: "BLOOMBERG", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, PhaseMarketDataSources, plan.Calls[0].Phase)
+	assert.Equal(t, MethodRegisterDataSource, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_MarketDataSourceUpdate(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceMarketDataSource, ResourceCode: "ECB", Action: differ.ActionUpdate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, MethodUpdateDataSource, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_MarketDataSourceDelete(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceMarketDataSource, ResourceCode: "REUTERS", Action: differ.ActionDelete},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, MethodDeactivateDataSource, plan.Calls[0].GRPCMethod)
+}
+
+// --- Market Data Set planner tests ---
+
+func TestPlan_MarketDataSetsInPhase10(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceMarketDataSet, ResourceCode: "USD_EUR_FX", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, PhaseMarketDataSets, plan.Calls[0].Phase)
+	assert.Equal(t, MethodRegisterDataSet, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_MarketDataSetUpdate(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceMarketDataSet, ResourceCode: "BRENT_CRUDE", Action: differ.ActionUpdate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, MethodUpdateDataSet, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_MarketDataSetDelete(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceMarketDataSet, ResourceCode: "OLD_FX", Action: differ.ActionDelete},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, MethodDeprecateDataSet, plan.Calls[0].GRPCMethod)
+}
+
+// --- Organization planner tests ---
+
+func TestPlan_OrganizationsInPhase11(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceOrganization, ResourceCode: "ACME_ENERGY", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, PhaseOrganizations, plan.Calls[0].Phase)
+	assert.Equal(t, MethodRegisterOrganization, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_OrganizationUpdate(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceOrganization, ResourceCode: "ACME_ENERGY", Action: differ.ActionUpdate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 1)
+	assert.Equal(t, MethodRegisterOrganization, plan.Calls[0].GRPCMethod)
+}
+
+func TestPlan_PhaseOrdering_MarketDataBeforeOrganizations(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceOrganization, ResourceCode: "ORG", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourceMarketDataSet, ResourceCode: "FX", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourceMarketDataSource, ResourceCode: "SRC", Action: differ.ActionCreate},
+		},
+	}
+
+	plan, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Calls, 3)
+
+	// Verify phase ordering: sources (9) < sets (10) < organizations (11)
+	assert.Equal(t, PhaseMarketDataSources, plan.Calls[0].Phase)
+	assert.Equal(t, PhaseMarketDataSets, plan.Calls[1].Phase)
+	assert.Equal(t, PhaseOrganizations, plan.Calls[2].Phase)
+}
+
 // --- Test helpers ---
 
 func indexCallsByResourceID(calls []PlannedCall) map[string]PlannedCall {

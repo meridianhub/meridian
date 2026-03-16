@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -975,4 +976,249 @@ func TestDiff_WithoutSkipSafetyChecks_SafetyChecksStillRun(t *testing.T) {
 
 	assert.True(t, plan.HasBlockedDeletions())
 	assert.True(t, plan.HasBreakingChanges)
+}
+
+// --- Market Data Source differ tests ---
+
+func TestDiff_MarketDataSourceAdded_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "BLOOMBERG", Name: "Bloomberg Terminal", TrustLevel: 90},
+		},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourceMarketDataSource)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "BLOOMBERG", creates[0].ResourceCode)
+	assert.Contains(t, creates[0].Description, "Bloomberg Terminal")
+}
+
+func TestDiff_MarketDataSourceRemoved_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "ECB", Name: "European Central Bank", TrustLevel: 95},
+		},
+	}
+
+	newManifest := testManifest()
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceMarketDataSource)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "ECB", deletes[0].ResourceCode)
+}
+
+func TestDiff_MarketDataSourceModified_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "BLOOMBERG", Name: "Bloomberg Terminal", TrustLevel: 90},
+		},
+	}
+
+	newManifest := testManifest()
+	newManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "BLOOMBERG", Name: "Bloomberg Terminal (Updated)", TrustLevel: 95},
+		},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceMarketDataSource)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "BLOOMBERG", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "name:")
+	assert.Contains(t, updates[0].Description, "trust_level:")
+}
+
+func TestDiff_MarketDataSourceUnchanged_NoChange(t *testing.T) {
+	d := New(nil, nil)
+	manifest := testManifest()
+	manifest.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "ECB", Name: "ECB", TrustLevel: 100},
+		},
+	}
+
+	plan, err := d.Diff(context.Background(), manifest, manifest)
+	require.NoError(t, err)
+
+	noChanges := filterActionsByResource(plan.Actions, ActionNoChange, ResourceMarketDataSource)
+	assert.Len(t, noChanges, 1)
+	assert.Equal(t, "ECB", noChanges[0].ResourceCode)
+}
+
+// --- Market Data Set differ tests ---
+
+func TestDiff_MarketDataSetAdded_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{
+				Code:       "USD_EUR_FX",
+				Category:   marketinformationv1.DataCategory_DATA_CATEGORY_FX_RATE,
+				Unit:       "USD/EUR",
+				SourceCode: "ECB",
+			},
+		},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourceMarketDataSet)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "USD_EUR_FX", creates[0].ResourceCode)
+	assert.Contains(t, creates[0].Description, "USD/EUR")
+}
+
+func TestDiff_MarketDataSetRemoved_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{
+				Code:       "BRENT_CRUDE",
+				Category:   marketinformationv1.DataCategory_DATA_CATEGORY_COMMODITY_PRICE,
+				Unit:       "USD/BBL",
+				SourceCode: "REUTERS",
+			},
+		},
+	}
+
+	newManifest := testManifest()
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceMarketDataSet)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "BRENT_CRUDE", deletes[0].ResourceCode)
+}
+
+func TestDiff_MarketDataSetModified_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{
+				Code:       "USD_EUR_FX",
+				Category:   marketinformationv1.DataCategory_DATA_CATEGORY_FX_RATE,
+				Unit:       "USD/EUR",
+				SourceCode: "ECB",
+			},
+		},
+	}
+
+	newManifest := testManifest()
+	newManifest.MarketData = &controlplanev1.MarketDataConfig{
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{
+				Code:       "USD_EUR_FX",
+				Category:   marketinformationv1.DataCategory_DATA_CATEGORY_FX_RATE,
+				Unit:       "EUR/USD",
+				SourceCode: "BLOOMBERG",
+			},
+		},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceMarketDataSet)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "USD_EUR_FX", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "unit:")
+	assert.Contains(t, updates[0].Description, "source_code:")
+}
+
+// --- Organization differ tests ---
+
+func TestDiff_OrganizationAdded_Create(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+
+	newManifest := testManifest()
+	newManifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME_ENERGY", Name: "Acme Energy Ltd", PartyType: "ORGANIZATION"},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	creates := filterActionsByResource(plan.Actions, ActionCreate, ResourceOrganization)
+	assert.Len(t, creates, 1)
+	assert.Equal(t, "ACME_ENERGY", creates[0].ResourceCode)
+	assert.Contains(t, creates[0].Description, "Acme Energy Ltd")
+}
+
+func TestDiff_OrganizationRemoved_Delete(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "GRID_OPS", Name: "Grid Operations", PartyType: "ORGANIZATION"},
+	}
+
+	newManifest := testManifest()
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceOrganization)
+	assert.Len(t, deletes, 1)
+	assert.Equal(t, "GRID_OPS", deletes[0].ResourceCode)
+}
+
+func TestDiff_OrganizationModified_Update(t *testing.T) {
+	d := New(nil, nil)
+	oldManifest := testManifest()
+	oldManifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME_ENERGY", Name: "Acme Energy Ltd", PartyType: "ORGANIZATION"},
+	}
+
+	newManifest := testManifest()
+	newManifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME_ENERGY", Name: "Acme Energy PLC", PartyType: "COUNTERPARTY"},
+	}
+
+	plan, err := d.Diff(context.Background(), oldManifest, newManifest)
+	require.NoError(t, err)
+
+	updates := filterActionsByResource(plan.Actions, ActionUpdate, ResourceOrganization)
+	assert.Len(t, updates, 1)
+	assert.Equal(t, "ACME_ENERGY", updates[0].ResourceCode)
+	assert.Contains(t, updates[0].Description, "name:")
+	assert.Contains(t, updates[0].Description, "party_type:")
+}
+
+func TestDiff_OrganizationUnchanged_NoChange(t *testing.T) {
+	d := New(nil, nil)
+	manifest := testManifest()
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME_ENERGY", Name: "Acme Energy Ltd", PartyType: "ORGANIZATION"},
+	}
+
+	plan, err := d.Diff(context.Background(), manifest, manifest)
+	require.NoError(t, err)
+
+	noChanges := filterActionsByResource(plan.Actions, ActionNoChange, ResourceOrganization)
+	assert.Len(t, noChanges, 1)
+	assert.Equal(t, "ACME_ENERGY", noChanges[0].ResourceCode)
 }

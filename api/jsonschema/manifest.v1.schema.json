@@ -14,7 +14,9 @@
                 "paymentRails",
                 "partyTypes",
                 "mappings",
-                "operationalGateway"
+                "operationalGateway",
+                "marketData",
+                "organizations"
             ],
             "properties": {
                 "version": {
@@ -91,6 +93,19 @@
                     "$ref": "#/definitions/meridian.control_plane.v1.OperationalGatewayConfig",
                     "additionalProperties": false,
                     "description": "operational_gateway defines external system integrations for this tenant."
+                },
+                "marketData": {
+                    "$ref": "#/definitions/meridian.control_plane.v1.MarketDataConfig",
+                    "additionalProperties": false,
+                    "description": "market_data defines market data sources and data sets for this tenant."
+                },
+                "organizations": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.OrganizationDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "organizations defines the organization entities (parties) for this tenant."
                 }
             },
             "additionalProperties": false,
@@ -522,6 +537,136 @@
             "title": "========================================\n Manifest Metadata\n ========================================",
             "description": "======================================== Manifest Metadata ========================================  ManifestMetadata contains identifying information about a manifest."
         },
+        "meridian.control_plane.v1.MarketDataConfig": {
+            "required": [
+                "sources",
+                "datasets"
+            ],
+            "properties": {
+                "sources": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.MarketDataSourceDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "sources defines the market data providers for this tenant."
+                },
+                "datasets": {
+                    "items": {
+                        "$ref": "#/definitions/meridian.control_plane.v1.MarketDataSetDefinition"
+                    },
+                    "additionalProperties": false,
+                    "type": "array",
+                    "description": "datasets defines the market data set definitions for this tenant."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Market Data Config\n ========================================",
+            "description": "======================================== Market Data Config ========================================  MarketDataConfig declares market data sources and data sets for a tenant. Sources represent providers of market data (e.g., Bloomberg, ECB). Data sets define the types of market data that can be tracked (e.g., FX rates, commodity prices)."
+        },
+        "meridian.control_plane.v1.MarketDataSetDefinition": {
+            "required": [
+                "code",
+                "category",
+                "unit",
+                "sourceCode",
+                "displayName",
+                "description"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "code is the unique data set code within the tenant (e.g., \"USD_EUR_FX\", \"BRENT_CRUDE\"). Must be uppercase alphanumeric with underscores."
+                },
+                "category": {
+                    "enum": [
+                        "DATA_CATEGORY_UNSPECIFIED",
+                        0,
+                        "DATA_CATEGORY_FX_RATE",
+                        1,
+                        "DATA_CATEGORY_INTEREST_RATE",
+                        2,
+                        "DATA_CATEGORY_COMMODITY_PRICE",
+                        3,
+                        "DATA_CATEGORY_EQUITY_PRICE",
+                        4,
+                        "DATA_CATEGORY_INDEX_VALUE",
+                        5,
+                        "DATA_CATEGORY_ENERGY_PRICE",
+                        6,
+                        "DATA_CATEGORY_CARBON_PRICE",
+                        7,
+                        "DATA_CATEGORY_BENCHMARK_RATE",
+                        8,
+                        "DATA_CATEGORY_VOLATILITY",
+                        9,
+                        "DATA_CATEGORY_CREDIT_SPREAD",
+                        10
+                    ],
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "integer"
+                        }
+                    ],
+                    "title": "========================================\n Enums\n ========================================",
+                    "description": "======================================== Enums ========================================  DataCategory defines the type of market data being tracked."
+                },
+                "unit": {
+                    "type": "string",
+                    "description": "unit describes the unit of measurement for observations (e.g., \"USD\", \"USD/EUR\", \"USD/BBL\")."
+                },
+                "sourceCode": {
+                    "type": "string",
+                    "description": "source_code identifies the market data source that provides this data set. Must match a code in market_data.sources."
+                },
+                "displayName": {
+                    "type": "string",
+                    "description": "display_name is the human-readable name for this data set."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "description provides additional context about this data set."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Market Data Set Definition",
+            "description": "MarketDataSetDefinition declares a type of market data that can be tracked within the manifest. The code field is the immutable primary key."
+        },
+        "meridian.control_plane.v1.MarketDataSourceDefinition": {
+            "required": [
+                "code",
+                "name",
+                "description",
+                "trustLevel"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "code is the unique identifier for this data source (e.g., \"BLOOMBERG\", \"ECB\", \"NORDPOOL\"). Must be uppercase alphanumeric with underscores."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "name is the human-readable display name (e.g., \"Bloomberg Terminal\", \"European Central Bank\")."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "description provides additional context about this data source."
+                },
+                "trustLevel": {
+                    "type": "integer",
+                    "description": "trust_level indicates the reliability of this source (0-100). Higher values indicate more trusted sources for conflict resolution."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Market Data Source Definition",
+            "description": "MarketDataSourceDefinition declares a market data source (provider) within the manifest. The code field is the immutable primary key."
+        },
         "meridian.control_plane.v1.OAuth2AuthConfig": {
             "required": [
                 "tokenUrl",
@@ -591,6 +736,39 @@
             "type": "object",
             "title": "========================================\n Operational Gateway Config\n ========================================",
             "description": "======================================== Operational Gateway Config ========================================  OperationalGatewayConfig declares the external system integrations for a tenant. It configures provider connections, outbound instruction routing, and inbound event handling."
+        },
+        "meridian.control_plane.v1.OrganizationDefinition": {
+            "required": [
+                "code",
+                "name",
+                "partyType",
+                "attributes"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "code is the unique identifier for this organization (e.g., \"ACME_ENERGY\", \"GRID_OPS\"). Must be uppercase alphanumeric with underscores."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "name is the legal or display name of the organization."
+                },
+                "partyType": {
+                    "type": "string",
+                    "description": "party_type is the party classification (e.g., \"ORGANIZATION\", \"COUNTERPARTY\"). Must match a party type code from the manifest's party_types or a built-in type."
+                },
+                "attributes": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "type": "object",
+                    "description": "attributes contains additional metadata for this organization as key-value pairs. Keys and values are validated against the party type's attribute_schema if defined."
+                }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "========================================\n Organization Definitions\n ========================================",
+            "description": "======================================== Organization Definitions ========================================  OrganizationDefinition declares an organization entity (party) within the manifest. Organizations are registered as parties via the Party Service. The code field is the immutable primary key."
         },
         "meridian.control_plane.v1.PaymentRails": {
             "required": [
