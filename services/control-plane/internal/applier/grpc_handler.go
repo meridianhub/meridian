@@ -561,23 +561,23 @@ func updatePhaseStatus(
 
 // findFailedPhase returns the phase number of the first failed step, or 0 if
 // it cannot be determined from step results.
+//
+// Step results are ordered by execution sequence, matching the call order in
+// the execution plan. We use positional correlation: step result at index i
+// corresponds to planned call at index i. This avoids the naming mismatch
+// between saga handler names (e.g. "reference_data.register_instrument") and
+// gRPC method paths in the execution plan.
 func findFailedPhase(plan *planner.ExecutionPlan, result *ApplyManifestResult) planner.Phase {
 	if result == nil || len(result.StepResults) == 0 {
 		return 0
 	}
 
-	// Build a map from step name to phase using the execution plan
-	stepPhase := make(map[string]planner.Phase)
-	for _, call := range plan.Calls {
-		stepPhase[string(call.GRPCMethod)] = call.Phase
-	}
-
-	// Find the first failed step and return its phase
-	for _, step := range result.StepResults {
+	for i, step := range result.StepResults {
 		if !step.Success {
-			if phase, ok := stepPhase[step.StepName]; ok {
-				return phase
+			if i < len(plan.Calls) {
+				return plan.Calls[i].Phase
 			}
+			return 0
 		}
 	}
 

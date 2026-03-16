@@ -569,19 +569,20 @@ func TestUpdatePhaseStatus_AllSuccess(t *testing.T) {
 func TestUpdatePhaseStatus_PartialFailure(t *testing.T) {
 	plan := &planner.ExecutionPlan{
 		Calls: []planner.PlannedCall{
-			{Phase: planner.PhaseInstruments, GRPCMethod: "RegisterInstrument"},
-			{Phase: planner.PhaseAccountTypes, GRPCMethod: "CreateDraft"},
-			{Phase: planner.PhaseSagas, GRPCMethod: "CreateSagaDraft"},
+			{Phase: planner.PhaseInstruments},
+			{Phase: planner.PhaseAccountTypes},
+			{Phase: planner.PhaseSagas},
 		},
 	}
 	ps := buildInitialPhaseStatus(plan)
 
+	// Positional correlation: step 0 -> call 0 (phase 1), step 1 -> call 1 (phase 2)
 	result := &ApplyManifestResult{
 		Status: "failed",
 		Error:  "account type creation failed",
 		StepResults: []saga.StepResult{
-			{StepName: "RegisterInstrument", Success: true},
-			{StepName: "CreateDraft", Success: false, Error: "account type creation failed"},
+			{StepName: "reference_data.register_instrument", Success: true},
+			{StepName: "reference_data.register_account_type", Success: false, Error: "account type creation failed"},
 		},
 	}
 	updatePhaseStatus(ps, plan, result, fmt.Errorf("saga failed"))
@@ -600,14 +601,15 @@ func TestFindFailedPhase_NoResult(t *testing.T) {
 func TestFindFailedPhase_WithResult(t *testing.T) {
 	plan := &planner.ExecutionPlan{
 		Calls: []planner.PlannedCall{
-			{Phase: planner.PhaseInstruments, GRPCMethod: "RegisterInstrument"},
-			{Phase: planner.PhaseAccountTypes, GRPCMethod: "CreateDraft"},
+			{Phase: planner.PhaseInstruments},
+			{Phase: planner.PhaseAccountTypes},
 		},
 	}
+	// Positional correlation: step 0 -> call 0 (Instruments), step 1 -> call 1 (AccountTypes)
 	result := &ApplyManifestResult{
 		StepResults: []saga.StepResult{
-			{StepName: "RegisterInstrument", Success: true},
-			{StepName: "CreateDraft", Success: false},
+			{StepName: "reference_data.register_instrument", Success: true},
+			{StepName: "reference_data.register_account_type", Success: false},
 		},
 	}
 	assert.Equal(t, planner.PhaseAccountTypes, findFailedPhase(plan, result))

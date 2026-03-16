@@ -133,28 +133,71 @@ func (s *HistoryService) StoreManifestVersion(
 }
 
 // StoreManifestVersionWithPhaseStatus saves a manifest snapshot with phase-level execution status.
-// It delegates to StoreManifestVersion and then sets the phase_status field.
+// Phase status is included in the initial entity creation (single atomic write).
 func (s *HistoryService) StoreManifestVersionWithPhaseStatus(
 	ctx context.Context,
 	mf *controlplanev1.Manifest,
 	appliedBy string,
 	applyJobID *uuid.UUID,
-	status ApplyStatus,
+	applyStatus ApplyStatus,
 	graph *validator.RelationshipGraph,
 	expectedSeq int64,
 	phaseStatus PhaseStatusMap,
 ) (*VersionEntity, error) {
-	entity, err := s.StoreManifestVersion(ctx, mf, appliedBy, applyJobID, status, graph, expectedSeq)
-	if err != nil {
-		return nil, err
+	if mf == nil {
+		return nil, ErrNilManifest
+	}
+	if appliedBy == "" {
+		return nil, ErrEmptyAppliedBy
 	}
 
-	// Update with phase status if provided.
-	// Serialization or update failure is non-blocking: the core entity is already stored.
-	if phaseStatus != nil {
-		if setErr := entity.SetPhaseStatus(phaseStatus); setErr == nil {
-			_ = s.repo.UpdatePhaseStatus(ctx, entity.ID, entity.PhaseStatus)
+	marshaler := protojson.MarshalOptions{UseProtoNames: true}
+	jsonBytes, err := marshaler.Marshal(mf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal manifest to JSON: %w", err)
+	}
+
+	var diffSummary *string
+	if applyStatus == ApplyStatusApplied {
+		summary, diffErr := s.generateDiffSummary(ctx, mf)
+		if diffErr != nil && !errors.Is(diffErr, ErrVersionNotFound) {
+			return nil, fmt.Errorf("failed to generate diff summary: %w", diffErr)
 		}
+		if summary != "" {
+			diffSummary = &summary
+		}
+	}
+
+	var graphJSON *string
+	if graph != nil {
+		if graphBytes, graphErr := json.Marshal(graph); graphErr == nil {
+			s := string(graphBytes)
+			graphJSON = &s
+		}
+	}
+
+	now := time.Now().UTC()
+	entity := &VersionEntity{
+		ID:                uuid.New(),
+		Version:           mf.Version,
+		ManifestJSON:      string(jsonBytes),
+		AppliedAt:         now,
+		AppliedBy:         appliedBy,
+		ApplyStatus:       applyStatus,
+		ApplyJobID:        applyJobID,
+		DiffSummary:       diffSummary,
+		RelationshipGraph: graphJSON,
+		CreatedAt:         now,
+	}
+
+	if phaseStatus != nil {
+		if err := entity.SetPhaseStatus(phaseStatus); err != nil {
+			return nil, fmt.Errorf("failed to serialize phase_status: %w", err)
+		}
+	}
+
+	if err := s.repo.Store(ctx, entity, expectedSeq); err != nil {
+		return nil, err
 	}
 
 	return entity, nil
@@ -279,8 +322,11 @@ func EntityToProto(entity *VersionEntity) (*controlplanev1.ManifestVersion, erro
 	}
 
 	// Populate phase_status from the JSONB column.
-	phaseStatus, err := entity.GetPhaseStatus()
-	if err == nil && phaseStatus != nil {
+	phaseStatus, phaseErr := entity.GetPhaseStatus()
+	if phaseErr != nil {
+		return nil, fmt.Errorf("failed to unmarshal phase_status: %w", phaseErr)
+	}
+	if phaseStatus != nil {
 		mv.PhaseStatus = phaseStatusMapToProto(phaseStatus)
 	}
 
