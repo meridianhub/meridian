@@ -11,6 +11,7 @@ describe('NODE_TYPE_REGISTRY', () => {
     'instrument',
     'account_type',
     'valuation_rule',
+    'event_channel',
     'saga',
     'payment_rail',
     'party_type',
@@ -20,8 +21,8 @@ describe('NODE_TYPE_REGISTRY', () => {
     'instruction_route',
   ]
 
-  it('has entries for all 10 ManifestNodeType values', () => {
-    expect(Object.keys(NODE_TYPE_REGISTRY)).toHaveLength(10)
+  it('has entries for all ManifestNodeType values', () => {
+    expect(Object.keys(NODE_TYPE_REGISTRY)).toHaveLength(ALL_TYPES.length)
     for (const type of ALL_TYPES) {
       expect(NODE_TYPE_REGISTRY[type]).toBeDefined()
     }
@@ -93,9 +94,9 @@ describe('NODE_TYPE_REGISTRY', () => {
 })
 
 describe('getNodeThemes', () => {
-  it('returns a Record<ManifestNodeType, { color, label }> for all 10 types', () => {
+  it('returns a Record<ManifestNodeType, { color, label }> for all types', () => {
     const themes = getNodeThemes()
-    expect(Object.keys(themes)).toHaveLength(10)
+    expect(Object.keys(themes)).toHaveLength(Object.keys(NODE_TYPE_REGISTRY).length)
     expect(themes.instrument).toEqual({
       color: 'var(--graph-instrument)',
       label: 'Instruments',
@@ -126,9 +127,9 @@ describe('getNodeThemes', () => {
 })
 
 describe('getLayerPriority', () => {
-  it('returns a Record<ManifestNodeType, string> for all 10 types', () => {
+  it('returns a Record<ManifestNodeType, string> for all types', () => {
     const priority = getLayerPriority()
-    expect(Object.keys(priority)).toHaveLength(10)
+    expect(Object.keys(priority)).toHaveLength(Object.keys(NODE_TYPE_REGISTRY).length)
     expect(priority.instrument).toBe('40')
     expect(priority.account_type).toBe('30')
     expect(priority.valuation_rule).toBe('20')

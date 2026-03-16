@@ -710,6 +710,208 @@ describe('buildManifestGraph', () => {
     })
   })
 
+  describe('event_channel nodes', () => {
+    it('creates event_channel nodes from saga event triggers', () => {
+      const manifest = createMockManifest({
+        sagas: [
+          { name: 'saga_a', trigger: 'event:order.created.v1', script: '' },
+          { name: 'saga_b', trigger: 'event:payment.completed.v1', script: '' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const channelNodes = graph.nodes.filter((n) => n.type === 'event_channel')
+
+      expect(channelNodes).toHaveLength(2)
+      expect(channelNodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'event_channel:order.created.v1', label: 'order.created.v1' }),
+          expect.objectContaining({ id: 'event_channel:payment.completed.v1', label: 'payment.completed.v1' }),
+        ]),
+      )
+    })
+
+    it('deduplicates event_channel nodes when multiple sagas listen on the same channel', () => {
+      const manifest = createMockManifest({
+        sagas: [
+          { name: 'saga_a', trigger: 'event:order.created.v1', script: '' },
+          { name: 'saga_b', trigger: 'event:order.created.v1', filter: 'event.type == "PREMIUM"', script: '' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const channelNodes = graph.nodes.filter((n) => n.type === 'event_channel')
+
+      expect(channelNodes).toHaveLength(1)
+      expect(channelNodes[0]).toMatchObject({ id: 'event_channel:order.created.v1' })
+    })
+
+    it('does not create event_channel nodes for non-event triggers', () => {
+      const manifest = createMockManifest({
+        sagas: [
+          { name: 'saga_a', trigger: 'scheduled:daily_check', script: '' },
+          { name: 'saga_b', trigger: 'api:/v1/payments', script: '' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const channelNodes = graph.nodes.filter((n) => n.type === 'event_channel')
+
+      expect(channelNodes).toHaveLength(0)
+    })
+
+    it('creates event_channel node for channel produced by saga outputs', () => {
+      const manifest = createMockManifest({
+        sagas: [{
+          name: 'log_energy',
+          trigger: 'api:/v1/energy',
+          script: [
+            'saga(name="log_energy")',
+            'step(name="record")',
+            'position_keeping.initiate_log(instrument_code="KWH", direction="CREDIT", amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const channelNodes = graph.nodes.filter((n) => n.type === 'event_channel')
+
+      expect(channelNodes).toHaveLength(1)
+      expect(channelNodes[0]).toMatchObject({
+        id: 'event_channel:position-keeping.transaction-captured.v1',
+        label: 'position-keeping.transaction-captured.v1',
+      })
+    })
+  })
+
+  describe('triggered_by edges', () => {
+    it('creates triggered_by edges from saga to event_channel it listens on', () => {
+      const manifest = createMockManifest({
+        sagas: [
+          { name: 'saga_a', trigger: 'event:order.created.v1', script: '' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const triggeredBy = graph.edges.filter((e) => e.relationship === 'triggered_by')
+
+      expect(triggeredBy).toHaveLength(1)
+      expect(triggeredBy[0]).toMatchObject({
+        source: 'saga:saga_a',
+        target: 'event_channel:order.created.v1',
+        relationship: 'triggered_by',
+      })
+    })
+
+    it('creates triggered_by edges for multiple sagas on same channel', () => {
+      const manifest = createMockManifest({
+        sagas: [
+          { name: 'saga_a', trigger: 'event:order.created.v1', script: '' },
+          { name: 'saga_b', trigger: 'event:order.created.v1', filter: 'event.type == "X"', script: '' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const triggeredBy = graph.edges.filter((e) => e.relationship === 'triggered_by')
+
+      expect(triggeredBy).toHaveLength(2)
+      expect(triggeredBy).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ source: 'saga:saga_a', target: 'event_channel:order.created.v1' }),
+          expect.objectContaining({ source: 'saga:saga_b', target: 'event_channel:order.created.v1' }),
+        ]),
+      )
+    })
+
+    it('does not create triggered_by edges for non-event triggers', () => {
+      const manifest = createMockManifest({
+        sagas: [
+          { name: 'saga_a', trigger: 'scheduled:daily_check', script: '' },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+      const triggeredBy = graph.edges.filter((e) => e.relationship === 'triggered_by')
+
+      expect(triggeredBy).toHaveLength(0)
+    })
+  })
+
+  describe('produces edges', () => {
+    it('creates produces edges from saga to event_channel when saga emits events', () => {
+      const manifest = createMockManifest({
+        sagas: [{
+          name: 'log_energy',
+          trigger: 'api:/v1/energy',
+          script: [
+            'saga(name="log_energy")',
+            'step(name="record")',
+            'position_keeping.initiate_log(instrument_code="KWH", direction="CREDIT", amount=qty)',
+          ].join('\n'),
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const produces = graph.edges.filter((e) => e.relationship === 'produces')
+
+      expect(produces).toHaveLength(1)
+      expect(produces[0]).toMatchObject({
+        source: 'saga:log_energy',
+        target: 'event_channel:position-keeping.transaction-captured.v1',
+        relationship: 'produces',
+      })
+    })
+
+    it('does not create produces edges for sagas without position_keeping calls', () => {
+      const manifest = createMockManifest({
+        sagas: [{
+          name: 'simple_saga',
+          trigger: 'event:order.created.v1',
+          script: 'def main(): pass',
+        }],
+      })
+      const graph = buildManifestGraph(manifest)
+      const produces = graph.edges.filter((e) => e.relationship === 'produces')
+
+      expect(produces).toHaveLength(0)
+    })
+
+    it('creates both triggered_by and produces edges showing full event chain', () => {
+      const manifest = createMockManifest({
+        sagas: [
+          {
+            name: 'record_usage',
+            trigger: 'api:/v1/meter-reading',
+            script: [
+              'saga(name="record_usage")',
+              'step(name="log")',
+              'position_keeping.initiate_log(instrument_code="KWH", direction="CREDIT", amount=qty)',
+            ].join('\n'),
+          },
+          {
+            name: 'settle_usage',
+            trigger: 'event:position-keeping.transaction-captured.v1',
+            filter: 'event.instrument_code == "KWH"',
+            script: 'def main(): pass',
+          },
+        ],
+      })
+      const graph = buildManifestGraph(manifest)
+
+      // record_usage produces on the channel
+      const produces = graph.edges.filter((e) => e.relationship === 'produces')
+      expect(produces).toHaveLength(1)
+      expect(produces[0]).toMatchObject({
+        source: 'saga:record_usage',
+        target: 'event_channel:position-keeping.transaction-captured.v1',
+      })
+
+      // settle_usage is triggered by the channel
+      const triggeredBy = graph.edges.filter((e) => e.relationship === 'triggered_by')
+      expect(triggeredBy).toHaveLength(1)
+      expect(triggeredBy[0]).toMatchObject({
+        source: 'saga:settle_usage',
+        target: 'event_channel:position-keeping.transaction-captured.v1',
+      })
+
+      // Only one event_channel node (deduplicated)
+      const channelNodes = graph.nodes.filter((n) => n.type === 'event_channel')
+      expect(channelNodes).toHaveLength(1)
+    })
+  })
+
   describe('edge cases', () => {
     it('returns empty graph for empty manifest', () => {
       const manifest = createMockManifest()
