@@ -1,6 +1,7 @@
 package applier
 
 import (
+	"errors"
 	"fmt"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
@@ -8,6 +9,9 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
 )
+
+// ErrUnknownExternalReferenceType is returned when an unrecognized external_reference_type is provided.
+var ErrUnknownExternalReferenceType = errors.New("unknown external_reference_type")
 
 // PartyClient wraps the party gRPC client to implement PartyService for use as a
 // saga handler dependency.
@@ -37,7 +41,11 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 	req.ExternalReference, _ = params["external_reference"].(string)
 
 	externalRefTypeStr, _ := params["external_reference_type"].(string)
-	req.ExternalReferenceType = parseExternalReferenceType(externalRefTypeStr)
+	externalRefType, err := parseExternalReferenceType(externalRefTypeStr)
+	if err != nil {
+		return nil, fmt.Errorf("register organization: %w", err)
+	}
+	req.ExternalReferenceType = externalRefType
 
 	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
 	resp, err := c.client.RegisterParty(callCtx, req)
@@ -54,11 +62,15 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 }
 
 // parseExternalReferenceType converts a string to the proto ExternalReferenceType enum.
-func parseExternalReferenceType(s string) partyv1.ExternalReferenceType {
-	if v, ok := partyv1.ExternalReferenceType_value[s]; ok {
-		return partyv1.ExternalReferenceType(v)
+// Returns an error for non-empty strings that do not match a known type.
+func parseExternalReferenceType(s string) (partyv1.ExternalReferenceType, error) {
+	if s == "" {
+		return partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED, nil
 	}
-	return partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED
+	if v, ok := partyv1.ExternalReferenceType_value[s]; ok {
+		return partyv1.ExternalReferenceType(v), nil
+	}
+	return 0, fmt.Errorf("%w: %q", ErrUnknownExternalReferenceType, s)
 }
 
 // Ensure PartyClient implements PartyService at compile time.

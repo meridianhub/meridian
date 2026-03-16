@@ -1,6 +1,7 @@
 package applier
 
 import (
+	"errors"
 	"fmt"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
@@ -8,6 +9,9 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
 )
+
+// ErrUnknownDataCategory is returned when an unrecognized data category string is provided.
+var ErrUnknownDataCategory = errors.New("unknown data category")
 
 // MarketInformationClient wraps the market-information gRPC client to implement
 // MarketInformationService for use as a saga handler dependency.
@@ -64,7 +68,11 @@ func (c *MarketInformationClient) RegisterDataSet(ctx *saga.StarlarkContext, par
 	req.ErrorMessageExpression, _ = params["error_message_expression"].(string)
 
 	categoryStr, _ := params["category"].(string)
-	req.Category = parseDataCategory(categoryStr)
+	category, err := parseDataCategory(categoryStr)
+	if err != nil {
+		return nil, fmt.Errorf("register data set: %w", err)
+	}
+	req.Category = category
 
 	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
 	resp, err := c.client.RegisterDataSet(callCtx, req)
@@ -106,11 +114,15 @@ func (c *MarketInformationClient) ActivateDataSet(ctx *saga.StarlarkContext, par
 }
 
 // parseDataCategory converts a string category name to the proto enum value.
-func parseDataCategory(s string) marketinformationv1.DataCategory {
-	if v, ok := marketinformationv1.DataCategory_value[s]; ok {
-		return marketinformationv1.DataCategory(v)
+// Returns an error for non-empty strings that do not match a known category.
+func parseDataCategory(s string) (marketinformationv1.DataCategory, error) {
+	if s == "" {
+		return marketinformationv1.DataCategory_DATA_CATEGORY_UNSPECIFIED, nil
 	}
-	return marketinformationv1.DataCategory_DATA_CATEGORY_UNSPECIFIED
+	if v, ok := marketinformationv1.DataCategory_value[s]; ok {
+		return marketinformationv1.DataCategory(v), nil
+	}
+	return 0, fmt.Errorf("%w: %q", ErrUnknownDataCategory, s)
 }
 
 // Ensure MarketInformationClient implements MarketInformationService at compile time.
