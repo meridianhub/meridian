@@ -99,7 +99,7 @@ func TestRepository_Store(t *testing.T) {
 	repo, tc := setupTestRepo(t)
 
 	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err := repo.Store(tc.Ctx, entity)
+	err := repo.Store(tc.Ctx, entity, 0)
 	require.NoError(t, err)
 }
 
@@ -109,12 +109,12 @@ func TestRepository_GetLatestApplied(t *testing.T) {
 	// Store two versions with different timestamps
 	entity1 := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
 	entity1.AppliedAt = time.Now().UTC().Add(-1 * time.Hour)
-	err := repo.Store(tc.Ctx, entity1)
+	err := repo.Store(tc.Ctx, entity1, 0)
 	require.NoError(t, err)
 
 	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusApplied)
 	entity2.AppliedAt = time.Now().UTC()
-	err = repo.Store(tc.Ctx, entity2)
+	err = repo.Store(tc.Ctx, entity2, 0)
 	require.NoError(t, err)
 
 	// Should return the latest (v2.0)
@@ -129,13 +129,13 @@ func TestRepository_GetLatestApplied_IgnoresFailed(t *testing.T) {
 	// Store applied version
 	entity1 := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
 	entity1.AppliedAt = time.Now().UTC().Add(-1 * time.Hour)
-	err := repo.Store(tc.Ctx, entity1)
+	err := repo.Store(tc.Ctx, entity1, 0)
 	require.NoError(t, err)
 
 	// Store failed version (more recent)
 	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusFailed)
 	entity2.AppliedAt = time.Now().UTC()
-	err = repo.Store(tc.Ctx, entity2)
+	err = repo.Store(tc.Ctx, entity2, 0)
 	require.NoError(t, err)
 
 	// Should return v1.0 (latest APPLIED, not the FAILED v2.0)
@@ -155,7 +155,7 @@ func TestRepository_GetByVersion(t *testing.T) {
 	repo, tc := setupTestRepo(t)
 
 	entity := newTestEntity("1.5", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err := repo.Store(tc.Ctx, entity)
+	err := repo.Store(tc.Ctx, entity, 0)
 	require.NoError(t, err)
 
 	found, err := repo.GetByVersion(tc.Ctx, "1.5")
@@ -178,7 +178,7 @@ func TestRepository_List(t *testing.T) {
 	for i, v := range []string{"1.0", "1.1", "2.0"} {
 		entity := newTestEntity(v, "admin@meridian.io", manifest.ApplyStatusApplied)
 		entity.AppliedAt = time.Now().UTC().Add(time.Duration(i) * time.Minute)
-		err := repo.Store(tc.Ctx, entity)
+		err := repo.Store(tc.Ctx, entity, 0)
 		require.NoError(t, err)
 	}
 
@@ -200,7 +200,7 @@ func TestRepository_List_Pagination(t *testing.T) {
 	for i, v := range []string{"1.0", "1.1", "1.2", "1.3", "2.0"} {
 		entity := newTestEntity(v, "admin@meridian.io", manifest.ApplyStatusApplied)
 		entity.AppliedAt = time.Now().UTC().Add(time.Duration(i) * time.Minute)
-		err := repo.Store(tc.Ctx, entity)
+		err := repo.Store(tc.Ctx, entity, 0)
 		require.NoError(t, err)
 	}
 
@@ -236,12 +236,12 @@ func TestRepository_GetPreviousApplied(t *testing.T) {
 	// Store two applied versions
 	entity1 := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
 	entity1.AppliedAt = time.Now().UTC().Add(-2 * time.Hour)
-	err := repo.Store(tc.Ctx, entity1)
+	err := repo.Store(tc.Ctx, entity1, 0)
 	require.NoError(t, err)
 
 	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusApplied)
 	entity2.AppliedAt = time.Now().UTC().Add(-1 * time.Hour)
-	err = repo.Store(tc.Ctx, entity2)
+	err = repo.Store(tc.Ctx, entity2, 0)
 	require.NoError(t, err)
 
 	// Get previous before entity2's time
@@ -254,7 +254,7 @@ func TestRepository_GetPreviousApplied_NotFound(t *testing.T) {
 	repo, tc := setupTestRepo(t)
 
 	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err := repo.Store(tc.Ctx, entity)
+	err := repo.Store(tc.Ctx, entity, 0)
 	require.NoError(t, err)
 
 	// No version before the earliest one
@@ -267,19 +267,19 @@ func TestRepository_Store_SequenceNumberIncrements(t *testing.T) {
 
 	// First store should get sequence_number = 1
 	entity1 := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err := repo.Store(tc.Ctx, entity1)
+	err := repo.Store(tc.Ctx, entity1, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), entity1.SequenceNumber)
 
 	// Second store should get sequence_number = 2
 	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err = repo.Store(tc.Ctx, entity2)
+	err = repo.Store(tc.Ctx, entity2, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), entity2.SequenceNumber)
 
 	// Third store should get sequence_number = 3
 	entity3 := newTestEntity("3.0", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err = repo.Store(tc.Ctx, entity3)
+	err = repo.Store(tc.Ctx, entity3, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), entity3.SequenceNumber)
 }
@@ -294,7 +294,7 @@ func TestRepository_GetCurrentSequenceNumber(t *testing.T) {
 
 	// Store a version
 	entity := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err = repo.Store(tc.Ctx, entity)
+	err = repo.Store(tc.Ctx, entity, 0)
 	require.NoError(t, err)
 
 	seq, err = repo.GetCurrentSequenceNumber(tc.Ctx)
@@ -303,12 +303,34 @@ func TestRepository_GetCurrentSequenceNumber(t *testing.T) {
 
 	// Store another
 	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusApplied)
-	err = repo.Store(tc.Ctx, entity2)
+	err = repo.Store(tc.Ctx, entity2, 0)
 	require.NoError(t, err)
 
 	seq, err = repo.GetCurrentSequenceNumber(tc.Ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), seq)
+}
+
+func TestRepository_Store_SequenceConflict(t *testing.T) {
+	repo, tc := setupTestRepo(t)
+
+	// Store first version (sequence becomes 1)
+	entity1 := newTestEntity("1.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err := repo.Store(tc.Ctx, entity1, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), entity1.SequenceNumber)
+
+	// Attempt to store with expectedSeq=1 (matches current) - should succeed
+	entity2 := newTestEntity("2.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err = repo.Store(tc.Ctx, entity2, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), entity2.SequenceNumber)
+
+	// Attempt to store with expectedSeq=1 (stale, current is 2) - should fail
+	entity3 := newTestEntity("3.0", "admin@meridian.io", manifest.ApplyStatusApplied)
+	err = repo.Store(tc.Ctx, entity3, 1)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, manifest.ErrSequenceConflict)
 }
 
 func TestRepository_Store_NewColumnsPopulated(t *testing.T) {
@@ -323,7 +345,7 @@ func TestRepository_Store_NewColumnsPopulated(t *testing.T) {
 	entity.Source = &source
 	entity.ResourcePath = &resourcePath
 
-	err := repo.Store(tc.Ctx, entity)
+	err := repo.Store(tc.Ctx, entity, 0)
 	require.NoError(t, err)
 
 	// Retrieve and verify

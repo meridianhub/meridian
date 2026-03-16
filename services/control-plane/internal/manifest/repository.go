@@ -69,18 +69,30 @@ func NewRepository(database *gorm.DB) (*Repository, error) {
 
 // Store saves a new manifest version record, atomically assigning the next
 // sequence number. The entity's SequenceNumber field is updated in place.
-func (r *Repository) Store(ctx context.Context, entity *VersionEntity) error {
+//
+// If expectedSeq is non-zero, the current sequence number must match it
+// (optimistic locking). A mismatch returns ErrSequenceConflict.
+// Pass 0 to skip the check (first apply or overwrite mode).
+func (r *Repository) Store(ctx context.Context, entity *VersionEntity, expectedSeq int64) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		// Atomically compute the next sequence number.
 		var maxSeq *int64
 		if err := tx.Model(&VersionEntity{}).Select("MAX(sequence_number)").Scan(&maxSeq).Error; err != nil {
 			return fmt.Errorf("failed to get max sequence number: %w", err)
 		}
+
+		var currentSeq int64
 		if maxSeq != nil {
-			entity.SequenceNumber = *maxSeq + 1
-		} else {
-			entity.SequenceNumber = 1
+			currentSeq = *maxSeq
 		}
+
+		// Optimistic locking: verify expected sequence within the same transaction.
+		if expectedSeq != 0 && currentSeq != expectedSeq {
+			return fmt.Errorf("%w: expected %d but current is %d",
+				ErrSequenceConflict, expectedSeq, currentSeq)
+		}
+
+		entity.SequenceNumber = currentSeq + 1
 
 		if err := tx.Create(entity).Error; err != nil {
 			return fmt.Errorf("failed to store manifest version: %w", err)

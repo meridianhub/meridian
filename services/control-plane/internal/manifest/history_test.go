@@ -207,7 +207,7 @@ func TestStoreManifestVersion_NilManifest(t *testing.T) {
 	svc, _ := NewHistoryService(repo)
 
 	ctx := context.TODO()
-	_, err := svc.StoreManifestVersion(ctx, nil, "admin", nil, ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(ctx, nil, "admin", nil, ApplyStatusApplied, nil, 0)
 	assert.ErrorIs(t, err, ErrNilManifest)
 }
 
@@ -217,7 +217,7 @@ func TestStoreManifestVersion_EmptyAppliedBy(t *testing.T) {
 
 	ctx := context.TODO()
 	m := testManifest("1.0")
-	_, err := svc.StoreManifestVersion(ctx, m, "", nil, ApplyStatusApplied, nil)
+	_, err := svc.StoreManifestVersion(ctx, m, "", nil, ApplyStatusApplied, nil, 0)
 	assert.ErrorIs(t, err, ErrEmptyAppliedBy)
 }
 
