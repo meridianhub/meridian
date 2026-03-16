@@ -21,7 +21,10 @@ import type {
   StepResult,
   ValidationError,
 } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
-import { ApplyManifestStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
+import {
+  ApplyManifestStatus,
+  StepResultStatus,
+} from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 import type { ManifestPlan } from '../hooks/use-manifest-plan'
 
 // ── Step state machine ──────────────────────────────────────────────────────
@@ -110,7 +113,7 @@ export function DeployWizard({
     onSuccess: (response) => {
       setApplyStepResults(response.stepResults ?? [])
       const isPartial = response.status === ApplyManifestStatus.FAILED &&
-        (response.stepResults ?? []).some((s) => s.status === 1 /* SUCCESS */)
+        (response.stepResults ?? []).some((s) => s.status === StepResultStatus.SUCCESS)
       void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
       if (isPartial) {
         setApplyError('Apply completed with partial failures. Some phases did not succeed.')
