@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
+	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
@@ -13,6 +15,14 @@ import (
 // ErrNoValuationMethodService is returned when default_conversion_method is provided
 // but no ValuationMethodService was configured in HandlerDependencies.
 var ErrNoValuationMethodService = errors.New("no ValuationMethodService configured")
+
+// ErrMarketInformationNotConfigured is returned when a handler requires the market
+// information service but none was configured in HandlerDependencies.
+var ErrMarketInformationNotConfigured = errors.New("market_information service not configured")
+
+// ErrPartyNotConfigured is returned when a handler requires the party service
+// but none was configured in HandlerDependencies.
+var ErrPartyNotConfigured = errors.New("party service not configured")
 
 // RegisterManifestHandlers registers all Starlark service bindings needed by
 // the apply_manifest saga. These handlers adapt Starlark parameters to the
@@ -138,6 +148,58 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
+		// Market Information - Data source registration
+		"market_information.register_data_source": {
+			handler: registerDataSourceHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Register a new market data source",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*marketinformationv1.RegisterDataSourceRequest)(nil),
+				ProtoResponseType:    (*marketinformationv1.RegisterDataSourceResponse)(nil),
+				Version:              1,
+			},
+		},
+		// Market Information - Data set registration (creates in DRAFT status)
+		"market_information.register_data_set": {
+			handler: registerDataSetHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Register a new market data set definition in DRAFT status",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*marketinformationv1.RegisterDataSetRequest)(nil),
+				ProtoResponseType:    (*marketinformationv1.RegisterDataSetResponse)(nil),
+				Version:              1,
+			},
+		},
+		// Market Information - Data set activation (DRAFT → ACTIVE)
+		"market_information.activate_data_set": {
+			handler: activateDataSetHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Activate a market data set definition (DRAFT → ACTIVE)",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*marketinformationv1.ActivateDataSetRequest)(nil),
+				ProtoResponseType:    (*marketinformationv1.ActivateDataSetResponse)(nil),
+				Version:              1,
+			},
+		},
+		// Party - Organization registration
+		"party.register_organization": {
+			handler: registerOrganizationHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Register a new organization party in the party directory",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*partyv1.RegisterPartyRequest)(nil),
+				ProtoResponseType:    (*partyv1.RegisterPartyResponse)(nil),
+				Version:              1,
+			},
+		},
 	}
 
 	for name, h := range handlers {
@@ -161,6 +223,12 @@ type HandlerDependencies struct {
 	// OperationalGateway provides provider connection and instruction route management.
 	// May be nil if no operational_gateway section is present in the manifest.
 	OperationalGateway OperationalGatewayService
+	// MarketInformation provides market data source and data set management.
+	// May be nil if no market_information section is present in the manifest.
+	MarketInformation MarketInformationService
+	// Party provides organization and party registration.
+	// May be nil if no party section is present in the manifest.
+	Party PartyService
 }
 
 // ReferenceDataService abstracts the Reference Data gRPC client for testing.
@@ -196,6 +264,24 @@ type OperationalGatewayService interface {
 	UpsertConnection(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 	// UpsertRoute creates or updates an instruction route configuration.
 	UpsertRoute(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+}
+
+// MarketInformationService abstracts the Market Information gRPC client for manifest apply.
+// It provides operations for registering data sources and data sets.
+type MarketInformationService interface {
+	// RegisterDataSource creates a new market data source.
+	RegisterDataSource(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+	// RegisterDataSet creates a new market data set definition in DRAFT status.
+	RegisterDataSet(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+	// ActivateDataSet transitions a data set from DRAFT to ACTIVE.
+	ActivateDataSet(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+}
+
+// PartyService abstracts the Party gRPC client for manifest apply.
+// It provides organization registration for the party directory.
+type PartyService interface {
+	// RegisterOrganization registers a new organization party in the party directory.
+	RegisterOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 }
 
 // registerInstrumentHandler creates a handler that registers an instrument via Reference Data.
@@ -295,6 +381,50 @@ func upsertRouteHandler(deps *HandlerDependencies) saga.Handler {
 			return nil, ErrOperationalGatewayNotConfigured
 		}
 		return deps.OperationalGateway.UpsertRoute(ctx, params)
+	}
+}
+
+// registerDataSourceHandler creates a handler that registers a market data source.
+// Returns an error if MarketInformation is nil to prevent silent skipping.
+func registerDataSourceHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		if deps.MarketInformation == nil {
+			return nil, ErrMarketInformationNotConfigured
+		}
+		return deps.MarketInformation.RegisterDataSource(ctx, params)
+	}
+}
+
+// registerDataSetHandler creates a handler that registers a market data set in DRAFT status.
+// Returns an error if MarketInformation is nil to prevent silent skipping.
+func registerDataSetHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		if deps.MarketInformation == nil {
+			return nil, ErrMarketInformationNotConfigured
+		}
+		return deps.MarketInformation.RegisterDataSet(ctx, params)
+	}
+}
+
+// activateDataSetHandler creates a handler that activates a market data set (DRAFT → ACTIVE).
+// Returns an error if MarketInformation is nil to prevent silent skipping.
+func activateDataSetHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		if deps.MarketInformation == nil {
+			return nil, ErrMarketInformationNotConfigured
+		}
+		return deps.MarketInformation.ActivateDataSet(ctx, params)
+	}
+}
+
+// registerOrganizationHandler creates a handler that registers an organization in the party directory.
+// Returns an error if Party is nil to prevent silent skipping.
+func registerOrganizationHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		if deps.Party == nil {
+			return nil, ErrPartyNotConfigured
+		}
+		return deps.Party.RegisterOrganization(ctx, params)
 	}
 }
 

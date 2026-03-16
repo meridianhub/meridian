@@ -275,6 +275,33 @@ func (r *Repository) UpdatePhaseStatus(ctx context.Context, id uuid.UUID, phaseS
 	})
 }
 
+// GetBySequenceNumber retrieves a manifest version by its sequence number.
+func (r *Repository) GetBySequenceNumber(ctx context.Context, seq int64) (*VersionEntity, error) {
+	var entity VersionEntity
+	var found bool
+
+	err := db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		result := tx.Where("sequence_number = ?", seq).First(&entity)
+
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			found = false
+			return nil
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		found = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrVersionNotFound
+	}
+	return &entity, nil
+}
+
 // GetPreviousApplied retrieves the applied manifest version immediately before the given timestamp.
 func (r *Repository) GetPreviousApplied(ctx context.Context, beforeTime time.Time) (*VersionEntity, error) {
 	var entity VersionEntity

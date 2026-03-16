@@ -307,11 +307,13 @@ func (h *ApplyManifestHandler) validate(
 	protoErrors := make([]*controlplanev1.ValidationError, 0, len(result.Errors))
 	for _, ve := range result.Errors {
 		protoErrors = append(protoErrors, &controlplanev1.ValidationError{
-			Severity:   string(ve.Severity),
-			Path:       ve.Path,
-			Code:       ve.Code,
-			Message:    ve.Message,
-			Suggestion: ve.Suggestion,
+			Severity:     string(ve.Severity),
+			Path:         ve.Path,
+			Code:         ve.Code,
+			Message:      ve.Message,
+			Suggestion:   ve.Suggestion,
+			ResourceType: ve.ResourceType,
+			ResourceId:   ve.ResourceID,
 		})
 	}
 

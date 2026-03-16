@@ -215,12 +215,9 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 
 		// RFC 8414 OAuth Authorization Server Metadata — required by MCP clients
 		// (e.g. Claude.ai) to discover auth endpoints before connecting.
-		mux.HandleFunc("/.well-known/oauth-authorization-server", mcpauth.NewMetadataHandler(baseURL, oauthCfg))
-
-		meta := mcpauth.Metadata{
-			AuthorizationURL: oauthCfg.AuthorizationURL,
-			TokenURL:         oauthCfg.TokenURL,
-		}
+		// URLs are derived at runtime from the request's Host header so that
+		// tenant-scoped subdomains receive correctly scoped endpoints.
+		mux.HandleFunc("/.well-known/oauth-authorization-server", mcpauth.NewMetadataHandler(baseURL))
 
 		baseDomain := env.GetEnvOrDefault("MCP_BASE_DOMAIN", "")
 
@@ -286,7 +283,7 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 		if validatorCleanup != nil {
 			defer validatorCleanup()
 		}
-		bearerMW := mcpauth.NewBearerMiddleware(validator, meta)
+		bearerMW := mcpauth.NewBearerMiddleware(validator, baseURL)
 
 		// Subdomain-to-tenant validation: ensures the request's subdomain
 		// matches the authenticated user's tenant from the JWT.
@@ -298,7 +295,7 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 		// subdomain validation. The passthrough validator in dev mode does not
 		// implement ClaimsBearerValidator, so subdomain checks are skipped.
 		if claimsValidator, ok := validator.(mcpauth.ClaimsBearerValidator); ok {
-			mcpHandler = subdomainMW.Handler(claimsValidator, meta, mcpHandler)
+			mcpHandler = subdomainMW.Handler(claimsValidator, baseURL, mcpHandler)
 		}
 
 		mux.Handle("/mcp", mcpHandler)

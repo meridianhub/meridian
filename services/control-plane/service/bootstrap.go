@@ -25,9 +25,12 @@ type ManifestValidationResult struct {
 
 // ManifestValidationError represents a single validation finding.
 type ManifestValidationError struct {
-	Path    string
-	Code    string
-	Message string
+	Path         string
+	Code         string
+	Message      string
+	Suggestion   string
+	ResourceType string
+	ResourceID   string
 }
 
 // ValidateManifest validates a manifest against the schema and business rules.
@@ -41,12 +44,14 @@ func ValidateManifest(mf *controlplanev1.Manifest, prev *controlplanev1.Manifest
 	result := &ManifestValidationResult{Valid: internal.Valid}
 	for _, e := range internal.Errors {
 		result.Errors = append(result.Errors, ManifestValidationError{
-			Path: e.Path, Code: e.Code, Message: e.Message,
+			Path: e.Path, Code: e.Code, Message: e.Message, Suggestion: e.Suggestion,
+			ResourceType: e.ResourceType, ResourceID: e.ResourceID,
 		})
 	}
 	for _, w := range internal.Warnings {
 		result.Warnings = append(result.Warnings, ManifestValidationError{
-			Path: w.Path, Code: w.Code, Message: w.Message,
+			Path: w.Path, Code: w.Code, Message: w.Message, Suggestion: w.Suggestion,
+			ResourceType: w.ResourceType, ResourceID: w.ResourceID,
 		})
 	}
 	return result, nil
