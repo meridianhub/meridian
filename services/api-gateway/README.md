@@ -156,7 +156,7 @@ Commit the updated `cmd/meridian/descriptor.binpb` after regenerating.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `AUTH_ENABLED` | No | `false` | Enable authentication for API routes |
+| `AUTH_ENABLED` | No | `true` | Enable authentication for API routes |
 | `JWKS_URL` | When AUTH_ENABLED=true | - | JWKS endpoint URL for JWT validation |
 | `JWKS_CACHE_TTL` | No | `24h` | How long to cache JWKS keys |
 | `JWKS_REFRESH_TTL` | No | `1h` | Background refresh interval for JWKS keys |
