@@ -84,17 +84,18 @@ func NewDatabase(ctx context.Context, cfg DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Register TenantGuard to enforce tenant scoping on all queries.
-	// Any query executed without WithGormTenantScope will fail with ErrTenantScopeRequired.
-	// Use WithTenantGuardBypass for migrations, health checks, and tenant provisioning.
-	if err := db.Use(dbpkg.NewTenantGuard()); err != nil {
-		return nil, fmt.Errorf("failed to register tenant guard: %w", err)
-	}
-
 	// Configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database instance: %w", err)
+	}
+
+	// Register TenantGuard to enforce tenant scoping on all queries.
+	// Any query executed without WithGormTenantScope will fail with ErrTenantScopeRequired.
+	// Use WithTenantGuardBypass for migrations, health checks, and tenant provisioning.
+	if err := db.Use(dbpkg.NewTenantGuard()); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("failed to register tenant guard: %w", err)
 	}
 
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
