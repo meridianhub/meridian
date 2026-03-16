@@ -3117,3 +3117,64 @@ func TestValidate_DuplicateOrganizationCodes(t *testing.T) {
 	}
 	assert.True(t, found, "expected DUPLICATE_CODE error for organizations")
 }
+
+func TestValidate_OrganizationReferencesInvalidPartyType(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME", Name: "Acme Corp", PartyType: "UNKNOWN_TYPE"},
+	}
+
+	result := v.Validate(manifest, nil)
+	assert.False(t, result.Valid)
+
+	found := false
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "organizations[0].party_type") {
+			found = true
+			assert.Contains(t, e.Message, "UNKNOWN_TYPE")
+			break
+		}
+	}
+	assert.True(t, found, "expected INVALID_REFERENCE error for invalid party_type")
+}
+
+func TestValidate_OrganizationReferencesBuiltInPartyType(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME", Name: "Acme Corp", PartyType: "ORGANIZATION"},
+		{Code: "BOB", Name: "Bob Smith", PartyType: "PERSON"},
+	}
+
+	result := v.Validate(manifest, nil)
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "organizations") {
+			t.Errorf("unexpected INVALID_REFERENCE error: %s", e.Message)
+		}
+	}
+}
+
+func TestValidate_OrganizationReferencesManifestDefinedPartyType(t *testing.T) {
+	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
+	require.NoError(t, err)
+
+	manifest := validManifest()
+	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
+		{TenantId: "test", PartyType: "COUNTERPARTY", AttributeSchema: `{"type":"object"}`},
+	}
+	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "PARTNER", Name: "Trading Partner", PartyType: "COUNTERPARTY"},
+	}
+
+	result := v.Validate(manifest, nil)
+	for _, e := range result.Errors {
+		if e.Code == "INVALID_REFERENCE" && strings.Contains(e.Path, "organizations") {
+			t.Errorf("unexpected INVALID_REFERENCE error: %s", e.Message)
+		}
+	}
+}

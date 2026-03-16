@@ -698,6 +698,19 @@ func TestPlan_OrganizationUpdate(t *testing.T) {
 	assert.Equal(t, MethodRegisterOrganization, plan.Calls[0].GRPCMethod)
 }
 
+func TestPlan_Organization_Delete_NotSupported(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceOrganization, ResourceCode: "ACME", Action: differ.ActionDelete},
+		},
+	}
+
+	_, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	assert.Error(t, err, "DELETE for organizations should fail")
+	assert.ErrorIs(t, err, ErrDeleteNotSupportedForOrganization)
+}
+
 func TestPlan_PhaseOrdering_MarketDataBeforeOrganizations(t *testing.T) {
 	p := NewManifestPlanner()
 	diffPlan := &differ.DiffPlan{

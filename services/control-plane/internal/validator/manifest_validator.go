@@ -934,6 +934,43 @@ func (v *ManifestValidator) validateCrossReferences(
 			addError(result, ve)
 		}
 	}
+
+	// Validate organization party_type references
+	v.validateOrganizationCrossRefs(manifest, result)
+}
+
+// validateOrganizationCrossRefs validates that organizations reference valid party types.
+func (v *ManifestValidator) validateOrganizationCrossRefs(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Built-in party types from the PartyType enum plus manifest-defined party types
+	validPartyTypes := map[string]bool{
+		"PERSON":       true,
+		"ORGANIZATION": true,
+	}
+	for _, pt := range manifest.GetPartyTypes() {
+		if ptCode := pt.GetPartyType(); ptCode != "" {
+			validPartyTypes[ptCode] = true
+		}
+	}
+	partyTypeList := mapKeys(validPartyTypes)
+	for i, org := range manifest.GetOrganizations() {
+		partyType := org.GetPartyType()
+		if partyType != "" && !validPartyTypes[partyType] {
+			ve := ValidationError{
+				Severity:        SeverityError,
+				Path:            fmt.Sprintf("organizations[%d].party_type", i),
+				Code:            "INVALID_REFERENCE",
+				Message:         fmt.Sprintf("organization %q references unknown party type %q", org.GetCode(), partyType),
+				AvailableFields: partyTypeList,
+			}
+			if suggestion := findClosestMatch(partyType, partyTypeList); suggestion != "" {
+				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+			}
+			addError(result, ve)
+		}
+	}
 }
 
 // validateOperationalGatewayCrossRefs validates referential integrity for the operational_gateway section.
