@@ -229,6 +229,7 @@ func NewMetadataHandler(fallbackBaseURL string) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Vary", "Host, X-Forwarded-Host, X-Forwarded-Proto")
 		_, _ = w.Write(body)
 	}
 }
@@ -237,6 +238,11 @@ func NewMetadataHandler(fallbackBaseURL string) http.HandlerFunc {
 // request. It checks X-Forwarded-Host and X-Forwarded-Proto headers first
 // (set by reverse proxies like Caddy), then falls back to r.Host.
 // If the host cannot be determined, fallback is returned.
+//
+// Security: This function trusts X-Forwarded-Host/Proto headers. In production
+// these are set by Caddy which overwrites (not appends) forwarded headers,
+// preventing client spoofing. The MCP server must NOT be exposed directly
+// to the internet without a reverse proxy that sanitizes these headers.
 func baseURLFromRequest(r *http.Request, fallback string) string {
 	host := r.Header.Get("X-Forwarded-Host")
 	if host == "" {
