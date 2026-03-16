@@ -8,6 +8,7 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ReconcileResult holds the output of a reconciliation operation.
@@ -71,7 +72,7 @@ type ReconcileService struct {
 // d is the differ used for comparison; if nil a no-op differ is used.
 func NewReconcileService(history *HistoryService, exporter *ExportService, d *differ.ManifestDiffer) (*ReconcileService, error) {
 	if history == nil {
-		return nil, ErrNilRepository
+		return nil, ErrHistoryServiceRequired
 	}
 	if exporter == nil {
 		return nil, ErrNilExporter
@@ -248,6 +249,7 @@ func filterManifestSections(m *controlplanev1.Manifest, includeSections []string
 func (r *ReconcileResult) ToProtoResponse() *controlplanev1.ReconcileManifestResponse {
 	resp := &controlplanev1.ReconcileManifestResponse{
 		ReconciledVersion: r.ReconciledVersion,
+		ReconciledAt:      timestamppb.New(r.ReconciledAt),
 		Warnings:          r.Warnings,
 		Summary: &controlplanev1.ReconcileSummary{
 			TotalChecked: int32(r.Summary.TotalChecked),

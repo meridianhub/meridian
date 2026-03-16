@@ -3,6 +3,7 @@ package manifest
 import (
 	"context"
 	"testing"
+	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
@@ -16,7 +17,7 @@ import (
 
 func TestNewReconcileService_NilHistory(t *testing.T) {
 	_, err := NewReconcileService(nil, &ExportService{}, nil)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrHistoryServiceRequired)
 }
 
 func TestNewReconcileService_NilExporter(t *testing.T) {
@@ -158,6 +159,7 @@ func TestToDriftTypeProto(t *testing.T) {
 }
 
 func TestReconcileResult_ToProtoResponse(t *testing.T) {
+	reconciledAt := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
 	result := &ReconcileResult{
 		DriftItems: []DriftItem{
 			{
@@ -180,6 +182,7 @@ func TestReconcileResult_ToProtoResponse(t *testing.T) {
 			Extra:        1,
 		},
 		ReconciledVersion: "1.0",
+		ReconciledAt:      reconciledAt,
 		Warnings:          []string{"warn1"},
 	}
 
@@ -187,6 +190,8 @@ func TestReconcileResult_ToProtoResponse(t *testing.T) {
 	require.NotNil(t, resp)
 
 	assert.Equal(t, "1.0", resp.ReconciledVersion)
+	require.NotNil(t, resp.ReconciledAt)
+	assert.Equal(t, reconciledAt.Unix(), resp.ReconciledAt.AsTime().Unix())
 	assert.Len(t, resp.DriftItems, 2)
 	assert.Equal(t, controlplanev1.DriftType_DRIFT_TYPE_MISSING, resp.DriftItems[0].DriftType)
 	assert.Equal(t, "GBP", resp.DriftItems[0].ResourceCode)
