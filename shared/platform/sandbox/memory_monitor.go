@@ -127,7 +127,7 @@ func (m *MemoryMonitor) run(ctx context.Context) {
 	}
 }
 
-// MonitorOption configures optional behaviour for MonitorExecution.
+// MonitorOption configures optional behavior for MonitorExecution.
 type MonitorOption func(*MemoryMonitor)
 
 // WithHeapReader injects a custom heap-allocation reader, replacing the
