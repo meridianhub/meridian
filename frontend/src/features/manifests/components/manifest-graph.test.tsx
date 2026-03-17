@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ManifestGraph } from './manifest-graph'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
@@ -176,6 +176,7 @@ function renderGraph(manifest: Manifest) {
 describe('ManifestGraph', () => {
   beforeEach(() => {
     mockNavigate.mockClear()
+    localStorage.clear()
   })
 
   describe('rendering', () => {
@@ -263,6 +264,58 @@ describe('ManifestGraph', () => {
       const flow = await screen.findByTestId('react-flow')
       // The node count should decrease (7 - 2 sagas = 5)
       expect(flow).toHaveAttribute('data-node-count', '5')
+    })
+
+    it('renders Show All and None buttons', async () => {
+      renderGraph(energyManifest)
+      expect(await screen.findByLabelText('Show all types')).toBeInTheDocument()
+      expect(screen.getByLabelText('Hide all types')).toBeInTheDocument()
+    })
+
+    it('None button hides all nodes', async () => {
+      renderGraph(energyManifest)
+      const noneButton = await screen.findByLabelText('Hide all types')
+      fireEvent.click(noneButton)
+      const flow = await screen.findByTestId('react-flow')
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '0'))
+    })
+
+    it('All button restores all nodes after hiding', async () => {
+      renderGraph(energyManifest)
+      const noneButton = await screen.findByLabelText('Hide all types')
+      fireEvent.click(noneButton)
+      const allButton = screen.getByLabelText('Show all types')
+      fireEvent.click(allButton)
+      const flow = await screen.findByTestId('react-flow')
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '7'))
+    })
+
+    it('persists visible types to localStorage when toggling', async () => {
+      renderGraph(energyManifest)
+      const sagaCheckbox = await screen.findByLabelText('Show Sagas')
+      fireEvent.click(sagaCheckbox)
+      const stored = localStorage.getItem('meridian:graph-visible-types')
+      expect(stored).not.toBeNull()
+      const parsed: unknown = JSON.parse(stored!)
+      expect(Array.isArray(parsed)).toBe(true)
+      expect((parsed as string[]).includes('saga')).toBe(false)
+    })
+
+    it('restores visible types from localStorage on mount', async () => {
+      // Pre-populate localStorage with sagas hidden
+      const types = ['instrument', 'account_type', 'valuation_rule']
+      localStorage.setItem('meridian:graph-visible-types', JSON.stringify(types))
+      renderGraph(energyManifest)
+      const flow = await screen.findByTestId('react-flow')
+      // Only instrument, account_type, valuation_rule nodes visible (2 + 1 + 1 = 4)
+      expect(flow).toHaveAttribute('data-node-count', '4')
+    })
+
+    it('restores empty (hide all) state from localStorage on mount', async () => {
+      localStorage.setItem('meridian:graph-visible-types', JSON.stringify([]))
+      renderGraph(energyManifest)
+      const flow = await screen.findByTestId('react-flow')
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '0'))
     })
   })
 

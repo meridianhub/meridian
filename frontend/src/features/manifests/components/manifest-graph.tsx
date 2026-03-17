@@ -628,9 +628,25 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
   const [showEventChain, setShowEventChain] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
-  const [visibleTypes, setVisibleTypes] = useState<Set<ManifestNodeType>>(
-    () => new Set<ManifestNodeType>(Object.keys(NODE_TYPE_REGISTRY) as ManifestNodeType[]),
-  )
+  const [visibleTypes, setVisibleTypes] = useState<Set<ManifestNodeType>>(() => {
+    try {
+      const stored = localStorage.getItem('meridian:graph-visible-types')
+      if (stored) {
+        const parsed: unknown = JSON.parse(stored)
+        if (Array.isArray(parsed)) {
+          const allTypes = new Set<string>(Object.keys(NODE_TYPE_REGISTRY))
+          const valid = (parsed as unknown[]).filter(
+            (t): t is ManifestNodeType => typeof t === 'string' && allTypes.has(t),
+          )
+          // Respect empty array as a valid "hide all" preference
+          return new Set<ManifestNodeType>(valid)
+        }
+      }
+    } catch {
+      // ignore localStorage errors
+    }
+    return new Set<ManifestNodeType>(Object.keys(NODE_TYPE_REGISTRY) as ManifestNodeType[])
+  })
 
   const graph = useMemo(() => buildManifestGraph(manifest), [manifest])
 
@@ -794,6 +810,14 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
     setHoveredNode(null)
   }, [])
 
+  const persistVisibleTypes = useCallback((types: Set<ManifestNodeType>) => {
+    try {
+      localStorage.setItem('meridian:graph-visible-types', JSON.stringify([...types]))
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [])
+
   const toggleType = useCallback((type: ManifestNodeType) => {
     setVisibleTypes((prev) => {
       const next = new Set(prev)
@@ -802,6 +826,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
       } else {
         next.add(type)
       }
+      persistVisibleTypes(next)
       return next
     })
     // Clear selection if the selected node's type was just hidden
@@ -809,7 +834,21 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
       setSelectedNode(null)
       setShowEventChain(false)
     }
-  }, [selectedManifestNode])
+  }, [selectedManifestNode, persistVisibleTypes])
+
+  const showAllTypes = useCallback(() => {
+    const all = new Set<ManifestNodeType>(Object.keys(NODE_TYPE_REGISTRY) as ManifestNodeType[])
+    setVisibleTypes(all)
+    persistVisibleTypes(all)
+  }, [persistVisibleTypes])
+
+  const hideAllTypes = useCallback(() => {
+    const empty = new Set<ManifestNodeType>()
+    setVisibleTypes(empty)
+    setSelectedNode(null)
+    setShowEventChain(false)
+    persistVisibleTypes(empty)
+  }, [persistVisibleTypes])
 
   const totalVisible = nodes.length
 
@@ -852,7 +891,28 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
 
       {/* Filter sidebar */}
       <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 rounded-lg border bg-background/95 p-3 backdrop-blur-sm shadow-sm">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Element Types</span>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Element Types</span>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={showAllTypes}
+              className="text-[10px] text-muted-foreground hover:text-foreground transition-colors px-1"
+              aria-label="Show all types"
+            >
+              All
+            </button>
+            <span className="text-[10px] text-muted-foreground">/</span>
+            <button
+              type="button"
+              onClick={hideAllTypes}
+              className="text-[10px] text-muted-foreground hover:text-foreground transition-colors px-1"
+              aria-label="Hide all types"
+            >
+              None
+            </button>
+          </div>
+        </div>
         {(Object.keys(NODE_THEMES) as ManifestNodeType[]).map((type) => {
           const theme = NODE_THEMES[type]
           const count = nodeCountByType[type]
