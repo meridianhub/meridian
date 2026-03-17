@@ -17,21 +17,27 @@ type noopReferenceData struct{}
 func (n *noopReferenceData) RegisterInstrument(_ *saga.StarlarkContext, p map[string]any) (any, error) {
 	return map[string]any{"instrument_code": p["instrument_code"], "version": int32(1), "status": "DRAFT"}, nil
 }
+
 func (n *noopReferenceData) ActivateInstrument(_ *saga.StarlarkContext, p map[string]any) (any, error) {
 	return map[string]any{"instrument_code": p["instrument_code"], "status": "ACTIVE"}, nil
 }
+
 func (n *noopReferenceData) DeleteInstrument(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 	return nil, nil
 }
+
 func (n *noopReferenceData) RegisterAccountType(_ *saga.StarlarkContext, p map[string]any) (any, error) {
 	return map[string]any{"code": p["code"], "version": int32(1), "status": "ACTIVE"}, nil
 }
+
 func (n *noopReferenceData) DeleteAccountType(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 	return nil, nil
 }
+
 func (n *noopReferenceData) RegisterValuationRule(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 	return map[string]any{"status": "REGISTERED"}, nil
 }
+
 func (n *noopReferenceData) RegisterSagaDefinition(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 	return map[string]any{"status": "REGISTERED"}, nil
 }

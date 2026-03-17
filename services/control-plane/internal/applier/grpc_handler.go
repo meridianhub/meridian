@@ -744,7 +744,7 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 		input.AccountTypes = append(input.AccountTypes, AccountTypeInput{
 			Code:          acct.GetCode(),
 			DisplayName:   acct.GetName(),
-			NormalBalance: acct.GetNormalBalance().String(),
+			NormalBalance: stripEnumPrefix(acct.GetNormalBalance().String(), "NORMAL_BALANCE_"),
 		})
 	}
 
@@ -884,6 +884,13 @@ func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit stri
 		return ""
 	}
 	return ""
+}
+
+// stripEnumPrefix removes a common prefix from a proto enum string representation.
+// For example, stripEnumPrefix("NORMAL_BALANCE_DEBIT", "NORMAL_BALANCE_") returns "DEBIT".
+// Returns the original string if the prefix is not found.
+func stripEnumPrefix(s, prefix string) string {
+	return strings.TrimPrefix(s, prefix)
 }
 
 // extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).
