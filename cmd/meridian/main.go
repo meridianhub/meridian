@@ -1056,6 +1056,13 @@ func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, loop
 	}
 	logger.Info("registered control-plane service (ApplyManifestService)")
 
+	// Ensure the apply_manifest saga definition is seeded in the platform table.
+	// This is idempotent and runs on every startup so the saga is always available
+	// even when --bootstrap was not invoked (e.g., E2E and local dev).
+	if err := controlplaneservice.EnsurePlatformSaga(context.Background(), pool); err != nil {
+		logger.Warn("failed to seed platform saga (non-fatal, --bootstrap will retry)", "error", err)
+	}
+
 	// Register ManifestHistoryService for manifest version history queries.
 	if err := controlplaneservice.RegisterManifestHistoryService(server, controlplaneservice.ManifestHistoryServiceConfig{
 		DB:     db,
