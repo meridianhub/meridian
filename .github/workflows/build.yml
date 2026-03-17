@@ -37,6 +37,11 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+      security-events: write  # Required for SARIF upload to Security tab
+      id-token: write         # Required for cosign keyless signing via OIDC
 
     steps:
       - name: Checkout code
@@ -105,6 +110,16 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Sign container image
+        if: github.event_name != 'pull_request'
+        run: |
+          cosign sign --yes \
+            ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
       - name: Run Trivy vulnerability scanner (filesystem)
         if: github.event_name == 'pull_request'

@@ -18,6 +18,7 @@ import (
 func TestWireGateway_Config(t *testing.T) {
 	// wireGateway should construct a gateway.Server with correct loopback routing
 	// for all 11 services. Verify the server starts and responds to health checks.
+	t.Setenv("AUTH_ENABLED", "false")
 	grpcPort := allocateFreePort(t)
 	httpPort := allocateFreePort(t)
 

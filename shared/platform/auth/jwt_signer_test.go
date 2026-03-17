@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,59 @@ func TestJWTSigner_RoundTripWithJWKS(t *testing.T) {
 	assert.Equal(t, "admin@acme.com", parsed.Email)
 	assert.Equal(t, "acme", parsed.TenantID)
 	assert.Equal(t, []string{"platform-admin", "super-admin"}, parsed.Roles)
+}
+
+func TestNewJWTSigner_WithKeyFile(t *testing.T) {
+	pemKey := generateTestPEM(t)
+
+	// Write PEM to a temp file.
+	f, err := os.CreateTemp(t.TempDir(), "jwt-key-*.pem")
+	require.NoError(t, err)
+	_, err = f.WriteString(pemKey)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	signer, err := auth.NewJWTSigner(auth.JWTSignerConfig{
+		PrivateKeyFile: f.Name(),
+		KeyID:          "file-key-1",
+		Issuer:         "test-issuer",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "file-key-1", signer.KeyID())
+	assert.Equal(t, "test-issuer", signer.Issuer())
+
+	// Verify the signer works end-to-end.
+	tokenStr, err := signer.SignClaims(map[string]interface{}{
+		"sub": "user-from-file",
+	}, time.Hour)
+	require.NoError(t, err)
+	assert.NotEmpty(t, tokenStr)
+}
+
+func TestNewJWTSigner_KeyFileTakesPrecedenceOverPEM(t *testing.T) {
+	pemKey := generateTestPEM(t)
+
+	f, err := os.CreateTemp(t.TempDir(), "jwt-key-*.pem")
+	require.NoError(t, err)
+	_, err = f.WriteString(pemKey)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// PrivateKeyFile wins; PrivateKeyPEM is intentionally invalid.
+	signer, err := auth.NewJWTSigner(auth.JWTSignerConfig{
+		PrivateKeyFile: f.Name(),
+		PrivateKeyPEM:  "not-a-pem",
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, signer.PublicKey())
+}
+
+func TestNewJWTSigner_KeyFileNotFound(t *testing.T) {
+	_, err := auth.NewJWTSigner(auth.JWTSignerConfig{
+		PrivateKeyFile: "/nonexistent/path/key.pem",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read key file")
 }
 
 func TestNewJWTSigner_EscapedNewlinePEM(t *testing.T) {
