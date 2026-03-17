@@ -435,7 +435,7 @@ func (m *mockReferenceDataClient) GetSaga(_ context.Context, name string, versio
 
 	script := m.customSagaScript
 	if script == "" {
-		// Default payment_execution saga script using invoke_handler for backward compatibility
+		// Default payment_execution saga script using typed service modules
 		script = `# Saga: payment_execution
 # Version: 1.0.0
 
@@ -448,37 +448,31 @@ def payment_execution():
 
     # Step 1: Reserve funds with bucket-aware lien
     step(name="reserve_funds")
-    lien_result = invoke_handler(
-        handler="payment_order.create_lien",
-        params={
-            "account_id": ctx.get("debtor_account_id"),
-            "amount_cents": ctx.get("amount_cents"),
-            "currency": ctx.get("currency"),
-            "payment_order_id": ctx.get("payment_order_id"),
-            "instrument_code": ctx.get("instrument_code", ""),
-            "payment_attributes": ctx.get("payment_attributes", {}),
-        }
+    lien_result = payment_order.create_lien(
+        account_id=ctx.get("debtor_account_id"),
+        amount_cents=ctx.get("amount_cents"),
+        currency=ctx.get("currency"),
+        payment_order_id=ctx.get("payment_order_id"),
+        instrument_code=ctx.get("instrument_code", ""),
+        payment_attributes=ctx.get("payment_attributes", {}),
     )
 
-    lien_id = lien_result.get("lien_id")
-    bucket_id = lien_result.get("bucket_id")
+    lien_id = lien_result.lien_id
+    bucket_id = lien_result.bucket_id
 
     # Step 2: Send payment to gateway
     step(name="send_to_gateway")
-    gateway_result = invoke_handler(
-        handler="payment_order.send_to_gateway",
-        params={
-            "payment_order_id": ctx.get("payment_order_id"),
-            "debtor_account_id": ctx.get("debtor_account_id"),
-            "creditor_reference": ctx.get("creditor_reference"),
-            "amount_cents": ctx.get("amount_cents"),
-            "currency": ctx.get("currency"),
-            "idempotency_key": ctx.get("idempotency_key"),
-        }
+    gateway_result = payment_order.send_to_gateway(
+        payment_order_id=ctx.get("payment_order_id"),
+        debtor_account_id=ctx.get("debtor_account_id"),
+        creditor_reference=ctx.get("creditor_reference"),
+        amount_cents=ctx.get("amount_cents"),
+        currency=ctx.get("currency"),
+        idempotency_key=ctx.get("idempotency_key"),
     )
 
-    gateway_reference_id = gateway_result.get("gateway_reference_id")
-    gateway_status = gateway_result.get("gateway_status")
+    gateway_reference_id = gateway_result.gateway_reference_id
+    gateway_status = gateway_result.gateway_status
 
     result = {
         "lien_id": lien_id,
@@ -490,29 +484,25 @@ def payment_execution():
     # Step 3: Post ledger entries (conditional)
     if ctx.get("should_post_ledger", False):
         step(name="post_ledger_entries")
-        ledger_result = invoke_handler(
-            handler="payment_order.post_ledger_entries",
-            params={
-                "payment_order_id": ctx.get("payment_order_id"),
-                "debtor_account_id": ctx.get("debtor_account_id"),
-                "gateway_reference_id": gateway_reference_id,
-                "amount_cents": ctx.get("amount_cents"),
-                "currency": ctx.get("currency"),
-                "idempotency_key": ctx.get("idempotency_key"),
-                "internal_clearing_enabled": ctx.get("internal_clearing_enabled", False),
-            }
+        ledger_result = payment_order.post_ledger_entries(
+            payment_order_id=ctx.get("payment_order_id"),
+            debtor_account_id=ctx.get("debtor_account_id"),
+            gateway_reference_id=gateway_reference_id,
+            amount_cents=ctx.get("amount_cents"),
+            currency=ctx.get("currency"),
+            idempotency_key=ctx.get("idempotency_key"),
+            internal_clearing_enabled=ctx.get("internal_clearing_enabled", False),
         )
-        result["booking_log_id"] = ledger_result.get("booking_log_id")
+        result["booking_log_id"] = ledger_result.booking_log_id
 
     # Step 4: Execute lien (conditional)
     if ctx.get("should_execute_lien", False):
         if lien_id:
             step(name="execute_lien")
-            execution_result = invoke_handler(
-                handler="payment_order.execute_lien",
-                params={"lien_id": lien_id}
+            execution_result = payment_order.execute_lien(
+                lien_id=lien_id,
             )
-            result["lien_execution_status"] = execution_result.get("execution_status")
+            result["lien_execution_status"] = execution_result.execution_status
 
     return result
 

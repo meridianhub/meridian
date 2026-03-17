@@ -58,61 +58,75 @@ type FieldTemplateData struct {
 const markdownTemplate = `# Saga Service Catalog
 
 This document provides a reference for all saga handlers available in the Meridian platform.
+{{- if not .Handlers}}
 
-{{if not .Handlers}}
 ## No handlers registered
 
 The schema registry is empty. Please ensure handler schemas are loaded.
-{{else}}
+{{- else}}
 {{range .Handlers}}
+
 ## {{.Name}}
 
 {{.Description}}
 
 ### Parameters
-
 {{if not .Params}}
-_No parameters_
-{{else}}
+_Parameters are defined in the handler's proto service definition._
+_See [handlers.yaml](../shared/pkg/saga/schema/handlers.yaml) for the schema._
+{{- else}}
+
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-{{range .Params}}| {{.Name}} | {{.Type}} | {{if .Required}}✓{{else}}-{{end}} | {{.Description}} |
-{{end}}
+{{- range .Params}}
+| {{md .Name}} | {{md .Type}} | {{if .Required}}✓{{else}}-{{end}} | {{md .Description}} |
+{{- end}}
 {{end}}
 
 ### Returns
-
 {{if not .Returns}}
-_No return values_
-{{else}}
+_Return values are defined in the handler's proto service definition._
+_See [handlers.yaml](../shared/pkg/saga/schema/handlers.yaml) for the schema._
+{{- else}}
+
 | Name | Type | Description |
 |------|------|-------------|
-{{range .Returns}}| {{.Name}} | {{.Type}} | {{.Description}} |
+{{- range .Returns}}
+| {{md .Name}} | {{md .Type}} | {{md .Description}} |
+{{- end}}
 {{end}}
-{{end}}
+{{- if .HasCompensate}}
 
-{{if .HasCompensate}}
 **Compensation Handler:** ` + "`{{.Compensate}}`" + `
-{{end}}
+{{- end}}
 
 ### Example Usage
 
-` + "```" + `starlark
-result = invoke_handler("{{.Name}}", {
-{{range $i, $p := .Params}}{{if $i}},
-{{end}}    "{{$p.Name}}": <value>{{end}}
-})
+` + "```starlark" + `
+result = {{.Name}}(
+{{- range $i, $p := .Params}}{{if $i}},{{end}}
+    {{$p.Name}}=<value>
+{{- end}}
+)
 ` + "```" + `
 
 ---
-
 {{end}}
-{{end}}
+{{- end}}
 `
 
 // GenerateMarkdown generates a Markdown service catalog from the schema registry.
+// escapeMarkdownCell escapes characters that would break Markdown table formatting.
+func escapeMarkdownCell(v string) string {
+	v = strings.ReplaceAll(v, "|", `\|`)
+	v = strings.ReplaceAll(v, "\n", "<br>")
+	return v
+}
+
 func GenerateMarkdown(registry *schema.Registry, writer io.Writer) error {
-	tmpl, err := template.New("markdown").Parse(markdownTemplate)
+	tmpl, err := template.New("markdown").Funcs(template.FuncMap{
+		"md": escapeMarkdownCell,
+	}).Parse(markdownTemplate)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrTemplateParse, err)
 	}

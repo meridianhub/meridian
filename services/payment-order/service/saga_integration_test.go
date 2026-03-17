@@ -179,7 +179,7 @@ func TestExecutePaymentSaga_PersistsExecutionOnFailure(t *testing.T) {
 	refClient.sagaScript = `
 def bad_saga():
     step(name="will_fail")
-    invoke_handler(handler="nonexistent.handler", params={})
+    nonexistent.handler()
     return {}
 
 output = bad_saga()

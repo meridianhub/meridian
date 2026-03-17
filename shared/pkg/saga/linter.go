@@ -130,6 +130,16 @@ type HandlerMetadata struct {
 	// RequiresPreCheck indicates verify_external_state must be called before this handler.
 	RequiresPreCheck bool
 
+	// ResourceType identifies the RBAC resource type this handler operates on
+	// (e.g., "payment_order", "position", "account"). When set, the saga runtime
+	// checks that the executing user has RequiredPermission on this resource type
+	// before allowing invocation. Empty means no authorization check (backward compat).
+	ResourceType string
+
+	// RequiredPermission is the RBAC permission required to invoke this handler
+	// (e.g., "write", "read", "execute"). Only checked when ResourceType is non-empty.
+	RequiredPermission string
+
 	// Category indicates the handler's operational role (ingestion, settlement, valuation).
 	// Used for conservation rule enforcement (FR-Conservation).
 	Category HandlerCategory

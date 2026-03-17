@@ -50,6 +50,16 @@ var (
 
 	// ErrDecimalConversion is returned when a value cannot be converted to Decimal.
 	ErrDecimalConversion = errors.New("cannot convert to Decimal")
+
+	// ErrHandlerAuthorizationDenied is returned when the executing user lacks the
+	// required RBAC permission for a handler with a declared ResourceType.
+	ErrHandlerAuthorizationDenied = errors.New("handler authorization denied")
+
+	// ErrNilHandlerDef is returned when a handler schema definition is nil.
+	ErrNilHandlerDef = errors.New("nil schema definition")
+
+	// ErrPartialRBACMetadata is returned when only one of resource_type/required_permission is set.
+	ErrPartialRBACMetadata = errors.New("resource_type and required_permission must both be set or both be empty")
 )
 
 // handlerTree represents a hierarchical tree of handler names.
@@ -158,10 +168,6 @@ func (t *handlerTree) validateNode(path string) error {
 // The resulting modules enable typed handler calls like:
 //
 //	position_keeping.initiate_log(position_id="123", amount="100.00", direction="DEBIT")
-//
-// Instead of:
-//
-//	invoke_handler(handler="position_keeping.initiate_log", params={...})
 func BuildServiceModules(registry *saga.HandlerRegistry) (starlark.StringDict, error) {
 	if registry == nil {
 		return nil, ErrNilRegistry
@@ -186,6 +192,16 @@ func BuildServiceModulesFromSchema(registry *saga.HandlerRegistry, s *Schema) (s
 	}
 	if s == nil {
 		return nil, ErrNilSchema
+	}
+
+	// Fast-fail: reject handlers with partial RBAC metadata at build time
+	for name, handlerDef := range s.Handlers {
+		if handlerDef == nil {
+			return nil, fmt.Errorf("handler %s: %w", name, ErrNilHandlerDef)
+		}
+		if (handlerDef.ResourceType == "") != (handlerDef.RequiredPermission == "") {
+			return nil, fmt.Errorf("handler %s: %w", name, ErrPartialRBACMetadata)
+		}
 	}
 
 	// Get all handler names from the schema
@@ -262,6 +278,11 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 		ctx := getStarlarkContext(thread)
 		if ctx == nil {
 			return nil, ErrMissingStarlarkContext
+		}
+
+		// Authorization check: enforce RBAC when handler declares a ResourceType
+		if err := authorizeHandlerInvocation(ctx, handlerDef, fullName); err != nil {
+			return nil, err
 		}
 
 		// Convert kwargs to Go map
@@ -367,6 +388,50 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 		// Convert result to Starlark value
 		return goToStarlarkResult(fullName, result)
 	})
+}
+
+// authorizeHandlerInvocation checks RBAC authorization before handler invocation.
+//
+// Fail-safe rules:
+//   - Handlers without RBAC metadata (both empty): allow (backward compatibility)
+//   - Partial RBAC metadata (one set, other empty): deny (fail-closed)
+//   - Sagas without Claims (system-initiated): allow
+//   - Claims present + both RBAC fields set: check that Claims has the required scope
+//     formatted as "resource_type:permission" (e.g., "payment_order:write")
+func authorizeHandlerInvocation(ctx *saga.StarlarkContext, handlerDef *HandlerDef, fullName string) error {
+	// No RBAC metadata declared: backward compatibility, allow
+	if handlerDef.ResourceType == "" && handlerDef.RequiredPermission == "" {
+		return nil
+	}
+
+	// Partial RBAC metadata: fail closed
+	if handlerDef.ResourceType == "" || handlerDef.RequiredPermission == "" {
+		return fmt.Errorf(
+			"%w: handler %s must declare both resource_type and required_permission",
+			ErrHandlerAuthorizationDenied,
+			fullName,
+		)
+	}
+
+	// No Claims on context: system-initiated saga, allow
+	if ctx.Claims == nil {
+		return nil
+	}
+
+	// Build the required scope string: "resource_type:permission"
+	requiredScope := handlerDef.ResourceType + ":" + handlerDef.RequiredPermission
+
+	// Check if the user has the required scope
+	if ctx.Claims.HasScope(requiredScope) {
+		return nil
+	}
+
+	// Also check role-based access: "resource_type:permission" as a role
+	if ctx.Claims.HasRole(requiredScope) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: handler %s requires permission %q via scope or role", ErrHandlerAuthorizationDenied, fullName, requiredScope)
 }
 
 // convertKwargsToParams converts Starlark kwargs to a Go map.

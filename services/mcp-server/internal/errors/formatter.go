@@ -65,7 +65,7 @@ var knownServiceBindings = []string{
 // knownStarlarkBuiltins lists the top-level names available in saga Starlark scripts.
 var knownStarlarkBuiltins = []string{
 	"input_data",
-	"invoke_handler",
+
 	"party_scope",
 	"Decimal",
 	"print",
