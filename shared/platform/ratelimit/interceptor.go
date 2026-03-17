@@ -214,8 +214,7 @@ func (r *Interceptor) cleanupIdleLimiters() {
 			r.limiters.Delete(key)
 			r.activeCount.Add(-1)
 			if r.config.Logger != nil {
-				r.config.Logger.Debug("evicted idle rate limiter",
-					"key", key)
+				r.config.Logger.Debug("evicted idle rate limiter")
 			}
 		}
 		return true
