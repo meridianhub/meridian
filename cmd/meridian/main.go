@@ -249,8 +249,13 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		return fmt.Errorf("tracer: %w", err)
 	}
 
-	// Shared gRPC server (no auth for unified dev mode)
-	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).Build()
+	// Shared gRPC server (no auth for unified dev mode — auth handled at HTTP gateway)
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
+		WithoutAuth().
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to build grpc server: %w", err)
+	}
 
 	// Idempotency service backed by the platform pgxpool (no Redis required in dev)
 	idempotencySvc := idempotency.NewPostgresService(conns.pgxPool("control-plane"))
