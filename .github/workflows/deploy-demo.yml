@@ -86,8 +86,6 @@ jobs:
         uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
 
       - name: Sign container image
-        env:
-          COSIGN_EXPERIMENTAL: 1
         run: |
           cosign sign --yes \
             ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
@@ -154,8 +152,6 @@ jobs:
         uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
 
       - name: Verify container image signature
-        env:
-          COSIGN_EXPERIMENTAL: 1
         run: |
           cosign verify \
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/deploy-demo.yml@refs/heads/demo" \
@@ -192,13 +188,18 @@ jobs:
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          IMAGE_DIGEST: ${{ needs.build-and-push.outputs.image-digest }}
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_DIGEST
           script: |
             cd /opt/meridian
-            docker compose pull
+            # Pull the exact verified digest to prevent TOCTOU between verify and deploy
+            docker pull ghcr.io/meridianhub/meridian@${IMAGE_DIGEST}
+            docker tag ghcr.io/meridianhub/meridian@${IMAGE_DIGEST} ghcr.io/meridianhub/meridian:demo
             docker compose up -d --remove-orphans
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f

@@ -113,8 +113,6 @@ jobs:
 
       - name: Sign container image
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: 1
         run: |
           cosign sign --yes \
             ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
