@@ -725,7 +725,7 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 		input.Instruments = append(input.Instruments, InstrumentInput{
 			Code:          inst.GetCode(),
 			DisplayName:   inst.GetName(),
-			Dimension:     inst.GetDimensions().GetUnit(),
+			Dimension:     instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit()),
 			DecimalPlaces: int(inst.GetDimensions().GetPrecision()),
 		})
 	}
@@ -850,6 +850,42 @@ func extractOperationalGateway(mf *controlplanev1.Manifest, input *ApplyManifest
 			HTTPMethod:           route.GetHttpMethod(),
 			PathTemplate:         route.GetPathTemplate(),
 		})
+	}
+}
+
+// instrumentTypeToDimension maps a manifest InstrumentType and unit to a Dimension enum name.
+// FIAT instruments are always CURRENCY. COMMODITY instruments use a unit-based lookup.
+// VOUCHER instruments use COUNT. Returns the unit string itself as a fallback.
+func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit string) string {
+	switch instType {
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:
+		return "CURRENCY"
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER:
+		return "COUNT"
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY:
+		return unitToDimension(unit)
+	default:
+		return unit
+	}
+}
+
+// unitToDimension maps common commodity unit strings to Dimension enum names.
+func unitToDimension(unit string) string {
+	switch unit {
+	case "kWh", "KWH", "MWh", "MWH":
+		return "ENERGY"
+	case "TONNE_CO2E", "tCO2e":
+		return "CARBON"
+	case "GPU_HOUR", "GPU_HOURS":
+		return "COMPUTE"
+	case "kg", "KG", "tonne", "TONNE":
+		return "MASS"
+	case "L", "m3", "bbl":
+		return "VOLUME"
+	case "GB", "TB":
+		return "DATA"
+	default:
+		return unit
 	}
 }
 
