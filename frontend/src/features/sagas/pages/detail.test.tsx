@@ -78,6 +78,7 @@ vi.mock('@codemirror/lint', () => ({
   lintGutter: vi.fn(() => ({})),
 }))
 
+import { ConnectError } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 
 function makeQueryClient() {
@@ -137,15 +138,23 @@ const draftSaga = {
 }
 
 function makeMockClients(options: {
-  saga?: typeof activeSaga
+  saga?: typeof activeSaga | null
+  manifestSagas?: Array<{ name: string; trigger: string; script: string; filter?: string }>
   validateSuccess?: boolean
   validateErrors?: Array<{ line: number; column: number; message: string; category: number }>
   validateMetrics?: { handlerCallCount: number; operationCount: number; estimatedDurationMs: number; complexityScore: number }
 } = {}) {
-  const saga = options.saga ?? activeSaga
+  const saga = options.saga === undefined ? activeSaga : options.saga
+  const notFoundError = new Error('not found')
+  Object.defineProperty(notFoundError, 'code', { value: 5 }) // Code.NotFound
+  // Make it look like a ConnectError for the hook's catch clause
+  Object.setPrototypeOf(notFoundError, ConnectError.prototype)
+
   return {
     sagaRegistry: {
-      getActiveSaga: vi.fn().mockResolvedValue({ saga, isTenantOverride: false }),
+      getActiveSaga: saga
+        ? vi.fn().mockResolvedValue({ saga, isTenantOverride: false })
+        : vi.fn().mockRejectedValue(notFoundError),
       validateSaga: vi.fn().mockResolvedValue({
         success: options.validateSuccess ?? true,
         errors: options.validateErrors ?? [],
@@ -157,8 +166,21 @@ function makeMockClients(options: {
         },
         formattedReport: '',
       }),
-      activateSaga: vi.fn().mockResolvedValue({ saga: { ...saga, status: 2 }, validation: {} }),
-      deprecateSaga: vi.fn().mockResolvedValue({ saga: { ...saga, status: 3 } }),
+      activateSaga: saga
+        ? vi.fn().mockResolvedValue({ saga: { ...saga, status: 2 }, validation: {} })
+        : vi.fn(),
+      deprecateSaga: saga
+        ? vi.fn().mockResolvedValue({ saga: { ...saga, status: 3 } })
+        : vi.fn(),
+    },
+    manifestHistory: {
+      getCurrentManifest: vi.fn().mockResolvedValue({
+        version: {
+          manifest: {
+            sagas: options.manifestSagas ?? [],
+          },
+        },
+      }),
     },
   }
 }
@@ -370,6 +392,95 @@ describe('StarlarkDetailPage', () => {
       await waitFor(() => {
         const panel = screen.getByTestId('complexity-metrics-panel')
         expect(panel).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('manifest fallback', () => {
+    const manifestSagas = [
+      {
+        name: 'energy_purchase_settlement',
+        trigger: 'event:position-keeping.transaction-captured.v1',
+        script: 'def main():\n  position_keeping.initiate_log(amount=Decimal("100"))',
+        filter: 'event.instrument_code == "KWH"',
+      },
+    ]
+
+    it('renders manifest saga when registry returns not found', async () => {
+      const clients = makeMockClients({ saga: null, manifestSagas })
+      renderWithRoute('energy_purchase_settlement', clients)
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /energy_purchase_settlement/i })).toBeInTheDocument()
+      })
+    })
+
+    it('shows MANIFEST status badge for manifest-only saga', async () => {
+      const clients = makeMockClients({ saga: null, manifestSagas })
+      renderWithRoute('energy_purchase_settlement', clients)
+
+      await waitFor(() => {
+        expect(screen.getByText('MANIFEST')).toBeInTheDocument()
+      })
+    })
+
+    it('shows trigger for manifest-only saga', async () => {
+      const clients = makeMockClients({ saga: null, manifestSagas })
+      renderWithRoute('energy_purchase_settlement', clients)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Trigger:.*position-keeping\.transaction-captured\.v1/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders editor with manifest script', async () => {
+      const clients = makeMockClients({ saga: null, manifestSagas })
+      renderWithRoute('energy_purchase_settlement', clients)
+
+      await waitFor(() => {
+        expect(screen.getByTestId('starlark-editor')).toBeInTheDocument()
+      })
+    })
+
+    it('does not show Validate, Activate, or Deprecate buttons', async () => {
+      const clients = makeMockClients({ saga: null, manifestSagas })
+      renderWithRoute('energy_purchase_settlement', clients)
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /energy_purchase_settlement/i })).toBeInTheDocument()
+      })
+      expect(screen.queryByRole('button', { name: /Validate/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Activate/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Deprecate/i })).not.toBeInTheDocument()
+    })
+
+    it('does not show version for manifest-only saga', async () => {
+      const clients = makeMockClients({ saga: null, manifestSagas })
+      renderWithRoute('energy_purchase_settlement', clients)
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /energy_purchase_settlement/i })).toBeInTheDocument()
+      })
+      expect(screen.queryByText(/Version/)).not.toBeInTheDocument()
+    })
+
+    it('shows error state when both registry and manifest have no match', async () => {
+      const clients = makeMockClients({ saga: null, manifestSagas: [] })
+      renderWithRoute('nonexistent_saga', clients)
+
+      await waitFor(() => {
+        expect(screen.getByText('Saga not found')).toBeInTheDocument()
+      })
+    })
+
+    it('uses registry data when both sources have the saga', async () => {
+      const clients = makeMockClients({ saga: activeSaga, manifestSagas })
+      renderWithRoute('current_account_withdrawal', clients)
+
+      await waitFor(() => {
+        // Should show registry status, not MANIFEST
+        expect(screen.getByText('ACTIVE')).toBeInTheDocument()
+        expect(screen.queryByText('MANIFEST')).not.toBeInTheDocument()
       })
     })
   })
