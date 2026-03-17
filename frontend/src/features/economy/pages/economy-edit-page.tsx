@@ -141,8 +141,9 @@ export function EconomyEditPage() {
     setManifestYaml(yamlStr)
     setDraftManifest(serverManifest)
     setYamlParseError(false)
+    validate(serverManifest)
     setManifestChangedSincePlan(false)
-  }, [])
+  }, [validate])
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
