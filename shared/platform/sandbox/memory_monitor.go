@@ -127,14 +127,28 @@ func (m *MemoryMonitor) run(ctx context.Context) {
 	}
 }
 
+// MonitorOption configures optional behaviour for MonitorExecution.
+type MonitorOption func(*MemoryMonitor)
+
+// WithHeapReader injects a custom heap-allocation reader, replacing the
+// default runtime.ReadMemStats call. Intended for deterministic testing.
+func WithHeapReader(fn func() uint64) MonitorOption {
+	return func(m *MemoryMonitor) {
+		m.readHeapAlloc = fn
+	}
+}
+
 // MonitorExecution runs work under active memory monitoring.
 // It starts the monitor, calls work(), performs a final synchronous sample to
 // catch any breach near execution end, then stops the monitor.
 // If the memory threshold is exceeded during execution,
 // ErrMemoryLimitExceeded is returned (even if work returned nil).
 // Errors from work take precedence only when no memory breach is detected.
-func MonitorExecution(ctx context.Context, cfg Config, work func() error) error {
+func MonitorExecution(ctx context.Context, cfg Config, work func() error, opts ...MonitorOption) error {
 	monitor := NewMemoryMonitor(cfg)
+	for _, opt := range opts {
+		opt(monitor)
+	}
 	monitor.Start(ctx)
 	defer monitor.Stop()
 
