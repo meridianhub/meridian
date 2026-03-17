@@ -19,6 +19,8 @@
 #   /opt/meridian/certs/          - Cloudflare Origin Certificate files
 #     origin-cert.pem
 #     origin-key.pem
+#   /opt/meridian/secrets/        - Runtime secrets (mode 700, deploy-owned)
+#     jwt-signing-key.pem         - RSA private key for JWT signing (set JWT_SIGNING_KEY_FILE)
 
 services:
   postgres:
@@ -73,6 +75,11 @@ services:
       # Both the gateway (BFF auth + JWKS endpoint) and MCP server must use the
       # same RSA key. Without this, MCP-signed tokens fail JWKS validation because
       # the gateway generates a random key on startup when JWT_SIGNING_KEY is empty.
+      #
+      # Preferred: mount the key as a file to keep it out of `docker inspect` output.
+      # Set JWT_SIGNING_KEY_FILE to the container path (e.g. /run/secrets/jwt-signing-key.pem).
+      # JWT_SIGNING_KEY (PEM string) is still supported as a fallback.
+      JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
       JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-1}
       JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian}
@@ -109,6 +116,10 @@ services:
       DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
       DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
       DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
+    volumes:
+      # Mount the secrets directory read-only so JWT_SIGNING_KEY_FILE can reference
+      # /run/secrets/jwt-signing-key.pem without the key appearing in docker inspect.
+      - /opt/meridian/secrets:/run/secrets:ro
     deploy:
       resources:
         limits:
@@ -158,12 +169,15 @@ services:
       MCP_DEX_CALLBACK_URL: ${MCP_DEX_CALLBACK_URL:-}             # e.g. https://demo.meridianhub.cloud/oauth/callback
 
       # --- JWT signing (shared with BFF for session interoperability) ---
+      JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
       JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-1}
       JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian}
 
       # --- Bearer token validation ---
       MCP_JWKS_URL: ${MCP_JWKS_URL:-}                             # e.g. https://demo.meridianhub.cloud/api/auth/jwks
+    volumes:
+      - /opt/meridian/secrets:/run/secrets:ro
     deploy:
       resources:
         limits:

@@ -7,9 +7,16 @@ import (
 	"fmt"
 	"time"
 
+	dbpkg "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
+
+// bypassCtx wraps the context with tenant guard bypass.
+// The provisioner operates at platform level — all DB operations bypass tenant scoping.
+func bypassCtx(ctx context.Context) context.Context {
+	return dbpkg.WithTenantGuardBypass(ctx)
+}
 
 // provisioningEntity is the database entity for the tenant_provisioning table.
 type provisioningEntity struct {
@@ -33,7 +40,7 @@ func (provisioningEntity) TableName() string {
 // Caller must hold the mutex.
 func (p *PostgresProvisioner) getProvisioningStatusLocked(ctx context.Context, tenantID tenant.TenantID) (*ProvisioningStatus, error) {
 	var entity provisioningEntity
-	result := p.platformDB.WithContext(ctx).Where("tenant_id = ?", tenantID.String()).First(&entity)
+	result := p.platformDB.WithContext(bypassCtx(ctx)).Where("tenant_id = ?", tenantID.String()).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrProvisioningStatusNotFound
@@ -69,7 +76,7 @@ func (p *PostgresProvisioner) saveProvisioningStatus(ctx context.Context, status
 			version = tenant_provisioning.version + 1
 	`
 
-	return p.platformDB.WithContext(ctx).Exec(
+	return p.platformDB.WithContext(bypassCtx(ctx)).Exec(
 		upsertSQL,
 		entity.TenantID,
 		entity.State,
@@ -83,7 +90,7 @@ func (p *PostgresProvisioner) saveProvisioningStatus(ctx context.Context, status
 
 // deleteProvisioningStatus removes the provisioning status record.
 func (p *PostgresProvisioner) deleteProvisioningStatus(ctx context.Context, tenantID tenant.TenantID) error {
-	return p.platformDB.WithContext(ctx).
+	return p.platformDB.WithContext(bypassCtx(ctx)).
 		Where("tenant_id = ?", tenantID.String()).
 		Delete(&provisioningEntity{}).Error
 }

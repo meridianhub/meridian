@@ -23,6 +23,10 @@ func TestMain(m *testing.M) {
 		// during context cancellation tests. These are cleaned up by deferred
 		// cleanup functions but may still be running at test completion.
 		goleak.IgnoreTopFunction("database/sql.(*DB).connectionOpener"),
+		// Ignore testcontainers Reaper goroutines. The Reaper is a global singleton
+		// in the testcontainers library that runs a background goroutine to clean up
+		// containers. It is not a leak in our code.
+		goleak.IgnoreTopFunction("github.com/testcontainers/testcontainers-go.(*Reaper).connect.func1"),
 	)
 }
 

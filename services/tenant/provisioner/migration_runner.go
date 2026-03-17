@@ -89,7 +89,7 @@ func (p *PostgresProvisioner) getTenantsToReconcile(ctx context.Context, tenantI
 
 	// Query all active tenants from the platform database
 	var entities []provisioningEntity
-	result := p.platformDB.WithContext(ctx).
+	result := p.platformDB.WithContext(bypassCtx(ctx)).
 		Where("state = ?", string(StateActive)).
 		Find(&entities)
 	if result.Error != nil {
@@ -264,7 +264,7 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 		}
 
 		// Execute migration within a transaction
-		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := db.WithContext(bypassCtx(ctx)).Transaction(func(tx *gorm.DB) error {
 			if err := tx.Exec(setPathQuery).Error; err != nil {
 				return fmt.Errorf("set search_path: %w", err)
 			}

@@ -93,7 +93,7 @@ func quoteIdentifier(identifier string) string {
 // schema already exists.
 func (p *PostgresProvisioner) createSchemaInDB(ctx context.Context, db *gorm.DB, schemaName string) error {
 	query := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdentifier(schemaName))
-	return db.WithContext(ctx).Exec(query).Error
+	return db.WithContext(bypassCtx(ctx)).Exec(query).Error
 }
 
 // dropSchemaInAllDBs drops the org_{tenant_id} schema from all service databases.
@@ -108,7 +108,7 @@ func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName
 			continue
 		}
 		query := fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoteIdentifier(schemaName))
-		if err := serviceDB.WithContext(ctx).Exec(query).Error; err != nil {
+		if err := serviceDB.WithContext(bypassCtx(ctx)).Exec(query).Error; err != nil {
 			errs = append(errs, fmt.Errorf("drop schema in %s: %w", svc.Name, err))
 		}
 	}

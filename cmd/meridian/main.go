@@ -1007,9 +1007,10 @@ func wireEmbeddedDex(ctx context.Context, identityDB *gorm.DB, logger *slog.Logg
 //   - JWT_TOKEN_TTL: token lifetime (default: "1h")
 func wireBFFAuth(identityDB *gorm.DB, logger *slog.Logger) (*platformauth.JWTSigner, []gateway.ServerOption) {
 	signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
-		PrivateKeyPEM: os.Getenv("JWT_SIGNING_KEY"),
-		KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
-		Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+		PrivateKeyFile: os.Getenv("JWT_SIGNING_KEY_FILE"),
+		PrivateKeyPEM:  os.Getenv("JWT_SIGNING_KEY"),
+		KeyID:          env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+		Issuer:         env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
 	})
 	if err != nil {
 		logger.Error("failed to create JWT signer, BFF auth disabled", "error", err)

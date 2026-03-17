@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	dbpkg "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -1125,4 +1126,41 @@ func TestRepository_ListByStatusOlderThan_OrderedByCreatedAt(t *testing.T) {
 	assert.Equal(t, "tenant_3", tenants[1].ID.String()) // 4 hours ago
 	assert.Equal(t, "tenant_0", tenants[2].ID.String()) // 3 hours ago
 	assert.Equal(t, "tenant_2", tenants[3].ID.String()) // 2 hours ago (newest)
+}
+
+func TestRepository_ConnBypassesTenantGuard(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Register TenantGuard — same as bootstrap.NewDatabase does in production.
+	require.NoError(t, db.Use(dbpkg.NewTenantGuard()))
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Without bypass, IsSlugAvailable would fail with ErrTenantScopeRequired.
+	// The conn() helper applies WithTenantGuardBypass, so this should succeed.
+	available, err := repo.IsSlugAvailable(ctx, "any-slug")
+	require.NoError(t, err)
+	assert.True(t, available)
+}
+
+func TestRepository_ConnBypassesTenantGuard_Create(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	require.NoError(t, db.Use(dbpkg.NewTenantGuard()))
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+	tenant := newTestTenant("guard_test")
+
+	// Create should succeed despite TenantGuard being active.
+	err := repo.Create(ctx, tenant)
+	require.NoError(t, err)
+
+	// GetByID should also succeed.
+	retrieved, err := repo.GetByID(ctx, tenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "guard_test", retrieved.ID.String())
 }
