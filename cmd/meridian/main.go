@@ -271,9 +271,16 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	outboxPublisher := events.NewOutboxPublisher("unified")
 	outboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("financial-accounting"))
 
+	// Service-to-service auth credentials (opt-in via SERVICE_AUTH_ENABLED=true).
+	svcAuthCfg := platformauth.NewServiceAuthConfigFromEnv()
+	svcCreds, err := svcAuthCfg.NewCredentials()
+	if err != nil {
+		return fmt.Errorf("service auth credentials: %w", err)
+	}
+
 	// Loopback gRPC clients for inter-service communication within the unified binary.
 	// grpc.NewClient is lazy — connects on first RPC, after the server is listening.
-	loopback, err := newLoopbackClients(ctx, grpcPort)
+	loopback, err := newLoopbackClients(ctx, grpcPort, svcCreds)
 	if err != nil {
 		return fmt.Errorf("loopback clients: %w", err)
 	}
@@ -1425,9 +1432,14 @@ type loopbackClients struct {
 
 // newLoopbackClients creates loopback gRPC clients targeting the local gRPC server.
 // grpc.NewClient is lazy — it connects on first RPC, after the server is listening.
-func newLoopbackClients(ctx context.Context, grpcPort int) (*loopbackClients, error) {
+// When svcCreds is non-nil, bearer tokens are attached to every outbound RPC.
+func newLoopbackClients(ctx context.Context, grpcPort int, svcCreds *platformauth.ServiceCredentials) (*loopbackClients, error) {
 	target := fmt.Sprintf("localhost:%d", grpcPort)
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+
+	if authOpt := platformauth.NewServiceCredentialsDialOption(svcCreds); authOpt != nil {
+		opts = append(opts, authOpt)
+	}
 
 	mds, mdsClose, err := misclient.New(ctx, misclient.Config{Target: target, DialOptions: opts})
 	if err != nil {
