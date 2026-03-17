@@ -39,6 +39,7 @@ function renderWizard(props?: Partial<React.ComponentProps<typeof DeployWizard>>
       <DeployWizard
         manifest={manifest}
         manifestChanged={false}
+        onReloadManifest={vi.fn()}
         {...props}
       />
     </QueryClientProvider>,

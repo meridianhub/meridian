@@ -46,7 +46,7 @@ export interface DeployWizardProps {
   /** Called when a plan run is initiated so callers can reset stale flags. */
   onPlanStart?: () => void
   /** Called when the user chooses to reload the server version after a version conflict. */
-  onReloadManifest?: (serverManifest: Manifest) => void
+  onReloadManifest: (serverManifest: Manifest) => void
 }
 
 // ── Plan hash ───────────────────────────────────────────────────────────────
@@ -173,11 +173,17 @@ export function DeployWizard({
           expectedSequenceNumber: BigInt(0),
         }).then((response) => {
           setApplyStepResults(response.stepResults ?? [])
-          const isPartial = response.status === ApplyManifestStatus.FAILED &&
-            (response.stepResults ?? []).some((s) => s.status === StepResultStatus.SUCCESS)
+          const isFailed = response.status === ApplyManifestStatus.FAILED
+          const hasAnyStepSuccess = (response.stepResults ?? []).some(
+            (s) => s.status === StepResultStatus.SUCCESS,
+          )
           void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
-          if (isPartial) {
-            setApplyError('Apply completed with partial failures. Some phases did not succeed.')
+          if (isFailed) {
+            setApplyError(
+              hasAnyStepSuccess
+                ? 'Apply completed with partial failures. Some phases did not succeed.'
+                : 'Apply failed. No phases succeeded.',
+            )
             setStep('error')
           } else {
             setStep('success')
@@ -189,7 +195,7 @@ export function DeployWizard({
         })
         break
       case 'reload':
-        if (serverManifest && onReloadManifest) {
+        if (serverManifest) {
           onReloadManifest(serverManifest)
         }
         setStep('idle')

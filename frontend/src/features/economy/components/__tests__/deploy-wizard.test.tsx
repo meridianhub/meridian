@@ -81,6 +81,7 @@ function renderWizard(props: Partial<React.ComponentProps<typeof DeployWizard>> 
       manifestChanged={false}
       onLineClick={vi.fn()}
       onSuggestionApply={vi.fn()}
+      onReloadManifest={vi.fn()}
       {...props}
     />,
     { initialToken: createTenantUserToken() },
@@ -362,6 +363,7 @@ describe('DeployWizard', () => {
           manifestChanged={false}
           onLineClick={vi.fn()}
           onSuggestionApply={vi.fn()}
+          onReloadManifest={vi.fn()}
         />,
         { initialToken: createTenantUserToken() },
       )
@@ -376,6 +378,7 @@ describe('DeployWizard', () => {
           manifestChanged={true}
           onLineClick={vi.fn()}
           onSuggestionApply={vi.fn()}
+          onReloadManifest={vi.fn()}
         />,
       )
 
@@ -401,6 +404,7 @@ describe('DeployWizard', () => {
           manifestChanged={false}
           onLineClick={vi.fn()}
           onSuggestionApply={vi.fn()}
+          onReloadManifest={vi.fn()}
         />,
         { initialToken: createTenantUserToken() },
       )
@@ -416,6 +420,7 @@ describe('DeployWizard', () => {
           manifestChanged={true}
           onLineClick={vi.fn()}
           onSuggestionApply={vi.fn()}
+          onReloadManifest={vi.fn()}
         />,
       )
 
@@ -428,6 +433,7 @@ describe('DeployWizard', () => {
           manifestChanged={false}
           onLineClick={vi.fn()}
           onSuggestionApply={vi.fn()}
+          onReloadManifest={vi.fn()}
         />,
       )
       await user.click(screen.getByRole('button', { name: /re-plan/i }))
