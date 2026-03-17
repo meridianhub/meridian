@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	sagaschema "github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -173,10 +174,17 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		return nil, fmt.Errorf("failed to create starlark runtime: %w", err)
 	}
 
+	// Build typed service modules from the handler registry for Starlark scripts
+	serviceModules, err := sagaschema.BuildServiceModules(handlerRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service modules: %w", err)
+	}
+
 	starlarkRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
-		Runtime:  runtime,
-		Registry: handlerRegistry,
-		Logger:   cfg.Logger,
+		Runtime:        runtime,
+		Registry:       handlerRegistry,
+		ServiceModules: serviceModules,
+		Logger:         cfg.Logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create starlark saga runner: %w", err)

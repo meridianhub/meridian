@@ -193,8 +193,8 @@ These items are from PRD Section 5.3.
 | Service-to-service auth | MEDIUM-2 | Use existing `OAuth2Client` for service-to-service JWT. Currently all internal gRPC uses insecure credentials. |
 | Demo server hardening | MEDIUM-4 | Remaining items: create non-root deploy user, move JWT signing key from env var to file mount. |
 | Security tests for runtimes | Test parity | Add security-focused tests for forecasting and valuation Starlark runtimes (step limit enforcement, script size rejection, timeout behaviour). |
-| Auth hook in `wrapHandler` | Sandbox RBAC | Add auth hook for saga handler ACLs so tenant scripts cannot call handlers above their role. |
-| Remove `invoke_handler` shim | LOW-1 | Deprecated backward-compatibility shim accepts handler names as strings with no type coercion or schema validation. |
+| ~~Auth hook in `wrapHandler`~~ | ~~Sandbox RBAC~~ | ~~Done: Authorization check added in `wrapHandler` using ResourceType/RequiredPermission on HandlerDef.~~ |
+| ~~Remove `invoke_handler` shim~~ | ~~LOW-1~~ | ~~Done: Removed backward-compatibility shim. All scripts migrated to typed service modules.~~ |
 | Cosign image signing | Supply chain | Add cosign signing to the build pipeline for Docker image provenance. |
 | Cross-tenant isolation tests | Regression | Integration tests that assert one tenant cannot read or write another tenant's data. |
 | Audit pgx raw SQL paths | CRITICAL-2 | The pgx path (`shared/platform/db/db.go`) has no equivalent to TenantGuard. Audit raw SQL for missing tenant scoping. |

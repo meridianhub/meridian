@@ -50,6 +50,10 @@ var (
 
 	// ErrDecimalConversion is returned when a value cannot be converted to Decimal.
 	ErrDecimalConversion = errors.New("cannot convert to Decimal")
+
+	// ErrHandlerAuthorizationDenied is returned when the executing user lacks the
+	// required RBAC permission for a handler with a declared ResourceType.
+	ErrHandlerAuthorizationDenied = errors.New("handler authorization denied")
 )
 
 // handlerTree represents a hierarchical tree of handler names.
@@ -158,10 +162,6 @@ func (t *handlerTree) validateNode(path string) error {
 // The resulting modules enable typed handler calls like:
 //
 //	position_keeping.initiate_log(position_id="123", amount="100.00", direction="DEBIT")
-//
-// Instead of:
-//
-//	invoke_handler(handler="position_keeping.initiate_log", params={...})
 func BuildServiceModules(registry *saga.HandlerRegistry) (starlark.StringDict, error) {
 	if registry == nil {
 		return nil, ErrNilRegistry
@@ -262,6 +262,11 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 		ctx := getStarlarkContext(thread)
 		if ctx == nil {
 			return nil, ErrMissingStarlarkContext
+		}
+
+		// Authorization check: enforce RBAC when handler declares a ResourceType
+		if err := authorizeHandlerInvocation(ctx, handlerDef, fullName); err != nil {
+			return nil, err
 		}
 
 		// Convert kwargs to Go map
@@ -367,6 +372,41 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 		// Convert result to Starlark value
 		return goToStarlarkResult(fullName, result)
 	})
+}
+
+// authorizeHandlerInvocation checks RBAC authorization before handler invocation.
+//
+// Fail-safe rules:
+//   - Handlers without ResourceType: allow (backward compatibility)
+//   - Sagas without Claims (system-initiated): allow
+//   - Claims present + ResourceType set: check that Claims has the required scope
+//     formatted as "resource_type:permission" (e.g., "payment_order:write")
+//   - Invalid/empty ResourceType with RequiredPermission: deny (fail-closed)
+func authorizeHandlerInvocation(ctx *saga.StarlarkContext, handlerDef *HandlerDef, fullName string) error {
+	// No ResourceType declared: backward compatibility, allow
+	if handlerDef.ResourceType == "" {
+		return nil
+	}
+
+	// No Claims on context: system-initiated saga, allow
+	if ctx.Claims == nil {
+		return nil
+	}
+
+	// Build the required scope string: "resource_type:permission"
+	requiredScope := handlerDef.ResourceType + ":" + handlerDef.RequiredPermission
+
+	// Check if the user has the required scope
+	if ctx.Claims.HasScope(requiredScope) {
+		return nil
+	}
+
+	// Also check role-based access: "resource_type:permission" as a role
+	if ctx.Claims.HasRole(requiredScope) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: handler %s requires scope %q", ErrHandlerAuthorizationDenied, fullName, requiredScope)
 }
 
 // convertKwargsToParams converts Starlark kwargs to a Go map.

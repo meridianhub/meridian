@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1128,67 +1129,6 @@ output_position = result.position
 		assert.Equal(t, "pos-123", output.Output["output_position"])
 	})
 
-	t.Run("invoke_handler backward compatibility", func(t *testing.T) {
-		script := `
-# Old-style invoke_handler still works
-result = invoke_handler(
-    handler="position_keeping.initiate_log",
-    params={
-        "position_id": "pos-456",
-        "amount": "200.00",
-        "direction": "CREDIT",
-    }
-)
-output_status = result["status"]
-output_position = result["position"]
-`
-		output, err := runner.ExecuteSaga(context.Background(), "compat_saga", script, saga.RunnerInput{
-			SagaExecutionID: uuid.New(),
-			CorrelationID:   uuid.New(),
-			KnowledgeAt:     time.Now(),
-			Input:           map[string]interface{}{},
-		})
-		require.NoError(t, err)
-		assert.True(t, output.Success)
-		assert.Equal(t, "INITIATED", output.Output["output_status"])
-		assert.Equal(t, "pos-456", output.Output["output_position"])
-
-		// Step results tracked via invoke_handler
-		require.Len(t, output.StepResults, 1)
-		assert.Equal(t, "position_keeping.initiate_log", output.StepResults[0].StepName)
-		assert.True(t, output.StepResults[0].Success)
-	})
-
-	t.Run("mixed syntax in same script", func(t *testing.T) {
-		script := `
-# New typed syntax
-new_result = position_keeping.initiate_log(
-    position_id="pos-new",
-    amount="50.00",
-    direction="DEBIT"
-)
-
-# Old invoke_handler syntax
-old_result = invoke_handler(
-    handler="position_keeping.cancel_log",
-    params={"log_id": new_result.log_id}
-)
-
-new_status = new_result.status
-old_status = old_result["status"]
-`
-		output, err := runner.ExecuteSaga(context.Background(), "mixed_saga", script, saga.RunnerInput{
-			SagaExecutionID: uuid.New(),
-			CorrelationID:   uuid.New(),
-			KnowledgeAt:     time.Now(),
-			Input:           map[string]interface{}{},
-		})
-		require.NoError(t, err)
-		assert.True(t, output.Success)
-		assert.Equal(t, "INITIATED", output.Output["new_status"])
-		assert.Equal(t, "CANCELLED", output.Output["old_status"])
-	})
-
 	t.Run("service modules discoverable via dir()", func(t *testing.T) {
 		script := `
 # Verify service module structure
@@ -1208,20 +1148,6 @@ has_cancel = "cancel_log" in pk_attrs
 		assert.Equal(t, true, output.Output["has_cancel"])
 	})
 
-	t.Run("invoke_handler error for missing handler", func(t *testing.T) {
-		script := `
-result = invoke_handler(handler="nonexistent.handler", params={})
-`
-		output, err := runner.ExecuteSaga(context.Background(), "error_saga", script, saga.RunnerInput{
-			SagaExecutionID: uuid.New(),
-			CorrelationID:   uuid.New(),
-			KnowledgeAt:     time.Now(),
-			Input:           map[string]interface{}{},
-		})
-		require.NoError(t, err)
-		assert.False(t, output.Success)
-		assert.Contains(t, output.Error, "not found")
-	})
 }
 
 // TestParseHandlerTree_SinglePart tests that single-part names are ignored.
@@ -1234,4 +1160,62 @@ func TestParseHandlerTree_SinglePart(t *testing.T) {
 	// Should only have "valid" as top-level
 	assert.Len(t, tree.children, 1)
 	assert.Contains(t, tree.children, "valid")
+}
+
+func TestAuthorizeHandlerInvocation(t *testing.T) {
+	t.Run("allows handler without ResourceType (backward compat)", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{}
+		def := &HandlerDef{ResourceType: ""}
+		err := authorizeHandlerInvocation(ctx, def, "test.handler")
+		assert.NoError(t, err)
+	})
+
+	t.Run("allows system saga without Claims", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{Claims: nil}
+		def := &HandlerDef{ResourceType: "payment_order", RequiredPermission: "write"}
+		err := authorizeHandlerInvocation(ctx, def, "payment_order.create_lien")
+		assert.NoError(t, err)
+	})
+
+	t.Run("allows when user has required scope", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{
+			Claims: &auth.Claims{Scopes: []string{"payment_order:write"}},
+		}
+		def := &HandlerDef{ResourceType: "payment_order", RequiredPermission: "write"}
+		err := authorizeHandlerInvocation(ctx, def, "payment_order.create_lien")
+		assert.NoError(t, err)
+	})
+
+	t.Run("allows when user has required role", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{
+			Claims: &auth.Claims{Roles: []string{"payment_order:write"}},
+		}
+		def := &HandlerDef{ResourceType: "payment_order", RequiredPermission: "write"}
+		err := authorizeHandlerInvocation(ctx, def, "payment_order.create_lien")
+		assert.NoError(t, err)
+	})
+
+	t.Run("denies when user lacks permission", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{
+			Claims: &auth.Claims{
+				Scopes: []string{"payment_order:read"},
+				Roles:  []string{"viewer"},
+			},
+		}
+		def := &HandlerDef{ResourceType: "payment_order", RequiredPermission: "write"}
+		err := authorizeHandlerInvocation(ctx, def, "payment_order.create_lien")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrHandlerAuthorizationDenied)
+		assert.Contains(t, err.Error(), "payment_order:write")
+	})
+
+	t.Run("denies with empty scopes and roles", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{
+			Claims: &auth.Claims{},
+		}
+		def := &HandlerDef{ResourceType: "account", RequiredPermission: "execute"}
+		err := authorizeHandlerInvocation(ctx, def, "account.debit")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrHandlerAuthorizationDenied)
+	})
 }

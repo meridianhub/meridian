@@ -98,10 +98,10 @@ _No return values_
 ### Example Usage
 
 ` + "```" + `starlark
-result = invoke_handler("{{.Name}}", {
+result = {{.Name}}(
 {{range $i, $p := .Params}}{{if $i}},
-{{end}}    "{{$p.Name}}": <value>{{end}}
-})
+{{end}}    {{$p.Name}}=<value>{{end}}
+)
 ` + "```" + `
 
 ---
