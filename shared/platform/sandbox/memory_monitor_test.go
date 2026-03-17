@@ -165,7 +165,8 @@ func TestMonitorExecution_UnderLimit(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MemoryThreshold = 512 * 1024 * 1024 // 512MB — will not trigger
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	err := MonitorExecution(ctx, cfg, func() error {
 		// Simulate a small computation.
@@ -183,7 +184,8 @@ func TestMonitorExecution_ReturnsWorkError(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MemoryThreshold = 512 * 1024 * 1024
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	expected := ErrScriptTooLarge // reuse existing sentinel for testing
 
 	err := MonitorExecution(ctx, cfg, func() error {
@@ -205,7 +207,8 @@ func TestMonitorExecution_DetectsLimitExceeded(t *testing.T) {
 	cfg.MemoryThreshold = currentHeap - 1
 	cfg.MemoryPollInterval = 1 * time.Millisecond
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	err := MonitorExecution(ctx, cfg, func() error {
 		// Block long enough for the monitor to detect the breach.
