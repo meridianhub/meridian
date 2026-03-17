@@ -3,6 +3,9 @@ package ratelimit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -109,7 +112,14 @@ func NewMetrics(namespace string, registry prometheus.Registerer) *Metrics {
 		),
 	}
 
-	registry.MustRegister(m.allowed, m.blocked, m.active)
+	for _, collector := range []prometheus.Collector{m.allowed, m.blocked, m.active} {
+		if err := registry.Register(collector); err != nil {
+			var alreadyRegistered prometheus.AlreadyRegisteredError
+			if !errors.As(err, &alreadyRegistered) {
+				panic(err)
+			}
+		}
+	}
 	return m
 }
 
@@ -216,6 +226,12 @@ func (r *Interceptor) cleanupIdleLimiters() {
 	}
 }
 
+// hashTenantID creates a short, privacy-preserving hash for logging.
+func hashTenantID(tenantID string) string {
+	h := sha256.Sum256([]byte(tenantID))
+	return hex.EncodeToString(h[:8])
+}
+
 // limiterKey returns the composite key for per-tenant, per-method rate limiting.
 func limiterKey(tenantID, method string) string {
 	return tenantID + ":" + method
@@ -293,12 +309,12 @@ func (r *Interceptor) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 			}
 			if r.config.Logger != nil {
 				r.config.Logger.Warn("rate limit exceeded",
-					"tenant", tenantStr,
+					"tenant_hash", hashTenantID(tenantStr),
 					"method", info.FullMethod)
 			}
 			return nil, status.Errorf(codes.ResourceExhausted,
-				"rate limit exceeded for tenant %s on %s: burst capacity %d exhausted, try again later",
-				tenantStr, info.FullMethod, r.config.BurstSize)
+				"rate limit exceeded: burst capacity %d exhausted on %s, try again later",
+				r.config.BurstSize, info.FullMethod)
 		}
 
 		if r.metrics != nil {

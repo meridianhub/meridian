@@ -54,7 +54,7 @@ func TestInterceptor_AllowsUpToBurstSize(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.ResourceExhausted, st.Code())
 	assert.Contains(t, st.Message(), "rate limit exceeded")
-	assert.Contains(t, st.Message(), "test_tenant")
+	assert.NotContains(t, st.Message(), "test_tenant", "tenant ID must not appear in client-facing error")
 }
 
 func TestInterceptor_PerTenantIsolation(t *testing.T) {

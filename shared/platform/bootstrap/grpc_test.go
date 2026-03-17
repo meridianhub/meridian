@@ -92,6 +92,20 @@ func TestGrpcServerBuilder_WithoutAuth(t *testing.T) {
 	assert.NotNil(t, info)
 }
 
+// TestGrpcServerBuilder_WithAuthInterceptorNil verifies that WithAuthInterceptor(nil)
+// counts as explicit auth configuration (auth disabled via config), so Build() succeeds.
+func TestGrpcServerBuilder_WithAuthInterceptorNil(t *testing.T) {
+	tracer := testTracer(t)
+	logger := testLogger()
+
+	server, err := NewGrpcServerBuilder(tracer, logger).
+		WithAuthInterceptor(nil).
+		Build()
+
+	require.NoError(t, err)
+	require.NotNil(t, server)
+}
+
 // TestGrpcServerBuilder_WithAuth verifies that WithAuthInterceptor adds
 // the auth interceptor to the chain.
 func TestGrpcServerBuilder_WithAuth(t *testing.T) {

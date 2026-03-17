@@ -472,16 +472,11 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
-	builder := bootstrap.NewGrpcServerBuilder(tracer, logger).
-		WithUnaryInterceptor(interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
-
-	if container.AuthInterceptor != nil {
-		builder = builder.WithAuthInterceptor(container.AuthInterceptor)
-	} else {
-		builder = builder.WithoutAuth()
-	}
-
-	grpcServer, err := builder.Build()
+	// WithAuthInterceptor accepts nil (auth disabled in config → tenant extraction only).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
+		WithAuthInterceptor(container.AuthInterceptor).
+		WithUnaryInterceptor(interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration)).
+		Build()
 	if err != nil {
 		return fmt.Errorf("failed to build grpc server: %w", err)
 	}

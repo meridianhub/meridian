@@ -51,6 +51,7 @@ var ErrAuthRequired = errors.New("grpc server: auth interceptor required; call W
 type GrpcServerBuilder struct {
 	tracer          *observability.Tracer
 	authInterceptor *auth.Interceptor
+	authConfigured  bool
 	platformAdmin   bool
 	authOptOut      bool
 	logger          *slog.Logger
@@ -85,6 +86,7 @@ func NewGrpcServerBuilder(tracer *observability.Tracer, logger *slog.Logger) *Gr
 // which trusts the x-tenant-id header without JWT validation (development only).
 func (b *GrpcServerBuilder) WithAuthInterceptor(interceptor *auth.Interceptor) *GrpcServerBuilder {
 	b.authInterceptor = interceptor
+	b.authConfigured = true
 	return b
 }
 
@@ -155,8 +157,11 @@ func (b *GrpcServerBuilder) WithStreamInterceptor(interceptor grpc.StreamServerI
 // Returns ErrAuthRequired if neither WithAuthInterceptor() nor WithoutAuth()
 // was called.
 func (b *GrpcServerBuilder) Build() (*grpc.Server, error) {
-	// Fail-closed: require explicit auth configuration
-	if b.authInterceptor == nil && !b.authOptOut {
+	// Fail-closed: require explicit auth configuration.
+	// WithAuthInterceptor(nil) counts as explicit (auth disabled in config).
+	// WithoutAuth() counts as explicit (auth handled elsewhere).
+	// Neither called = error.
+	if !b.authConfigured && !b.authOptOut {
 		return nil, ErrAuthRequired
 	}
 
