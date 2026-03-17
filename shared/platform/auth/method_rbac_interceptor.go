@@ -78,6 +78,23 @@ func newMethodRBACInterceptor(cfg MethodRBACConfig, audit AuditFunc) grpc.UnaryS
 				"method %s is not configured in RBAC policy", info.FullMethod)
 		}
 
+		// Fail closed on misconfiguration: Public + AllowedRoles is contradictory.
+		// A method cannot be both public (no auth) and role-restricted simultaneously.
+		if perm.Public && len(perm.AllowedRoles) > 0 {
+			slog.Error("RBAC misconfiguration: method is both Public and has AllowedRoles",
+				"method", info.FullMethod,
+			)
+			if audit != nil {
+				userID := ""
+				if claims, ok := GetClaimsFromContext(ctx); ok {
+					userID = claims.EffectiveUserID()
+				}
+				audit(info.FullMethod, userID, "denied_misconfigured")
+			}
+			return nil, status.Errorf(codes.Internal,
+				"RBAC misconfiguration for method %s: Public and AllowedRoles are mutually exclusive", info.FullMethod)
+		}
+
 		// Public methods bypass authentication entirely (e.g., login, password reset).
 		if perm.Public {
 			if audit != nil {

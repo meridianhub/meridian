@@ -337,6 +337,89 @@ func TestMethodRBACInterceptor_PublicMethod_AuditLog(t *testing.T) {
 	}
 }
 
+func TestMethodRBACInterceptor_PublicWithAllowedRoles_FailsClosed(t *testing.T) {
+	interceptor := NewMethodRBACInterceptor(MethodRBACConfig{
+		Permissions: map[string]MethodPermission{
+			"/some.Service/Misconfigured": {
+				Public:       true,
+				AllowedRoles: []Role{RoleAdmin},
+			},
+		},
+	})
+
+	// Even with valid admin claims, the misconfiguration should be rejected
+	claims := &Claims{Roles: []string{"admin"}}
+	ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
+
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Misconfigured"}, noopHandler)
+	if err == nil {
+		t.Fatal("expected error for Public+AllowedRoles misconfiguration, got nil")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %v", err)
+	}
+	if st.Code() != codes.Internal {
+		t.Errorf("expected Internal, got %v", st.Code())
+	}
+}
+
+func TestMethodRBACInterceptor_PublicWithAllowedRoles_NoClaims_FailsClosed(t *testing.T) {
+	interceptor := NewMethodRBACInterceptor(MethodRBACConfig{
+		Permissions: map[string]MethodPermission{
+			"/some.Service/Misconfigured": {
+				Public:       true,
+				AllowedRoles: []Role{RoleAdmin},
+			},
+		},
+	})
+
+	// No claims - should still fail closed due to misconfiguration
+	ctx := context.Background()
+
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Misconfigured"}, noopHandler)
+	if err == nil {
+		t.Fatal("expected error for Public+AllowedRoles misconfiguration without claims, got nil")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %v", err)
+	}
+	if st.Code() != codes.Internal {
+		t.Errorf("expected Internal, got %v", st.Code())
+	}
+}
+
+func TestMethodRBACInterceptor_PublicWithAllowedRoles_AuditLog(t *testing.T) {
+	var logged []string
+	logger := func(method, userID, decision string) {
+		logged = append(logged, method+":"+userID+":"+decision)
+	}
+
+	interceptor := NewMethodRBACInterceptorWithAudit(MethodRBACConfig{
+		Permissions: map[string]MethodPermission{
+			"/some.Service/Misconfigured": {
+				Public:       true,
+				AllowedRoles: []Role{RoleAdmin},
+			},
+		},
+	}, logger)
+
+	claims := &Claims{UserID: "user-1", Roles: []string{"admin"}}
+	ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
+
+	_, _ = interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Misconfigured"}, noopHandler)
+
+	if len(logged) != 1 {
+		t.Fatalf("expected 1 audit log entry, got %d: %v", len(logged), logged)
+	}
+	if logged[0] != "/some.Service/Misconfigured:user-1:denied_misconfigured" {
+		t.Errorf("unexpected audit log entry: %s", logged[0])
+	}
+}
+
 func TestMethodRBACInterceptor_AuditLog_AllowUnmapped(t *testing.T) {
 	var logged []string
 	logger := func(method, userID, decision string) {

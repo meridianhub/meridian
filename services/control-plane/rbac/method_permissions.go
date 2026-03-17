@@ -13,7 +13,7 @@ import "github.com/meridianhub/meridian/shared/platform/auth"
 // Services covered:
 // ApplyManifestService, ManifestHistoryService, SagaExecutionService,
 // EconomyGeneratorService, AuthService, CausationVisualizerService, BalanceSheetService,
-// SagaAdminService, SagaRegistryService, MappingService, and HealthService.
+// SagaAdminService, SagaRegistryService, MappingService, AuditService, and HealthService.
 var MethodPermissions = auth.MethodRBACConfig{
 	Permissions: map[string]auth.MethodPermission{
 		// ApplyManifestService - admin only (deploys configuration)
@@ -57,7 +57,7 @@ var MethodPermissions = auth.MethodRBACConfig{
 			AllowedRoles: []auth.Role{auth.RoleAdmin, auth.RoleOperator, auth.RoleAuditor},
 		},
 
-		// AuthService - admin only
+		// AuthService - admin, operator, auditor (all roles validate API keys)
 		"/meridian.control_plane.v1.AuthService/ValidateAPIKey": {
 			AllowedRoles: []auth.Role{auth.RoleAdmin, auth.RoleOperator, auth.RoleAuditor},
 		},
