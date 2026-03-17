@@ -79,7 +79,11 @@ func TestSagaScriptExecution(t *testing.T) {
 		PartyScope:      &saga.PartyScope{TenantID: "test-tenant"},
 		Input: map[string]any{
 			"manifest_version":   "1.0",
-			"instruments":        []any{map[string]any{"code": "GBP", "display_name": "British Pound", "dimension": "CURRENCY", "decimal_places": 2}},
+			"instruments": []any{
+				map[string]any{"code": "GBP", "display_name": "British Pound", "dimension": "CURRENCY", "decimal_places": 2},
+				map[string]any{"code": "KWH", "display_name": "Kilowatt Hour", "dimension": "CURRENCY", "decimal_places": 3},
+				map[string]any{"code": "CARBON_CREDIT", "display_name": "Carbon Credit", "dimension": "CURRENCY", "decimal_places": 4},
+			},
 			"account_types":      []any{},
 			"valuation_rules":    []any{},
 			"organizations":      []any{},

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/meridianhub/meridian/services/control-plane/internal/manifest"
 	"github.com/meridianhub/meridian/services/control-plane/internal/planner"
@@ -722,10 +724,18 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 	}
 
 	for _, inst := range mf.GetInstruments() {
+		dim := instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit())
+		if dim == "" {
+			// Fallback: the Starlark script's .get("dimension", "CURRENCY") only
+			// kicks in when the key is absent, not when it's empty. Use CURRENCY
+			// as a safe default so the saga can proceed. A future manifest proto
+			// change should add an explicit dimension field.
+			dim = "CURRENCY"
+		}
 		input.Instruments = append(input.Instruments, InstrumentInput{
 			Code:          inst.GetCode(),
 			DisplayName:   inst.GetName(),
-			Dimension:     instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit()),
+			Dimension:     dim,
 			DecimalPlaces: int(inst.GetDimensions().GetPrecision()),
 		})
 	}
@@ -854,24 +864,24 @@ func extractOperationalGateway(mf *controlplanev1.Manifest, input *ApplyManifest
 }
 
 // instrumentTypeToDimension derives the Dimension enum name from the manifest
-// InstrumentType. Multi-asset purity: the mapping uses the proto enum name
-// (e.g., "INSTRUMENT_TYPE_FIAT" → "CURRENCY") so it handles any instrument
-// without hardcoding specific units.
+// InstrumentType and unit. FIAT→CURRENCY, VOUCHER→COUNT. For COMMODITY and
+// other types, checks if the uppercased unit is a valid Dimension enum name;
+// otherwise returns empty string so the Starlark script uses its default.
 func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit string) string {
-	// Map from manifest InstrumentType proto enum to reference-data Dimension enum name.
-	dimensionByType := map[controlplanev1.InstrumentType]string{
-		controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:    "CURRENCY",
-		controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER: "COUNT",
-		// COMMODITY instruments don't have a single dimension — the unit string
-		// is passed through for the reference-data service to resolve.
+	switch instType {
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:
+		return "CURRENCY"
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER:
+		return "COUNT"
+	default:
+		// Check if the uppercased unit matches a known Dimension enum name.
+		upper := strings.ToUpper(unit)
+		if _, ok := referencedatav1.Dimension_value["DIMENSION_"+upper]; ok {
+			return upper
+		}
+		// Not a known dimension — return empty so the Starlark default applies.
+		return ""
 	}
-
-	if dim, ok := dimensionByType[instType]; ok {
-		return dim
-	}
-	// For commodity/unrecognized types, pass the unit through to the
-	// reference-data service which resolves it via its own instrument registry.
-	return unit
 }
 
 // extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).
