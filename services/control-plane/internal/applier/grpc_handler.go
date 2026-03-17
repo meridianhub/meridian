@@ -756,6 +756,7 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 			NormalBalance:  nb,
 			BehaviorClass:  "CLEARING",
 			InstrumentCode: instrumentCode,
+			AccountType:    acct.GetCode(), // used by saga auto-derivation for internal accounts
 		})
 	}
 
