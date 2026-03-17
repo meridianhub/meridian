@@ -329,7 +329,6 @@ func TestTenantGuard_Integration_ConcurrentTenantRequests(t *testing.T) {
 		err := db.WithGormTenantTransaction(ctx, gormDB, func(tx *gorm.DB) error {
 			return tx.Table("isolation_test_entities").Find(&rows).Error
 		})
-
 		if err != nil {
 			ch <- result{tenantID: id, err: err}
 			return

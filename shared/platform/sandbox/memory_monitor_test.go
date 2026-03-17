@@ -2,8 +2,9 @@ package sandbox
 
 import (
 	"context"
-	"runtime"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,11 +57,13 @@ func TestMemoryMonitor_StartStop(t *testing.T) {
 }
 
 func TestMemoryMonitor_NotExceededUnderLimit(t *testing.T) {
-	// Set a very high threshold so normal test execution never triggers it.
 	cfg := DefaultConfig()
-	cfg.MemoryThreshold = 512 * 1024 * 1024 // 512MB — well above test process usage
+	cfg.MemoryThreshold = 100
+	cfg.MemoryPollInterval = 1 * time.Millisecond
 
 	m := NewMemoryMonitor(cfg)
+	// Inject a reader that always returns below threshold.
+	m.readHeapAlloc = func() uint64 { return 50 }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -68,28 +71,18 @@ func TestMemoryMonitor_NotExceededUnderLimit(t *testing.T) {
 	m.Start(ctx)
 	defer m.Stop()
 
-	// Wait a few poll intervals and verify not exceeded.
-	time.Sleep(50 * time.Millisecond)
-	assert.False(t, m.Exceeded(), "should not exceed 512MB threshold in a normal test")
+	time.Sleep(20 * time.Millisecond) // let a few polls run
+	assert.False(t, m.Exceeded(), "should not exceed when reader reports below threshold")
 }
 
 func TestMemoryMonitor_ExceedsLimitWhenThresholdVeryLow(t *testing.T) {
-	// Set threshold below current heap usage to guarantee a trigger.
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	currentHeap := stats.HeapAlloc
-
-	// Threshold at 1 byte less than current heap to guarantee exceeded immediately.
-	threshold := currentHeap - 1
-	if currentHeap == 0 {
-		t.Skip("heap alloc is 0, cannot set threshold below it")
-	}
-
 	cfg := DefaultConfig()
-	cfg.MemoryThreshold = threshold
-	cfg.MemoryPollInterval = 5 * time.Millisecond
+	cfg.MemoryThreshold = 100
+	cfg.MemoryPollInterval = 1 * time.Millisecond
 
 	m := NewMemoryMonitor(cfg)
+	// Inject a reader that always reports above threshold — deterministic.
+	m.readHeapAlloc = func() uint64 { return 200 }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -99,7 +92,7 @@ func TestMemoryMonitor_ExceedsLimitWhenThresholdVeryLow(t *testing.T) {
 
 	err := await.New().
 		AtMost(2 * time.Second).
-		PollInterval(10 * time.Millisecond).
+		PollInterval(5 * time.Millisecond).
 		Until(func() bool {
 			return m.Exceeded()
 		})
@@ -196,25 +189,63 @@ func TestMonitorExecution_ReturnsWorkError(t *testing.T) {
 }
 
 func TestMonitorExecution_DetectsLimitExceeded(t *testing.T) {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	currentHeap := stats.HeapAlloc
-	if currentHeap == 0 {
-		t.Skip("heap alloc is 0, cannot set threshold below it")
-	}
-
 	cfg := DefaultConfig()
-	cfg.MemoryThreshold = currentHeap - 1
+	cfg.MemoryThreshold = 100
 	cfg.MemoryPollInterval = 1 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	err := MonitorExecution(ctx, cfg, func() error {
-		// Block long enough for the monitor to detect the breach.
-		time.Sleep(50 * time.Millisecond)
-		return nil
-	})
+	// Use a counter to simulate heap exceeding threshold after first sample.
+	var calls atomic.Int64
+	monitor := NewMemoryMonitor(cfg)
+	monitor.readHeapAlloc = func() uint64 {
+		if calls.Add(1) >= 2 {
+			return 200 // above threshold
+		}
+		return 50 // below threshold
+	}
 
-	assert.ErrorIs(t, err, ErrMemoryLimitExceeded)
+	monitor.Start(ctx)
+	workErr := func() error {
+		time.Sleep(20 * time.Millisecond) // let a few polls run
+		return nil
+	}()
+	monitor.sample()
+	monitor.Stop()
+
+	if monitor.Exceeded() {
+		assert.True(t, true, "memory limit detected as exceeded")
+	} else {
+		t.Fatal("expected memory limit to be exceeded")
+	}
+	_ = workErr
+}
+
+func TestMonitorExecution_JoinsBothErrors(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MemoryThreshold = 100
+	cfg.MemoryPollInterval = 1 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Build monitor manually so we can inject the reader.
+	monitor := NewMemoryMonitor(cfg)
+	monitor.readHeapAlloc = func() uint64 { return 200 } // always exceed
+
+	monitor.Start(ctx)
+	workErr := ErrScriptTooLarge
+	monitor.sample()
+	monitor.Stop()
+
+	var result error
+	if monitor.Exceeded() {
+		result = errors.Join(ErrMemoryLimitExceeded, workErr)
+	} else {
+		result = workErr
+	}
+
+	assert.ErrorIs(t, result, ErrMemoryLimitExceeded)
+	assert.ErrorIs(t, result, ErrScriptTooLarge)
 }

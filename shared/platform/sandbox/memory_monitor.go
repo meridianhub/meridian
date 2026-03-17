@@ -15,6 +15,10 @@ const (
 	defaultMemoryThreshold = uint64(10 * 1024 * 1024)
 
 	// defaultMemoryPollInterval is how often HeapAlloc is sampled.
+	// 10ms balances responsiveness (catching short-lived spikes before a script
+	// finishes) against the ~50-200µs stop-the-world cost of ReadMemStats.
+	// At 10ms this adds roughly 1-2% CPU overhead — acceptable for sandboxed
+	// script execution that is itself bounded by the execution timeout.
 	defaultMemoryPollInterval = 10 * time.Millisecond
 )
 
@@ -38,11 +42,12 @@ var ErrMemoryLimitExceeded = errors.New("memory limit exceeded in sandbox")
 //  3. GC timing fluctuations — a garbage-collection cycle can cause HeapAlloc
 //     to drop temporarily between polls, potentially masking a true overage.
 type MemoryMonitor struct {
-	threshold    uint64
-	pollInterval time.Duration
-	exceeded     atomic.Bool
-	stopOnce     sync.Once
-	stopCh       chan struct{}
+	threshold     uint64
+	pollInterval  time.Duration
+	exceeded      atomic.Bool
+	stopOnce      sync.Once
+	stopCh        chan struct{}
+	readHeapAlloc func() uint64 // injectable for testing; nil uses runtime.ReadMemStats
 }
 
 // NewMemoryMonitor constructs a MemoryMonitor from a sandbox Config.
@@ -88,11 +93,21 @@ func (m *MemoryMonitor) Exceeded() bool {
 // sample performs one synchronous HeapAlloc measurement and updates the
 // exceeded flag if the threshold is surpassed.
 func (m *MemoryMonitor) sample() {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	if stats.HeapAlloc > m.threshold {
+	heap := m.heapAlloc()
+	if heap > m.threshold {
 		m.exceeded.Store(true)
 	}
+}
+
+// heapAlloc returns the current HeapAlloc value. It uses the injected
+// readHeapAlloc function when set (tests), falling back to runtime.ReadMemStats.
+func (m *MemoryMonitor) heapAlloc() uint64 {
+	if m.readHeapAlloc != nil {
+		return m.readHeapAlloc()
+	}
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.HeapAlloc
 }
 
 // run is the monitoring goroutine body.
@@ -131,7 +146,9 @@ func MonitorExecution(ctx context.Context, cfg Config, work func() error) error 
 	monitor.Stop()
 
 	if monitor.Exceeded() {
-		return ErrMemoryLimitExceeded
+		// Preserve the work error alongside the memory breach so callers
+		// retain diagnostics (e.g. which Starlark line was executing).
+		return errors.Join(ErrMemoryLimitExceeded, workErr)
 	}
 	return workErr
 }
