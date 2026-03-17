@@ -253,6 +253,12 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 	// Print step results for debugging (visible in CI logs).
 	for _, sr := range resp.GetStepResults() {
 		fmt.Printf("  Step [%s]: %s — %s\n", sr.GetStepName(), sr.GetStatus().String(), sr.GetMessage())
+		for k, v := range sr.GetDetails() {
+			fmt.Printf("    %s: %s\n", k, v)
+		}
+	}
+	for phase, detail := range resp.GetPhaseStatus() {
+		fmt.Printf("  Phase [%s]: %s %s\n", phase, detail.GetStatus(), detail.GetError())
 	}
 
 	// Check response status — a nil-executor or saga failure returns a non-success status.
