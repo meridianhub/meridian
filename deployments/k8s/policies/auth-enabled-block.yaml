@@ -6,7 +6,7 @@
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
 metadata:
-  name: blockauthdiabledinproduction
+  name: blockauthdisabledinproduction
   annotations:
     description: Blocks AUTH_ENABLED=false in ConfigMaps and container env vars in production namespaces
 spec:
@@ -17,7 +17,7 @@ spec:
   targets:
     - target: admission.k8s.gatekeeper.sh
       rego: |
-        package blockauthdiabledinproduction
+        package blockauthdisabledinproduction
 
         # =============================================================================
         # ConfigMap violation rule

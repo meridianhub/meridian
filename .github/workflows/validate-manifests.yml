@@ -221,8 +221,8 @@ jobs:
 
           verify_rego_sync \
             "deployments/k8s/policies/auth-enabled-block.yaml" \
-            "deployments/k8s/policies/tests/blockauthdiabledinproduction.rego" \
-            "blockauthdiabledinproduction" || ERRORS=$((ERRORS + 1))
+            "deployments/k8s/policies/tests/blockauthdisabledinproduction.rego" \
+            "blockauthdisabledinproduction" || ERRORS=$((ERRORS + 1))
 
           if [ "$ERRORS" -gt 0 ]; then
             echo "ERROR: $ERRORS Rego policy file(s) out of sync."

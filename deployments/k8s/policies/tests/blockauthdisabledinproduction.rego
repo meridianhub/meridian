@@ -2,7 +2,7 @@
 # This file is the Rego policy extracted from the ConstraintTemplate for testing.
 # The canonical source is auth-enabled-block.yaml - keep these in sync.
 
-package blockauthdiabledinproduction
+package blockauthdisabledinproduction
 
 # =============================================================================
 # ConfigMap violation rule

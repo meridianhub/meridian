@@ -1,7 +1,7 @@
 # Tests for the BlockAuthDisabledInProduction OPA Gatekeeper policy
 # Run with: opa test deployments/k8s/policies/tests/ --v0-compatible -v
 
-package blockauthdiabledinproduction
+package blockauthdisabledinproduction
 
 # =============================================================================
 # Test: Production namespace detection
