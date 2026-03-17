@@ -121,11 +121,17 @@ export function DeployWizard({
     },
     onSuccess: (response) => {
       setApplyStepResults(response.stepResults ?? [])
-      const isPartial = response.status === ApplyManifestStatus.FAILED &&
-        (response.stepResults ?? []).some((s) => s.status === StepResultStatus.SUCCESS)
+      const isFailed = response.status === ApplyManifestStatus.FAILED
+      const hasAnyStepSuccess = (response.stepResults ?? []).some(
+        (s) => s.status === StepResultStatus.SUCCESS,
+      )
       void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
-      if (isPartial) {
-        setApplyError('Apply completed with partial failures. Some phases did not succeed.')
+      if (isFailed) {
+        setApplyError(
+          hasAnyStepSuccess
+            ? 'Apply completed with partial failures. Some phases did not succeed.'
+            : 'Apply failed. No phases succeeded.',
+        )
         setStep('error')
       } else {
         setStep('success')
