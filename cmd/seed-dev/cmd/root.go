@@ -255,11 +255,7 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
 		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN:
 		// success
-	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_UNSPECIFIED,
-		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED,
-		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_VALIDATION_FAILED,
-		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_BLOCKED,
-		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_PARTIAL:
+	default:
 		return fmt.Errorf("%w: %s", ErrManifestApplyFailed, resp.GetStatus().String())
 	}
 
