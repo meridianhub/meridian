@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ManifestGraph } from './manifest-graph'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
@@ -276,8 +276,8 @@ describe('ManifestGraph', () => {
       renderGraph(energyManifest)
       const noneButton = await screen.findByLabelText('Hide all types')
       fireEvent.click(noneButton)
-      const flow = screen.getByTestId('react-flow')
-      expect(flow).toHaveAttribute('data-node-count', '0')
+      const flow = await screen.findByTestId('react-flow')
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '0'))
     })
 
     it('All button restores all nodes after hiding', async () => {
@@ -286,8 +286,8 @@ describe('ManifestGraph', () => {
       fireEvent.click(noneButton)
       const allButton = screen.getByLabelText('Show all types')
       fireEvent.click(allButton)
-      const flow = screen.getByTestId('react-flow')
-      expect(flow).toHaveAttribute('data-node-count', '7')
+      const flow = await screen.findByTestId('react-flow')
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '7'))
     })
 
     it('persists visible types to localStorage when toggling', async () => {
