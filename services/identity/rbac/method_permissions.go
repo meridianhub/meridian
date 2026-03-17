@@ -37,18 +37,20 @@ var MethodPermissions = auth.MethodRBACConfig{
 			AllowedRoles: []auth.Role{auth.RoleAdmin, auth.RoleOperator},
 		},
 
-		// Public operations (authentication flow, no role required - handled by auth middleware)
+		// Pre-authentication flows: callers do not have a JWT yet, so these must
+		// bypass the claims check entirely. Public: true causes the interceptor to
+		// skip authentication and allow the request through.
 		"/meridian.identity.v1.IdentityService/Authenticate": {
-			AllowedRoles: []auth.Role{auth.RoleAdmin, auth.RoleOperator, auth.RoleAuditor},
+			Public: true,
 		},
 		"/meridian.identity.v1.IdentityService/RequestPasswordReset": {
-			AllowedRoles: []auth.Role{auth.RoleAdmin, auth.RoleOperator, auth.RoleAuditor},
+			Public: true,
 		},
 		"/meridian.identity.v1.IdentityService/CompletePasswordReset": {
-			AllowedRoles: []auth.Role{auth.RoleAdmin, auth.RoleOperator, auth.RoleAuditor},
+			Public: true,
 		},
 		"/meridian.identity.v1.IdentityService/AcceptInvitation": {
-			AllowedRoles: []auth.Role{auth.RoleAdmin, auth.RoleOperator, auth.RoleAuditor},
+			Public: true,
 		},
 
 		// Read operations: admin, operator, auditor

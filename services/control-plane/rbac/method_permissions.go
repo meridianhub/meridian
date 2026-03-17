@@ -3,7 +3,14 @@ package rbac
 
 import "github.com/meridianhub/meridian/shared/platform/auth"
 
-// MethodPermissions defines RBAC permissions for all control-plane gRPC services:
+// MethodPermissions defines RBAC permissions for all control-plane gRPC services.
+//
+// RoleService is intentionally absent from AllowedRoles across all services.
+// Service-to-service calls are internal gRPC calls that do not pass through the
+// MethodRBACInterceptor. Internal calls are authenticated via a separate mechanism
+// (e.g., mTLS or internal auth middleware) and bypass per-method RBAC entirely.
+//
+// Services covered:
 // ApplyManifestService, ManifestHistoryService, SagaExecutionService,
 // EconomyGeneratorService, AuthService, CausationVisualizerService, BalanceSheetService,
 // SagaAdminService, SagaRegistryService, MappingService, and HealthService.

@@ -12,10 +12,13 @@ import (
 // MethodPermission defines the required permission for a gRPC method.
 // Use either AllowedRoles for direct role checks, or ResourceType+Permission
 // for permission-based checks via the existing RBAC permission matrix.
+// Set Public to true for pre-authentication endpoints (e.g., login, password reset)
+// that must be accessible without a JWT.
 type MethodPermission struct {
 	ResourceType ResourceType
 	Permission   Permission
 	AllowedRoles []Role
+	Public       bool
 }
 
 // MethodRBACConfig maps gRPC full method names to required permissions.
@@ -73,6 +76,18 @@ func newMethodRBACInterceptor(cfg MethodRBACConfig, audit AuditFunc) grpc.UnaryS
 			}
 			return nil, status.Errorf(codes.PermissionDenied,
 				"method %s is not configured in RBAC policy", info.FullMethod)
+		}
+
+		// Public methods bypass authentication entirely (e.g., login, password reset).
+		if perm.Public {
+			if audit != nil {
+				userID := ""
+				if claims, ok := GetClaimsFromContext(ctx); ok {
+					userID = claims.EffectiveUserID()
+				}
+				audit(info.FullMethod, userID, "allowed_public")
+			}
+			return handler(ctx, req)
 		}
 
 		claims, ok := GetClaimsFromContext(ctx)

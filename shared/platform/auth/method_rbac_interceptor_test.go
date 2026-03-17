@@ -265,6 +265,78 @@ func TestMethodRBACInterceptor_AuditLog(t *testing.T) {
 	}
 }
 
+func TestMethodRBACInterceptor_PublicMethod_NoClaimsAllowed(t *testing.T) {
+	interceptor := NewMethodRBACInterceptor(MethodRBACConfig{
+		Permissions: map[string]MethodPermission{
+			"/some.Service/Login": {Public: true},
+			"/some.Service/Admin": {AllowedRoles: []Role{RoleAdmin}},
+		},
+	})
+
+	// No claims in context - should still pass for public method
+	ctx := context.Background()
+
+	resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Login"}, noopHandler)
+	if err != nil {
+		t.Fatalf("expected no error for public method without claims, got %v", err)
+	}
+	if resp != "ok" {
+		t.Errorf("expected handler response 'ok', got %v", resp)
+	}
+}
+
+func TestMethodRBACInterceptor_PublicMethod_WithClaimsAllowed(t *testing.T) {
+	interceptor := NewMethodRBACInterceptor(MethodRBACConfig{
+		Permissions: map[string]MethodPermission{
+			"/some.Service/Login": {Public: true},
+		},
+	})
+
+	// Claims present - should still pass (public method doesn't check roles)
+	claims := &Claims{Roles: []string{"auditor"}}
+	ctx := context.WithValue(context.Background(), ClaimsContextKey, claims)
+
+	resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Login"}, noopHandler)
+	if err != nil {
+		t.Fatalf("expected no error for public method with claims, got %v", err)
+	}
+	if resp != "ok" {
+		t.Errorf("expected handler response 'ok', got %v", resp)
+	}
+}
+
+func TestMethodRBACInterceptor_PublicMethod_AuditLog(t *testing.T) {
+	var logged []string
+	logger := func(method, userID, decision string) {
+		logged = append(logged, method+":"+userID+":"+decision)
+	}
+
+	interceptor := NewMethodRBACInterceptorWithAudit(MethodRBACConfig{
+		Permissions: map[string]MethodPermission{
+			"/some.Service/Login": {Public: true},
+		},
+	}, logger)
+
+	// Without claims
+	ctx := context.Background()
+	_, _ = interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Login"}, noopHandler)
+
+	// With claims
+	claims := &Claims{UserID: "user-1", Roles: []string{"admin"}}
+	ctx2 := context.WithValue(context.Background(), ClaimsContextKey, claims)
+	_, _ = interceptor(ctx2, nil, &grpc.UnaryServerInfo{FullMethod: "/some.Service/Login"}, noopHandler)
+
+	if len(logged) != 2 {
+		t.Fatalf("expected 2 audit log entries, got %d: %v", len(logged), logged)
+	}
+	if logged[0] != "/some.Service/Login::allowed_public" {
+		t.Errorf("unexpected audit log entry: %s", logged[0])
+	}
+	if logged[1] != "/some.Service/Login:user-1:allowed_public" {
+		t.Errorf("unexpected audit log entry: %s", logged[1])
+	}
+}
+
 func TestMethodRBACInterceptor_AuditLog_AllowUnmapped(t *testing.T) {
 	var logged []string
 	logger := func(method, userID, decision string) {

@@ -141,7 +141,12 @@ const (
 	ResourceTypeGateway ResourceType = "gateway"
 )
 
-// rolePermissions defines the permissions for each role
+// rolePermissions defines the permissions for each role.
+// Note: Not all ResourceType constants have entries here. The additional resource types
+// (e.g., ResourceTypeParty, ResourceTypePayment, ResourceTypeReferenceData, etc.) are
+// defined for future use when methods adopt the ResourceType+Permission authorization
+// mode. Until then, all method permissions use AllowedRoles directly, so the absence
+// of these resource types from this map is safe and intentional.
 var rolePermissions = map[Role]map[ResourceType][]Permission{
 	RoleAdmin: {
 		ResourceTypeAccount:     {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},
