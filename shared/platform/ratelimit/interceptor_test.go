@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -231,9 +232,14 @@ func TestInterceptor_CleanupIdleLimiters(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, interceptor.ActiveLimiters())
 
-	// Wait for cleanup
-	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, 0, interceptor.ActiveLimiters())
+	// Wait for cleanup to evict
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			return interceptor.ActiveLimiters() == 0
+		})
+	require.NoError(t, err, "limiter should be evicted after idle timeout")
 }
 
 func TestInterceptor_Metrics(t *testing.T) {
@@ -256,13 +262,15 @@ func TestInterceptor_Metrics(t *testing.T) {
 	handler(ctx, nil, info, testHandler)
 	handler(ctx, nil, info, testHandler)
 
+	tenantHash := hashTenantID("metrics_tenant")
+
 	allowedMetric := &dto.Metric{}
-	err := metrics.allowed.WithLabelValues("metrics_tenant", "/test.Service/Write").Write(allowedMetric)
+	err := metrics.allowed.WithLabelValues(tenantHash, "/test.Service/Write").Write(allowedMetric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(2), allowedMetric.Counter.GetValue())
 
 	blockedMetric := &dto.Metric{}
-	err = metrics.blocked.WithLabelValues("metrics_tenant", "/test.Service/Write").Write(blockedMetric)
+	err = metrics.blocked.WithLabelValues(tenantHash, "/test.Service/Write").Write(blockedMetric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(1), blockedMetric.Counter.GetValue())
 }

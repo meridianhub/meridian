@@ -300,16 +300,17 @@ func (r *Interceptor) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		tenantStr := tenantID.String()
+		tenantHash := hashTenantID(tenantStr)
 		key := limiterKey(tenantStr, info.FullMethod)
 		tl := r.getOrCreateLimiter(key)
 
 		if !tl.limiter.Allow() {
 			if r.metrics != nil {
-				r.metrics.blocked.WithLabelValues(tenantStr, info.FullMethod).Inc()
+				r.metrics.blocked.WithLabelValues(tenantHash, info.FullMethod).Inc()
 			}
 			if r.config.Logger != nil {
 				r.config.Logger.Warn("rate limit exceeded",
-					"tenant_hash", hashTenantID(tenantStr),
+					"tenant_hash", tenantHash,
 					"method", info.FullMethod)
 			}
 			return nil, status.Errorf(codes.ResourceExhausted,
@@ -318,7 +319,7 @@ func (r *Interceptor) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		if r.metrics != nil {
-			r.metrics.allowed.WithLabelValues(tenantStr, info.FullMethod).Inc()
+			r.metrics.allowed.WithLabelValues(tenantHash, info.FullMethod).Inc()
 		}
 
 		return handler(ctx, req)
