@@ -1147,7 +1147,6 @@ has_cancel = "cancel_log" in pk_attrs
 		assert.Equal(t, true, output.Output["has_initiate"])
 		assert.Equal(t, true, output.Output["has_cancel"])
 	})
-
 }
 
 // TestParseHandlerTree_SinglePart tests that single-part names are ignored.

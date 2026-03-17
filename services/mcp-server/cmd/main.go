@@ -20,7 +20,10 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
-var errUnknownTransport = errors.New("unknown transport")
+var (
+	errUnknownTransport = errors.New("unknown transport")
+	errMissingJWTKey    = errors.New("JWT_SIGNING_KEY_FILE or JWT_SIGNING_KEY must be set when MCP_DEX_ISSUER_URL is configured")
+)
 
 // Build information set via ldflags during compilation.
 var (
@@ -233,7 +236,7 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 			keyFile := env.GetEnvOrDefault("JWT_SIGNING_KEY_FILE", "")
 			keyPEM := env.GetEnvOrDefault("JWT_SIGNING_KEY", "")
 			if keyFile == "" && keyPEM == "" {
-				return fmt.Errorf("JWT_SIGNING_KEY_FILE or JWT_SIGNING_KEY must be set when MCP_DEX_ISSUER_URL is configured")
+				return errMissingJWTKey
 			}
 			signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
 				PrivateKeyFile: keyFile,

@@ -280,7 +280,7 @@ func (h *HandlerDef) Validate(handlerName string) error {
 
 	// Validate RBAC metadata: require both or neither
 	if (h.ResourceType == "") != (h.RequiredPermission == "") {
-		return fmt.Errorf("handler %s: resource_type and required_permission must both be set or both be empty", handlerName)
+		return fmt.Errorf("handler %s: %w", handlerName, ErrPartialRBACMetadata)
 	}
 
 	if err := h.validateCompensation(handlerName); err != nil {
