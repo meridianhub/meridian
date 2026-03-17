@@ -328,6 +328,35 @@ describe('ManifestGraph', () => {
     })
   })
 
+  describe('event channel nodes', () => {
+    it('renders event_channel nodes for event-triggered sagas', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-event_channel:position-keeping.transaction-captured.v1')
+      expect(node).toBeInTheDocument()
+      expect(node).toHaveAttribute('data-node-type', 'event_channel')
+    })
+
+    it('displays channel name as node label', async () => {
+      renderGraph(energyManifest)
+      await screen.findByTestId('node-event_channel:position-keeping.transaction-captured.v1')
+      expect(screen.getByText('position-keeping.transaction-captured.v1')).toBeInTheDocument()
+    })
+
+    it('renders event channel filter checkbox', async () => {
+      renderGraph(energyManifest)
+      expect(await screen.findByLabelText('Show Event Channels')).toBeInTheDocument()
+    })
+
+    it('hides event channel nodes when filter unchecked', async () => {
+      renderGraph(energyManifest)
+      const checkbox = await screen.findByLabelText('Show Event Channels')
+      fireEvent.click(checkbox)
+      const flow = await screen.findByTestId('react-flow')
+      // 7 total - 1 event channel = 6
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '6'))
+    })
+  })
+
   describe('double-click navigation', () => {
     it('navigates to instruments page on instrument double-click', async () => {
       renderGraph(energyManifest)

@@ -12,7 +12,7 @@ import { referenceKeys } from '@/lib/query-keys'
 import { SagaStatus, ErrorCategory } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import type { SagaDefinition } from '@/api/gen/meridian/saga/v1/saga_registry_pb'
 import { usePageTitle } from '@/hooks/use-page-title'
-import { useActiveSaga } from '../hooks'
+import { useActiveSaga, useManifestSaga } from '../hooks'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,11 +69,16 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [complexityMetrics, setComplexityMetrics] = useState<ComplexityMetrics | undefined>(undefined)
 
-  const { data: activeSagaResponse, isLoading } = useActiveSaga(sagaName)
+  const { data: activeSagaResponse, isLoading: isLoadingRegistry } = useActiveSaga(sagaName)
+  // Only fetch from manifest when registry has finished and returned nothing
+  const shouldFetchManifest = !isLoadingRegistry && !activeSagaResponse?.saga
+  const { data: manifestSaga, isLoading: isLoadingManifest } = useManifestSaga(sagaName, shouldFetchManifest)
 
-  const sagaData = activeSagaResponse?.saga
+  const sagaData = activeSagaResponse?.saga ?? null
+  // When the saga registry doesn't have it, fall back to the manifest definition
+  const manifestOnly = !sagaData && !!manifestSaga
 
-  const effectiveScript = script ?? sagaData?.script ?? ''
+  const effectiveScript = script ?? sagaData?.script ?? manifestSaga?.script ?? ''
 
   // Validate saga
   const validateMutation = useMutation({
@@ -136,7 +141,7 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
     setComplexityMetrics(undefined)
   }, [])
 
-  if (isLoading) {
+  if (isLoadingRegistry || (shouldFetchManifest && isLoadingManifest)) {
     return (
       <PageShell>
         <DetailSkeleton tabCount={0} fieldCount={2} />
@@ -144,7 +149,7 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
     )
   }
 
-  if (!sagaData) {
+  if (!sagaData && !manifestSaga) {
     return (
       <PageShell>
         <Breadcrumbs items={[
@@ -156,11 +161,12 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
     )
   }
 
-  const readOnly = isReadOnly(sagaData)
+  const displayName = sagaData?.name ?? manifestSaga?.name ?? sagaName ?? ''
+  const readOnly = manifestOnly || (sagaData ? isReadOnly(sagaData) : true)
 
-  const actionButtons = (
+  const actionButtons = manifestOnly ? null : (
     <>
-      {!readOnly && (
+      {sagaData && !isReadOnly(sagaData) && (
         <Button
           variant="outline"
           size="sm"
@@ -170,7 +176,7 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
           Validate
         </Button>
       )}
-      {sagaData.status === SagaStatus.DRAFT && (
+      {sagaData?.status === SagaStatus.DRAFT && (
         <Button
           variant="default"
           size="sm"
@@ -180,7 +186,7 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
           Activate
         </Button>
       )}
-      {sagaData.status === SagaStatus.ACTIVE && (
+      {sagaData?.status === SagaStatus.ACTIVE && (
         <Button
           variant="outline"
           size="sm"
@@ -200,27 +206,36 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
         items={[
           { label: 'Economy', href: '/economy' },
           { label: 'Starlark Config', href: '/starlark-config' },
-          { label: sagaData.name },
+          { label: displayName },
         ]}
       />
 
       {/* Header */}
       <PageHeader
-        title={sagaData.name}
-        description={sagaData.description || undefined}
+        title={displayName}
+        description={sagaData?.description || undefined}
         actions={actionButtons}
       />
 
       <div className="flex items-center gap-3">
-        <StatusBadge status={sagaStatusLabel(sagaData.status)} />
-        {sagaData.displayName && (
-          <span className="text-muted-foreground">{sagaData.displayName}</span>
-        )}
-        <span className="text-sm text-muted-foreground">Version {sagaData.version}</span>
-        {sagaData.updatedAt && (
-          <span className="text-sm text-muted-foreground">
-            Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
-          </span>
+        {manifestOnly ? (
+          <StatusBadge status="MANIFEST" />
+        ) : sagaData ? (
+          <>
+            <StatusBadge status={sagaStatusLabel(sagaData.status)} />
+            {sagaData.displayName && (
+              <span className="text-muted-foreground">{sagaData.displayName}</span>
+            )}
+            <span className="text-sm text-muted-foreground">Version {sagaData.version}</span>
+            {sagaData.updatedAt && (
+              <span className="text-sm text-muted-foreground">
+                Updated <TimeDisplay timestamp={sagaData.updatedAt} format="relative" />
+              </span>
+            )}
+          </>
+        ) : null}
+        {manifestSaga?.trigger && (
+          <span className="text-sm text-muted-foreground">Trigger: {manifestSaga.trigger}</span>
         )}
       </div>
 

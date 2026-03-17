@@ -1,1 +1,1 @@
-export { useSagasTable, useSagaDetail, useActiveSaga } from './use-sagas'
+export { useSagasTable, useSagaDetail, useActiveSaga, useManifestSaga } from './use-sagas'
