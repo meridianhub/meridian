@@ -141,19 +141,19 @@ export function DeployWizard({
     onError: (err: unknown) => {
       setConfirmOpen(false)
       if (isVersionConflict(err)) {
+        setStep('error')
+        setApplyError('Version conflict detected. Loading server version…')
         // Fetch the current server manifest to show the diff
         void manifestHistory.getCurrentManifest({}).then((res) => {
           if (res.version?.manifest) {
+            setApplyError(null)
             setServerManifest(res.version.manifest)
             setConflictOpen(true)
-            setStep('error')
           } else {
             setApplyError('Version conflict detected, but the server returned no manifest.')
-            setStep('error')
           }
         }).catch(() => {
           setApplyError('Version conflict detected, but failed to fetch current version.')
-          setStep('error')
         })
         return
       }
