@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	errUnknownTransport    = errors.New("unknown transport")
+	errUnknownTransport     = errors.New("unknown transport")
 	errMissingJWTSigningKey = errors.New("JWT_SIGNING_KEY_FILE or JWT_SIGNING_KEY must be set when MCP_DEX_ISSUER_URL is configured")
 )
 
