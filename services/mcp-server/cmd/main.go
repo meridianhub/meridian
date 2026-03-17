@@ -29,6 +29,9 @@ var (
 	BuildDate = "unknown"
 )
 
+// errMissingJWTSigningKey is returned when OIDC is enabled but no JWT signing key is configured.
+var errMissingJWTSigningKey = errors.New("JWT_SIGNING_KEY_FILE or JWT_SIGNING_KEY must be set when MCP_DEX_ISSUER_URL is configured")
+
 func main() {
 	// Log to stderr: in stdio mode, stdout is the JSON-RPC wire protocol channel.
 	// Logging to stdout would corrupt the protocol for MCP clients.
@@ -233,7 +236,7 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 			keyFile := env.GetEnvOrDefault("JWT_SIGNING_KEY_FILE", "")
 			keyPEM := env.GetEnvOrDefault("JWT_SIGNING_KEY", "")
 			if keyFile == "" && keyPEM == "" {
-				return fmt.Errorf("JWT_SIGNING_KEY_FILE or JWT_SIGNING_KEY must be set when MCP_DEX_ISSUER_URL is configured")
+				return errMissingJWTSigningKey
 			}
 			signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
 				PrivateKeyFile: keyFile,
