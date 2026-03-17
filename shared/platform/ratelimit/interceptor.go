@@ -91,7 +91,7 @@ func NewMetrics(namespace string, registry prometheus.Registerer) *Metrics {
 				Name:      "requests_allowed_total",
 				Help:      "Total number of requests allowed by the rate limiter",
 			},
-			[]string{"tenant", "method"},
+			[]string{"method"},
 		),
 		blocked: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -100,7 +100,7 @@ func NewMetrics(namespace string, registry prometheus.Registerer) *Metrics {
 				Name:      "requests_blocked_total",
 				Help:      "Total number of requests blocked by the rate limiter",
 			},
-			[]string{"tenant", "method"},
+			[]string{"method"},
 		),
 		active: prometheus.NewGauge(
 			prometheus.GaugeOpts{
@@ -137,16 +137,16 @@ type Interceptor struct {
 
 // NewInterceptor creates a new rate limit interceptor with the given config.
 func NewInterceptor(config Config, metrics *Metrics) *Interceptor {
-	if config.BurstSize == 0 {
+	if config.BurstSize <= 0 {
 		config.BurstSize = DefaultBurstSize
 	}
-	if config.RefillRate == 0 {
+	if config.RefillRate <= 0 {
 		config.RefillRate = DefaultRefillRate
 	}
-	if config.CleanupInterval == 0 {
+	if config.CleanupInterval <= 0 {
 		config.CleanupInterval = DefaultCleanupInterval
 	}
-	if config.IdleTimeout == 0 {
+	if config.IdleTimeout <= 0 {
 		config.IdleTimeout = DefaultIdleTimeout
 	}
 
@@ -305,7 +305,7 @@ func (r *Interceptor) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 		if !tl.limiter.Allow() {
 			if r.metrics != nil {
-				r.metrics.blocked.WithLabelValues(tenantHash, info.FullMethod).Inc()
+				r.metrics.blocked.WithLabelValues(info.FullMethod).Inc()
 			}
 			if r.config.Logger != nil {
 				r.config.Logger.Warn("rate limit exceeded",
@@ -318,7 +318,7 @@ func (r *Interceptor) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		if r.metrics != nil {
-			r.metrics.allowed.WithLabelValues(tenantHash, info.FullMethod).Inc()
+			r.metrics.allowed.WithLabelValues(info.FullMethod).Inc()
 		}
 
 		return handler(ctx, req)

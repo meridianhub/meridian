@@ -262,15 +262,13 @@ func TestInterceptor_Metrics(t *testing.T) {
 	handler(ctx, nil, info, testHandler)
 	handler(ctx, nil, info, testHandler)
 
-	tenantHash := hashTenantID("metrics_tenant")
-
 	allowedMetric := &dto.Metric{}
-	err := metrics.allowed.WithLabelValues(tenantHash, "/test.Service/Write").Write(allowedMetric)
+	err := metrics.allowed.WithLabelValues("/test.Service/Write").Write(allowedMetric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(2), allowedMetric.Counter.GetValue())
 
 	blockedMetric := &dto.Metric{}
-	err = metrics.blocked.WithLabelValues(tenantHash, "/test.Service/Write").Write(blockedMetric)
+	err = metrics.blocked.WithLabelValues("/test.Service/Write").Write(blockedMetric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(1), blockedMetric.Counter.GetValue())
 }
