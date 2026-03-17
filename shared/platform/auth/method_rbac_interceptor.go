@@ -12,10 +12,13 @@ import (
 // MethodPermission defines the required permission for a gRPC method.
 // Use either AllowedRoles for direct role checks, or ResourceType+Permission
 // for permission-based checks via the existing RBAC permission matrix.
+// Set Public to true for pre-authentication endpoints (e.g., login, password reset)
+// that must be accessible without a JWT.
 type MethodPermission struct {
 	ResourceType ResourceType
 	Permission   Permission
 	AllowedRoles []Role
+	Public       bool
 }
 
 // MethodRBACConfig maps gRPC full method names to required permissions.
@@ -73,6 +76,35 @@ func newMethodRBACInterceptor(cfg MethodRBACConfig, audit AuditFunc) grpc.UnaryS
 			}
 			return nil, status.Errorf(codes.PermissionDenied,
 				"method %s is not configured in RBAC policy", info.FullMethod)
+		}
+
+		// Fail closed on misconfiguration: Public + AllowedRoles is contradictory.
+		// A method cannot be both public (no auth) and role-restricted simultaneously.
+		if perm.Public && len(perm.AllowedRoles) > 0 {
+			slog.Error("RBAC misconfiguration: method is both Public and has AllowedRoles",
+				"method", info.FullMethod,
+			)
+			if audit != nil {
+				userID := ""
+				if claims, ok := GetClaimsFromContext(ctx); ok {
+					userID = claims.EffectiveUserID()
+				}
+				audit(info.FullMethod, userID, "denied_misconfigured")
+			}
+			return nil, status.Errorf(codes.Internal,
+				"RBAC misconfiguration for method %s: Public and AllowedRoles are mutually exclusive", info.FullMethod)
+		}
+
+		// Public methods bypass authentication entirely (e.g., login, password reset).
+		if perm.Public {
+			if audit != nil {
+				userID := ""
+				if claims, ok := GetClaimsFromContext(ctx); ok {
+					userID = claims.EffectiveUserID()
+				}
+				audit(info.FullMethod, userID, "allowed_public")
+			}
+			return handler(ctx, req)
 		}
 
 		claims, ok := GetClaimsFromContext(ctx)
