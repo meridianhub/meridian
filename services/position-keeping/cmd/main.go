@@ -24,12 +24,12 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/pkg/refdata"
-	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	pkobservability "github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
@@ -457,50 +457,29 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("position keeping service initialized")
 
-	// Create gRPC server with interceptor chain
-	var serverOptions []grpc.ServerOption
-
-	// Build interceptor chain: metrics → tracing → auth (future) → recovery
-	// Order matters: metrics first for all requests, tracing for observability, recovery last to catch panics
-	var unaryInterceptors []grpc.UnaryServerInterceptor
-	var streamInterceptors []grpc.StreamServerInterceptor
-
-	// 1. Metrics (always enabled)
-	unaryInterceptors = append(unaryInterceptors,
-		interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration))
-
-	// 2. Tracing (optional if OTLP endpoint configured)
-	if container.Tracer != nil {
-		unaryInterceptors = append(unaryInterceptors, container.Tracer.UnaryServerInterceptor())
-		streamInterceptors = append(streamInterceptors, container.Tracer.StreamServerInterceptor())
+	// Create gRPC server using GrpcServerBuilder for consistent interceptor ordering.
+	// If tracing is disabled (no OTLP endpoint), create a no-op tracer for the builder.
+	tracer := container.Tracer
+	if tracer == nil {
+		var tracerErr error
+		tracer, tracerErr = pkobservability.NewTracer(ctx, pkobservability.TracerConfig{
+			ServiceName:  "position-keeping",
+			OTLPEndpoint: "localhost:4317",
+			Enabled:      false,
+		})
+		if tracerErr != nil {
+			return fmt.Errorf("failed to create no-op tracer: %w", tracerErr)
+		}
 	}
 
-	// 3. Auth (JWT validation with JWKS)
-	if container.AuthInterceptor != nil {
-		unaryInterceptors = append(unaryInterceptors, container.AuthInterceptor.UnaryInterceptor())
-		streamInterceptors = append(streamInterceptors, container.AuthInterceptor.StreamInterceptor())
-		logger.Info("auth interceptor enabled in chain")
-	} else {
-		// When auth is disabled, use TenantExtractionInterceptor to get tenant from header
-		unaryInterceptors = append(unaryInterceptors, auth.TenantExtractionInterceptor())
-		streamInterceptors = append(streamInterceptors, auth.TenantExtractionStreamInterceptor())
-		logger.Info("tenant extraction interceptor enabled (auth disabled)")
+	// WithAuthInterceptor accepts nil (auth disabled in config → tenant extraction only).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
+		WithAuthInterceptor(container.AuthInterceptor).
+		WithUnaryInterceptor(interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration)).
+		Build()
+	if err != nil {
+		return bootstrap.Permanent(fmt.Errorf("failed to build grpc server: %w", err))
 	}
-
-	// 4. Recovery (last in chain to catch all panics)
-	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(logger))
-	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(logger))
-
-	serverOptions = append(serverOptions,
-		grpc.ChainUnaryInterceptor(unaryInterceptors...),
-	)
-	if len(streamInterceptors) > 0 {
-		serverOptions = append(serverOptions,
-			grpc.ChainStreamInterceptor(streamInterceptors...),
-		)
-	}
-
-	grpcServer := grpc.NewServer(serverOptions...)
 
 	// Create health check aggregator (used by both gRPC and HTTP)
 	healthCheckers := []health.Checker{
