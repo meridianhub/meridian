@@ -1,0 +1,65 @@
+# Port: 50061 (ports.Forecasting)
+# Callers: (none known - standalone service, called via api-gateway if routed)
+# Calls: (none - standalone gRPC service)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forecasting
+  labels:
+    app: forecasting
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: forecasting
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound gRPC from api-gateway
+  - from:
+    - podSelector:
+        matchLabels:
+          app: gateway
+    ports:
+    - protocol: TCP
+      port: 50061
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092

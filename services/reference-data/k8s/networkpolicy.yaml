@@ -1,0 +1,74 @@
+# Port: 50059 (ports.ReferenceData)
+# Callers: current-account, payment-order, reconciliation, mcp-server (via api-gateway)
+# Calls: (none - standalone gRPC service)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: reference-data
+  labels:
+    app: reference-data
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: reference-data
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound gRPC from services that call reference-data
+  - from:
+    - podSelector:
+        matchLabels:
+          app: current-account
+    - podSelector:
+        matchLabels:
+          app: payment-order
+    - podSelector:
+        matchLabels:
+          app: reconciliation
+    - podSelector:
+        matchLabels:
+          app: gateway
+    ports:
+    - protocol: TCP
+      port: 50059
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092

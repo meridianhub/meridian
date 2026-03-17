@@ -1,0 +1,197 @@
+# Port: 8080 (ports.Gateway - HTTP/Connect)
+# Callers: external clients (Ingress), mcp-server
+# Calls: current-account (50051), payment-order (50054), party (50055),
+#         position-keeping (50053), and any service added to BACKENDS config
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+  labels:
+    app: gateway
+    component: api-gateway
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: gateway
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound HTTP/Connect from Ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+
+  # Allow inbound from mcp-server (connects via gateway URL)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: mcp-server
+    ports:
+    - protocol: TCP
+      port: 8080
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB - for tenant resolution)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections (for event streaming)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092
+
+  # Allow Redis connections (for event fan-out)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # Allow outbound gRPC to all backend services
+  - to:
+    - podSelector:
+        matchLabels:
+          app: current-account
+    ports:
+    - protocol: TCP
+      port: 50051
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: financial-accounting
+    ports:
+    - protocol: TCP
+      port: 50052
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: position-keeping
+    ports:
+    - protocol: TCP
+      port: 50053
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: payment-order
+    ports:
+    - protocol: TCP
+      port: 50054
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: party
+    ports:
+    - protocol: TCP
+      port: 50055
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: tenant
+    ports:
+    - protocol: TCP
+      port: 50056
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: internal-account
+    ports:
+    - protocol: TCP
+      port: 50057
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: market-information
+    ports:
+    - protocol: TCP
+      port: 50058
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: reference-data
+    ports:
+    - protocol: TCP
+      port: 50059
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: reconciliation
+    ports:
+    - protocol: TCP
+      port: 50060
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: forecasting
+    ports:
+    - protocol: TCP
+      port: 50061
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: control-plane
+    ports:
+    - protocol: TCP
+      port: 50062
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: operational-gateway
+    ports:
+    - protocol: TCP
+      port: 50063
+
+  - to:
+    - podSelector:
+        matchLabels:
+          app: financial-gateway
+    ports:
+    - protocol: TCP
+      port: 50064

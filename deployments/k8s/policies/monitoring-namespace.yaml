@@ -1,0 +1,35 @@
+# NetworkPolicy for the monitoring namespace.
+# Allows Prometheus to scrape metrics from all service namespaces.
+# Apply this to the cluster alongside service-level NetworkPolicies.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-egress
+  namespace: monitoring
+  labels:
+    app: prometheus
+    component: monitoring
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: prometheus
+  policyTypes:
+  - Egress
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow scraping metrics from all namespaces on port 9090
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 9090

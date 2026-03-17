@@ -1,0 +1,65 @@
+# Port: 50062 (ports.ControlPlane)
+# Callers: mcp-server (via api-gateway)
+# Calls: (none - standalone gRPC service)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: control-plane
+  labels:
+    app: control-plane
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: control-plane
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound gRPC from api-gateway
+  - from:
+    - podSelector:
+        matchLabels:
+          app: gateway
+    ports:
+    - protocol: TCP
+      port: 50062
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092

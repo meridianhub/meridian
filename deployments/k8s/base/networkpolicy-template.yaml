@@ -1,0 +1,105 @@
+# NetworkPolicy Template for Meridian Services
+#
+# Usage: Copy this file to services/<name>/k8s/networkpolicy.yaml and customize.
+#
+# Port assignments (from shared/platform/ports/ports.go):
+#   50051 - current-account
+#   50052 - financial-accounting
+#   50053 - position-keeping
+#   50054 - payment-order
+#   50055 - party
+#   50056 - tenant
+#   50057 - internal-account
+#   50058 - market-information
+#   50059 - reference-data
+#   50060 - reconciliation
+#   50061 - forecasting
+#   50062 - control-plane
+#   50063 - operational-gateway
+#   50064 - financial-gateway
+#   8080   - api-gateway HTTP/Connect
+#   8081   - health check (all services)
+#   9090   - Prometheus metrics (all services)
+#
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: <service-name>
+  labels:
+    app: <service-name>
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: <service-name>
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound gRPC from services that call this service
+  # Uncomment and list specific callers:
+  # - from:
+  #   - podSelector:
+  #       matchLabels:
+  #         app: <calling-service>
+  #   ports:
+  #   - protocol: TCP
+  #     port: <this-service-port>
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090  # Prometheus metrics
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092
+
+  # Allow Redis connections (if used)
+  # - to:
+  #   - podSelector:
+  #       matchLabels:
+  #         app: redis
+  #   ports:
+  #   - protocol: TCP
+  #     port: 6379
+
+  # Allow outbound gRPC to downstream services
+  # Uncomment and list specific downstream services:
+  # - to:
+  #   - podSelector:
+  #       matchLabels:
+  #         app: <downstream-service>
+  #   ports:
+  #   - protocol: TCP
+  #     port: <downstream-port>

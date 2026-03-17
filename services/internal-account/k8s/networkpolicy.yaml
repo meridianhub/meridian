@@ -1,0 +1,77 @@
+# Port: 50057 (ports.InternalAccount)
+# Callers: current-account, payment-order
+# Calls: position-keeping (50053)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: internal-account
+  labels:
+    app: internal-account
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: internal-account
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound gRPC from services that call internal-account
+  - from:
+    - podSelector:
+        matchLabels:
+          app: current-account
+    - podSelector:
+        matchLabels:
+          app: payment-order
+    ports:
+    - protocol: TCP
+      port: 50057
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092
+
+  # Allow outbound gRPC to position-keeping
+  - to:
+    - podSelector:
+        matchLabels:
+          app: position-keeping
+    ports:
+    - protocol: TCP
+      port: 50053

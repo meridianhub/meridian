@@ -1,0 +1,139 @@
+# Port: 50054 (ports.PaymentOrder)
+# Callers: api-gateway
+# Calls: position-keeping (50053), party (50055), reference-data (50059),
+#         current-account (50051), financial-accounting (50052), internal-account (50057),
+#         financial-gateway (50064, HTTPS 8095 for webhooks)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payment-order
+  labels:
+    app: payment-order
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-order
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound gRPC from services that call payment-order
+  - from:
+    - podSelector:
+        matchLabels:
+          app: gateway
+    ports:
+    - protocol: TCP
+      port: 50054
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092
+
+  # Allow Redis connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # Allow outbound gRPC to position-keeping
+  - to:
+    - podSelector:
+        matchLabels:
+          app: position-keeping
+    ports:
+    - protocol: TCP
+      port: 50053
+
+  # Allow outbound gRPC to party
+  - to:
+    - podSelector:
+        matchLabels:
+          app: party
+    ports:
+    - protocol: TCP
+      port: 50055
+
+  # Allow outbound gRPC to reference-data
+  - to:
+    - podSelector:
+        matchLabels:
+          app: reference-data
+    ports:
+    - protocol: TCP
+      port: 50059
+
+  # Allow outbound gRPC to current-account
+  - to:
+    - podSelector:
+        matchLabels:
+          app: current-account
+    ports:
+    - protocol: TCP
+      port: 50051
+
+  # Allow outbound gRPC to financial-accounting
+  - to:
+    - podSelector:
+        matchLabels:
+          app: financial-accounting
+    ports:
+    - protocol: TCP
+      port: 50052
+
+  # Allow outbound gRPC to internal-account
+  - to:
+    - podSelector:
+        matchLabels:
+          app: internal-account
+    ports:
+    - protocol: TCP
+      port: 50057
+
+  # Allow outbound gRPC to financial-gateway
+  - to:
+    - podSelector:
+        matchLabels:
+          app: financial-gateway
+    ports:
+    - protocol: TCP
+      port: 50064
