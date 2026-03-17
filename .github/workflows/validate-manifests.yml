@@ -7,12 +7,14 @@ on:
       - 'deployments/k8s/**'
       - 'services/*/k8s/**'
       - '.github/workflows/validate-manifests.yml'
+      - '.github/workflows/security-defaults.yml'
   pull_request:
     branches: [develop, main]
     paths:
       - 'deployments/k8s/**'
       - 'services/*/k8s/**'
       - '.github/workflows/validate-manifests.yml'
+      - '.github/workflows/security-defaults.yml'
 
 permissions:
   contents: read
@@ -162,49 +164,72 @@ jobs:
         run: |
           echo "Verifying Rego policy files are in sync..."
 
-          CONSTRAINT_TEMPLATE="deployments/k8s/policies/gateway-dev-mode-block.yaml"
-          REGO_FILE="deployments/k8s/policies/tests/blockdevmodeinproduction.rego"
+          verify_rego_sync() {
+            local CONSTRAINT_TEMPLATE="$1"
+            local REGO_FILE="$2"
+            local PACKAGE_NAME="$3"
 
-          if [ ! -f "$CONSTRAINT_TEMPLATE" ]; then
-            echo "ConstraintTemplate not found: $CONSTRAINT_TEMPLATE"
+            if [ ! -f "$CONSTRAINT_TEMPLATE" ]; then
+              echo "ConstraintTemplate not found: $CONSTRAINT_TEMPLATE"
+              return 1
+            fi
+
+            if [ ! -f "$REGO_FILE" ]; then
+              echo "Rego test file not found: $REGO_FILE"
+              return 1
+            fi
+
+            # Extract Rego from ConstraintTemplate (between 'rego: |' and the next '---')
+            # Skip comment lines at the top of the standalone .rego file for comparison
+            YAML_REGO_FILE=$(mktemp)
+            sed -n '/rego: |/,/^---$/p' "$CONSTRAINT_TEMPLATE" | \
+              sed '1d;$d' | \
+              sed 's/^        //' > "$YAML_REGO_FILE"
+
+            # Get standalone Rego, skipping the header comments
+            TEST_REGO_FILE=$(mktemp)
+            sed -n "/^package ${PACKAGE_NAME}/,\$p" "$REGO_FILE" > "$TEST_REGO_FILE"
+
+            # Use opa fmt to normalize both files before comparing
+            # This is more robust than sed-based normalization
+            opa fmt "$YAML_REGO_FILE" > /tmp/yaml_rego_formatted.rego
+            opa fmt "$TEST_REGO_FILE" > /tmp/test_rego_formatted.rego
+
+            if ! diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego > /dev/null; then
+              echo "ERROR: Rego policy in ConstraintTemplate differs from standalone test file!"
+              echo ""
+              echo "The Rego embedded in $CONSTRAINT_TEMPLATE must match $REGO_FILE"
+              echo "(excluding header comments and formatting differences)"
+              echo ""
+              echo "To fix: Update both files to have identical Rego policy logic."
+              echo ""
+              echo "=== Differences (after opa fmt normalization) ==="
+              diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego | head -30 || true
+              return 1
+            fi
+
+            echo "In sync: $CONSTRAINT_TEMPLATE"
+            return 0
+          }
+
+          ERRORS=0
+
+          verify_rego_sync \
+            "deployments/k8s/policies/gateway-dev-mode-block.yaml" \
+            "deployments/k8s/policies/tests/blockdevmodeinproduction.rego" \
+            "blockdevmodeinproduction" || ERRORS=$((ERRORS + 1))
+
+          verify_rego_sync \
+            "deployments/k8s/policies/auth-enabled-block.yaml" \
+            "deployments/k8s/policies/tests/blockauthdiabledinproduction.rego" \
+            "blockauthdiabledinproduction" || ERRORS=$((ERRORS + 1))
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "ERROR: $ERRORS Rego policy file(s) out of sync."
             exit 1
           fi
 
-          if [ ! -f "$REGO_FILE" ]; then
-            echo "Rego test file not found: $REGO_FILE"
-            exit 1
-          fi
-
-          # Extract Rego from ConstraintTemplate (between 'rego: |' and the next '---')
-          # Skip comment lines at the top of the standalone .rego file for comparison
-          YAML_REGO_FILE=$(mktemp)
-          sed -n '/rego: |/,/^---$/p' "$CONSTRAINT_TEMPLATE" | \
-            sed '1d;$d' | \
-            sed 's/^        //' > "$YAML_REGO_FILE"
-
-          # Get standalone Rego, skipping the header comments
-          TEST_REGO_FILE=$(mktemp)
-          sed -n '/^package blockdevmodeinproduction/,$p' "$REGO_FILE" > "$TEST_REGO_FILE"
-
-          # Use opa fmt to normalize both files before comparing
-          # This is more robust than sed-based normalization
-          opa fmt "$YAML_REGO_FILE" > /tmp/yaml_rego_formatted.rego
-          opa fmt "$TEST_REGO_FILE" > /tmp/test_rego_formatted.rego
-
-          if ! diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego > /dev/null; then
-            echo "ERROR: Rego policy in ConstraintTemplate differs from standalone test file!"
-            echo ""
-            echo "The Rego embedded in $CONSTRAINT_TEMPLATE must match $REGO_FILE"
-            echo "(excluding header comments and formatting differences)"
-            echo ""
-            echo "To fix: Update both files to have identical Rego policy logic."
-            echo ""
-            echo "=== Differences (after opa fmt normalization) ==="
-            diff /tmp/yaml_rego_formatted.rego /tmp/test_rego_formatted.rego | head -30 || true
-            exit 1
-          fi
-
-          echo "Rego policy files are in sync."
+          echo "All Rego policy files are in sync."
 
       - name: Run OPA policy tests
         run: |
