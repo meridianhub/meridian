@@ -6,7 +6,6 @@ import (
 	"time"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
-	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -42,7 +41,7 @@ func (c *MarketInformationClient) RegisterDataSource(ctx *saga.StarlarkContext, 
 		req.TrustLevel = tl
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.client.RegisterDataSource(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register data source: %w", err)
@@ -84,7 +83,7 @@ func (c *MarketInformationClient) RegisterDataSet(ctx *saga.StarlarkContext, par
 		req.EffectiveFrom = timestamppb.New(t)
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.client.RegisterDataSet(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register data set: %w", err)
@@ -108,7 +107,7 @@ func (c *MarketInformationClient) ActivateDataSet(ctx *saga.StarlarkContext, par
 		req.Version = v
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.client.ActivateDataSet(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("activate data set: %w", err)

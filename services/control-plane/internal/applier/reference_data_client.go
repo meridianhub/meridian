@@ -1,14 +1,35 @@
 package applier
 
 import (
+	"context"
 	"fmt"
 
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
+
+// prepareCallContext enriches the gRPC call context with saga metadata:
+// tenant ID (from PartyScope), idempotency key, knowledge_at, and correlation ID.
+// This is required for loopback gRPC calls where the interceptor chain does not
+// automatically inject tenant context.
+func prepareCallContext(ctx *saga.StarlarkContext) context.Context {
+	callCtx := ctx.Context
+
+	// Propagate idempotency key
+	callCtx = clients.PropagateIdempotencyKey(callCtx, ctx.IdempotencyKey)
+
+	// Propagate tenant ID from PartyScope to gRPC metadata
+	if ctx.PartyScope != nil && ctx.PartyScope.TenantID != "" {
+		callCtx = metadata.AppendToOutgoingContext(callCtx, tenant.TenantIDKey, ctx.PartyScope.TenantID)
+	}
+
+	return callCtx
+}
 
 // ReferenceDataClient wraps the reference-data gRPC clients to implement
 // ReferenceDataService for use as a saga handler dependency.
@@ -53,7 +74,7 @@ func (c *ReferenceDataClient) RegisterInstrument(ctx *saga.StarlarkContext, para
 		req.Precision = dp
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.instruments.RegisterInstrument(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register instrument: %w", err)
@@ -76,7 +97,7 @@ func (c *ReferenceDataClient) ActivateInstrument(ctx *saga.StarlarkContext, para
 		req.Version = v
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.instruments.ActivateInstrument(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("activate instrument: %w", err)
@@ -99,7 +120,7 @@ func (c *ReferenceDataClient) DeleteInstrument(ctx *saga.StarlarkContext, params
 		req.Version = v
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.instruments.DeprecateInstrument(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("delete instrument: %w", err)
@@ -139,7 +160,7 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 		draftReq.DefaultConversionMethodVersion = v
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	draftResp, err := c.accountTypes.CreateDraft(callCtx, draftReq)
 	if err != nil {
 		return nil, fmt.Errorf("create account type draft: %w", err)
@@ -170,7 +191,7 @@ func (c *ReferenceDataClient) DeleteAccountType(ctx *saga.StarlarkContext, param
 	req := &referencedatav1.DeprecateAccountTypeRequest{}
 	req.Id, _ = params["id"].(string)
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.accountTypes.DeprecateAccountType(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("delete account type: %w", err)
@@ -205,7 +226,7 @@ func (c *ReferenceDataClient) RegisterSagaDefinition(ctx *saga.StarlarkContext, 
 	draftReq.Description, _ = params["description"].(string)
 	draftReq.Script, _ = params["script"].(string)
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	draftResp, err := c.sagas.CreateSagaDraft(callCtx, draftReq)
 	if err != nil {
 		return nil, fmt.Errorf("create saga draft: %w", err)

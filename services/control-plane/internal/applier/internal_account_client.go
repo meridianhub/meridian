@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
-	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
 )
@@ -36,7 +35,7 @@ func (c *InternalAccountClient) InitiateAccount(ctx *saga.StarlarkContext, param
 	req.ProductTypeCode, _ = params["account_type"].(string)
 	req.OrgPartyId, _ = params["owner_organization"].(string)
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.client.InitiateInternalAccount(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("initiate internal account: %w", err)

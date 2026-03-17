@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
-	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
 )
@@ -47,7 +46,7 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 	}
 	req.ExternalReferenceType = externalRefType
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.client.RegisterParty(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("register organization: %w", err)
