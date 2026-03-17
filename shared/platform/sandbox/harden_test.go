@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 )
 
 func TestHardenThread_SetsMaxSteps(t *testing.T) {
@@ -30,7 +31,7 @@ def work():
     return x
 work()
 `
-	_, err := starlark.ExecFile(smallThread, "test.star", script, nil)
+	_, err := starlark.ExecFileOptions(&syntax.FileOptions{},smallThread, "test.star", script, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too many steps")
 }
@@ -42,7 +43,7 @@ func TestHardenThread_AllowsSmallScripts(t *testing.T) {
 	HardenThread(thread, cfg)
 
 	script := `x = 1 + 2`
-	_, err := starlark.ExecFile(thread, "test.star", script, nil)
+	_, err := starlark.ExecFileOptions(&syntax.FileOptions{},thread, "test.star", script, nil)
 	assert.NoError(t, err)
 }
 
