@@ -22,7 +22,7 @@ func TestNewMemoryMonitor_DefaultConfig(t *testing.T) {
 
 func TestNewMemoryMonitor_CustomConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.MemoryThreshold = 20 * 1024 * 1024    // 20MB
+	cfg.MemoryThreshold = 20 * 1024 * 1024 // 20MB
 	cfg.MemoryPollInterval = 5 * time.Millisecond
 
 	m := NewMemoryMonitor(cfg)
@@ -112,7 +112,7 @@ func TestMemoryMonitor_StopHaltsMonitoring(t *testing.T) {
 	assert.NotPanics(t, func() { m.Stop() })
 }
 
-func TestMemoryMonitor_ConcurrentSafety(t *testing.T) {
+func TestMemoryMonitor_ConcurrentSafety(_ *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MemoryThreshold = 512 * 1024 * 1024
 	cfg.MemoryPollInterval = 1 * time.Millisecond
