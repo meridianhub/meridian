@@ -141,6 +141,9 @@ export function DeployWizard({
             setServerManifest(res.version.manifest)
             setConflictOpen(true)
             setStep('error')
+          } else {
+            setApplyError('Version conflict detected, but the server returned no manifest.')
+            setStep('error')
           }
         }).catch(() => {
           setApplyError('Version conflict detected, but failed to fetch current version.')
