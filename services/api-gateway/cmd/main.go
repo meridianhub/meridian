@@ -29,10 +29,10 @@ import (
 // ErrRedisURLRequired is returned when Redis fan-out is enabled but no REDIS_URL is configured.
 var ErrRedisURLRequired = errors.New("redis fan-out requires REDIS_URL to be configured")
 
-// ErrJWTSigningKeyRequired is returned when SSO is enabled but JWT_SIGNING_KEY is not set
-// outside local dev mode. Auto-generation would produce instance-local keys that break
-// multi-replica deployments and any gateway restart.
-var ErrJWTSigningKeyRequired = errors.New("JWT_SIGNING_KEY must be set when SSO is enabled outside local dev mode")
+// ErrJWTSigningKeyRequired is returned when SSO is enabled but neither JWT_SIGNING_KEY nor
+// JWT_SIGNING_KEY_FILE is set outside local dev mode. Auto-generation would produce
+// instance-local keys that break multi-replica deployments and any gateway restart.
+var ErrJWTSigningKeyRequired = errors.New("JWT_SIGNING_KEY or JWT_SIGNING_KEY_FILE must be set when SSO is enabled outside local dev mode")
 
 // Build information set via ldflags during compilation.
 var (
