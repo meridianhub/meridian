@@ -25,6 +25,12 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # Required for cosign keyless signing via OIDC
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout code
@@ -64,6 +70,7 @@ jobs:
             type=sha,prefix=demo-,format=short
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -77,6 +84,14 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Sign container image
+        run: |
+          cosign sign --yes \
+            ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
   build-frontend:
     name: Build Frontend
@@ -136,6 +151,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Verify container image signature
+        run: |
+          cosign verify \
+            --certificate-identity="https://github.com/${{ github.repository }}/.github/workflows/deploy-demo.yml@refs/heads/demo" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            ghcr.io/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.image-digest }}
+
       - name: Download frontend artifact
         uses: actions/download-artifact@v8
         with:
@@ -166,13 +191,18 @@ jobs:
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          IMAGE_DIGEST: ${{ needs.build-and-push.outputs.image-digest }}
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_DIGEST
           script: |
             cd /opt/meridian
-            docker compose pull
+            # Pull the exact verified digest to prevent TOCTOU between verify and deploy
+            docker pull ghcr.io/meridianhub/meridian@${IMAGE_DIGEST}
+            docker tag ghcr.io/meridianhub/meridian@${IMAGE_DIGEST} ghcr.io/meridianhub/meridian:demo
             docker compose up -d --remove-orphans
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f
