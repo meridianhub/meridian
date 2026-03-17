@@ -119,6 +119,26 @@ const (
 	ResourceTypeSystem ResourceType = "system"
 	// ResourceTypeIdentity represents identity and user management resources
 	ResourceTypeIdentity ResourceType = "identity"
+	// ResourceTypeParty represents party/customer-related resources
+	ResourceTypeParty ResourceType = "party"
+	// ResourceTypePayment represents payment order resources
+	ResourceTypePayment ResourceType = "payment"
+	// ResourceTypeReconciliation represents reconciliation resources
+	ResourceTypeReconciliation ResourceType = "reconciliation"
+	// ResourceTypeReferenceData represents reference data resources (instruments, account types, nodes)
+	ResourceTypeReferenceData ResourceType = "reference-data"
+	// ResourceTypeMarketData represents market information resources
+	ResourceTypeMarketData ResourceType = "market-data"
+	// ResourceTypeForecasting represents forecasting resources
+	ResourceTypeForecasting ResourceType = "forecasting"
+	// ResourceTypeMapping represents mapping/transformation resources
+	ResourceTypeMapping ResourceType = "mapping"
+	// ResourceTypeSaga represents saga definition and execution resources
+	ResourceTypeSaga ResourceType = "saga"
+	// ResourceTypeManifest represents control plane manifest resources
+	ResourceTypeManifest ResourceType = "manifest"
+	// ResourceTypeGateway represents financial and operational gateway resources
+	ResourceTypeGateway ResourceType = "gateway"
 )
 
 // rolePermissions defines the permissions for each role
