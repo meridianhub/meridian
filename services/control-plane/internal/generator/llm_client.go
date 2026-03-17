@@ -110,7 +110,7 @@ func NewClaudeLLMClient(apiKey string, model string) *ClaudeLLMClient {
 // It strips markdown code fences from the response if present.
 func (c *ClaudeLLMClient) Generate(ctx context.Context, prompt string) (string, error) {
 	message, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.model),
+		Model:     c.model,
 		MaxTokens: defaultMaxTokens,
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},
@@ -137,7 +137,7 @@ func (c *ClaudeLLMClient) Fix(ctx context.Context, manifest string, errors []Val
 	prompt := buildFixPrompt(manifest, errors)
 
 	message, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.model),
+		Model:     c.model,
 		MaxTokens: defaultMaxTokens,
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},
