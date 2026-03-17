@@ -185,6 +185,7 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 
 	activeDef := activateResp.GetDefinition()
 	return map[string]any{
+		"id":      activeDef.GetId(),
 		"code":    activeDef.GetCode(),
 		"version": activeDef.GetVersion(),
 		"status":  activeDef.GetStatus().String(),
