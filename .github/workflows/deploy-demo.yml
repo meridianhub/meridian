@@ -157,7 +157,7 @@ jobs:
       - name: Verify container image signature
         run: |
           cosign verify \
-            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/deploy-demo.yml@refs/heads/demo" \
+            --certificate-identity="https://github.com/${{ github.repository }}/.github/workflows/deploy-demo.yml@refs/heads/demo" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
             ghcr.io/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.image-digest }}
 
