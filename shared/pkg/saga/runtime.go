@@ -10,9 +10,15 @@ import (
 
 	"github.com/google/uuid"
 	"go.starlark.net/starlark"
+
+	"github.com/meridianhub/meridian/shared/platform/sandbox"
 )
 
+// sandboxCfg is the unified sandbox configuration for saga scripts.
+var sandboxCfg = sandbox.DefaultConfig()
+
 // Security constraints for Starlark runtime per PRD Section 6.1.
+// These constants are retained for backward compatibility; canonical values live in sandbox.DefaultConfig().
 const (
 	// DefaultTimeout is the maximum execution time for a saga script.
 	DefaultTimeout = 5 * time.Second
@@ -134,6 +140,11 @@ func (r *Runtime) ExecuteSaga(ctx context.Context, name string, script string, i
 //   - Party scope resolution happens BEFORE the first user step (synthetic step -1)
 //   - Resolution failures cause the saga to fail before any user steps execute
 func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script string, execInput ExecutionInput) (*ExecutionResult, error) {
+	// Validate script size before any execution.
+	if err := sandbox.ValidateScript(script, sandboxCfg); err != nil {
+		return nil, fmt.Errorf("%w: %d bytes exceeds %d", ErrScriptTooLarge, len(script), sandboxCfg.MaxScriptSize)
+	}
+
 	// Apply timeout to context
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
@@ -200,7 +211,7 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	}
 
 	// Enforce CPU step limit to prevent tenant scripts from exhausting compute resources.
-	thread.SetMaxExecutionSteps(MaxStepsPerExecution)
+	sandbox.HardenThread(thread, sandboxCfg)
 
 	// Set up cancellation checking
 	done := make(chan struct{})
