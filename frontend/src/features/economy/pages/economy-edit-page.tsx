@@ -135,6 +135,16 @@ export function EconomyEditPage() {
     setManifestChangedSincePlan(false)
   }, [])
 
+  const handleReloadManifest = useCallback((serverManifest: Manifest) => {
+    const plainObj = JSON.parse(JSON.stringify(serverManifest)) as Record<string, unknown>
+    const yamlStr = yaml.dump(plainObj, { lineWidth: 120 })
+    setManifestYaml(yamlStr)
+    setDraftManifest(serverManifest)
+    setYamlParseError(false)
+    validate(serverManifest)
+    setManifestChangedSincePlan(false)
+  }, [validate])
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumbs + title bar — always visible */}
@@ -181,6 +191,7 @@ export function EconomyEditPage() {
                   onLineClick={() => {}}
                   onSuggestionApply={() => {}}
                   onPlanStart={handlePlanStart}
+                  onReloadManifest={handleReloadManifest}
                 />
               </div>
             )}

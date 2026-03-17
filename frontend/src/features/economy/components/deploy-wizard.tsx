@@ -4,6 +4,8 @@ import { AlertCircle, CheckCircle2, Loader2, TriangleAlert } from 'lucide-react'
 import { useManifestPlan } from '../hooks/use-manifest-plan'
 import { ValidationPanel } from './validation-panel'
 import { ApplyPhasesStepper } from './apply-phases-stepper'
+import { ConflictResolutionModal, type ConflictResolution } from './conflict-resolution-modal'
+import { isVersionConflict } from '../lib/version-conflict'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -43,6 +45,8 @@ export interface DeployWizardProps {
   onSuggestionApply?: (path: string, suggestion: string) => void
   /** Called when a plan run is initiated so callers can reset stale flags. */
   onPlanStart?: () => void
+  /** Called when the user chooses to reload the server version after a version conflict. */
+  onReloadManifest: (serverManifest: Manifest) => void
 }
 
 // ── Plan hash ───────────────────────────────────────────────────────────────
@@ -60,15 +64,20 @@ export function DeployWizard({
   onLineClick,
   onSuggestionApply,
   onPlanStart,
+  onReloadManifest,
 }: DeployWizardProps) {
   const { claims } = useAuth()
-  const { manifestApplier } = useApiClients()
+  const { manifestApplier, manifestHistory } = useApiClients()
   const queryClient = useQueryClient()
 
   const [step, setStep] = useState<DeployStep>('idle')
   const [applyError, setApplyError] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [applyStepResults, setApplyStepResults] = useState<StepResult[]>([])
+
+  // Conflict resolution state
+  const [conflictOpen, setConflictOpen] = useState(false)
+  const [serverManifest, setServerManifest] = useState<Manifest | null>(null)
 
   // Track plan hash to detect manifest edits after planning
   const [planHash, setPlanHash] = useState<string | null>(null)
@@ -112,11 +121,17 @@ export function DeployWizard({
     },
     onSuccess: (response) => {
       setApplyStepResults(response.stepResults ?? [])
-      const isPartial = response.status === ApplyManifestStatus.FAILED &&
-        (response.stepResults ?? []).some((s) => s.status === StepResultStatus.SUCCESS)
+      const isFailed = response.status === ApplyManifestStatus.FAILED
+      const hasAnyStepSuccess = (response.stepResults ?? []).some(
+        (s) => s.status === StepResultStatus.SUCCESS,
+      )
       void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
-      if (isPartial) {
-        setApplyError('Apply completed with partial failures. Some phases did not succeed.')
+      if (isFailed) {
+        setApplyError(
+          hasAnyStepSuccess
+            ? 'Apply completed with partial failures. Some phases did not succeed.'
+            : 'Apply failed. No phases succeeded.',
+        )
         setStep('error')
       } else {
         setStep('success')
@@ -124,12 +139,82 @@ export function DeployWizard({
       setConfirmOpen(false)
     },
     onError: (err: unknown) => {
+      setConfirmOpen(false)
+      if (isVersionConflict(err)) {
+        setStep('error')
+        setApplyError('Version conflict detected. Loading server version…')
+        // Fetch the current server manifest to show the diff
+        void manifestHistory.getCurrentManifest({}).then((res) => {
+          if (res.version?.manifest) {
+            setApplyError(null)
+            setServerManifest(res.version.manifest)
+            setConflictOpen(true)
+          } else {
+            setApplyError('Version conflict detected, but the server returned no manifest.')
+          }
+        }).catch(() => {
+          setApplyError('Version conflict detected, but failed to fetch current version.')
+        })
+        return
+      }
       const message = err instanceof Error ? err.message : 'Apply failed. Please try again.'
       setApplyError(message)
       setStep('error')
-      setConfirmOpen(false)
     },
   })
+
+  // ── Conflict resolution ──────────────────────────────────────────────────
+
+  const handleConflictResolve = useCallback((resolution: ConflictResolution) => {
+    setConflictOpen(false)
+    switch (resolution) {
+      case 'force':
+        setStep('applying')
+        // Re-apply with force=true and expectedSequenceNumber=0 to skip the check
+        manifestApplier.applyManifest({
+          manifest,
+          dryRun: false,
+          force: true,
+          appliedBy: claims?.userId ?? '',
+          expectedSequenceNumber: BigInt(0),
+        }).then((response) => {
+          setApplyStepResults(response.stepResults ?? [])
+          const isFailed = response.status === ApplyManifestStatus.FAILED
+          const hasAnyStepSuccess = (response.stepResults ?? []).some(
+            (s) => s.status === StepResultStatus.SUCCESS,
+          )
+          void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
+          if (isFailed) {
+            setApplyError(
+              hasAnyStepSuccess
+                ? 'Apply completed with partial failures. Some phases did not succeed.'
+                : 'Apply failed. No phases succeeded.',
+            )
+            setStep('error')
+          } else {
+            setStep('success')
+          }
+        }).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : 'Force apply failed.'
+          setApplyError(message)
+          setStep('error')
+        })
+        break
+      case 'reload':
+        if (serverManifest) {
+          onReloadManifest(serverManifest)
+        }
+        setStep('idle')
+        setApplyError(null)
+        setServerManifest(null)
+        break
+      case 'cancel':
+        setStep('error')
+        setApplyError('Apply cancelled due to version conflict.')
+        setServerManifest(null)
+        break
+    }
+  }, [manifest, claims?.userId, manifestApplier, queryClient, serverManifest, onReloadManifest])
 
   // ── Subtask 4: Plan hash invalidation ────────────────────────────────────
 
@@ -306,6 +391,16 @@ export function DeployWizard({
         canConfirm={isApplyAllowed}
         onConfirm={handleConfirmApply}
       />
+
+      {/* Version conflict modal */}
+      {serverManifest && (
+        <ConflictResolutionModal
+          open={conflictOpen}
+          onResolve={handleConflictResolve}
+          userManifest={manifest}
+          serverManifest={serverManifest}
+        />
+      )}
     </div>
   )
 }
