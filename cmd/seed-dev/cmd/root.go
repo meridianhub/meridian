@@ -24,6 +24,9 @@ import (
 // ErrManifestValidation is returned when the manifest contains validation errors.
 var ErrManifestValidation = errors.New("manifest validation failed")
 
+// ErrManifestApplyFailed is returned when the manifest apply returns a non-success status.
+var ErrManifestApplyFailed = errors.New("manifest apply failed")
+
 var (
 	gatewayURL       string
 	grpcAddr         string
@@ -252,8 +255,12 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
 		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN:
 		// success
-	default:
-		return fmt.Errorf("manifest apply failed: %s", resp.GetStatus().String())
+	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_UNSPECIFIED,
+		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED,
+		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_VALIDATION_FAILED,
+		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_BLOCKED,
+		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_PARTIAL:
+		return fmt.Errorf("%w: %s", ErrManifestApplyFailed, resp.GetStatus().String())
 	}
 
 	fmt.Println("Manifest applied successfully.")

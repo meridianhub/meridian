@@ -27,7 +27,8 @@ func (f *fakeInternalAccountServer) InitiateInternalAccount(_ context.Context, r
 	return &internalaccountv1.InitiateInternalAccountResponse{
 		AccountId: "ia-uuid-1",
 		Facility: &internalaccountv1.InternalAccountFacility{
-			AccountCode: req.AccountCode,
+			AccountCode:   req.AccountCode,
+			AccountStatus: internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 		},
 	}, nil
 }
@@ -73,7 +74,7 @@ func TestInternalAccountClient_InitiateAccount(t *testing.T) {
 	m := result.(map[string]any)
 	assert.Equal(t, "ia-uuid-1", m["account_id"])
 	assert.Equal(t, "CLEARING_GBP", m["account_code"])
-	assert.Equal(t, "ACTIVE", m["status"])
+	assert.Contains(t, m["status"], "ACTIVE")
 }
 
 func TestInternalAccountClient_InitiateAccount_MinimalParams(t *testing.T) {

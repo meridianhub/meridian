@@ -45,7 +45,7 @@ func (c *InternalAccountClient) InitiateAccount(ctx *saga.StarlarkContext, param
 	return map[string]any{
 		"account_id":   resp.GetAccountId(),
 		"account_code": req.AccountCode,
-		"status":       "ACTIVE",
+		"status":       resp.GetFacility().GetAccountStatus().String(),
 	}, nil
 }
 
