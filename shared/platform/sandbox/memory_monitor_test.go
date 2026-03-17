@@ -31,15 +31,26 @@ func TestNewMemoryMonitor_CustomConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Millisecond, m.pollInterval)
 }
 
+func TestNewMemoryMonitor_NegativeIntervalFallsBackToDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MemoryPollInterval = -1 * time.Millisecond
+
+	m := NewMemoryMonitor(cfg)
+
+	// Negative interval must not reach time.NewTicker (which panics on <= 0).
+	assert.Equal(t, defaultMemoryPollInterval, m.pollInterval)
+}
+
 func TestMemoryMonitor_StartStop(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.MemoryThreshold = 512 * 1024 * 1024 // keep this lifecycle test independent of ambient heap usage
 	m := NewMemoryMonitor(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	m.Start(ctx)
-	assert.False(t, m.Exceeded(), "should not exceed limit immediately after start")
+	assert.False(t, m.Exceeded(), "should not exceed high threshold immediately after start")
 
 	m.Stop()
 }

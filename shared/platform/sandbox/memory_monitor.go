@@ -47,7 +47,7 @@ type MemoryMonitor struct {
 
 // NewMemoryMonitor constructs a MemoryMonitor from a sandbox Config.
 // If Config.MemoryThreshold is zero the default (10MB) is used.
-// If Config.MemoryPollInterval is zero the default (10ms) is used.
+// If Config.MemoryPollInterval is non-positive the default (10ms) is used.
 func NewMemoryMonitor(cfg Config) *MemoryMonitor {
 	threshold := cfg.MemoryThreshold
 	if threshold == 0 {
@@ -55,7 +55,7 @@ func NewMemoryMonitor(cfg Config) *MemoryMonitor {
 	}
 
 	interval := cfg.MemoryPollInterval
-	if interval == 0 {
+	if interval <= 0 {
 		interval = defaultMemoryPollInterval
 	}
 
@@ -66,7 +66,7 @@ func NewMemoryMonitor(cfg Config) *MemoryMonitor {
 	}
 }
 
-// Start captures a baseline reading and begins the monitoring goroutine.
+// Start begins the monitoring goroutine.
 // The goroutine exits when Stop is called or ctx is cancelled.
 func (m *MemoryMonitor) Start(ctx context.Context) {
 	go m.run(ctx)
@@ -85,6 +85,16 @@ func (m *MemoryMonitor) Exceeded() bool {
 	return m.exceeded.Load()
 }
 
+// sample performs one synchronous HeapAlloc measurement and updates the
+// exceeded flag if the threshold is surpassed.
+func (m *MemoryMonitor) sample() {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	if stats.HeapAlloc > m.threshold {
+		m.exceeded.Store(true)
+	}
+}
+
 // run is the monitoring goroutine body.
 func (m *MemoryMonitor) run(ctx context.Context) {
 	ticker := time.NewTicker(m.pollInterval)
@@ -93,11 +103,7 @@ func (m *MemoryMonitor) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			var stats runtime.MemStats
-			runtime.ReadMemStats(&stats)
-			if stats.HeapAlloc > m.threshold {
-				m.exceeded.Store(true)
-			}
+			m.sample()
 		case <-m.stopCh:
 			return
 		case <-ctx.Done():
@@ -107,7 +113,8 @@ func (m *MemoryMonitor) run(ctx context.Context) {
 }
 
 // MonitorExecution runs work under active memory monitoring.
-// It starts the monitor, calls work(), then stops the monitor.
+// It starts the monitor, calls work(), performs a final synchronous sample to
+// catch any breach near execution end, then stops the monitor.
 // If the memory threshold is exceeded during execution,
 // ErrMemoryLimitExceeded is returned (even if work returned nil).
 // Errors from work take precedence only when no memory breach is detected.
@@ -118,6 +125,9 @@ func MonitorExecution(ctx context.Context, cfg Config, work func() error) error 
 
 	workErr := work()
 
+	// Final synchronous sample catches breaches that fell between the last
+	// ticker tick and work completion.
+	monitor.sample()
 	monitor.Stop()
 
 	if monitor.Exceeded() {
