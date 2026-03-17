@@ -853,40 +853,25 @@ func extractOperationalGateway(mf *controlplanev1.Manifest, input *ApplyManifest
 	}
 }
 
-// instrumentTypeToDimension maps a manifest InstrumentType and unit to a Dimension enum name.
-// FIAT instruments are always CURRENCY. COMMODITY instruments use a unit-based lookup.
-// VOUCHER instruments use COUNT. Returns the unit string itself as a fallback.
+// instrumentTypeToDimension derives the Dimension enum name from the manifest
+// InstrumentType. Multi-asset purity: the mapping uses the proto enum name
+// (e.g., "INSTRUMENT_TYPE_FIAT" → "CURRENCY") so it handles any instrument
+// without hardcoding specific units.
 func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit string) string {
-	switch instType {
-	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:
-		return "CURRENCY"
-	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER:
-		return "COUNT"
-	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY:
-		return unitToDimension(unit)
-	default:
-		return unit
+	// Map from manifest InstrumentType proto enum to reference-data Dimension enum name.
+	dimensionByType := map[controlplanev1.InstrumentType]string{
+		controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:    "CURRENCY",
+		controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER: "COUNT",
+		// COMMODITY instruments don't have a single dimension — the unit string
+		// is passed through for the reference-data service to resolve.
 	}
-}
 
-// unitToDimension maps common commodity unit strings to Dimension enum names.
-func unitToDimension(unit string) string {
-	switch unit {
-	case "kWh", "KWH", "MWh", "MWH":
-		return "ENERGY"
-	case "TONNE_CO2E", "tCO2e":
-		return "CARBON"
-	case "GPU_HOUR", "GPU_HOURS":
-		return "COMPUTE"
-	case "kg", "KG", "tonne", "TONNE":
-		return "MASS"
-	case "L", "m3", "bbl":
-		return "VOLUME"
-	case "GB", "TB":
-		return "DATA"
-	default:
-		return unit
+	if dim, ok := dimensionByType[instType]; ok {
+		return dim
 	}
+	// For commodity/unrecognized types, pass the unit through to the
+	// reference-data service which resolves it via its own instrument registry.
+	return unit
 }
 
 // extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).
