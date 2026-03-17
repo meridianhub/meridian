@@ -1,4 +1,4 @@
-h1:F+sWRUTLULkpmrEEB8E4AVf1OU4yyoq+AoPUFXb3I5w=
+h1:Xdif1ICPYDYzbRHw4PVMPf7L6lBL9yVsS96Ud0ynfMs=
 20260209000001_staff_identity.sql h1:OR9Cq4l2MfrW7It8jLDt0Kzg/z1th9KJdSlZEVpOhqA=
 20260209000002_create_manifest_versions.sql h1:1Qzl3JK0Ah3DP0Vm/t4WsKBqXfMvNCyl2YU0pUxbYA0=
 20260209000003_manifest_versions.sql h1:uaOBuNtyDQd6MSQHbe0+yTtCg0Q/zcMCgXhKeMbTm8g=
@@ -8,3 +8,4 @@ h1:F+sWRUTLULkpmrEEB8E4AVf1OU4yyoq+AoPUFXb3I5w=
 20260316000002_add_phase_status.sql h1:SzkgGgM93sIDSd46hJkW/eGf3dlVU3eF7oUFmPCjz5U=
 20260316000003_add_partial_apply_status.sql h1:PybQUpbRdjZvdmCLKIdbYg+m5ixHgqfd2a7kqBalJRg=
 20260316000004_add_partial_apply_status_constraint.sql h1:GfUdzMlUYfC2Ew0bHStxg8vbO2sR80KXkflVqxunFSM=
+20260317000001_platform_saga_definition.sql h1:0b0yu4EK2njK9fgD27PyJU4mYzzwDDLQc/LL/p/bDuQ=

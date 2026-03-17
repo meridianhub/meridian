@@ -6,7 +6,6 @@ import (
 	"math"
 
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
-	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
 )
@@ -40,7 +39,7 @@ func (c *OperationalGatewayClient) UpsertConnection(ctx *saga.StarlarkContext, p
 		return nil, fmt.Errorf("build upsert connection request: %w", err)
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.connClient.UpsertConnection(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert connection: %w", err)
@@ -61,7 +60,7 @@ func (c *OperationalGatewayClient) UpsertRoute(ctx *saga.StarlarkContext, params
 		return nil, fmt.Errorf("build upsert route request: %w", err)
 	}
 
-	callCtx := clients.PropagateIdempotencyKey(ctx.Context, ctx.IdempotencyKey)
+	callCtx := prepareCallContext(ctx)
 	resp, err := c.routeClient.UpsertRoute(callCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert route: %w", err)

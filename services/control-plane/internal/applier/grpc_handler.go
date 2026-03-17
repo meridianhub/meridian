@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/meridianhub/meridian/services/control-plane/internal/manifest"
 	"github.com/meridianhub/meridian/services/control-plane/internal/planner"
@@ -722,19 +724,39 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 	}
 
 	for _, inst := range mf.GetInstruments() {
+		dim := instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit())
+		if dim == "" {
+			// Fallback: the Starlark script's .get("dimension", "CURRENCY") only
+			// kicks in when the key is absent, not when it's empty. Use CURRENCY
+			// as a safe default so the saga can proceed. A future manifest proto
+			// change should add an explicit dimension field.
+			dim = "CURRENCY"
+		}
 		input.Instruments = append(input.Instruments, InstrumentInput{
 			Code:          inst.GetCode(),
 			DisplayName:   inst.GetName(),
-			Dimension:     inst.GetDimensions().GetUnit(),
+			Dimension:     dim,
 			DecimalPlaces: int(inst.GetDimensions().GetPrecision()),
 		})
 	}
 
 	for _, acct := range mf.GetAccountTypes() {
+		nb := stripEnumPrefix(acct.GetNormalBalance().String(), "NORMAL_BALANCE_")
+		if nb == "UNSPECIFIED" {
+			nb = "DEBIT"
+		}
+		// Use the first allowed instrument as the account type's instrument code.
+		var instrumentCode string
+		if instruments := acct.GetAllowedInstruments(); len(instruments) > 0 {
+			instrumentCode = instruments[0]
+		}
 		input.AccountTypes = append(input.AccountTypes, AccountTypeInput{
-			Code:          acct.GetCode(),
-			DisplayName:   acct.GetName(),
-			NormalBalance: acct.GetNormalBalance().String(),
+			Code:           acct.GetCode(),
+			DisplayName:    acct.GetName(),
+			NormalBalance:  nb,
+			BehaviorClass:  "HOLDING",
+			InstrumentCode: instrumentCode,
+			AccountType:    acct.GetCode(), // used by saga auto-derivation for internal accounts
 		})
 	}
 
@@ -851,6 +873,36 @@ func extractOperationalGateway(mf *controlplanev1.Manifest, input *ApplyManifest
 			PathTemplate:         route.GetPathTemplate(),
 		})
 	}
+}
+
+// instrumentTypeToDimension derives the Dimension enum name from the manifest
+// InstrumentType and unit. FIAT→CURRENCY, VOUCHER→COUNT. For COMMODITY and
+// other types, checks if the uppercased unit is a valid Dimension enum name;
+// otherwise returns empty string so the Starlark script uses its default.
+func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit string) string {
+	switch instType {
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:
+		return "CURRENCY"
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER:
+		return "COUNT"
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
+		controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED:
+		// Check if the uppercased unit matches a known Dimension enum name.
+		upper := strings.ToUpper(unit)
+		if _, ok := referencedatav1.Dimension_value["DIMENSION_"+upper]; ok {
+			return upper
+		}
+		// Not a known dimension — return empty so the Starlark default applies.
+		return ""
+	}
+	return ""
+}
+
+// stripEnumPrefix removes a common prefix from a proto enum string representation.
+// For example, stripEnumPrefix("NORMAL_BALANCE_DEBIT", "NORMAL_BALANCE_") returns "DEBIT".
+// Returns the original string if the prefix is not found.
+func stripEnumPrefix(s, prefix string) string {
+	return strings.TrimPrefix(s, prefix)
 }
 
 // extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).

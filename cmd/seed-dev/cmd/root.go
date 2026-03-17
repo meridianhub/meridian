@@ -24,6 +24,9 @@ import (
 // ErrManifestValidation is returned when the manifest contains validation errors.
 var ErrManifestValidation = errors.New("manifest validation failed")
 
+// ErrManifestApplyFailed is returned when the manifest apply returns a non-success status.
+var ErrManifestApplyFailed = errors.New("manifest apply failed")
+
 var (
 	gatewayURL       string
 	grpcAddr         string
@@ -245,6 +248,26 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 			fmt.Printf("    [%s] %s: %s\n", ve.GetSeverity(), ve.GetPath(), ve.GetMessage())
 		}
 		return fmt.Errorf("%w: %d error(s)", ErrManifestValidation, len(resp.GetValidationErrors()))
+	}
+
+	// Print step results for debugging (visible in CI logs).
+	for _, sr := range resp.GetStepResults() {
+		fmt.Printf("  Step [%s]: %s — %s\n", sr.GetStepName(), sr.GetStatus().String(), sr.GetMessage())
+		for k, v := range sr.GetDetails() {
+			fmt.Printf("    %s: %s\n", k, v)
+		}
+	}
+	for phase, detail := range resp.GetPhaseStatus() {
+		fmt.Printf("  Phase [%s]: %s %s\n", phase, detail.GetStatus(), detail.GetError())
+	}
+
+	// Check response status — a nil-executor or saga failure returns a non-success status.
+	switch resp.GetStatus() { //nolint:exhaustive // default catches future enum additions
+	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
+		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN:
+		// success
+	default:
+		return fmt.Errorf("%w: %s", ErrManifestApplyFailed, resp.GetStatus().String())
 	}
 
 	fmt.Println("Manifest applied successfully.")
