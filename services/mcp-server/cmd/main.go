@@ -229,9 +229,10 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 		if dexIssuerURL != "" {
 			// Build JWT signer with the same key as BFF for session sharing.
 			signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
-				PrivateKeyPEM: env.GetEnvOrDefault("JWT_SIGNING_KEY", ""),
-				KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
-				Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+				PrivateKeyFile: env.GetEnvOrDefault("JWT_SIGNING_KEY_FILE", ""),
+				PrivateKeyPEM:  env.GetEnvOrDefault("JWT_SIGNING_KEY", ""),
+				KeyID:          env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+				Issuer:         env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
 			})
 			if err != nil {
 				return fmt.Errorf("jwt signer: %w", err)

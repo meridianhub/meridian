@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -41,6 +42,9 @@ type JWTSignerConfig struct {
 	// PrivateKeyPEM is the RSA private key in PEM format.
 	// If empty, a new 2048-bit key is generated (suitable for dev/test).
 	PrivateKeyPEM string
+	// PrivateKeyFile is a path to a file containing the RSA private key in PEM format.
+	// Takes precedence over PrivateKeyPEM when set.
+	PrivateKeyFile string
 	// KeyID is the "kid" header value for signed tokens. Defaults to "meridian-1".
 	KeyID string
 	// Issuer is the "iss" claim. Defaults to "meridian".
@@ -48,17 +52,28 @@ type JWTSignerConfig struct {
 }
 
 // NewJWTSigner creates a signer from configuration.
-// If PrivateKeyPEM is empty, a development key is auto-generated.
+// If PrivateKeyFile is set, the key is read from that file (takes precedence over PrivateKeyPEM).
+// If neither is set, a development key is auto-generated.
 func NewJWTSigner(cfg JWTSignerConfig) (*JWTSigner, error) {
 	var privateKey *rsa.PrivateKey
 
-	if cfg.PrivateKeyPEM != "" {
+	switch {
+	case cfg.PrivateKeyFile != "":
+		keyBytes, err := os.ReadFile(cfg.PrivateKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("jwt signer: read key file: %w", err)
+		}
+		privateKey, err = parseRSAPrivateKey(string(keyBytes))
+		if err != nil {
+			return nil, fmt.Errorf("jwt signer: %w", err)
+		}
+	case cfg.PrivateKeyPEM != "":
 		var err error
 		privateKey, err = parseRSAPrivateKey(cfg.PrivateKeyPEM)
 		if err != nil {
 			return nil, fmt.Errorf("jwt signer: %w", err)
 		}
-	} else {
+	default:
 		var err error
 		privateKey, err = rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {

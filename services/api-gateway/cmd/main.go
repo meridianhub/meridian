@@ -332,14 +332,16 @@ func wireBFFSSO(config *gateway.Config, logger *slog.Logger) (gateway.ServerOpti
 	}
 
 	privateKeyPEM := os.Getenv("JWT_SIGNING_KEY")
-	if privateKeyPEM == "" && !config.LocalDevMode {
+	privateKeyFile := os.Getenv("JWT_SIGNING_KEY_FILE")
+	if privateKeyPEM == "" && privateKeyFile == "" && !config.LocalDevMode {
 		return nil, nil, ErrJWTSigningKeyRequired
 	}
 
 	signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
-		PrivateKeyPEM: privateKeyPEM,
-		KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
-		Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+		PrivateKeyFile: privateKeyFile,
+		PrivateKeyPEM:  privateKeyPEM,
+		KeyID:          env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+		Issuer:         env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create JWT signer for SSO: %w", err)
