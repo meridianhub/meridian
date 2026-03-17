@@ -478,7 +478,7 @@ func run(logger *slog.Logger) error {
 		WithUnaryInterceptor(interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration)).
 		Build()
 	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
+		return bootstrap.Permanent(fmt.Errorf("failed to build grpc server: %w", err))
 	}
 
 	// Create health check aggregator (used by both gRPC and HTTP)
