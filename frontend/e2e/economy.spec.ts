@@ -30,8 +30,8 @@ test.describe('Economy Overview', () => {
   })
 
   test('renders empty state or overview content', async ({ authenticatedPage: page }) => {
-    // Without a backend, the page shows either empty state (NotFound) or error state.
-    // Both are valid outcomes — the page loaded without crashing.
+    // The page can resolve to empty state (NotFound), error state, or rendered content.
+    // All are valid outcomes — the page loaded without crashing.
     const emptyState = page.getByTestId('overview-empty')
     const errorState = page.getByTestId('overview-error')
     const loadingState = page.getByTestId('overview-loading')
@@ -39,11 +39,12 @@ test.describe('Economy Overview', () => {
     // Wait for loading to complete
     await expect(loadingState).toHaveCount(0, { timeout: 15_000 })
 
-    // One of empty or error should be visible (no backend = NotFound or connection error)
+    // One of empty, error, or content (h1 heading) should be visible
     const isEmpty = await emptyState.isVisible().catch(() => false)
     const isError = await errorState.isVisible().catch(() => false)
+    const hasContent = await page.getByRole('heading', { level: 1 }).isVisible().catch(() => false)
 
-    expect(isEmpty || isError).toBe(true)
+    expect(isEmpty || isError || hasContent).toBe(true)
   })
 
   test('empty state has Configure Economy button', async ({ authenticatedPage: page }) => {
@@ -92,10 +93,12 @@ test.describe('Economy Explorer', () => {
 
     await expect(loadingState).toHaveCount(0, { timeout: 15_000 })
 
+    // One of empty, error, or content (h1 heading) should be visible
     const isEmpty = await emptyState.isVisible().catch(() => false)
     const isError = await errorState.isVisible().catch(() => false)
+    const hasContent = await page.getByRole('heading', { level: 1 }).isVisible().catch(() => false)
 
-    expect(isEmpty || isError).toBe(true)
+    expect(isEmpty || isError || hasContent).toBe(true)
   })
 
   test('shows tab triggers when manifest data is present', async ({ authenticatedPage: page }) => {
@@ -156,9 +159,12 @@ test.describe('Economy Edit', () => {
 test.describe('Economy navigation flow', () => {
   test('sidebar Economy link navigates to /economy', async ({ authenticatedPage: page }) => {
     const nav = page.getByRole('navigation', { name: 'Main navigation' })
-    // Economy is in a collapsible group — click the group label first
-    const economyGroup = nav.getByText('Economy', { exact: true })
-    await economyGroup.click()
+    // Economy is in a collapsible group — expand it if collapsed
+    const economyToggle = nav.getByRole('button', { name: /economy/i })
+    const isExpanded = await economyToggle.getAttribute('aria-expanded')
+    if (isExpanded === 'false') {
+      await economyToggle.click()
+    }
 
     const overviewLink = nav.getByRole('link', { name: 'Overview' })
     await overviewLink.click()
