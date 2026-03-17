@@ -69,6 +69,10 @@ func (g *GuardedPgxPool) QueryRow(ctx context.Context, sql string, args ...any) 
 
 // Begin starts a transaction with tenant context validation.
 // Requires tenant context or bypass in ctx.
+//
+// The returned pgx.Tx is not individually guarded because tenant context
+// was validated at Begin time. For tenant schema isolation, prefer
+// BeginTenantTx which also sets the search_path.
 func (g *GuardedPgxPool) Begin(ctx context.Context) (pgx.Tx, error) {
 	if _, err := RequirePgxTenantContext(ctx); err != nil {
 		return nil, err
@@ -101,8 +105,9 @@ func (g *GuardedPgxPool) BeginTenantTx(ctx context.Context) (pgx.Tx, error) {
 	return tx, nil
 }
 
-// Pool returns the underlying *pgxpool.Pool for cases where direct access
-// is needed (e.g., Close, Stat). The returned pool is NOT guarded.
+// Pool returns the underlying *pgxpool.Pool for infrastructure operations
+// only (Close, Stat, Ping). The returned pool is NOT guarded — do not use
+// it for tenant-scoped queries.
 func (g *GuardedPgxPool) Pool() *pgxpool.Pool {
 	return g.pool
 }
