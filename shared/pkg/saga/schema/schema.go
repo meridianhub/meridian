@@ -157,6 +157,14 @@ type HandlerDef struct {
 	// Valid values: "auto" (implicit when compensate is set), "saga_managed", "none".
 	CompensationStrategy CompensationStrategy `yaml:"compensation_strategy,omitempty"`
 
+	// ResourceType identifies the RBAC resource type for authorization checks.
+	// When set, the saga runtime checks Claims before allowing invocation.
+	ResourceType string `yaml:"resource_type,omitempty"`
+
+	// RequiredPermission is the RBAC permission required to invoke this handler.
+	// Only checked when ResourceType is non-empty.
+	RequiredPermission string `yaml:"required_permission,omitempty"`
+
 	// Version is the handler version number. Defaults to 1 if unset.
 	Version int `yaml:"version,omitempty"`
 
