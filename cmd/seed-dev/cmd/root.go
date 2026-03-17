@@ -256,7 +256,7 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 	}
 
 	// Check response status — a nil-executor or saga failure returns a non-success status.
-	switch resp.GetStatus() {
+	switch resp.GetStatus() { //nolint:exhaustive // default catches future enum additions
 	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
 		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN:
 		// success

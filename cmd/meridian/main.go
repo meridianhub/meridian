@@ -414,7 +414,7 @@ func registerServices(
 			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), refDataComps, logger)
 		}},
 		{"control-plane", func() error {
-			return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), loopback, logger)
+			return wireControlPlane(ctx, grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), loopback, logger)
 		}},
 		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
 		{"identity", func() error { return wireIdentity(grpcServer, conns.gormDB("identity"), logger) }},
@@ -1047,7 +1047,7 @@ func wireBFFAuth(identityDB *gorm.DB, logger *slog.Logger) (*platformauth.JWTSig
 
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
-func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, loopback *loopbackClients, logger *slog.Logger) error {
+func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, loopback *loopbackClients, logger *slog.Logger) error {
 	// Build handler dependencies from loopback connections.
 	// All downstream services are accessible via the shared loopback connection.
 	deps := controlplaneservice.NewHandlerDeps(loopback.rawConn)
@@ -1064,7 +1064,7 @@ func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, loop
 	// Ensure the apply_manifest saga definition is seeded in the platform table.
 	// This is idempotent and runs on every startup so the saga is always available
 	// even when --bootstrap was not invoked (e.g., E2E and local dev).
-	if err := controlplaneservice.EnsurePlatformSaga(context.Background(), pool); err != nil {
+	if err := controlplaneservice.EnsurePlatformSaga(ctx, pool); err != nil {
 		logger.Warn("failed to seed platform saga (non-fatal, --bootstrap will retry)", "error", err)
 	}
 
