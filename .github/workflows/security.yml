@@ -136,6 +136,7 @@ jobs:
         severity: 'CRITICAL,HIGH'
         exit-code: '1'  # Fail on critical/high vulnerabilities
         trivyignores: '.trivyignore'
+        limit-severities-for-sarif: true
       env:
         TRIVY_IGNOREFILE: '.trivyignore'
 
