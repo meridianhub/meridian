@@ -308,3 +308,24 @@ x = 42
 	require.Error(t, err)
 	assert.ErrorIs(t, err, valuation.ErrStarlarkMissingResult)
 }
+
+// TestValuationSecurityContextImmutability documents that the valuation runtime
+// currently passes an unfrozen ctx dict to scripts. A script that mutates ctx
+// will succeed silently — this is a known gap. The forecasting runtime uses a
+// frozen dict and correctly rejects mutations.
+//
+// TODO: freeze the ctx dict in defaultStarlarkRuntime.buildScriptContext so that
+// mutations are rejected at runtime (matching forecasting behaviour).
+func TestValuationSecurityContextImmutability(t *testing.T) {
+	t.Skip("ctx dict is not frozen in valuation runtime — script mutations succeed silently; see TODO in starlark_runtime.go")
+
+	runtime := newSecurityRuntime(5 * time.Second)
+
+	// Attempt to mutate the ctx dict passed to the script — must fail once frozen.
+	script := `
+ctx["injected"] = "value"
+result = {"valued_amount": 0, "instrument": "GBP"}
+`
+	_, err := runtime.Execute(context.Background(), script, minimalRequest())
+	require.Error(t, err, "mutating ctx should be rejected once ctx dict is frozen")
+}
