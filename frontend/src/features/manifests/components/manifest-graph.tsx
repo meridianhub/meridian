@@ -638,7 +638,8 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
           const valid = (parsed as unknown[]).filter(
             (t): t is ManifestNodeType => typeof t === 'string' && allTypes.has(t),
           )
-          if (valid.length > 0) return new Set<ManifestNodeType>(valid)
+          // Respect empty array as a valid "hide all" preference
+          return new Set<ManifestNodeType>(valid)
         }
       }
     } catch {

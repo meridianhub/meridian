@@ -303,12 +303,19 @@ describe('ManifestGraph', () => {
 
     it('restores visible types from localStorage on mount', async () => {
       // Pre-populate localStorage with sagas hidden
-      const allTypes = Object.keys({ instrument: 1, account_type: 1, valuation_rule: 1 })
-      localStorage.setItem('meridian:graph-visible-types', JSON.stringify(allTypes))
+      const types = ['instrument', 'account_type', 'valuation_rule']
+      localStorage.setItem('meridian:graph-visible-types', JSON.stringify(types))
       renderGraph(energyManifest)
       const flow = await screen.findByTestId('react-flow')
       // Only instrument, account_type, valuation_rule nodes visible (2 + 1 + 1 = 4)
       expect(flow).toHaveAttribute('data-node-count', '4')
+    })
+
+    it('restores empty (hide all) state from localStorage on mount', async () => {
+      localStorage.setItem('meridian:graph-visible-types', JSON.stringify([]))
+      renderGraph(energyManifest)
+      const flow = await screen.findByTestId('react-flow')
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '0'))
     })
   })
 
