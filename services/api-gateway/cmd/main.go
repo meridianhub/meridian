@@ -29,10 +29,10 @@ import (
 // ErrRedisURLRequired is returned when Redis fan-out is enabled but no REDIS_URL is configured.
 var ErrRedisURLRequired = errors.New("redis fan-out requires REDIS_URL to be configured")
 
-// ErrJWTSigningKeyRequired is returned when SSO is enabled but JWT_SIGNING_KEY is not set
-// outside local dev mode. Auto-generation would produce instance-local keys that break
-// multi-replica deployments and any gateway restart.
-var ErrJWTSigningKeyRequired = errors.New("JWT_SIGNING_KEY must be set when SSO is enabled outside local dev mode")
+// ErrJWTSigningKeyRequired is returned when SSO is enabled but neither JWT_SIGNING_KEY nor
+// JWT_SIGNING_KEY_FILE is set outside local dev mode. Auto-generation would produce
+// instance-local keys that break multi-replica deployments and any gateway restart.
+var ErrJWTSigningKeyRequired = errors.New("JWT_SIGNING_KEY or JWT_SIGNING_KEY_FILE must be set when SSO is enabled outside local dev mode")
 
 // Build information set via ldflags during compilation.
 var (
@@ -332,14 +332,16 @@ func wireBFFSSO(config *gateway.Config, logger *slog.Logger) (gateway.ServerOpti
 	}
 
 	privateKeyPEM := os.Getenv("JWT_SIGNING_KEY")
-	if privateKeyPEM == "" && !config.LocalDevMode {
+	privateKeyFile := os.Getenv("JWT_SIGNING_KEY_FILE")
+	if privateKeyPEM == "" && privateKeyFile == "" && !config.LocalDevMode {
 		return nil, nil, ErrJWTSigningKeyRequired
 	}
 
 	signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
-		PrivateKeyPEM: privateKeyPEM,
-		KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
-		Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+		PrivateKeyFile: privateKeyFile,
+		PrivateKeyPEM:  privateKeyPEM,
+		KeyID:          env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+		Issuer:         env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create JWT signer for SSO: %w", err)

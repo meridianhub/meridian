@@ -1,8 +1,11 @@
 name: Deploy Demo
 
 # Required secrets:
-#   DEPLOY_SSH_KEY  - Private SSH key (Ed25519 or RSA 4096+) for the root user on the Droplet
+#   DEPLOY_SSH_KEY  - Private SSH key (Ed25519 or RSA 4096+) for the deploy user on the Droplet
 #   DROPLET_IP      - IP address of the DigitalOcean Droplet (e.g. 143.198.xxx.xxx)
+#
+# The deploy user is created by deploy/demo/provision.sh with docker group membership
+# and ownership of /opt/meridian/. Run provision.sh once as root to set up the server.
 
 on:
   push:
@@ -171,7 +174,7 @@ jobs:
         uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.DROPLET_IP }}
-          username: root
+          username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           source: "frontend-dist/*"
           target: /opt/meridian/frontend/
@@ -182,7 +185,7 @@ jobs:
         uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.DROPLET_IP }}
-          username: root
+          username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           source: "deploy/demo/Caddyfile,deploy/demo/docker-compose.yml,deploy/demo/dex.yaml,deploy/demo/init-databases.sql"
           target: /opt/meridian/
@@ -195,7 +198,7 @@ jobs:
           IMAGE_DIGEST: ${{ needs.build-and-push.outputs.image-digest }}
         with:
           host: ${{ secrets.DROPLET_IP }}
-          username: root
+          username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           envs: IMAGE_DIGEST
           script: |
@@ -211,7 +214,7 @@ jobs:
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.DROPLET_IP }}
-          username: root
+          username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             max_attempts=30

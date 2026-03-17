@@ -228,10 +228,18 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 
 		if dexIssuerURL != "" {
 			// Build JWT signer with the same key as BFF for session sharing.
+			// Fail closed: when OIDC is enabled, auto-generated keys break cross-service
+			// token interoperability and invalidate sessions after restart.
+			keyFile := env.GetEnvOrDefault("JWT_SIGNING_KEY_FILE", "")
+			keyPEM := env.GetEnvOrDefault("JWT_SIGNING_KEY", "")
+			if keyFile == "" && keyPEM == "" {
+				return fmt.Errorf("JWT_SIGNING_KEY_FILE or JWT_SIGNING_KEY must be set when MCP_DEX_ISSUER_URL is configured")
+			}
 			signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
-				PrivateKeyPEM: env.GetEnvOrDefault("JWT_SIGNING_KEY", ""),
-				KeyID:         env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
-				Issuer:        env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
+				PrivateKeyFile: keyFile,
+				PrivateKeyPEM:  keyPEM,
+				KeyID:          env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
+				Issuer:         env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
 			})
 			if err != nil {
 				return fmt.Errorf("jwt signer: %w", err)
