@@ -16,7 +16,6 @@ concurrency:
 permissions:
   contents: read
   packages: write
-  id-token: write  # Required for cosign keyless signing via OIDC
 
 env:
   REGISTRY: ghcr.io
@@ -26,6 +25,10 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # Required for cosign keyless signing via OIDC
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
 

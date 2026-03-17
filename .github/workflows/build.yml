@@ -23,7 +23,6 @@ permissions:
   contents: read
   packages: write
   security-events: write  # Required for SARIF upload to Security tab
-  id-token: write         # Required for cosign keyless signing via OIDC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -38,6 +37,11 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+      security-events: write  # Required for SARIF upload to Security tab
+      id-token: write         # Required for cosign keyless signing via OIDC
 
     steps:
       - name: Checkout code
