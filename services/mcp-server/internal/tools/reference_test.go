@@ -118,7 +118,7 @@ func TestStarlarkReference_ReturnsBindingsAndBuiltins(t *testing.T) {
 	}
 	assert.Contains(t, builtinStrs, "Decimal")
 	assert.Contains(t, builtinStrs, "input_data")
-	assert.Contains(t, builtinStrs, "invoke_handler")
+	assert.NotContains(t, builtinStrs, "invoke_handler")
 
 	notes := result["notes"].([]interface{})
 	assert.Greater(t, len(notes), 0)

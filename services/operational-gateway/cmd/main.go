@@ -113,9 +113,12 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create gRPC server.
-	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
 		Build()
+	if err != nil {
+		return fmt.Errorf("failed to build grpc server: %w", err)
+	}
 
 	// Initialize and register OperationalGatewayService.
 	gatewaySvc, err := service.NewOperationalGatewayService(instructionRepo, connectionRepo, logger)

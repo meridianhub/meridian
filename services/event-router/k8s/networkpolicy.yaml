@@ -1,0 +1,70 @@
+# Port: (no inbound gRPC - event-router is a consumer, not a server)
+# Callers: (none - event-router is triggered by Kafka, not by direct gRPC calls)
+# Calls: position-keeping (50053), market-information (50058)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: event-router
+  labels:
+    app: event-router
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: event-router
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+  # Allow Kafka connections (primary event source)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092
+
+  # Allow outbound gRPC to position-keeping
+  - to:
+    - podSelector:
+        matchLabels:
+          app: position-keeping
+    ports:
+    - protocol: TCP
+      port: 50053
+
+  # Allow outbound gRPC to market-information
+  - to:
+    - podSelector:
+        matchLabels:
+          app: market-information
+    ports:
+    - protocol: TCP
+      port: 50058

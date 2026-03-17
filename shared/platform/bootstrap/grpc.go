@@ -1,13 +1,19 @@
 package bootstrap
 
 import (
+	"errors"
 	"log/slog"
 
 	"github.com/meridianhub/meridian/shared/pkg/interceptors"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ratelimit"
 	"google.golang.org/grpc"
 )
+
+// ErrAuthRequired is returned by Build() when neither WithAuthInterceptor()
+// nor WithoutAuth() has been called.
+var ErrAuthRequired = errors.New("grpc server: auth interceptor required; call WithAuthInterceptor() or WithoutAuth()")
 
 // GrpcServerBuilder provides a fluent API for constructing gRPC servers
 // with properly ordered interceptor chains.
@@ -15,9 +21,14 @@ import (
 // The interceptor chain order is critical for correctness:
 //  1. Tracing (always first) - captures full request lifecycle including auth failures
 //  2. Auth/TenantExtraction - validates JWT and populates claims in context
-//  3. PlatformAdmin (if enabled) - requires platform-admin role, rejects tenant-scoped tokens
-//  4. Custom interceptors - user-provided interceptors
-//  5. Recovery (always last) - catches panics from any preceding interceptor or handler
+//  3. Rate limiting (if enabled) - per-tenant, per-method rate limiting
+//  4. PlatformAdmin (if enabled) - requires platform-admin role, rejects tenant-scoped tokens
+//  5. Custom interceptors - user-provided interceptors
+//  6. Recovery (always last) - catches panics from any preceding interceptor or handler
+//
+// Build() is fail-closed: it returns an error unless WithAuthInterceptor()
+// or WithoutAuth() has been called. This prevents services from accidentally
+// running without authentication.
 //
 // Example usage for tenant-layer service:
 //
@@ -32,15 +43,19 @@ import (
 //	    WithPlatformAdmin().
 //	    Build()
 //
-// Example usage when auth is disabled (development/testing):
+// Example usage when auth is handled elsewhere (unified binary / gateway):
 //
 //	server, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
+//	    WithoutAuth().
 //	    Build()
 type GrpcServerBuilder struct {
 	tracer          *observability.Tracer
 	authInterceptor *auth.Interceptor
+	authConfigured  bool
 	platformAdmin   bool
+	authOptOut      bool
 	logger          *slog.Logger
+	rateLimiter     *ratelimit.Interceptor
 	extraUnary      []grpc.UnaryServerInterceptor
 	extraStream     []grpc.StreamServerInterceptor
 }
@@ -71,6 +86,17 @@ func NewGrpcServerBuilder(tracer *observability.Tracer, logger *slog.Logger) *Gr
 // which trusts the x-tenant-id header without JWT validation (development only).
 func (b *GrpcServerBuilder) WithAuthInterceptor(interceptor *auth.Interceptor) *GrpcServerBuilder {
 	b.authInterceptor = interceptor
+	b.authConfigured = true
+	return b
+}
+
+// WithoutAuth explicitly opts out of authentication. Use this only when
+// auth is handled at a different layer (e.g. the unified binary handles auth
+// at the HTTP gateway level).
+//
+// Without this or WithAuthInterceptor(), Build() returns ErrAuthRequired.
+func (b *GrpcServerBuilder) WithoutAuth() *GrpcServerBuilder {
+	b.authOptOut = true
 	return b
 }
 
@@ -84,6 +110,14 @@ func (b *GrpcServerBuilder) WithAuthInterceptor(interceptor *auth.Interceptor) *
 // Must be combined with WithAuthInterceptor to have any effect.
 func (b *GrpcServerBuilder) WithPlatformAdmin() *GrpcServerBuilder {
 	b.platformAdmin = true
+	return b
+}
+
+// WithRateLimiting adds per-tenant, per-method rate limiting to the interceptor chain.
+// The rate limiter is positioned after auth (so tenant context is available)
+// but before business logic.
+func (b *GrpcServerBuilder) WithRateLimiting(limiter *ratelimit.Interceptor) *GrpcServerBuilder {
+	b.rateLimiter = limiter
 	return b
 }
 
@@ -114,13 +148,23 @@ func (b *GrpcServerBuilder) WithStreamInterceptor(interceptor grpc.StreamServerI
 //  2. Auth/TenantExtraction:
 //     - If authInterceptor != nil AND platformAdmin: PlatformUnaryInterceptor
 //     - If authInterceptor != nil AND !platformAdmin: UnaryInterceptor
-//     - If authInterceptor == nil: TenantExtractionInterceptor
-//  3. PlatformAdmin (if platformAdmin && authInterceptor != nil)
-//  4. Custom interceptors (extraUnary/extraStream)
-//  5. Recovery (always last)
+//     - If authOptOut: TenantExtractionInterceptor (with warning)
+//  3. Rate limiting (if configured via WithRateLimiting)
+//  4. PlatformAdmin (if platformAdmin && authInterceptor != nil)
+//  5. Custom interceptors (extraUnary/extraStream)
+//  6. Recovery (always last)
 //
-// Returns the configured gRPC server ready for service registration.
-func (b *GrpcServerBuilder) Build() *grpc.Server {
+// Returns ErrAuthRequired if neither WithAuthInterceptor() nor WithoutAuth()
+// was called.
+func (b *GrpcServerBuilder) Build() (*grpc.Server, error) {
+	// Fail-closed: require explicit auth configuration.
+	// WithAuthInterceptor(nil) counts as explicit (auth disabled in config).
+	// WithoutAuth() counts as explicit (auth handled elsewhere).
+	// Neither called = error.
+	if !b.authConfigured && !b.authOptOut {
+		return nil, ErrAuthRequired
+	}
+
 	var unaryInterceptors []grpc.UnaryServerInterceptor
 	var streamInterceptors []grpc.StreamServerInterceptor
 
@@ -140,7 +184,7 @@ func (b *GrpcServerBuilder) Build() *grpc.Server {
 			streamInterceptors = append(streamInterceptors, b.authInterceptor.StreamInterceptor())
 		}
 	} else {
-		// Auth disabled: use TenantExtractionInterceptor (development only)
+		// Auth opted out: use TenantExtractionInterceptor (development only)
 		unaryInterceptors = append(unaryInterceptors, auth.TenantExtractionInterceptor())
 		streamInterceptors = append(streamInterceptors, auth.TenantExtractionStreamInterceptor())
 
@@ -150,22 +194,27 @@ func (b *GrpcServerBuilder) Build() *grpc.Server {
 		}
 	}
 
-	// 3. PlatformAdmin (if enabled with auth)
+	// 3. Rate limiting (after auth, so tenant context is available)
+	if b.rateLimiter != nil {
+		unaryInterceptors = append(unaryInterceptors, b.rateLimiter.UnaryServerInterceptor())
+	}
+
+	// 4. PlatformAdmin (if enabled with auth)
 	if b.platformAdmin && b.authInterceptor != nil {
 		unaryInterceptors = append(unaryInterceptors, auth.PlatformAdminInterceptor())
 		streamInterceptors = append(streamInterceptors, auth.PlatformAdminStreamInterceptor())
 	}
 
-	// 4. Custom interceptors
+	// 5. Custom interceptors
 	unaryInterceptors = append(unaryInterceptors, b.extraUnary...)
 	streamInterceptors = append(streamInterceptors, b.extraStream...)
 
-	// 5. Recovery (always last to catch all panics)
+	// 6. Recovery (always last to catch all panics)
 	unaryInterceptors = append(unaryInterceptors, interceptors.RecoveryUnaryInterceptor(b.logger))
 	streamInterceptors = append(streamInterceptors, interceptors.RecoveryStreamInterceptor(b.logger))
 
 	return grpc.NewServer(
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 		grpc.ChainStreamInterceptor(streamInterceptors...),
-	)
+	), nil
 }

@@ -45,7 +45,6 @@ var knownServiceBindings = []string{
 // Known top-level Starlark builtins provided by the saga runtime.
 var knownStarlarkBuiltins = []string{
 	"input_data",
-	"invoke_handler",
 	"party_scope",
 	"Decimal",
 	"print",
@@ -2027,10 +2026,6 @@ func (v *ManifestValidator) buildStarlarkPredeclared() (starlark.StringDict, *[]
 
 	// Add common builtins
 	predeclared["input_data"] = starlark.NewDict(0)
-	predeclared["invoke_handler"] = starlark.NewBuiltin("invoke_handler",
-		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
-			return starlark.None, nil
-		})
 	predeclared["party_scope"] = starlark.NewDict(0)
 	predeclared["Decimal"] = starlark.NewBuiltin("Decimal",
 		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
