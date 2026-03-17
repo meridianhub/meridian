@@ -16,8 +16,6 @@ import { manifestKeys } from '@/lib/query-keys'
 import { ApplyManifestStatus } from '@/api/gen/meridian/control_plane/v1/apply_manifest_service_pb'
 import type { ManifestNodeType } from '@/features/manifests/lib/manifest-graph-model'
 import { ResourceForm } from './resource-form'
-import { type ConflictResolution } from './conflict-resolution-modal'
-import { isVersionConflict } from '../lib/version-conflict'
 import {
   getResourceSchema,
   buildResourcePayload,
@@ -69,14 +67,10 @@ export function ApplyResourceModal({
   const [state, setState] = useState<ModalState>('editing')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  // Conflict resolution state
-  const [conflictOpen, setConflictOpen] = useState(false)
-
   const resetState = useCallback(() => {
     setValues(defaultValues)
     setState('editing')
     setErrorMessage(null)
-    setConflictOpen(false)
   }, [defaultValues])
 
   const handleOpenChange = useCallback(
@@ -124,11 +118,6 @@ export function ApplyResourceModal({
       }
     },
     onError: (err: unknown) => {
-      if (isVersionConflict(err)) {
-        setConflictOpen(true)
-        setState('error')
-        return
-      }
       const message =
         err instanceof Error ? err.message : 'Apply failed. Please try again.'
       setErrorMessage(message)
@@ -146,48 +135,6 @@ export function ApplyResourceModal({
     setState('applying')
     applyMutation.mutate()
   }, [applyMutation])
-
-  const handleConflictResolve = useCallback((resolution: ConflictResolution) => {
-    setConflictOpen(false)
-    switch (resolution) {
-      case 'force':
-        if (!schema) return
-        setState('applying')
-        manifestApplier.applyResource({
-          resourceType: schema.resourceType,
-          resource: {
-            case: schema.oneofCase as never,
-            value: buildResourcePayload(schema, values) as never,
-          },
-          dryRun: false,
-          appliedBy: claims?.userId ?? '',
-          expectedSequenceNumber: BigInt(0),
-        }).then((response) => {
-          void queryClient.invalidateQueries({ queryKey: manifestKeys.all })
-          if (response.status === ApplyManifestStatus.APPLIED) {
-            setState('success')
-          } else {
-            const validationMessages = response.validationErrors
-              ?.map((e) => e.message)
-              .join('; ')
-            setErrorMessage(validationMessages || response.diffSummary || 'Apply failed')
-            setState('error')
-          }
-        }).catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : 'Force apply failed.'
-          setErrorMessage(message)
-          setState('error')
-        })
-        break
-      case 'reload':
-        resetState()
-        break
-      case 'cancel':
-        setErrorMessage('Apply cancelled due to version conflict.')
-        setState('error')
-        break
-    }
-  }, [schema, values, claims?.userId, manifestApplier, queryClient, resetState])
 
   if (!schema) {
     return (
@@ -244,44 +191,6 @@ export function ApplyResourceModal({
               >
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 <span>{errorMessage}</span>
-              </div>
-            )}
-
-            {conflictOpen && (
-              <div
-                className="space-y-2 rounded-md border border-warning/30 bg-warning-muted p-3"
-                data-testid="apply-resource-conflict"
-              >
-                <div className="flex items-center gap-2 text-sm font-medium text-warning-foreground">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  Version conflict: the manifest was modified by another user.
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleConflictResolve('reload')}
-                    data-testid="conflict-reload"
-                  >
-                    Reload
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => handleConflictResolve('force')}
-                    data-testid="conflict-force"
-                  >
-                    Force Apply
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleConflictResolve('cancel')}
-                    data-testid="conflict-cancel"
-                  >
-                    Cancel
-                  </Button>
-                </div>
               </div>
             )}
           </>
