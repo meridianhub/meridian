@@ -25,7 +25,7 @@ spec:
           app: event-router
     - podSelector:
         matchLabels:
-          app: gateway
+          app: gateway  # api-gateway deployment label is "app: gateway"
     ports:
     - protocol: TCP
       port: 50058
