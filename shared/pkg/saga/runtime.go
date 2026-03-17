@@ -140,6 +140,11 @@ func (r *Runtime) ExecuteSaga(ctx context.Context, name string, script string, i
 //   - Party scope resolution happens BEFORE the first user step (synthetic step -1)
 //   - Resolution failures cause the saga to fail before any user steps execute
 func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script string, execInput ExecutionInput) (*ExecutionResult, error) {
+	// Validate script size before any execution.
+	if err := sandbox.ValidateScript(script, sandboxCfg); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrScriptTooLarge, err)
+	}
+
 	// Apply timeout to context
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
