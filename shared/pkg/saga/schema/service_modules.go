@@ -377,15 +377,24 @@ func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) 
 // authorizeHandlerInvocation checks RBAC authorization before handler invocation.
 //
 // Fail-safe rules:
-//   - Handlers without ResourceType: allow (backward compatibility)
+//   - Handlers without RBAC metadata (both empty): allow (backward compatibility)
+//   - Partial RBAC metadata (one set, other empty): deny (fail-closed)
 //   - Sagas without Claims (system-initiated): allow
-//   - Claims present + ResourceType set: check that Claims has the required scope
+//   - Claims present + both RBAC fields set: check that Claims has the required scope
 //     formatted as "resource_type:permission" (e.g., "payment_order:write")
-//   - Invalid/empty ResourceType with RequiredPermission: deny (fail-closed)
 func authorizeHandlerInvocation(ctx *saga.StarlarkContext, handlerDef *HandlerDef, fullName string) error {
-	// No ResourceType declared: backward compatibility, allow
-	if handlerDef.ResourceType == "" {
+	// No RBAC metadata declared: backward compatibility, allow
+	if handlerDef.ResourceType == "" && handlerDef.RequiredPermission == "" {
 		return nil
+	}
+
+	// Partial RBAC metadata: fail closed
+	if handlerDef.ResourceType == "" || handlerDef.RequiredPermission == "" {
+		return fmt.Errorf(
+			"%w: handler %s must declare both resource_type and required_permission",
+			ErrHandlerAuthorizationDenied,
+			fullName,
+		)
 	}
 
 	// No Claims on context: system-initiated saga, allow

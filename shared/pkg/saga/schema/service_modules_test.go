@@ -1163,11 +1163,29 @@ func TestParseHandlerTree_SinglePart(t *testing.T) {
 }
 
 func TestAuthorizeHandlerInvocation(t *testing.T) {
-	t.Run("allows handler without ResourceType (backward compat)", func(t *testing.T) {
+	t.Run("allows handler without RBAC metadata (backward compat)", func(t *testing.T) {
 		ctx := &saga.StarlarkContext{}
-		def := &HandlerDef{ResourceType: ""}
+		def := &HandlerDef{ResourceType: "", RequiredPermission: ""}
 		err := authorizeHandlerInvocation(ctx, def, "test.handler")
 		assert.NoError(t, err)
+	})
+
+	t.Run("denies handler with ResourceType but no RequiredPermission (partial RBAC)", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{}
+		def := &HandlerDef{ResourceType: "payment_order", RequiredPermission: ""}
+		err := authorizeHandlerInvocation(ctx, def, "payment_order.create")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrHandlerAuthorizationDenied)
+		assert.Contains(t, err.Error(), "must declare both")
+	})
+
+	t.Run("denies handler with RequiredPermission but no ResourceType (partial RBAC)", func(t *testing.T) {
+		ctx := &saga.StarlarkContext{}
+		def := &HandlerDef{ResourceType: "", RequiredPermission: "write"}
+		err := authorizeHandlerInvocation(ctx, def, "payment_order.create")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrHandlerAuthorizationDenied)
+		assert.Contains(t, err.Error(), "must declare both")
 	})
 
 	t.Run("allows system saga without Claims", func(t *testing.T) {
