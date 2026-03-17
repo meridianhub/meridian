@@ -195,10 +195,12 @@ func (r *Repository) UpdateStatus(ctx context.Context, id tenant.TenantID, statu
 	if result.RowsAffected == 0 {
 		// Check if tenant exists
 		var count int64
-		r.conn(ctx).
+		if err := r.conn(ctx).
 			Model(&TenantEntity{}).
 			Where("id = ?", id.String()).
-			Count(&count)
+			Count(&count).Error; err != nil {
+			return nil, err
+		}
 
 		if count == 0 {
 			return nil, ErrTenantNotFound
@@ -231,10 +233,12 @@ func (r *Repository) UpdateStatusWithError(ctx context.Context, id tenant.Tenant
 	if result.RowsAffected == 0 {
 		// Check if tenant exists
 		var count int64
-		r.conn(ctx).
+		if err := r.conn(ctx).
 			Model(&TenantEntity{}).
 			Where("id = ?", id.String()).
-			Count(&count)
+			Count(&count).Error; err != nil {
+			return nil, err
+		}
 
 		if count == 0 {
 			return nil, ErrTenantNotFound
