@@ -30,6 +30,7 @@ def work():
     return x
 work()
 `
+	//nolint:staticcheck // ExecFileOptions requires FileOptions which we don't need to customize
 	_, err := starlark.ExecFile(smallThread, "test.star", script, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too many steps")
@@ -42,6 +43,7 @@ func TestHardenThread_AllowsSmallScripts(t *testing.T) {
 	HardenThread(thread, cfg)
 
 	script := `x = 1 + 2`
+	//nolint:staticcheck // ExecFileOptions requires FileOptions which we don't need to customize
 	_, err := starlark.ExecFile(thread, "test.star", script, nil)
 	assert.NoError(t, err)
 }
