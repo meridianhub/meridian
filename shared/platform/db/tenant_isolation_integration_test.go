@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -166,6 +165,7 @@ func TestTenantGuard_Integration_TenantACannotReadTenantBData(t *testing.T) {
 		return tx.Table("isolation_test_entities").Find(&results).Error
 	})
 	require.NoError(t, err)
+	require.NotEmpty(t, results, "tenant_alpha scope must return at least one row — empty result would make loop assertions vacuously true")
 
 	for _, r := range results {
 		assert.Equal(t, "alpha-secret-data", r.Payload,
@@ -327,13 +327,19 @@ func TestTenantGuard_Integration_ConcurrentTenantRequests(t *testing.T) {
 
 		var rows []struct{ Payload string }
 		err := db.WithGormTenantTransaction(ctx, gormDB, func(tx *gorm.DB) error {
-			// Introduce a small delay to increase the chance of interleaving.
-			time.Sleep(10 * time.Millisecond)
 			return tx.Table("isolation_test_entities").Find(&rows).Error
 		})
 
 		if err != nil {
 			ch <- result{tenantID: id, err: err}
+			return
+		}
+
+		if len(rows) == 0 {
+			ch <- result{
+				tenantID: id,
+				err:      fmt.Errorf("tenant %s returned no rows — empty result makes payload assertions vacuously true", id),
+			}
 			return
 		}
 
