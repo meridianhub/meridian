@@ -42,11 +42,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '1'
+          memory: 1G
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.25'
+          memory: 256M
     # Not exposed to host — accessed only by meridian on the internal network
 
   # Dex OIDC is embedded in the meridian binary (no sidecar container needed).
@@ -123,11 +123,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 4G
-        reservations:
           cpus: '1'
-          memory: 1G
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     # Note: The meridian image uses gcr.io/distroless/static-debian12 (no shell,
     # no wget), so a CMD-SHELL healthcheck cannot run. Health is monitored via
     # the gRPC health check service on port 50051. Caddy uses service_started
