@@ -134,11 +134,8 @@ def run():
     return x
 result = {"valued_amount": run(), "instrument": "GBP"}
 `
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
 
 	_, err := runtime.Execute(ctx, script, minimalRequest())
 	require.Error(t, err)

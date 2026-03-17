@@ -159,11 +159,8 @@ def compute_forecast(ctx):
         x = x + 1
     return []
 `
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
 
 	_, err := runner.executeScript(ctx, script, minimalForecastCtx())
 	require.Error(t, err)
