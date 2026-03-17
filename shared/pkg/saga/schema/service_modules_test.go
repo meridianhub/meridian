@@ -1224,6 +1224,7 @@ func TestAuthorizeHandlerInvocation(t *testing.T) {
 		err := authorizeHandlerInvocation(ctx, def, "payment_order.create_lien")
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrHandlerAuthorizationDenied)
+		assert.Contains(t, err.Error(), "requires permission")
 		assert.Contains(t, err.Error(), "payment_order:write")
 	})
 

@@ -188,6 +188,19 @@ func BuildServiceModulesFromSchema(registry *saga.HandlerRegistry, s *Schema) (s
 		return nil, ErrNilSchema
 	}
 
+	// Fast-fail: reject handlers with partial RBAC metadata at build time
+	for name, handlerDef := range s.Handlers {
+		if handlerDef == nil {
+			return nil, fmt.Errorf("handler %s: nil schema definition", name)
+		}
+		if (handlerDef.ResourceType == "") != (handlerDef.RequiredPermission == "") {
+			return nil, fmt.Errorf(
+				"handler %s: resource_type and required_permission must both be set or both be empty",
+				name,
+			)
+		}
+	}
+
 	// Get all handler names from the schema
 	schemaHandlers := make([]string, 0, len(s.Handlers))
 	for name := range s.Handlers {
@@ -415,7 +428,7 @@ func authorizeHandlerInvocation(ctx *saga.StarlarkContext, handlerDef *HandlerDe
 		return nil
 	}
 
-	return fmt.Errorf("%w: handler %s requires scope %q", ErrHandlerAuthorizationDenied, fullName, requiredScope)
+	return fmt.Errorf("%w: handler %s requires permission %q via scope or role", ErrHandlerAuthorizationDenied, fullName, requiredScope)
 }
 
 // convertKwargsToParams converts Starlark kwargs to a Go map.

@@ -2,6 +2,7 @@
 
 This document provides a reference for all saga handlers available in the Meridian platform.
 
+
 ## current_account.control
 
 Perform lifecycle control action on an account (FREEZE, UNFREEZE, CLOSE)
@@ -24,6 +25,7 @@ result = current_account.control(
 ```
 
 ---
+
 
 ## current_account.create_lien
 
@@ -50,6 +52,7 @@ result = current_account.create_lien(
 
 ---
 
+
 ## current_account.execute_lien
 
 Execute (consume) a previously created lien
@@ -72,6 +75,7 @@ result = current_account.execute_lien(
 ```
 
 ---
+
 
 ## current_account.save
 
@@ -96,6 +100,7 @@ result = current_account.save(
 
 ---
 
+
 ## current_account.terminate_lien
 
 Terminate (release) a lien without execution (compensation handler)
@@ -118,6 +123,7 @@ result = current_account.terminate_lien(
 ```
 
 ---
+
 
 ## financial_accounting.capture_posting
 
@@ -144,6 +150,7 @@ result = financial_accounting.capture_posting(
 
 ---
 
+
 ## financial_accounting.compensate_posting
 
 Compensate (reverse) a captured posting entry
@@ -166,6 +173,7 @@ result = financial_accounting.compensate_posting(
 ```
 
 ---
+
 
 ## financial_accounting.create_booking
 
@@ -190,6 +198,7 @@ result = financial_accounting.create_booking(
 
 ---
 
+
 ## financial_accounting.initiate_booking_log
 
 Initiate a booking log for a deposit or withdrawal transaction
@@ -212,6 +221,7 @@ result = financial_accounting.initiate_booking_log(
 ```
 
 ---
+
 
 ## financial_accounting.post_entries
 
@@ -238,6 +248,7 @@ result = financial_accounting.post_entries(
 
 ---
 
+
 ## financial_accounting.reverse_entries
 
 Reverse previously posted accounting entries (compensation handler)
@@ -260,6 +271,7 @@ result = financial_accounting.reverse_entries(
 ```
 
 ---
+
 
 ## financial_accounting.update_booking_log
 
@@ -284,6 +296,7 @@ result = financial_accounting.update_booking_log(
 
 ---
 
+
 ## financial_gateway.cancel_payment
 
 Cancel a pending payment dispatch (compensation handler)
@@ -306,6 +319,7 @@ result = financial_gateway.cancel_payment(
 ```
 
 ---
+
 
 ## financial_gateway.dispatch_payment
 
@@ -332,6 +346,7 @@ result = financial_gateway.dispatch_payment(
 
 ---
 
+
 ## financial_gateway.dispatch_refund
 
 Dispatch a refund for a previously processed payment
@@ -354,6 +369,7 @@ result = financial_gateway.dispatch_refund(
 ```
 
 ---
+
 
 ## internal_account.get_balance
 
@@ -378,6 +394,7 @@ result = internal_account.get_balance(
 
 ---
 
+
 ## internal_account.initiate
 
 Initiate a new internal account
@@ -400,6 +417,7 @@ result = internal_account.initiate(
 ```
 
 ---
+
 
 ## internal_account.retrieve
 
@@ -424,6 +442,7 @@ result = internal_account.retrieve(
 
 ---
 
+
 ## market_information.get_rate
 
 Fetch FX rates for currency pair conversion
@@ -447,6 +466,7 @@ result = market_information.get_rate(
 
 ---
 
+
 ## operational_gateway.cancel_instruction
 
 Cancel a pending instruction before dispatch (compensation handler)
@@ -469,6 +489,7 @@ result = operational_gateway.cancel_instruction(
 ```
 
 ---
+
 
 ## operational_gateway.dispatch_instruction
 
@@ -495,6 +516,7 @@ result = operational_gateway.dispatch_instruction(
 
 ---
 
+
 ## operational_gateway.get_instruction
 
 Get instruction status and details by ID
@@ -517,6 +539,7 @@ result = operational_gateway.get_instruction(
 ```
 
 ---
+
 
 ## party.get_default_payment_method
 
@@ -541,6 +564,7 @@ result = party.get_default_payment_method(
 
 ---
 
+
 ## party.get_structuring_data
 
 Retrieve structuring metadata for a participant in a syndicate
@@ -563,6 +587,7 @@ result = party.get_structuring_data(
 ```
 
 ---
+
 
 ## party.list_participants
 
@@ -587,6 +612,7 @@ result = party.list_participants(
 
 ---
 
+
 ## position_keeping.cancel_log
 
 Cancel a position log entry (compensation handler)
@@ -609,6 +635,7 @@ result = position_keeping.cancel_log(
 ```
 
 ---
+
 
 ## position_keeping.initiate_log
 
@@ -635,6 +662,7 @@ result = position_keeping.initiate_log(
 
 ---
 
+
 ## position_keeping.update_log
 
 Update an existing position log entry
@@ -657,6 +685,7 @@ result = position_keeping.update_log(
 ```
 
 ---
+
 
 ## reconciliation.assert_balance
 
@@ -681,6 +710,7 @@ result = reconciliation.assert_balance(
 
 ---
 
+
 ## reconciliation.cancel_run
 
 Cancel a settlement run (compensation handler)
@@ -703,6 +733,7 @@ result = reconciliation.cancel_run(
 ```
 
 ---
+
 
 ## reconciliation.execute_run
 
@@ -727,6 +758,7 @@ result = reconciliation.execute_run(
 
 ---
 
+
 ## reconciliation.initiate_dispute
 
 Raise a formal dispute against a detected variance
@@ -749,6 +781,7 @@ result = reconciliation.initiate_dispute(
 ```
 
 ---
+
 
 ## reconciliation.initiate_run
 
@@ -775,6 +808,7 @@ result = reconciliation.initiate_run(
 
 ---
 
+
 ## reconciliation.retrieve_run
 
 Retrieve a settlement run summary
@@ -798,6 +832,7 @@ result = reconciliation.retrieve_run(
 
 ---
 
+
 ## reference_data.retrieve_instrument
 
 Retrieve an instrument definition by code and version
@@ -820,3 +855,4 @@ result = reference_data.retrieve_instrument(
 ```
 
 ---
+
