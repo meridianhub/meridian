@@ -7,9 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ratelimit"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -60,22 +63,47 @@ func createTestAuthInterceptor(t *testing.T) *auth.Interceptor {
 	return interceptor
 }
 
-// TestGrpcServerBuilder_MinimalChain verifies that a minimal configuration
-// produces a valid server with tracing, tenant extraction, and recovery interceptors.
-func TestGrpcServerBuilder_MinimalChain(t *testing.T) {
+// TestGrpcServerBuilder_BuildFailsWithoutAuth verifies that Build() returns
+// ErrAuthRequired when neither WithAuthInterceptor() nor WithoutAuth() is called.
+func TestGrpcServerBuilder_BuildFailsWithoutAuth(t *testing.T) {
 	tracer := testTracer(t)
 	logger := testLogger()
 
-	// Build server without auth (minimal chain)
-	server := NewGrpcServerBuilder(tracer, logger).Build()
+	server, err := NewGrpcServerBuilder(tracer, logger).Build()
 
-	// Verify server was created
-	require.NotNil(t, server, "server should not be nil")
+	require.ErrorIs(t, err, ErrAuthRequired)
+	assert.Nil(t, server)
+}
 
-	// Verify it's a valid gRPC server by checking service info exists
-	// (even though we haven't registered any services)
+// TestGrpcServerBuilder_WithoutAuth verifies that WithoutAuth() allows Build()
+// to succeed without an auth interceptor.
+func TestGrpcServerBuilder_WithoutAuth(t *testing.T) {
+	tracer := testTracer(t)
+	logger := testLogger()
+
+	server, err := NewGrpcServerBuilder(tracer, logger).
+		WithoutAuth().
+		Build()
+
+	require.NoError(t, err)
+	require.NotNil(t, server)
+
 	info := server.GetServiceInfo()
-	assert.NotNil(t, info, "service info should not be nil")
+	assert.NotNil(t, info)
+}
+
+// TestGrpcServerBuilder_WithAuthInterceptorNil verifies that WithAuthInterceptor(nil)
+// counts as explicit auth configuration (auth disabled via config), so Build() succeeds.
+func TestGrpcServerBuilder_WithAuthInterceptorNil(t *testing.T) {
+	tracer := testTracer(t)
+	logger := testLogger()
+
+	server, err := NewGrpcServerBuilder(tracer, logger).
+		WithAuthInterceptor(nil).
+		Build()
+
+	require.NoError(t, err)
+	require.NotNil(t, server)
 }
 
 // TestGrpcServerBuilder_WithAuth verifies that WithAuthInterceptor adds
@@ -85,12 +113,12 @@ func TestGrpcServerBuilder_WithAuth(t *testing.T) {
 	logger := testLogger()
 	authInterceptor := createTestAuthInterceptor(t)
 
-	// Build server with auth
-	server := NewGrpcServerBuilder(tracer, logger).
+	server, err := NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
 		Build()
 
-	require.NotNil(t, server, "server should not be nil")
+	require.NoError(t, err)
+	require.NotNil(t, server)
 }
 
 // TestGrpcServerBuilder_WithPlatformAdmin verifies that WithPlatformAdmin
@@ -100,13 +128,13 @@ func TestGrpcServerBuilder_WithPlatformAdmin(t *testing.T) {
 	logger := testLogger()
 	authInterceptor := createTestAuthInterceptor(t)
 
-	// Build server with platform admin configuration
-	server := NewGrpcServerBuilder(tracer, logger).
+	server, err := NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
 		WithPlatformAdmin().
 		Build()
 
-	require.NotNil(t, server, "server should not be nil")
+	require.NoError(t, err)
+	require.NotNil(t, server)
 }
 
 // TestGrpcServerBuilder_WithCustomInterceptors verifies that custom interceptors
@@ -115,17 +143,12 @@ func TestGrpcServerBuilder_WithCustomInterceptors(t *testing.T) {
 	tracer := testTracer(t)
 	logger := testLogger()
 
-	// Track whether custom interceptors are called
-	unaryCalled := false
-	streamCalled := false
-
 	customUnary := func(
 		ctx context.Context,
 		req interface{},
 		_ *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
-		unaryCalled = true
 		return handler(ctx, req)
 	}
 
@@ -135,23 +158,17 @@ func TestGrpcServerBuilder_WithCustomInterceptors(t *testing.T) {
 		_ *grpc.StreamServerInfo,
 		handler grpc.StreamHandler,
 	) error {
-		streamCalled = true
 		return handler(srv, ss)
 	}
 
-	// Build server with custom interceptors
-	server := NewGrpcServerBuilder(tracer, logger).
+	server, err := NewGrpcServerBuilder(tracer, logger).
+		WithoutAuth().
 		WithUnaryInterceptor(customUnary).
 		WithStreamInterceptor(customStream).
 		Build()
 
-	require.NotNil(t, server, "server should not be nil")
-
-	// Note: We can't easily verify the interceptors are in the chain without
-	// actually making RPC calls. The fact that Build() succeeds is sufficient
-	// for this unit test. Integration tests would verify the actual behavior.
-	_ = unaryCalled
-	_ = streamCalled
+	require.NoError(t, err)
+	require.NotNil(t, server)
 }
 
 // TestGrpcServerBuilder_Build verifies that Build() produces a functional server.
@@ -160,21 +177,29 @@ func TestGrpcServerBuilder_Build(t *testing.T) {
 		name          string
 		authEnabled   bool
 		platformAdmin bool
+		authOptOut    bool
+		expectErr     bool
 	}{
 		{
-			name:          "minimal (no auth)",
-			authEnabled:   false,
-			platformAdmin: false,
+			name:       "no auth config (fail-closed)",
+			authOptOut: false,
+			expectErr:  true,
 		},
 		{
-			name:          "with auth (tenant service)",
-			authEnabled:   true,
-			platformAdmin: false,
+			name:       "auth opted out",
+			authOptOut: true,
+			expectErr:  false,
+		},
+		{
+			name:        "with auth (tenant service)",
+			authEnabled: true,
+			expectErr:   false,
 		},
 		{
 			name:          "with auth and platform admin",
 			authEnabled:   true,
 			platformAdmin: true,
+			expectErr:     false,
 		},
 	}
 
@@ -194,30 +219,38 @@ func TestGrpcServerBuilder_Build(t *testing.T) {
 				builder = builder.WithPlatformAdmin()
 			}
 
-			server := builder.Build()
+			if tt.authOptOut {
+				builder = builder.WithoutAuth()
+			}
 
-			require.NotNil(t, server, "server should not be nil")
+			server, err := builder.Build()
 
-			// Verify server is functional by getting service info
-			info := server.GetServiceInfo()
-			assert.NotNil(t, info, "service info should not be nil")
+			if tt.expectErr {
+				require.ErrorIs(t, err, ErrAuthRequired)
+				assert.Nil(t, server)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, server)
+				info := server.GetServiceInfo()
+				assert.NotNil(t, info)
+			}
 		})
 	}
 }
 
 // TestGrpcServerBuilder_PlatformAdminWithoutAuth verifies that WithPlatformAdmin
-// has no effect when auth is not configured.
+// without auth still requires explicit auth opt-out.
 func TestGrpcServerBuilder_PlatformAdminWithoutAuth(t *testing.T) {
 	tracer := testTracer(t)
 	logger := testLogger()
 
-	// Build with platform admin but without auth
-	// This should still work - platform admin interceptor is simply not added
-	server := NewGrpcServerBuilder(tracer, logger).
+	// Platform admin without auth or opt-out should fail
+	server, err := NewGrpcServerBuilder(tracer, logger).
 		WithPlatformAdmin().
 		Build()
 
-	require.NotNil(t, server, "server should not be nil")
+	require.ErrorIs(t, err, ErrAuthRequired)
+	assert.Nil(t, server)
 }
 
 // TestGrpcServerBuilder_FluentChaining verifies that all fluent methods
@@ -227,8 +260,7 @@ func TestGrpcServerBuilder_FluentChaining(t *testing.T) {
 	logger := testLogger()
 	authInterceptor := createTestAuthInterceptor(t)
 
-	// Verify all methods can be chained
-	server := NewGrpcServerBuilder(tracer, logger).
+	server, err := NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
 		WithPlatformAdmin().
 		WithUnaryInterceptor(func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -239,7 +271,8 @@ func TestGrpcServerBuilder_FluentChaining(t *testing.T) {
 		}).
 		Build()
 
-	require.NotNil(t, server, "server should not be nil")
+	require.NoError(t, err)
+	require.NotNil(t, server)
 }
 
 // TestGrpcServerBuilder_MultipleCustomInterceptors verifies that multiple
@@ -248,7 +281,6 @@ func TestGrpcServerBuilder_MultipleCustomInterceptors(t *testing.T) {
 	tracer := testTracer(t)
 	logger := testLogger()
 
-	// Create multiple custom interceptors
 	interceptor1 := func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		return handler(ctx, req)
 	}
@@ -256,10 +288,36 @@ func TestGrpcServerBuilder_MultipleCustomInterceptors(t *testing.T) {
 		return handler(ctx, req)
 	}
 
-	server := NewGrpcServerBuilder(tracer, logger).
+	server, err := NewGrpcServerBuilder(tracer, logger).
+		WithoutAuth().
 		WithUnaryInterceptor(interceptor1).
 		WithUnaryInterceptor(interceptor2).
 		Build()
 
-	require.NotNil(t, server, "server should not be nil")
+	require.NoError(t, err)
+	require.NotNil(t, server)
+}
+
+// TestGrpcServerBuilder_WithRateLimiting verifies that WithRateLimiting adds
+// the rate limiter to the interceptor chain.
+func TestGrpcServerBuilder_WithRateLimiting(t *testing.T) {
+	tracer := testTracer(t)
+	logger := testLogger()
+	authInterceptor := createTestAuthInterceptor(t)
+
+	registry := prometheus.NewRegistry()
+	metrics := ratelimit.NewMetrics("test", registry)
+	limiter := ratelimit.NewInterceptor(ratelimit.Config{
+		BurstSize:  10,
+		RefillRate: 1 * time.Minute,
+	}, metrics)
+	defer limiter.Stop()
+
+	server, err := NewGrpcServerBuilder(tracer, logger).
+		WithAuthInterceptor(authInterceptor).
+		WithRateLimiting(limiter).
+		Build()
+
+	require.NoError(t, err)
+	require.NotNil(t, server)
 }

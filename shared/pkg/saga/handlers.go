@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/shopspring/decimal"
 )
 
@@ -181,6 +182,11 @@ type StarlarkContext struct {
 	// Handlers should propagate this key using shared/pkg/clients.PropagateIdempotencyKey
 	// before making external service calls.
 	IdempotencyKey string
+
+	// Claims contains the authenticated user's JWT claims for RBAC authorization.
+	// When set, handler invocations with ResourceType are checked against these claims.
+	// Nil for system-initiated sagas (no authorization checks performed).
+	Claims *auth.Claims
 
 	// Logger for structured logging within handlers.
 	Logger *slog.Logger

@@ -19,12 +19,6 @@ var (
 
 	// ErrRegistryRequired is returned when Registry is nil.
 	ErrRegistryRequired = errors.New("registry is required")
-
-	// ErrInvokeHandlerMissingName is returned when invoke_handler is called without a handler kwarg.
-	ErrInvokeHandlerMissingName = errors.New("invoke_handler: handler keyword argument is required")
-
-	// ErrInvokeHandlerBadType is returned when invoke_handler receives a wrong type for a kwarg.
-	ErrInvokeHandlerBadType = errors.New("invoke_handler: unexpected type")
 )
 
 // StarlarkSagaRunner executes saga definitions written in Starlark.
@@ -49,8 +43,6 @@ type StarlarkSagaRunnerConfig struct {
 	// schema.BuildServiceModules(). When set, these modules are injected into
 	// the Starlark global scope, enabling typed handler calls like:
 	//   position_keeping.initiate_log(position_id="123", amount="100.00")
-	// instead of:
-	//   invoke_handler(handler="position_keeping.initiate_log", params={...})
 	ServiceModules starlark.StringDict
 
 	// Logger for structured logging.
@@ -160,7 +152,7 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 		LookupCache:     NewLookupResultCache(),
 	}
 
-	// Track step results for both service module calls and invoke_handler shim
+	// Track step results for service module calls
 	var stepResults []StepResult
 
 	// Build input for Starlark script
@@ -180,9 +172,6 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 	for name, module := range r.serviceModules {
 		predeclared[name] = module
 	}
-
-	// Add invoke_handler backward compatibility shim
-	predeclared["invoke_handler"] = r.buildInvokeHandlerShim(starlarkCtx, &stepResults)
 
 	// Execute the Starlark script with service modules and StarlarkContext on the thread
 	result, err := r.runtime.ExecuteSagaWithInput(ctx, sagaName, script, ExecutionInput{
@@ -247,112 +236,6 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 	}, nil
 }
 
-// buildInvokeHandlerShim creates a backward-compatible invoke_handler Starlark builtin.
-// This allows existing scripts using invoke_handler(handler="name", params={...})
-// to continue working while migration to typed service modules proceeds.
-//
-//nolint:gocognit // Handler shim requires checking multiple kwargs conditions
-func (r *StarlarkSagaRunner) buildInvokeHandlerShim(starlarkCtx *StarlarkContext, stepResults *[]StepResult) *starlark.Builtin {
-	return starlark.NewBuiltin("invoke_handler", func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-		r.logger.Warn("invoke_handler is deprecated, use typed service modules instead",
-			"saga_execution_id", starlarkCtx.SagaExecutionID.String())
-
-		// Extract handler name from kwargs
-		var handlerName string
-		var paramsDict *starlark.Dict
-
-		for _, kwarg := range kwargs {
-			keyVal, ok := kwarg[0].(starlark.String)
-			if !ok {
-				return nil, fmt.Errorf("%w: kwarg key is %s, want string", ErrInvokeHandlerBadType, kwarg[0].Type())
-			}
-			switch string(keyVal) {
-			case "handler":
-				s, ok := kwarg[1].(starlark.String)
-				if !ok {
-					return nil, fmt.Errorf("%w: handler must be a string, got %s", ErrInvokeHandlerBadType, kwarg[1].Type())
-				}
-				handlerName = string(s)
-			case "params":
-				d, ok := kwarg[1].(*starlark.Dict)
-				if !ok {
-					return nil, fmt.Errorf("%w: params must be a dict, got %s", ErrInvokeHandlerBadType, kwarg[1].Type())
-				}
-				paramsDict = d
-			}
-		}
-
-		if handlerName == "" {
-			return nil, ErrInvokeHandlerMissingName
-		}
-
-		stepStart := time.Now()
-
-		// Look up handler in registry
-		handler, err := r.registry.Get(handlerName)
-		if err != nil {
-			*stepResults = append(*stepResults, StepResult{
-				StepName: handlerName,
-				Success:  false,
-				Error:    err.Error(),
-				Duration: time.Since(stepStart),
-			})
-			return nil, fmt.Errorf("invoke_handler: %w", err)
-		}
-
-		// Convert Starlark dict to Go map
-		params := make(map[string]any)
-		if paramsDict != nil {
-			for _, item := range paramsDict.Items() {
-				key, ok := item[0].(starlark.String)
-				if !ok {
-					return nil, fmt.Errorf("%w: param key must be string, got %s", ErrInvokeHandlerBadType, item[0].Type())
-				}
-				params[string(key)] = starlarkToGo(item[1])
-			}
-		}
-
-		// Generate idempotency key for this step
-		starlarkCtx.IdempotencyKey = starlarkCtx.NextIdempotencyKey()
-
-		// Call handler
-		result, err := handler(starlarkCtx, params)
-		duration := time.Since(stepStart)
-
-		if err != nil {
-			*stepResults = append(*stepResults, StepResult{
-				StepName: handlerName,
-				Success:  false,
-				Error:    err.Error(),
-				Duration: duration,
-			})
-			return nil, err
-		}
-
-		// Create step result with compensation metadata
-		stepResult := StepResult{
-			StepName: handlerName,
-			Success:  true,
-			Output:   result,
-			Duration: duration,
-		}
-
-		// Add compensation handler if known
-		// This is a backward-compatibility mapping for invoke_handler.
-		// Typed service modules should define compensation in handler metadata instead.
-		compensateHandler := getCompensationHandler(handlerName)
-		if compensateHandler != "" {
-			stepResult.CompensateHandler = compensateHandler
-			stepResult.CompensateParams = deriveCompensationParams(stepResult)
-		}
-
-		*stepResults = append(*stepResults, stepResult)
-
-		// Convert result to Starlark value
-		return goToStarlark(result), nil
-	})
-}
-
 // WithLogger returns a new runner with the given logger.
 func (r *StarlarkSagaRunner) WithLogger(logger *slog.Logger) *StarlarkSagaRunner {
 	if logger == nil {
@@ -364,45 +247,6 @@ func (r *StarlarkSagaRunner) WithLogger(logger *slog.Logger) *StarlarkSagaRunner
 		serviceModules: r.serviceModules,
 		logger:         logger,
 	}
-}
-
-// getCompensationHandler returns the compensation handler name for a given forward handler.
-// This is a backward-compatibility mapping for invoke_handler API.
-// Typed service modules should define compensation in handler metadata instead.
-func getCompensationHandler(forwardHandler string) string {
-	// Map forward handlers to their compensation handlers
-	compensationMap := map[string]string{
-		"payment_order.create_lien": "payment_order.terminate_lien",
-		// payment_order.send_to_gateway has no compensation (idempotent gateway calls)
-		// payment_order.post_ledger_entries has no compensation (immutable ledger)
-		// payment_order.execute_lien has no compensation (final settlement)
-	}
-
-	return compensationMap[forwardHandler]
-}
-
-// deriveCompensationParams extracts relevant fields from a forward step's output
-// to be used as input parameters for the compensation handler.
-// It follows a simple heuristic: copy any fields ending in "_id" or named "id",
-// as these typically identify resources created by the forward step that need
-// to be cancelled/reverted by the compensation handler.
-func deriveCompensationParams(forwardStep StepResult) map[string]any {
-	params := make(map[string]any)
-
-	// Check if output is a map
-	output, ok := forwardStep.Output.(map[string]interface{})
-	if !ok {
-		return params
-	}
-
-	// Copy fields that look like IDs
-	for key, value := range output {
-		if key == "id" || len(key) > 3 && key[len(key)-3:] == "_id" {
-			params[key] = value
-		}
-	}
-
-	return params
 }
 
 // executeCompensation executes compensation handlers in LIFO (Last In, First Out) order

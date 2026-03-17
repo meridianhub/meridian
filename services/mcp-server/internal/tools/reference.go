@@ -107,7 +107,7 @@ var knownServiceBindingsRef = []string{
 // knownStarlarkBuiltinsRef mirrors the known Starlark builtins from the manifest validator.
 var knownStarlarkBuiltinsRef = []string{
 	"input_data",
-	"invoke_handler",
+
 	"party_scope",
 	"Decimal",
 	"print",
@@ -167,7 +167,7 @@ func buildStarlarkReferenceTool() Tool {
 					"Starlark does not support while loops or recursion — all programs are guaranteed to terminate.",
 					"Use Decimal() for financial arithmetic to avoid floating-point errors.",
 					"Use input_data to access the saga trigger payload.",
-					"Use invoke_handler(handler_name, params) for direct handler invocation.",
+					"Use typed service modules for handler invocation (e.g., payment_order.create_lien(...)).",
 					"Use party_scope(party_id) to scope operations to a specific party.",
 				},
 			}, nil

@@ -46,6 +46,8 @@ func DeriveHandlerDef(_ string, meta *saga.HandlerMetadata) (*HandlerDef, error)
 
 	hd.Description = meta.Description
 	hd.Compensate = meta.Compensate
+	hd.ResourceType = meta.ResourceType
+	hd.RequiredPermission = meta.RequiredPermission
 	hd.Version = meta.Version
 	if hd.Version == 0 {
 		hd.Version = 1

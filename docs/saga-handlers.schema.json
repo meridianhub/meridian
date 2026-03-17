@@ -3,47 +3,31 @@
   "title": "Saga Handler Schemas",
   "description": "JSON Schema definitions for all saga handlers in the Meridian platform",
   "definitions": {
+    "current_account.control": {
+      "type": "object",
+      "description": "Perform lifecycle control action on an account (FREEZE, UNFREEZE, CLOSE)",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
     "current_account.create_lien": {
       "type": "object",
       "description": "Create a lien (hold) on an account for a specified amount",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "account_id": {
-              "type": "string",
-              "description": "Identifier of the account to place lien on"
-            },
-            "amount": {
-              "type": "string",
-              "description": "Amount to hold (must be positive)"
-            }
-          },
-          "required": [
-            "account_id",
-            "amount"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "account_id": {
-              "type": "string",
-              "description": "Echo of the input account ID"
-            },
-            "amount": {
-              "type": "string",
-              "description": "Echo of the input amount"
-            },
-            "lien_id": {
-              "type": "string",
-              "description": "Generated lien identifier (UUID)"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the lien (ACTIVE)"
-            }
-          }
+          "type": "object"
         }
       },
       "required": [
@@ -56,29 +40,26 @@
       "description": "Execute (consume) a previously created lien",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "lien_id": {
-              "type": "string",
-              "description": "Identifier of the lien to execute"
-            }
-          },
-          "required": [
-            "lien_id"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "lien_id": {
-              "type": "string",
-              "description": "Echo of the input lien ID"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the lien (EXECUTED)"
-            }
-          }
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "current_account.save": {
+      "type": "object",
+      "description": "Persist current account metadata for a transaction",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
         }
       },
       "required": [
@@ -91,29 +72,42 @@
       "description": "Terminate (release) a lien without execution (compensation handler)",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "lien_id": {
-              "type": "string",
-              "description": "Identifier of the lien to terminate"
-            }
-          },
-          "required": [
-            "lien_id"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "lien_id": {
-              "type": "string",
-              "description": "Echo of the input lien ID"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the lien (TERMINATED)"
-            }
-          }
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_accounting.capture_posting": {
+      "type": "object",
+      "description": "Capture a single-sided posting entry within a booking log",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_accounting.compensate_posting": {
+      "type": "object",
+      "description": "Compensate (reverse) a captured posting entry",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
         }
       },
       "required": [
@@ -126,33 +120,26 @@
       "description": "Create a booking log entry for audit purposes",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "description": {
-              "type": "string",
-              "description": "Human-readable description of the booking"
-            }
-          },
-          "required": [
-            "description"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "booking_id": {
-              "type": "string",
-              "description": "Generated booking identifier (UUID)"
-            },
-            "description": {
-              "type": "string",
-              "description": "Echo of the input description"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the booking (CREATED)"
-            }
-          }
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_accounting.initiate_booking_log": {
+      "type": "object",
+      "description": "Initiate a booking log for a deposit or withdrawal transaction",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
         }
       },
       "required": [
@@ -165,29 +152,10 @@
       "description": "Post double-entry accounting entries to the ledger",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "entries": {
-              "type": "array",
-              "description": "Array of accounting entries to post"
-            }
-          },
-          "required": [
-            "entries"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "posting_ids": {
-              "type": "array",
-              "description": "Array of generated posting IDs (UUIDs)"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the posting (POSTED)"
-            }
-          }
+          "type": "object"
         }
       },
       "required": [
@@ -200,29 +168,10 @@
       "description": "Reverse previously posted accounting entries (compensation handler)",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "posting_ids": {
-              "type": "array",
-              "description": "Array of posting IDs to reverse"
-            }
-          },
-          "required": [
-            "posting_ids"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "original_posting_ids": {
-              "type": "array",
-              "description": "Echo of the input posting IDs"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the reversal (REVERSED)"
-            }
-          }
+          "type": "object"
         }
       },
       "required": [
@@ -230,47 +179,223 @@
         "returns"
       ]
     },
-    "notification.send": {
+    "financial_accounting.update_booking_log": {
       "type": "object",
-      "description": "Send a notification to a recipient",
+      "description": "Update the status of an existing booking log",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "recipient": {
-              "type": "string",
-              "description": "Recipient identifier (email, phone, user ID)"
-            },
-            "type": {
-              "type": "string",
-              "description": "Notification type (e.g., EMAIL, SMS, PUSH)"
-            }
-          },
-          "required": [
-            "recipient",
-            "type"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "notification_id": {
-              "type": "string",
-              "description": "Generated notification identifier (UUID)"
-            },
-            "recipient": {
-              "type": "string",
-              "description": "Echo of the input recipient"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the notification (SENT)"
-            },
-            "type": {
-              "type": "string",
-              "description": "Echo of the input notification type"
-            }
-          }
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_gateway.cancel_payment": {
+      "type": "object",
+      "description": "Cancel a pending payment dispatch (compensation handler)",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_gateway.dispatch_payment": {
+      "type": "object",
+      "description": "Dispatch a payment to an external provider via the Financial Gateway",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "financial_gateway.dispatch_refund": {
+      "type": "object",
+      "description": "Dispatch a refund for a previously processed payment",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "internal_account.get_balance": {
+      "type": "object",
+      "description": "Query the current balance for an internal account",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "internal_account.initiate": {
+      "type": "object",
+      "description": "Initiate a new internal account",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "internal_account.retrieve": {
+      "type": "object",
+      "description": "Retrieve an internal account by ID",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "market_information.get_rate": {
+      "type": "object",
+      "description": "Fetch FX rates for currency pair conversion",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "operational_gateway.cancel_instruction": {
+      "type": "object",
+      "description": "Cancel a pending instruction before dispatch (compensation handler)",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "operational_gateway.dispatch_instruction": {
+      "type": "object",
+      "description": "Queue an instruction for dispatch to an external provider",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "operational_gateway.get_instruction": {
+      "type": "object",
+      "description": "Get instruction status and details by ID",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "party.get_default_payment_method": {
+      "type": "object",
+      "description": "Retrieve the default payment method for a party",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "party.get_structuring_data": {
+      "type": "object",
+      "description": "Retrieve structuring metadata for a participant in a syndicate",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "party.list_participants": {
+      "type": "object",
+      "description": "List active participants for a syndicate organization",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
         }
       },
       "required": [
@@ -283,29 +408,10 @@
       "description": "Cancel a position log entry (compensation handler)",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "log_id": {
-              "type": "string",
-              "description": "Identifier of the log entry to cancel"
-            }
-          },
-          "required": [
-            "log_id"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "log_id": {
-              "type": "string",
-              "description": "Echo of the input log ID"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the log entry (CANCELLED)"
-            }
-          }
+          "type": "object"
         }
       },
       "required": [
@@ -318,55 +424,10 @@
       "description": "Initiate a position log entry for a DEBIT or CREDIT transaction",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "amount": {
-              "type": "string",
-              "description": "Transaction amount (must be positive)"
-            },
-            "direction": {
-              "type": "string",
-              "description": "Direction of the transaction",
-              "enum": [
-                "DEBIT",
-                "CREDIT"
-              ]
-            },
-            "position_id": {
-              "type": "string",
-              "description": "Unique identifier for the position"
-            }
-          },
-          "required": [
-            "amount",
-            "direction",
-            "position_id"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "amount": {
-              "type": "string",
-              "description": "Echo of the input amount"
-            },
-            "direction": {
-              "type": "string",
-              "description": "Echo of the input direction"
-            },
-            "log_id": {
-              "type": "string",
-              "description": "Generated log entry identifier (UUID)"
-            },
-            "position_id": {
-              "type": "string",
-              "description": "Echo of the input position ID"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the log entry (INITIATED)"
-            }
-          }
+          "type": "object"
         }
       },
       "required": [
@@ -379,29 +440,10 @@
       "description": "Update an existing position log entry",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "log_id": {
-              "type": "string",
-              "description": "Identifier of the log entry to update"
-            }
-          },
-          "required": [
-            "log_id"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "log_id": {
-              "type": "string",
-              "description": "Echo of the input log ID"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the log entry (UPDATED)"
-            }
-          }
+          "type": "object"
         }
       },
       "required": [
@@ -409,47 +451,15 @@
         "returns"
       ]
     },
-    "repository.save": {
+    "reconciliation.assert_balance": {
       "type": "object",
-      "description": "Persist an entity to the repository",
+      "description": "Evaluate a balance assertion against current positions",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "entity": {
-              "type": "object",
-              "description": "Entity data to persist"
-            },
-            "entity_type": {
-              "type": "string",
-              "description": "Type of entity being saved (e.g., Account, Transaction)"
-            }
-          },
-          "required": [
-            "entity",
-            "entity_type"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "entity": {
-              "type": "object",
-              "description": "Echo of the saved entity"
-            },
-            "entity_id": {
-              "type": "string",
-              "description": "Generated or existing entity identifier (UUID)"
-            },
-            "entity_type": {
-              "type": "string",
-              "description": "Echo of the input entity type"
-            },
-            "status": {
-              "type": "string",
-              "description": "Status of the save operation (SAVED)"
-            }
-          }
+          "type": "object"
         }
       },
       "required": [
@@ -457,64 +467,95 @@
         "returns"
       ]
     },
-    "valuation_engine.valuate": {
+    "reconciliation.cancel_run": {
       "type": "object",
-      "description": "Valuate an instrument at a specific point in time",
+      "description": "Cancel a settlement run (compensation handler)",
       "properties": {
         "params": {
-          "type": "object",
-          "properties": {
-            "context_type": {
-              "type": "string",
-              "description": "Valuation context (e.g., MARK_TO_MARKET, FAIR_VALUE)"
-            },
-            "instrument": {
-              "type": "string",
-              "description": "Instrument identifier or code"
-            },
-            "quantity": {
-              "type": "string",
-              "description": "Quantity to valuate"
-            }
-          },
-          "required": [
-            "context_type",
-            "instrument",
-            "quantity"
-          ]
+          "type": "object"
         },
         "returns": {
-          "type": "object",
-          "properties": {
-            "context_type": {
-              "type": "string",
-              "description": "Echo of the input context type"
-            },
-            "currency": {
-              "type": "string",
-              "description": "Currency of the valuation"
-            },
-            "instrument": {
-              "type": "string",
-              "description": "Echo of the input instrument"
-            },
-            "quantity": {
-              "type": "string",
-              "description": "Echo of the input quantity"
-            },
-            "unit_price": {
-              "type": "string",
-              "description": "Price per unit of the instrument"
-            },
-            "value": {
-              "type": "string",
-              "description": "Total value (quantity * unit_price)"
-            },
-            "valued_at": {
-              "type": "string",
-              "description": "Timestamp when valuation was computed"
-            }
-          }
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "reconciliation.execute_run": {
+      "type": "object",
+      "description": "Trigger execution of a pending settlement run",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "reconciliation.initiate_dispute": {
+      "type": "object",
+      "description": "Raise a formal dispute against a detected variance",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "reconciliation.initiate_run": {
+      "type": "object",
+      "description": "Initiate a new settlement reconciliation run",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "reconciliation.retrieve_run": {
+      "type": "object",
+      "description": "Retrieve a settlement run summary",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "returns"
+      ]
+    },
+    "reference_data.retrieve_instrument": {
+      "type": "object",
+      "description": "Retrieve an instrument definition by code and version",
+      "properties": {
+        "params": {
+          "type": "object"
+        },
+        "returns": {
+          "type": "object"
         }
       },
       "required": [
