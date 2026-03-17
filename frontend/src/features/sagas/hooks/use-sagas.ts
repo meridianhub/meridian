@@ -49,6 +49,24 @@ export function useSagaDetail(definitionId: string | undefined) {
 /**
  * Fetches the active saga for a given name (platform default).
  */
+/**
+ * Fetches a saga definition from the manifest by name.
+ * Falls back source when the saga registry does not have the saga registered.
+ */
+export function useManifestSaga(sagaName: string | undefined) {
+  const { manifestHistory } = useApiClients()
+
+  return useQuery({
+    queryKey: [...manifestKeys.current(), 'saga', sagaName ?? ''],
+    queryFn: async () => {
+      const response = await manifestHistory.getCurrentManifest({})
+      const sagas = response.version?.manifest?.sagas ?? []
+      return sagas.find((s: SagaDefinition) => s.name === sagaName) ?? null
+    },
+    enabled: !!sagaName,
+  })
+}
+
 export function useActiveSaga(sagaName: string | undefined, enabled: boolean = true) {
   const { sagaRegistry } = useApiClients()
 
