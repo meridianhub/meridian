@@ -55,8 +55,7 @@ spec:
 
   # Allow database connections (CockroachDB)
   - to:
-    - namespaceSelector: {}
-      podSelector:
+    - podSelector:
         matchLabels:
           app: cockroachdb
     ports:
@@ -65,8 +64,7 @@ spec:
 
   # Allow Kafka connections
   - to:
-    - namespaceSelector: {}
-      podSelector:
+    - podSelector:
         matchLabels:
           app: kafka
     ports:
@@ -75,8 +73,7 @@ spec:
 
   # Allow Redis connections
   - to:
-    - namespaceSelector: {}
-      podSelector:
+    - podSelector:
         matchLabels:
           app: redis
     ports:

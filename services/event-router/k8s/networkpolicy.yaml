@@ -44,8 +44,7 @@ spec:
 
   # Allow Kafka connections (primary event source)
   - to:
-    - namespaceSelector: {}
-      podSelector:
+    - podSelector:
         matchLabels:
           app: kafka
     ports:
