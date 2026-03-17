@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	dbpkg "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
@@ -39,6 +40,13 @@ func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
 
+// conn returns a GORM session with tenant guard bypass applied.
+// The tenant service operates at the platform level (managing tenants),
+// so all its queries bypass tenant-scoped search_path restrictions.
+func (r *Repository) conn(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(dbpkg.WithTenantGuardBypass(ctx))
+}
+
 // WithTx returns a new Repository that uses the provided transaction.
 func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 	return &Repository{db: tx}
@@ -48,7 +56,7 @@ func (r *Repository) WithTx(tx *gorm.DB) *Repository {
 func (r *Repository) Create(ctx context.Context, tenant *domain.Tenant) error {
 	entity := toEntity(tenant)
 
-	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
+	if err := r.conn(ctx).Create(&entity).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			if strings.Contains(err.Error(), "slug") {
 				return ErrSlugTaken
@@ -71,7 +79,7 @@ func (r *Repository) Create(ctx context.Context, tenant *domain.Tenant) error {
 // GetByID retrieves a tenant by ID (BIAN: Retrieve).
 func (r *Repository) GetByID(ctx context.Context, id tenant.TenantID) (*domain.Tenant, error) {
 	var entity TenantEntity
-	result := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&entity)
+	result := r.conn(ctx).Where("id = ?", id.String()).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrTenantNotFound
@@ -97,7 +105,7 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (*domain.Tenant
 	slug = strings.ToLower(slug)
 
 	var entity TenantEntity
-	result := r.db.WithContext(ctx).Where("slug = ?", slug).First(&entity)
+	result := r.conn(ctx).Where("slug = ?", slug).First(&entity)
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, ErrTenantNotFound
@@ -124,7 +132,7 @@ func (r *Repository) IsSlugAvailable(ctx context.Context, slug string) (bool, er
 	slug = strings.ToLower(slug)
 
 	var count int64
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Model(&TenantEntity{}).
 		Where("slug = ?", slug).
 		Count(&count)
@@ -140,7 +148,7 @@ func (r *Repository) IsSlugAvailable(ctx context.Context, slug string) (bool, er
 // This is optimized for validation middleware - returns only what's needed.
 func (r *Repository) IsActive(ctx context.Context, id tenant.TenantID) (bool, error) {
 	var status string
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Model(&TenantEntity{}).
 		Select("status").
 		Where("id = ?", id.String()).
@@ -175,7 +183,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, id tenant.TenantID, statu
 		updates["error_message"] = nil
 	}
 
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Model(&TenantEntity{}).
 		Where("id = ? AND version = ?", id.String(), currentVersion).
 		Updates(updates)
@@ -187,10 +195,12 @@ func (r *Repository) UpdateStatus(ctx context.Context, id tenant.TenantID, statu
 	if result.RowsAffected == 0 {
 		// Check if tenant exists
 		var count int64
-		r.db.WithContext(ctx).
+		if err := r.conn(ctx).
 			Model(&TenantEntity{}).
 			Where("id = ?", id.String()).
-			Count(&count)
+			Count(&count).Error; err != nil {
+			return nil, err
+		}
 
 		if count == 0 {
 			return nil, ErrTenantNotFound
@@ -211,7 +221,7 @@ func (r *Repository) UpdateStatusWithError(ctx context.Context, id tenant.Tenant
 		"version":       currentVersion + 1,
 	}
 
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Model(&TenantEntity{}).
 		Where("id = ? AND version = ?", id.String(), currentVersion).
 		Updates(updates)
@@ -223,10 +233,12 @@ func (r *Repository) UpdateStatusWithError(ctx context.Context, id tenant.Tenant
 	if result.RowsAffected == 0 {
 		// Check if tenant exists
 		var count int64
-		r.db.WithContext(ctx).
+		if err := r.conn(ctx).
 			Model(&TenantEntity{}).
 			Where("id = ?", id.String()).
-			Count(&count)
+			Count(&count).Error; err != nil {
+			return nil, err
+		}
 
 		if count == 0 {
 			return nil, ErrTenantNotFound
@@ -250,7 +262,7 @@ func (r *Repository) ListByStatus(ctx context.Context, status domain.Status, lim
 	}
 
 	var entities []TenantEntity
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Where("status = ?", status).
 		Order("created_at ASC").
 		Limit(limit).
@@ -281,7 +293,7 @@ func (r *Repository) ListByStatus(ctx context.Context, status domain.Status, lim
 // Limited to 100 results to prevent large result sets in degraded states.
 func (r *Repository) ListByStatusOlderThan(ctx context.Context, status domain.Status, cutoff time.Time) ([]*domain.Tenant, error) {
 	var entities []TenantEntity
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Where("status = ? AND updated_at < ?", status, cutoff).
 		Order("updated_at ASC").
 		Limit(100). // Prevent large result sets in degraded states
@@ -313,7 +325,7 @@ func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, page
 		pageSize = 1000
 	}
 
-	query := r.db.WithContext(ctx).Model(&TenantEntity{})
+	query := r.conn(ctx).Model(&TenantEntity{})
 
 	// Apply status filter if provided
 	if statusFilter != nil {
@@ -358,7 +370,7 @@ func (r *Repository) List(ctx context.Context, statusFilter *domain.Status, page
 // GetAll returns all tenants (for cache initialization).
 func (r *Repository) GetAll(ctx context.Context) ([]*domain.Tenant, error) {
 	var entities []TenantEntity
-	if err := r.db.WithContext(ctx).Find(&entities).Error; err != nil {
+	if err := r.conn(ctx).Find(&entities).Error; err != nil {
 		return nil, err
 	}
 
@@ -378,7 +390,7 @@ func (r *Repository) GetAll(ctx context.Context) ([]*domain.Tenant, error) {
 // Returns an empty slice if no provisioning status records exist (not an error).
 func (r *Repository) FindProvisioningStatusByTenantID(ctx context.Context, tenantID string) ([]domain.ProvisioningStatus, error) {
 	var entities []ProvisioningStatusEntity
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Where("tenant_id = ?", tenantID).
 		Order("service_name").
 		Find(&entities)
@@ -405,7 +417,7 @@ func (r *Repository) FindProvisioningStatusByTenantID(ctx context.Context, tenan
 // Ping checks database connectivity.
 func (r *Repository) Ping(ctx context.Context) error {
 	var result int
-	return r.db.WithContext(ctx).Raw("SELECT 1").Scan(&result).Error
+	return r.conn(ctx).Raw("SELECT 1").Scan(&result).Error
 }
 
 // toEntity converts domain model to database entity.
