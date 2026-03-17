@@ -7,12 +7,17 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/pkg/valuation/internal/builtins"
+	"github.com/meridianhub/meridian/shared/platform/sandbox"
 	"github.com/shopspring/decimal"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 )
 
+// SandboxConfig is the unified sandbox configuration for valuation scripts.
+var SandboxConfig = sandbox.ValuationConfig()
+
 // Starlark security constraints.
+// These constants are retained for backward compatibility; canonical values live in sandbox.ValuationConfig().
 const (
 	// DefaultStarlarkTimeout is the maximum execution time for a valuation script.
 	DefaultStarlarkTimeout = 5 * time.Second
@@ -87,9 +92,9 @@ func NewStarlarkRuntime(cfg StarlarkRuntimeConfig) StarlarkRuntime {
 //   - valued_amount: numeric value
 //   - instrument: string instrument code (e.g., "GBP", "USD")
 func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req *Request) (*Response, error) {
-	// Validate script size
-	if len(script) > MaxStarlarkScriptSize {
-		return nil, fmt.Errorf("%w: %d bytes exceeds %d", ErrStarlarkScriptTooLarge, len(script), MaxStarlarkScriptSize)
+	// Validate script size using unified sandbox config.
+	if err := sandbox.ValidateScript(script, SandboxConfig); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStarlarkScriptTooLarge, err)
 	}
 
 	// Apply timeout
@@ -122,9 +127,8 @@ func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req
 		}
 	}()
 
-	// Set maximum execution steps (5 million steps ≈ 5s on typical hardware)
-	const maxSteps = 5_000_000
-	thread.SetMaxExecutionSteps(maxSteps)
+	// Apply sandbox security constraints (step limits) from unified config.
+	sandbox.HardenThread(thread, SandboxConfig)
 
 	// Build predeclared variables: builtins + script context
 	predeclared := make(starlark.StringDict, len(r.builtins)+1)

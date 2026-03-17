@@ -10,9 +10,15 @@ import (
 
 	"github.com/google/uuid"
 	"go.starlark.net/starlark"
+
+	"github.com/meridianhub/meridian/shared/platform/sandbox"
 )
 
+// SandboxConfig is the unified sandbox configuration for saga scripts.
+var SandboxConfig = sandbox.DefaultConfig()
+
 // Security constraints for Starlark runtime per PRD Section 6.1.
+// These constants are retained for backward compatibility; canonical values live in sandbox.DefaultConfig().
 const (
 	// DefaultTimeout is the maximum execution time for a saga script.
 	DefaultTimeout = 5 * time.Second
@@ -200,7 +206,7 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	}
 
 	// Enforce CPU step limit to prevent tenant scripts from exhausting compute resources.
-	thread.SetMaxExecutionSteps(MaxStepsPerExecution)
+	sandbox.HardenThread(thread, SandboxConfig)
 
 	// Set up cancellation checking
 	done := make(chan struct{})
