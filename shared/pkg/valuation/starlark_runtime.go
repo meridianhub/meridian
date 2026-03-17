@@ -94,7 +94,7 @@ func NewStarlarkRuntime(cfg StarlarkRuntimeConfig) StarlarkRuntime {
 func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req *Request) (*Response, error) {
 	// Validate script size using unified sandbox config.
 	if err := sandbox.ValidateScript(script, sandboxCfg); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrStarlarkScriptTooLarge, err)
+		return nil, fmt.Errorf("%w: %d bytes exceeds %d", ErrStarlarkScriptTooLarge, len(script), sandboxCfg.MaxScriptSize)
 	}
 
 	// Apply timeout

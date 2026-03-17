@@ -175,7 +175,7 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 		return nil, ErrScriptRequired
 	}
 	if err := sandbox.ValidateScript(input.Script, sandboxCfg); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrScriptTooLarge, err)
+		return nil, fmt.Errorf("%w: size %d exceeds maximum %d bytes", ErrScriptTooLarge, len(input.Script), sandboxCfg.MaxScriptSize)
 	}
 
 	now := input.Now

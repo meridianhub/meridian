@@ -142,7 +142,7 @@ func (r *Runtime) ExecuteSaga(ctx context.Context, name string, script string, i
 func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script string, execInput ExecutionInput) (*ExecutionResult, error) {
 	// Validate script size before any execution.
 	if err := sandbox.ValidateScript(script, sandboxCfg); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrScriptTooLarge, err)
+		return nil, fmt.Errorf("%w: %d bytes exceeds %d", ErrScriptTooLarge, len(script), sandboxCfg.MaxScriptSize)
 	}
 
 	// Apply timeout to context
