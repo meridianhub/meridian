@@ -71,7 +71,9 @@ of unbounded CPU and memory per invocation.
 **Fix**: Added script size limit (64KB), step limit, static validation, and reduced
 default timeout from 30s to 10s.
 
-**Status**: RESOLVED
+**Status**: RESOLVED — script size limit, step limit, static validation, and timeout
+reduction (30s → 10s) all applied. Shared sandbox extraction for consistency across
+runtimes is tracked in Wave 3.
 
 ---
 
@@ -176,7 +178,6 @@ These items are from PRD Section 5.2 and were not completed in Wave 1.
 | Migrate hand-rolled interceptor chains | Consistency | Services that build their own interceptor chains should migrate to `GrpcServerBuilder` for uniform security defaults. |
 | Rate-limiting middleware | MEDIUM-1 | Add rate-limiting interceptor to the gRPC interceptor chain. No rate limiting currently exists on financial API endpoints. |
 | `GrpcServerBuilder.Build()` fail-closed | MEDIUM-6 | Unified binary gRPC port is built without `.WithAuthInterceptor()`; `Build()` should require auth configuration or fail. |
-| Forecasting timeout (partial) | HIGH-2 | Timeout reduced from 30s to 10s in PR #1713. Monitor forecasting workloads; further reduction may be warranted. |
 | NetworkPolicy for all services | MEDIUM-2 | Replicate existing NetworkPolicy to all services to restrict inter-service traffic. |
 
 ---
@@ -197,6 +198,7 @@ These items are from PRD Section 5.3.
 | Cosign image signing | Supply chain | Add cosign signing to the build pipeline for Docker image provenance. |
 | Cross-tenant isolation tests | Regression | Integration tests that assert one tenant cannot read or write another tenant's data. |
 | Audit pgx raw SQL paths | CRITICAL-2 | The pgx path (`shared/platform/db/db.go`) has no equivalent to TenantGuard. Audit raw SQL for missing tenant scoping. |
+| Fix X-Forwarded-For trust in security logs | LOW-2 | `extractClientIP` trusts the `x-forwarded-for` header without validation. Direct connections can spoof IP in audit logs. |
 
 ---
 
