@@ -1,0 +1,85 @@
+# Port: 50053 (ports.PositionKeeping)
+# Callers: current-account, payment-order, internal-account, event-router, reconciliation, api-gateway (gateway label)
+# Calls: CockroachDB (26257), Kafka (9092) - infrastructure only, no service-to-service gRPC
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: position-keeping
+  labels:
+    app: position-keeping
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: position-keeping
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound gRPC from services that call position-keeping
+  - from:
+    - podSelector:
+        matchLabels:
+          app: current-account
+    - podSelector:
+        matchLabels:
+          app: payment-order
+    - podSelector:
+        matchLabels:
+          app: internal-account
+    - podSelector:
+        matchLabels:
+          app: event-router
+    - podSelector:
+        matchLabels:
+          app: reconciliation
+    - podSelector:
+        matchLabels:
+          app: gateway
+    ports:
+    - protocol: TCP
+      port: 50053
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+  # Allow database connections (CockroachDB)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: cockroachdb
+    ports:
+    - protocol: TCP
+      port: 26257
+
+  # Allow Kafka connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092

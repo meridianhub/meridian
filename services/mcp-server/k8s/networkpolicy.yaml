@@ -1,0 +1,76 @@
+# Port: 8090 (mcp-server HTTP - see deployment containerPort)
+# Callers: external AI assistant clients (via Ingress)
+# Calls: api-gateway (8080) - all backend calls go through the gateway
+#         control-plane (50062) - startup dependency (init container)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-server
+  labels:
+    app: mcp-server
+    component: microservice
+    managed-by: kustomize
+spec:
+  podSelector:
+    matchLabels:
+      app: mcp-server
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow inbound from Ingress controller (if mcp-server is externally accessible)
+  # Note: verify podSelector label matches your nginx-ingress installation;
+  # Helm chart default: app.kubernetes.io/name: ingress-nginx
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8090  # mcp-server HTTP port (containerPort in deployment)
+
+  # Allow Prometheus scraping from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+  # Allow outbound to api-gateway (all backend service calls go via gateway)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: gateway
+    ports:
+    - protocol: TCP
+      port: 8080
+
+  # Allow outbound to control-plane (init container startup dependency)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: control-plane
+    ports:
+    - protocol: TCP
+      port: 50062

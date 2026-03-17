@@ -381,9 +381,12 @@ func run(logger *slog.Logger) error {
 
 	// Create gRPC server with interceptor chain
 	// Order is handled by bootstrap: tracing -> auth -> recovery
-	grpcServer := bootstrap.NewGrpcServerBuilder(tracer, logger).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
 		Build()
+	if err != nil {
+		return fmt.Errorf("failed to build grpc server: %w", err)
+	}
 
 	// Register Financial Accounting gRPC service
 	financialaccountingv1.RegisterFinancialAccountingServiceServer(grpcServer, financialAccountingSvc)
