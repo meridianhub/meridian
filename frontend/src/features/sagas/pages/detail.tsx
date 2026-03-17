@@ -70,7 +70,9 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
   const [complexityMetrics, setComplexityMetrics] = useState<ComplexityMetrics | undefined>(undefined)
 
   const { data: activeSagaResponse, isLoading: isLoadingRegistry } = useActiveSaga(sagaName)
-  const { data: manifestSaga, isLoading: isLoadingManifest } = useManifestSaga(sagaName)
+  // Only fetch from manifest when registry has finished and returned nothing
+  const shouldFetchManifest = !isLoadingRegistry && !activeSagaResponse?.saga
+  const { data: manifestSaga, isLoading: isLoadingManifest } = useManifestSaga(sagaName, shouldFetchManifest)
 
   const sagaData = activeSagaResponse?.saga ?? null
   // When the saga registry doesn't have it, fall back to the manifest definition
@@ -139,7 +141,7 @@ function StarlarkDetailPageInner({ sagaName }: { sagaName: string | undefined })
     setComplexityMetrics(undefined)
   }, [])
 
-  if (isLoadingRegistry || isLoadingManifest) {
+  if (isLoadingRegistry || (shouldFetchManifest && isLoadingManifest)) {
     return (
       <PageShell>
         <DetailSkeleton tabCount={0} fieldCount={2} />

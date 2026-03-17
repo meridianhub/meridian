@@ -353,7 +353,7 @@ describe('ManifestGraph', () => {
       fireEvent.click(checkbox)
       const flow = await screen.findByTestId('react-flow')
       // 7 total - 1 event channel = 6
-      expect(flow).toHaveAttribute('data-node-count', '6')
+      await waitFor(() => expect(flow).toHaveAttribute('data-node-count', '6'))
     })
   })
 

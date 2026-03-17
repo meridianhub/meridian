@@ -78,7 +78,7 @@ vi.mock('@codemirror/lint', () => ({
   lintGutter: vi.fn(() => ({})),
 }))
 
-import { ConnectError } from '@connectrpc/connect'
+import { ConnectError, Code } from '@connectrpc/connect'
 import { useApiClients } from '@/api/context'
 
 function makeQueryClient() {
@@ -145,10 +145,7 @@ function makeMockClients(options: {
   validateMetrics?: { handlerCallCount: number; operationCount: number; estimatedDurationMs: number; complexityScore: number }
 } = {}) {
   const saga = options.saga === undefined ? activeSaga : options.saga
-  const notFoundError = new Error('not found')
-  Object.defineProperty(notFoundError, 'code', { value: 5 }) // Code.NotFound
-  // Make it look like a ConnectError for the hook's catch clause
-  Object.setPrototypeOf(notFoundError, ConnectError.prototype)
+  const notFoundError = new ConnectError('not found', Code.NotFound)
 
   return {
     sagaRegistry: {
