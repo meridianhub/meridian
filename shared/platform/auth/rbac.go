@@ -119,9 +119,34 @@ const (
 	ResourceTypeSystem ResourceType = "system"
 	// ResourceTypeIdentity represents identity and user management resources
 	ResourceTypeIdentity ResourceType = "identity"
+	// ResourceTypeParty represents party/customer-related resources
+	ResourceTypeParty ResourceType = "party"
+	// ResourceTypePayment represents payment order resources
+	ResourceTypePayment ResourceType = "payment"
+	// ResourceTypeReconciliation represents reconciliation resources
+	ResourceTypeReconciliation ResourceType = "reconciliation"
+	// ResourceTypeReferenceData represents reference data resources (instruments, account types, nodes)
+	ResourceTypeReferenceData ResourceType = "reference-data"
+	// ResourceTypeMarketData represents market information resources
+	ResourceTypeMarketData ResourceType = "market-data"
+	// ResourceTypeForecasting represents forecasting resources
+	ResourceTypeForecasting ResourceType = "forecasting"
+	// ResourceTypeMapping represents mapping/transformation resources
+	ResourceTypeMapping ResourceType = "mapping"
+	// ResourceTypeSaga represents saga definition and execution resources
+	ResourceTypeSaga ResourceType = "saga"
+	// ResourceTypeManifest represents control plane manifest resources
+	ResourceTypeManifest ResourceType = "manifest"
+	// ResourceTypeGateway represents financial and operational gateway resources
+	ResourceTypeGateway ResourceType = "gateway"
 )
 
-// rolePermissions defines the permissions for each role
+// rolePermissions defines the permissions for each role.
+// Note: Not all ResourceType constants have entries here. The additional resource types
+// (e.g., ResourceTypeParty, ResourceTypePayment, ResourceTypeReferenceData, etc.) are
+// defined for future use when methods adopt the ResourceType+Permission authorization
+// mode. Until then, all method permissions use AllowedRoles directly, so the absence
+// of these resource types from this map is safe and intentional.
 var rolePermissions = map[Role]map[ResourceType][]Permission{
 	RoleAdmin: {
 		ResourceTypeAccount:     {PermissionRead, PermissionWrite, PermissionDelete, PermissionExecute},

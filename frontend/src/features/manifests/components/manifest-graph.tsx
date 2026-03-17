@@ -473,6 +473,37 @@ const InstructionRouteNode = memo(function InstructionRouteNode({ data }: { data
   )
 })
 
+const EventChannelNode = memo(function EventChannelNode({ data }: { data: ManifestNodeData }) {
+  const node = data.manifestNode
+  const channel = node.data.channel as string
+
+  const containerStyle = useMemo(() => ({
+    width: 180,
+    borderColor: data.color,
+    backgroundColor: `color-mix(in oklch, ${data.color} 10%, transparent)`,
+    opacity: data.dimmed ? 0.25 : 1,
+    boxShadow: data.highlighted ? `0 0 12px color-mix(in oklch, ${data.color} 53%, transparent)` : undefined,
+  }), [data.color, data.dimmed, data.highlighted])
+
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150 cursor-pointer"
+            style={containerStyle}
+          >
+            <span className="text-[11px] font-bold font-mono text-foreground truncate w-full">{channel}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">Event Channel: {channel}</TooltipContent>
+      </Tooltip>
+      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+})
+
 const PartyTypeNode = memo(function PartyTypeNode({ data }: { data: ManifestNodeData }) {
   const node = data.manifestNode
 
@@ -517,6 +548,7 @@ const nodeTypes = {
   provider_connection: ProviderConnectionNode,
   instruction_route: InstructionRouteNode,
   party_type: PartyTypeNode,
+  event_channel: EventChannelNode,
 }
 
 function buildReactFlowEdges(manifestEdges: ManifestEdge[]): Edge[] {
