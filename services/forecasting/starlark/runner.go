@@ -20,8 +20,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/sandbox"
 )
 
-// SandboxConfig is the unified sandbox configuration for forecasting scripts.
-var SandboxConfig = sandbox.ForecasterConfig()
+// sandboxCfg is the unified sandbox configuration for forecasting scripts.
+var sandboxCfg = sandbox.ForecasterConfig()
 
 // Default execution constraints.
 // These constants are retained for backward compatibility; canonical values live in sandbox.ForecasterConfig().
@@ -174,7 +174,7 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 	if input.Script == "" {
 		return nil, ErrScriptRequired
 	}
-	if err := sandbox.ValidateScript(input.Script, SandboxConfig); err != nil {
+	if err := sandbox.ValidateScript(input.Script, sandboxCfg); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrScriptTooLarge, err)
 	}
 
@@ -281,7 +281,7 @@ func (r *ForecastRunner) executeScript(ctx context.Context, script string, forec
 		},
 	}
 	thread.SetLocal("ctx", ctx)
-	sandbox.HardenThread(thread, SandboxConfig)
+	sandbox.HardenThread(thread, sandboxCfg)
 
 	// Execute script in a goroutine for timeout support
 	done := make(chan struct{})

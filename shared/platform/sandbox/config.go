@@ -7,6 +7,9 @@ import "time"
 // Config holds security constraints for a Starlark sandbox.
 type Config struct {
 	// Timeout is the maximum execution time for a script.
+	// Note: HardenThread does not apply this value; each runtime manages
+	// timeouts independently via context.WithTimeout. This field is provided
+	// so callers have a single config struct for all sandbox parameters.
 	Timeout time.Duration
 
 	// MaxScriptSize is the maximum allowed script size in bytes.

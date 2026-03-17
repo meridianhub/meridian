@@ -14,8 +14,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/sandbox"
 )
 
-// SandboxConfig is the unified sandbox configuration for saga scripts.
-var SandboxConfig = sandbox.DefaultConfig()
+// sandboxCfg is the unified sandbox configuration for saga scripts.
+var sandboxCfg = sandbox.DefaultConfig()
 
 // Security constraints for Starlark runtime per PRD Section 6.1.
 // These constants are retained for backward compatibility; canonical values live in sandbox.DefaultConfig().
@@ -206,7 +206,7 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	}
 
 	// Enforce CPU step limit to prevent tenant scripts from exhausting compute resources.
-	sandbox.HardenThread(thread, SandboxConfig)
+	sandbox.HardenThread(thread, sandboxCfg)
 
 	// Set up cancellation checking
 	done := make(chan struct{})

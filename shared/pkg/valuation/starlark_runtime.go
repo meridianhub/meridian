@@ -13,8 +13,8 @@ import (
 	"go.starlark.net/syntax"
 )
 
-// SandboxConfig is the unified sandbox configuration for valuation scripts.
-var SandboxConfig = sandbox.ValuationConfig()
+// sandboxCfg is the unified sandbox configuration for valuation scripts.
+var sandboxCfg = sandbox.ValuationConfig()
 
 // Starlark security constraints.
 // These constants are retained for backward compatibility; canonical values live in sandbox.ValuationConfig().
@@ -93,7 +93,7 @@ func NewStarlarkRuntime(cfg StarlarkRuntimeConfig) StarlarkRuntime {
 //   - instrument: string instrument code (e.g., "GBP", "USD")
 func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req *Request) (*Response, error) {
 	// Validate script size using unified sandbox config.
-	if err := sandbox.ValidateScript(script, SandboxConfig); err != nil {
+	if err := sandbox.ValidateScript(script, sandboxCfg); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStarlarkScriptTooLarge, err)
 	}
 
@@ -128,7 +128,7 @@ func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req
 	}()
 
 	// Apply sandbox security constraints (step limits) from unified config.
-	sandbox.HardenThread(thread, SandboxConfig)
+	sandbox.HardenThread(thread, sandboxCfg)
 
 	// Build predeclared variables: builtins + script context
 	predeclared := make(starlark.StringDict, len(r.builtins)+1)
