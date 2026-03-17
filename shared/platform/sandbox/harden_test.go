@@ -31,7 +31,7 @@ def work():
     return x
 work()
 `
-	_, err := starlark.ExecFileOptions(&syntax.FileOptions{},smallThread, "test.star", script, nil)
+	_, err := starlark.ExecFileOptions(&syntax.FileOptions{}, smallThread, "test.star", script, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too many steps")
 }
@@ -43,7 +43,7 @@ func TestHardenThread_AllowsSmallScripts(t *testing.T) {
 	HardenThread(thread, cfg)
 
 	script := `x = 1 + 2`
-	_, err := starlark.ExecFileOptions(&syntax.FileOptions{},thread, "test.star", script, nil)
+	_, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "test.star", script, nil)
 	assert.NoError(t, err)
 }
 
