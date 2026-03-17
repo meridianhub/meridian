@@ -35,6 +35,9 @@ spec:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
     ports:
     - protocol: TCP
       port: 9090
@@ -48,10 +51,13 @@ spec:
     ports:
     - protocol: UDP
       port: 53
+    - protocol: TCP
+      port: 53
 
   # Allow database connections (CockroachDB)
   - to:
-    - podSelector:
+    - namespaceSelector: {}
+      podSelector:
         matchLabels:
           app: cockroachdb
     ports:
@@ -60,7 +66,8 @@ spec:
 
   # Allow Kafka connections
   - to:
-    - podSelector:
+    - namespaceSelector: {}
+      podSelector:
         matchLabels:
           app: kafka
     ports:

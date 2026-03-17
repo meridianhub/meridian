@@ -24,6 +24,9 @@ spec:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: ingress-nginx
+      podSelector:
+        matchLabels:
+          app: ingress-nginx
     ports:
     - protocol: TCP
       port: 8080
@@ -42,6 +45,9 @@ spec:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
     ports:
     - protocol: TCP
       port: 9090
@@ -55,10 +61,13 @@ spec:
     ports:
     - protocol: UDP
       port: 53
+    - protocol: TCP
+      port: 53
 
   # Allow database connections (CockroachDB - for tenant resolution)
   - to:
-    - podSelector:
+    - namespaceSelector: {}
+      podSelector:
         matchLabels:
           app: cockroachdb
     ports:
@@ -67,7 +76,8 @@ spec:
 
   # Allow Kafka connections (for event streaming)
   - to:
-    - podSelector:
+    - namespaceSelector: {}
+      podSelector:
         matchLabels:
           app: kafka
     ports:
@@ -76,7 +86,8 @@ spec:
 
   # Allow Redis connections (for event fan-out)
   - to:
-    - podSelector:
+    - namespaceSelector: {}
+      podSelector:
         matchLabels:
           app: redis
     ports:
