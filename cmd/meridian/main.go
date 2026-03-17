@@ -409,7 +409,7 @@ func registerServices(
 			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), refDataComps, logger)
 		}},
 		{"control-plane", func() error {
-			return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), logger)
+			return wireControlPlane(grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), loopback, logger)
 		}},
 		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
 		{"identity", func() error { return wireIdentity(grpcServer, conns.gormDB("identity"), logger) }},
@@ -1042,14 +1042,15 @@ func wireBFFAuth(identityDB *gorm.DB, logger *slog.Logger) (*platformauth.JWTSig
 
 // ─── Control Plane Wiring ────────────────────────────────────────────────────
 
-func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, logger *slog.Logger) error {
-	// Register ApplyManifestService without executor for now.
-	// HandlerDeps (reference-data, internal-account, operational-gateway gRPC clients)
-	// will be wired in a follow-up once cross-service connections are established here.
+func wireControlPlane(server *grpc.Server, pool *pgxpool.Pool, db *gorm.DB, loopback *loopbackClients, logger *slog.Logger) error {
+	// Build handler dependencies from loopback connections.
+	// All downstream services are accessible via the shared loopback connection.
+	deps := controlplaneservice.NewHandlerDeps(loopback.rawConn)
+
 	if err := controlplaneservice.RegisterApplyManifestService(server, controlplaneservice.ApplyManifestServiceConfig{
 		Pool:        pool,
 		Logger:      logger,
-		HandlerDeps: nil,
+		HandlerDeps: deps,
 	}); err != nil {
 		return err
 	}
@@ -1416,6 +1417,10 @@ type loopbackClients struct {
 	faClose    func()
 	party      *partyclient.Client
 	partyClose func()
+	// rawConn is a plain gRPC connection to the loopback server, used by
+	// control-plane handler deps that create proto clients directly.
+	rawConn      *grpc.ClientConn
+	rawConnClose func()
 }
 
 // newLoopbackClients creates loopback gRPC clients targeting the local gRPC server.
@@ -1450,11 +1455,22 @@ func newLoopbackClients(ctx context.Context, grpcPort int) (*loopbackClients, er
 		return nil, fmt.Errorf("party loopback: %w", err)
 	}
 
+	// Raw gRPC connection for control-plane handler deps (reference-data, internal-account, etc.)
+	rawConn, err := grpc.NewClient(target, opts...)
+	if err != nil {
+		_ = mdsClose()
+		pkClose()
+		faClose()
+		partyClose()
+		return nil, fmt.Errorf("raw loopback: %w", err)
+	}
+
 	return &loopbackClients{
 		mds: mds, mdsClose: func() { _ = mdsClose() },
 		pk: pk, pkClose: pkClose,
 		fa: fa, faClose: faClose,
 		party: party, partyClose: partyClose,
+		rawConn: rawConn, rawConnClose: func() { _ = rawConn.Close() },
 	}, nil
 }
 
@@ -1471,5 +1487,8 @@ func (l *loopbackClients) closeAll() {
 	}
 	if l.partyClose != nil {
 		l.partyClose()
+	}
+	if l.rawConnClose != nil {
+		l.rawConnClose()
 	}
 }

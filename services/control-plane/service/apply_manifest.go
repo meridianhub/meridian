@@ -81,3 +81,17 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 	controlplanev1.RegisterApplyManifestServiceServer(server, handler)
 	return nil
 }
+
+// NewHandlerDeps builds HandlerDependencies from a raw gRPC connection that can
+// reach all downstream services (reference-data, internal-account, operational-gateway,
+// market-information, party, saga-registry). In the unified binary, a single loopback
+// connection suffices because all services share one gRPC server.
+func NewHandlerDeps(conn *grpc.ClientConn) *applier.HandlerDependencies {
+	return &applier.HandlerDependencies{
+		ReferenceData:      applier.NewReferenceDataClient(conn, conn),
+		InternalAccount:    applier.NewInternalAccountClient(conn),
+		OperationalGateway: applier.NewOperationalGatewayClient(conn),
+		MarketInformation:  applier.NewMarketInformationClient(conn),
+		Party:              applier.NewPartyClient(conn),
+	}
+}
