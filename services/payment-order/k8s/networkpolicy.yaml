@@ -137,11 +137,13 @@ spec:
     - protocol: TCP
       port: 50057
 
-  # Allow outbound gRPC to financial-gateway
+  # Allow outbound gRPC and HTTP to financial-gateway
   - to:
     - podSelector:
         matchLabels:
           app: financial-gateway
     ports:
     - protocol: TCP
-      port: 50064
+      port: 50064  # gRPC
+    - protocol: TCP
+      port: 8095   # HTTP webhook receiver (FinancialGatewayHTTP)
