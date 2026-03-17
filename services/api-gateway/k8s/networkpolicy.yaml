@@ -20,13 +20,15 @@ spec:
 
   ingress:
   # Allow inbound HTTP/Connect from Ingress controller
+  # Note: verify podSelector label matches your nginx-ingress installation;
+  # Helm chart default: app.kubernetes.io/name: ingress-nginx
   - from:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: ingress-nginx
       podSelector:
         matchLabels:
-          app: ingress-nginx
+          app.kubernetes.io/name: ingress-nginx
     ports:
     - protocol: TCP
       port: 8080

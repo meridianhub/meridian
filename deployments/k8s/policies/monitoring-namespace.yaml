@@ -26,6 +26,8 @@ spec:
     ports:
     - protocol: UDP
       port: 53
+    - protocol: TCP
+      port: 53
 
   # Allow scraping metrics from all namespaces on port 9090
   - to:
