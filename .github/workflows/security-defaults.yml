@@ -1,0 +1,144 @@
+name: Security Defaults Gate
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'services/*/k8s/configmap.yaml'
+      - 'services/*/config*.go'
+      - 'shared/platform/bootstrap/auth.go'
+      - 'deployments/k8s/policies/**'
+      - '.github/workflows/security-defaults.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'services/*/k8s/configmap.yaml'
+      - 'services/*/config*.go'
+      - 'shared/platform/bootstrap/auth.go'
+      - 'deployments/k8s/policies/**'
+      - '.github/workflows/security-defaults.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check-auth-defaults:
+    name: Security Defaults Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check AUTH_ENABLED not disabled in K8s ConfigMaps
+        run: |
+          echo "Checking for AUTH_ENABLED=false in K8s ConfigMaps..."
+
+          # Look for AUTH_ENABLED explicitly set to false in service configmaps.
+          # The default is true; explicitly setting false in a K8s manifest is a
+          # security regression that must be caught before merge.
+          VIOLATIONS=$(grep -rn --include="configmap.yaml" \
+            -E 'AUTH_ENABLED[[:space:]]*:[[:space:]]*"false"' \
+            services/ deployments/k8s/ 2>/dev/null || true)
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::AUTH_ENABLED=false found in K8s ConfigMaps:"
+            echo "$VIOLATIONS"
+            echo ""
+            echo "AUTH_ENABLED must not be set to false in K8s manifests."
+            echo "To fix: remove AUTH_ENABLED from the ConfigMap or set it to \"true\"."
+            exit 1
+          fi
+
+          echo "No AUTH_ENABLED=false violations found in K8s ConfigMaps."
+
+      - name: Check Go auth defaults are not false
+        run: |
+          echo "Checking Go auth defaults..."
+
+          # Detect any GetEnvAsBool("AUTH_ENABLED", false) — the default must be
+          # true so that a missing env var is safe. A false default would mean
+          # auth is off unless explicitly configured, which is unsafe.
+          VIOLATIONS=$(grep -rn --include="*.go" \
+            -E 'GetEnvAsBool\("AUTH_ENABLED"[[:space:]]*,[[:space:]]*false\)' \
+            services/ shared/ 2>/dev/null || true)
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::AUTH_ENABLED defaults to false in Go code:"
+            echo "$VIOLATIONS"
+            echo ""
+            echo "AUTH_ENABLED must default to true (safe default)."
+            echo "To fix: change GetEnvAsBool(\"AUTH_ENABLED\", false) to GetEnvAsBool(\"AUTH_ENABLED\", true)."
+            exit 1
+          fi
+
+          echo "Go auth defaults are safe (default: true)."
+
+      - name: Verify OPA constraints exist
+        run: |
+          echo "Verifying OPA Gatekeeper constraints are present..."
+
+          ERRORS=0
+
+          # LOCAL_DEV_MODE constraint (guards against dev mode in production)
+          DEV_MODE_CONSTRAINT="deployments/k8s/policies/gateway-dev-mode-block.yaml"
+          if [ ! -f "$DEV_MODE_CONSTRAINT" ]; then
+            echo "::error::LOCAL_DEV_MODE OPA constraint missing: $DEV_MODE_CONSTRAINT"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "Found: $DEV_MODE_CONSTRAINT"
+          fi
+
+          # AUTH_ENABLED constraint (guards against auth disabled in production)
+          AUTH_CONSTRAINT="deployments/k8s/policies/auth-enabled-block.yaml"
+          if [ ! -f "$AUTH_CONSTRAINT" ]; then
+            echo "::error::AUTH_ENABLED OPA constraint missing: $AUTH_CONSTRAINT"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "Found: $AUTH_CONSTRAINT"
+          fi
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo ""
+            echo "OPA Gatekeeper constraints provide admission control for production K8s clusters."
+            echo "These files must not be deleted."
+            exit 1
+          fi
+
+          echo "All required OPA constraints are present."
+
+      - name: Verify OPA constraint enforcement action is deny
+        run: |
+          echo "Verifying OPA constraints enforce with 'deny' action..."
+
+          ERRORS=0
+
+          for constraint_file in \
+            "deployments/k8s/policies/gateway-dev-mode-block.yaml" \
+            "deployments/k8s/policies/auth-enabled-block.yaml"; do
+
+            if [ ! -f "$constraint_file" ]; then
+              continue
+            fi
+
+            # Constraints must use enforcementAction: deny to actively block violations.
+            # 'dryrun' or 'warn' only audit without blocking — unacceptable for production.
+            ACTION=$(grep 'enforcementAction:' "$constraint_file" | awk '{print $2}' | head -1)
+            if [ "$ACTION" != "deny" ]; then
+              echo "::error::$constraint_file has enforcementAction: $ACTION (must be 'deny')"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "enforcementAction: deny — $constraint_file"
+            fi
+          done
+
+          if [ "$ERRORS" -gt 0 ]; then
+            exit 1
+          fi
+
+          echo "All OPA constraints have enforcementAction: deny."
