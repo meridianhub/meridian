@@ -745,11 +745,17 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 		if nb == "UNSPECIFIED" {
 			nb = "DEBIT"
 		}
+		// Use the first allowed instrument as the account type's instrument code.
+		var instrumentCode string
+		if instruments := acct.GetAllowedInstruments(); len(instruments) > 0 {
+			instrumentCode = instruments[0]
+		}
 		input.AccountTypes = append(input.AccountTypes, AccountTypeInput{
-			Code:          acct.GetCode(),
-			DisplayName:   acct.GetName(),
-			NormalBalance: nb,
-			BehaviorClass: "CLEARING",
+			Code:           acct.GetCode(),
+			DisplayName:    acct.GetName(),
+			NormalBalance:  nb,
+			BehaviorClass:  "CLEARING",
+			InstrumentCode: instrumentCode,
 		})
 	}
 
