@@ -1,3 +1,4 @@
+// Package rbac defines RBAC permission maps for the control-plane service.
 package rbac
 
 import "github.com/meridianhub/meridian/shared/platform/auth"
@@ -148,6 +149,7 @@ var MethodPermissions = auth.MethodRBACConfig{
 	},
 }
 
+// ExpectedMethods lists all gRPC methods expected to be registered for this service.
 var ExpectedMethods = []string{
 	// ApplyManifestService
 	"/meridian.control_plane.v1.ApplyManifestService/ApplyManifest",

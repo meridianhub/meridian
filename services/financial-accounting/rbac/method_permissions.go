@@ -1,3 +1,4 @@
+// Package rbac defines RBAC permission maps for the financial-accounting service.
 package rbac
 
 import "github.com/meridianhub/meridian/shared/platform/auth"
@@ -38,6 +39,7 @@ var MethodPermissions = auth.MethodRBACConfig{
 	},
 }
 
+// ExpectedMethods lists all gRPC methods expected to be registered for this service.
 var ExpectedMethods = []string{
 	"/meridian.financial_accounting.v1.FinancialAccountingService/InitiateFinancialBookingLog",
 	"/meridian.financial_accounting.v1.FinancialAccountingService/UpdateFinancialBookingLog",

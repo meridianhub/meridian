@@ -1,3 +1,4 @@
+// Package rbac defines RBAC permission maps for the position-keeping service.
 package rbac
 
 import "github.com/meridianhub/meridian/shared/platform/auth"
@@ -56,6 +57,7 @@ var MethodPermissions = auth.MethodRBACConfig{
 	},
 }
 
+// ExpectedMethods lists all gRPC methods expected to be registered for this service.
 var ExpectedMethods = []string{
 	"/meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLog",
 	"/meridian.position_keeping.v1.PositionKeepingService/InitiateFinancialPositionLogBatch",

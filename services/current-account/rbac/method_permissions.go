@@ -1,3 +1,4 @@
+// Package rbac defines RBAC permission maps for the current-account service.
 package rbac
 
 import "github.com/meridianhub/meridian/shared/platform/auth"

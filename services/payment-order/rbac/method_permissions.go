@@ -1,3 +1,4 @@
+// Package rbac defines RBAC permission maps for the payment-order service.
 package rbac
 
 import "github.com/meridianhub/meridian/shared/platform/auth"
@@ -29,6 +30,7 @@ var MethodPermissions = auth.MethodRBACConfig{
 	},
 }
 
+// ExpectedMethods lists all gRPC methods expected to be registered for this service.
 var ExpectedMethods = []string{
 	"/meridian.payment_order.v1.PaymentOrderService/InitiatePaymentOrder",
 	"/meridian.payment_order.v1.PaymentOrderService/RetrievePaymentOrder",
