@@ -873,7 +873,8 @@ func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit stri
 		return "CURRENCY"
 	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER:
 		return "COUNT"
-	default:
+	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
+		controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED:
 		// Check if the uppercased unit matches a known Dimension enum name.
 		upper := strings.ToUpper(unit)
 		if _, ok := referencedatav1.Dimension_value["DIMENSION_"+upper]; ok {
@@ -882,6 +883,7 @@ func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit stri
 		// Not a known dimension — return empty so the Starlark default applies.
 		return ""
 	}
+	return ""
 }
 
 // extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).
