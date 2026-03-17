@@ -741,10 +741,15 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 	}
 
 	for _, acct := range mf.GetAccountTypes() {
+		nb := stripEnumPrefix(acct.GetNormalBalance().String(), "NORMAL_BALANCE_")
+		if nb == "UNSPECIFIED" {
+			nb = "DEBIT"
+		}
 		input.AccountTypes = append(input.AccountTypes, AccountTypeInput{
 			Code:          acct.GetCode(),
 			DisplayName:   acct.GetName(),
-			NormalBalance: stripEnumPrefix(acct.GetNormalBalance().String(), "NORMAL_BALANCE_"),
+			NormalBalance: nb,
+			BehaviorClass: "CLEARING",
 		})
 	}
 
