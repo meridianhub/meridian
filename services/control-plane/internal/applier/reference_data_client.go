@@ -95,6 +95,10 @@ func (c *ReferenceDataClient) ActivateInstrument(ctx *saga.StarlarkContext, para
 	req.Code, _ = params["instrument_code"].(string)
 	if v, ok := toInt32(params["version"]); ok {
 		req.Version = v
+	} else {
+		// Default to version 1 — the saga registers then immediately activates,
+		// and RegisterInstrument always creates version 1.
+		req.Version = 1
 	}
 
 	callCtx := prepareCallContext(ctx)
@@ -118,6 +122,8 @@ func (c *ReferenceDataClient) DeleteInstrument(ctx *saga.StarlarkContext, params
 	req.Code, _ = params["instrument_code"].(string)
 	if v, ok := toInt32(params["version"]); ok {
 		req.Version = v
+	} else {
+		req.Version = 1
 	}
 
 	callCtx := prepareCallContext(ctx)
