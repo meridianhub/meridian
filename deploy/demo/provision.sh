@@ -285,11 +285,13 @@ log "5/7 — Creating Meridian directory structure..."
 
 install -d -m 750 "${MERIDIAN_DIR}"
 install -d -m 700 "${MERIDIAN_DIR}/certs"
+install -d -m 700 "${MERIDIAN_DIR}/secrets"
 install -d -m 750 "${MERIDIAN_DIR}/data"
 install -d -m 755 "${MERIDIAN_DIR}/scripts"
 
 chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${MERIDIAN_DIR}"
-log "  Created ${MERIDIAN_DIR}/{certs,data,scripts}"
+log "  Created ${MERIDIAN_DIR}/{certs,secrets,data,scripts}"
+log "  Place JWT signing key at ${MERIDIAN_DIR}/secrets/jwt-signing-key.pem (mode 600, deploy-owned)"
 
 # ---------------------------------------------------------------------------
 # 6. SSH hardening
@@ -364,4 +366,8 @@ log ""
 log "Next steps:"
 log "  1. Copy deploy/demo/docker-compose.yml to ${MERIDIAN_DIR}/docker-compose.yml"
 log "  2. Copy deploy/demo/.env.demo.example to ${MERIDIAN_DIR}/.env and fill in secrets"
-log "  3. Log in as '${DEPLOY_USER}' and run: cd ${MERIDIAN_DIR} && docker compose up -d"
+log "  3. Generate the JWT signing key (as ${DEPLOY_USER}):"
+log "       openssl genrsa -out ${MERIDIAN_DIR}/secrets/jwt-signing-key.pem 2048"
+log "       chmod 600 ${MERIDIAN_DIR}/secrets/jwt-signing-key.pem"
+log "  4. Log in as '${DEPLOY_USER}' and run: cd ${MERIDIAN_DIR} && docker compose up -d"
+log "  5. Add the deploy user's SSH private key as the DEPLOY_SSH_KEY GitHub secret"
