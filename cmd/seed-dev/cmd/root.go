@@ -250,6 +250,11 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 		return fmt.Errorf("%w: %d error(s)", ErrManifestValidation, len(resp.GetValidationErrors()))
 	}
 
+	// Print step results for debugging (visible in CI logs).
+	for _, sr := range resp.GetStepResults() {
+		fmt.Printf("  Step [%s]: %s — %s\n", sr.GetStepName(), sr.GetStatus().String(), sr.GetMessage())
+	}
+
 	// Check response status — a nil-executor or saga failure returns a non-success status.
 	switch resp.GetStatus() {
 	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
