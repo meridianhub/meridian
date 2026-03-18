@@ -99,3 +99,80 @@ message PaymentFailedEvent {
   // failed_at is when the payment failure occurred.
   google.protobuf.Timestamp failed_at = 10;
 }
+
+// PaymentRefundedEvent is published when a Stripe charge.refunded webhook
+// is received and validated. It signals that a payment has been partially or fully refunded.
+message PaymentRefundedEvent {
+  // event_id uniquely identifies this event instance (UUID).
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the provider event that caused this domain event.
+  string causation_id = 3 [(buf.validate.field).string.max_len = 255];
+
+  // version is the event schema version for forward compatibility.
+  int32 version = 4 [(buf.validate.field).int32.gte = 1];
+
+  // payment_order_id is the Meridian payment order associated with this refund.
+  string payment_order_id = 5 [(buf.validate.field).string.max_len = 255];
+
+  // provider_reference_id is the payment provider's identifier (e.g., Stripe Charge ID).
+  string provider_reference_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // amount_refunded_minor_units is the refunded amount in the smallest currency unit (e.g., cents for USD).
+  int64 amount_refunded_minor_units = 7 [(buf.validate.field).int64.gte = 0];
+
+  // currency is the ISO 4217 currency code (e.g., "USD", "GBP").
+  string currency = 8 [(buf.validate.field).string.max_len = 3];
+
+  // provider_event_id is the payment provider's webhook event ID (e.g., Stripe evt_ ID).
+  string provider_event_id = 9 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // refunded_at is when the refund was processed by the provider.
+  google.protobuf.Timestamp refunded_at = 10;
+}
+
+// PaymentDisputedEvent is published when a Stripe charge.dispute.created webhook
+// is received and validated. It signals that a payment has been disputed by the cardholder.
+message PaymentDisputedEvent {
+  // event_id uniquely identifies this event instance (UUID).
+  string event_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // correlation_id links all events across services for a single user request.
+  string correlation_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // causation_id identifies the provider event that caused this domain event.
+  string causation_id = 3 [(buf.validate.field).string.max_len = 255];
+
+  // version is the event schema version for forward compatibility.
+  int32 version = 4 [(buf.validate.field).int32.gte = 1];
+
+  // payment_order_id is the Meridian payment order associated with this dispute.
+  string payment_order_id = 5 [(buf.validate.field).string.max_len = 255];
+
+  // provider_reference_id is the payment provider's identifier (e.g., Stripe Charge ID).
+  string provider_reference_id = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // dispute_reason is the provider's reason for the dispute (e.g., "fraudulent", "product_not_received").
+  string dispute_reason = 7 [(buf.validate.field).string.max_len = 255];
+
+  // provider_event_id is the payment provider's webhook event ID (e.g., Stripe evt_ ID).
+  string provider_event_id = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // disputed_at is when the dispute was created by the provider.
+  google.protobuf.Timestamp disputed_at = 9;
+}

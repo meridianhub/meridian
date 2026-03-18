@@ -101,12 +101,13 @@ func (s *FinancialGatewayService) dispatchStripePayment(
 	dispatchID := uuid.New().String()
 
 	return &financialgatewayv1.DispatchPaymentResponse{
-		DispatchId:        dispatchID,
-		PaymentOrderId:    req.GetPaymentOrderId(),
-		Rail:              financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE,
-		Status:            result.Status,
-		ProviderReference: result.ProviderReference,
-		CreatedAt:         timestamppb.Now(),
+		DispatchId:            dispatchID,
+		PaymentOrderId:        req.GetPaymentOrderId(),
+		Rail:                  financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE,
+		Status:                result.Status,
+		ProviderReference:     result.ProviderReference,
+		CreatedAt:             timestamppb.Now(),
+		PlatformFeeMinorUnits: result.PlatformFeeAmount,
 	}, nil
 }
 
@@ -120,12 +121,39 @@ func (s *FinancialGatewayService) DispatchRefund(
 }
 
 // CancelPayment cancels a pending payment dispatch before it is delivered to the payment rail.
-// Returns Unimplemented until cancellation support is added.
 func (s *FinancialGatewayService) CancelPayment(
-	_ context.Context,
-	_ *financialgatewayv1.CancelPaymentRequest,
+	ctx context.Context,
+	req *financialgatewayv1.CancelPaymentRequest,
 ) (*financialgatewayv1.CancelPaymentResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "CancelPayment not yet implemented")
+	if s.stripeAdapter == nil || s.clientFactory == nil {
+		return nil, status.Error(codes.Unavailable, "stripe adapter is not configured")
+	}
+
+	client, err := s.clientFactory.NewClient(ctx)
+	if err != nil {
+		s.logger.Error("failed to create stripe client for cancel",
+			"payment_order_id", req.GetPaymentOrderId(),
+			"error", err,
+		)
+		return nil, mapClientFactoryError(err)
+	}
+
+	ctx = stripeadapter.WithStripeAccount(ctx, client.AccountID)
+
+	_, err = s.stripeAdapter.CancelPayment(ctx, req.GetPaymentOrderId(), req.GetReason())
+	if err != nil {
+		s.logger.Error("stripe cancel failed",
+			"payment_order_id", req.GetPaymentOrderId(),
+			"error", err,
+		)
+		return nil, mapCancelError(err)
+	}
+
+	return &financialgatewayv1.CancelPaymentResponse{
+		PaymentOrderId: req.GetPaymentOrderId(),
+		Status:         "CANCELLED",
+		Reason:         req.GetReason(),
+	}, nil
 }
 
 // GetProviderHealth returns the current health status of a payment rail provider.
@@ -179,6 +207,24 @@ func mapClientFactoryError(err error) error {
 		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
 	default:
 		return status.Error(codes.Internal, "failed to resolve stripe configuration")
+	}
+}
+
+// mapCancelError maps cancel-specific adapter errors to appropriate gRPC status codes.
+func mapCancelError(err error) error {
+	switch {
+	case errors.Is(err, stripeadapter.ErrCancelNotConfigured):
+		return status.Error(codes.Unimplemented, "cancel support not configured")
+	case errors.Is(err, stripeadapter.ErrPaymentIntentNotFound):
+		return status.Error(codes.NotFound, "payment intent not found for payment order")
+	case errors.Is(err, stripeadapter.ErrMissingStripeAccount):
+		return status.Error(codes.FailedPrecondition, "stripe connected account not configured")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "request canceled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
+	default:
+		return status.Error(codes.Internal, "failed to cancel payment")
 	}
 }
 

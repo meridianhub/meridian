@@ -95,6 +95,20 @@ func TestGetProviderHealth_UnsupportedRail(t *testing.T) {
 	assert.Equal(t, codes.Unimplemented, st.Code())
 }
 
+func TestCancelPayment_StripeNotConfigured(t *testing.T) {
+	svc, err := NewFinancialGatewayService(Config{Logger: slog.Default()})
+	require.NoError(t, err)
+
+	_, err = svc.CancelPayment(context.Background(), &financialgatewayv1.CancelPaymentRequest{
+		PaymentOrderId: "11111111-1111-1111-1111-111111111111",
+		Reason:         "test",
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unavailable, st.Code())
+}
+
 func TestMapCircuitBreakerHealth(t *testing.T) {
 	tests := []struct {
 		name           string
