@@ -137,8 +137,6 @@ func TestListLedgerPostings_Error(t *testing.T) {
 
 func TestRetrieveFinancialBookingLog_Success(t *testing.T) {
 	expected := &financialaccountingv1.RetrieveFinancialBookingLogResponse{}
-	mockClient := &mockFinancialAccountingClient{}
-	// Override the default stub to return a success response
 	c := &Client{
 		financialAccounting: &retrieveFinancialBookingLogMock{
 			fn: func(_ context.Context, _ *financialaccountingv1.RetrieveFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.RetrieveFinancialBookingLogResponse, error) {
@@ -147,7 +145,6 @@ func TestRetrieveFinancialBookingLog_Success(t *testing.T) {
 		},
 		timeout: DefaultTimeout,
 	}
-	_ = mockClient
 
 	resp, err := c.RetrieveFinancialBookingLog(context.Background(), &financialaccountingv1.RetrieveFinancialBookingLogRequest{
 		Id: "booking-123",
