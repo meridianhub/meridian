@@ -197,14 +197,14 @@ func TestWatch_TickerFires(t *testing.T) {
 	}()
 
 	// Wait until at least 2 responses have been sent (initial + at least one ticker response)
-	_ = await.New().
-		AtMost(2 * time.Second).
+	require.NoError(t, await.New().
+		AtMost(2*time.Second).
 		PollInterval(time.Millisecond).
 		Until(func() bool {
 			stream.mu.Lock()
 			defer stream.mu.Unlock()
 			return len(stream.responses) >= 2
-		})
+		}), "should receive at least 2 health watch responses")
 
 	cancel() // cancel context to terminate Watch
 

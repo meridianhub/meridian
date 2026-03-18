@@ -91,7 +91,7 @@ func TestLeaseRenewer_RenewsLeaseAtInterval(t *testing.T) {
 		})
 	require.NoError(t, err, "Lease should be renewed")
 
-	// Verify multiple renewals occurred by waiting and checking again
+	// Verify multiple renewals occurred by waiting for a strictly later expiry
 	firstExpiry := getLeaseExpiresAtForTest(t, db, sagaID)
 	var secondExpiry time.Time
 	awaitErr2 := await.New().
@@ -99,12 +99,12 @@ func TestLeaseRenewer_RenewsLeaseAtInterval(t *testing.T) {
 		PollInterval(50 * time.Millisecond).
 		Until(func() bool {
 			secondExpiry = getLeaseExpiresAtForTest(t, db, sagaID)
-			return secondExpiry.After(firstExpiry) || secondExpiry.Equal(firstExpiry)
+			return secondExpiry.After(firstExpiry)
 		})
 	require.NoError(t, awaitErr2, "Lease should continue to be renewed")
 
 	// The claimed_at should have been updated
-	assert.True(t, secondExpiry.After(firstExpiry) || secondExpiry.Equal(firstExpiry),
+	assert.True(t, secondExpiry.After(firstExpiry),
 		"Lease should continue to be renewed")
 }
 
@@ -181,10 +181,11 @@ func TestLeaseRenewer_StopsOnStopCall(t *testing.T) {
 	renewer := NewLeaseRenewer(sagaID, claimService, logger, WithRenewalInterval(50*time.Millisecond))
 
 	ctx := context.Background()
+	// Capture baseline before Start so the goroutine is not yet counted
+	initialGoroutinesStop := runtime.NumGoroutine()
 	renewer.Start(ctx)
 
-	// Verify renewer is running by waiting for at least one renewal
-	initialGoroutinesStop := runtime.NumGoroutine()
+	// Verify renewer is running by waiting for the background goroutine to appear
 	awaitStopErr := await.New().
 		AtMost(1 * time.Second).
 		PollInterval(10 * time.Millisecond).

@@ -5,12 +5,15 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/meridianhub/meridian/services/position-keeping/app"
 	"github.com/meridianhub/meridian/services/position-keeping/observability"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -18,6 +21,7 @@ import (
 type mockHealthWatchServer struct {
 	grpc_health_v1.Health_WatchServer
 	ctx       context.Context
+	mu        sync.Mutex
 	responses []*grpc_health_v1.HealthCheckResponse
 	sendErr   error
 }
@@ -30,8 +34,25 @@ func (m *mockHealthWatchServer) Send(resp *grpc_health_v1.HealthCheckResponse) e
 	if m.sendErr != nil {
 		return m.sendErr
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.responses = append(m.responses, resp)
 	return nil
+}
+
+func (m *mockHealthWatchServer) responseCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.responses)
+}
+
+func (m *mockHealthWatchServer) firstResponse() *grpc_health_v1.HealthCheckResponse {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.responses) == 0 {
+		return nil
+	}
+	return m.responses[0]
 }
 
 func TestHealthServer_Check_WithHealthyDatabase(t *testing.T) {
@@ -222,12 +243,11 @@ func TestHealthServer_Watch_SendsInitialStatus(t *testing.T) {
 	}
 
 	// Verify at least initial status was sent
-	if len(mockStream.responses) < 1 {
-		t.Errorf("Watch() sent %d responses, want at least 1", len(mockStream.responses))
+	if mockStream.responseCount() < 1 {
+		t.Errorf("Watch() sent %d responses, want at least 1", mockStream.responseCount())
 	}
 
-	if len(mockStream.responses) > 0 {
-		firstResp := mockStream.responses[0]
+	if firstResp := mockStream.firstResponse(); firstResp != nil {
 		if firstResp.Status != grpc_health_v1.HealthCheckResponse_SERVING &&
 			firstResp.Status != grpc_health_v1.HealthCheckResponse_NOT_SERVING {
 			t.Errorf("Watch() initial status = %v, want SERVING or NOT_SERVING", firstResp.Status)
@@ -286,8 +306,10 @@ func TestHealthServer_Watch_RespectsContext(t *testing.T) {
 		done <- healthSrv.Watch(&grpc_health_v1.HealthCheckRequest{}, mockStream)
 	}()
 
-	// Intentional sleep: Give grpc health watch time to send initial status
-	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // gives gRPC health Watch time to send initial status
+	// Wait for Watch to send initial status before cancelling
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(5*time.Millisecond).Until(func() bool {
+		return mockStream.responseCount() >= 1
+	}), "Watch should send at least one response before cancellation")
 
 	// Cancel the context
 	streamCancel()

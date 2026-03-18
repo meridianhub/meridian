@@ -220,12 +220,11 @@ func TestValidateExists_CacheMiss(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, client.GetCallCount())
 
-	// Wait for cache to expire
-	time.Sleep(5 * time.Millisecond) //nolint:forbidigo // triggers cache TTL expiry
-
-	// Second call - cache should have expired
-	err = validator.ValidateExists(context.Background(), "cache-miss-account")
-	require.NoError(t, err)
+	// Poll until cache expires and the next call increments the backend call count
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(5*time.Millisecond).Until(func() bool {
+		_ = validator.ValidateExists(context.Background(), "cache-miss-account")
+		return client.GetCallCount() >= 2
+	}), "cache should expire and trigger a new backend call")
 	assert.Equal(t, 2, client.GetCallCount()) // Count should increase
 }
 
