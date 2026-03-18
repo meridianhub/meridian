@@ -18,6 +18,7 @@ on:
       - 'buf.lock'
       - 'Makefile'
       - '.github/workflows/build.yml'
+      - 'scripts/check-service-coverage.sh'
 
 permissions:
   contents: read
@@ -66,6 +67,12 @@ jobs:
       - name: Verify compilation
         if: github.event_name == 'pull_request'
         run: go build ./...
+
+      - name: Check per-service coverage
+        if: github.event_name == 'pull_request'
+        run: |
+          chmod +x scripts/check-service-coverage.sh
+          ./scripts/check-service-coverage.sh
 
       - name: Run tests
         if: github.event_name != 'pull_request'
