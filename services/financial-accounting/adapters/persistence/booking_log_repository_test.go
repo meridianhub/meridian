@@ -215,12 +215,14 @@ func TestListBookingLogs_Pagination(t *testing.T) {
 
 	repo := NewLedgerRepository(db)
 
-	// Create 5 booking logs
+	// Create 5 booking logs with explicit timestamps to ensure deterministic ordering.
+	// Timestamps are spaced 1 second apart since applyCursorPagination truncates to seconds.
+	baseTime := time.Now().UTC()
 	for i := 0; i < 5; i++ {
 		log := newTestBookingLog()
+		log.CreatedAt = baseTime.Add(time.Duration(i) * time.Second)
+		log.UpdatedAt = log.CreatedAt
 		require.NoError(t, repo.SaveBookingLog(ctx, log, fmt.Sprintf("paginate-%d-%s", i, uuid.New().String())))
-		// Ensure distinct timestamps for deterministic ordering
-		time.Sleep(2 * time.Millisecond)
 	}
 
 	// Get first page of 3
