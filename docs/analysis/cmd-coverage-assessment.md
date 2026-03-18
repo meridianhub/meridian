@@ -73,7 +73,7 @@ Pure functions that read environment variables and validate/transform them. Fast
 
 | Function | Service(s) | Currently Tested? |
 |----------|-----------|-------------------|
-| `parseLogLevel(levelStr string) slog.Level` | **15/18 services** | `party`, `reconciliation` only |
+| `parseLogLevel(levelStr string) slog.Level` | **14/18 services** | `financial-gateway`, `party`, `reconciliation` |
 | `getPort() string` | audit-worker | ✅ audit-worker |
 | `getDBConnectionString() (string, error)` | audit-worker | ✅ audit-worker |
 | `getAuditSchema() (string, error)` | audit-worker | ✅ audit-worker |
@@ -232,7 +232,7 @@ func TestHealthHandler_Returns200(t *testing.T) {
 |-------------|--------|-----------|
 | `main()` | Leave uncovered | Untestable without full stack; E2E covers it |
 | `run()` | Leave uncovered | Same as main(); wiring only |
-| `parseLogLevel()` | **Add tests** (15 services) | Pure function, 0 dependencies, already tested in 2 services |
+| `parseLogLevel()` | **Add tests** (11 untested services) | Pure function, 0 dependencies, already tested in 3 services |
 | `getPort()`, `getDBConnectionString()` | **Already tested** in audit-worker | — |
 | `loadWorkerConfig()`, `WorkerConfig.Validate()` | **Already tested** in tenant | — |
 | `setupRoutes()`, `createServer()` | **Already tested** in audit-worker | — |
@@ -257,7 +257,7 @@ Estimated breakdown of ~8,183 cmd/ lines:
 | Category | Approx Lines | Testable? | Currently Covered? |
 |----------|-------------|-----------|-------------------|
 | main() + run() orchestration | ~4,500 | Minimally | Via E2E only |
-| parseLogLevel (15 copies) | ~180 | Yes | ~2 services |
+| parseLogLevel (14 copies) | ~168 | Yes | ~3 services |
 | Config parsing functions | ~400 | Yes | audit-worker, tenant |
 | HTTP/health setup | ~350 | Yes | audit-worker, position-keeping |
 | Factory functions with branching | ~600 | Yes | payment-order (build fails), reconciliation partial |
