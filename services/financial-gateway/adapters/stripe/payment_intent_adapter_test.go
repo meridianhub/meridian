@@ -533,6 +533,40 @@ func TestPaymentIntentAdapter_CancelPayment_AlreadyCancelled(t *testing.T) {
 	assert.Equal(t, financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED, result.Status)
 }
 
+func TestPaymentIntentAdapter_CancelPayment_AlreadySucceeded(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	canceller := &mockPaymentIntentCanceller{
+		cancelFn: func(_ context.Context, _ string, _ *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+			return nil, &stripego.Error{
+				HTTPStatusCode: 400,
+				Type:           stripego.ErrorTypeInvalidRequest,
+				Msg:            "You cannot cancel this PaymentIntent because it has a status of succeeded.",
+			}
+		},
+	}
+	resolver := &mockPaymentIntentResolver{
+		findFn: func(_ context.Context, _ string) (string, error) {
+			return "pi_already_succeeded", nil
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{
+		Canceller: canceller,
+		Resolver:  resolver,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	_, err = adapter.CancelPayment(ctx, "po-already-succeeded", "reason")
+	require.Error(t, err, "already-succeeded should return error, not silent success")
+	assert.Contains(t, err.Error(), "cannot be cancelled")
+}
+
 func TestPaymentIntentAdapter_CancelPayment_EmptyReason(t *testing.T) {
 	creator := &mockPaymentIntentCreator{
 		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {

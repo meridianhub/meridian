@@ -140,7 +140,7 @@ func (s *FinancialGatewayService) CancelPayment(
 
 	ctx = stripeadapter.WithStripeAccount(ctx, client.AccountID)
 
-	_, err = s.stripeAdapter.CancelPayment(ctx, req.GetPaymentOrderId(), req.GetReason())
+	result, err := s.stripeAdapter.CancelPayment(ctx, req.GetPaymentOrderId(), req.GetReason())
 	if err != nil {
 		s.logger.Error("stripe cancel failed",
 			"payment_order_id", req.GetPaymentOrderId(),
@@ -148,6 +148,12 @@ func (s *FinancialGatewayService) CancelPayment(
 		)
 		return nil, mapCancelError(err)
 	}
+
+	s.logger.Info("payment cancelled",
+		"payment_order_id", req.GetPaymentOrderId(),
+		"provider_reference", result.ProviderReference,
+		"status", result.Status.String(),
+	)
 
 	return &financialgatewayv1.CancelPaymentResponse{
 		PaymentOrderId: req.GetPaymentOrderId(),
