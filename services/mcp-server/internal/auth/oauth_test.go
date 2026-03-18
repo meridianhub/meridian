@@ -237,6 +237,31 @@ func TestAuthorizationHandler_WrongRedirectURI_ReturnsBadRequest(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestAuthorizationHandler_UnsafeRedirectScheme_ReturnsBadRequest(t *testing.T) {
+	store := newTestStore(t)
+	// Simulate a misconfigured static client with a dangerous redirect URI.
+	cfg := auth.OAuthConfig{
+		ClientID:    "meridian-mcp",
+		RedirectURI: "javascript:alert(1)",
+	}
+	handler := auth.NewAuthorizationHandler(cfg, store, nil)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {cfg.ClientID},
+		"redirect_uri":          {cfg.RedirectURI},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid redirect_uri")
+}
+
 func TestAuthorizationHandler_NonGetMethod_ReturnsMethodNotAllowed(t *testing.T) {
 	store := newTestStore(t)
 	cfg := auth.OAuthConfig{

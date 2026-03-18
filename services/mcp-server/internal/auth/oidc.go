@@ -529,6 +529,14 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		tenantID = resolved
 	}
 
+	// Defense-in-depth: validate redirect URI scheme before signing tokens.
+	// The URI was validated at authorize-time, but re-check before redirect.
+	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
+		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
+		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
+	}
+
 	// Sign Meridian JWT with tenant context.
 	claims := map[string]interface{}{
 		"sub":         email, // Use email as subject until identity resolution is wired
@@ -562,20 +570,28 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		"tenant", flowState.TenantSlug)
 
 	// Redirect to MCP client's redirect_uri with the authorization code.
-	target, err := url.Parse(flowState.MCPRedirectURI)
+	redirectURL, err := buildAuthRedirect(flowState.MCPRedirectURI, mcpCode, flowState.MCPState)
 	if err != nil {
 		h.logger.Error("oidc: invalid redirect URI", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// buildAuthRedirect constructs the redirect URL with authorization code and optional state.
+func buildAuthRedirect(redirectURI, code, state string) (string, error) {
+	target, err := url.Parse(redirectURI)
+	if err != nil {
+		return "", err
+	}
 	params := target.Query()
-	params.Set("code", mcpCode)
-	if flowState.MCPState != "" {
-		params.Set("state", flowState.MCPState)
+	params.Set("code", code)
+	if state != "" {
+		params.Set("state", state)
 	}
 	target.RawQuery = params.Encode()
-
-	http.Redirect(w, r, target.String(), http.StatusFound)
+	return target.String(), nil
 }
 
 // exchangeDexCode exchanges a Dex authorization code for an ID token.
@@ -700,9 +716,16 @@ func BuildTenantScopedDexURL(dexBaseURL, tenantSlug, baseDomain string) string {
 
 // isAllowedRedirectURI validates that a redirect URI is safe to redirect to.
 // HTTPS is required for production; HTTP is allowed only for localhost (development).
+// Rejects opaque or hostless forms (e.g., "https:evil.com", "https:///cb")
+// that could bypass scheme-only validation due to URL parsing differences.
 func isAllowedRedirectURI(uri string) bool {
 	parsed, err := url.Parse(uri)
 	if err != nil {
+		return false
+	}
+	// Reject opaque URIs (e.g., "https:evil.com") and empty-host URIs
+	// (e.g., "https:///cb") which browsers may resolve unexpectedly.
+	if parsed.Opaque != "" || parsed.Hostname() == "" {
 		return false
 	}
 	if parsed.Scheme == schemeHTTPS {
