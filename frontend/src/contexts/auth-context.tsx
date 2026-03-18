@@ -83,7 +83,15 @@ export function parseJWT(token: unknown): JWTClaims | null {
 
     return {
       userId,
-      tenantId: typeof decoded.tenantId === 'string' ? decoded.tenantId : undefined,
+      // Prefer x-tenant-slug (the URL-safe subdomain slug), fall back to tenantId
+      // for dev tokens. The backend also sends x-tenant-id (the internal tenant ID)
+      // but that uses underscores and cannot be used for subdomain routing.
+      tenantId:
+        typeof decoded['x-tenant-slug'] === 'string'
+          ? decoded['x-tenant-slug']
+          : typeof decoded.tenantId === 'string'
+            ? decoded.tenantId
+            : undefined,
       roles: effectiveRoles,
       scopes,
       exp: decoded.exp,
@@ -179,11 +187,9 @@ export function AuthProvider({ children, initialToken }: AuthProviderProps) {
       sessionStorage.removeItem(SESSION_STORAGE_KEY)
       return false
     }
-    // Validate that the token's tenantId matches the current subdomain tenant.
+    // Validate that the token's tenant slug matches the current subdomain.
     // This prevents session bleeding across subdomains for all token paths
     // (restore, login, refresh).
-    // Invariant: JWT tenantId holds the tenant slug (same value used in subdomains).
-    // See tenant-context.tsx where claims.tenantId is used directly as tenantSlug.
     const currentSlug = getTenantSlugFromSubdomain(window.location.hostname)
     if (currentSlug && parsed.tenantId && parsed.tenantId !== currentSlug) {
       authGenerationRef.current += 1
