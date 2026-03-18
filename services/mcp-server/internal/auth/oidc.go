@@ -716,9 +716,16 @@ func BuildTenantScopedDexURL(dexBaseURL, tenantSlug, baseDomain string) string {
 
 // isAllowedRedirectURI validates that a redirect URI is safe to redirect to.
 // HTTPS is required for production; HTTP is allowed only for localhost (development).
+// Rejects opaque or hostless forms (e.g., "https:evil.com", "https:///cb")
+// that could bypass scheme-only validation due to URL parsing differences.
 func isAllowedRedirectURI(uri string) bool {
 	parsed, err := url.Parse(uri)
 	if err != nil {
+		return false
+	}
+	// Reject opaque URIs (e.g., "https:evil.com") and empty-host URIs
+	// (e.g., "https:///cb") which browsers may resolve unexpectedly.
+	if parsed.Opaque != "" || parsed.Hostname() == "" {
 		return false
 	}
 	if parsed.Scheme == schemeHTTPS {
