@@ -1,11 +1,14 @@
 package client
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	financialgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
@@ -321,6 +324,330 @@ func TestParseDispatchRefundParams(t *testing.T) {
 		_, err := parseDispatchRefundParams(params)
 		require.ErrorIs(t, err, saga.ErrMissingParam)
 	})
+}
+
+// --- Starlark Handler Tests (via mock gRPC server) ---
+
+func TestDispatchPaymentHandler_Success(t *testing.T) {
+	server := &fakeServer{
+		dispatchFn: func(_ context.Context, req *financialgatewayv1.DispatchPaymentRequest) (*financialgatewayv1.DispatchPaymentResponse, error) {
+			return &financialgatewayv1.DispatchPaymentResponse{
+				DispatchId:            "dispatch-1",
+				PaymentOrderId:        req.GetPaymentOrderId(),
+				Status:                financialgatewayv1.DispatchStatus_DISPATCH_STATUS_DELIVERED,
+				ProviderReference:     "pi_test_123",
+				PlatformFeeMinorUnits: 250,
+			}, nil
+		},
+	}
+	c, cleanup := setupTestServer(t, server)
+	defer cleanup()
+
+	handler := dispatchPaymentHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		CorrelationID:  uuid.New(),
+		IdempotencyKey: "test-idem",
+	}
+
+	result, err := handler(ctx, map[string]any{
+		"payment_order_id":         "po-123",
+		"amount_minor_units":       int64(10000),
+		"currency":                 "GBP",
+		"customer_reference":       "cus_test",
+		"payment_method_reference": "pm_test",
+		"idempotency_key":          "idem-key",
+		"rail":                     "STRIPE",
+	})
+	require.NoError(t, err)
+
+	m, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "pi_test_123", m["provider_reference_id"])
+	assert.Equal(t, "DELIVERED", m["status"])
+	assert.Equal(t, int64(250), m["platform_fee_minor_units"])
+}
+
+func TestDispatchPaymentHandler_ValidationError(t *testing.T) {
+	c, cleanup := setupTestServer(t, &fakeServer{})
+	defer cleanup()
+
+	handler := dispatchPaymentHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	// Missing required params
+	_, err := handler(ctx, map[string]any{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, saga.ErrMissingParam)
+}
+
+func TestDispatchPaymentHandler_GRPCError(t *testing.T) {
+	server := &fakeServer{
+		dispatchFn: func(_ context.Context, _ *financialgatewayv1.DispatchPaymentRequest) (*financialgatewayv1.DispatchPaymentResponse, error) {
+			return nil, status.Error(codes.Unavailable, "stripe down")
+		},
+	}
+	c, cleanup := setupTestServer(t, server)
+	defer cleanup()
+
+	handler := dispatchPaymentHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		CorrelationID:  uuid.New(),
+		IdempotencyKey: "test-idem",
+	}
+
+	_, err := handler(ctx, map[string]any{
+		"payment_order_id":         "po-123",
+		"amount_minor_units":       int64(10000),
+		"currency":                 "GBP",
+		"customer_reference":       "cus_test",
+		"payment_method_reference": "pm_test",
+		"idempotency_key":          "idem-key",
+		"rail":                     "STRIPE",
+	})
+	require.Error(t, err)
+}
+
+func TestCancelPaymentHandler_Success(t *testing.T) {
+	server := &fakeServer{
+		cancelFn: func(_ context.Context, req *financialgatewayv1.CancelPaymentRequest) (*financialgatewayv1.CancelPaymentResponse, error) {
+			return &financialgatewayv1.CancelPaymentResponse{
+				PaymentOrderId: req.GetPaymentOrderId(),
+				Status:         "CANCELLED",
+				Reason:         req.GetReason(),
+			}, nil
+		},
+	}
+	c, cleanup := setupTestServer(t, server)
+	defer cleanup()
+
+	handler := cancelPaymentHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	result, err := handler(ctx, map[string]any{
+		"payment_order_id": "po-cancel-1",
+		"reason":           "customer request",
+	})
+	require.NoError(t, err)
+
+	m, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "po-cancel-1", m["payment_order_id"])
+	assert.Equal(t, "CANCELLED", m["status"])
+	assert.Equal(t, "customer request", m["reason"])
+}
+
+func TestCancelPaymentHandler_MissingPaymentOrderID(t *testing.T) {
+	c, cleanup := setupTestServer(t, &fakeServer{})
+	defer cleanup()
+
+	handler := cancelPaymentHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	_, err := handler(ctx, map[string]any{})
+	require.Error(t, err)
+}
+
+func TestCancelPaymentHandler_GRPCError(t *testing.T) {
+	server := &fakeServer{
+		cancelFn: func(_ context.Context, _ *financialgatewayv1.CancelPaymentRequest) (*financialgatewayv1.CancelPaymentResponse, error) {
+			return nil, status.Error(codes.NotFound, "not found")
+		},
+	}
+	c, cleanup := setupTestServer(t, server)
+	defer cleanup()
+
+	handler := cancelPaymentHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	_, err := handler(ctx, map[string]any{
+		"payment_order_id": "po-1",
+	})
+	require.Error(t, err)
+}
+
+func TestDispatchRefundHandler_Success(t *testing.T) {
+	server := &fakeServer{
+		refundFn: func(_ context.Context, _ *financialgatewayv1.DispatchRefundRequest) (*financialgatewayv1.DispatchRefundResponse, error) {
+			return &financialgatewayv1.DispatchRefundResponse{
+				DispatchId:        "refund-1",
+				Status:            financialgatewayv1.DispatchStatus_DISPATCH_STATUS_PENDING,
+				ProviderReference: "re_test_123",
+			}, nil
+		},
+	}
+	c, cleanup := setupTestServer(t, server)
+	defer cleanup()
+
+	handler := dispatchRefundHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	result, err := handler(ctx, map[string]any{
+		"payment_order_id":          "po-refund-1",
+		"refund_amount_minor_units": int64(5000),
+		"idempotency_key":           "refund-idem",
+		"reason":                    "item returned",
+	})
+	require.NoError(t, err)
+
+	m, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "refund-1", m["refund_reference_id"])
+	assert.Equal(t, "PENDING", m["status"])
+	assert.Equal(t, "re_test_123", m["provider_reference"])
+}
+
+func TestDispatchRefundHandler_ValidationError(t *testing.T) {
+	c, cleanup := setupTestServer(t, &fakeServer{})
+	defer cleanup()
+
+	handler := dispatchRefundHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	_, err := handler(ctx, map[string]any{})
+	require.Error(t, err)
+}
+
+func TestDispatchRefundHandler_GRPCError(t *testing.T) {
+	server := &fakeServer{
+		refundFn: func(_ context.Context, _ *financialgatewayv1.DispatchRefundRequest) (*financialgatewayv1.DispatchRefundResponse, error) {
+			return nil, status.Error(codes.Unimplemented, "not implemented")
+		},
+	}
+	c, cleanup := setupTestServer(t, server)
+	defer cleanup()
+
+	handler := dispatchRefundHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	_, err := handler(ctx, map[string]any{
+		"payment_order_id":          "po-1",
+		"refund_amount_minor_units": int64(1000),
+		"idempotency_key":           "key",
+	})
+	require.Error(t, err)
+}
+
+func TestCancelPaymentHandler_WithCausationID(t *testing.T) {
+	server := &fakeServer{
+		cancelFn: func(_ context.Context, req *financialgatewayv1.CancelPaymentRequest) (*financialgatewayv1.CancelPaymentResponse, error) {
+			assert.Equal(t, "cause-123", req.GetCausationId())
+			return &financialgatewayv1.CancelPaymentResponse{
+				PaymentOrderId: req.GetPaymentOrderId(),
+				Status:         "CANCELLED",
+			}, nil
+		},
+	}
+	c, cleanup := setupTestServer(t, server)
+	defer cleanup()
+
+	handler := cancelPaymentHandler(c)
+	ctx := &saga.StarlarkContext{
+		Context:       context.Background(),
+		CorrelationID: uuid.New(),
+	}
+
+	_, err := handler(ctx, map[string]any{
+		"payment_order_id": "po-1",
+		"causation_id":     "cause-123",
+	})
+	require.NoError(t, err)
+}
+
+// --- applyRefundOptionalFields ---
+
+func TestApplyRefundOptionalFields(t *testing.T) {
+	corrID := uuid.New()
+	ctx := &saga.StarlarkContext{
+		CorrelationID: corrID,
+	}
+
+	t.Run("defaults correlation_id from context", func(t *testing.T) {
+		req := &financialgatewayv1.DispatchRefundRequest{}
+		params := map[string]any{}
+
+		applyRefundOptionalFields(req, ctx, params)
+		assert.Equal(t, corrID.String(), req.CorrelationId)
+		assert.Empty(t, req.CausationId)
+		assert.Nil(t, req.Metadata)
+	})
+
+	t.Run("explicit correlation_id overrides context", func(t *testing.T) {
+		req := &financialgatewayv1.DispatchRefundRequest{}
+		params := map[string]any{
+			"correlation_id": "custom-corr",
+		}
+
+		applyRefundOptionalFields(req, ctx, params)
+		assert.Equal(t, "custom-corr", req.CorrelationId)
+	})
+
+	t.Run("sets causation_id when provided", func(t *testing.T) {
+		req := &financialgatewayv1.DispatchRefundRequest{}
+		params := map[string]any{
+			"causation_id": "cause-123",
+		}
+
+		applyRefundOptionalFields(req, ctx, params)
+		assert.Equal(t, "cause-123", req.CausationId)
+	})
+
+	t.Run("passes through metadata", func(t *testing.T) {
+		req := &financialgatewayv1.DispatchRefundRequest{}
+		params := map[string]any{
+			"metadata": map[string]any{
+				"key1": "val1",
+			},
+		}
+
+		applyRefundOptionalFields(req, ctx, params)
+		assert.Equal(t, map[string]string{"key1": "val1"}, req.Metadata)
+	})
+}
+
+// --- prepareClientContext ---
+
+func TestPrepareClientContext(t *testing.T) {
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		CorrelationID:  uuid.New(),
+		IdempotencyKey: "test-idem-key",
+	}
+
+	result := prepareClientContext(ctx)
+	assert.NotNil(t, result)
+}
+
+// --- RegisterStarlarkHandlers ---
+
+func TestRegisterStarlarkHandlers(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+
+	// Use nil client - registration should succeed (handlers are closures, not called during registration)
+	err := RegisterStarlarkHandlers(registry, nil)
+	require.NoError(t, err)
 }
 
 // --- buildDispatchPaymentRequest ---
