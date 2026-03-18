@@ -42,6 +42,17 @@ Before starting, ensure you have:
 | `services/current-account/` | Inter-service clients, complex domain logic |
 | `services/financial-accounting/` | Kafka messaging, complex observability |
 
+## Convention Guides
+
+These guides document patterns you will apply throughout service creation. Read them before
+starting, and reference them when working on the relevant tasks.
+
+| Guide | Apply When |
+|-------|------------|
+| [Error Conventions](error-conventions.md) | Task 2 (domain errors), Task 7 (gRPC error mapping) |
+| [Repository Conventions](repository-conventions.md) | Task 2 (repository interface), Task 3 (GORM implementation) |
+| [Value Types](value-types.md) | Task 2 (domain model fields), Task 3 (persistence mapping) |
+
 ---
 
 ## Service Creation Tasks
@@ -105,6 +116,11 @@ go build ./...                # Verify generated code compiles
 
 Create the domain model with business rules and validation.
 
+**Convention references**:
+- [Error Conventions](error-conventions.md) — sentinel error naming and where to define them
+- [Repository Conventions](repository-conventions.md) — interface location, method naming, error documentation
+- [Value Types](value-types.md) — choosing between Money, Asset, and Amount for domain fields
+
 **Files to create:**
 
 - `{entity}.go` - Domain entity with:
@@ -112,6 +128,8 @@ Create the domain model with business rules and validation.
   - Constructor (`New{Entity}`) enforcing invariants
   - Mutation methods that validate state transitions
   - Value objects (enums, status types)
+- `errors.go` or `repository.go` - Sentinel errors (see [Error Conventions](error-conventions.md))
+- `repository.go` - Repository interface (port) with documented error contracts
 - `{entity}_test.go` - Unit tests for domain logic
 
 **Reference**: `services/party/domain/party.go`
@@ -167,13 +185,19 @@ go test ./services/{service}/domain/... -v
 
 Implement the repository using GORM.
 
+**Convention references**:
+- [Repository Conventions](repository-conventions.md) — entity-prefixed errors, TableName, optimistic locking, tenant scoping
+- [Value Types](value-types.md) — mapping Qty/Money/Amount to/from persistence columns
+
 **Files to create:**
 
 - `{entity}_entity.go` - Database entity with GORM tags
 - `repository.go` - Repository implementation with:
+  - Compile-time interface assertion (`var _ domain.{Entity}Repository = (*{Entity}Repository)(nil)`)
+  - Entity-prefixed sentinel errors (see [Error Conventions](error-conventions.md))
   - Optimistic locking via version field
-  - Soft delete support
-  - Context-based audit fields
+  - Tenant scoping via `db.WithGormTenantScope`
+  - Soft delete support (where applicable)
 - `repository_test.go` - Integration tests with Testcontainers
 
 **Reference**: `services/party/adapters/persistence/`
@@ -382,6 +406,8 @@ psql -h localhost -p 26257 -U {service}_svc -d meridian_{service} -c "\dt"
 ### Task 7: gRPC Service Handler
 
 **Location**: `services/{service}/service/`
+
+**Convention reference**: [Error Conventions](error-conventions.md) — gRPC status code mapping table and error message guidelines.
 
 Implement the gRPC service.
 
