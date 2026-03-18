@@ -47,9 +47,11 @@ func TestParseCursorToken_InvalidFormat(t *testing.T) {
 }
 
 func TestParseCursorToken_InvalidTimestamp(t *testing.T) {
-	import64 := "bm90bnVtYmVyfHZhbGlkLXV1aWQ=" // "notnumber|valid-uuid"
+	// "notnumber|8d89ac2b-7848-46a9-a956-133854f4c135" - valid UUID, invalid timestamp
+	import64 := "bm90bnVtYmVyfDhkODlhYzJiLTc4NDgtNDZhOS1hOTU2LTEzMzg1NGY0YzEzNQ=="
 	_, _, err := parseCursorToken(import64)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cursor timestamp")
 }
 
 func TestParseCursorToken_InvalidUUID(t *testing.T) {
