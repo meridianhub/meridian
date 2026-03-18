@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -94,14 +93,10 @@ func TestAttributeKeys_AreDistinct(t *testing.T) {
 	}
 }
 
-// Verify the trace package codes constant is accessible.
-func TestCodes_ErrorConstant(t *testing.T) {
-	assert.Equal(t, codes.Error, codes.Error)
-}
-
-// Verify SpanKindInternal is used.
-func TestStartSpan_UsesInternalKind(t *testing.T) {
-	t.Helper()
-	// StartSpan uses trace.SpanKindInternal; verify it compiles.
-	assert.NotNil(t, trace.SpanKindInternal)
+func TestStartSpan_ProducesValidSpanContext(t *testing.T) {
+	ctx, span := StartSpan(context.Background(), "valid-span")
+	defer span.End()
+	// Verify span is embedded in the returned context.
+	spanFromCtx := trace.SpanFromContext(ctx)
+	assert.Equal(t, span, spanFromCtx)
 }

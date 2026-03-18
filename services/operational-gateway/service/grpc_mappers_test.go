@@ -334,7 +334,8 @@ func TestAnyToProtoValue_AllTypes(t *testing.T) {
 	t.Run("Nil", func(t *testing.T) {
 		v := anyToProtoValue(nil)
 		assert.NotNil(t, v)
-		assert.NotNil(t, v.GetNullValue())
+		_, ok := v.GetKind().(*structpb.Value_NullValue)
+		assert.True(t, ok)
 	})
 
 	t.Run("Bool", func(t *testing.T) {
@@ -402,7 +403,8 @@ func TestAnyToProtoValue_AllTypes(t *testing.T) {
 
 	t.Run("UnsupportedType_ReturnsNull", func(t *testing.T) {
 		v := anyToProtoValue(struct{}{})
-		assert.NotNil(t, v.GetNullValue())
+		_, ok := v.GetKind().(*structpb.Value_NullValue)
+		assert.True(t, ok)
 	})
 }
 

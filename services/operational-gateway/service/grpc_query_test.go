@@ -494,6 +494,7 @@ func TestDispatchInstruction_WithOptionalFields(t *testing.T) {
 	assert.Equal(t, opgatewayv1.Priority_PRIORITY_HIGH, resp.Instruction.Priority)
 	assert.Equal(t, "corr-123", resp.Instruction.CorrelationId)
 	assert.Equal(t, "cause-456", resp.Instruction.CausationId)
+	assert.Equal(t, "test", resp.Instruction.Metadata["env"])
 }
 
 // ========== CancelInstruction additional unhappy paths ==========

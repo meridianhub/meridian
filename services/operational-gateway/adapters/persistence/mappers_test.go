@@ -23,6 +23,7 @@ func TestAuthConfigRoundtrip_APIKey(t *testing.T) {
 	apiKey, ok := back.(*domain.APIKeyAuth)
 	require.True(t, ok)
 	assert.Equal(t, "X-Key", apiKey.HeaderName)
+	assert.Equal(t, "ref", apiKey.SecretRef)
 }
 
 func TestAuthConfigRoundtrip_Basic(t *testing.T) {
@@ -36,6 +37,7 @@ func TestAuthConfigRoundtrip_Basic(t *testing.T) {
 	basic, ok := back.(*domain.BasicAuth)
 	require.True(t, ok)
 	assert.Equal(t, "user", basic.Username)
+	assert.Equal(t, "pass", basic.PasswordRef)
 }
 
 func TestAuthConfigRoundtrip_OAuth2(t *testing.T) {
@@ -54,6 +56,9 @@ func TestAuthConfigRoundtrip_OAuth2(t *testing.T) {
 	oauth, ok := back.(*domain.OAuth2Auth)
 	require.True(t, ok)
 	assert.Equal(t, "https://auth.example.com/token", oauth.TokenURL)
+	assert.Equal(t, "c1", oauth.ClientID)
+	assert.Equal(t, "cs", oauth.ClientSecretRef)
+	assert.Equal(t, []string{"read"}, oauth.Scopes)
 }
 
 func TestAuthConfigRoundtrip_HMAC(t *testing.T) {
@@ -67,6 +72,8 @@ func TestAuthConfigRoundtrip_HMAC(t *testing.T) {
 	hmac, ok := back.(*domain.HMACAuth)
 	require.True(t, ok)
 	assert.Equal(t, "SHA256", hmac.Algorithm)
+	assert.Equal(t, "ref", hmac.SecretRef)
+	assert.Equal(t, "X-Sig", hmac.SignatureHeader)
 }
 
 func TestAuthConfigRoundtrip_MTLS(t *testing.T) {
@@ -80,6 +87,8 @@ func TestAuthConfigRoundtrip_MTLS(t *testing.T) {
 	mtls, ok := back.(*domain.MTLSAuth)
 	require.True(t, ok)
 	assert.Equal(t, "cert", mtls.ClientCertRef)
+	assert.Equal(t, "key", mtls.ClientKeyRef)
+	assert.Equal(t, "ca", mtls.CACertRef)
 }
 
 func TestAuthConfigToJSON_UnknownType(t *testing.T) {
