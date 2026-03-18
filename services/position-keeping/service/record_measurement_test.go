@@ -1733,3 +1733,258 @@ func TestDomain_Measurement_BucketID_CanBeEmpty(t *testing.T) {
 	require.NotNil(t, measurement)
 	assert.Empty(t, measurement.BucketID)
 }
+
+// TestRecordMeasurement_Idempotency_MarkPendingError tests that MarkPending failure
+// returns an Internal error for the measurement idempotency path.
+func TestRecordMeasurement_Idempotency_MarkPendingError(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
+	require.NoError(t, err)
+
+	logID := uuid.New()
+
+	// Mock idempotency check - no previous operation
+	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(nil, idempotency.ErrResultNotFound)
+
+	// Mock idempotency mark pending to fail
+	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
+		Return(assert.AnError)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.Now(),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "test-key-mark-pending-fail",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to mark operation as pending")
+	mockIdempotency.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_Idempotency_NoKeyProvided tests that no idempotency key
+// skips the idempotency check entirely.
+func TestRecordMeasurement_Idempotency_NoKeyProvided(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-no-key",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		// No IdempotencyKey
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	// Idempotency should NOT have been called at all
+	mockIdempotency.AssertNotCalled(t, "Check")
+	mockIdempotency.AssertNotCalled(t, "MarkPending")
+	mockIdempotency.AssertNotCalled(t, "StoreResult")
+	mockIdempotency.AssertNotCalled(t, "Delete")
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_Idempotency_EmptyKey tests that empty idempotency key
+// is treated the same as no key.
+func TestRecordMeasurement_Idempotency_EmptyKey(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-empty-key",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "", // Empty key
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	mockIdempotency.AssertNotCalled(t, "Check")
+	mockIdempotency.AssertNotCalled(t, "MarkPending")
+	mockIdempotency.AssertNotCalled(t, "StoreResult")
+	mockIdempotency.AssertNotCalled(t, "Delete")
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_Idempotency_StoreResultError tests the error path when
+// StoreResult fails after a successful measurement recording.
+func TestRecordMeasurement_Idempotency_StoreResultError(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-store-fail",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	// Idempotency check - no previous operation
+	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).
+		Return(nil, idempotency.ErrResultNotFound)
+	mockIdempotency.On("MarkPending", ctx, mock.AnythingOfType("idempotency.Key"), mock.AnythingOfType("time.Duration")).
+		Return(nil)
+	// StoreResult fails
+	mockIdempotency.On("StoreResult", ctx, mock.AnythingOfType("idempotency.Result")).
+		Return(assert.AnError)
+	// Delete called to clean up on error
+	mockIdempotency.On("Delete", ctx, mock.AnythingOfType("idempotency.Key")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "test-store-result-fail",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to store idempotency result")
+	mockIdempotency.AssertExpectations(t)
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+}
+
+// TestRecordMeasurement_Idempotency_CachedResultWithBadJSON tests the error path when
+// cached idempotency data contains invalid JSON.
+func TestRecordMeasurement_Idempotency_CachedResultWithBadJSON(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc, err := service.NewPositionKeepingService(mockRepo, mockMeasurementRepo, mockEventPublisher, mockIdempotency, newTestOutboxPublisher(t))
+	require.NoError(t, err)
+
+	logID := uuid.New()
+
+	cachedResult := &idempotency.Result{
+		Status:      idempotency.StatusCompleted,
+		Data:        []byte(`{invalid json}`),
+		CompletedAt: time.Now(),
+	}
+
+	mockIdempotency.On("Check", ctx, mock.AnythingOfType("idempotency.Key")).Return(cachedResult, nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.Now(),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: "test-bad-json-key",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to decode cached idempotency response")
+	mockIdempotency.AssertExpectations(t)
+}
