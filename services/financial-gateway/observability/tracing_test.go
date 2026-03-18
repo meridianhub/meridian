@@ -25,7 +25,7 @@ func TestStartSpan(t *testing.T) {
 	assert.NotNil(t, span)
 }
 
-func TestRecordError(t *testing.T) {
+func TestRecordError(_ *testing.T) {
 	_, span := StartSpan(context.Background(), "test-error")
 	defer span.End()
 
