@@ -254,7 +254,7 @@ function LoginPage() {
           <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
         </div>
 
-        {/* Dex login form - shown in demo mode and production */}
+        {/* Password login form - shown in production builds only */}
         {!import.meta.env.DEV && (
           <form onSubmit={(e) => void handleLogin(e)} className="space-y-4">
             <div>
