@@ -607,7 +607,9 @@ func TestHandleInitiate_RedirectsTenantScopedDexURL(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/google", nil)
 	tid, _ := tenant.NewTenantID("acme")
-	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	ctx := tenant.WithTenant(req.Context(), tid)
+	ctx = tenant.WithSlug(ctx, "acme")
+	req = req.WithContext(ctx)
 	req.SetPathValue("connector_id", "google")
 
 	rec := httptest.NewRecorder()
