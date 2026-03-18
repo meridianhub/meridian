@@ -281,32 +281,23 @@ func TestProductTypeSeeder_SeedFromProductType_MultipleTenants(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create a second tenant schema
+	// Create a second tenant schema and migrate tables using AutoMigrate
+	// (must match the GORM-created schema from the first tenant to avoid type mismatches)
 	tid2 := tenant.TenantID("test_tenant_2")
 	schemaName2 := tid2.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName2)).Error
 	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.valuation_features (
-		id UUID PRIMARY KEY,
-		account_id UUID NOT NULL,
-		instrument_code VARCHAR(32) NOT NULL,
-		valuation_method_id UUID NOT NULL,
-		valuation_method_version INT NOT NULL,
-		parameters JSONB,
-		lifecycle_status VARCHAR(16) NOT NULL,
-		valid_from TIMESTAMP WITH TIME ZONE NOT NULL,
-		valid_to TIMESTAMP WITH TIME ZONE NOT NULL,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		created_by VARCHAR(100) NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_by VARCHAR(100) NOT NULL,
-		version INT NOT NULL DEFAULT 1,
-		CONSTRAINT chk_vf_t2_lifecycle_status CHECK (lifecycle_status IN ('INITIATED','ACTIVE','TERMINATED'))
-	)`, schemaName2)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName2)).Error
 	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX idx_vf_t2_account_instrument_active
-		ON %q.valuation_features (account_id, instrument_code)
-		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, schemaName2)).Error
+	err = db.AutoMigrate(&Entity{})
+	require.NoError(t, err)
+	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vf_t2_account_instrument_active
+		ON valuation_features (account_id, instrument_code)
+		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`)).Error
+	require.NoError(t, err)
+	// Restore search_path to the primary tenant
+	primarySchema := tenant.TenantID(testTenantID).SchemaName()
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", primarySchema)).Error
 	require.NoError(t, err)
 
 	ctx2 := tenant.WithTenant(context.Background(), tid2)
