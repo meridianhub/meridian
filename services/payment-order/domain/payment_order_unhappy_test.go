@@ -203,14 +203,7 @@ func TestFailTransition_InvalidFromTerminal(t *testing.T) {
 		t.Run(string(status), func(t *testing.T) {
 			po := &PaymentOrder{Status: status}
 			err := po.Fail("test", "TEST")
-			// Already in terminal — Fail is idempotent for FAILED, error for others
-			if status == PaymentOrderStatusFailed {
-				assert.NoError(t, err)
-			} else {
-				// These are terminal but not FAILED — should either error or be idempotent
-				// depending on implementation
-				_ = err
-			}
+			assert.Error(t, err, "Fail() should error when called on terminal status %s", status)
 		})
 	}
 }
