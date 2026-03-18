@@ -103,13 +103,17 @@ type FinancialPositionLogRepository interface {
 }
 
 // services/tenant/domain/repository.go
+// Note: tenant uses UpdateStatus (targeted) rather than a full Update method.
+// Domain entities with multiple write paths may use targeted update methods
+// rather than a single generic Update.
 type TenantRepository interface {
     Create(ctx context.Context, tenant *Tenant) error
     GetByID(ctx context.Context, id tenant.TenantID) (*Tenant, error)
     GetBySlug(ctx context.Context, slug string) (*Tenant, error)
     IsSlugAvailable(ctx context.Context, slug string) (bool, error)
-    Update(ctx context.Context, tenant *Tenant) error
-    List(ctx context.Context, filter TenantFilter) ([]*Tenant, int64, error)
+    UpdateStatus(ctx context.Context, id tenant.TenantID, status Status, currentVersion int) (*Tenant, error)
+    UpdateStatusWithError(ctx context.Context, id tenant.TenantID, status Status, errorMsg string, currentVersion int) (*Tenant, error)
+    List(ctx context.Context, statusFilter *Status, pageSize int, pageToken string) ([]*Tenant, string, error)
 }
 ```
 
@@ -136,6 +140,14 @@ FindByID(ctx context.Context, runID uuid.UUID) (*SettlementRun, error)
 // Returns ErrOptimisticLock if the version doesn't match.
 Update(ctx context.Context, run *SettlementRun) error
 ```
+
+> **ErrOptimisticLock vs ErrVersionConflict**: The domain layer defines `ErrOptimisticLock`
+> as the semantic error for concurrent modification. The persistence layer defines
+> `ErrVersionConflict` (entity-prefixed in practice, e.g., no prefix needed when there is
+> only one entity type per repo file). Both name the same condition at different layers.
+> Service code checks `persistence.ErrVersionConflict`; domain interface comments reference
+> `ErrOptimisticLock`. This is intentional layering—domain errors describe business
+> semantics, persistence errors describe storage outcomes.
 
 ## GORM Entity Structure
 
