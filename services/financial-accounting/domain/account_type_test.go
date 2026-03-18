@@ -6,8 +6,8 @@ import (
 
 func TestAccountType_IsValid(t *testing.T) {
 	tests := []struct {
-		name     string
-		atype    AccountType
+		name      string
+		atype     AccountType
 		wantValid bool
 	}{
 		{
