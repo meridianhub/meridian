@@ -46,6 +46,14 @@ stateDiagram-v2
 | [Starlark Testing Framework](010-starlark-testing-framework.md) | N/A (tracked across other tags) | Implemented 2026-02-06 |
 | [Structured Mapping Layer](024-structured-inbound-mapping.md) | `structured-mapping-layer` | 16/16 done |
 | [Valuation Service](011-valuation-service.md) | `valuation-engine` | 14/14 done |
+| [Platform Scheduler](021-platform-scheduler.md) | `platform-scheduler` | 12/12 done |
+| [Stripe Connect Wiring](015-stripe-connect.md) | `stripe-connect-wiring` | 10/10 done |
+| [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) | `account-service-wiring` | 20/21 done, 1 cancelled |
+| [Internal Account - PK Client](019-internal-bank-account-position-keeping-client.md) | `account-service-wiring` | (included in account-service-wiring) |
+| [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) | `party-kyc-aml` | 10/10 done |
+| [MCP Server](027-mcp-server.md) | `mcp-server` | 17/18 done, 1 cancelled |
+| [Operational Gateway](029-operational-gateway.md) | `operational-gateway` | 20/20 done |
+| [Reconciliation Phase 2](013-reconciliation-service.md) | `reconciliation-service-phase2-completed-2026-02-13` | 10/10 done |
 
 #### Paused (Deferred Items Remain)
 
@@ -57,22 +65,7 @@ stateDiagram-v2
 
 | PRD | Task Master Tag | Tasks |
 |-----|-----------------|-------|
-| [Platform Scheduler](021-platform-scheduler.md) | `platform-scheduler` | 3/10 done, 1 review, 6 pending |
-
-#### Near Completion
-
-| PRD | Task Master Tag | Tasks | Remaining |
-|-----|-----------------|-------|-----------|
-| [Stripe Connect Wiring](015-stripe-connect.md) | `stripe-connect-wiring` | 9/10 done | Task 10: E2E integration test (in-progress) |
-| [Reconciliation Phase 2](013-reconciliation-service.md) | `reconciliation-service-phase2` | 9/10 done | Task 10: E2E test suite (review) |
-
-#### Planned (Task Master Tags Created)
-
-| PRD | Task Master Tag | Description |
-|-----|-----------------|-------------|
-| [Current Account Withdrawal Persistence](018-current-account-withdrawal-persistence.md) | `account-service-wiring` | Wire withdrawal-by-ID gRPC handlers in current-account service |
-| [Internal Account - Position Keeping Client](019-internal-bank-account-position-keeping-client.md) | `account-service-wiring` | Wire Position Keeping gRPC client in internal-account service |
-| [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) | `party-kyc-aml` | External KYC/AML provider adapter for production party onboarding |
+| [Test Coverage to 80%](048-test-coverage-80.md) | `test-coverage-80` | 0/13 done |
 
 #### Not Started
 
@@ -81,26 +74,24 @@ stateDiagram-v2
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
 | [Identity and Access Management](031-identity-access-management.md) | Bridge Party service identity to authentication with dynamic user management and RBAC |
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
-| [MCP Server](027-mcp-server.md) | Model Context Protocol server bridging LLMs to Meridian Core |
-| [Operational Gateway](029-operational-gateway.md) | Bidirectional asset-agnostic gateway for outbound instructions and inbound messages |
-| [AsyncAPI Specification](030-asyncapi-specification.md) | Formal AsyncAPI 3.0 specs for Kafka event contracts, mirroring OpenAPI for sync APIs |
-| [Event-Triggered Saga Execution](032-event-driven-valuation-saga.md) | Fourth saga trigger type (event:) for reactive workflows via domain events |
-| [Gateway Architecture](033-gateway-architecture.md) | Unified gateway architecture consolidating API, operational, and admin gateways |
-| [Frontend Service Alignment](034-frontend-service-alignment.md) | Service-aligned frontend modules, Storybook, and runtime tenant UI customisation |
-| [Economy Cookbook](035-economy-cookbook.md) | Unified pattern registry for economy patterns and UI components |
-| [Cookbook Browser](036-cookbook-browser.md) | Visual pattern and component explorer for the cookbook |
-| [Multi-Asset Purity](037-multi-asset-purity.md) | Remove hardcoded asset references, enforce instrument resolution via Reference Data |
-| [Manifest Business Model Visualization](038-manifest-business-model-visualization.md) | Interactive business model graph from live tenant manifest |
-| [Meridian Economy Runtime](039-meridian-vm.md) | Formalise Meridian as programmable Economy Runtime with typed service modules, AI generator, and IDE |
-| [Org-Scoped Accounts](022-org-scoped-accounts.md) | Multi-party resource pooling following BIAN Syndicate Pattern |
-| [Product Directory](023-product-directory.md) | BIAN-aligned AccountTypeRegistry for runtime-configurable product catalog |
+| [AsyncAPI Specification](030-asyncapi-specification.md) | Formal AsyncAPI 3.0 specs for Kafka event contracts |
+| [Event-Triggered Saga Execution](032-event-driven-valuation-saga.md) | Fourth saga trigger type (event:) for reactive workflows |
+| [Gateway Architecture](033-gateway-architecture.md) | Unified gateway architecture |
+| [Frontend Service Alignment](034-frontend-service-alignment.md) | Service-aligned frontend modules and runtime tenant UI |
+| [Economy Cookbook](035-economy-cookbook.md) | Unified pattern registry for economy patterns |
+| [Cookbook Browser](036-cookbook-browser.md) | Visual pattern and component explorer |
+| [Multi-Asset Purity](037-multi-asset-purity.md) | Remove hardcoded asset references |
+| [Manifest Business Model Visualization](038-manifest-business-model-visualization.md) | Interactive business model graph |
+| [Meridian Economy Runtime](039-meridian-vm.md) | Programmable Economy Runtime with AI generator |
+| [Org-Scoped Accounts](022-org-scoped-accounts.md) | Multi-party resource pooling |
+| [Product Directory](023-product-directory.md) | Runtime-configurable product catalog |
 | [Operations Console UI](026-operations-console-ui.md) | Meridian operations console frontend |
-| [Handler Schema Alignment](040-handler-schema-alignment.md) | Eliminate handlers.yaml; derive handler schemas from proto definitions |
-| [Economy Generator](041-economy-generator.md) | AI-assisted economy generation via MCP tool producing validated manifests |
-| [Economy IDE](042-economy-ide.md) | Conversational economy creation UI with manifest editor and deploy wizard |
-| [MCP Manifest Tenant Isolation](043-mcp-manifest-tenant-isolation.md) | Fix tenant leakage and create-vs-amend mode in MCP manifest validation |
-| [Auth Flow Architecture](044-auth-flow-architecture.md) | Authentication entry points (BFF, SSO, MCP OAuth) and tenant context flow |
-| [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) | Control plane owns all structural economy declarations, versioned in DB |
+| [Handler Schema Alignment](040-handler-schema-alignment.md) | Derive handler schemas from proto definitions |
+| [Economy Generator](041-economy-generator.md) | AI-assisted economy generation via MCP |
+| [Economy IDE](042-economy-ide.md) | Conversational economy creation UI |
+| [MCP Manifest Tenant Isolation](043-mcp-manifest-tenant-isolation.md) | Fix tenant leakage in MCP manifest validation |
+| [Auth Flow Architecture](044-auth-flow-architecture.md) | Authentication entry points and tenant context flow |
+| [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) | Control plane owns all economy declarations |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
