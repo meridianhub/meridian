@@ -43,23 +43,25 @@ func TestStartSpan_WithMultipleAttributes(t *testing.T) {
 }
 
 func TestRecordError_NilError(t *testing.T) {
-	_, span := StartSpan(context.Background(), "test")
-	defer span.End()
-	// Should not panic.
-	RecordError(span, nil)
+	assert.NotPanics(t, func() {
+		_, span := StartSpan(context.Background(), "test")
+		defer span.End()
+		RecordError(span, nil)
+	})
 }
 
 func TestRecordError_NilSpan(t *testing.T) {
-	// Should not panic.
-	RecordError(nil, errors.New("test error"))
+	assert.NotPanics(t, func() {
+		RecordError(nil, errors.New("test error"))
+	})
 }
 
 func TestRecordError_WithError(t *testing.T) {
-	// Use a recording span to verify error is recorded.
-	_, span := StartSpan(context.Background(), "error-span")
-	defer span.End()
-	RecordError(span, errors.New("test error"))
-	// Verify span is still valid (no panic).
+	assert.NotPanics(t, func() {
+		_, span := StartSpan(context.Background(), "error-span")
+		defer span.End()
+		RecordError(span, errors.New("test error"))
+	})
 }
 
 func TestRecordError_SetsErrorStatus(t *testing.T) {

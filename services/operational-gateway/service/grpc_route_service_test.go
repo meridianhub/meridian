@@ -124,12 +124,12 @@ func TestUpsertRoute_Success(t *testing.T) {
 	seedConnection(connRepo, tid, connID)
 
 	resp, err := svc.UpsertRoute(ctx, &opgatewayv1.UpsertRouteRequest{
-		InstructionType:    "kyc.verify",
-		ConnectionId:       connID,
-		OutboundMapping:    "kyc-outbound",
-		InboundMapping:     "kyc-inbound",
-		HttpMethod:         "POST",
-		PathTemplate:       "/v1/checks",
+		InstructionType: "kyc.verify",
+		ConnectionId:    connID,
+		OutboundMapping: "kyc-outbound",
+		InboundMapping:  "kyc-inbound",
+		HttpMethod:      "POST",
+		PathTemplate:    "/v1/checks",
 	})
 
 	require.NoError(t, err)
