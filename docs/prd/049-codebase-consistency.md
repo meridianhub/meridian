@@ -143,7 +143,7 @@ modifies a `.proto` file but forgets to regenerate.
 
 ### Rationale
 
-`shared/pkg/` has 18 packages and `shared/platform/` has 21 packages. Fewer than half have
+`shared/pkg/` has 20 packages and `shared/platform/` has 19 packages. Fewer than half have
 `doc.go` files. Without them, understanding a package requires scanning all exported symbols -
 expensive for humans, catastrophic for AI context windows.
 
@@ -183,12 +183,13 @@ package mapping
 
 ### Task 2.2: Add doc.go to All shared/platform/ Packages
 
-**Problem**: 13 of 21 `shared/platform/` packages lack `doc.go`.
+**Problem**: 14 of 19 `shared/platform/` packages lack `doc.go`.
 
 **Packages missing doc.go** (verify current state before implementing):
 
-- `auth/`, `db/`, `env/`, `gateway/`, `kafka/`, `observability/`, `ports/`,
-  `quantity/`, `ratelimit/`, `redislock/`, `sandbox/`, `scheduler/`, `tenant/`
+- `auth/`, `await/`, `db/`, `gateway/`, `kafka/`, `observability/`,
+  `ports/`, `quantity/`, `ratelimit/`, `redislock/`, `sandbox/`,
+  `scheduler/`, `tenant/`, `testdb/`
 
 **Acceptance Criteria**:
 
@@ -231,7 +232,7 @@ Three different naming patterns for the main gRPC service file:
 | `server.go` | internal-account, market-information |
 | `grpc_service.go` | current-account, party, payment-order, tenant, identity, financial-gateway, operational-gateway |
 | `service.go` | position-keeping, reconciliation |
-| `{name}_service.go` | financial-accounting (`financial_accounting_service.go`) |
+| `{name}_service.go` | financial-accounting (`financial_accounting_service.go`), audit-worker (`audit_service.go`) |
 
 This means "find the gRPC handler registration" requires checking
 multiple filenames per service.
@@ -254,6 +255,7 @@ for the gRPC service implementation file. Most services use
 - `services/financial-accounting/service/financial_accounting_service.go`
   -> `server.go`
 - `services/position-keeping/service/service.go` -> `server.go`
+- `services/audit-worker/service/audit_service.go` -> `server.go`
 - `services/reconciliation/service/service.go` -> `server.go`
 
 **Acceptance Criteria**:
