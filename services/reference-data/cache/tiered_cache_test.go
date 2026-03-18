@@ -38,7 +38,7 @@ func (m *mockSource) GetDefinition(ctx context.Context, code string, version int
 	atomic.AddInt32(&m.loadCount, 1)
 
 	if m.loadDelay > 0 {
-		time.Sleep(m.loadDelay)
+		time.Sleep(m.loadDelay) //nolint:forbidigo // simulates source latency in mock
 	}
 
 	if m.loadErr != nil {

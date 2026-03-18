@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -206,7 +207,7 @@ func TestRateLimitInterceptor_TokenReplenishment(t *testing.T) {
 	assert.Equal(t, codes.ResourceExhausted, status.Code(err))
 
 	// Wait for token to replenish
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond) //nolint:forbidigo // triggers rate limit token replenishment
 
 	// Should succeed again
 	_, err = handler(ctx, nil, info, testHandler)
@@ -276,7 +277,13 @@ func TestRateLimitInterceptor_CleanupIdleLimiters(t *testing.T) {
 	assert.Equal(t, 1, interceptor.ActiveLimiters())
 
 	// Wait for cleanup to evict it
-	time.Sleep(200 * time.Millisecond)
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			return interceptor.ActiveLimiters() == 0
+		})
+	require.NoError(t, err, "idle limiter should be evicted by cleanup")
 
 	assert.Equal(t, 0, interceptor.ActiveLimiters())
 }
@@ -343,7 +350,15 @@ func TestRateLimitMetrics_ActiveLimitersGauge(t *testing.T) {
 	assert.Equal(t, float64(3), gaugeMetric.Gauge.GetValue())
 
 	// Wait for cleanup
-	time.Sleep(200 * time.Millisecond)
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			m := &dto.Metric{}
+			_ = metrics.active.Write(m)
+			return m.Gauge.GetValue() == 0
+		})
+	require.NoError(t, err, "active limiters gauge should reach 0 after cleanup")
 
 	err = metrics.active.Write(gaugeMetric)
 	require.NoError(t, err)

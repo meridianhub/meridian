@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/party/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -166,8 +167,10 @@ func TestTimeoutHandler_DetectsTimedOutVerifications(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for at least one poll cycle
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the handler to process the timed-out verification
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		return len(repo.getUpdatedCalls()) >= 1
+	}), "handler did not process timed-out verification within timeout")
 	cancel()
 	<-done
 
@@ -231,7 +234,9 @@ func TestTimeoutHandler_ProviderReturnsApproved(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		return len(repo.getUpdatedCalls()) >= 1
+	}), "handler did not process verification within timeout")
 	cancel()
 	<-done
 
@@ -290,7 +295,9 @@ func TestTimeoutHandler_ProviderReturnsRejected(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		return len(repo.getUpdatedCalls()) >= 1
+	}), "handler did not process verification within timeout")
 	cancel()
 	<-done
 
@@ -338,7 +345,7 @@ func TestTimeoutHandler_IgnoresCompletedVerifications(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond) //nolint:forbidigo // gives handler time to run at least one poll cycle (asserting absence of processing)
 	cancel()
 	<-done
 
@@ -445,7 +452,14 @@ func TestTimeoutHandler_HandlesProviderErrorsGracefully(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		for _, u := range repo.getUpdatedCalls() {
+			if u.VerificationID == v2 {
+				return true
+			}
+		}
+		return false
+	}), "handler did not process provider-ok verification within timeout")
 	cancel()
 	<-done
 
@@ -524,7 +538,9 @@ func TestTimeoutHandler_ProviderReturnsManualReview(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		return len(repo.getUpdatedCalls()) >= 1
+	}), "handler did not process verification within timeout")
 	cancel()
 	<-done
 

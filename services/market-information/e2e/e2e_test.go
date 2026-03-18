@@ -1053,7 +1053,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 
 		// Create observation in goroutine with delay
 		go func() {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond) //nolint:forbidigo // simulates async processing delay
 			now := time.Now().UTC()
 			obs, _ := domain.NewMarketPriceObservation(
 				"ASYNC_TEST",

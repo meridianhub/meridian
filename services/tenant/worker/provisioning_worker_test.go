@@ -271,7 +271,7 @@ func TestProvisioningWorker_Start_ContextCancellation(t *testing.T) {
 	}()
 
 	// Intentional sleep: Let it run through at least one poll interval before stopping
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) //nolint:forbidigo // gives worker time to run at least one poll cycle
 
 	// Cancel context
 	cancel()
@@ -308,7 +308,7 @@ func TestProvisioningWorker_Start_ExplicitStop(t *testing.T) {
 	}()
 
 	// Intentional sleep: Let it run through at least one poll interval before stopping
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) //nolint:forbidigo // gives worker time to run at least one poll cycle
 
 	// Call Stop()
 	worker.Stop()
@@ -1534,8 +1534,7 @@ func TestProcessPendingTenants_ConcurrentClaimSkipped(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		// Intentional sleep: Small delay to create race condition for concurrent claim testing
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond) //nolint:forbidigo // simulates concurrent work delay for race condition testing
 		worker.processPendingTenants(ctx)
 	}()
 

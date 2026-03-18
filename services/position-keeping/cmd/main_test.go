@@ -287,7 +287,7 @@ func TestHealthServer_Watch_RespectsContext(t *testing.T) {
 	}()
 
 	// Intentional sleep: Give grpc health watch time to send initial status
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // gives gRPC health Watch time to send initial status
 
 	// Cancel the context
 	streamCancel()

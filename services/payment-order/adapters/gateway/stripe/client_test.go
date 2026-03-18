@@ -168,7 +168,7 @@ func TestClientFactory_NewClient_CacheExpires(t *testing.T) {
 	assert.Equal(t, int64(1), provider.callCount.Load())
 
 	// Wait for cache to expire
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond) //nolint:forbidigo // triggers cache TTL expiry
 
 	// Second call should fetch again
 	_, err = factory.NewClient(ctx)

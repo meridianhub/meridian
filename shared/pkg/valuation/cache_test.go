@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/meridianhub/meridian/shared/pkg/valuation"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 func TestInMemoryCache_MethodCaching(t *testing.T) {
@@ -83,12 +84,11 @@ func TestInMemoryCache_MethodTTL(t *testing.T) {
 	cached, _ := cache.GetMethod("method-1", intPtr(1))
 	assert.NotNil(t, cached)
 
-	// Wait for TTL to expire
-	time.Sleep(100 * time.Millisecond)
-
-	// Lookup after TTL returns nil (expired)
-	cached, _ = cache.GetMethod("method-1", intPtr(1))
-	assert.Nil(t, cached, "entry should be expired")
+	// Wait for TTL to expire, polling until GetMethod returns nil (expired)
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(10*time.Millisecond).Until(func() bool {
+		cached, _ = cache.GetMethod("method-1", intPtr(1))
+		return cached == nil
+	}), "entry should be expired")
 }
 
 func TestInMemoryCache_PolicyCaching(t *testing.T) {

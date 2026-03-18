@@ -186,7 +186,7 @@ func TestRouter_HandleEvent_TenantIsolation(t *testing.T) {
 	require.NoError(t, err, "tenant-A connection should have received event")
 
 	// Give some time to ensure tenant-B doesn't receive anything
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // no observable condition; confirms absence of delivery
 	assert.Equal(t, 0, connB.ReceivedCount(), "tenant-B connection must not receive tenant-A's event")
 }
 
@@ -223,7 +223,7 @@ func TestRouter_HandleEvent_SubscriptionFilterMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	// Give time to confirm no delivery
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // no observable condition; confirms absence of delivery
 	assert.Equal(t, 0, conn.ReceivedCount(), "connection should not receive non-matching channel event")
 }
 
@@ -272,7 +272,7 @@ func TestRouter_UnregisterConnection_StopsDelivery(t *testing.T) {
 	err := fanOut.Publish(context.Background(), event)
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // no observable condition; confirms absence of delivery
 	assert.Equal(t, 0, conn.ReceivedCount(), "unregistered connection should not receive events")
 }
 

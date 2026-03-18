@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -260,7 +261,7 @@ func TestLocalAccountTypeCache_TTLExpiry_RegularDefinition(t *testing.T) {
 	require.NotNil(t, cached)
 
 	// Wait for TTL expiry
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond) //nolint:forbidigo // triggers TTL expiry to test cache expiration
 
 	// Should be expired
 	expired := cache.Get(ctx, def.Code, def.Version)
@@ -396,7 +397,7 @@ func TestLocalAccountTypeCache_ExpiredSystemBlueprintTriggersBackgroundRefresh(t
 	lruCache.Add(AccountTypeKey{Code: "SYSTEM_NOSTRO", Version: 1}, entry)
 
 	// Wait for expiry
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond) //nolint:forbidigo // triggers TTL expiry to test stale-while-revalidate behavior
 
 	// Get should return stale entry (not nil) and trigger background refresh
 	result := cache.Get(ctx, "SYSTEM_NOSTRO", 1)
@@ -404,7 +405,14 @@ func TestLocalAccountTypeCache_ExpiredSystemBlueprintTriggersBackgroundRefresh(t
 	assert.Equal(t, "SYSTEM_NOSTRO", result.Definition.Code)
 
 	// Wait for background refresh to complete
-	time.Sleep(100 * time.Millisecond)
+	err := await.New().
+		AtMost(2 * time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			refreshed := cache.Get(ctx, "SYSTEM_NOSTRO", 1)
+			return refreshed != nil && refreshed.ExpiresAt().After(time.Now())
+		})
+	require.NoError(t, err, "background refresh should complete with fresh TTL")
 
 	// After refresh, entry should have a fresh TTL
 	refreshed := cache.Get(ctx, "SYSTEM_NOSTRO", 1)

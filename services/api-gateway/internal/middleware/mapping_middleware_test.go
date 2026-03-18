@@ -364,7 +364,7 @@ func TestCachedMappingResolver_ExpiredEntry(t *testing.T) {
 	assert.Equal(t, 1, delegate.calls)
 
 	// Wait for expiry
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond) //nolint:forbidigo // triggers cache TTL expiry to test re-resolution
 
 	// Second call should re-resolve
 	_, err = cached.Resolve(context.Background(), "tenant-1", "stripe-webhook")

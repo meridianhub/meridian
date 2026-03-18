@@ -595,7 +595,7 @@ func TestPostgresAccountTypeRegistry_LifecycleTimestamps(t *testing.T) {
 		original, err := reg.GetDefinition(ctx, "TIMESTAMPS_AT", 1)
 		require.NoError(t, err)
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps between read and update
 
 		updates := &accounttype.Definition{DisplayName: "Updated Name"}
 		require.NoError(t, reg.UpdateDefinition(ctx, "TIMESTAMPS_AT", 1, updates))

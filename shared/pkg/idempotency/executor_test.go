@@ -301,7 +301,7 @@ func TestExecutor_Execute_ConcurrentRequests(t *testing.T) {
 			defer wg.Done()
 			_, err := executor.Execute(context.Background(), key, time.Hour, func(_ context.Context) ([]byte, error) {
 				atomic.AddInt32(&executionCount, 1)
-				// Intentional sleep: Simulate work to test concurrent idempotency enforcement
+				//nolint:forbidigo // simulates work latency to test concurrent idempotency enforcement
 				time.Sleep(10 * time.Millisecond)
 				return []byte("result"), nil
 			})

@@ -13,6 +13,8 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 // mockInternalAccountClient is a mock implementation for testing.
@@ -31,7 +33,7 @@ type mockInternalAccountClient struct {
 
 func (m *mockInternalAccountClient) ListInternalAccounts(_ context.Context, req *internalaccountv1.ListInternalAccountsRequest) (*internalaccountv1.ListInternalAccountsResponse, error) {
 	if m.latency > 0 {
-		time.Sleep(m.latency)
+		time.Sleep(m.latency) //nolint:forbidigo // mock: simulates configurable backend latency for singleflight coalescing tests
 	}
 	m.callCount.Add(1)
 	m.mu.Lock()
@@ -236,13 +238,15 @@ func TestCacheTTL_Expiration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, mockClient.getCallCount(), "Should still be cached")
 
-	// Wait for cache to expire
-	time.Sleep(shortTTL + 10*time.Millisecond)
+	// Wait for cache to expire, then verify the next call reaches the backend
+	var thirdErr error
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(5*time.Millisecond).Until(func() bool {
+		_, thirdErr = resolver.GetDepositClearingAccount(context.Background(), "GBP")
+		return mockClient.getCallCount() >= 2
+	}), "Expired cache should trigger new backend call")
 
-	// Third call - cache expired, should call backend again
-	_, err = resolver.GetDepositClearingAccount(context.Background(), "GBP")
-	require.NoError(t, err)
-	assert.Equal(t, 2, mockClient.getCallCount(), "Expired cache should trigger new backend call")
+	require.NoError(t, thirdErr)
+	assert.GreaterOrEqual(t, mockClient.getCallCount(), 2)
 }
 
 func TestCacheStampede_SingleflightCoalescing(t *testing.T) {

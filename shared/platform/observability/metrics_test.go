@@ -310,14 +310,13 @@ func TestStartMetricsServer(t *testing.T) {
 		}
 	}()
 
-	// Intentional sleep: Give metrics server time to start.
-	// The server doesn't expose a "started" state we can poll.
+	//nolint:forbidigo // metrics server does not expose a ready state; time-based startup wait required
 	time.Sleep(100 * time.Millisecond)
 
 	// Cancel context to shutdown server
 	cancel()
 
-	// Intentional sleep: Allow time for graceful shutdown to complete.
+	//nolint:forbidigo // allows graceful HTTP server shutdown to complete before checking for errors
 	time.Sleep(100 * time.Millisecond)
 
 	// Check if there were any errors

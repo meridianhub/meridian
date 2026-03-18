@@ -246,7 +246,7 @@ func TestHTTPNotifier_ContextCancellation(t *testing.T) {
 	// Server that waits longer than the context timeout
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Intentional sleep: Simulate slow server to test context timeout handling
-		time.Sleep(1 * time.Second)
+		time.Sleep(1 * time.Second) //nolint:forbidigo // simulates slow server response to trigger context timeout
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

@@ -1059,7 +1059,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 
 		// Simulate async activation (in real scenario, this might be an event handler)
 		go func() {
-			time.Sleep(100 * time.Millisecond) // Simulate delay
+			time.Sleep(100 * time.Millisecond) //nolint:forbidigo // simulates async event handler delay
 			_ = reg.ActivateInstrument(ctx, "ASYNC_TEST", 1)
 		}()
 
@@ -1081,7 +1081,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 	t.Run("Wait for position to appear", func(t *testing.T) {
 		// Simulate async position creation
 		go func() {
-			time.Sleep(150 * time.Millisecond)
+			time.Sleep(150 * time.Millisecond) //nolint:forbidigo // simulates async position creation delay
 			insertPosition(t, pool, ctx, "ASYNC-ACC", "ASYNC_TEST", "bucket",
 				decimal.NewFromFloat(123.45), "Custom", nil)
 		}()

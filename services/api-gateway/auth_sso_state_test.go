@@ -67,7 +67,7 @@ func TestStateStore_ExpiredEntry(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond) //nolint:forbidigo // triggers TTL expiry to test expiration behavior
 
 	_, ok := store.Get(key)
 	assert.False(t, ok, "expired entry should not be returned")

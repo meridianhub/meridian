@@ -999,7 +999,7 @@ func TestPostgresRegistry_UpdatedAtManagement(t *testing.T) {
 		original, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
 		require.NoError(t, err)
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps between read and update
 
 		updates := &registry.InstrumentDefinition{
 			DisplayName: "Updated Name",
@@ -1015,7 +1015,7 @@ func TestPostgresRegistry_UpdatedAtManagement(t *testing.T) {
 		before, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
 		require.NoError(t, err)
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps between read and activation
 
 		require.NoError(t, reg.ActivateInstrument(ctx, "TIMESTAMP1", 1))
 
@@ -1029,7 +1029,7 @@ func TestPostgresRegistry_UpdatedAtManagement(t *testing.T) {
 		before, err := reg.GetDefinition(ctx, "TIMESTAMP1", 1)
 		require.NoError(t, err)
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps between read and deprecation
 
 		require.NoError(t, reg.DeprecateInstrument(ctx, "TIMESTAMP1", 1, nil))
 

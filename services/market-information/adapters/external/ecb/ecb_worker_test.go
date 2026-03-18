@@ -243,8 +243,7 @@ func TestWorker_FetchError(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	// Wait briefly to allow the initial fetch to fail
-	// Since fetch fails, no observations should be recorded
+	//nolint:forbidigo // Intentional: verifying no observations recorded on fetch error (negative assertion) requires waiting
 	time.Sleep(200 * time.Millisecond)
 
 	worker.Stop()
@@ -272,7 +271,7 @@ func TestWorker_ParseError(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	// Wait briefly for initial fetch
+	//nolint:forbidigo // Intentional: verifying no observations recorded on parse error (negative assertion) requires waiting
 	time.Sleep(200 * time.Millisecond)
 
 	worker.Stop()
@@ -495,7 +494,7 @@ func TestWorker_RateLimited(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	// Wait briefly for fetch attempt
+	//nolint:forbidigo // Intentional: verifying no observations recorded on rate limiting (negative assertion) requires waiting
 	time.Sleep(200 * time.Millisecond)
 
 	worker.Stop()
@@ -642,7 +641,7 @@ func TestWorker_ImmediateFailureOnPermanentError(t *testing.T) {
 		})
 	require.NoError(t, err)
 
-	// Wait a bit more to ensure no retries happen
+	//nolint:forbidigo // Intentional: verifying no retries for permanent error (negative assertion) requires waiting
 	time.Sleep(500 * time.Millisecond)
 
 	worker.Stop()
@@ -687,7 +686,8 @@ func TestWorker_ContextCancellationDuringBackoff(t *testing.T) {
 
 	// Cancel context during backoff wait (before second attempt)
 	// First backoff is 1s, so cancel immediately after first failure
-	time.Sleep(100 * time.Millisecond) // Small delay to ensure we're in backoff
+	//nolint:forbidigo // Intentional: timed delay to ensure cancellation lands during backoff window, not before first attempt
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 
 	// Worker should stop gracefully

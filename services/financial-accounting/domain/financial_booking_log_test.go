@@ -141,7 +141,7 @@ func TestFinancialBookingLog_WithStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Intentional sleep: Ensure time has advanced for distinct UpdatedAt timestamps
-			time.Sleep(time.Millisecond)
+			time.Sleep(time.Millisecond) //nolint:forbidigo // ensures distinct timestamps
 			beforeUpdate := time.Now().UTC()
 
 			updated := original.WithStatus(tt.newStatus)
@@ -227,7 +227,7 @@ func TestFinancialBookingLog_WithChartOfAccountsRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Intentional sleep: Ensure time has advanced for distinct UpdatedAt timestamps
-			time.Sleep(time.Millisecond)
+			time.Sleep(time.Millisecond) //nolint:forbidigo // ensures distinct timestamps
 			beforeUpdate := time.Now().UTC()
 
 			updated := original.WithChartOfAccountsRules(tt.newRules)

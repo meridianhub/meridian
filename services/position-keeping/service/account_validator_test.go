@@ -221,7 +221,7 @@ func TestValidateExists_CacheMiss(t *testing.T) {
 	assert.Equal(t, 1, client.GetCallCount())
 
 	// Wait for cache to expire
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond) //nolint:forbidigo // triggers cache TTL expiry
 
 	// Second call - cache should have expired
 	err = validator.ValidateExists(context.Background(), "cache-miss-account")
@@ -303,7 +303,7 @@ func TestValidateExists_ConcurrentRequests_NoStampede(t *testing.T) {
 		retrieveFunc: func(_ context.Context, req *currentaccountv1.RetrieveCurrentAccountRequest) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
 			callCount.Add(1)
 			// Simulate slow service response
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond) //nolint:forbidigo // simulates slow service response latency
 			return &currentaccountv1.RetrieveCurrentAccountResponse{
 				Facility: &currentaccountv1.CurrentAccountFacility{
 					AccountId: req.GetAccountId(),

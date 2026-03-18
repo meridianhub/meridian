@@ -40,7 +40,7 @@ EXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2024-01-15,1.0876`
 func TestClient_FetchDailyRates_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Intentional sleep: Delay response to test timeout handling
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // simulates slow HTTP server to trigger client timeout
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -86,7 +86,7 @@ func TestClient_FetchDailyRates_Non200Status(t *testing.T) {
 func TestClient_FetchDailyRates_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Intentional sleep: Delay response to test context cancellation handling
-		time.Sleep(1 * time.Second)
+		time.Sleep(1 * time.Second) //nolint:forbidigo // simulates slow HTTP server to ensure client context cancellation is tested
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -188,7 +188,7 @@ func TestClient_OptionEndpointOverridesConfig(t *testing.T) {
 func TestClient_ConfigTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Intentional sleep: Delay response to test timeout configuration
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) //nolint:forbidigo // simulates slow HTTP server to trigger configured client timeout
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

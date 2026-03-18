@@ -351,7 +351,7 @@ func TestGetPostingsByBookingLogID_OrderedByCreatedAt(t *testing.T) {
 	require.NoError(t, repo.SavePosting(ctx, posting1))
 	// Intentional sleep: DB auto-populates CreatedAt on insert; sleep ensures
 	// distinct timestamps for ordering verification (domain CreatedAt is not persisted)
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct DB-generated timestamps for ordering verification
 	require.NoError(t, repo.SavePosting(ctx, posting2))
 
 	// Retrieve postings - should be ordered by created_at

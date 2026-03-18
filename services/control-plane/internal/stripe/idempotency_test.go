@@ -110,7 +110,7 @@ func TestIdempotencyKeyStability(t *testing.T) {
 	key1 := generateIdempotencyKey(eventID, eventType)
 
 	// Simulate passage of time
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps to test key stability
 
 	key2 := generateIdempotencyKey(eventID, eventType)
 

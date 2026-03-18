@@ -799,7 +799,7 @@ func TestDispatch_LargeResponseBody_TruncatesAt1MiB(t *testing.T) {
 func TestDispatch_ContextDeadlineExceeded_ReturnsError(t *testing.T) {
 	// Server delays response beyond the context deadline.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond) //nolint:forbidigo // simulates slow HTTP server to trigger context deadline exceeded
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

@@ -12,6 +12,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
@@ -126,7 +127,7 @@ func TestDunningWorker_StartStop(t *testing.T) {
 		<-started
 
 		// Give the poll loop time to run at least once
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) //nolint:forbidigo // gives poll loop time to run at least once
 
 		w.Stop()
 
@@ -153,7 +154,7 @@ func TestDunningWorker_StartStop(t *testing.T) {
 		<-started
 
 		// Give Start time to acquire running state
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond) //nolint:forbidigo // gives worker time to enter running state
 
 		err = w.Start(context.Background())
 		assert.ErrorIs(t, err, scheduler.ErrAlreadyRunning)
@@ -174,7 +175,7 @@ func TestDunningWorker_StartStop(t *testing.T) {
 			errCh <- w.Start(ctx)
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) //nolint:forbidigo // gives worker time to start before cancellation
 		cancel()
 
 		select {
@@ -238,20 +239,13 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		}()
 
 		// Wait for the callback to fire
-		deadline := time.After(5 * time.Second)
-		for !callbackCalled.Load() {
-			select {
-			case <-deadline:
-				t.Fatal("callback was not called within timeout")
-			default:
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
+		require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+			return callbackCalled.Load()
+		}), "callback was not called within timeout")
 
 		// Wait for the ZREM to complete (happens after callback in the same poll cycle).
 		// Poll before calling Stop() to avoid context cancellation racing with ZREM.
-		zsetDeadline := time.After(5 * time.Second)
-		for {
+		require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
 			members, zErr := client.ZRangeArgs(context.Background(), redis.ZRangeArgs{
 				Key:     zsetKey,
 				Start:   "-inf",
@@ -259,16 +253,8 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 				ByScore: true,
 			}).Result()
 			require.NoError(t, zErr)
-			if len(members) == 0 {
-				break
-			}
-			select {
-			case <-zsetDeadline:
-				t.Fatalf("ZSET not drained within timeout, remaining: %v", members)
-			default:
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
+			return len(members) == 0
+		}), "ZSET not drained within timeout")
 
 		w.Stop()
 	})
@@ -312,7 +298,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		}()
 
 		// Wait for a poll cycle
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // gives worker time to run at least one poll cycle
 		w.Stop()
 
 		assert.False(t, callbackCalled.Load(), "callback should not be called for non-failed billing run")
@@ -339,7 +325,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 			_ = w.Start(context.Background())
 		}()
 
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // gives worker time to run at least one poll cycle
 		w.Stop()
 
 		// Verify the retry was removed from the ZSET (dropped)
@@ -389,7 +375,7 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 			_ = w.Start(context.Background())
 		}()
 
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // gives worker time to run at least one poll cycle
 		w.Stop()
 
 		// Verify the retry is still in the ZSET
@@ -538,7 +524,7 @@ func TestDunningWorker_GracefulShutdownWaitsForInFlight(t *testing.T) {
 
 	var callbackCompleted atomic.Bool
 	slowCallback := func(_ context.Context, _ *domain.BillingRun) error {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // simulates slow callback latency
 		callbackCompleted.Store(true)
 		return nil
 	}
@@ -558,7 +544,7 @@ func TestDunningWorker_GracefulShutdownWaitsForInFlight(t *testing.T) {
 	}()
 
 	// Wait for the callback to start
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond) //nolint:forbidigo // gives worker time to start processing callback
 
 	// Stop should wait for the slow callback to complete
 	w.Stop()
@@ -593,7 +579,7 @@ func TestDunningWorker_InvalidMemberInZSET(t *testing.T) {
 		_ = w.Start(ctx)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond) //nolint:forbidigo // gives worker time to run at least one poll cycle
 	w.Stop()
 
 	// Invalid member should be removed
@@ -636,7 +622,7 @@ func TestDunningWorker_RepoErrorRetainsRetry(t *testing.T) {
 		_ = w.Start(ctx)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond) //nolint:forbidigo // gives worker time to run at least one poll cycle
 	w.Stop()
 
 	// Retry should still be in the ZSET
@@ -798,15 +784,9 @@ func TestDunningWorker_TenantIsolation_Processing(t *testing.T) {
 	}()
 
 	// Wait for both to be processed
-	deadline := time.After(5 * time.Second)
-	for !processedA.Load() || !processedB.Load() {
-		select {
-		case <-deadline:
-			t.Fatalf("expected both tenants processed, got A=%v B=%v", processedA.Load(), processedB.Load())
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
+		return processedA.Load() && processedB.Load()
+	}), "expected both tenants to be processed within timeout")
 
 	// Both billing runs should have been processed
 	assert.True(t, processedA.Load(), "tenant A's billing run should have been processed")
@@ -815,20 +795,11 @@ func TestDunningWorker_TenantIsolation_Processing(t *testing.T) {
 	// Wait for ZSET cleanup to complete (ZRem happens after the callback)
 	keyA := dunningRetryZSetPrefix + tenantA
 	keyB := dunningRetryZSetPrefix + tenantB
-	cleanupDeadline := time.After(5 * time.Second)
-	for {
+	require.NoError(t, await.New().AtMost(5*time.Second).PollInterval(10*time.Millisecond).Until(func() bool {
 		countA, _ := client.ZCard(ctx, keyA).Result()
 		countB, _ := client.ZCard(ctx, keyB).Result()
-		if countA == 0 && countB == 0 {
-			break
-		}
-		select {
-		case <-cleanupDeadline:
-			t.Fatalf("ZSET cleanup timeout: A=%d B=%d", countA, countB)
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+		return countA == 0 && countB == 0
+	}), "ZSET cleanup timeout")
 
 	w.Stop()
 

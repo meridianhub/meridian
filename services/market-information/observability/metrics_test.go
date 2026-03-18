@@ -12,7 +12,7 @@ func TestOperationTimer_ObserveSuccess(t *testing.T) {
 		timer := NewOperationTimer(OperationDefineDataset)
 
 		// Simulate some work
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // simulates operation latency for metrics measurement
 
 		timer.ObserveSuccess()
 

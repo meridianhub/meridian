@@ -257,7 +257,7 @@ func TestStaffService(t *testing.T) {
 			result, err := svc.CreateAPIKey(ctx, apiUser.ID, "acme", "expired-test", nil, 1*time.Millisecond)
 			require.NoError(t, err)
 
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond) //nolint:forbidigo // triggers API key expiry (1ms TTL)
 
 			_, err = svc.ValidateAPIKey(ctx, result.KeyPrefix, result.PlaintextKey)
 			require.ErrorIs(t, err, staff.ErrAPIKeyExpired)

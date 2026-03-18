@@ -352,7 +352,7 @@ func TestCircuitBreaker_ContextTimeout(t *testing.T) {
 	defer cancel()
 
 	_, err := cb.Execute(ctx, func() (any, error) {
-		// Intentional sleep: Simulates slow operation to trigger context deadline exceeded
+		//nolint:forbidigo // simulates slow operation latency to trigger context deadline exceeded
 		time.Sleep(100 * time.Millisecond)
 		return "should timeout", nil
 	})
@@ -395,7 +395,7 @@ func TestCircuitBreaker_ConcurrentExecution(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			_, err := cb.Execute(ctx, func() (any, error) {
-				// Intentional sleep: Simulates concurrent work to test thread-safety
+				//nolint:forbidigo // simulates concurrent work latency to test thread-safety
 				time.Sleep(10 * time.Millisecond)
 				return successString, nil
 			})
@@ -444,8 +444,7 @@ func TestCircuitBreaker_ResetAfterInterval(t *testing.T) {
 	assert.Equal(t, gobreaker.StateClosed, cb.State(), "should remain closed below threshold")
 
 	// Wait for interval to reset counts.
-	// Intentional sleep: We need time to actually pass for the circuit breaker's internal
-	// interval timer to reset. There's no observable state change we can poll for.
+	//nolint:forbidigo // triggers circuit breaker interval timer reset; no observable state change to poll
 	time.Sleep(250 * time.Millisecond)
 
 	// Execute 3 more failures (should not trip because counts were reset)
@@ -552,7 +551,7 @@ func TestCircuitBreaker_MaxRequestsInHalfOpen(t *testing.T) {
 			defer wg.Done()
 			_, err := cb.Execute(ctx, func() (any, error) {
 				executedCount.Add(1)
-				// Intentional sleep: Hold the slot to test MaxRequests limiting
+				//nolint:forbidigo // holds the slot to test MaxRequests limiting in half-open state
 				time.Sleep(50 * time.Millisecond)
 				return successString, nil
 			})
@@ -666,13 +665,13 @@ func TestCircuitBreaker_ContextCancellationInHalfOpen(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		_, execErr = cb.Execute(ctx, func() (any, error) {
-			// Intentional sleep: Simulate a slow operation to test context cancellation
+			//nolint:forbidigo // simulates slow operation latency to test context cancellation in half-open state
 			time.Sleep(200 * time.Millisecond)
 			return successString, nil
 		})
 	}()
 
-	// Intentional sleep: Cancel the context while the request is in-flight
+	//nolint:forbidigo // ensures context is cancelled while the slow operation is still in-flight
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 

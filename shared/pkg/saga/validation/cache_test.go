@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 func TestValidationCache_GetMiss(t *testing.T) {
@@ -73,12 +75,11 @@ func TestValidationCache_TTLExpiration(t *testing.T) {
 	assert.True(t, ok, "expected cache hit before TTL")
 	require.NotNil(t, result)
 
-	// Wait for TTL to expire
-	time.Sleep(60 * time.Millisecond)
-
-	// Should miss after TTL
-	result, ok = cache.Get("expiring script")
-	assert.False(t, ok, "expected cache miss after TTL expiration")
+	// Wait for TTL to expire, polling until cache misses
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(10*time.Millisecond).Until(func() bool {
+		result, ok = cache.Get("expiring script")
+		return !ok
+	}), "expected cache miss after TTL expiration")
 	assert.Nil(t, result)
 }
 
@@ -121,8 +122,11 @@ func TestValidationCache_EvictExpired(t *testing.T) {
 	cache.Set("script1", &ValidationResult{Success: true})
 	cache.Set("script2", &ValidationResult{Success: true})
 
-	// Wait for TTL to expire
-	time.Sleep(60 * time.Millisecond)
+	// Wait for TTL to expire, polling until script1 is gone
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(10*time.Millisecond).Until(func() bool {
+		_, expired := cache.Get("script1")
+		return !expired
+	}))
 
 	// Add a new entry that won't be expired
 	cache.Set("script3", &ValidationResult{Success: true})
@@ -184,7 +188,7 @@ func TestValidationCache_ConcurrentMixedOperations(_ *testing.T) {
 				script := "mixed script " + string(rune('A'+(id+j)%26))
 				cache.Set(script, &ValidationResult{Success: true})
 				cache.Get(script)
-				time.Sleep(5 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond) //nolint:forbidigo // simulates realistic concurrent access timing between operations
 			}
 		}(i)
 	}
@@ -203,14 +207,17 @@ func TestValidationCache_StartStop(t *testing.T) {
 	// Start background eviction
 	cache.Start(ctx)
 
-	// Let some eviction cycles run
-	time.Sleep(200 * time.Millisecond)
+	// Wait for background eviction to remove the expired entry
+	require.NoError(t, await.New().AtMost(1*time.Second).PollInterval(20*time.Millisecond).Until(func() bool {
+		_, ok := cache.Get("script1")
+		return !ok
+	}))
 
 	// Cancel context to stop background eviction
 	cancel()
 
 	// Give goroutine time to stop
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // goroutine lifecycle: brief wait for background goroutine to observe context cancellation
 
 	// Cache should still work after stop
 	cache.Set("script2", &ValidationResult{Success: true})
@@ -254,7 +261,7 @@ func TestValidationCache_ZeroTTL(t *testing.T) {
 
 	cache.Set("script", &ValidationResult{Success: true})
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond) //nolint:forbidigo // intentional: verifies zero-TTL entries do NOT expire (no condition to poll against)
 
 	result, ok := cache.Get("script")
 	assert.True(t, ok, "entry should not expire with zero TTL")

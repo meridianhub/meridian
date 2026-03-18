@@ -648,6 +648,7 @@ func TestIntegration_TimeoutWorker_GracefulShutdown(t *testing.T) {
 	}()
 
 	// Let it run for a bit
+	//nolint:forbidigo // allows worker to complete multiple poll cycles before testing graceful shutdown
 	time.Sleep(250 * time.Millisecond)
 
 	// Cancel context to stop worker

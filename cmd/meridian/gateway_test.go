@@ -57,7 +57,7 @@ func TestWireGateway_Config(t *testing.T) {
 			conn.Close()
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond) //nolint:forbidigo // poll interval waiting for server bind
 	}
 	require.NoError(t, dialErr, "gateway server did not start")
 

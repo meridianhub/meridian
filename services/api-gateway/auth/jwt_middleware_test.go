@@ -1057,7 +1057,7 @@ func TestJWTMiddleware_IntegrationWithRealToken_ExpirationBoundary(t *testing.T)
 	// This is testing real-time token expiration, not waiting for async operations.
 	waitTime := time.Until(expiresAt) + 100*time.Millisecond
 	if waitTime > 0 {
-		time.Sleep(waitTime)
+		time.Sleep(waitTime) //nolint:forbidigo // waits for real JWT token expiration
 	}
 
 	// Token should be rejected after expiration

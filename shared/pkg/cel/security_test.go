@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -114,10 +115,12 @@ func TestPoisonPillNoGoroutineLeaks(t *testing.T) {
 		t.Logf("Attempted expression %d (blocked as expected)", i)
 	}
 
-	// Allow any cleanup
+	// Allow any cleanup - wait for goroutines to settle within acceptable threshold
 	runtime.GC()
-	time.Sleep(100 * time.Millisecond)
-	runtime.GC()
+	_ = await.AtMost(500 * time.Millisecond).PollInterval(10 * time.Millisecond).Until(func() bool {
+		runtime.GC()
+		return runtime.NumGoroutine() <= initialGoroutines+2
+	})
 
 	finalGoroutines := runtime.NumGoroutine()
 	t.Logf("Final goroutines: %d", finalGoroutines)

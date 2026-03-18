@@ -125,11 +125,12 @@ func TestWorkerLifecycle_Stop_WaitsForInFlightWork(t *testing.T) {
 
 	// Start guarded work that takes time
 	go lc.ExecuteGuarded(func() {
+		//nolint:forbidigo // Intentional: simulates in-flight work duration for shutdown test
 		time.Sleep(200 * time.Millisecond)
 		close(workDone)
 	})
 
-	// Give time for ExecuteGuarded to register
+	//nolint:forbidigo // Intentional: lifecycle has no observable state to poll for "guard registered"
 	time.Sleep(50 * time.Millisecond)
 
 	// Stop should wait for guarded work to finish
@@ -160,10 +161,11 @@ func TestWorkerLifecycle_Stop_TimesOut(t *testing.T) {
 
 	// Start guarded work that takes longer than timeout
 	go lc.ExecuteGuarded(func() {
+		//nolint:forbidigo // Intentional: simulates work that outlasts the shutdown timeout
 		time.Sleep(5 * time.Second)
 	})
 
-	// Give time for ExecuteGuarded to register
+	//nolint:forbidigo // Intentional: lifecycle has no observable state to poll for "guard registered"
 	time.Sleep(50 * time.Millisecond)
 
 	start := time.Now()
@@ -220,6 +222,7 @@ func TestWorkerLifecycle_ExecuteGuarded_TracksWaitGroup(t *testing.T) {
 			defer wg.Done()
 			lc.ExecuteGuarded(func() {
 				counter.Add(1)
+				//nolint:forbidigo // Intentional: simulates concurrent work duration for WaitGroup tracking test
 				time.Sleep(50 * time.Millisecond)
 			})
 		}()

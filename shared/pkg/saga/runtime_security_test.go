@@ -84,6 +84,7 @@ result = long_running()
 
 	// Cancel after a short delay
 	go func() {
+		//nolint:forbidigo // triggers context cancellation while long-running saga security test executes
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()

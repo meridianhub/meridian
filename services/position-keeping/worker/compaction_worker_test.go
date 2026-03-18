@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 // mockPool creates a minimal pool configuration for testing
@@ -284,8 +285,12 @@ func TestCompactionWorker_ContextCancellation(t *testing.T) {
 		startErr <- worker.Start(ctx)
 	}()
 
-	// Give worker time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for worker to enter running state
+	_ = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		worker.mu.Lock()
+		defer worker.mu.Unlock()
+		return worker.running
+	})
 
 	// Cancel context
 	cancel()
@@ -322,8 +327,12 @@ func TestCompactionWorker_StopSignal(t *testing.T) {
 		startErr <- worker.Start(ctx)
 	}()
 
-	// Give worker time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for worker to enter running state
+	_ = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		worker.mu.Lock()
+		defer worker.mu.Unlock()
+		return worker.running
+	})
 
 	// Call Stop
 	var wg sync.WaitGroup

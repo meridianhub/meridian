@@ -172,7 +172,7 @@ func TestClearingErrorHandling(t *testing.T) {
 		shortCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
 		defer cancel()
 
-		time.Sleep(10 * time.Millisecond) // Ensure context has expired
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // triggers context expiry (context has 1ns timeout)
 
 		// Verify context is done
 		assert.Error(t, shortCtx.Err(), "context should be cancelled")
@@ -398,7 +398,7 @@ func TestServiceRecoveryScenarios(t *testing.T) {
 		// In pgxpool, connections are managed and reconnected as needed
 		// Here we just verify continued operation after a pause
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) //nolint:forbidigo // simulates brief connection pause in reconnect resilience test
 
 		// Operations should still work
 		resolvedID, _, found2 := getClearingAccountByPurpose(t, ctx,

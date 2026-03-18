@@ -1008,7 +1008,7 @@ func TestLoad_ConcurrentConnections_Throughput(t *testing.T) {
 		elapsed := time.Since(emitStart)
 		expected := time.Duration(i+1) * emitInterval
 		if expected > elapsed {
-			time.Sleep(expected - elapsed)
+			time.Sleep(expected - elapsed) //nolint:forbidigo // paces event emission to simulate real-time throughput
 		}
 	}
 	emitDuration := time.Since(emitStart)
@@ -1196,7 +1196,7 @@ func TestLoad_HighThroughput_EventsPerSecond(t *testing.T) {
 		elapsed := time.Since(emitStart)
 		expected := time.Duration(i+1) * interval
 		if expected > elapsed {
-			time.Sleep(expected - elapsed)
+			time.Sleep(expected - elapsed) //nolint:forbidigo // paces event emission to simulate real-time throughput
 		}
 	}
 

@@ -81,8 +81,7 @@ func TestCleanupWorker_StaleKeyMarkedAsFailed(t *testing.T) {
 	err = redisSvc.MarkPending(ctx, staleKey, time.Hour)
 	require.NoError(t, err)
 
-	// Intentional sleep: Wait for the key to become stale (older than threshold).
-	// This is testing time-based staleness detection, not async operations.
+	//nolint:forbidigo // Intentional: tests time-based staleness detection; key must age before cleanup runs
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with very short threshold
@@ -169,9 +168,7 @@ func TestCleanupWorker_FreshKeyNotMarked(t *testing.T) {
 		_ = w.Start(workerCtx)
 	}()
 
-	// Intentional sleep: Wait for a few cleanup iterations to pass.
-	// We're testing that fresh keys are NOT modified, so we must allow time for the
-	// worker to run multiple cycles without touching them.
+	//nolint:forbidigo // Intentional: verifying fresh keys are not modified (negative assertion) requires waiting for cycles
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify the key is still PENDING
@@ -206,7 +203,7 @@ func TestCleanupWorker_BatchProcessing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Intentional sleep: Wait for keys to become stale (older than threshold)
+	//nolint:forbidigo // Intentional: keys must age past the staleness threshold before cleanup can detect them
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with batch size of 100 (so we need 2 batches)
@@ -272,7 +269,7 @@ func TestCleanupWorker_GracefulShutdown(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Intentional sleep: Wait for keys to become stale (older than threshold)
+	//nolint:forbidigo // Intentional: keys must age past the staleness threshold before cleanup can detect them
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with short intervals
@@ -299,7 +296,7 @@ func TestCleanupWorker_GracefulShutdown(t *testing.T) {
 	// Wait for worker to start
 	<-startedChan
 
-	// Intentional sleep: Let worker run for a few cycles before shutting down
+	//nolint:forbidigo // Intentional: allows worker to run a few cycles before testing graceful shutdown
 	time.Sleep(100 * time.Millisecond)
 
 	// Stop the worker gracefully via context cancellation
@@ -428,7 +425,7 @@ func TestCleanupWorker_MetricsRecorded(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Intentional sleep: Wait for keys to become stale (older than threshold)
+	//nolint:forbidigo // Intentional: keys must age past the staleness threshold before cleanup can detect them
 	time.Sleep(50 * time.Millisecond)
 
 	// Configure worker with short threshold

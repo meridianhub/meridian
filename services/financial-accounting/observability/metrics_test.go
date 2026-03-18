@@ -176,7 +176,7 @@ func TestOperationTimer(t *testing.T) {
 		assert.Equal(t, initialInFlight+1, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationRetrieveLedgerPosting)))
 
 		// Intentional sleep: Simulate work to measure elapsed time in metrics
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // simulates operation latency for metrics measurement
 
 		// Record success
 		timer.ObserveSuccess()

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
 )
@@ -464,18 +465,20 @@ func TestPostgresService_StartCleanup(t *testing.T) {
 	cleanupSvc.StartCleanup(ctx)
 
 	// Wait for cleanup to run
-	time.Sleep(500 * time.Millisecond)
-
-	// Row should be cleaned up
-	var count int
-	err = svc.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM _idempotency_keys WHERE key = $1`, key.String(),
-	).Scan(&count)
-	if err != nil {
-		t.Fatalf("Count query failed: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 rows after cleanup, got %d", count)
+	awaitCleanupErr := await.New().
+		AtMost(5 * time.Second).
+		PollInterval(100 * time.Millisecond).
+		Until(func() bool {
+			var count int
+			if err := svc.pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM _idempotency_keys WHERE key = $1`, key.String(),
+			).Scan(&count); err != nil {
+				return false
+			}
+			return count == 0
+		})
+	if awaitCleanupErr != nil {
+		t.Errorf("Expected 0 rows after cleanup, but row was not cleaned up within timeout")
 	}
 }
 

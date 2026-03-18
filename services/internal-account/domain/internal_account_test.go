@@ -306,7 +306,7 @@ func TestImmutability(t *testing.T) {
 	originalUpdatedAt := original.UpdatedAt()
 
 	// Give some time for timestamp difference
-	time.Sleep(1 * time.Millisecond)
+	time.Sleep(1 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps
 
 	// Perform a status change
 	suspended, err := original.Suspend("Testing immutability")
@@ -982,7 +982,7 @@ func TestTimestamps_UpdatedAtChangesOnModification(t *testing.T) {
 	originalUpdatedAt := account.UpdatedAt()
 
 	// Wait a tiny bit to ensure timestamp difference
-	time.Sleep(1 * time.Millisecond)
+	time.Sleep(1 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps
 
 	// Suspend should update the timestamp
 	suspended, err := account.Suspend("Test")

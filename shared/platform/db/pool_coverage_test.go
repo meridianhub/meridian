@@ -56,7 +56,7 @@ func TestPostgresPool_Integration_CloseWithContext(t *testing.T) {
 		closeCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
 		defer cancel()
 
-		// Intentional sleep: Allow context to definitely expire before testing close behavior
+		//nolint:forbidigo // ensures nanosecond-TTL context has expired before calling CloseWithContext
 		time.Sleep(10 * time.Millisecond)
 
 		err := tempPool.CloseWithContext(closeCtx)
@@ -485,8 +485,7 @@ func TestHealthChecker_Integration(t *testing.T) {
 		require.NoError(t, err, "checker should become healthy after first check")
 		checker.Stop()
 
-		// Intentional sleep: Wait for checks to become stale (2x interval).
-		// We need actual time to pass for staleness detection to trigger.
+		//nolint:forbidigo // triggers health check staleness detection; requires actual time to pass beyond 2x interval
 		time.Sleep(30 * time.Millisecond)
 
 		// Should now be unhealthy due to staleness

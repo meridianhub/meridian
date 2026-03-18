@@ -379,7 +379,7 @@ func TestIntegration_ConcurrentReplay(t *testing.T) {
 	executionCount := int32(0)
 	handler := func(_ context.Context, _ map[string]interface{}) (interface{}, error) {
 		atomic.AddInt32(&executionCount, 1)
-		// Simulate work
+		//nolint:forbidigo // simulates step handler work latency to test concurrent idempotency enforcement
 		time.Sleep(10 * time.Millisecond)
 		return map[string]interface{}{"result": "done"}, nil
 	}
