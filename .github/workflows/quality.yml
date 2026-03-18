@@ -85,6 +85,37 @@ jobs:
           version: v2.9.0
           args: --timeout=5m --config=.golangci.yml
 
+  proto-freshness:
+    name: Proto Freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.1'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Regenerate proto files
+        run: buf generate api/proto
+
+      - name: Check for uncommitted changes
+        run: |
+          if ! git diff --exit-code -- api/proto api/openapi; then
+            echo "Proto-generated files are out of sync with .proto sources."
+            echo "Run 'buf generate api/proto' locally and commit the result."
+            exit 1
+          fi
+
   multi-asset-purity:
     name: Multi-Asset Purity
     runs-on: ubuntu-latest
