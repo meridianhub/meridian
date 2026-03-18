@@ -70,7 +70,9 @@ func TestAuthHandler_LoginSuccess(t *testing.T) {
 
 	// Inject tenant context (normally done by tenant resolver middleware)
 	tid, _ := tenant.NewTenantID("volterra")
-	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	ctx := tenant.WithTenant(req.Context(), tid)
+	ctx = tenant.WithSlug(ctx, "volterra")
+	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
 	handler.HandleLogin(rec, req)

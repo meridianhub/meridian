@@ -304,3 +304,52 @@ func TestPropagateToBackground_NilContext(t *testing.T) {
 		t.Error("PropagateToBackground(nil) should not have tenant")
 	}
 }
+
+func TestSlugContextRoundTrip(t *testing.T) {
+	ctx := tenant.WithSlug(context.Background(), "volterra-energy")
+
+	slug, ok := tenant.SlugFromContext(ctx)
+	if !ok {
+		t.Error("SlugFromContext returned ok=false for context with slug")
+	}
+	if slug != "volterra-energy" {
+		t.Errorf("SlugFromContext returned %q, want %q", slug, "volterra-energy")
+	}
+}
+
+func TestSlugFromContext_Missing(t *testing.T) {
+	slug, ok := tenant.SlugFromContext(context.Background())
+	if ok {
+		t.Error("SlugFromContext returned ok=true for context without slug")
+	}
+	if slug != "" {
+		t.Errorf("SlugFromContext returned %q, want empty string", slug)
+	}
+}
+
+func TestSlugFromContext_NilContext(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	slug, ok := tenant.SlugFromContext(nil)
+	if ok {
+		t.Error("SlugFromContext returned ok=true for nil context")
+	}
+	if slug != "" {
+		t.Errorf("SlugFromContext returned %q for nil context, want empty string", slug)
+	}
+}
+
+func TestSlugAndTenantIDIndependent(t *testing.T) {
+	tid := tenant.MustNewTenantID("volterra_energy")
+	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx = tenant.WithSlug(ctx, "volterra-energy")
+
+	gotID, ok := tenant.FromContext(ctx)
+	if !ok || gotID != tid {
+		t.Errorf("FromContext returned (%q, %v), want (%q, true)", gotID, ok, tid)
+	}
+
+	gotSlug, ok := tenant.SlugFromContext(ctx)
+	if !ok || gotSlug != "volterra-energy" {
+		t.Errorf("SlugFromContext returned (%q, %v), want (%q, true)", gotSlug, ok, "volterra-energy")
+	}
+}
