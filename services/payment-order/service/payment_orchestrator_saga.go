@@ -176,8 +176,13 @@ func (o *PaymentOrchestrator) ExecutePaymentSaga(ctx context.Context, paymentOrd
 			"error", err,
 			"duration_ms", durationMs)
 
+		// Detach from the saga context (may be cancelled due to timeout) so
+		// failure recording and compensation complete successfully.
+		failCtx, failCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer failCancel()
+
 		now := time.Now()
-		o.logSagaExecution(ctx, &domain.SagaExecution{
+		o.logSagaExecution(failCtx, &domain.SagaExecution{
 			ID:             executionID,
 			PaymentOrderID: paymentOrderID,
 			SagaName:       sagaName,
@@ -191,7 +196,7 @@ func (o *PaymentOrchestrator) ExecutePaymentSaga(ctx context.Context, paymentOrd
 			CompletedAt:    &now,
 		})
 
-		if err := o.failPaymentOrder(ctx, po, fmt.Sprintf("saga execution error: %v", err), "SAGA_FAILED"); err != nil {
+		if err := o.failPaymentOrder(failCtx, po, fmt.Sprintf("saga execution error: %v", err), "SAGA_FAILED"); err != nil {
 			o.logger.Error("failed to mark payment order as failed",
 				"payment_order_id", po.ID.String(),
 				"error", err)
@@ -260,8 +265,11 @@ func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *
 func (o *PaymentOrchestrator) handleSagaFailure(ctx context.Context, po *domain.PaymentOrder, result *saga.RunnerOutput) {
 	// Detach from the caller's context so failure handling succeeds even when
 	// the saga context has been cancelled (e.g. timeout). The detached context
-	// preserves values (tenant, correlation ID) but not the deadline.
-	ctx = context.WithoutCancel(ctx)
+	// preserves values (tenant, correlation ID) but removes the deadline.
+	// Add a fresh timeout to prevent indefinite hangs.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
 	o.logger.Error("payment saga failed in Starlark execution",
 		"payment_order_id", po.ID.String(),
 		"error", result.Error,
@@ -538,11 +546,6 @@ func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.P
 // (e.g., UpdatePaymentOrder) should propagate this error to clients. Callers in async paths
 // (e.g., saga orchestration) may log and swallow the error.
 func (o *PaymentOrchestrator) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder, reason string, errorCode string) error {
-	// Detach from the caller's context so compensation operations succeed even
-	// when the saga context has been cancelled (e.g. timeout). The detached
-	// context preserves values (tenant, correlation ID) but not the deadline.
-	ctx = context.WithoutCancel(ctx)
-
 	// Capture original status before transitioning (for event)
 	failedAtStatus := po.Status
 
