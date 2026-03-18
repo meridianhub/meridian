@@ -143,7 +143,8 @@ FindByID(ctx context.Context, runID uuid.UUID) (*SettlementRun, error)
 
 // Update updates an existing SettlementRun using optimistic locking.
 // Returns ErrNotFound if the run doesn't exist.
-// Returns ErrVersionConflict if the version doesn't match.
+// Returns ErrOptimisticLock if the version doesn't match (domain sentinel).
+// The persistence implementation surfaces this as ErrVersionConflict.
 Update(ctx context.Context, run *SettlementRun) error
 ```
 

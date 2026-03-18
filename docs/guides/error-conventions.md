@@ -126,7 +126,7 @@ The service layer translates domain and persistence errors into gRPC status code
 | `domain.ErrNotFound` | `codes.NotFound` | 404 | Entity doesn't exist |
 | `persistence.Err{Entity}NotFound` | `codes.NotFound` | 404 | Row missing in DB |
 | `domain.ErrConflict` / `persistence.Err{Entity}Exists` | `codes.AlreadyExists` | 409 | Duplicate unique key |
-| `persistence.ErrVersionConflict` | `codes.Aborted` | 409 | Concurrent modification—retry |
+| `domain.ErrOptimisticLock` / `persistence.ErrVersionConflict` | `codes.Aborted` | 409 | Concurrent modification—retry |
 | `domain.ErrInvalidStatusTransition` | `codes.FailedPrecondition` | 422 | State machine violation |
 | `domain.ErrUnauthorized` | `codes.PermissionDenied` | 403 | Authorization failed |
 | Validation failures (input) | `codes.InvalidArgument` | 400 | Caller error, don't retry |
