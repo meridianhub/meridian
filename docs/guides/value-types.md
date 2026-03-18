@@ -17,7 +17,7 @@ relate, and when to use each.
 
 ## Type Hierarchy
 
-```
+```text
 shared/platform/quantity/
 └── Qty[D Dimension]          ← generic base type (phantom-typed)
     ├── type Money = Qty[Monetary]    ← currency quantities (GBP, USD, EUR)
@@ -54,7 +54,7 @@ or `decimal.Decimal` fields cannot prevent.
 
 ## Quick Decision Guide
 
-```
+```text
 Is the value always a fiat currency (USD, GBP, EUR...)?
 ├── Yes → Does this code interact with legacy APIs or cross-service protos?
 │         ├── Yes → shared/pkg/money.Money

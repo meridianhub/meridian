@@ -17,7 +17,7 @@ implementations across Meridian services. It follows the directory structure def
 
 ## Directory Layout
 
-```
+```text
 services/{service}/
 ├── domain/
 │   └── repository.go       # Interface (port) + sentinel errors
