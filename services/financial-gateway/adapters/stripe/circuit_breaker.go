@@ -31,8 +31,9 @@ func NewTenantCircuitBreakerRegistry(settings gobreaker.Settings) *TenantCircuit
 // does not yet exist. Concurrent calls for the same tenant are safe and will
 // return the same breaker instance.
 func (r *TenantCircuitBreakerRegistry) Get(tenantID tenant.TenantID) *gobreaker.CircuitBreaker[TenantConfig] {
-	if cb, ok := r.breakers.Load(tenantID); ok {
-		return cb.(*gobreaker.CircuitBreaker[TenantConfig])
+	if val, ok := r.breakers.Load(tenantID); ok {
+		cb, _ := val.(*gobreaker.CircuitBreaker[TenantConfig]) //nolint:errcheck // sync.Map only stores this type
+		return cb
 	}
 
 	// Build tenant-specific settings with per-tenant metrics on state change.
@@ -50,15 +51,17 @@ func (r *TenantCircuitBreakerRegistry) Get(tenantID tenant.TenantID) *gobreaker.
 
 	newCB := gobreaker.NewCircuitBreaker[TenantConfig](s)
 	actual, _ := r.breakers.LoadOrStore(tenantID, newCB)
-	return actual.(*gobreaker.CircuitBreaker[TenantConfig])
+	cb, _ := actual.(*gobreaker.CircuitBreaker[TenantConfig]) //nolint:errcheck // sync.Map only stores this type
+	return cb
 }
 
 // State returns the circuit breaker state for a specific tenant.
 // If no breaker exists yet for the tenant, it returns StateClosed (the default
 // initial state for a new breaker).
 func (r *TenantCircuitBreakerRegistry) State(tenantID tenant.TenantID) gobreaker.State {
-	if cb, ok := r.breakers.Load(tenantID); ok {
-		return cb.(*gobreaker.CircuitBreaker[TenantConfig]).State()
+	if val, ok := r.breakers.Load(tenantID); ok {
+		cb, _ := val.(*gobreaker.CircuitBreaker[TenantConfig]) //nolint:errcheck // sync.Map only stores this type
+		return cb.State()
 	}
 	return gobreaker.StateClosed
 }
