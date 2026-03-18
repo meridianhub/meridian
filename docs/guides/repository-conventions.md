@@ -112,7 +112,13 @@ type TenantRepository interface {
     GetBySlug(ctx context.Context, slug string) (*Tenant, error)
     IsSlugAvailable(ctx context.Context, slug string) (bool, error)
     UpdateStatus(ctx context.Context, id tenant.TenantID, status Status, currentVersion int) (*Tenant, error)
-    UpdateStatusWithError(ctx context.Context, id tenant.TenantID, status Status, errorMsg string, currentVersion int) (*Tenant, error)
+    UpdateStatusWithError(
+        ctx context.Context,
+        id tenant.TenantID,
+        status Status,
+        errorMsg string,
+        currentVersion int,
+    ) (*Tenant, error)
     List(ctx context.Context, statusFilter *Status, pageSize int, pageToken string) ([]*Tenant, string, error)
 }
 ```
