@@ -713,6 +713,8 @@ func TestInternalAccountValidator_ValidateExists_CachesNotFoundResult(t *testing
 	err2 := validator.ValidateExists(context.Background(), "missing-cached-internal")
 	require.Error(t, err2)
 	assert.Equal(t, 1, client.GetCallCount()) // No new call
+	// Verify cached miss preserves the error contract
+	assert.Contains(t, err2.Error(), "not found")
 }
 
 func TestInternalAccountValidator_IsCached(t *testing.T) {
@@ -1051,6 +1053,8 @@ func TestCompositeAccountValidator_ValidateExists_OnlyInternalValidator(t *testi
 
 	err = composite.ValidateExists(context.Background(), "internal-only-account")
 	assert.NoError(t, err)
+	// Verify internal validator was actually called (delegation check)
+	assert.Equal(t, 1, internalClient.GetCallCount())
 }
 
 func TestCompositeAccountValidator_ResolveServiceDomain(t *testing.T) {
@@ -1141,6 +1145,9 @@ func TestCompositeAccountValidator_ValidateExists_CurrentAccountServiceUnavailab
 	// (graceful degradation), so the composite validator also returns nil without trying internal
 	err = composite.ValidateExists(context.Background(), "any-account")
 	assert.NoError(t, err)
+	// Current was attempted, internal was NOT attempted (early return on graceful degradation)
+	assert.Equal(t, 1, currentClient.GetCallCount())
+	assert.Equal(t, 0, internalClient.GetCallCount())
 }
 
 func TestCompositeAccountValidator_ValidateExists_InternalAccountServiceUnavailable(t *testing.T) {
@@ -1174,4 +1181,7 @@ func TestCompositeAccountValidator_ValidateExists_InternalAccountServiceUnavaila
 	// So composite should also return nil (graceful degradation)
 	err = composite.ValidateExists(context.Background(), "any-account")
 	assert.NoError(t, err)
+	// Both validators were attempted in sequence
+	assert.Equal(t, 1, currentClient.GetCallCount())
+	assert.Equal(t, 1, internalClient.GetCallCount())
 }

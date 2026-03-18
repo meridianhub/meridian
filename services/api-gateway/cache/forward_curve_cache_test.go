@@ -407,10 +407,13 @@ func TestForwardCurveCache_GetRange_AllCached(t *testing.T) {
 
 	end := start.Add(2 * time.Hour)
 
-	// GetRange should use cached data
+	callsBefore := atomic.LoadInt64(&source.rangeCalls)
+
+	// GetRange should use cached data (no new source range calls)
 	obs, err := cache.GetRange(ctx, "ELEC_PEAK", start, end)
 	require.NoError(t, err)
 	assert.Len(t, obs, 3)
+	assert.Equal(t, callsBefore, atomic.LoadInt64(&source.rangeCalls), "expected no new source range calls when all data is cached")
 }
 
 func TestForwardCurveCache_GetRange_NoTenantContext(t *testing.T) {
