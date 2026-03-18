@@ -7,12 +7,16 @@ triggers:
   - Standardizing service file naming
   - Proto generated file management
   - Updating the new service checklist
+  - Refactoring large Go files (>600 LOC)
+  - Extracting shared test infrastructure or test helpers
+  - Reducing test boilerplate or setupTestDB duplication
+  - Migrating time.Sleep to await in tests
 instructions: |
-  This PRD addresses micro-inconsistencies that compound across 16 services.
-  Streams 1-4 are independent; Stream 5 depends on Stream 4.
-  Prioritize Stream 1 (proto files) and Stream 2
-  (doc.go) as they have the highest impact on AI code generation reliability.
-  Update the new-bian-service-checklist.md to reflect all conventions established here.
+  7 streams, 47 story points. Streams 1-4, 6, 7 are independent;
+  Stream 5 depends on Stream 4. Stream 6 tasks depend on Stream 3
+  (rename before refactor). Streams 6-7 are the largest work items
+  (13 pts each). Prioritize Stream 1 (proto) and Stream 2 (doc.go)
+  for highest AI impact. Stream 6 supersedes PRD-012 Stream 3.
 ---
 
 # PRD-049: Codebase Consistency & AI Navigability
@@ -56,17 +60,18 @@ codebase isn't self-describing enough.
 
 Total estimated complexity: **47 story points** across 7 streams.
 
-Streams 1-4, 6, 7 are independent. Stream 5 depends on Stream 4.
+Streams 1, 2, 4, 7 are fully independent. Stream 5 depends on
+Stream 4. Stream 6 (refactoring) depends on Stream 3 (rename first).
 
 ```mermaid
 graph LR
-    S1["Stream 1: Commit Proto Files<br/>5 pts"] --> DONE
-    S2["Stream 2: Package Documentation<br/>5 pts"] --> DONE
-    S3["Stream 3: Service Naming<br/>3 pts"] --> DONE
-    S4["Stream 4: Convention Documentation<br/>5 pts"] --> S5
-    S5["Stream 5: Checklist Update<br/>3 pts"] --> DONE
-    S6["Stream 6: Large File Refactoring<br/>13 pts"] --> DONE
-    S7["Stream 7: Shared Test Infrastructure<br/>13 pts"] --> DONE
+    S1["Stream 1: Proto Files<br/>5 pts"] --> DONE
+    S2["Stream 2: Package Docs<br/>5 pts"] --> DONE
+    S3["Stream 3: Service Naming<br/>3 pts"] --> S6
+    S4["Stream 4: Convention Docs<br/>5 pts"] --> S5
+    S5["Stream 5: Checklist<br/>3 pts"] --> DONE
+    S6["Stream 6: Refactoring<br/>13 pts"] --> DONE
+    S7["Stream 7: Test Infra<br/>13 pts"] --> DONE
 ```
 
 Stream 5 depends on Stream 4 (conventions must be documented before the checklist encodes them).
@@ -410,6 +415,15 @@ in this PRD and ADR-015.
 mixed concerns. This stream targets the 10 largest non-generated files
 for decomposition.
 
+**Relationship to PRD-012**: PRD-012 Stream 3 (8 pts) targeted 5
+files for refactoring. This stream supersedes it with a broader scope
+(10+ files) and updated line counts. PRD-012 Stream 3 tasks should be
+marked cancelled in favour of this stream.
+
+**Dependency on Stream 3**: Tasks 6.3 and 6.5 target files that
+Stream 3 (Task 3.1) will rename. Execute the rename first, then
+refactor. Task Master should mark 6.3 and 6.5 as depending on 3.1.
+
 ### Task 6.1: Refactor manifest_validator.go (2753 lines)
 
 **Problem**: Largest non-generated file in the codebase. Mixes
@@ -573,16 +587,17 @@ definitions in test files.
 
 | Stream | Points | Dependencies | Parallelizable With |
 |--------|--------|-------------|-------------------|
-| 1. Proto Files | 5 | None | All except 5 |
-| 2. Package Docs | 5 | None | All except 5 |
-| 3. Service Naming | 3 | None | All except 5 |
-| 4. Convention Docs | 5 | None | All except 5 |
+| 1. Proto Files | 5 | None | All except 5, 6 |
+| 2. Package Docs | 5 | None | All except 5, 6 |
+| 3. Service Naming | 3 | None | All except 5, 6 |
+| 4. Convention Docs | 5 | None | All except 5, 6 |
 | 5. Checklist Update | 3 | Stream 4 | After 4 |
-| 6. Large File Refactoring | 13 | None | All except 5 |
-| 7. Test Infrastructure | 13 | None | All except 5 |
+| 6. Refactoring | 13 | Stream 3 | After 3 |
+| 7. Test Infrastructure | 13 | None | All except 5, 6 |
 
-**Critical path**: Stream 4 (5 pts) -> Stream 5 (3 pts) = 8 pts.
-Streams 1-4, 6, 7 run concurrently, then Stream 5 follows.
+**Critical path**: Stream 3 (3 pts) -> Stream 6 (13 pts) = 16 pts.
+Streams 1, 2, 3, 4, 7 run concurrently. Stream 5 follows 4.
+Stream 6 follows 3.
 
 ## Task Master Parsing Guidance
 
@@ -593,6 +608,7 @@ When parsing this PRD into Task Master tasks:
 - Each task maps to a single PR-able unit of work
 - Preserve stream grouping in task numbering
 - Mark Stream 5 tasks as depending on Stream 4 tasks
+- Mark Stream 6 tasks 6.3 and 6.5 as depending on Task 3.1
 - All other streams have zero dependencies
 
 **Task-to-stream mapping:**
