@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/stretchr/testify/require"
 )
 
 // mockPool creates a minimal pool configuration for testing
