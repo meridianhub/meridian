@@ -149,13 +149,18 @@ Every entity that is an aggregate root includes:
 ```go
 type SettlementRunEntity struct {
     ID        uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+    RunID     uuid.UUID      `gorm:"column:run_id;uniqueIndex;type:uuid;not null"` // business key
     CreatedAt time.Time      `gorm:"not null;default:now()"`
     UpdatedAt time.Time      `gorm:"not null;default:now()"`
-    DeletedAt gorm.DeletedAt `gorm:"index"`           // soft delete (optional)
+    DeletedAt gorm.DeletedAt `gorm:"index"`              // soft delete (optional)
     Version   int64          `gorm:"not null;default:1"` // optimistic locking
     // ... domain fields
 }
 ```
+
+> **DB PK vs business key**: `ID` is the CockroachDB-managed row primary key
+> (`gen_random_uuid()`). `RunID` is the domain-visible identifier, uniquely indexed and
+> used in all WHERE clauses. The domain layer never exposes `ID` directly.
 
 ### TableName
 
