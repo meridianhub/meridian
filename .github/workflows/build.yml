@@ -18,6 +18,7 @@ on:
       - 'buf.lock'
       - 'Makefile'
       - '.github/workflows/build.yml'
+      - 'scripts/check-service-coverage.sh'
 
 permissions:
   contents: read
@@ -36,7 +37,7 @@ jobs:
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -66,6 +67,14 @@ jobs:
       - name: Verify compilation
         if: github.event_name == 'pull_request'
         run: go build ./...
+
+      - name: Check per-service coverage
+        if: github.event_name == 'pull_request'
+        # continue-on-error: remove this once all services reach the 70% threshold
+        continue-on-error: true
+        run: |
+          chmod +x scripts/check-service-coverage.sh
+          ./scripts/check-service-coverage.sh
 
       - name: Run tests
         if: github.event_name != 'pull_request'
