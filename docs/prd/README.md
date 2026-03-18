@@ -71,6 +71,7 @@ stateDiagram-v2
 
 | PRD | Description |
 |-----|-------------|
+| [Codebase Consistency & AI Navigability](049-codebase-consistency.md) | Standardize naming, patterns, and documentation across services |
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
 | [Identity and Access Management](031-identity-access-management.md) | Bridge Party service identity to authentication with dynamic user management and RBAC |
 | [Meridian Edge](003-meridian-edge.md) | Embedded modular monolith for IoT devices and browser (WASM) |
@@ -258,6 +259,8 @@ material.
   Service-aligned frontend modules, Storybook, and runtime tenant UI customisation
 - [MCP Server](027-mcp-server.md) - Model Context Protocol server bridging LLMs to Meridian Core
 - [Codebase Health Audit](012-codebase-health-audit.md) - Remediation for documentation, CI/CD, and code hygiene
+- [Codebase Consistency & AI Navigability](049-codebase-consistency.md) -
+  Standardize naming, patterns, and documentation for AI and developer navigability
 - [Production Readiness Review](009-production-readiness-review.md) - Audit and remediation for production gaps
 - [Operations Console UI](026-operations-console-ui.md) - Meridian operations console frontend
 - [Economy Cookbook](035-economy-cookbook.md) - Unified pattern registry for economy patterns and UI components
