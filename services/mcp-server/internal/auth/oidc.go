@@ -529,6 +529,14 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		tenantID = resolved
 	}
 
+	// Defense-in-depth: validate redirect URI scheme before signing tokens.
+	// The URI was validated at authorize-time, but re-check before redirect.
+	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
+		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
+		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
+	}
+
 	// Sign Meridian JWT with tenant context.
 	claims := map[string]interface{}{
 		"sub":         email, // Use email as subject until identity resolution is wired
@@ -562,12 +570,6 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		"tenant", flowState.TenantSlug)
 
 	// Redirect to MCP client's redirect_uri with the authorization code.
-	// Defense-in-depth: validate scheme before redirecting.
-	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
-		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
-		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
-		return
-	}
 	target, err := url.Parse(flowState.MCPRedirectURI)
 	if err != nil {
 		h.logger.Error("oidc: invalid redirect URI", "error", err)

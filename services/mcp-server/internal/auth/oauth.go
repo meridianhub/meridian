@@ -347,6 +347,15 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Defense-in-depth: validate the resolved redirect URI has a safe scheme.
+	// resolveClient already validates against registered URIs, but this
+	// explicit check prevents open-redirect if a malformed URI is registered.
+	if !isAllowedRedirectURI(redirectURI) {
+		h.logger.Error("unsafe redirect URI scheme", "uri", redirectURI)
+		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
+	}
+
 	clientID := q.Get("client_id")
 
 	// Require response_type=code (only supported grant).
@@ -384,14 +393,6 @@ func (h *AuthorizationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	h.logger.Info("authorization code issued", "client_id", clientID)
 
-	// Defense-in-depth: validate the resolved redirect URI has a safe scheme.
-	// resolveClient already validates against registered URIs, but this
-	// explicit check prevents open-redirect if a malformed URI is registered.
-	if !isAllowedRedirectURI(redirectURI) {
-		h.logger.Error("unsafe redirect URI scheme", "uri", redirectURI)
-		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
-		return
-	}
 	target, err := url.Parse(redirectURI)
 	if err != nil {
 		h.logger.Error("invalid registered redirect URI", "error", err)
