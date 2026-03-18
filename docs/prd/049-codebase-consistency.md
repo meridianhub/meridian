@@ -58,7 +58,7 @@ codebase isn't self-describing enough.
 
 ## Complexity Assessment
 
-Total estimated complexity: **47 story points** across 7 streams.
+Total estimated complexity: **49 story points** across 7 streams.
 
 Streams 1, 2, 4, 7 are fully independent. Stream 5 depends on
 Stream 4. Stream 6 (refactoring) depends on Stream 3 (rename first).
@@ -69,7 +69,7 @@ graph LR
     S2["Stream 2: Package Docs<br/>5 pts"] --> DONE
     S3["Stream 3: Service Naming<br/>3 pts"] --> S6
     S4["Stream 4: Convention Docs<br/>5 pts"] --> S5
-    S5["Stream 5: Checklist<br/>3 pts"] --> DONE
+    S5["Stream 5: Checklist + CI<br/>5 pts"] --> DONE
     S6["Stream 6: Refactoring<br/>13 pts"] --> DONE
     S7["Stream 7: Test Infra<br/>13 pts"] --> DONE
 ```
@@ -175,6 +175,7 @@ does without reading implementation files.
    usage example or "see X for usage" pointer
 3. Format follows Go convention: `// Package X provides...`
 4. No implementation code in `doc.go` files
+5. **Enforcement**: Task 5.3 CI check validates new packages have `doc.go`
 
 **Example**:
 
@@ -270,6 +271,8 @@ for the gRPC service implementation file. Most services use
 2. All imports and references updated
 3. All tests pass
 4. `git log --follow` preserves file history (use `git mv`)
+5. **Enforcement**: Task 5.3 CI check validates `server.go` exists in
+   every `services/*/service/` directory
 
 ### Task 3.2: Standardize gRPC Handler File Splitting Convention
 
@@ -404,6 +407,43 @@ in this PRD and ADR-015.
 2. Outputs pass/fail per check with actionable fix instructions
 3. Can be run in CI for new service PRs
 
+### Task 5.3: Add CI Convention Enforcement Workflow
+
+**Problem**: After fixing all conventions, nothing prevents regression.
+New code can reintroduce `time.Sleep` in tests, create files >600 LOC,
+add packages without `doc.go`, or use non-standard service file names.
+
+**Files Affected**:
+
+- `.github/workflows/conventions.yml` (new)
+- `.githooks/pre-commit` (add file-size check for staged Go files)
+
+**Checks to enforce** (each fails CI with actionable message):
+
+1. **No Go file >600 lines** (excluding `*.pb.go`, `*_grpc.pb.go`):
+   `find . -name '*.go' ! -name '*.pb.go' | xargs wc -l | awk '$1>600'`
+2. **No `time.Sleep` in test files** (except `await_test.go`):
+   `grep -rn 'time\.Sleep' --include='*_test.go' | grep -v await_test`
+3. **Every shared/ package has doc.go**:
+   check all dirs under `shared/pkg/` and `shared/platform/`
+4. **Proto generated files are fresh**:
+   run `buf generate` and check for uncommitted changes
+5. **Service naming convention**:
+   every `services/*/service/` dir contains `server.go`
+
+**Pre-commit hook additions**:
+
+- File size check on staged `.go` files (warn if >600 lines)
+- `time.Sleep` check on staged `*_test.go` files
+
+**Acceptance Criteria**:
+
+1. CI workflow runs on PRs touching Go, proto, or shared/ files
+2. Each check has a clear failure message with fix instructions
+3. Pre-commit hook warns (non-blocking) on convention violations
+4. Existing codebase passes all checks after streams 1-7 complete
+5. False positive rate is zero (no legitimate code flagged)
+
 ---
 
 ## Stream 6: Large File Refactoring (13 pts)
@@ -434,7 +474,8 @@ and schema validation in a single file.
 
 **Acceptance Criteria**:
 
-1. Split into focused validators (e.g., `cel_validator.go`,
+1. **Enforcement**: Task 5.3 CI check prevents new files >600 LOC
+2. Split into focused validators (e.g., `cel_validator.go`,
    `starlark_validator.go`, `crossref_validator.go`)
 2. No file exceeds 600 lines
 3. All existing tests pass unchanged
@@ -541,6 +582,8 @@ or slow CI (sleep too long).
 3. Exception: `time.Sleep` used to simulate delays (not to wait
    for conditions) may be retained with a comment explaining why
 4. CI time does not increase
+5. **Enforcement**: Task 5.3 CI check prevents new `time.Sleep`
+   in test files; pre-commit hook warns on staged violations
 
 ### Task 7.3: Extract Shared Test Context Helpers
 
@@ -591,7 +634,7 @@ definitions in test files.
 | 2. Package Docs | 5 | None | All except 5, 6 |
 | 3. Service Naming | 3 | None | All except 5, 6 |
 | 4. Convention Docs | 5 | None | All except 5, 6 |
-| 5. Checklist Update | 3 | Stream 4 | After 4 |
+| 5. Checklist + CI | 5 | Stream 4 | After 4 |
 | 6. Refactoring | 13 | Stream 3 | After 3 |
 | 7. Test Infrastructure | 13 | None | All except 5, 6 |
 
@@ -603,7 +646,7 @@ Stream 6 follows 3.
 
 When parsing this PRD into Task Master tasks:
 
-- **Create exactly 22 tasks** corresponding to the numbered tasks
+- **Create exactly 23 tasks** corresponding to the numbered tasks
   (1.1 through 7.4)
 - Each task maps to a single PR-able unit of work
 - Preserve stream grouping in task numbering
@@ -628,15 +671,16 @@ When parsing this PRD into Task Master tasks:
 | 11 | Task 4.3: Document Value Type Hierarchy | Convention Docs |
 | 12 | Task 5.1: Update New Service Checklist | Checklist |
 | 13 | Task 5.2: Add Service Consistency Script | Checklist |
-| 14 | Task 6.1: Refactor manifest_validator.go | Refactoring |
-| 15 | Task 6.2: Refactor postgres_repository.go | Refactoring |
-| 16 | Task 6.3: Refactor party grpc_service.go | Refactoring |
-| 17 | Task 6.4: Refactor lien_service.go | Refactoring |
-| 18 | Task 6.5: Refactor remaining >1000 LOC files | Refactoring |
-| 19 | Task 7.1: Standardize Test DB Setup | Test Infra |
-| 20 | Task 7.2: Migrate time.Sleep to await | Test Infra |
-| 21 | Task 7.3: Extract Shared Test Context Helpers | Test Infra |
-| 22 | Task 7.4: Extract Service Test Helpers | Test Infra |
+| 14 | Task 5.3: CI Convention Enforcement Workflow | Checklist |
+| 15 | Task 6.1: Refactor manifest_validator.go | Refactoring |
+| 16 | Task 6.2: Refactor postgres_repository.go | Refactoring |
+| 17 | Task 6.3: Refactor party server.go | Refactoring |
+| 18 | Task 6.4: Refactor lien_service.go | Refactoring |
+| 19 | Task 6.5: Refactor remaining >1000 LOC files | Refactoring |
+| 20 | Task 7.1: Standardize Test DB Setup | Test Infra |
+| 21 | Task 7.2: Migrate time.Sleep to await | Test Infra |
+| 22 | Task 7.3: Extract Shared Test Context Helpers | Test Infra |
+| 23 | Task 7.4: Extract Service Test Helpers | Test Infra |
 
 ## Success Criteria
 
@@ -649,3 +693,5 @@ When parsing this PRD into Task Master tasks:
 7. No Go file exceeds 600 lines (excluding generated code)
 8. Zero `time.Sleep` in test files (except await package tests)
 9. Top 5 services use shared `testdb.SetupTestDB(t)` helper
+10. CI convention enforcement workflow prevents regression on all
+    conventions established in this PRD
