@@ -75,7 +75,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // For tenant users, slug comes from JWT claims or falls back to the current
-  // subdomain (needed in demo mode where OIDC tokens lack tenantId).
+  // subdomain. The fallback is the primary path: the backend JWT uses the
+  // "x-tenant-id" claim key (tenant ID, e.g. "volterra_energy") which doesn't
+  // match the frontend's "tenantId" field, so subdomain parsing provides the
+  // slug (e.g. "volterra-energy"). VITE_BASE_DOMAIN must match the deployment
+  // domain for subdomain extraction to work correctly.
   const tenantSlug = isPlatformAdmin
     ? selectedTenant?.slug ?? null
     : claims?.tenantId ?? getTenantSlugFromSubdomain(window.location.hostname)
