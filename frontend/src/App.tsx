@@ -503,7 +503,7 @@ function ApiClientBridge({ children }: { children: ReactNode }) {
 }
 
 /**
- * In dev/demo mode, auto-select the first real tenant for platform admins
+ * In DEV and E2E mode, auto-select the first real tenant for platform admins
  * so pages show data immediately after login.
  */
 function DevTenantAutoSelector() {
