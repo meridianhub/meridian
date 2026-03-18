@@ -90,6 +90,17 @@ func SetupTestDB(t *testing.T, opts ...Option) (*gorm.DB, context.Context, func(
 	// Start CockroachDB container with GORM connection
 	db, cleanup := SetupCockroachDB(t, nil, WithLogLevel(cfg.logLevel))
 
+	// Pin to a single connection so session-level SET search_path persists
+	// across all subsequent Exec/AutoMigrate calls.
+	if cfg.tenantID != "" {
+		sqlDB, err := db.DB()
+		if err != nil {
+			cleanup()
+			t.Fatalf("testdb: failed to get underlying sql.DB: %v", err)
+		}
+		sqlDB.SetMaxOpenConns(1)
+	}
+
 	// AutoMigrate models in public schema first (provides fallback for cross-tenant queries)
 	if len(cfg.models) > 0 {
 		if err := db.AutoMigrate(cfg.models...); err != nil {

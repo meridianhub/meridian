@@ -34,7 +34,8 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 }
 
 // setupTenantSchema creates an additional tenant schema with the identity tables.
-// Used for multi-tenant isolation tests.
+// Used for multi-tenant isolation tests. Session affinity for SET search_path is
+// guaranteed because SetupTestDB pins the connection pool to MaxOpenConns(1).
 func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.Context {
 	t.Helper()
 	schemaName := tid.SchemaName()
