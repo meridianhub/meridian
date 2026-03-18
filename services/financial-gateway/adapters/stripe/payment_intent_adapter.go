@@ -330,10 +330,10 @@ func (a *PaymentIntentAdapter) CancelPayment(ctx context.Context, paymentOrderID
 	pi, err := a.config.Canceller.Cancel(ctx, piID, params)
 	if err != nil {
 		var stripeErr *stripego.Error
-		if errors.As(err, &stripeErr) && stripeErr.HTTPStatusCode == 400 {
-			// Stripe returns 400 when the PI is in a terminal state.
-			// Only treat "already canceled" as idempotent success.
-			// Other terminal states (succeeded, etc.) are NOT cancellable.
+		if errors.As(err, &stripeErr) && stripeErr.Code == stripego.ErrorCodePaymentIntentUnexpectedState {
+			// Stripe returns payment_intent_unexpected_state when the PI
+			// is in a non-cancellable state. Check if it's already canceled
+			// (idempotent success) vs a truly non-cancellable state (e.g., succeeded).
 			if strings.Contains(stripeErr.Msg, "status of canceled") {
 				a.logger.Info("stripe payment intent already cancelled",
 					"payment_order_id", paymentOrderID,
@@ -344,8 +344,8 @@ func (a *PaymentIntentAdapter) CancelPayment(ctx context.Context, paymentOrderID
 					Status:            financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED,
 				}, nil
 			}
-			// Non-cancellable state (e.g., succeeded) — return error
-			return CancelResult{}, fmt.Errorf("payment intent %s cannot be cancelled: %w", piID, err)
+			// Non-cancellable state (e.g., succeeded) — return as invalid request
+			return CancelResult{}, fmt.Errorf("payment intent %s cannot be cancelled: %w", piID, ErrInvalidRequest)
 		}
 		return CancelResult{}, fmt.Errorf("stripe cancel failed: %w", err)
 	}

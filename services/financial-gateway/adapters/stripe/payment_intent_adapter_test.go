@@ -509,6 +509,7 @@ func TestPaymentIntentAdapter_CancelPayment_AlreadyCancelled(t *testing.T) {
 			return nil, &stripego.Error{
 				HTTPStatusCode: 400,
 				Type:           stripego.ErrorTypeInvalidRequest,
+				Code:           stripego.ErrorCodePaymentIntentUnexpectedState,
 				Msg:            "You cannot cancel this PaymentIntent because it has a status of canceled.",
 			}
 		},
@@ -544,6 +545,7 @@ func TestPaymentIntentAdapter_CancelPayment_AlreadySucceeded(t *testing.T) {
 			return nil, &stripego.Error{
 				HTTPStatusCode: 400,
 				Type:           stripego.ErrorTypeInvalidRequest,
+				Code:           stripego.ErrorCodePaymentIntentUnexpectedState,
 				Msg:            "You cannot cancel this PaymentIntent because it has a status of succeeded.",
 			}
 		},
@@ -564,7 +566,7 @@ func TestPaymentIntentAdapter_CancelPayment_AlreadySucceeded(t *testing.T) {
 	ctx = WithStripeAccount(ctx, "acct_tenant_a")
 	_, err = adapter.CancelPayment(ctx, "po-already-succeeded", "reason")
 	require.Error(t, err, "already-succeeded should return error, not silent success")
-	assert.Contains(t, err.Error(), "cannot be cancelled")
+	assert.True(t, errors.Is(err, ErrInvalidRequest))
 }
 
 func TestPaymentIntentAdapter_CancelPayment_EmptyReason(t *testing.T) {

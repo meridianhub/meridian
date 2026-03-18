@@ -225,12 +225,14 @@ func mapCancelError(err error) error {
 		return status.Error(codes.NotFound, "payment intent not found for payment order")
 	case errors.Is(err, stripeadapter.ErrMissingStripeAccount):
 		return status.Error(codes.FailedPrecondition, "stripe connected account not configured")
+	case errors.Is(err, stripeadapter.ErrInvalidRequest):
+		return status.Error(codes.FailedPrecondition, "payment cannot be cancelled in current state")
 	case errors.Is(err, context.Canceled):
 		return status.Error(codes.Canceled, "request canceled")
 	case errors.Is(err, context.DeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
 	default:
-		return status.Error(codes.Internal, "failed to cancel payment")
+		return status.Error(codes.Unavailable, "cancel provider temporarily unavailable")
 	}
 }
 
