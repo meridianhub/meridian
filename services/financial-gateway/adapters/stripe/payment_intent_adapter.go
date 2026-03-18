@@ -17,9 +17,11 @@ import (
 
 // Sentinel errors for the Stripe payment intent adapter.
 var (
-	ErrMissingStripeAccount = errors.New("stripe connected account ID not found in context")
-	ErrInvalidRequest       = errors.New("invalid stripe request")
-	ErrNilCreator           = errors.New("payment intent creator must not be nil")
+	ErrMissingStripeAccount  = errors.New("stripe connected account ID not found in context")
+	ErrInvalidRequest        = errors.New("invalid stripe request")
+	ErrNilCreator            = errors.New("payment intent creator must not be nil")
+	ErrPaymentIntentNotFound = errors.New("payment intent not found for payment order")
+	ErrCancelNotConfigured   = errors.New("cancel support not configured on adapter")
 )
 
 // Prometheus metrics for Stripe gateway operations.
@@ -59,11 +61,28 @@ type PaymentIntentCreator interface {
 	Create(ctx context.Context, params *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error)
 }
 
+// PaymentIntentCanceller abstracts Stripe PaymentIntent cancellation for testability.
+type PaymentIntentCanceller interface {
+	Cancel(ctx context.Context, id string, params *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error)
+}
+
+// PaymentIntentResolver abstracts finding a Stripe PaymentIntent ID by payment order metadata.
+type PaymentIntentResolver interface {
+	// FindByPaymentOrderID returns the Stripe PaymentIntent ID for the given payment_order_id.
+	FindByPaymentOrderID(ctx context.Context, paymentOrderID string) (string, error)
+}
+
 // PaymentIntentAdapterConfig holds configuration for the Stripe payment intent adapter.
 type PaymentIntentAdapterConfig struct {
 	// PlatformFee configures the platform fee calculation.
 	// If nil or zero, no platform fee is applied.
 	PlatformFee *PlatformFeeConfig
+
+	// Canceller handles Stripe PaymentIntent cancellation. Optional; if nil, CancelPayment returns ErrCancelNotConfigured.
+	Canceller PaymentIntentCanceller
+
+	// Resolver finds Stripe PaymentIntent IDs by metadata. Optional; required for CancelPayment.
+	Resolver PaymentIntentResolver
 }
 
 // stripeAccountKey is the context key for the Stripe Connected Account ID.
@@ -269,6 +288,80 @@ func (a *PaymentIntentAdapter) handleError(err error, currency string, duration 
 		"message", stripeErr.Msg,
 	)
 	return DispatchResult{}, fmt.Errorf("stripe error (%s): %w", stripeErr.Type, err)
+}
+
+// CancelResult captures the outcome of a Stripe payment cancellation.
+type CancelResult struct {
+	// ProviderReference is the Stripe PaymentIntent ID.
+	ProviderReference string
+	// Status is the mapped dispatch status after cancellation.
+	Status financialgatewayv1.DispatchStatus
+}
+
+// CancelPayment finds and cancels the Stripe PaymentIntent associated with the given payment order.
+// If the PaymentIntent is already cancelled, it succeeds idempotently.
+func (a *PaymentIntentAdapter) CancelPayment(ctx context.Context, paymentOrderID, reason string) (CancelResult, error) {
+	if a.config.Canceller == nil || a.config.Resolver == nil {
+		return CancelResult{}, ErrCancelNotConfigured
+	}
+
+	accountID, ok := AccountFromContext(ctx)
+	if !ok {
+		return CancelResult{}, ErrMissingStripeAccount
+	}
+
+	piID, err := a.config.Resolver.FindByPaymentOrderID(ctx, paymentOrderID)
+	if err != nil {
+		return CancelResult{}, fmt.Errorf("failed to find payment intent for order %s: %w", paymentOrderID, err)
+	}
+
+	params := &stripego.PaymentIntentCancelParams{}
+	if reason != "" {
+		params.CancellationReason = stripego.String("requested_by_customer")
+	}
+	params.SetStripeAccount(accountID)
+
+	a.logger.Debug("cancelling stripe payment intent",
+		"payment_order_id", paymentOrderID,
+		"payment_intent_id", piID,
+		"connected_account", accountID,
+	)
+
+	pi, err := a.config.Canceller.Cancel(ctx, piID, params)
+	if err != nil {
+		var stripeErr *stripego.Error
+		if errors.As(err, &stripeErr) && stripeErr.Code == stripego.ErrorCodePaymentIntentUnexpectedState {
+			// Stripe returns payment_intent_unexpected_state when the PI
+			// is in a non-cancellable state. Check if it's already canceled
+			// (idempotent success) vs a truly non-cancellable state (e.g., succeeded).
+			if strings.Contains(stripeErr.Msg, "status of canceled") {
+				a.logger.Info("stripe payment intent already cancelled",
+					"payment_order_id", paymentOrderID,
+					"payment_intent_id", piID,
+				)
+				return CancelResult{
+					ProviderReference: piID,
+					Status:            financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED,
+				}, nil
+			}
+			// Non-cancellable state (e.g., succeeded) — return as invalid request
+			return CancelResult{}, fmt.Errorf("payment intent %s cannot be cancelled: %w", piID, ErrInvalidRequest)
+		}
+		return CancelResult{}, fmt.Errorf("stripe cancel failed: %w", err)
+	}
+
+	status := mapPaymentIntentStatus(pi.Status)
+
+	a.logger.Info("stripe payment intent cancelled",
+		"payment_order_id", paymentOrderID,
+		"payment_intent_id", pi.ID,
+		"status", string(pi.Status),
+	)
+
+	return CancelResult{
+		ProviderReference: pi.ID,
+		Status:            status,
+	}, nil
 }
 
 // mapPaymentIntentStatus maps a Stripe PaymentIntent status to a gateway DispatchStatus.

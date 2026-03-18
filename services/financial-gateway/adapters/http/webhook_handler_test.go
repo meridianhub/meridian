@@ -286,6 +286,110 @@ func TestWebhookHandler_OutboxPublishFails_Returns500(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 
+func TestWebhookHandler_PaymentRefunded_PublishesToOutbox(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	h := setupHandler(t, stub)
+
+	payload := buildStripePayload(t, "evt_ref_1", "charge.refunded", map[string]any{
+		"id":              "ch_test_ref_789",
+		"object":          "charge",
+		"amount_refunded": 3000,
+		"currency":        "usd",
+		"metadata":        map[string]string{},
+		"payment_intent": map[string]any{
+			"id":       "pi_original_789",
+			"metadata": map[string]string{"payment_order_id": "po-ref-789"},
+		},
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	require.Len(t, stub.published, 1)
+	assert.Equal(t, "financial-gateway.payment-refunded.v1", stub.published[0].topic)
+	assert.Equal(t, "po-ref-789", stub.published[0].aggID)
+
+	evt, ok := stub.published[0].event.(*financialgatewayeventsv1.PaymentRefundedEvent)
+	require.True(t, ok, "expected *PaymentRefundedEvent, got %T", stub.published[0].event)
+	assert.Equal(t, "ch_test_ref_789", evt.GetProviderReferenceId())
+	assert.Equal(t, "po-ref-789", evt.GetPaymentOrderId())
+	assert.Equal(t, int64(3000), evt.GetAmountRefundedMinorUnits())
+	assert.Equal(t, "usd", evt.GetCurrency())
+	assert.Equal(t, "evt_ref_1", evt.GetProviderEventId())
+	assert.NotEmpty(t, evt.GetEventId())
+	assert.Equal(t, int32(1), evt.GetVersion())
+}
+
+func TestWebhookHandler_PaymentDisputed_PublishesToOutbox(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	h := setupHandler(t, stub)
+
+	payload := buildStripePayload(t, "evt_disp_1", "charge.dispute.created", map[string]any{
+		"id":     "dp_test_disp_101",
+		"object": "dispute",
+		"reason": "fraudulent",
+		"status": "needs_response",
+		"charge": map[string]any{
+			"id":       "ch_disputed_101",
+			"metadata": map[string]string{"payment_order_id": "po-disp-101"},
+		},
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	require.Len(t, stub.published, 1)
+	assert.Equal(t, "financial-gateway.payment-disputed.v1", stub.published[0].topic)
+	assert.Equal(t, "po-disp-101", stub.published[0].aggID)
+
+	evt, ok := stub.published[0].event.(*financialgatewayeventsv1.PaymentDisputedEvent)
+	require.True(t, ok, "expected *PaymentDisputedEvent, got %T", stub.published[0].event)
+	assert.Equal(t, "ch_disputed_101", evt.GetProviderReferenceId())
+	assert.Equal(t, "po-disp-101", evt.GetPaymentOrderId())
+	assert.Equal(t, "dispute reason: fraudulent", evt.GetDisputeReason())
+	assert.Equal(t, "evt_disp_1", evt.GetProviderEventId())
+	assert.NotEmpty(t, evt.GetEventId())
+	assert.Equal(t, int32(1), evt.GetVersion())
+}
+
+func TestWebhookHandler_RefundedWithoutPaymentOrderID_AcknowledgesOnly(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	h := setupHandler(t, stub)
+
+	payload := buildStripePayload(t, "evt_ref_noid", "charge.refunded", map[string]any{
+		"id":              "ch_no_po_id",
+		"object":          "charge",
+		"amount_refunded": 1000,
+		"currency":        "gbp",
+		"metadata":        map[string]string{},
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Len(t, stub.published, 0, "should not publish event without payment_order_id")
+}
+
 func TestWebhookHandler_TenantNotFound_Returns500(t *testing.T) {
 	stub := &stubOutboxPublisher{}
 	provider := &testTenantConfigProvider{

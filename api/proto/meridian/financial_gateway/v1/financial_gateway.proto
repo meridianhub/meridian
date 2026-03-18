@@ -148,6 +148,10 @@ message DispatchPaymentResponse {
 
   // created_at is when this dispatch record was created.
   google.protobuf.Timestamp created_at = 6;
+
+  // platform_fee_minor_units is the platform fee charged on this payment in the smallest currency unit.
+  // Zero if no platform fee was applied.
+  int64 platform_fee_minor_units = 7 [(buf.validate.field).int64.gte = 0];
 }
 
 // DispatchRefundRequest submits a financial refund for dispatch via a payment rail.

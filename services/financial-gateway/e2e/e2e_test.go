@@ -472,7 +472,7 @@ func TestDispatchRefund_Unimplemented(t *testing.T) {
 	assert.Equal(t, codes.Unimplemented, st.Code())
 }
 
-func TestCancelPayment_Unimplemented(t *testing.T) {
+func TestCancelPayment_MissingTenant(t *testing.T) {
 	creator := &stubPaymentIntentCreator{
 		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
 			return nil, nil
@@ -486,5 +486,5 @@ func TestCancelPayment_Unimplemented(t *testing.T) {
 
 	st, ok := status.FromError(err)
 	require.True(t, ok)
-	assert.Equal(t, codes.Unimplemented, st.Code())
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
 }

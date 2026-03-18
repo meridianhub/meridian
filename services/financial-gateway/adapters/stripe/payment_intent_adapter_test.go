@@ -359,3 +359,246 @@ func TestNewPaymentIntentAdapter_NilCreator(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNilCreator))
 }
+
+// --- CancelPayment Tests ---
+
+type mockPaymentIntentCanceller struct {
+	cancelFn func(ctx context.Context, id string, params *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error)
+}
+
+func (m *mockPaymentIntentCanceller) Cancel(ctx context.Context, id string, params *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+	return m.cancelFn(ctx, id, params)
+}
+
+type mockPaymentIntentResolver struct {
+	findFn func(ctx context.Context, paymentOrderID string) (string, error)
+}
+
+func (m *mockPaymentIntentResolver) FindByPaymentOrderID(ctx context.Context, paymentOrderID string) (string, error) {
+	return m.findFn(ctx, paymentOrderID)
+}
+
+func TestPaymentIntentAdapter_CancelPayment_Success(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	canceller := &mockPaymentIntentCanceller{
+		cancelFn: func(_ context.Context, id string, params *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+			assert.Equal(t, "pi_to_cancel", id)
+			assert.NotNil(t, params.CancellationReason)
+			assert.Equal(t, "requested_by_customer", *params.CancellationReason)
+
+			require.NotNil(t, params.StripeAccount)
+			assert.Equal(t, "acct_tenant_a", *params.StripeAccount)
+
+			return &stripego.PaymentIntent{
+				ID:     "pi_to_cancel",
+				Status: stripego.PaymentIntentStatusCanceled,
+			}, nil
+		},
+	}
+	resolver := &mockPaymentIntentResolver{
+		findFn: func(_ context.Context, paymentOrderID string) (string, error) {
+			assert.Equal(t, "po-cancel-123", paymentOrderID)
+			return "pi_to_cancel", nil
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{
+		Canceller: canceller,
+		Resolver:  resolver,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	result, err := adapter.CancelPayment(ctx, "po-cancel-123", "customer requested")
+	require.NoError(t, err)
+	assert.Equal(t, "pi_to_cancel", result.ProviderReference)
+	assert.Equal(t, financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED, result.Status)
+}
+
+func TestPaymentIntentAdapter_CancelPayment_NotConfigured(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	_, err = adapter.CancelPayment(ctx, "po-123", "reason")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrCancelNotConfigured))
+}
+
+func TestPaymentIntentAdapter_CancelPayment_MissingStripeAccount(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	canceller := &mockPaymentIntentCanceller{
+		cancelFn: func(_ context.Context, _ string, _ *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	resolver := &mockPaymentIntentResolver{
+		findFn: func(_ context.Context, _ string) (string, error) {
+			return "pi_x", nil
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{
+		Canceller: canceller,
+		Resolver:  resolver,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	// No stripe account in context
+	_, err = adapter.CancelPayment(ctx, "po-123", "reason")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrMissingStripeAccount))
+}
+
+func TestPaymentIntentAdapter_CancelPayment_ResolverNotFound(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	canceller := &mockPaymentIntentCanceller{
+		cancelFn: func(_ context.Context, _ string, _ *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+			t.Fatal("cancel should not be called when resolver fails")
+			return nil, nil
+		},
+	}
+	resolver := &mockPaymentIntentResolver{
+		findFn: func(_ context.Context, _ string) (string, error) {
+			return "", ErrPaymentIntentNotFound
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{
+		Canceller: canceller,
+		Resolver:  resolver,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	_, err = adapter.CancelPayment(ctx, "po-not-found", "reason")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrPaymentIntentNotFound))
+}
+
+func TestPaymentIntentAdapter_CancelPayment_AlreadyCancelled(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	canceller := &mockPaymentIntentCanceller{
+		cancelFn: func(_ context.Context, _ string, _ *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+			return nil, &stripego.Error{
+				HTTPStatusCode: 400,
+				Type:           stripego.ErrorTypeInvalidRequest,
+				Code:           stripego.ErrorCodePaymentIntentUnexpectedState,
+				Msg:            "You cannot cancel this PaymentIntent because it has a status of canceled.",
+			}
+		},
+	}
+	resolver := &mockPaymentIntentResolver{
+		findFn: func(_ context.Context, _ string) (string, error) {
+			return "pi_already_cancelled", nil
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{
+		Canceller: canceller,
+		Resolver:  resolver,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	result, err := adapter.CancelPayment(ctx, "po-already-cancelled", "reason")
+	require.NoError(t, err, "already-cancelled should succeed idempotently")
+	assert.Equal(t, "pi_already_cancelled", result.ProviderReference)
+	assert.Equal(t, financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED, result.Status)
+}
+
+func TestPaymentIntentAdapter_CancelPayment_AlreadySucceeded(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	canceller := &mockPaymentIntentCanceller{
+		cancelFn: func(_ context.Context, _ string, _ *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+			return nil, &stripego.Error{
+				HTTPStatusCode: 400,
+				Type:           stripego.ErrorTypeInvalidRequest,
+				Code:           stripego.ErrorCodePaymentIntentUnexpectedState,
+				Msg:            "You cannot cancel this PaymentIntent because it has a status of succeeded.",
+			}
+		},
+	}
+	resolver := &mockPaymentIntentResolver{
+		findFn: func(_ context.Context, _ string) (string, error) {
+			return "pi_already_succeeded", nil
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{
+		Canceller: canceller,
+		Resolver:  resolver,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	_, err = adapter.CancelPayment(ctx, "po-already-succeeded", "reason")
+	require.Error(t, err, "already-succeeded should return error, not silent success")
+	assert.True(t, errors.Is(err, ErrInvalidRequest))
+}
+
+func TestPaymentIntentAdapter_CancelPayment_EmptyReason(t *testing.T) {
+	creator := &mockPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return nil, nil
+		},
+	}
+	canceller := &mockPaymentIntentCanceller{
+		cancelFn: func(_ context.Context, _ string, params *stripego.PaymentIntentCancelParams) (*stripego.PaymentIntent, error) {
+			assert.Nil(t, params.CancellationReason, "empty reason should not set CancellationReason")
+			return &stripego.PaymentIntent{
+				ID:     "pi_no_reason",
+				Status: stripego.PaymentIntentStatusCanceled,
+			}, nil
+		},
+	}
+	resolver := &mockPaymentIntentResolver{
+		findFn: func(_ context.Context, _ string) (string, error) {
+			return "pi_no_reason", nil
+		},
+	}
+
+	adapter, err := NewPaymentIntentAdapter(creator, PaymentIntentAdapterConfig{
+		Canceller: canceller,
+		Resolver:  resolver,
+	}, slog.Default())
+	require.NoError(t, err)
+
+	ctx := tenantContext("tenant_a")
+	ctx = WithStripeAccount(ctx, "acct_tenant_a")
+	result, err := adapter.CancelPayment(ctx, "po-no-reason", "")
+	require.NoError(t, err)
+	assert.Equal(t, "pi_no_reason", result.ProviderReference)
+}
