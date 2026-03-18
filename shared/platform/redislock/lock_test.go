@@ -4,10 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,6 +190,7 @@ func TestLock_ContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	initialGoroutines := runtime.NumGoroutine()
 	acquired, _, err := l.Acquire(ctx, "tenant-1", "resource-a")
 	require.NoError(t, err)
 	assert.True(t, acquired)
@@ -196,7 +199,9 @@ func TestLock_ContextCancellation(t *testing.T) {
 	cancel()
 
 	// Give goroutine time to exit
-	time.Sleep(100 * time.Millisecond)
+	_ = await.AtMost(1 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return runtime.NumGoroutine() <= initialGoroutines
+	})
 
 	// Lock map entry may still exist but renewal has stopped
 	// This tests that cancellation doesn't panic

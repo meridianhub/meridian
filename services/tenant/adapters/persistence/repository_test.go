@@ -385,9 +385,7 @@ func TestRepository_List(t *testing.T) {
 		tenant := newTestTenant(string(rune('a'+i)) + "_tenant")
 		err := repo.Create(ctx, tenant)
 		require.NoError(t, err)
-		// Intentional sleep: Ensure distinct created_at timestamps for ordering tests.
-		// Database timestamp precision requires actual time to pass.
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps for DB ordering test
 	}
 
 	// List all tenants
@@ -441,8 +439,7 @@ func TestRepository_List_Pagination(t *testing.T) {
 		tenant := newTestTenant("page_tenant_" + string(rune('a'+i)))
 		err := repo.Create(ctx, tenant)
 		require.NoError(t, err)
-		// Intentional sleep: Ensure distinct timestamps for pagination ordering
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps for DB ordering test
 	}
 
 	// Get first page of 3

@@ -1271,7 +1271,7 @@ func TestListCurrentAccounts(t *testing.T) {
 			acc, err := domain.NewCurrentAccount(fmt.Sprintf("ACC-%03d", i), iban, uuid.New().String(), "GBP")
 			require.NoError(t, err)
 			require.NoError(t, repo.Save(ctx, acc))
-			time.Sleep(2 * time.Millisecond) // ensure distinct created_at for cursor ordering
+			time.Sleep(2 * time.Millisecond) //nolint:forbidigo // ensures distinct created_at for cursor ordering
 		}
 
 		// First page: page_size=2

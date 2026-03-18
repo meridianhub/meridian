@@ -302,8 +302,7 @@ func TestListVerificationsByParty(t *testing.T) {
 		}
 		err := repo.CreateVerification(ctx, verification)
 		require.NoError(t, err)
-		// Intentional sleep: Ensure different timestamps for ordering tests
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // ensures distinct timestamps for DB ordering test
 	}
 
 	// List verifications

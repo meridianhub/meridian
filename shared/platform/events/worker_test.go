@@ -389,8 +389,7 @@ func TestWorker_GracefulShutdown(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	// Intentional sleep: Give worker time to start its run loop.
-	// The worker doesn't expose a "started" state we can poll.
+	//nolint:forbidigo // Intentional: worker has no observable "started" state to poll
 	time.Sleep(50 * time.Millisecond)
 
 	// Stop should complete without hanging
@@ -420,8 +419,7 @@ func TestWorker_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
 
-	// Intentional sleep: Give worker time to start its run loop.
-	// The worker doesn't expose a "started" state we can poll.
+	//nolint:forbidigo // Intentional: worker has no observable "started" state to poll
 	time.Sleep(50 * time.Millisecond)
 
 	// Cancel context

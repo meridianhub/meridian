@@ -410,6 +410,7 @@ func TestHTTPChecker_Check_UnhealthyStatusCode(t *testing.T) {
 // TestHTTPChecker_Check_Timeout tests timeout behavior
 func TestHTTPChecker_Check_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		//nolint:forbidigo // simulates slow HTTP handler to trigger client timeout
 		time.Sleep(200 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))

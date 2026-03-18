@@ -8,6 +8,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/pkg/health"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -196,16 +197,14 @@ func TestWatch_TickerFires(t *testing.T) {
 	}()
 
 	// Wait until at least 2 responses have been sent (initial + at least one ticker response)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		stream.mu.Lock()
-		n := len(stream.responses)
-		stream.mu.Unlock()
-		if n >= 2 {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	require.NoError(t, await.New().
+		AtMost(2*time.Second).
+		PollInterval(time.Millisecond).
+		Until(func() bool {
+			stream.mu.Lock()
+			defer stream.mu.Unlock()
+			return len(stream.responses) >= 2
+		}), "should receive at least 2 health watch responses")
 
 	cancel() // cancel context to terminate Watch
 

@@ -126,12 +126,13 @@ func TestForwardCurveCache_L2Hit(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "45.5", obs.Value.String())
 
-	// Wait for L1 to expire
-	time.Sleep(60 * time.Millisecond)
-
-	// Second call: L2 hit (L1 expired)
-	obs2, err := cache1.Get(ctx, "ELEC_PEAK", ts)
-	require.NoError(t, err)
+	// Poll until L1 expires and the next Get registers an L2 hit
+	var obs2 *Observation
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(10*time.Millisecond).Until(func() bool {
+		obs2, _ = cache1.Get(ctx, "ELEC_PEAK", ts)
+		return cache1.Stats().L2Hits >= 1
+	}))
+	require.NotNil(t, obs2)
 	assert.Equal(t, "45.5", obs2.Value.String())
 
 	// Source should only be called once
@@ -181,12 +182,11 @@ func TestForwardCurveCache_L1TTLExpiry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), atomic.LoadInt64(&source.calls))
 
-	// Wait for TTL expiry
-	time.Sleep(60 * time.Millisecond)
-
-	// Should re-query source after TTL expiry
-	_, err = cache.Get(ctx, "ELEC_PEAK", ts)
-	require.NoError(t, err)
+	// Poll until TTL expires and source is re-queried
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(10*time.Millisecond).Until(func() bool {
+		_, _ = cache.Get(ctx, "ELEC_PEAK", ts)
+		return atomic.LoadInt64(&source.calls) >= 2
+	}))
 	assert.Equal(t, int64(2), atomic.LoadInt64(&source.calls))
 }
 
@@ -212,12 +212,13 @@ func TestForwardCurveCache_RedisFailureGraceful(t *testing.T) {
 	// Shut down Redis
 	mr.Close()
 
-	// Wait for L1 to expire
-	time.Sleep(60 * time.Millisecond)
-
-	// Should degrade gracefully: L2 fails -> L3
-	obs2, err := cache.Get(ctx, "ELEC_PEAK", ts)
-	require.NoError(t, err)
+	// Poll until L1 expires; source is called again as L2 (Redis) is down
+	var obs2 *Observation
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(10*time.Millisecond).Until(func() bool {
+		obs2, _ = cache.Get(ctx, "ELEC_PEAK", ts)
+		return atomic.LoadInt64(&source.calls) >= 2
+	}))
+	require.NotNil(t, obs2)
 	assert.Equal(t, "45.5", obs2.Value.String())
 
 	// Source called twice (initial + after Redis failure)

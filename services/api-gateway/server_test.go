@@ -405,7 +405,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	// Intentional sleep: Give server time to start and bind the port.
 	// The server doesn't expose a "started" state we can poll. This is a unit test
 	// verifying lifecycle; the mutex in Server ensures thread-safety regardless of timing.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // no observable started state to poll
 
 	select {
 	case err := <-serverErr:

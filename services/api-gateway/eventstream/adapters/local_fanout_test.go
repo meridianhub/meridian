@@ -396,13 +396,13 @@ func TestLocalFanOut_ConcurrentSubscribeUnsubscribePublish(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond) //nolint:forbidigo // staggers unsubscribe relative to concurrent publish goroutines
 			_ = fo.Unsubscribe(context.Background(), tenant)
 		}()
 	}
 
 	// Let everything run, then cancel to unblock remaining subscribers.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) //nolint:forbidigo // allows concurrent goroutines to run before cancellation
 	cancel()
 	wg.Wait()
 }

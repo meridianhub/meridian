@@ -393,8 +393,7 @@ func TestAuditWorker_GracefulShutdown(t *testing.T) {
 
 	worker.Start(ctx)
 
-	// Intentional sleep: Give worker time to start and enter its run loop.
-	// There's no observable state we can poll for to detect "worker is running".
+	//nolint:forbidigo // Intentional: worker has no observable "started" state to poll
 	time.Sleep(100 * time.Millisecond)
 
 	// Call Stop() and measure time
@@ -589,7 +588,7 @@ func TestAuditWorker_MultipleStartStop(t *testing.T) {
 	// Start and stop
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
-	// Intentional sleep: Give worker time to start its run loop
+	//nolint:forbidigo // Intentional: worker has no observable "started" state to poll
 	time.Sleep(100 * time.Millisecond)
 	worker.Stop()
 	cancel()
@@ -604,7 +603,7 @@ func TestAuditWorker_MultipleStartStop(t *testing.T) {
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	worker2.Start(ctx2)
-	// Intentional sleep: Give worker time to start its run loop
+	//nolint:forbidigo // Intentional: worker has no observable "started" state to poll
 	time.Sleep(100 * time.Millisecond)
 	worker2.Stop()
 
@@ -756,7 +755,7 @@ func TestAuditWorker_Stop_MultipleCallsSafe(t *testing.T) {
 
 	worker.Start(ctx)
 
-	// Intentional sleep: Give worker time to start its run loop
+	//nolint:forbidigo // Intentional: worker has no observable "started" state to poll
 	time.Sleep(100 * time.Millisecond)
 
 	// Call Stop() multiple times concurrently - should not panic
@@ -773,7 +772,7 @@ func TestAuditWorker_Stop_MultipleCallsSafe(t *testing.T) {
 
 	// Verify worker actually stopped by checking it doesn't process new entries
 	createTestEntries(t, db, 5)
-	// Intentional sleep: Wait to verify worker does NOT process new entries after stop
+	//nolint:forbidigo // Intentional: verifying worker does not process entries after stop (negative assertion) requires waiting
 	time.Sleep(200 * time.Millisecond)
 
 	var processed int64

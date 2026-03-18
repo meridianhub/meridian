@@ -293,6 +293,7 @@ func TestBucketKeyDeterminismTimeSensitivity(t *testing.T) {
 	}
 
 	for _, interval := range intervals {
+		//nolint:forbidigo // advances time between evaluations to verify CEL determinism across temporal gaps
 		time.Sleep(interval)
 		result, _, err := prg.Eval(input)
 		require.NoError(t, err)

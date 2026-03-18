@@ -59,7 +59,7 @@ func setupPostgresContainer(ctx context.Context, t *testing.T) (*PostgresPool, f
 			break
 		}
 		t.Logf("Ping attempt %d failed: %v, retrying...", attempt, pingErr)
-		// Intentional sleep: Exponential backoff for database connection retry
+		//nolint:forbidigo // exponential backoff between database connection retry attempts
 		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 	}
 	require.NoError(t, pingErr, "failed to ping postgres after retries")
@@ -493,7 +493,7 @@ func TestPostgresPool_Integration_ContextCancellation(t *testing.T) {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Millisecond)
 		defer cancel()
 
-		// Intentional sleep: Wait for context timeout to trigger before executing query
+		//nolint:forbidigo // ensures nanosecond-TTL context has expired before executing query
 		time.Sleep(10 * time.Millisecond)
 
 		// Query should fail due to timeout
@@ -516,7 +516,7 @@ func TestPostgresPool_Integration_ContextCancellation(t *testing.T) {
 		defer cancel()
 
 		err := WithTransaction(timeoutCtx, pool, func(_ DB) error {
-			// Intentional sleep: Simulate slow operation to trigger context timeout
+			//nolint:forbidigo // simulates slow transaction to trigger context timeout
 			time.Sleep(200 * time.Millisecond)
 			return nil
 		})

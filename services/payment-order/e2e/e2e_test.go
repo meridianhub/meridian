@@ -1117,7 +1117,7 @@ func TestPaymentSaga_E2E_Idempotency(t *testing.T) {
 
 	// InitiateLien should only be called once (not for the duplicate)
 	// Give some time for potential extra calls
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond) //nolint:forbidigo // gives time for potential duplicate calls to materialize
 	assert.LessOrEqual(t, atomic.LoadInt32(&env.CurrentAccountClient.initiateLienCalls), int32(1),
 		"InitiateLien should be called at most once for idempotent requests")
 }

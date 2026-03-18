@@ -249,7 +249,7 @@ func TestInMemorySlugCache_BackgroundCleanup(t *testing.T) {
 
 		// Intentional sleep: Wait for multiple cleanup cycles to run (50ms interval x 3 = 150ms)
 		// to verify they don't remove entries that haven't expired (1 hour TTL).
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond) //nolint:forbidigo // verifies non-expired entries are NOT removed — no condition to poll against
 
 		// Entry should still exist
 		assert.Equal(t, 1, cache.Size())

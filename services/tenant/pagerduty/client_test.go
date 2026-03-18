@@ -327,8 +327,7 @@ func TestClient_TriggerAlert_NetworkError(t *testing.T) {
 
 func TestClient_TriggerAlert_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Intentional sleep: Delay response to test context cancellation handling
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) //nolint:forbidigo // simulates slow server response to test context cancellation
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer server.Close()

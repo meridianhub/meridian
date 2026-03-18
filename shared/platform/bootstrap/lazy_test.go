@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -130,11 +131,11 @@ func TestLazyClient_ContextCancellation_StopsBackground(t *testing.T) {
 	// Cancel context to stop background goroutine
 	cancel()
 
-	// Give goroutine time to observe cancellation
+	//nolint:forbidigo // gives goroutine time to observe context cancellation before sampling attempt count
 	time.Sleep(50 * time.Millisecond)
 
 	countAfterCancel := attempts.Load()
-	// Wait a bit more to ensure no new attempts happen
+	//nolint:forbidigo // ensures no new attempts are made after context cancellation (absence of activity)
 	time.Sleep(50 * time.Millisecond)
 
 	if got := attempts.Load(); got != countAfterCancel {
@@ -232,12 +233,7 @@ func TestLazyClient_ConcurrentGet_NoRace(t *testing.T) {
 // waitForReady polls IsReady() until true or timeout.
 func waitForReady[T any](t *testing.T, lc *LazyClient[T], timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if lc.IsReady() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	if err := await.AtMost(timeout).PollInterval(5 * time.Millisecond).Until(lc.IsReady); err != nil {
+		t.Fatal("LazyClient did not become ready within timeout")
 	}
-	t.Fatal("LazyClient did not become ready within timeout")
 }

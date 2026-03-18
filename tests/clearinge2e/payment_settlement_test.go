@@ -305,7 +305,7 @@ func TestPaymentSettlementFlow(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			time.Sleep(50 * time.Millisecond) // Simulate processing delay
+			time.Sleep(50 * time.Millisecond) //nolint:forbidigo // simulates async settlement processing delay
 
 			// Debit customer, credit clearing
 			legRef := paymentRef + "-SETTLE"

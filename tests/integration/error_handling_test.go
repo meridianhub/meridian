@@ -577,7 +577,7 @@ func TestDatabase_ConnectionFailure_ContextTimeout(t *testing.T) {
 
 	dbOperation := func() error {
 		attemptCount++
-		time.Sleep(100 * time.Millisecond) // Simulate slow operation
+		time.Sleep(100 * time.Millisecond) //nolint:forbidigo // triggers context timeout by simulating slow operation
 		return errDatabaseUnavailable
 	}
 

@@ -322,7 +322,7 @@ func TestRetryContextDeadlineExceeded(t *testing.T) {
 	attempts := 0
 	fn := func() error {
 		attempts++
-		// Intentional sleep: Simulate slow operation to trigger context deadline
+		//nolint:forbidigo // simulates slow operation latency to trigger context deadline
 		time.Sleep(30 * time.Millisecond)
 		return status.Error(codes.Unavailable, "service unavailable")
 	}

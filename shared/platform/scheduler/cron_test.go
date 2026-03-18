@@ -596,7 +596,7 @@ func TestCronScheduler_ProviderError_ContinuesRunning(t *testing.T) {
 		errCh <- s.Start(ctx)
 	}()
 
-	// Let a few refresh cycles run with error
+	//nolint:forbidigo // Intentional: verifying negative condition (scheduler still running) requires waiting
 	time.Sleep(500 * time.Millisecond)
 
 	// Scheduler should still be running despite provider errors
@@ -645,7 +645,7 @@ func TestCronScheduler_LockError_SkipsExecution(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Give time for cron to fire (seconds-level, fast)
+	//nolint:forbidigo // Intentional: verifying cron fires but executor is skipped (negative assertion) requires waiting
 	time.Sleep(2 * time.Second)
 
 	// Executor should not have been called (lock error prevents execution)

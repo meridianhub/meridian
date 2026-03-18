@@ -466,7 +466,7 @@ func TestMarketDataPublisher_CircuitBreaker(t *testing.T) {
 			default:
 				pub.Publish(testMeasurement("tenant-1", "current-account", "Op", 1, ts.Add(time.Duration(i)*time.Millisecond)))
 				i++
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond) //nolint:forbidigo // simulates publish rate in circuit breaker test
 			}
 		}
 	}()

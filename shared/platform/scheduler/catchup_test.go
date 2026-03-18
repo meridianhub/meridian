@@ -157,7 +157,7 @@ func TestCatchUp_RecentExecution_NoCatchUpNeeded(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Give a moment for any catch-up to complete.
+	//nolint:forbidigo // Intentional: verifying no catch-up occurs (negative assertion) requires waiting
 	time.Sleep(200 * time.Millisecond)
 
 	// Executor should not have been called by catch-up.
@@ -324,6 +324,7 @@ func TestCatchUp_NoExecutionStore_IsNoOp(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	//nolint:forbidigo // Intentional: verifying no catch-up occurs without a store (negative assertion) requires waiting
 	time.Sleep(200 * time.Millisecond)
 
 	// Executor should not have been called by catch-up (no store = no catch-up).
@@ -437,8 +438,7 @@ func TestCatchUp_LockNotAcquired_SkipsCatchUp(t *testing.T) {
 		_ = s.Start(ctx)
 	}()
 
-	// Wait for scheduler to start (schedule won't register since lock fails for cron too).
-	// Instead, wait a moment for the start sequence to complete.
+	//nolint:forbidigo // Intentional: lock failure prevents observable state; waiting to confirm no catch-up occurs
 	time.Sleep(500 * time.Millisecond)
 
 	// No catch-up records should exist.

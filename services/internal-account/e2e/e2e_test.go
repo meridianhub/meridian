@@ -1286,7 +1286,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 
 		// Create account in goroutine with delay
 		go func() {
-			time.Sleep(100 * time.Millisecond) // Simulate async processing delay
+			time.Sleep(100 * time.Millisecond) //nolint:forbidigo // simulates async processing delay
 			_, _ = tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
 				AccountCode:     accountCode,
 				Name:            "Async Created Account",
@@ -1333,7 +1333,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 
 		// Suspend in goroutine
 		go func() {
-			time.Sleep(150 * time.Millisecond)
+			time.Sleep(150 * time.Millisecond) //nolint:forbidigo // simulates async processing delay
 			_, _ = tc.svc.ControlInternalAccount(ctx, &pb.ControlInternalAccountRequest{
 				AccountId:     accountCode,
 				ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
@@ -1364,7 +1364,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 
 		// Create account with delay
 		go func() {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond) //nolint:forbidigo // simulates async processing delay
 			_, _ = tc.svc.InitiateInternalAccount(ctx, &pb.InitiateInternalAccountRequest{
 				AccountCode:     uniqueCode,
 				Name:            "Retry Test Account",

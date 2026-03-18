@@ -12,6 +12,8 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
 // mockInternalAccountClient is a mock implementation of InternalAccountClient for testing.
@@ -220,13 +222,15 @@ func TestAccountResolver_GetSettlementClearingAccount_CacheExpiry(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, 1, mockClient.getCallCount())
 
-	// Wait for cache to expire (3x safety margin for CI scheduling variance)
-	time.Sleep(3 * cacheTTL)
+	// Wait for cache to expire, then verify the next call reaches the client
+	var secondErr error
+	require.NoError(t, await.New().AtMost(500*time.Millisecond).PollInterval(5*time.Millisecond).Until(func() bool {
+		_, secondErr = resolver.GetSettlementClearingAccount(context.Background(), "GBP")
+		return mockClient.getCallCount() >= 2
+	}), "cache should have expired and triggered a new client call")
 
-	// Second call - cache expired, should call client again
-	_, err = resolver.GetSettlementClearingAccount(context.Background(), "GBP")
-	require.NoError(t, err)
-	assert.Equal(t, 2, mockClient.getCallCount())
+	require.NoError(t, secondErr)
+	assert.GreaterOrEqual(t, mockClient.getCallCount(), 2)
 }
 
 // =============================================================================

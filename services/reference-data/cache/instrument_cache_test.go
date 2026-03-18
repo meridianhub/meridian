@@ -131,7 +131,7 @@ func TestInstrumentCache_TTLExpiration(t *testing.T) {
 	require.NotNil(t, result)
 
 	// Wait for expiration
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond) //nolint:forbidigo // triggers TTL expiry to test cache expiration
 
 	// Should be expired now
 	result = cache.Get(ctx, "USD", 1)
@@ -576,7 +576,7 @@ func TestInstrumentCache_GetOrLoad_SingleflightDeduplication(t *testing.T) {
 			results[idx], errs[idx] = cache.GetOrLoad(ctx, "USD", 1, func() (*CachedInstrument, error) {
 				atomic.AddInt32(&loadCalled, 1)
 				// Simulate some load time to increase overlap window
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond) //nolint:forbidigo // simulates loader latency to create singleflight overlap
 				return newTestInstrument("USD", 1), nil
 			})
 		}(i)
@@ -613,7 +613,7 @@ func TestInstrumentCache_GetOrLoad_SingleflightTenantIsolation(t *testing.T) {
 		defer wg.Done()
 		_, _ = cache.GetOrLoad(ctx1, "USD", 1, func() (*CachedInstrument, error) {
 			atomic.AddInt32(&loadCalled1, 1)
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond) //nolint:forbidigo // simulates loader latency to test tenant isolation
 			return newTestInstrument("USD", 1), nil
 		})
 	}()
@@ -622,7 +622,7 @@ func TestInstrumentCache_GetOrLoad_SingleflightTenantIsolation(t *testing.T) {
 		defer wg.Done()
 		_, _ = cache.GetOrLoad(ctx2, "USD", 1, func() (*CachedInstrument, error) {
 			atomic.AddInt32(&loadCalled2, 1)
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond) //nolint:forbidigo // simulates loader latency to test tenant isolation
 			return newTestInstrument("USD", 1), nil
 		})
 	}()

@@ -415,7 +415,7 @@ func TestIntegration_OptimisticLocking_Concurrent(t *testing.T) {
 			}
 
 			// Small delay to increase contention
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond) //nolint:forbidigo // simulates latency to increase concurrent contention
 
 			// Try to update
 			renamed, err := acc.Rename(fmt.Sprintf("Updated by goroutine %d", idx))
@@ -716,7 +716,7 @@ func TestIntegration_AwaitPattern(t *testing.T) {
 
 	// Save account in goroutine with small delay
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond) //nolint:forbidigo // simulates async save delay
 		_ = tc.repo.Save(ctx, account)
 	}()
 

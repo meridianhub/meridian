@@ -331,7 +331,7 @@ func TestBalanceAssertionRepository_ListPagination(t *testing.T) {
 		a := newTestBalanceAssertion(t)
 		require.NoError(t, repo.Create(ctx, a))
 		// Small delay to ensure distinct created_at for ordering
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Millisecond) //nolint:forbidigo // ensures distinct timestamps for DB ordering test
 	}
 
 	t.Run("limit", func(t *testing.T) {

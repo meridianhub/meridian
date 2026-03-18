@@ -366,7 +366,7 @@ func TestFinalizeSettlement_LockExhaustedRetries(t *testing.T) {
 
 	// Cancel context after first attempt to speed up test
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond) //nolint:forbidigo // triggers lock retry cancellation after first attempt
 		cancel()
 	}()
 

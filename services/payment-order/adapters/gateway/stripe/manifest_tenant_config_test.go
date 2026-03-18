@@ -159,7 +159,7 @@ func TestManifestTenantConfigProvider_CacheExpiry(t *testing.T) {
 	assert.Equal(t, int32(1), mock.callCount.Load())
 
 	// Wait for cache to expire
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond) //nolint:forbidigo // triggers cache TTL expiry
 
 	// Second call - cache expired
 	_, err = provider.GetTenantConfig("tenant_abc")

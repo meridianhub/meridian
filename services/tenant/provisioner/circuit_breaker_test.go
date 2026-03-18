@@ -528,8 +528,7 @@ func TestBreakerBehavior_HalfOpenMaxRequests(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, execErr := breaker.Execute(func() (any, error) {
-				// Intentional sleep: Hold the slot to test MaxRequests limiting
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond) //nolint:forbidigo // holds slot to test MaxRequests limiting in half-open state
 				return "success", nil
 			})
 			results <- execErr

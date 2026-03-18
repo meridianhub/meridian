@@ -73,6 +73,7 @@ for i in range(10000000):
 
 	// Cancel after a short delay
 	go func() {
+		//nolint:forbidigo // triggers context cancellation while long-running saga script executes
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
