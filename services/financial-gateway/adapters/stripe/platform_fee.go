@@ -61,7 +61,7 @@ func (c PlatformFeeConfig) IsZero() bool {
 }
 
 // CalculateFee computes the platform fee in minor units for a given payment amount.
-// For percentage fees: fee = amountMinor * value / 100 (truncated to integer).
+// For percentage fees: fee = round_half_up(amountMinor * value / 100).
 // For flat fees: fee = value (the configured flat amount in minor units).
 // Returns an error if the fee exceeds the payment amount.
 func (c PlatformFeeConfig) CalculateFee(amountMinor int64) (int64, error) {
@@ -79,7 +79,10 @@ func (c PlatformFeeConfig) CalculateFee(amountMinor int64) (int64, error) {
 	case PlatformFeeTypePercentage:
 		amount := decimal.NewFromInt(amountMinor)
 		feeDecimal := amount.Mul(c.Value).Div(decimal.NewFromInt(100))
-		fee = feeDecimal.IntPart()
+		// Round half-up to avoid systematic revenue leakage from truncation.
+		// Example: 2.5% of 1001 = 25.025 → 25 (old truncation) vs 25 (rounds down correctly here).
+		// Example: 3% of 199 = 5.97 → 5 (old truncation lost 0.97) vs 6 (round half-up).
+		fee = feeDecimal.Round(0).IntPart()
 	case PlatformFeeTypeFlat:
 		fee = c.Value.IntPart()
 	default:
