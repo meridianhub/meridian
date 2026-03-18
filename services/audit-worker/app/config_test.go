@@ -306,6 +306,48 @@ func TestConfigValidate(t *testing.T) {
 			wantErr:     true,
 			expectedErr: ErrInvalidMaxIdleConns,
 		},
+		{
+			name: "empty service port",
+			config: &Config{
+				Service: ServiceConfig{
+					Name: "current-account",
+					Port: "", // Invalid
+				},
+				Database: DatabaseConfig{
+					URL:          "postgres://localhost/db",
+					MaxOpenConns: 10,
+					MaxIdleConns: 2,
+				},
+				Kafka: KafkaConfig{
+					BootstrapServers: "kafka:9092",
+					Topic:            "audit.events.v1",
+					GroupID:          "group-1",
+				},
+			},
+			wantErr:     true,
+			expectedErr: ErrEmptyPort,
+		},
+		{
+			name: "empty Kafka GroupID",
+			config: &Config{
+				Service: ServiceConfig{
+					Name: "current-account",
+					Port: "8080",
+				},
+				Database: DatabaseConfig{
+					URL:          "postgres://localhost/db",
+					MaxOpenConns: 10,
+					MaxIdleConns: 2,
+				},
+				Kafka: KafkaConfig{
+					BootstrapServers: "kafka:9092",
+					Topic:            "audit.events.v1",
+					GroupID:          "", // Invalid
+				},
+			},
+			wantErr:     true,
+			expectedErr: ErrEmptyGroupID,
+		},
 	}
 
 	for _, tt := range tests {

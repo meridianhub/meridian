@@ -193,3 +193,45 @@ func TestDBWrapper_PingAndStats(t *testing.T) {
 		t.Errorf("Stats().MaxOpenConnections = %d, want 5", stats.MaxOpenConnections)
 	}
 }
+
+func TestCollectDBPoolStats_TickerFires(t *testing.T) {
+	dbURL := setupCockroachDBURL(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	config := &Config{
+		Service: ServiceConfig{
+			Name:                    "test-svc-ticker",
+			Port:                    "8080",
+			GracefulShutdownTimeout: 30 * time.Second,
+		},
+		Database: DatabaseConfig{
+			URL:               dbURL,
+			MaxOpenConns:      5,
+			MaxIdleConns:      2,
+			ConnMaxLifetime:   5 * time.Minute,
+			ConnMaxIdleTime:   10 * time.Minute,
+			PoolStatsInterval: 10 * time.Millisecond, // Very short to trigger ticker path
+		},
+		Kafka: KafkaConfig{
+			BootstrapServers: "localhost:9092",
+			Topic:            "audit.events.test.v1",
+			GroupID:          "test-group-ticker",
+			ClientID:         "test-client-ticker",
+			HandlerTimeout:   30 * time.Second,
+			MaxRetries:       3,
+		},
+	}
+
+	ctx := context.Background()
+	c, err := NewContainer(ctx, config, logger)
+	if err != nil {
+		t.Fatalf("NewContainer() error: %v", err)
+	}
+
+	// Allow ticker to fire at least a couple times
+	time.Sleep(50 * time.Millisecond)
+
+	if closeErr := c.Close(ctx); closeErr != nil {
+		t.Errorf("Close() error: %v", closeErr)
+	}
+}
