@@ -16,6 +16,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 THRESHOLD="${COVERAGE_THRESHOLD:-70}"
 TMPDIR="${TMPDIR:-/tmp}"
 
+# Validate THRESHOLD is a non-negative integer in range 0–100
+if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]] || [ "${THRESHOLD}" -gt 100 ]; then
+    echo "ERROR: COVERAGE_THRESHOLD must be an integer between 0 and 100 (got: '${THRESHOLD}')" >&2
+    exit 1
+fi
+
 FAILED=0
 PASSED=0
 SKIPPED=0
@@ -64,7 +70,12 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    coverage="$(go tool cover -func="${coverage_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
+    if ! coverage="$(go tool cover -func="${coverage_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"; then
+        echo "  SKIP ${service} (cover command failed)"
+        SKIPPED=$((SKIPPED + 1))
+        rm -f "${coverage_file}"
+        continue
+    fi
     rm -f "${coverage_file}"
 
     if [ -z "${coverage}" ]; then
@@ -73,7 +84,7 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    if awk "BEGIN { exit !(${coverage} + 0 < ${THRESHOLD} + 0) }"; then
+    if awk -v threshold="${THRESHOLD}" -v cov="${coverage}" 'BEGIN { exit !(cov + 0 < threshold + 0) }'; then
         echo "  FAIL ${service}: ${coverage}% < ${THRESHOLD}%"
         FAILED=$((FAILED + 1))
     else
