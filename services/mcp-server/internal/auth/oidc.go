@@ -562,6 +562,12 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		"tenant", flowState.TenantSlug)
 
 	// Redirect to MCP client's redirect_uri with the authorization code.
+	// Defense-in-depth: validate scheme before redirecting.
+	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
+		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
+		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
+	}
 	target, err := url.Parse(flowState.MCPRedirectURI)
 	if err != nil {
 		h.logger.Error("oidc: invalid redirect URI", "error", err)
