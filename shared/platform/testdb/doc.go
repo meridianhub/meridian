@@ -3,7 +3,7 @@
 // [SetupCockroachDB] spins up a CockroachDB testcontainer and returns a GORM
 // connection ready for integration tests. Using CockroachDB (rather than a
 // PostgreSQL substitute) ensures production parity for migration and constraint
-// behaviour.
+// behavior.
 //
 // The container is started with up to three retries to handle transient Docker
 // daemon contention in CI environments.
