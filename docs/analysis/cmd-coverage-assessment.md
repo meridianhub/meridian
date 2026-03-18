@@ -80,9 +80,9 @@ Pure functions that read environment variables and validate/transform them. Fast
 | `loadWorkerConfig() (WorkerConfig, error)` | tenant | ✅ tenant |
 | `WorkerConfig.Validate() error` | tenant | ✅ tenant |
 
-**Key gap:** `parseLogLevel` is duplicated across 15 services (nearly identical switch statement: `debug/warn/warning/error/default→info`). Only 2 services test it. The remaining 13 are identical untested copies.
+**Key gap:** `parseLogLevel` is duplicated across 14 services (nearly identical switch statement: `debug/warn/warning/error/default→info`). Only 3 services test it (financial-gateway, party, reconciliation). The remaining 11 are identical untested copies.
 
-**Recommendation:** Apply the `audit-worker` pattern to all services that have configuration parsing functions. Total effort: ~5 tests per service × 13 services = ~65 test cases, all trivial.
+**Recommendation:** Apply the `audit-worker` pattern to all services that have configuration parsing functions. Total effort: ~5 tests per service × 11 services = ~55 test cases, all trivial.
 
 ### Category C: HTTP/Health Setup — High-value unit test targets
 
@@ -192,11 +192,11 @@ The `control-plane/cmd`, `financial-gateway/cmd`, and `payment-order/cmd` packag
 
 ### Priority 2 — `parseLogLevel` across all services (low effort, high coverage delta)
 
-The function is identical across 15 services. Add a test table covering `debug`, `warn`, `warning`, `error`, default/unknown. Modeled on `services/reconciliation/cmd/main_test.go:TestParseLogLevel`.
+The function is present in 14 services. Add a test table covering `debug`, `warn`, `warning`, `error`, default/unknown. Modeled on `services/reconciliation/cmd/main_test.go:TestParseLogLevel`.
 
 **Expected coverage impact per service:** +3-5% (the function is 6-9 lines in a package of 200-700 lines).
 
-**Services without `parseLogLevel` tests:** api-gateway, audit-worker (already has `getPort` etc. but not `parseLogLevel`), current-account, financial-accounting, forecasting, internal-account, market-information, mcp-server, operational-gateway, position-keeping, reference-data, tenant.
+**Services without `parseLogLevel` tests (11):** api-gateway, control-plane, current-account, financial-accounting, forecasting, internal-account, market-information, mcp-server, operational-gateway, payment-order, reference-data.
 
 ### Priority 3 — Factory functions in api-gateway (security-relevant)
 
