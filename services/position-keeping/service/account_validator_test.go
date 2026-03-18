@@ -11,6 +11,7 @@ import (
 
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -770,10 +771,14 @@ func TestInternalAccountValidator_IsCached_ExpiredEntry(t *testing.T) {
 	err = validator.ValidateExists(context.Background(), "expiring-account")
 	require.NoError(t, err)
 
-	// Wait for cache to expire
-	time.Sleep(5 * time.Millisecond)
-
-	assert.False(t, validator.IsCached("expiring-account"))
+	// Poll until cache entry expires
+	err = await.New().
+		AtMost(1 * time.Second).
+		PollInterval(1 * time.Millisecond).
+		Until(func() bool {
+			return !validator.IsCached("expiring-account")
+		})
+	require.NoError(t, err)
 }
 
 func TestInternalAccountValidator_queryInternalAccount_NilResponse(t *testing.T) {
@@ -839,8 +844,13 @@ func TestCurrentAccountValidator_IsCached(t *testing.T) {
 		err = shortTTLValidator.ValidateExists(context.Background(), "expiring-current-acc")
 		require.NoError(t, err)
 
-		time.Sleep(5 * time.Millisecond)
-		assert.False(t, shortTTLValidator.IsCached("expiring-current-acc"))
+		err = await.New().
+			AtMost(1 * time.Second).
+			PollInterval(1 * time.Millisecond).
+			Until(func() bool {
+				return !shortTTLValidator.IsCached("expiring-current-acc")
+			})
+		require.NoError(t, err)
 	})
 }
 

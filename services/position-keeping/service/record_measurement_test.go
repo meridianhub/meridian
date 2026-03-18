@@ -1775,6 +1775,7 @@ func TestRecordMeasurement_Idempotency_MarkPendingError(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
 	assert.Contains(t, st.Message(), "failed to mark operation as pending")
+	mockIdempotency.AssertExpectations(t)
 }
 
 // TestRecordMeasurement_Idempotency_NoKeyProvided tests that no idempotency key
@@ -1822,6 +1823,10 @@ func TestRecordMeasurement_Idempotency_NoKeyProvided(t *testing.T) {
 	// Idempotency should NOT have been called at all
 	mockIdempotency.AssertNotCalled(t, "Check")
 	mockIdempotency.AssertNotCalled(t, "MarkPending")
+	mockIdempotency.AssertNotCalled(t, "StoreResult")
+	mockIdempotency.AssertNotCalled(t, "Delete")
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
 }
 
 // TestRecordMeasurement_Idempotency_EmptyKey tests that empty idempotency key
@@ -1869,6 +1874,11 @@ func TestRecordMeasurement_Idempotency_EmptyKey(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	mockIdempotency.AssertNotCalled(t, "Check")
+	mockIdempotency.AssertNotCalled(t, "MarkPending")
+	mockIdempotency.AssertNotCalled(t, "StoreResult")
+	mockIdempotency.AssertNotCalled(t, "Delete")
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
 }
 
 // TestRecordMeasurement_Idempotency_StoreResultError tests the error path when
@@ -1930,6 +1940,9 @@ func TestRecordMeasurement_Idempotency_StoreResultError(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
 	assert.Contains(t, st.Message(), "failed to store idempotency result")
+	mockIdempotency.AssertExpectations(t)
+	mockRepo.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
 }
 
 // TestRecordMeasurement_Idempotency_CachedResultWithBadJSON tests the error path when
@@ -1973,4 +1986,5 @@ func TestRecordMeasurement_Idempotency_CachedResultWithBadJSON(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.Internal, st.Code())
 	assert.Contains(t, st.Message(), "failed to decode cached idempotency response")
+	mockIdempotency.AssertExpectations(t)
 }
