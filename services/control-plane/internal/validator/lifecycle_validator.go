@@ -114,16 +114,6 @@ func (v *ManifestValidator) validateImmutability(
 		prevAccountTypesByIdx[i] = acct.GetCode()
 	}
 
-	// Build lookup maps for previous codes
-	prevInstruments := make(map[string]bool)
-	for _, inst := range previous.GetInstruments() {
-		prevInstruments[inst.GetCode()] = true
-	}
-	prevAccountTypes := make(map[string]bool)
-	for _, acct := range previous.GetAccountTypes() {
-		prevAccountTypes[acct.GetCode()] = true
-	}
-
 	// Check instruments: detect code changes at same index position
 	for i, inst := range current.GetInstruments() {
 		if prevCode, existed := prevInstrumentsByIdx[i]; existed {

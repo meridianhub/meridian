@@ -9,6 +9,7 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
+	"github.com/meridianhub/meridian/shared/platform/sandbox"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 )
@@ -115,7 +116,7 @@ func (r *permissiveResult) Hash() (uint32, error) { return 0, ErrUnhashable }
 func (r *permissiveResult) AttrNames() []string   { return nil }
 
 func (r *permissiveResult) Attr(_ string) (starlark.Value, error) {
-	return starlark.String(""), nil
+	return r, nil
 }
 
 // validateStarlarkScripts compiles each saga's Starlark script.
@@ -186,6 +187,7 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		Name:  sagaName,
 		Print: func(_ *starlark.Thread, _ string) {},
 	}
+	sandbox.HardenThread(thread, sandbox.DefaultConfig())
 
 	_, execErr := starlark.ExecFileOptions(fileOpts, thread, sagaName+".star", script, predeclared)
 	if execErr != nil {

@@ -196,6 +196,21 @@ func ExtractRelationshipGraph(
 		}
 	}
 
+	// Add inbound_route -> saga edges so that sagas referenced by inbound routes
+	// are detected as having dependents during destructive change analysis.
+	if gw := manifest.GetOperationalGateway(); gw != nil {
+		for i, route := range gw.GetInboundRoutes() {
+			if sagaName := route.GetHandlerSaga(); sagaName != "" {
+				g.Edges = append(g.Edges, GraphEdge{
+					Source:       fmt.Sprintf("inbound_route:%s", route.GetExternalType()),
+					Target:       "saga:" + sagaName,
+					Relationship: RelTriggersOn,
+					Location:     fmt.Sprintf("operational_gateway.inbound_routes[%d].handler_saga", i),
+				})
+			}
+		}
+	}
+
 	return g
 }
 
