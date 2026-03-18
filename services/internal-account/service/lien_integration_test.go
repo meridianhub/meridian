@@ -469,7 +469,7 @@ func TestHealthChecker_Check_AllComponents_WithRealDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	// Database is available (testcontainer), so should be SERVING
-	assert.NotEqual(t, grpc_health_v1.HealthCheckResponse_UNKNOWN, resp.Status)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
 }
 
 func TestHealthChecker_Check_ServiceName_Match(t *testing.T) {

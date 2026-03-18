@@ -18,7 +18,7 @@ import (
 
 const lienTestTenantID = "lien_test_tenant"
 
-// setupLienTestDB initializes a CockroachDB testcontainer with both the
+// setupLienTestDB initializes a Postgres testcontainer with both the
 // internal_account and lien tables created in the tenant schema.
 func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
