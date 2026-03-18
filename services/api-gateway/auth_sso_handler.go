@@ -214,9 +214,11 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 
 	returnURL := sanitizeReturnURL(r.URL.Query().Get("return_url"))
 
+	tenantSlug, _ := tenant.SlugFromContext(ctx)
 	stateKey, err := h.stateStore.Set(StateData{
 		CodeVerifier: codeVerifier,
 		TenantID:     tenantID,
+		TenantSlug:   tenantSlug,
 		ReturnURL:    returnURL,
 	})
 	if err != nil {
@@ -342,6 +344,9 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Sign Meridian JWT.
 	claims := connector.BuildClaims(identity, stateData.TenantID)
+	if stateData.TenantSlug != "" {
+		claims[tenant.TenantSlugKey] = stateData.TenantSlug
+	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "sso: failed to sign token",

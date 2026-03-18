@@ -8,9 +8,27 @@ type contextKey string
 // tenantContextKey is the context key for tenant ID.
 const tenantContextKey contextKey = TenantIDKey
 
+// slugContextKey is the context key for the tenant slug.
+const slugContextKey contextKey = TenantSlugKey
+
 // WithTenant returns a new context with the tenant ID attached.
 func WithTenant(ctx context.Context, tenantID TenantID) context.Context {
 	return context.WithValue(ctx, tenantContextKey, tenantID)
+}
+
+// WithSlug returns a new context with the tenant slug attached.
+func WithSlug(ctx context.Context, slug string) context.Context {
+	return context.WithValue(ctx, slugContextKey, slug)
+}
+
+// SlugFromContext extracts the tenant slug from the context.
+// Returns the slug and true if present, or empty string and false if not.
+func SlugFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	s, ok := ctx.Value(slugContextKey).(string)
+	return s, ok
 }
 
 // FromContext extracts the tenant ID from the context.

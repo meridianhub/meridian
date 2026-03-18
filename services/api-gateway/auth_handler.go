@@ -136,6 +136,11 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Build claims and sign JWT.
 	claims := connector.BuildClaims(identity, tenantID)
+	// Include the tenant slug for frontend subdomain routing. The slug differs
+	// from the tenant ID (e.g. slug "volterra-energy" vs ID "volterra_energy").
+	if slug, ok := tenant.SlugFromContext(ctx); ok {
+		claims[tenant.TenantSlugKey] = slug
+	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "auth: failed to sign token",
