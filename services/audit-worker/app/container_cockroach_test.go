@@ -224,20 +224,23 @@ func TestCollectDBPoolStats_TickerFires(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	start := time.Now()
 	c, err := NewContainer(ctx, config, logger)
 	if err != nil {
 		t.Fatalf("NewContainer() error: %v", err)
 	}
 
 	// Allow ticker to fire at least a couple times before closing.
-	// Poll until enough time has passed for the 10ms ticker to fire multiple times.
-	_ = await.New().
+	// Anchor timing after successful container creation so the 50ms window
+	// measures only ticker firing time (not container startup).
+	start := time.Now()
+	if awaitErr := await.New().
 		AtMost(500 * time.Millisecond).
 		PollInterval(5 * time.Millisecond).
 		Until(func() bool {
 			return time.Since(start) >= 50*time.Millisecond
-		})
+		}); awaitErr != nil {
+		t.Fatalf("ticker wait failed: %v", awaitErr)
+	}
 
 	if closeErr := c.Close(ctx); closeErr != nil {
 		t.Errorf("Close() error: %v", closeErr)
