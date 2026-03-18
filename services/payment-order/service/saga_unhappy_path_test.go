@@ -11,8 +11,8 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/adapters/gateway"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/services/payment-order/domain/testfixtures"
-	"github.com/meridianhub/meridian/shared/pkg/saga"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
+	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

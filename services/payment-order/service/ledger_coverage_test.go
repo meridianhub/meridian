@@ -82,12 +82,12 @@ func ledgerTestOrchestrator(t *testing.T, faClient *MockFinancialAccountingClien
 	gwConfig := testGatewayAccountConfig()
 
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
-		Logger:                   testLogger(),
-		Repo:                     repo,
+		Logger:                    testLogger(),
+		Repo:                      repo,
 		FinancialAccountingClient: faClient,
-		GatewayAccountConfig:     gwConfig,
-		CurrentAccountClient:     &MockCurrentAccountClient{},
-		PaymentGateway:           &MockPaymentGateway{},
+		GatewayAccountConfig:      gwConfig,
+		CurrentAccountClient:      &MockCurrentAccountClient{},
+		PaymentGateway:            &MockPaymentGateway{},
 	})
 	require.NoError(t, err)
 	return orchestrator

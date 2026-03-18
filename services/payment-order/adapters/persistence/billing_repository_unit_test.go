@@ -186,8 +186,8 @@ func TestDecodeCursor_InvalidTimestamp(t *testing.T) {
 	t.Parallel()
 
 	// base64 of "bad-time|valid-uuid"
-	import_b64 := "YmFkLXRpbWV8MDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAw"
-	_, err := DecodeCursor(import_b64)
+	importB64 := "YmFkLXRpbWV8MDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAw"
+	_, err := DecodeCursor(importB64)
 	assert.ErrorIs(t, err, ErrInvalidCursor)
 }
 
@@ -195,8 +195,8 @@ func TestDecodeCursor_InvalidUUID(t *testing.T) {
 	t.Parallel()
 
 	// base64 of "2023-01-01T00:00:00Z|not-a-uuid"
-	import_b64 := "MjAyMy0wMS0wMVQwMDowMDowMFp8bm90LWEtdXVpZA=="
-	_, err := DecodeCursor(import_b64)
+	importB64 := "MjAyMy0wMS0wMVQwMDowMDowMFp8bm90LWEtdXVpZA=="
+	_, err := DecodeCursor(importB64)
 	assert.ErrorIs(t, err, ErrInvalidCursor)
 }
 
