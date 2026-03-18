@@ -143,17 +143,9 @@ FindByID(ctx context.Context, runID uuid.UUID) (*SettlementRun, error)
 
 // Update updates an existing SettlementRun using optimistic locking.
 // Returns ErrNotFound if the run doesn't exist.
-// Returns ErrOptimisticLock if the version doesn't match.
+// Returns ErrVersionConflict if the version doesn't match.
 Update(ctx context.Context, run *SettlementRun) error
 ```
-
-> **ErrOptimisticLock vs ErrVersionConflict**: The domain layer defines `ErrOptimisticLock`
-> as the semantic error for concurrent modification. The persistence layer defines
-> `ErrVersionConflict` (entity-prefixed in practice, e.g., no prefix needed when there is
-> only one entity type per repo file). Both name the same condition at different layers.
-> Service code checks `persistence.ErrVersionConflict`; domain interface comments reference
-> `ErrOptimisticLock`. This is intentional layering—domain errors describe business
-> semantics, persistence errors describe storage outcomes.
 
 ## GORM Entity Structure
 
