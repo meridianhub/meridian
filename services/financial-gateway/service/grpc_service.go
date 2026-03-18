@@ -13,6 +13,7 @@ import (
 
 	financialgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway/v1"
 	stripeadapter "github.com/meridianhub/meridian/services/financial-gateway/adapters/stripe"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -129,20 +130,22 @@ func (s *FinancialGatewayService) CancelPayment(
 }
 
 // GetProviderHealth returns the current health status of a payment rail provider.
+// When tenant context is present, returns the per-tenant circuit breaker state.
+// Without tenant context, returns UNSPECIFIED health (per-tenant breakers require tenant).
 func (s *FinancialGatewayService) GetProviderHealth(
-	_ context.Context,
+	ctx context.Context,
 	req *financialgatewayv1.GetProviderHealthRequest,
 ) (*financialgatewayv1.GetProviderHealthResponse, error) {
 	switch req.GetRail() { //nolint:exhaustive // only Stripe is supported; all others fall through to default
 	case financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE:
-		return s.getStripeHealth()
+		return s.getStripeHealth(ctx)
 	default:
 		return nil, status.Errorf(codes.Unimplemented, "health check for rail %s is not yet supported", req.GetRail())
 	}
 }
 
-// getStripeHealth reports Stripe provider health based on circuit breaker state.
-func (s *FinancialGatewayService) getStripeHealth() (*financialgatewayv1.GetProviderHealthResponse, error) {
+// getStripeHealth reports Stripe provider health based on the per-tenant circuit breaker state.
+func (s *FinancialGatewayService) getStripeHealth(ctx context.Context) (*financialgatewayv1.GetProviderHealthResponse, error) {
 	if s.stripeAdapter == nil || s.clientFactory == nil {
 		return &financialgatewayv1.GetProviderHealthResponse{
 			Rail:          financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE,
@@ -152,7 +155,17 @@ func (s *FinancialGatewayService) getStripeHealth() (*financialgatewayv1.GetProv
 		}, nil
 	}
 
-	cbState := s.clientFactory.CircuitBreakerState()
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		return &financialgatewayv1.GetProviderHealthResponse{
+			Rail:          financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE,
+			Health:        financialgatewayv1.ProviderHealth_PROVIDER_HEALTH_UNSPECIFIED,
+			Message:       "tenant context required for per-tenant health check",
+			LastCheckedAt: timestamppb.Now(),
+		}, nil
+	}
+
+	cbState := s.clientFactory.CircuitBreakerState(tenantID)
 	health := mapCircuitBreakerHealth(cbState)
 
 	return &financialgatewayv1.GetProviderHealthResponse{
