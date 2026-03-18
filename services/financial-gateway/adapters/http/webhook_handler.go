@@ -276,10 +276,38 @@ func (h *WebhookHandler) mapToDomainEvent(parsed stripeadapter.ParsedWebhookEven
 		}
 		return evt, topics.FinancialGatewayPaymentFailedV1, nil
 
+	case "REFUNDED":
+		evt := &financialgatewayeventsv1.PaymentRefundedEvent{
+			EventId:                  uuid.New().String(),
+			Version:                  1,
+			PaymentOrderId:           parsed.PaymentOrderID,
+			ProviderReferenceId:      parsed.GatewayReferenceID,
+			ProviderEventId:          parsed.EventID,
+			CausationId:              parsed.EventID,
+			AmountRefundedMinorUnits: parsed.AmountMinorUnits,
+			Currency:                 parsed.Currency,
+		}
+		if !parsed.Timestamp.IsZero() {
+			evt.RefundedAt = timestamppb.New(parsed.Timestamp)
+		}
+		return evt, topics.FinancialGatewayPaymentRefundedV1, nil
+
+	case "DISPUTED":
+		evt := &financialgatewayeventsv1.PaymentDisputedEvent{
+			EventId:             uuid.New().String(),
+			Version:             1,
+			PaymentOrderId:      parsed.PaymentOrderID,
+			ProviderReferenceId: parsed.GatewayReferenceID,
+			ProviderEventId:     parsed.EventID,
+			CausationId:         parsed.EventID,
+			DisputeReason:       parsed.Message,
+		}
+		if !parsed.Timestamp.IsZero() {
+			evt.DisputedAt = timestamppb.New(parsed.Timestamp)
+		}
+		return evt, topics.FinancialGatewayPaymentDisputedV1, nil
+
 	default:
-		// REFUNDED and DISPUTED events are acknowledged but not mapped to
-		// PaymentCaptured/PaymentFailed events — they have their own topics
-		// but are out of scope for this task.
 		h.logger.Debug("stripe event acknowledged without domain event mapping",
 			"status", parsed.Status,
 			"event_id", parsed.EventID,
@@ -304,6 +332,10 @@ func topicToEventType(topic string) string {
 		return "financial_gateway.payment_captured.v1"
 	case topics.FinancialGatewayPaymentFailedV1:
 		return "financial_gateway.payment_failed.v1"
+	case topics.FinancialGatewayPaymentRefundedV1:
+		return "financial_gateway.payment_refunded.v1"
+	case topics.FinancialGatewayPaymentDisputedV1:
+		return "financial_gateway.payment_disputed.v1"
 	default:
 		return topic
 	}

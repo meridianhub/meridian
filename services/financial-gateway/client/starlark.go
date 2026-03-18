@@ -316,7 +316,7 @@ func dispatchPaymentHandler(c *Client) saga.Handler {
 		return map[string]any{
 			"provider_reference_id":    resp.GetProviderReference(),
 			"status":                   dispatchStatusToString(resp.GetStatus()),
-			"platform_fee_minor_units": int64(0),
+			"platform_fee_minor_units": resp.GetPlatformFeeMinorUnits(),
 		}, nil
 	}
 }
