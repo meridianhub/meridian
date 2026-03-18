@@ -55,9 +55,9 @@ __debug_bin
 *.pb.go
 *.pb.validate.go
 *_grpc.pb.go
-!api/**/*.pb.go
-!api/**/*.pb.validate.go
-!api/**/*_grpc.pb.go
+!api/proto/**/*.pb.go
+!api/proto/**/*.pb.validate.go
+!api/proto/**/*_grpc.pb.go
 
 # Generated OpenAPI specs (regenerate with buf generate)
 api/openapi/*
