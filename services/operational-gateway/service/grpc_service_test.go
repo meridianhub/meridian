@@ -88,6 +88,12 @@ func (m *mockInstructionRepo) ListByTenant(_ context.Context, params ports.ListI
 				continue
 			}
 		}
+		if !params.CreatedAfter.IsZero() && inst.CreatedAt.Before(params.CreatedAfter) {
+			continue
+		}
+		if !params.CreatedBefore.IsZero() && inst.CreatedAt.After(params.CreatedBefore) {
+			continue
+		}
 		stored := *inst
 		result = append(result, &stored)
 	}
