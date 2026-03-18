@@ -74,8 +74,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     setTenantTheme(theme)
   }, [])
 
-  // For tenant users, slug comes from JWT claims or falls back to the current
-  // subdomain (needed in demo mode where OIDC tokens lack tenantId).
+  // For tenant users, slug comes from JWT claims (x-tenant-slug) or falls back
+  // to subdomain parsing. VITE_BASE_DOMAIN must match the deployment domain
+  // for the subdomain fallback to work correctly.
   const tenantSlug = isPlatformAdmin
     ? selectedTenant?.slug ?? null
     : claims?.tenantId ?? getTenantSlugFromSubdomain(window.location.hostname)

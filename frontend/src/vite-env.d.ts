@@ -11,8 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_AUTH_AUDIENCE: string
   readonly VITE_AUTH_CLIENT_ID: string
   readonly VITE_AUTH_DOMAIN: string
-  readonly VITE_DEMO_MODE: string
   readonly VITE_E2E_MODE?: string
+  readonly VITE_BASE_DOMAIN?: string
   readonly VITE_MCP_SERVER_URL?: string
 }
 

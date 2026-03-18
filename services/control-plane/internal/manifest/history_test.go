@@ -3,7 +3,9 @@ package manifest
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/stretchr/testify/assert"
@@ -265,6 +267,161 @@ func TestListManifestVersions_LimitClamping(t *testing.T) {
 		limit = 100
 	}
 	assert.Equal(t, 100, limit)
+}
+
+func TestToProtoApplyStatus_Partial(t *testing.T) {
+	result := toProtoApplyStatus(ApplyStatusPartial)
+	assert.Equal(t, controlplanev1.ApplyStatus_APPLY_STATUS_PARTIAL, result)
+}
+
+func TestPhaseStatusMapToProto_Nil(t *testing.T) {
+	result := phaseStatusMapToProto(nil)
+	assert.Nil(t, result)
+}
+
+func TestPhaseStatusMapToProto_WithEntries(t *testing.T) {
+	now := time.Now().UTC()
+	later := now.Add(5 * time.Second)
+
+	m := PhaseStatusMap{
+		"phase_1": PhaseStatusEntry{
+			Status:      PhaseStatusCompleted,
+			StartedAt:   &now,
+			CompletedAt: &later,
+		},
+		"phase_2": PhaseStatusEntry{
+			Status:    PhaseStatusFailed,
+			StartedAt: &now,
+			Error:     "validation error",
+		},
+		"phase_3": PhaseStatusEntry{
+			Status: PhaseStatusPending,
+		},
+	}
+
+	result := phaseStatusMapToProto(m)
+	require.NotNil(t, result)
+	require.Len(t, result, 3)
+
+	// phase_1: completed with both timestamps
+	p1 := result["phase_1"]
+	require.NotNil(t, p1)
+	assert.Equal(t, string(PhaseStatusCompleted), p1.Status)
+	require.NotNil(t, p1.StartedAt)
+	require.NotNil(t, p1.CompletedAt)
+	assert.Empty(t, p1.Error)
+
+	// phase_2: failed with error, no completion time
+	p2 := result["phase_2"]
+	require.NotNil(t, p2)
+	assert.Equal(t, string(PhaseStatusFailed), p2.Status)
+	require.NotNil(t, p2.StartedAt)
+	assert.Nil(t, p2.CompletedAt)
+	assert.Equal(t, "validation error", p2.Error)
+
+	// phase_3: pending, no timestamps
+	p3 := result["phase_3"]
+	require.NotNil(t, p3)
+	assert.Equal(t, string(PhaseStatusPending), p3.Status)
+	assert.Nil(t, p3.StartedAt)
+	assert.Nil(t, p3.CompletedAt)
+}
+
+func TestStoreManifestVersionWithPhaseStatus_NilManifest(t *testing.T) {
+	repo := &Repository{}
+	svc, _ := NewHistoryService(repo)
+
+	ctx := context.TODO()
+	_, err := svc.StoreManifestVersionWithPhaseStatus(ctx, nil, "admin", nil, ApplyStatusApplied, nil, 0, nil)
+	assert.ErrorIs(t, err, ErrNilManifest)
+}
+
+func TestStoreManifestVersionWithPhaseStatus_EmptyAppliedBy(t *testing.T) {
+	repo := &Repository{}
+	svc, _ := NewHistoryService(repo)
+
+	ctx := context.TODO()
+	m := testManifest("1.0")
+	_, err := svc.StoreManifestVersionWithPhaseStatus(ctx, m, "", nil, ApplyStatusApplied, nil, 0, nil)
+	assert.ErrorIs(t, err, ErrEmptyAppliedBy)
+}
+
+func TestEntityToProto_WithPhaseStatus(t *testing.T) {
+	original := testManifest("2.0")
+	marshaler := protojson.MarshalOptions{UseProtoNames: true}
+	jsonBytes, err := marshaler.Marshal(original)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	entity := &VersionEntity{
+		ID:           uuid.New(),
+		Version:      "2.0",
+		ManifestJSON: string(jsonBytes),
+		AppliedBy:    "admin@meridian.io",
+		ApplyStatus:  ApplyStatusPartial,
+		CreatedAt:    now,
+		AppliedAt:    now,
+	}
+
+	// Set phase status
+	phaseMap := PhaseStatusMap{
+		"phase_1": PhaseStatusEntry{
+			Status:    PhaseStatusCompleted,
+			StartedAt: &now,
+		},
+	}
+	err = entity.SetPhaseStatus(phaseMap)
+	require.NoError(t, err)
+
+	proto, err := EntityToProto(entity)
+	require.NoError(t, err)
+
+	assert.Equal(t, controlplanev1.ApplyStatus_APPLY_STATUS_PARTIAL, proto.ApplyStatus)
+	require.NotNil(t, proto.PhaseStatus)
+	require.Contains(t, proto.PhaseStatus, "phase_1")
+	assert.Equal(t, string(PhaseStatusCompleted), proto.PhaseStatus["phase_1"].Status)
+}
+
+func TestEntityToProto_WithOptionalFields(t *testing.T) {
+	original := testManifest("1.0")
+	marshaler := protojson.MarshalOptions{UseProtoNames: true}
+	jsonBytes, err := marshaler.Marshal(original)
+	require.NoError(t, err)
+
+	jobID := uuid.New()
+	checksum := "abc123"
+	source := "cli"
+	resourcePath := "/manifests/v1.yaml"
+	graph := `{"nodes":[]}`
+
+	entity := &VersionEntity{
+		ID:                uuid.New(),
+		Version:           "1.0",
+		ManifestJSON:      string(jsonBytes),
+		AppliedBy:         "admin@meridian.io",
+		ApplyStatus:       ApplyStatusApplied,
+		ApplyJobID:        &jobID,
+		Checksum:          &checksum,
+		Source:            &source,
+		ResourcePath:      &resourcePath,
+		RelationshipGraph: &graph,
+		CreatedAt:         time.Now().UTC(),
+		AppliedAt:         time.Now().UTC(),
+	}
+
+	proto, err := EntityToProto(entity)
+	require.NoError(t, err)
+
+	require.NotNil(t, proto.ApplyJobId)
+	assert.Equal(t, jobID.String(), *proto.ApplyJobId)
+	require.NotNil(t, proto.Checksum)
+	assert.Equal(t, "abc123", *proto.Checksum)
+	require.NotNil(t, proto.Source)
+	assert.Equal(t, "cli", *proto.Source)
+	require.NotNil(t, proto.ResourcePath)
+	assert.Equal(t, "/manifests/v1.yaml", *proto.ResourcePath)
+	require.NotNil(t, proto.RelationshipGraph)
+	assert.Equal(t, `{"nodes":[]}`, *proto.RelationshipGraph)
 }
 
 // testManifest creates a test manifest for unit tests.

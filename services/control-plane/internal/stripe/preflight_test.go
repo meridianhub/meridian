@@ -119,3 +119,39 @@ func TestPreflightCheck_NilVerifiers(t *testing.T) {
 	err := checker.Check(context.Background())
 	assert.NoError(t, err)
 }
+
+func TestPreflightCheck_AccountVerifierError(t *testing.T) {
+	checker := NewPreflightChecker(PreflightConfig{
+		TenantVerifier: &mockTenantVerifier{
+			tenants: map[string]bool{"meridian-ops": true},
+		},
+		AccountVerifier: &mockAccountVerifier{
+			err: errors.New("account service unavailable"),
+		},
+	})
+
+	err := checker.Check(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPreflightFailed)
+	assert.Contains(t, err.Error(), "account service unavailable")
+}
+
+func TestPreflightCheck_RevenueAccountVerifierError(t *testing.T) {
+	// Nostro account exists but revenue check fails
+	checker := NewPreflightChecker(PreflightConfig{
+		TenantVerifier: &mockTenantVerifier{
+			tenants: map[string]bool{"meridian-ops": true},
+		},
+		AccountVerifier: &mockAccountVerifier{
+			accounts: map[string]bool{
+				"meridian-ops/stripe_nostro": true,
+				// revenue not present, so it returns false, not an error
+			},
+		},
+	})
+
+	err := checker.Check(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPreflightFailed)
+	assert.ErrorIs(t, err, ErrRevenueNotFound)
+}
