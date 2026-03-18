@@ -392,7 +392,7 @@ func TestSendControlActionWebhook_NoTenantInContext(_ *testing.T) {
 	svc.sendControlActionWebhook(context.Background(), req, &account, time.Now())
 }
 
-func TestSendControlActionWebhook_UnfreezeAction(t *testing.T) {
+func TestSendControlActionWebhook_UnfreezeAction(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -411,7 +411,7 @@ func TestSendControlActionWebhook_UnfreezeAction(t *testing.T) {
 	svc.sendControlActionWebhook(ctx, req, &account, time.Now())
 }
 
-func TestSendControlActionWebhook_UnspecifiedAction(t *testing.T) {
+func TestSendControlActionWebhook_UnspecifiedAction(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -433,7 +433,7 @@ func TestSendControlActionWebhook_UnspecifiedAction(t *testing.T) {
 // sendFreezeWebhook and sendCloseWebhook
 // =============================================================================
 
-func TestSendFreezeWebhook_Success(t *testing.T) {
+func TestSendFreezeWebhook_Success(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -443,7 +443,7 @@ func TestSendFreezeWebhook_Success(t *testing.T) {
 	svc.sendFreezeWebhook("tenant-1", "ACC-001", "regulatory freeze", time.Now())
 }
 
-func TestSendFreezeWebhook_Error(t *testing.T) {
+func TestSendFreezeWebhook_Error(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -453,7 +453,7 @@ func TestSendFreezeWebhook_Error(t *testing.T) {
 	svc.sendFreezeWebhook("tenant-1", "ACC-001", "regulatory freeze", time.Now())
 }
 
-func TestSendCloseWebhook_Success(t *testing.T) {
+func TestSendCloseWebhook_Success(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -465,7 +465,7 @@ func TestSendCloseWebhook_Success(t *testing.T) {
 	}, time.Now())
 }
 
-func TestSendCloseWebhook_Error(t *testing.T) {
+func TestSendCloseWebhook_Error(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -477,7 +477,7 @@ func TestSendCloseWebhook_Error(t *testing.T) {
 	}, time.Now())
 }
 
-func TestSendControlActionWebhook_FreezeWithTenant(t *testing.T) {
+func TestSendControlActionWebhook_FreezeWithTenant(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -499,7 +499,7 @@ func TestSendControlActionWebhook_FreezeWithTenant(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 }
 
-func TestSendControlActionWebhook_CloseWithTenant(t *testing.T) {
+func TestSendControlActionWebhook_CloseWithTenant(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -1198,7 +1198,7 @@ func TestFungibilityValidator_NoBucketKeyProgramFallsThrough(t *testing.T) {
 // checkBasisDrift
 // =============================================================================
 
-func TestCheckBasisDrift_NilValuationAnalysis(t *testing.T) {
+func TestCheckBasisDrift_NilValuationAnalysis(_ *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 	lien := &domain.Lien{
 		ValuationAnalysis: nil,
@@ -1207,7 +1207,7 @@ func TestCheckBasisDrift_NilValuationAnalysis(t *testing.T) {
 	svc.checkBasisDrift(lien)
 }
 
-func TestCheckBasisDrift_InvalidJSON(t *testing.T) {
+func TestCheckBasisDrift_InvalidJSON(_ *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 	lien := &domain.Lien{
 		ValuationAnalysis: json.RawMessage(`{invalid json`),
@@ -1215,7 +1215,7 @@ func TestCheckBasisDrift_InvalidJSON(t *testing.T) {
 	svc.checkBasisDrift(lien)
 }
 
-func TestCheckBasisDrift_EmptyKnowledgeAt(t *testing.T) {
+func TestCheckBasisDrift_EmptyKnowledgeAt(_ *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 	lien := &domain.Lien{
 		ValuationAnalysis: json.RawMessage(`{"knowledgeAt":""}`),
@@ -1223,7 +1223,7 @@ func TestCheckBasisDrift_EmptyKnowledgeAt(t *testing.T) {
 	svc.checkBasisDrift(lien)
 }
 
-func TestCheckBasisDrift_InvalidTimeFormat(t *testing.T) {
+func TestCheckBasisDrift_InvalidTimeFormat(_ *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 	lien := &domain.Lien{
 		ValuationAnalysis: json.RawMessage(`{"knowledgeAt":"not-a-time"}`),
@@ -1231,7 +1231,7 @@ func TestCheckBasisDrift_InvalidTimeFormat(t *testing.T) {
 	svc.checkBasisDrift(lien)
 }
 
-func TestCheckBasisDrift_RecentKnowledge(t *testing.T) {
+func TestCheckBasisDrift_RecentKnowledge(_ *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 	recent := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
 	lien := &domain.Lien{
@@ -1240,7 +1240,7 @@ func TestCheckBasisDrift_RecentKnowledge(t *testing.T) {
 	svc.checkBasisDrift(lien)
 }
 
-func TestCheckBasisDrift_StaleKnowledge(t *testing.T) {
+func TestCheckBasisDrift_StaleKnowledge(_ *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 	stale := time.Now().Add(-60 * 24 * time.Hour).Format(time.RFC3339) // 60 days ago
 	lien := &domain.Lien{
@@ -5474,13 +5474,13 @@ func TestHydrateAccountWithPrefetchedBalance_Success(t *testing.T) {
 // releaseReservation: nil client and error path
 // =============================================================================
 
-func TestReleaseReservation_NilClient(t *testing.T) {
+func TestReleaseReservation_NilClient(_ *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewJSONHandler(os.Stdout, nil))}
 	// Should not panic with nil client
 	svc.releaseReservation(context.Background(), uuid.New().String(), positionkeepingv1.ReservationStatus_RESERVATION_STATUS_TERMINATED)
 }
 
-func TestReleaseReservation_Error(t *testing.T) {
+func TestReleaseReservation_Error(_ *testing.T) {
 	mockPK := &stubPKClient{
 		releaseErr: fmt.Errorf("release failed"),
 	}
@@ -5492,7 +5492,7 @@ func TestReleaseReservation_Error(t *testing.T) {
 	svc.releaseReservation(context.Background(), uuid.New().String(), positionkeepingv1.ReservationStatus_RESERVATION_STATUS_TERMINATED)
 }
 
-func TestReleaseReservation_Success(t *testing.T) {
+func TestReleaseReservation_Success(_ *testing.T) {
 	mockPK := &stubPKClient{
 		releaseResp: &positionkeepingv1.ReleaseReservationResponse{},
 	}
