@@ -315,7 +315,9 @@ names without reading each service's `errors.go`.
 
 **Acceptance Criteria**:
 
-1. Establish canonical location: `adapters/persistence/repository.go` (matching majority pattern)
+1. Establish canonical locations per ADR-015:
+   `domain/repository.go` for interfaces (ports),
+   `adapters/persistence/repository.go` for implementations (adapters)
 2. Document standard method naming: `Create`, `FindByID`, `List`, `Update`, `Delete`
 3. Document optional methods: `CreateBatch`, `CreateWithOutbox`, `SoftDelete`
 4. Document the GORM vs pgx decision: GORM for standard CRUD, pgx for performance-critical paths (position-keeping)
