@@ -12,11 +12,11 @@ triggers:
   - Reducing test boilerplate or setupTestDB duplication
   - Migrating time.Sleep to await in tests
 instructions: |
-  7 streams, 47 story points. Streams 1-4, 6, 7 are independent;
-  Stream 5 depends on Stream 4. Stream 6 tasks depend on Stream 3
+  7 streams, 49 story points. Streams 1-4, 7 are independent;
+  Stream 5 depends on Stream 4; Stream 6 depends on Stream 3
   (rename before refactor). Streams 6-7 are the largest work items
   (13 pts each). Prioritize Stream 1 (proto) and Stream 2 (doc.go)
-  for highest AI impact. Stream 6 supersedes PRD-012 Stream 3.
+  for highest AI impact. Stream 6 complements PRD-012 Stream 3.
 ---
 
 # PRD-049: Codebase Consistency & AI Navigability
@@ -455,10 +455,12 @@ add packages without `doc.go`, or use non-standard service file names.
 mixed concerns. This stream targets the 10 largest non-generated files
 for decomposition.
 
-**Relationship to PRD-012**: PRD-012 Stream 3 (8 pts) targeted 5
-files for refactoring. This stream supersedes it with a broader scope
-(10+ files) and updated line counts. PRD-012 Stream 3 tasks should be
-marked cancelled in favour of this stream.
+**Relationship to PRD-012**: PRD-012 Stream 3 targeted 5 service
+files for refactoring. Those specific files (current-account at 446
+LOC, payment-order at 406 LOC) are now under 600 lines. This stream
+complements PRD-012 by targeting the remaining large files that
+PRD-012 did not cover (control-plane, position-keeping, reference-data,
+party, reconciliation).
 
 **Dependency on Stream 3**: Tasks 6.3 and 6.5 target files that
 Stream 3 (Task 3.1) will rename. Execute the rename first, then
@@ -477,9 +479,9 @@ and schema validation in a single file.
 1. **Enforcement**: Task 5.3 CI check prevents new files >600 LOC
 2. Split into focused validators (e.g., `cel_validator.go`,
    `starlark_validator.go`, `crossref_validator.go`)
-2. No file exceeds 600 lines
-3. All existing tests pass unchanged
-4. No public API changes
+3. No file exceeds 600 lines
+4. All existing tests pass unchanged
+5. No public API changes
 
 ### Task 6.2: Refactor postgres_repository.go (1518 lines)
 
