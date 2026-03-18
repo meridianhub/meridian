@@ -3,10 +3,12 @@ package gateway_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
@@ -16,6 +18,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// decodeJWTPayload extracts the raw claims map from a JWT token string.
+func decodeJWTPayload(t *testing.T, token string) map[string]interface{} {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3, "JWT must have 3 parts")
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	var claims map[string]interface{}
+	require.NoError(t, json.Unmarshal(payload, &claims))
+	return claims
+}
 
 // stubConnector is a test implementation of connector.PasswordConnector.
 type stubConnector struct {
@@ -68,10 +82,11 @@ func TestAuthHandler_LoginSuccess(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
-	// Inject tenant context (normally done by tenant resolver middleware)
-	tid, _ := tenant.NewTenantID("volterra")
+	// Inject tenant context (normally done by tenant resolver middleware).
+	// Use distinct ID and slug to verify the JWT carries both correctly.
+	tid, _ := tenant.NewTenantID("volterra_energy")
 	ctx := tenant.WithTenant(req.Context(), tid)
-	ctx = tenant.WithSlug(ctx, "volterra")
+	ctx = tenant.WithSlug(ctx, "volterra-energy")
 	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -93,8 +108,15 @@ func TestAuthHandler_LoginSuccess(t *testing.T) {
 	claims, err := validator.ValidateToken(resp["access_token"].(string))
 	require.NoError(t, err)
 	assert.Equal(t, "user@example.com", claims.Email)
-	assert.Equal(t, "volterra", claims.TenantID)
+	assert.Equal(t, "volterra_energy", claims.TenantID)
 	assert.Equal(t, []string{"operator"}, claims.Roles)
+
+	// Verify x-tenant-slug is included with the slug value (not the tenant ID).
+	rawClaims := decodeJWTPayload(t, resp["access_token"].(string))
+	assert.Equal(t, "volterra-energy", rawClaims["x-tenant-slug"],
+		"JWT should carry x-tenant-slug with the URL-safe slug, not the tenant ID")
+	assert.Equal(t, "volterra_energy", rawClaims["x-tenant-id"],
+		"JWT should carry x-tenant-id with the internal tenant ID")
 }
 
 func TestAuthHandler_InvalidCredentials(t *testing.T) {
