@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
@@ -285,9 +286,9 @@ func TestProductTypeSeeder_SeedFromProductType_MultipleTenants(t *testing.T) {
 	// (must match the GORM-created schema from the first tenant to avoid type mismatches)
 	tid2 := tenant.TenantID("test_tenant_2")
 	schemaName2 := tid2.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName2)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName2))).Error
 	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName2)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName2))).Error
 	require.NoError(t, err)
 	err = db.AutoMigrate(&Entity{})
 	require.NoError(t, err)
@@ -297,7 +298,7 @@ func TestProductTypeSeeder_SeedFromProductType_MultipleTenants(t *testing.T) {
 	require.NoError(t, err)
 	// Restore search_path to the primary tenant
 	primarySchema := tenant.TenantID(testTenantID).SchemaName()
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", primarySchema)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
 	require.NoError(t, err)
 
 	ctx2 := tenant.WithTenant(context.Background(), tid2)

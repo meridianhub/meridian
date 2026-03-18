@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -40,11 +41,11 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.C
 	t.Helper()
 	schemaName := tid.SchemaName()
 
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Temporarily switch search_path to new tenant schema for AutoMigrate
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	err = db.AutoMigrate(identityModels...)
@@ -52,7 +53,7 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.C
 
 	// Restore search_path to the primary tenant schema
 	primarySchema := tenant.TenantID(testTenantID).SchemaName()
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", primarySchema)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
 	require.NoError(t, err)
 
 	return tenant.WithTenant(context.Background(), tid)
