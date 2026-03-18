@@ -44,7 +44,7 @@ func TestSortForecastPoints_Unsorted(t *testing.T) {
 	assert.True(t, points[2].Timestamp.Equal(t3))
 }
 
-func TestSortForecastPoints_Empty(t *testing.T) {
+func TestSortForecastPoints_Empty(_ *testing.T) {
 	var points []ForecastPoint
 	SortForecastPoints(points) // should not panic
 }

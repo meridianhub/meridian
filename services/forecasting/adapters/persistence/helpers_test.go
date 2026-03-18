@@ -21,9 +21,9 @@ func TestFormatAndParseCursorToken_RoundTrip(t *testing.T) {
 	token := formatCursorToken(ts, id)
 	assert.NotEmpty(t, token)
 
-	parsedTs, parsedID, err := parseCursorToken(token)
+	parsedTS, parsedID, err := parseCursorToken(token)
 	require.NoError(t, err)
-	assert.Equal(t, ts.UnixMicro(), parsedTs.UnixMicro())
+	assert.Equal(t, ts.UnixMicro(), parsedTS.UnixMicro())
 	assert.Equal(t, id, parsedID)
 }
 

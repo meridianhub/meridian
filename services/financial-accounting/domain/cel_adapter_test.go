@@ -16,7 +16,7 @@ type mockCELProgram struct {
 	err    error
 }
 
-func (m *mockCELProgram) Eval(activation interface{}) (interface{ Value() interface{} }, interface{}, error) {
+func (m *mockCELProgram) Eval(_ interface{}) (interface{ Value() interface{} }, interface{}, error) {
 	return m.result, m.detail, m.err
 }
 
@@ -96,7 +96,7 @@ type mockValuerProgram struct {
 	asVal bool // if true, returns Value()-based result; if false returns string directly
 }
 
-func (m *mockValuerProgram) Eval(activation interface{}) (interface{}, error) {
+func (m *mockValuerProgram) Eval(_ interface{}) (interface{}, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
