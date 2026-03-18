@@ -309,7 +309,7 @@ func TestControlInternalAccount_VersionConflictOnSave(t *testing.T) {
 	repo.saveErr = persistence.ErrVersionConflict
 
 	_, err = svc.ControlInternalAccount(testCtx(), &pb.ControlInternalAccountRequest{
-		AccountId: createResp.Facility.AccountCode,
+		AccountId:     createResp.Facility.AccountCode,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
 	})
 	require.Error(t, err)
@@ -331,7 +331,7 @@ func TestControlInternalAccount_InvalidAction(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.ControlInternalAccount(testCtx(), &pb.ControlInternalAccountRequest{
-		AccountId: createResp.Facility.AccountCode,
+		AccountId:     createResp.Facility.AccountCode,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_UNSPECIFIED,
 	})
 	require.Error(t, err)
@@ -354,14 +354,14 @@ func TestControlInternalAccount_Activate(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.ControlInternalAccount(testCtx(), &pb.ControlInternalAccountRequest{
-		AccountId: createResp.Facility.AccountCode,
+		AccountId:     createResp.Facility.AccountCode,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_SUSPEND,
 	})
 	require.NoError(t, err)
 
 	// Now reactivate
 	resp, err := svc.ControlInternalAccount(testCtx(), &pb.ControlInternalAccountRequest{
-		AccountId: createResp.Facility.AccountCode,
+		AccountId:     createResp.Facility.AccountCode,
 		ControlAction: pb.ControlAction_CONTROL_ACTION_ACTIVATE,
 	})
 	require.NoError(t, err)
@@ -516,4 +516,3 @@ func TestGetBalance_PositionKeepingUnknownError(t *testing.T) {
 	// Unknown PK codes map to Internal
 	assert.Equal(t, codes.Internal, status.Code(err))
 }
-
