@@ -42,14 +42,14 @@ func (c *Client) ApplyAccountList(params *stripego.ListParams) {
 }
 
 // ClientFactory creates tenant-scoped Stripe clients with caching,
-// circuit breaker, and retry resilience.
+// per-tenant circuit breakers, and retry resilience.
 type ClientFactory struct {
 	apiKey         string
 	configProvider TenantConfigProvider
 	rawClient      *stripego.Client
 	cache          *lru.Cache[string, *cachedTenantConfig]
 	cacheTTL       time.Duration
-	cb             *gobreaker.CircuitBreaker[TenantConfig]
+	cbRegistry     *TenantCircuitBreakerRegistry
 	retryConfig    retrySettings
 	logger         *slog.Logger
 }
@@ -124,7 +124,7 @@ func NewClientFactory(cfg Config, provider TenantConfigProvider, logger *slog.Lo
 		rawClient:      stripego.NewClient(cfg.APIKey),
 		cache:          cache,
 		cacheTTL:       cfg.TenantCacheTTL,
-		cb:             gobreaker.NewCircuitBreaker[TenantConfig](cbSettings),
+		cbRegistry:     NewTenantCircuitBreakerRegistry(cbSettings),
 		retryConfig: retrySettings{
 			maxRetries:          cfg.MaxRetries,
 			initialInterval:     cfg.RetryInitialInterval,
@@ -192,9 +192,11 @@ func (f *ClientFactory) getTenantConfig(ctx context.Context, tenantID string) (T
 	return cfg, nil
 }
 
-// fetchWithResilience fetches tenant config through circuit breaker with retries.
+// fetchWithResilience fetches tenant config through a per-tenant circuit breaker with retries.
 func (f *ClientFactory) fetchWithResilience(ctx context.Context, tenantID string) (TenantConfig, error) {
 	var result TenantConfig
+
+	cb := f.cbRegistry.Get(tenant.TenantID(tenantID))
 
 	b := backoff.NewExponentialBackOff()
 	b.InitialInterval = f.retryConfig.initialInterval
@@ -216,7 +218,7 @@ func (f *ClientFactory) fetchWithResilience(ctx context.Context, tenantID string
 
 		attempt++
 
-		cfg, err := f.cb.Execute(func() (TenantConfig, error) {
+		cfg, err := cb.Execute(func() (TenantConfig, error) {
 			return f.configProvider.GetTenantConfig(tenantID)
 		})
 		if err != nil {
@@ -270,7 +272,8 @@ func (f *ClientFactory) InvalidateTenantConfig(tenantID string) {
 	f.logger.Debug("invalidated stripe config cache", "tenant_id", tenantID)
 }
 
-// CircuitBreakerState returns the current state of the circuit breaker.
-func (f *ClientFactory) CircuitBreakerState() gobreaker.State {
-	return f.cb.State()
+// CircuitBreakerState returns the circuit breaker state for a specific tenant.
+// If no breaker exists yet for the tenant, StateClosed is returned.
+func (f *ClientFactory) CircuitBreakerState(tenantID tenant.TenantID) gobreaker.State {
+	return f.cbRegistry.State(tenantID)
 }
