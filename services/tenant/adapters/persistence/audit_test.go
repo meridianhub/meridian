@@ -15,42 +15,13 @@ import (
 	"gorm.io/gorm"
 )
 
-// setupTestDBWithAudit creates a PostgreSQL container with GORM for testing
+// setupTestDBWithAudit creates a CockroachDB container with GORM for testing
 // and sets up the audit_outbox table required for GORM hooks.
 func setupTestDBWithAudit(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
-
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&TenantEntity{}})
-
-	// Create audit_outbox table (required for GORM hooks)
-	// Note: Tenant service uses string IDs (varchar(50)) for record_id
-	err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS audit_outbox (
-			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			table_name VARCHAR(100) NOT NULL,
-			operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-			record_id VARCHAR(50) NOT NULL,
-			old_values TEXT,
-			new_values TEXT,
-			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			retry_count INTEGER NOT NULL DEFAULT 0,
-			last_error TEXT,
-			changed_by VARCHAR(100),
-			transaction_id VARCHAR(100),
-			client_ip VARCHAR(45),
-			user_agent TEXT
-		)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox table")
-
-	// Create indexes
-	err = db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created
-		ON audit_outbox(status, created_at)
-	`).Error
-	require.NoError(t, err, "Failed to create audit_outbox indexes")
-
+	db, _, cleanup := testdb.SetupTestDB(t,
+		testdb.WithModels(&TenantEntity{}, &audit.AuditOutbox{}),
+	)
 	return db, cleanup
 }
 

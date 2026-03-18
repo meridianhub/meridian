@@ -3,11 +3,8 @@ package persistence
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
-
-	"github.com/lib/pq"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/party/domain"
@@ -24,76 +21,10 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PartyEntity{}, &audit.AuditOutbox{}})
-
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(testTenantID)
-	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create the party table in the tenant schema (note: singular 'party' to match entity)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party (
-		id UUID PRIMARY KEY,
-		party_type VARCHAR(20) NOT NULL,
-		legal_name VARCHAR(255) NOT NULL,
-		display_name VARCHAR(255),
-		status VARCHAR(20) NOT NULL,
-		external_reference VARCHAR(255),
-		external_reference_type VARCHAR(50),
-		attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
-		version BIGINT NOT NULL DEFAULT 1,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		deleted_at TIMESTAMP WITH TIME ZONE,
-		created_by VARCHAR(255),
-		updated_by VARCHAR(255),
-		UNIQUE(external_reference, external_reference_type)
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create the audit_outbox table in the tenant schema (required for audit hooks)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		table_name VARCHAR(100) NOT NULL,
-		operation VARCHAR(10) NOT NULL,
-		record_id VARCHAR(50) NOT NULL,
-		old_values TEXT,
-		new_values TEXT,
-		status VARCHAR(20) NOT NULL DEFAULT 'pending',
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		retry_count INT NOT NULL DEFAULT 0,
-		last_error TEXT,
-		changed_by VARCHAR(100),
-		transaction_id VARCHAR(100),
-		client_ip VARCHAR(45),
-		user_agent TEXT
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create the party_association table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.party_association (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		party_id UUID NOT NULL,
-		related_party_id UUID NOT NULL,
-		relationship_type VARCHAR(50) NOT NULL,
-		metadata JSONB NULL DEFAULT '{}'::jsonb,
-		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-		effective_from TIMESTAMPTZ NOT NULL DEFAULT now(),
-		effective_to TIMESTAMPTZ NULL,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create context with tenant
-	ctx := tenant.WithTenant(context.Background(), tid)
-
-	return db, ctx, cleanup
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(&PartyEntity{}, &PartyAssociationEntity{}, &audit.AuditOutbox{}),
+		testdb.WithTenant(testTenantID),
+	)
 }
 
 func TestSaveNewParty(t *testing.T) {

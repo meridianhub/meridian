@@ -3,16 +3,12 @@ package persistence
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
-
-	"github.com/lib/pq"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,82 +18,10 @@ import (
 // setupTestDBWithAudit creates a test database with both payment_order and audit tables.
 func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&PaymentOrderEntity{}, &audit.AuditOutbox{}})
-
-	// Create tenant schema
-	tid := tenant.TenantID(testTenantID)
-	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create payment_order table in tenant schema (singular per entity TableName())
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.payment_order (
-		id UUID PRIMARY KEY,
-		debtor_account_id VARCHAR(255) NOT NULL,
-		creditor_reference VARCHAR(255) NOT NULL,
-		amount_cents BIGINT NOT NULL,
-		currency VARCHAR(3) NOT NULL,
-		status VARCHAR(20) NOT NULL,
-		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
-		correlation_id VARCHAR(255),
-		causation_id VARCHAR(255),
-		lien_id VARCHAR(255),
-		gateway_reference_id VARCHAR(255),
-		ledger_booking_id VARCHAR(255),
-		failure_reason TEXT,
-		error_code VARCHAR(50),
-		version INTEGER NOT NULL DEFAULT 1,
-		lien_execution_status VARCHAR(20),
-		lien_execution_attempts INTEGER DEFAULT 0,
-		lien_execution_error TEXT,
-		instrument_code VARCHAR(32),
-		payment_attributes JSONB,
-		bucket_id VARCHAR(255),
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-		reserved_at TIMESTAMP WITH TIME ZONE,
-		executing_at TIMESTAMP WITH TIME ZONE,
-		completed_at TIMESTAMP WITH TIME ZONE,
-		failed_at TIMESTAMP WITH TIME ZONE,
-		cancelled_at TIMESTAMP WITH TIME ZONE,
-		reversed_at TIMESTAMP WITH TIME ZONE
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create audit_outbox table in tenant schema
-	// Note: record_id is VARCHAR(50) to match the shared audit.AuditOutbox struct
-	// which uses string to support both UUID and string IDs.
-	// old_values/new_values use TEXT to handle empty strings (JSONB rejects empty string).
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		table_name VARCHAR(100) NOT NULL,
-		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id VARCHAR(50) NOT NULL,
-		old_values TEXT,
-		new_values TEXT,
-		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
-		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-		retry_count INT NOT NULL DEFAULT 0,
-		last_error TEXT,
-		changed_by VARCHAR(100),
-		transaction_id VARCHAR(100),
-		client_ip VARCHAR(45),
-		user_agent TEXT
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create indexes for audit_outbox
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_audit_outbox_status_created ON %s.audit_outbox(status, created_at)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Set search_path to tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create context with tenant
-	ctx := tenant.WithTenant(context.Background(), tid)
-
-	return db, ctx, cleanup
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(&PaymentOrderEntity{}, &audit.AuditOutbox{}),
+		testdb.WithTenant(testTenantID),
+	)
 }
 
 // getAuditEntries retrieves all audit entries for a specific record from the outbox.
