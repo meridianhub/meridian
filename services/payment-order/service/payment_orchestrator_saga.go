@@ -258,6 +258,10 @@ func (o *PaymentOrchestrator) handleStarlarkSagaResult(ctx context.Context, po *
 // handleSagaFailure processes a failed saga result, extracting partial outputs and marking
 // the payment order as failed.
 func (o *PaymentOrchestrator) handleSagaFailure(ctx context.Context, po *domain.PaymentOrder, result *saga.RunnerOutput) {
+	// Detach from the caller's context so failure handling succeeds even when
+	// the saga context has been cancelled (e.g. timeout). The detached context
+	// preserves values (tenant, correlation ID) but not the deadline.
+	ctx = context.WithoutCancel(ctx)
 	o.logger.Error("payment saga failed in Starlark execution",
 		"payment_order_id", po.ID.String(),
 		"error", result.Error,
@@ -534,6 +538,11 @@ func (o *PaymentOrchestrator) evaluateBucketID(ctx context.Context, po *domain.P
 // (e.g., UpdatePaymentOrder) should propagate this error to clients. Callers in async paths
 // (e.g., saga orchestration) may log and swallow the error.
 func (o *PaymentOrchestrator) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder, reason string, errorCode string) error {
+	// Detach from the caller's context so compensation operations succeed even
+	// when the saga context has been cancelled (e.g. timeout). The detached
+	// context preserves values (tenant, correlation ID) but not the deadline.
+	ctx = context.WithoutCancel(ctx)
+
 	// Capture original status before transitioning (for event)
 	failedAtStatus := po.Status
 
