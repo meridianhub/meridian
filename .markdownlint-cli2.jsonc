@@ -52,6 +52,7 @@
     ".taskmaster/**",
     ".claude/**",
     "docs/architecture/**",
-    "docs/adr/**"
+    "docs/adr/**",
+    "docs/analysis/**"
   ]
 }
