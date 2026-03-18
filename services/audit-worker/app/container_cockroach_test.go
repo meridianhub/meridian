@@ -9,6 +9,8 @@ import (
 
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // setupCockroachDBURL returns a real CockroachDB connection URL for testing.
@@ -228,18 +230,45 @@ func TestCollectDBPoolStats_TickerFires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewContainer() error: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = c.Close(ctx)
+	})
 
-	// Allow ticker to fire at least a couple times before closing.
-	// Anchor timing after successful container creation so the 50ms window
-	// measures only ticker firing time (not container startup).
-	start := time.Now()
+	// Poll until the DB pool stats metric has been recorded by the ticker goroutine
+	// with the specific service name label, confirming collectDBPoolStats executed.
+	const (
+		metricName = "meridian_audit_consumer_db_connection_pool_idle"
+		svcLabel   = "test-svc-ticker"
+	)
+	hasLabel := func(m *dto.Metric, key, val string) bool {
+		for _, lp := range m.GetLabel() {
+			if lp.GetName() == key && lp.GetValue() == val {
+				return true
+			}
+		}
+		return false
+	}
 	if awaitErr := await.New().
 		AtMost(500 * time.Millisecond).
 		PollInterval(5 * time.Millisecond).
 		Until(func() bool {
-			return time.Since(start) >= 50*time.Millisecond
+			mfs, err := prometheus.DefaultGatherer.Gather()
+			if err != nil {
+				return false
+			}
+			for _, mf := range mfs {
+				if mf.GetName() != metricName {
+					continue
+				}
+				for _, m := range mf.GetMetric() {
+					if hasLabel(m, "service_name", svcLabel) {
+						return true
+					}
+				}
+			}
+			return false
 		}); awaitErr != nil {
-		t.Fatalf("ticker wait failed: %v", awaitErr)
+		t.Fatalf("DB pool stats metric %q with service_name=%q not recorded within timeout: %v", metricName, svcLabel, awaitErr)
 	}
 
 	if closeErr := c.Close(ctx); closeErr != nil {
