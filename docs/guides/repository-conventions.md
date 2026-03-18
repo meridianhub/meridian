@@ -178,7 +178,8 @@ type SettlementRunEntity struct {
 
 > **DB PK vs business key**: `ID` is the CockroachDB-managed row primary key
 > (`gen_random_uuid()`). `RunID` is the domain-visible identifier, uniquely indexed and
-> used in all WHERE clauses. The domain layer never exposes `ID` directly.
+> used in business-key lookups (`WHERE run_id = ?`). Internal FK relationships may still
+> use `ID`. The domain layer never exposes `ID` directly.
 
 ### TableName
 
