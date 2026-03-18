@@ -277,7 +277,7 @@ func TestListBookingLogs_StatusFilter(t *testing.T) {
 		StatusFilter: string(domain.TransactionStatusPending),
 	})
 	require.NoError(t, err)
-	assert.Len(t, result.BookingLogs, 1)
+	require.Len(t, result.BookingLogs, 1)
 	assert.Equal(t, pendingLog.ID, result.BookingLogs[0].ID)
 }
 
@@ -300,7 +300,7 @@ func TestListBookingLogs_BusinessUnitFilter(t *testing.T) {
 		BusinessUnitFilter: "BU-TREASURY",
 	})
 	require.NoError(t, err)
-	assert.Len(t, result.BookingLogs, 1)
+	require.Len(t, result.BookingLogs, 1)
 	assert.Equal(t, "BU-TREASURY", result.BookingLogs[0].BusinessUnitReference)
 }
 
@@ -404,7 +404,7 @@ func TestListPostings_ByBookingLogID(t *testing.T) {
 	// Filter by log1 ID
 	result, err := repo.ListPostings(ctx, ListPostingsParams{BookingLogID: &log1.ID})
 	require.NoError(t, err)
-	assert.Len(t, result.Postings, 1)
+	require.Len(t, result.Postings, 1)
 	assert.Equal(t, posting1.ID, result.Postings[0].ID)
 }
 
@@ -461,7 +461,7 @@ func TestListPostings_DirectionFilter(t *testing.T) {
 		PostingDirection: string(domain.PostingDirectionDebit),
 	})
 	require.NoError(t, err)
-	assert.Len(t, result.Postings, 1)
+	require.Len(t, result.Postings, 1)
 	assert.Equal(t, domain.PostingDirectionDebit, result.Postings[0].Direction)
 }
 
