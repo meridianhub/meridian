@@ -438,6 +438,28 @@ func TestHandleWebhook_UnhandledEventType(t *testing.T) {
 	assert.Empty(t, pub.events)
 }
 
+func TestHandleWebhook_PayloadTooLarge(t *testing.T) {
+	handler, err := NewWebhookHandler(WebhookHandlerConfig{
+		Publisher:     &mockPublisher{},
+		WebhookSecret: testWebhookSecret,
+	})
+	require.NoError(t, err)
+
+	// Create a payload larger than MaxBodySize (512KB)
+	largePayload := make([]byte, MaxBodySize+100)
+	for i := range largePayload {
+		largePayload[i] = 'x'
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", bytes.NewReader(largePayload))
+	req.Header.Set(StripeSignatureHeader, "t=123,v1=abc")
+
+	rr := httptest.NewRecorder()
+	handler.HandleWebhook(rr, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+}
+
 func TestIdempotencyKeyDeterminism(t *testing.T) {
 	key1 := generateIdempotencyKey("evt_123", "payment_intent.succeeded")
 	key2 := generateIdempotencyKey("evt_123", "payment_intent.succeeded")

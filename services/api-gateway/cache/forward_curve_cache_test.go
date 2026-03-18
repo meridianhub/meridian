@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -311,4 +312,241 @@ func TestTruncateToHour(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 45, 30, 123, time.UTC)
 	expected := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC).Unix()
 	assert.Equal(t, expected, truncateToHour(ts))
+}
+
+func TestNewForwardCurveCache_NilSource(t *testing.T) {
+	_, err := NewForwardCurveCache(nil, nil)
+	assert.ErrorIs(t, err, ErrNilSource)
+}
+
+func TestForwardCurveCache_Options(t *testing.T) {
+	source := newStubSource()
+
+	cache, err := NewForwardCurveCache(source, nil,
+		WithL1Size(500),
+		WithL1TTL(10*time.Minute, 1*time.Minute),
+		WithL2TTL(1*time.Hour),
+		WithL2Prefix("test_prefix"),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, 10*time.Minute, cache.l1TTL)
+	assert.Equal(t, 1*time.Minute, cache.l1Jitter)
+	assert.Equal(t, 1*time.Hour, cache.l2TTL)
+	assert.Equal(t, "test_prefix", cache.l2Prefix)
+
+	// Verify custom L2 key prefix
+	key := cache.l2Key("t1", "RES", 12345)
+	assert.Equal(t, "test_prefix:t1:RES:12345", key)
+}
+
+func TestForwardCurveCache_WithL1Size_NonPositive_Ignored(t *testing.T) {
+	source := newStubSource()
+
+	cache, err := NewForwardCurveCache(source, nil, WithL1Size(-1))
+	require.NoError(t, err)
+	// Should still work with default size
+	assert.NotNil(t, cache)
+}
+
+func TestForwardCurveCache_WithL1Size_Zero_Ignored(t *testing.T) {
+	source := newStubSource()
+
+	cache, err := NewForwardCurveCache(source, nil, WithL1Size(0))
+	require.NoError(t, err)
+	assert.NotNil(t, cache)
+}
+
+func TestForwardCurveCache_Stats(t *testing.T) {
+	source := newStubSource()
+	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
+	source.addObs("ELEC_PEAK", ts, "45.50")
+
+	cache, err := NewForwardCurveCache(source, nil)
+	require.NoError(t, err)
+
+	ctx := tenantCtx(t)
+
+	// First call -> L1 miss, source load
+	_, err = cache.Get(ctx, "ELEC_PEAK", ts)
+	require.NoError(t, err)
+
+	// Second call -> L1 hit
+	_, err = cache.Get(ctx, "ELEC_PEAK", ts)
+	require.NoError(t, err)
+
+	stats := cache.Stats()
+	assert.Equal(t, int64(1), stats.L1Hits)
+	assert.GreaterOrEqual(t, stats.L1Misses, int64(1))
+	assert.Equal(t, int64(1), stats.SourceLoads)
+	assert.Equal(t, 1, stats.L1Size)
+}
+
+func TestForwardCurveCache_GetRange_AllCached(t *testing.T) {
+	source := newStubSource()
+	start := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	// Add observations for three hours
+	for i := 0; i < 3; i++ {
+		ts := start.Add(time.Duration(i) * time.Hour)
+		source.addObs("ELEC_PEAK", ts, fmt.Sprintf("%d.50", 40+i))
+	}
+
+	cache, err := NewForwardCurveCache(source, nil)
+	require.NoError(t, err)
+
+	ctx := tenantCtx(t)
+
+	// Pre-populate the cache
+	for i := 0; i < 3; i++ {
+		ts := start.Add(time.Duration(i) * time.Hour)
+		_, err = cache.Get(ctx, "ELEC_PEAK", ts)
+		require.NoError(t, err)
+	}
+
+	end := start.Add(2 * time.Hour)
+
+	// GetRange should use cached data
+	obs, err := cache.GetRange(ctx, "ELEC_PEAK", start, end)
+	require.NoError(t, err)
+	assert.Len(t, obs, 3)
+}
+
+func TestForwardCurveCache_GetRange_NoTenantContext(t *testing.T) {
+	source := newStubSource()
+	cache, err := NewForwardCurveCache(source, nil)
+	require.NoError(t, err)
+
+	_, err = cache.GetRange(context.Background(), "ELEC_PEAK", time.Now(), time.Now().Add(time.Hour))
+	assert.ErrorIs(t, err, ErrTenantContextRequired)
+}
+
+func TestForwardCurveCache_GetRange_WithCacheMiss(t *testing.T) {
+	source := newStubSource()
+	start := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Hour)
+
+	// Add range observations to the source
+	rangeKey := "ELEC_PEAK:" + start.Format(time.RFC3339) + "-" + end.Add(time.Hour).Format(time.RFC3339)
+	source.rangeObs[rangeKey] = []*Observation{
+		{
+			Value:     decimal.RequireFromString("40.50"),
+			ValidFrom: start,
+			ValidTo:   start.Add(time.Hour),
+		},
+		{
+			Value:     decimal.RequireFromString("41.50"),
+			ValidFrom: start.Add(time.Hour),
+			ValidTo:   start.Add(2 * time.Hour),
+		},
+		{
+			Value:     decimal.RequireFromString("42.50"),
+			ValidFrom: start.Add(2 * time.Hour),
+			ValidTo:   start.Add(3 * time.Hour),
+		},
+	}
+
+	cache, err := NewForwardCurveCache(source, nil)
+	require.NoError(t, err)
+
+	ctx := tenantCtx(t)
+
+	obs, err := cache.GetRange(ctx, "ELEC_PEAK", start, end)
+	require.NoError(t, err)
+	assert.Len(t, obs, 3)
+
+	// Verify source was called for the range
+	assert.Equal(t, int64(1), atomic.LoadInt64(&source.rangeCalls))
+}
+
+func TestForwardCurveCache_GetRange_SourceError(t *testing.T) {
+	source := newStubSource()
+	source.err = errors.New("MDS unavailable")
+
+	cache, err := NewForwardCurveCache(source, nil)
+	require.NoError(t, err)
+
+	ctx := tenantCtx(t)
+
+	_, err = cache.GetRange(ctx, "ELEC_PEAK", time.Now(), time.Now().Add(time.Hour))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "MDS unavailable")
+}
+
+func TestForwardCurveCache_GetRange_WithL2(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	source := newStubSource()
+	start := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	// Add single obs that will be cached in L1 and L2
+	source.addObs("ELEC_PEAK", start, "45.50")
+
+	cache, err := NewForwardCurveCache(source, rdb, WithL1TTL(50*time.Millisecond, 0))
+	require.NoError(t, err)
+
+	ctx := tenantCtx(t)
+
+	// Pre-populate cache via Get
+	_, err = cache.Get(ctx, "ELEC_PEAK", start)
+	require.NoError(t, err)
+
+	// Wait for L1 expiry
+	time.Sleep(60 * time.Millisecond)
+
+	// GetRange should find observation in L2
+	obs, err := cache.GetRange(ctx, "ELEC_PEAK", start, start)
+	require.NoError(t, err)
+	assert.Len(t, obs, 1)
+	assert.Equal(t, "45.5", obs[0].Value.String())
+}
+
+func TestForwardCurveCache_JitteredL1TTL_NoJitter(t *testing.T) {
+	source := newStubSource()
+	cache, err := NewForwardCurveCache(source, nil, WithL1TTL(5*time.Minute, 0))
+	require.NoError(t, err)
+
+	ttl := cache.jitteredL1TTL()
+	assert.Equal(t, 5*time.Minute, ttl)
+}
+
+func TestRecordCELEvaluation(t *testing.T) {
+	// Just verify it doesn't panic
+	RecordCELEvaluation("forward_price")
+	RecordCELEvaluation("forward_price_range")
+}
+
+func TestForwardCurveCache_GetRange_L1Expiry(t *testing.T) {
+	source := newStubSource()
+	start := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	source.addObs("ELEC_PEAK", start, "45.50")
+
+	cache, err := NewForwardCurveCache(source, nil, WithL1TTL(50*time.Millisecond, 0))
+	require.NoError(t, err)
+
+	ctx := tenantCtx(t)
+
+	// Populate cache
+	_, err = cache.Get(ctx, "ELEC_PEAK", start)
+	require.NoError(t, err)
+
+	// Wait for L1 expiry
+	time.Sleep(60 * time.Millisecond)
+
+	// Add range obs for the fallback
+	rangeKey := "ELEC_PEAK:" + start.Format(time.RFC3339) + "-" + start.Add(time.Hour).Format(time.RFC3339)
+	source.rangeObs[rangeKey] = []*Observation{
+		{
+			Value:     decimal.RequireFromString("45.50"),
+			ValidFrom: start,
+			ValidTo:   start.Add(time.Hour),
+		},
+	}
+
+	// GetRange should detect expired L1 entry, remove it, and fetch from source
+	obs, err := cache.GetRange(ctx, "ELEC_PEAK", start, start)
+	require.NoError(t, err)
+	assert.Len(t, obs, 1)
 }

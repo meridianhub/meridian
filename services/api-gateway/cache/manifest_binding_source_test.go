@@ -75,3 +75,29 @@ func TestManifestJSON_ExtractAPIBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractAPIBindings_DuplicatePath_LastWins(t *testing.T) {
+	t.Parallel()
+
+	jsonStr := `{
+		"sagas": [
+			{"name": "payment_v1", "trigger": "api:/v1/payments"},
+			{"name": "payment_v2", "trigger": "api:/v1/payments"}
+		]
+	}`
+
+	var manifest manifestJSON
+	err := json.Unmarshal([]byte(jsonStr), &manifest)
+	require.NoError(t, err)
+
+	bindings := extractAPIBindings(manifest.Sagas, "test-tenant")
+
+	// Last one wins
+	assert.Equal(t, "payment_v2", bindings["/v1/payments"])
+	assert.Len(t, bindings, 1)
+}
+
+func TestNewManifestBindingSource(t *testing.T) {
+	source := NewManifestBindingSource(nil)
+	assert.NotNil(t, source)
+}
