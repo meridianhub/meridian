@@ -21,7 +21,7 @@ import (
 
 const lienIntegrationTenantID = "lien_integration_tenant"
 
-// setupLienIntegrationDB sets up a CockroachDB testcontainer with both
+// setupLienIntegrationDB sets up a Postgres testcontainer with both
 // internal_account and lien tables, returning a service ready for lien tests.
 func setupLienIntegrationDB(t *testing.T) (*Service, *gorm.DB, context.Context, func()) {
 	t.Helper()
