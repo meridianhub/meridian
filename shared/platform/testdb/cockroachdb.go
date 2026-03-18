@@ -5,6 +5,7 @@ package testdb
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,11 +74,17 @@ func StartCockroachContainer(t *testing.T, database string) (*cockroachdb.Cockro
 		t.Fatalf("Failed to start CockroachDB container after %d attempts: %v", cockroachMaxRetries, lastErr)
 	}
 
+	var cleanupOnce sync.Once
 	cleanup := func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cleanupCancel()
-		_ = container.Terminate(cleanupCtx)
+		cleanupOnce.Do(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cleanupCancel()
+			_ = container.Terminate(cleanupCtx)
+		})
 	}
+	// Register with t.Cleanup so the container is terminated even if the
+	// caller fatals before deferring the returned cleanup function.
+	t.Cleanup(cleanup)
 
 	return container, cleanup
 }
