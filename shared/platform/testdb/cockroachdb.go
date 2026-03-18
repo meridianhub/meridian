@@ -4,14 +4,99 @@ package testdb
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
 	gormpg "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+const (
+	// CockroachDBImage is the default CockroachDB container image.
+	CockroachDBImage = "cockroachdb/cockroach:v24.3.0"
+
+	// cockroachStartupTimeout is the per-attempt timeout for starting a CockroachDB container.
+	cockroachStartupTimeout = 120 * time.Second
+
+	// cockroachMaxRetries is the number of attempts to start the container.
+	// CI runners occasionally hit Docker daemon contention or image pull delays.
+	cockroachMaxRetries = 3
+)
+
+// StartCockroachContainer starts a CockroachDB testcontainer with retry logic
+// to handle transient Docker failures on CI. Returns the container and a cleanup
+// function. The caller is responsible for calling cleanup when done.
+func StartCockroachContainer(t *testing.T, database string) (*cockroachdb.CockroachDBContainer, func()) {
+	t.Helper()
+
+	if database == "" {
+		database = "test_db"
+	}
+
+	allOpts := []testcontainers.ContainerCustomizer{
+		cockroachdb.WithDatabase(database),
+		cockroachdb.WithUser("root"),
+		cockroachdb.WithInsecure(),
+	}
+
+	var container *cockroachdb.CockroachDBContainer
+	var lastErr error
+
+	for attempt := 1; attempt <= cockroachMaxRetries; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), cockroachStartupTimeout)
+
+		var err error
+		container, err = cockroachdb.Run(ctx, CockroachDBImage, allOpts...)
+		cancel()
+
+		if err == nil {
+			break
+		}
+
+		lastErr = err
+		t.Logf("CockroachDB container start attempt %d/%d failed: %v", attempt, cockroachMaxRetries, err)
+
+		// Clean up the failed container if it was partially created
+		if container != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = container.Terminate(cleanupCtx)
+			cleanupCancel()
+			container = nil
+		}
+	}
+
+	if container == nil {
+		t.Fatalf("Failed to start CockroachDB container after %d attempts: %v", cockroachMaxRetries, lastErr)
+	}
+
+	cleanup := func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_ = container.Terminate(cleanupCtx)
+	}
+
+	return container, cleanup
+}
+
+// CockroachDSN returns a PostgreSQL-compatible DSN from a CockroachDB container.
+func CockroachDSN(t *testing.T, container *cockroachdb.CockroachDBContainer) string {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	connConfig, err := container.ConnectionConfig(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get CockroachDB connection config: %v", err)
+	}
+
+	return fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=disable",
+		connConfig.User, connConfig.Host, connConfig.Port, connConfig.Database)
+}
 
 // SetupCockroachDB creates a CockroachDB testcontainer for integration testing.
 // It returns a configured GORM database connection and a cleanup function.
@@ -47,30 +132,17 @@ func SetupCockroachDB(t *testing.T, models []interface{}, opts ...PostgresOption
 		opt(cfg)
 	}
 
-	// Create context with timeout for container operations
-	// CockroachDB takes longer to start than PostgreSQL (~10-15s vs 2-3s)
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	crdbContainer, containerCleanup := StartCockroachContainer(t, "test_db")
 
-	// Create CockroachDB container
-	// Note: Do NOT override wait strategy - the module has its own that waits for
-	// the database to be created (via WithDatabase) before reporting ready
-	crdbContainer, err := cockroachdb.Run(ctx,
-		"cockroachdb/cockroach:v24.3.0",
-		cockroachdb.WithDatabase("test_db"),
-		cockroachdb.WithUser("root"),
-		// CockroachDB in insecure mode doesn't require password
-		cockroachdb.WithInsecure(),
-	)
-	if err != nil {
-		t.Fatalf("Failed to start CockroachDB container: %v", err)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// Get connection config (CockroachDB uses PostgreSQL wire protocol)
 	// Note: ConnectionConfig returns pgx.ConnConfig which gives us a proper connection string
 	// The ConnectionString() method returns a registered config reference, not a URL
 	connConfig, err := crdbContainer.ConnectionConfig(ctx)
 	if err != nil {
+		containerCleanup()
 		t.Fatalf("Failed to get connection config: %v", err)
 	}
 	connStr := connConfig.ConnString()
@@ -80,6 +152,7 @@ func SetupCockroachDB(t *testing.T, models []interface{}, opts ...PostgresOption
 		Logger: logger.Default.LogMode(cfg.logLevel),
 	})
 	if err != nil {
+		containerCleanup()
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
@@ -89,19 +162,17 @@ func SetupCockroachDB(t *testing.T, models []interface{}, opts ...PostgresOption
 		createSchemas(t, db, schemas)
 
 		if err := db.AutoMigrate(models...); err != nil {
+			containerCleanup()
 			t.Fatalf("Failed to migrate database: %v", err)
 		}
 	}
 
 	cleanup := func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cleanupCancel()
-
 		sqlDB, _ := db.DB()
 		if sqlDB != nil {
 			_ = sqlDB.Close()
 		}
-		_ = crdbContainer.Terminate(cleanupCtx)
+		containerCleanup()
 	}
 
 	return db, cleanup
