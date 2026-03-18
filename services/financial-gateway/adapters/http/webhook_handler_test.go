@@ -390,6 +390,112 @@ func TestWebhookHandler_RefundedWithoutPaymentOrderID_AcknowledgesOnly(t *testin
 	assert.Len(t, stub.published, 0, "should not publish event without payment_order_id")
 }
 
+func TestWebhookHandler_BodyTooLarge_Returns413(t *testing.T) {
+	h := setupHandler(t, nil)
+
+	// Body exceeding StripeWebhookMaxBodySize (512KB)
+	largeBody := make([]byte, fghttp.StripeWebhookMaxBodySize+1)
+	for i := range largeBody {
+		largeBody[i] = 'x'
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(largeBody))
+	req.SetPathValue("tenantID", "test-tenant")
+	req.Header.Set("Stripe-Signature", "t=1234,v1=test")
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+}
+
+func TestWebhookHandler_EmptyWebhookSecret_Returns500(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	provider := &testTenantConfigProvider{
+		configs: map[string]stripeadapter.TenantConfig{
+			"no-secret-tenant": {
+				ConnectedAccountID:    "acct_test",
+				WebhookEndpointSecret: "", // empty secret
+			},
+		},
+	}
+	factory, err := stripeadapter.NewClientFactory(stripeadapter.Config{
+		APIKey:             "sk_test_key",
+		TenantCacheSize:    10,
+		TenantCacheTTL:     time.Minute,
+		CircuitBreakerName: "test-cb",
+	}, provider, nil)
+	require.NoError(t, err)
+
+	h := fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+		ClientFactory:   factory,
+		OutboxPublisher: stub,
+	})
+
+	payload := buildStripePayload(t, "evt_1", "payment_intent.succeeded", map[string]any{})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/no-secret-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "no-secret-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestWebhookHandler_MissingPaymentOrderID_AcknowledgesOnly(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	h := setupHandler(t, stub)
+
+	// payment_intent.succeeded but with no payment_order_id in metadata
+	payload := buildStripePayload(t, "evt_no_po", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_no_po_id",
+		"object":   "payment_intent",
+		"amount":   2000,
+		"currency": "usd",
+		"metadata": map[string]string{},
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Len(t, stub.published, 0, "should not publish when payment_order_id is missing")
+}
+
+func TestWebhookHandler_NewWebhookHandler_PanicsOnNilClientFactory(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	assert.PanicsWithValue(t, fghttp.ErrNilClientFactory.Error(), func() {
+		fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+			OutboxPublisher: stub,
+		})
+	})
+}
+
+func TestWebhookHandler_NewWebhookHandler_PanicsOnNilPublisher(t *testing.T) {
+	provider := &testTenantConfigProvider{configs: map[string]stripeadapter.TenantConfig{}}
+	factory, err := stripeadapter.NewClientFactory(stripeadapter.Config{
+		APIKey:             "sk_test_key",
+		TenantCacheSize:    10,
+		TenantCacheTTL:     time.Minute,
+		CircuitBreakerName: "test-cb",
+	}, provider, nil)
+	require.NoError(t, err)
+
+	assert.PanicsWithValue(t, fghttp.ErrNilOutboxPublisher.Error(), func() {
+		fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+			ClientFactory: factory,
+		})
+	})
+}
+
 func TestWebhookHandler_TenantNotFound_Returns500(t *testing.T) {
 	stub := &stubOutboxPublisher{}
 	provider := &testTenantConfigProvider{
