@@ -707,14 +707,14 @@ func TestInternalAccountValidator_ValidateExists_CachesNotFoundResult(t *testing
 	// First call - cache miss, hits service
 	err1 := validator.ValidateExists(context.Background(), "missing-cached-internal")
 	require.Error(t, err1)
+	assert.Contains(t, err1.Error(), "not found")
 	assert.Equal(t, 1, client.GetCallCount())
 
-	// Second call - cache hit (returns cached "not found")
+	// Second call - cache hit (returns cached "not found") - error contract must be preserved
 	err2 := validator.ValidateExists(context.Background(), "missing-cached-internal")
 	require.Error(t, err2)
-	assert.Equal(t, 1, client.GetCallCount()) // No new call
-	// Verify cached miss preserves the error contract
 	assert.Contains(t, err2.Error(), "not found")
+	assert.Equal(t, 1, client.GetCallCount()) // No new call - served from cache
 }
 
 func TestInternalAccountValidator_IsCached(t *testing.T) {

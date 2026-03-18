@@ -557,6 +557,8 @@ func TestForwardCurveCache_GetRange_L1Expiry(t *testing.T) {
 		},
 	}
 
+	rangeCallsBefore := atomic.LoadInt64(&source.rangeCalls)
+
 	// Poll until L1 expires and GetRange detects it, falling back to source
 	var obs []*Observation
 	err = await.New().
@@ -568,8 +570,9 @@ func TestForwardCurveCache_GetRange_L1Expiry(t *testing.T) {
 			if getErr != nil {
 				return getErr
 			}
-			if len(obs) == 0 {
-				return fmt.Errorf("L1 not yet expired")
+			// Verify source was called (proves L1 expired, not just served from warm cache)
+			if atomic.LoadInt64(&source.rangeCalls) <= rangeCallsBefore {
+				return fmt.Errorf("L1 not yet expired — source not called")
 			}
 			return nil
 		})
