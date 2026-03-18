@@ -692,8 +692,10 @@ func (r *PostgresRepository) loadAuditTrailEntriesBatchTx(ctx context.Context, t
 			entry.IPAddress = ipAddress.String
 		}
 
-		if err := json.Unmarshal(sysContext, &entry.SystemContext); err != nil {
-			return fmt.Errorf("failed to unmarshal system context in batch: %w", err)
+		if len(sysContext) > 0 {
+			if err := json.Unmarshal(sysContext, &entry.SystemContext); err != nil {
+				return fmt.Errorf("failed to unmarshal system context in batch: %w", err)
+			}
 		}
 
 		// Append to the appropriate log
