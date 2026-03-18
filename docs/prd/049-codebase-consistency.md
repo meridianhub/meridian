@@ -9,7 +9,8 @@ triggers:
   - Updating the new service checklist
 instructions: |
   This PRD addresses micro-inconsistencies that compound across 16 services.
-  Each stream is independent. Prioritize Stream 1 (proto files) and Stream 2
+  Streams 1-4 are independent; Stream 5 depends on Stream 4.
+  Prioritize Stream 1 (proto files) and Stream 2
   (doc.go) as they have the highest impact on AI code generation reliability.
   Update the new-bian-service-checklist.md to reflect all conventions established here.
 ---
@@ -63,8 +64,8 @@ graph LR
     S1["Stream 1: Commit Proto Files<br/>5 pts"] --> DONE
     S2["Stream 2: Package Documentation<br/>5 pts"] --> DONE
     S3["Stream 3: Service Naming<br/>3 pts"] --> DONE
-    S4["Stream 4: Convention Documentation<br/>5 pts"] --> DONE
-    S5["Stream 5: Checklist Update<br/>3 pts"] --> S4
+    S4["Stream 4: Convention Documentation<br/>5 pts"] --> S5
+    S5["Stream 5: Checklist Update<br/>3 pts"] --> DONE
 ```
 
 Stream 5 depends on Stream 4 (conventions must be documented before the checklist encodes them).
