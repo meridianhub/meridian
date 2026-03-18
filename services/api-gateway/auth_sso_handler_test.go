@@ -642,7 +642,9 @@ func TestHandleInitiate_MeridianConnector_HasTenantInRedirect(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/meridian", nil)
 	tid, _ := tenant.NewTenantID("volterra")
-	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	ctx := tenant.WithTenant(req.Context(), tid)
+	ctx = tenant.WithSlug(ctx, "volterra")
+	req = req.WithContext(ctx)
 	req.SetPathValue("connector_id", "meridian")
 
 	rec := httptest.NewRecorder()
@@ -707,7 +709,9 @@ func TestHandleInitiate_PreservesPortInTenantScopedURL(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/sso/meridian", nil)
 	tid, _ := tenant.NewTenantID("acme")
-	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+	ctx := tenant.WithTenant(req.Context(), tid)
+	ctx = tenant.WithSlug(ctx, "acme")
+	req = req.WithContext(ctx)
 	req.SetPathValue("connector_id", "meridian")
 
 	rec := httptest.NewRecorder()
