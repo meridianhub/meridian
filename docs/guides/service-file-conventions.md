@@ -56,11 +56,16 @@ Examples from the codebase:
 |---|---|---|
 | `current-account` | `grpc_account_endpoints.go` | Account CRUD (Initiate, List, Retrieve, Update) |
 | `current-account` | `grpc_control_endpoints.go` | Control and status operations |
-| `current-account` | `grpc_deposit_endpoints.go` | Deposit and withdrawal operations |
+| `current-account` | `grpc_deposit_endpoints.go` | Deposit operations |
+| `current-account` | `grpc_withdrawal_execute.go` | Withdrawal execution RPCs |
+| `current-account` | `grpc_withdrawal_manage.go` | Withdrawal management RPCs |
 | `financial-accounting` | `grpc_posting_endpoints.go` | Ledger posting RPCs |
 | `financial-accounting` | `grpc_booking_endpoints.go` | Financial booking log RPCs |
 | `financial-accounting` | `grpc_control_endpoints.go` | Control plane RPCs |
 | `financial-accounting` | `grpc_ledger_endpoints.go` | Ledger query RPCs |
+
+Note: `grpc_withdrawal_execute.go` and `grpc_withdrawal_manage.go` predate this convention and
+omit the `_endpoints` suffix. New files should use the `_endpoints` suffix.
 
 Test files mirror the source file name:
 
@@ -115,7 +120,7 @@ The following services have `server.go` files large enough to benefit from split
 | `internal-account` | 952 | Monolithic — candidate for splitting |
 | `identity` | 887 | Monolithic — candidate for splitting |
 | `tenant` | 724 | Monolithic — candidate for splitting |
-| `current-account` | 446 | Split into 3 endpoint files |
+| `current-account` | 446 | Split into 5 handler files |
 | `financial-accounting` | 294 | Fully split — `server.go` is struct/constructor only |
 
 Services under 300 lines (`market-information`, `audit-worker`) do not need splitting.
