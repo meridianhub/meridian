@@ -8,8 +8,8 @@
 // # Key Types
 //
 //   - [SagaInstance]: persistent record of a running or completed saga
-//   - [StepExecution]: record of a single step within a saga
-//   - [CausationTree]: hierarchical view of nested sagas spawned by a parent
+//   - [SagaStepResult]: record of a single step within a saga
+//   - [CausationTreeNode]: hierarchical view of nested sagas spawned by a parent
 //
 // All sagas are persisted to the database before execution begins, enabling
 // resumption after service restarts and full audit-trail reconstruction.
