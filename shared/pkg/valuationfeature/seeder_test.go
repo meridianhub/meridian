@@ -291,9 +291,9 @@ func TestProductTypeSeeder_SeedFromProductType_MultipleTenants(t *testing.T) {
 	require.NoError(t, err)
 	err = db.AutoMigrate(&Entity{})
 	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vf_t2_account_instrument_active
+	err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vf_t2_account_instrument_active
 		ON valuation_features (account_id, instrument_code)
-		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`)).Error
+		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`).Error
 	require.NoError(t, err)
 	// Restore search_path to the primary tenant
 	primarySchema := tenant.TenantID(testTenantID).SchemaName()
