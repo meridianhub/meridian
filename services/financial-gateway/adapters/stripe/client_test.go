@@ -144,15 +144,13 @@ func TestNewClient_CacheHit(t *testing.T) {
 	assert.Equal(t, 1, provider.callCount, "should use cached config")
 }
 
-func TestNewClient_CacheExpiry(t *testing.T) {
+func TestNewClient_CacheInvalidation(t *testing.T) {
 	provider := &stubConfigProvider{
 		configs: map[string]TenantConfig{
 			"tenant-a": {ConnectedAccountID: "acct_123"},
 		},
 	}
-	cfg := validConfig()
-	cfg.TenantCacheTTL = time.Millisecond // very short TTL
-	factory, err := NewClientFactory(cfg, provider, slog.Default())
+	factory, err := NewClientFactory(validConfig(), provider, slog.Default())
 	require.NoError(t, err)
 
 	ctx := clientTenantCtx("tenant-a")
@@ -161,12 +159,12 @@ func TestNewClient_CacheExpiry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, provider.callCount)
 
-	// Wait for cache to expire
-	time.Sleep(5 * time.Millisecond)
+	// Invalidate cache entry, forcing refetch on next call
+	factory.InvalidateTenantConfig("tenant-a")
 
 	_, err = factory.NewClient(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 2, provider.callCount, "should refetch after cache expiry")
+	assert.Equal(t, 2, provider.callCount, "should refetch after cache invalidation")
 }
 
 // --- InvalidateTenantConfig ---
