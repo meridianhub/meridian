@@ -141,28 +141,12 @@ func TestValidateFungibility_EvalDebitError(t *testing.T) {
 
 func TestValidateFungibility_EvalCreditError(t *testing.T) {
 	// First debit call succeeds, second (credit) call fails
-	callCount := 0
-	program := &mockFungibilityKeyProgram{
-		keyFunc: func(attrs map[string]string) string {
-			callCount++
-			if callCount == 2 {
-				// Can't easily make Eval return an error from mockFungibilityKeyProgram
-				// Use the actual evaluateFungibilityKey path that triggers error via type
-				return ""
-			}
-			return "grade:" + attrs["grade"]
-		},
-	}
-
-	// This test verifies the credit error path via a program that errors on second eval
 	evalCount := 0
 	errProgram := &errOnSecondEvalProgram{evalCount: &evalCount, errorMsg: "credit eval error"}
 	err := ValidateFungibility(errProgram, map[string]string{"grade": "1"}, map[string]string{"grade": "2"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrFungibilityKeyEvaluation)
 	assert.Contains(t, err.Error(), "credit attributes")
-
-	_ = program // suppress unused warning
 }
 
 // errOnSecondEvalProgram fails on the second Eval call.
