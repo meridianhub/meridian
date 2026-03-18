@@ -51,9 +51,13 @@ __debug_bin
 /tenant
 
 # Generated protobuf files (regenerate with buf or make proto)
+# Excluded globally but committed under api/proto/ for readability
 *.pb.go
 *.pb.validate.go
 *_grpc.pb.go
+!api/proto/**/*.pb.go
+!api/proto/**/*.pb.validate.go
+!api/proto/**/*_grpc.pb.go
 
 # Generated OpenAPI specs (regenerate with buf generate)
 api/openapi/*
