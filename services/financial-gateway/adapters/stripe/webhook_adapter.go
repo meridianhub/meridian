@@ -147,7 +147,7 @@ func (a *WebhookAdapter) parseChargeRefunded(event *stripego.Event) (ParsedWebho
 		PaymentOrderID:     paymentOrderID,
 		Status:             "REFUNDED",
 		Timestamp:          time.Unix(event.Created, 0),
-		AmountMinorUnits:   charge.Amount,
+		AmountMinorUnits:   charge.AmountRefunded,
 		Currency:           string(charge.Currency),
 	}, nil
 }

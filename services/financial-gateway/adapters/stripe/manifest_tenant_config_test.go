@@ -129,7 +129,7 @@ func TestManifestTenantConfigProvider_GetTenantConfig(t *testing.T) {
 		p, err := NewManifestTenantConfigProvider(ManifestTenantConfigProviderConfig{
 			Client:   mock,
 			Logger:   slog.Default(),
-			CacheTTL: 1 * time.Millisecond, // expires immediately
+			CacheTTL: 1 * time.Hour,
 		})
 		require.NoError(t, err)
 
@@ -137,7 +137,12 @@ func TestManifestTenantConfigProvider_GetTenantConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, mock.callCount)
 
-		time.Sleep(5 * time.Millisecond) // let cache expire
+		// Force cache entry to expire by backdating it
+		p.mu.Lock()
+		entry := p.cache["tenant-expire"]
+		entry.expiresAt = time.Now().Add(-1 * time.Second)
+		p.cache["tenant-expire"] = entry
+		p.mu.Unlock()
 
 		_, err = p.GetTenantConfig("tenant-expire")
 		require.NoError(t, err)

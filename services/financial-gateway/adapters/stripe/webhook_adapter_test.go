@@ -2,6 +2,7 @@ package stripe
 
 import (
 	"encoding/json"
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestParseWebhook_MissingSignature(t *testing.T) {
 	a, err := NewWebhookAdapter("whsec_test")
 	require.NoError(t, err)
 
-	req, _ := http.NewRequest("POST", "/webhook", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/webhook", nil)
 	// No Stripe-Signature header
 	_, err = a.ParseWebhook(req, []byte("{}"))
 	require.ErrorIs(t, err, ErrWebhookMissingSignature)
@@ -38,7 +39,7 @@ func TestParseWebhook_InvalidSignature(t *testing.T) {
 	a, err := NewWebhookAdapter("whsec_test")
 	require.NoError(t, err)
 
-	req, _ := http.NewRequest("POST", "/webhook", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", "/webhook", nil)
 	req.Header.Set("Stripe-Signature", "t=1234,v1=bad_signature")
 	_, err = a.ParseWebhook(req, []byte(`{"id":"evt_1","type":"payment_intent.succeeded"}`))
 	require.ErrorIs(t, err, ErrWebhookInvalidSignature)
@@ -175,9 +176,10 @@ func TestParseChargeRefunded(t *testing.T) {
 
 	t.Run("with PaymentIntent metadata", func(t *testing.T) {
 		charge := stripego.Charge{
-			ID:       "ch_refund1",
-			Amount:   4000,
-			Currency: "gbp",
+			ID:             "ch_refund1",
+			Amount:         4000,
+			AmountRefunded: 4000, // full refund
+			Currency:       "gbp",
 			PaymentIntent: &stripego.PaymentIntent{
 				Metadata: map[string]string{"payment_order_id": "po-from-pi"},
 			},
@@ -194,16 +196,17 @@ func TestParseChargeRefunded(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "po-from-pi", result.PaymentOrderID, "should prefer PaymentIntent metadata")
 		assert.Equal(t, "REFUNDED", result.Status)
-		assert.Equal(t, int64(4000), result.AmountMinorUnits, "refund should carry amount")
+		assert.Equal(t, int64(4000), result.AmountMinorUnits, "should use AmountRefunded, not Amount")
 		assert.Equal(t, "gbp", result.Currency, "refund should carry currency")
 	})
 
-	t.Run("fallback to charge metadata", func(t *testing.T) {
+	t.Run("partial refund uses AmountRefunded not Amount", func(t *testing.T) {
 		charge := stripego.Charge{
-			ID:       "ch_refund2",
-			Amount:   2500,
-			Currency: "eur",
-			Metadata: map[string]string{"payment_order_id": "po-from-charge"},
+			ID:             "ch_partial",
+			Amount:         5000, // original charge
+			AmountRefunded: 2000, // partial refund
+			Currency:       "eur",
+			Metadata:       map[string]string{"payment_order_id": "po-partial"},
 		}
 		raw, _ := json.Marshal(charge)
 		event := &stripego.Event{
@@ -214,16 +217,17 @@ func TestParseChargeRefunded(t *testing.T) {
 
 		result, err := a.parseChargeRefunded(event)
 		require.NoError(t, err)
-		assert.Equal(t, "po-from-charge", result.PaymentOrderID)
-		assert.Equal(t, int64(2500), result.AmountMinorUnits)
+		assert.Equal(t, "po-partial", result.PaymentOrderID)
+		assert.Equal(t, int64(2000), result.AmountMinorUnits, "partial refund should report refunded amount, not full charge")
 		assert.Equal(t, "eur", result.Currency)
 	})
 
 	t.Run("no metadata anywhere", func(t *testing.T) {
 		charge := stripego.Charge{
-			ID:       "ch_refund_no_meta",
-			Amount:   1000,
-			Currency: "usd",
+			ID:             "ch_refund_no_meta",
+			Amount:         1000,
+			AmountRefunded: 1000,
+			Currency:       "usd",
 		}
 		raw, _ := json.Marshal(charge)
 		event := &stripego.Event{
