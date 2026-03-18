@@ -1,0 +1,238 @@
+package validator
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
+)
+
+// dispatchInstructionRegex matches dispatch_instruction calls in Starlark scripts
+// to extract the instruction type, supporting both positional and keyword argument styles.
+// NOTE: This scans raw source text so it may match occurrences in comments or string
+// literals, producing false negatives (suppressing orphan warnings). A proper Starlark
+// AST walk would eliminate this, but the current approach is acceptable for a warning-level check.
+var dispatchInstructionRegex = regexp.MustCompile(
+	`dispatch_instruction\s*\(\s*(?:instruction_type\s*=\s*)?["']([^"']+)["']`,
+)
+
+// validateOperationalGatewayOrphans detects unused provider connections and instruction routes.
+func (v *ManifestValidator) validateOperationalGatewayOrphans(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	gw := manifest.GetOperationalGateway()
+	if gw == nil {
+		return
+	}
+
+	v.detectOrphanProviderConnections(manifest, gw, result)
+	v.detectOrphanInstructionRoutes(manifest, gw, result)
+}
+
+// detectOrphanProviderConnections warns on provider connections not referenced by
+// any instruction route or webhook trigger.
+func (v *ManifestValidator) detectOrphanProviderConnections(
+	manifest *controlplanev1.Manifest,
+	gw *controlplanev1.OperationalGatewayConfig,
+	result *ValidationResult,
+) {
+	usedConnections := make(map[string]bool)
+	for _, route := range gw.GetInstructionRoutes() {
+		usedConnections[route.GetConnectionId()] = true
+		if fb := route.GetFallbackConnectionId(); fb != "" {
+			usedConnections[fb] = true
+		}
+	}
+
+	// Also count connections used as webhook sources in saga triggers
+	for _, saga := range manifest.GetSagas() {
+		if source := extractWebhookSource(saga.GetTrigger()); source != "" {
+			usedConnections[source] = true
+		}
+	}
+
+	for i, conn := range gw.GetProviderConnections() {
+		cid := conn.GetConnectionId()
+		if !usedConnections[cid] {
+			addError(result, ValidationError{
+				Severity:     SeverityWarning,
+				Path:         fmt.Sprintf("operational_gateway.provider_connections[%d].connection_id", i),
+				Code:         "ORPHAN_PROVIDER_CONNECTION",
+				Message:      fmt.Sprintf("provider connection %q is not referenced by any instruction route or webhook trigger", cid),
+				ResourceType: "provider_connection",
+				ResourceID:   cid,
+			})
+		}
+	}
+}
+
+// detectOrphanInstructionRoutes warns on instruction routes not dispatched by any saga.
+func (v *ManifestValidator) detectOrphanInstructionRoutes(
+	manifest *controlplanev1.Manifest,
+	gw *controlplanev1.OperationalGatewayConfig,
+	result *ValidationResult,
+) {
+	usedInstructionTypes := make(map[string]bool)
+	for _, saga := range manifest.GetSagas() {
+		for _, m := range dispatchInstructionRegex.FindAllStringSubmatch(saga.GetScript(), -1) {
+			usedInstructionTypes[m[1]] = true
+		}
+	}
+
+	for i, route := range gw.GetInstructionRoutes() {
+		instrType := route.GetInstructionType()
+		if !usedInstructionTypes[instrType] {
+			addError(result, ValidationError{
+				Severity:     SeverityWarning,
+				Path:         fmt.Sprintf("operational_gateway.instruction_routes[%d].instruction_type", i),
+				Code:         "ORPHAN_INSTRUCTION_ROUTE",
+				Message:      fmt.Sprintf("instruction type %q is not dispatched by any saga script", instrType),
+				ResourceType: "instruction_route",
+				ResourceID:   instrType,
+			})
+		}
+	}
+}
+
+// validateImmutability checks that immutable code fields have not been changed.
+func (v *ManifestValidator) validateImmutability(
+	current *controlplanev1.Manifest,
+	previous *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
+	// Build maps of previous codes by index position to detect renames
+	prevInstrumentsByIdx := make(map[int]string)
+	for i, inst := range previous.GetInstruments() {
+		prevInstrumentsByIdx[i] = inst.GetCode()
+	}
+
+	prevAccountTypesByIdx := make(map[int]string)
+	for i, acct := range previous.GetAccountTypes() {
+		prevAccountTypesByIdx[i] = acct.GetCode()
+	}
+
+	// Check instruments: detect code changes at same index position
+	for i, inst := range current.GetInstruments() {
+		if prevCode, existed := prevInstrumentsByIdx[i]; existed {
+			if inst.GetCode() != prevCode {
+				addError(result, ValidationError{
+					Severity: SeverityError,
+					Path:     fmt.Sprintf("instruments[%d].code", i),
+					Code:     "IMMUTABLE_FIELD_CHANGED",
+					Message:  fmt.Sprintf("instrument code changed from %q to %q; codes are immutable primary keys", prevCode, inst.GetCode()),
+				})
+			}
+		}
+	}
+
+	// Check account types: detect code changes at same index position
+	for i, acct := range current.GetAccountTypes() {
+		if prevCode, existed := prevAccountTypesByIdx[i]; existed {
+			if acct.GetCode() != prevCode {
+				addError(result, ValidationError{
+					Severity: SeverityError,
+					Path:     fmt.Sprintf("account_types[%d].code", i),
+					Code:     "IMMUTABLE_FIELD_CHANGED",
+					Message:  fmt.Sprintf("account type code changed from %q to %q; codes are immutable primary keys", prevCode, acct.GetCode()),
+				})
+			}
+		}
+	}
+}
+
+// validateDestructiveChanges detects removal of resources that have dependencies in the
+// previous manifest. Removing an instrument used by account types or valuation rules,
+// an account type referenced in sagas, or a saga with dependents produces an error.
+// When force is set via WithForceDestructiveChanges, these errors become warnings.
+func (v *ManifestValidator) validateDestructiveChanges(
+	current *controlplanev1.Manifest,
+	previous *controlplanev1.Manifest,
+	callLogs map[string][]schema.HandlerCallInfo,
+	cfg *validateConfig,
+	result *ValidationResult,
+) {
+	// Build the relationship graph from the previous manifest to check dependencies.
+	prevGraph := ExtractRelationshipGraph(previous, callLogs)
+
+	// Build lookup sets for current manifest resources.
+	currentInstruments := make(map[string]bool)
+	for _, inst := range current.GetInstruments() {
+		currentInstruments[inst.GetCode()] = true
+	}
+	currentAccountTypes := make(map[string]bool)
+	for _, acct := range current.GetAccountTypes() {
+		currentAccountTypes[acct.GetCode()] = true
+	}
+	currentSagas := make(map[string]bool)
+	for _, saga := range current.GetSagas() {
+		currentSagas[saga.GetName()] = true
+	}
+
+	severity := SeverityError
+	if cfg.forceDestructiveChanges {
+		severity = SeverityWarning
+	}
+
+	// Check removed instruments. Use Impact (all connected edges) because instruments
+	// can be both targets (denominated_in from account types) and sources (converts in
+	// valuation rules).
+	for _, inst := range previous.GetInstruments() {
+		code := inst.GetCode()
+		if currentInstruments[code] {
+			continue
+		}
+		nodeID := "instrument:" + code
+		impact := prevGraph.Impact(nodeID)
+		if len(impact.AffectedNodes) > 0 {
+			addError(result, ValidationError{
+				Severity: severity,
+				Path:     "instruments",
+				Code:     "DESTRUCTIVE_INSTRUMENT_REMOVAL",
+				Message:  fmt.Sprintf("cannot remove instrument %q: it is referenced by %s", code, strings.Join(impact.AffectedNodes, ", ")),
+			})
+		}
+	}
+
+	// Check removed account types.
+	// Note: In the current graph structure, account types are only sources (denominated_in
+	// edges to instruments), not targets. Saga-to-account-type dependencies are captured
+	// via dynamic edges when call logs are provided (e.g., from a saga execution engine).
+	// Without call logs, this check relies on graph edges populated externally.
+	for _, acct := range previous.GetAccountTypes() {
+		code := acct.GetCode()
+		if currentAccountTypes[code] {
+			continue
+		}
+		nodeID := "account_type:" + code
+		dependents := prevGraph.Dependents(nodeID)
+		if len(dependents) > 0 {
+			addError(result, ValidationError{
+				Severity: severity,
+				Path:     "account_types",
+				Code:     "DESTRUCTIVE_ACCOUNT_TYPE_REMOVAL",
+				Message:  fmt.Sprintf("cannot remove account type %q: it is referenced by %s", code, strings.Join(dependents, ", ")),
+			})
+		}
+	}
+
+	// Check removed sagas.
+	for _, saga := range previous.GetSagas() {
+		name := saga.GetName()
+		if currentSagas[name] {
+			continue
+		}
+		nodeID := "saga:" + name
+		dependents := prevGraph.Dependents(nodeID)
+		if len(dependents) > 0 {
+			addError(result, ValidationError{
+				Severity: severity,
+				Path:     "sagas",
+				Code:     "DESTRUCTIVE_SAGA_REMOVAL",
+				Message:  fmt.Sprintf("cannot remove saga %q: it is referenced by %s", name, strings.Join(dependents, ", ")),
+			})
+		}
+	}
+}
