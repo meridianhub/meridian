@@ -255,7 +255,7 @@ function LoginPage() {
         </div>
 
         {/* Dex login form - shown in demo mode and production */}
-        {(import.meta.env.VITE_DEMO_MODE === 'true' || !import.meta.env.DEV) && (
+        {!import.meta.env.DEV && (
           <form onSubmit={(e) => void handleLogin(e)} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1">
@@ -300,7 +300,7 @@ function LoginPage() {
         {/* External auth provider buttons */}
         {externalProviders.length > 0 && (
           <>
-            {(import.meta.env.VITE_DEMO_MODE === 'true' || !import.meta.env.DEV) && <AuthDivider />}
+            {!import.meta.env.DEV && <AuthDivider />}
             <div className="space-y-2">
               {externalProviders.map((provider: AuthProviderType) => (
                 <ProviderButton
@@ -530,7 +530,7 @@ function AuthenticatedApp() {
   return (
     <TenantProvider>
       <ApiClientBridge>
-        {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true' || import.meta.env.VITE_DEMO_MODE === 'true') && <DevTenantAutoSelector />}
+        {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true') && <DevTenantAutoSelector />}
         <TooltipProvider>
           <Toaster position="top-right" richColors closeButton />
           <BrowserRouter>
