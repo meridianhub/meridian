@@ -22,7 +22,6 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
-	"google.golang.org/genproto/googleapis/type/money"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/config"
 	"github.com/meridianhub/meridian/services/current-account/domain"
@@ -35,6 +34,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -354,7 +354,7 @@ func TestResolveClearingAccountID_EmptyStaticConfig(t *testing.T) {
 // sendControlActionWebhook - all branches
 // =============================================================================
 
-func TestSendControlActionWebhook_NilNotifier(t *testing.T) {
+func TestSendControlActionWebhook_NilNotifier(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -373,7 +373,7 @@ func TestSendControlActionWebhook_NilNotifier(t *testing.T) {
 	svc.sendControlActionWebhook(context.Background(), req, &account, time.Now())
 }
 
-func TestSendControlActionWebhook_NoTenantInContext(t *testing.T) {
+func TestSendControlActionWebhook_NoTenantInContext(_ *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	svc := &Service{
 		logger:          logger,
@@ -1039,9 +1039,9 @@ func TestDomainToProtoLifecycleStatus(t *testing.T) {
 	svc := &Service{logger: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 
 	tests := []struct {
-		name   string
-		input  domain.ValuationFeatureLifecycleStatus
-		want   pb.ValuationFeatureLifecycleStatus
+		name  string
+		input domain.ValuationFeatureLifecycleStatus
+		want  pb.ValuationFeatureLifecycleStatus
 	}{
 		{"initiated", domain.ValuationFeatureLifecycleStatusInitiated, pb.ValuationFeatureLifecycleStatus_VALUATION_FEATURE_LIFECYCLE_STATUS_INITIATED},
 		{"active", domain.ValuationFeatureLifecycleStatusActive, pb.ValuationFeatureLifecycleStatus_VALUATION_FEATURE_LIFECYCLE_STATUS_ACTIVE},
@@ -1259,7 +1259,7 @@ func TestLoadSagaAsset_WithEnvVar(t *testing.T) {
 	tmpDir := t.TempDir()
 	testContent := "test saga script content"
 	testPath := filepath.Join(tmpDir, "test.star")
-	require.NoError(t, os.WriteFile(testPath, []byte(testContent), 0644))
+	require.NoError(t, os.WriteFile(testPath, []byte(testContent), 0o644))
 
 	t.Setenv("SAGA_ASSET_DIR", tmpDir)
 
@@ -3726,7 +3726,7 @@ func TestLoadSagaAsset_WithEnvVar_Success(t *testing.T) {
 	// Create a temp directory with a saga file
 	tmpDir := t.TempDir()
 	sagaPath := filepath.Join(tmpDir, "test-saga.star")
-	err := os.WriteFile(sagaPath, []byte("# test saga script"), 0644)
+	err := os.WriteFile(sagaPath, []byte("# test saga script"), 0o644)
 	require.NoError(t, err)
 
 	t.Setenv("SAGA_ASSET_DIR", tmpDir)
@@ -4251,8 +4251,6 @@ func TestResolveDepositScript_SagaNotFound(t *testing.T) {
 	require.NoError(t, scriptErr)
 	assert.Equal(t, "default_script", script, "should fall back to default when saga not found")
 }
-
-
 
 // =============================================================================
 // protoMoneyToAmount: overflow and edge case coverage
@@ -4817,7 +4815,6 @@ func TestMapStatusToGRPC_AllStatuses(t *testing.T) {
 		assert.Equal(t, tc.expected, result, "status %v", tc.input)
 	}
 }
-
 
 // =============================================================================
 // domainToProtoValuationFeature: additional parameter paths
@@ -7056,24 +7053,31 @@ type stubPKClient struct {
 func (s *stubPKClient) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (s *stubPKClient) UpdateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.UpdateFinancialPositionLogRequest) (*positionkeepingv1.UpdateFinancialPositionLogResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (s *stubPKClient) RetrieveFinancialPositionLog(_ context.Context, _ *positionkeepingv1.RetrieveFinancialPositionLogRequest) (*positionkeepingv1.RetrieveFinancialPositionLogResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (s *stubPKClient) BulkImportTransactions(_ context.Context, _ *positionkeepingv1.BulkImportTransactionsRequest) (*positionkeepingv1.BulkImportTransactionsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (s *stubPKClient) ListFinancialPositionLogs(_ context.Context, _ *positionkeepingv1.ListFinancialPositionLogsRequest) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (s *stubPKClient) GetAccountBalance(_ context.Context, _ *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
 	return s.getBalanceResp, s.getBalanceErr
 }
+
 func (s *stubPKClient) GetAccountBalances(_ context.Context, _ *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (s *stubPKClient) ReleaseReservation(_ context.Context, _ *positionkeepingv1.ReleaseReservationRequest) (*positionkeepingv1.ReleaseReservationResponse, error) {
 	return s.releaseResp, s.releaseErr
 }

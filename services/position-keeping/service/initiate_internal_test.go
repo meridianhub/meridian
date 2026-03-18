@@ -25,10 +25,10 @@ func TestProtoLineageToDomain_ValidInput(t *testing.T) {
 	related1 := uuid.New()
 
 	proto := &positionkeepingv1.TransactionLineage{
-		TransactionId:       txID.String(),
-		TransactionType:     "PAYMENT",
-		ParentTransactionId: parentID.String(),
-		ChildTransactionIds: []string{child1.String(), child2.String()},
+		TransactionId:         txID.String(),
+		TransactionType:       "PAYMENT",
+		ParentTransactionId:   parentID.String(),
+		ChildTransactionIds:   []string{child1.String(), child2.String()},
 		RelatedTransactionIds: []string{related1.String()},
 	}
 

@@ -512,7 +512,7 @@ func TestForwardCurveCache_JitteredL1TTL_NoJitter(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, ttl)
 }
 
-func TestRecordCELEvaluation(t *testing.T) {
+func TestRecordCELEvaluation(_ *testing.T) {
 	// Just verify it doesn't panic
 	RecordCELEvaluation("forward_price")
 	RecordCELEvaluation("forward_price_range")
