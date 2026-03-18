@@ -17,11 +17,11 @@ import (
 
 // Sentinel errors for the Stripe payment intent adapter.
 var (
-	ErrMissingStripeAccount    = errors.New("stripe connected account ID not found in context")
-	ErrInvalidRequest          = errors.New("invalid stripe request")
-	ErrNilCreator              = errors.New("payment intent creator must not be nil")
-	ErrPaymentIntentNotFound   = errors.New("payment intent not found for payment order")
-	ErrCancelNotConfigured     = errors.New("cancel support not configured on adapter")
+	ErrMissingStripeAccount  = errors.New("stripe connected account ID not found in context")
+	ErrInvalidRequest        = errors.New("invalid stripe request")
+	ErrNilCreator            = errors.New("payment intent creator must not be nil")
+	ErrPaymentIntentNotFound = errors.New("payment intent not found for payment order")
+	ErrCancelNotConfigured   = errors.New("cancel support not configured on adapter")
 )
 
 // Prometheus metrics for Stripe gateway operations.

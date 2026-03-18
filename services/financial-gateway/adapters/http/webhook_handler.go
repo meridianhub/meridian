@@ -278,14 +278,14 @@ func (h *WebhookHandler) mapToDomainEvent(parsed stripeadapter.ParsedWebhookEven
 
 	case "REFUNDED":
 		evt := &financialgatewayeventsv1.PaymentRefundedEvent{
-			EventId:                   uuid.New().String(),
-			Version:                   1,
-			PaymentOrderId:            parsed.PaymentOrderID,
-			ProviderReferenceId:       parsed.GatewayReferenceID,
-			ProviderEventId:           parsed.EventID,
-			CausationId:               parsed.EventID,
-			AmountRefundedMinorUnits:  parsed.AmountMinorUnits,
-			Currency:                  parsed.Currency,
+			EventId:                  uuid.New().String(),
+			Version:                  1,
+			PaymentOrderId:           parsed.PaymentOrderID,
+			ProviderReferenceId:      parsed.GatewayReferenceID,
+			ProviderEventId:          parsed.EventID,
+			CausationId:              parsed.EventID,
+			AmountRefundedMinorUnits: parsed.AmountMinorUnits,
+			Currency:                 parsed.Currency,
 		}
 		if !parsed.Timestamp.IsZero() {
 			evt.RefundedAt = timestamppb.New(parsed.Timestamp)
