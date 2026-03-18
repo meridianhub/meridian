@@ -151,14 +151,15 @@ A `doc.go` file costs 5-15 lines and saves hundreds of lines of exploratory read
 
 ### Task 2.1: Add doc.go to All shared/pkg/ Packages
 
-**Problem**: 14 of 18 `shared/pkg/` packages lack `doc.go`. An AI or developer discovering
-`shared/pkg/mapping/` has no way to know what it does without reading implementation files.
+**Problem**: 16 of 20 `shared/pkg/` packages lack `doc.go`. An AI or
+developer discovering `shared/pkg/mapping/` has no way to know what it
+does without reading implementation files.
 
 **Packages missing doc.go** (verify current state before implementing):
 
-- `amount/`, `bucketing/`, `credentials/`, `dispatch/`, `grpc/`, `health/`,
-  `idempotency/`, `interceptors/`, `mapping/`, `money/`, `proto/`, `refdata/`,
-  `tokens/`, `types/`, `validation/`
+- `amount/`, `bucketing/`, `cel/`, `credentials/`, `grpc/`, `health/`,
+  `idempotency/`, `mapping/`, `money/`, `proto/`, `refdata/`, `saga/`,
+  `tokens/`, `validation/`, `valuation/`, `valuationfeature/`
 
 **Acceptance Criteria**:
 
@@ -223,31 +224,37 @@ Developers don't know where to add new shared code.
 
 ### Rationale
 
-Three different names for the same concept:
+Three different naming patterns for the main gRPC service file:
 
-| Service | Main service file |
-|---------|------------------|
-| current-account | `grpc_service.go` |
-| party | `grpc_service.go` |
-| internal-account | `server.go` |
-| reconciliation | `server.go` |
-| financial-accounting | `financial_accounting_service.go` |
+| Pattern | Services |
+|---------|----------|
+| `server.go` | internal-account, market-information |
+| `grpc_service.go` | current-account, party, payment-order, tenant, identity, financial-gateway, operational-gateway |
+| `service.go` | position-keeping, reconciliation |
+| `{name}_service.go` | financial-accounting (`financial_accounting_service.go`) |
 
-This means "find the gRPC handler registration" requires checking 2-3 filenames per service.
+This means "find the gRPC handler registration" requires checking
+multiple filenames per service.
 
 ### Task 3.1: Rename Variant Service Files to server.go
 
-**Problem**: `grpc_service.go` and `{service}_service.go` variants create
-navigation ambiguity. ADR-015 establishes `server.go` as the canonical name
-for the gRPC service implementation file. Several services diverge from this.
+**Problem**: ADR-015 establishes `server.go` as the canonical name
+for the gRPC service implementation file. Most services use
+`grpc_service.go` or other variants instead.
 
 **Files Affected** (verify current state before implementing):
 
-- `services/current-account/service/grpc_service.go` -> rename to `server.go`
-- `services/party/service/grpc_service.go` -> rename to `server.go`
+- `services/current-account/service/grpc_service.go` -> `server.go`
+- `services/party/service/grpc_service.go` -> `server.go`
+- `services/payment-order/service/grpc_service.go` -> `server.go`
+- `services/tenant/service/grpc_service.go` -> `server.go`
+- `services/identity/service/grpc_service.go` -> `server.go`
+- `services/financial-gateway/service/grpc_service.go` -> `server.go`
+- `services/operational-gateway/service/grpc_service.go` -> `server.go`
 - `services/financial-accounting/service/financial_accounting_service.go`
-  -> rename to `server.go`
-- Any other services not using `server.go`
+  -> `server.go`
+- `services/position-keeping/service/service.go` -> `server.go`
+- `services/reconciliation/service/service.go` -> `server.go`
 
 **Acceptance Criteria**:
 
