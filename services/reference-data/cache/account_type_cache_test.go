@@ -405,7 +405,7 @@ func TestLocalAccountTypeCache_ExpiredSystemBlueprintTriggersBackgroundRefresh(t
 	assert.Equal(t, "SYSTEM_NOSTRO", result.Definition.Code)
 
 	// Wait for background refresh to complete
-	err := await.New().
+	err = await.New().
 		AtMost(2 * time.Second).
 		PollInterval(20 * time.Millisecond).
 		Until(func() bool {
