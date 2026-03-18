@@ -53,6 +53,7 @@ stateDiagram-v2
 | [Party KYC/AML Provider Integration](020-party-kyc-aml-provider-integration.md) | `party-kyc-aml` | 10/10 done |
 | [MCP Server](027-mcp-server.md) | `mcp-server` | 17/18 done, 1 cancelled |
 | [Operational Gateway](029-operational-gateway.md) | `operational-gateway` | 20/20 done |
+| [Reconciliation Phase 2](013-reconciliation-service.md) | `reconciliation-service-phase2-completed-2026-02-13` | 10/10 done |
 
 #### Paused (Deferred Items Remain)
 
