@@ -66,11 +66,12 @@ func TestRecordError_WithError(t *testing.T) {
 
 func TestRecordError_SetsErrorStatus(t *testing.T) {
 	// Use noop tracer to verify no panic; status is set internally.
-	tracer := noop.NewTracerProvider().Tracer("test")
-	ctx, span := tracer.Start(context.Background(), "test-op")
-	_ = ctx
-	RecordError(span, errors.New("something went wrong"))
-	span.End()
+	assert.NotPanics(t, func() {
+		tracer := noop.NewTracerProvider().Tracer("test")
+		_, span := tracer.Start(context.Background(), "test-op")
+		RecordError(span, errors.New("something went wrong"))
+		span.End()
+	})
 }
 
 func TestAttributeKeys_AreDistinct(t *testing.T) {
@@ -100,6 +101,7 @@ func TestCodes_ErrorConstant(t *testing.T) {
 
 // Verify SpanKindInternal is used.
 func TestStartSpan_UsesInternalKind(t *testing.T) {
+	t.Helper()
 	// StartSpan uses trace.SpanKindInternal; verify it compiles.
-	_ = trace.SpanKindInternal
+	assert.NotNil(t, trace.SpanKindInternal)
 }
