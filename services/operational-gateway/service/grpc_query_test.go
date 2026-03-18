@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -94,8 +95,29 @@ func TestListInstructions_StatusFilter(t *testing.T) {
 }
 
 func TestListInstructions_DateRange(t *testing.T) {
-	svc, _, _ := newTestOGService(t)
+	svc, instRepo, _ := newTestOGService(t)
 	ctx := tenantContext("test-tenant")
+	tid := testTenantID()
+	tidUUID := tenantIDToUUID(tenant.TenantID(tid))
+
+	// Seed instructions at different dates.
+	before, _ := domain.NewInstruction(uuid.MustParse(tidUUID), "cmd.before", uuid.New().String(), map[string]any{"k": "v"})
+	before.ID = uuid.New()
+	before.CreatedAt = time.Date(2024, 12, 15, 0, 0, 0, 0, time.UTC)
+
+	inside, _ := domain.NewInstruction(uuid.MustParse(tidUUID), "cmd.inside", uuid.New().String(), map[string]any{"k": "v"})
+	inside.ID = uuid.New()
+	inside.CreatedAt = time.Date(2025, 6, 15, 0, 0, 0, 0, time.UTC)
+
+	after, _ := domain.NewInstruction(uuid.MustParse(tidUUID), "cmd.after", uuid.New().String(), map[string]any{"k": "v"})
+	after.ID = uuid.New()
+	after.CreatedAt = time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	instRepo.mu.Lock()
+	instRepo.instructions[before.ID] = before
+	instRepo.instructions[inside.ID] = inside
+	instRepo.instructions[after.ID] = after
+	instRepo.mu.Unlock()
 
 	resp, err := svc.ListInstructions(ctx, &opgatewayv1.ListInstructionsRequest{
 		DateRange: &commonpb.DateRange{
@@ -104,7 +126,8 @@ func TestListInstructions_DateRange(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	assert.NotNil(t, resp)
+	assert.Len(t, resp.Instructions, 1)
+	assert.Equal(t, "cmd.inside", resp.Instructions[0].InstructionType)
 }
 
 func TestListInstructions_InvalidStartDate(t *testing.T) {
