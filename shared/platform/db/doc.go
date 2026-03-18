@@ -12,10 +12,14 @@
 //
 //	postgresql://meridian:secret@cockroachdb:26257/meridian_current_account?sslmode=require
 //
-// # Environment Variables
+// # Configuration
 //
-//   - DATABASE_URL: full connection string (required)
-//   - DB_MAX_OPEN_CONNS: maximum open connections (default: 25)
-//   - DB_MAX_IDLE_CONNS: maximum idle connections (default: 5)
-//   - DB_CONN_MAX_LIFETIME: connection lifetime (default: 5m)
+// Use [DefaultConfig] to build a Config with CockroachDB-tuned defaults:
+//
+//   - MaxConnections: 50
+//   - MinConnections: 5
+//   - MaxConnectionLifetime: 1 hour
+//   - MaxConnectionIdleTime: 10 minutes
+//
+// The connection string is typically read from the DATABASE_URL environment variable.
 package db
