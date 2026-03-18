@@ -85,8 +85,8 @@ Generated `.pb.go` files are currently excluded from git. This means:
 - Code review cannot show proto-generated type changes inline
 
 This is the same rationale behind shadcn/ui's approach: copy the code into your project so it's
-readable, searchable, and versionable. Generated code that's invisible is code that doesn't
-exist for navigation purposes.
+readable, searchable, and versionable. If generated code is invisible,
+it is effectively unavailable for navigation.
 
 ### Task 1.1: Add Proto-Generated Files to Git
 
