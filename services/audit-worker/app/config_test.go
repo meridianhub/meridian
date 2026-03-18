@@ -5,6 +5,9 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -303,6 +306,48 @@ func TestConfigValidate(t *testing.T) {
 			wantErr:     true,
 			expectedErr: ErrInvalidMaxIdleConns,
 		},
+		{
+			name: "empty service port",
+			config: &Config{
+				Service: ServiceConfig{
+					Name: "current-account",
+					Port: "", // Invalid
+				},
+				Database: DatabaseConfig{
+					URL:          "postgres://localhost/db",
+					MaxOpenConns: 10,
+					MaxIdleConns: 2,
+				},
+				Kafka: KafkaConfig{
+					BootstrapServers: "kafka:9092",
+					Topic:            "audit.events.v1",
+					GroupID:          "group-1",
+				},
+			},
+			wantErr:     true,
+			expectedErr: ErrEmptyPort,
+		},
+		{
+			name: "empty Kafka GroupID",
+			config: &Config{
+				Service: ServiceConfig{
+					Name: "current-account",
+					Port: "8080",
+				},
+				Database: DatabaseConfig{
+					URL:          "postgres://localhost/db",
+					MaxOpenConns: 10,
+					MaxIdleConns: 2,
+				},
+				Kafka: KafkaConfig{
+					BootstrapServers: "kafka:9092",
+					Topic:            "audit.events.v1",
+					GroupID:          "", // Invalid
+				},
+			},
+			wantErr:     true,
+			expectedErr: ErrEmptyGroupID,
+		},
 	}
 
 	for _, tt := range tests {
@@ -319,4 +364,46 @@ func TestConfigValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetEnvAsInt_InvalidFormat(t *testing.T) {
+	os.Clearenv()
+	os.Setenv("DB_MAX_OPEN_CONNS", "not_a_number")
+	os.Setenv("SERVICE_NAME", "test")
+	os.Setenv("DATABASE_URL", "postgres://localhost/db")
+	os.Setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+	os.Setenv("AUDIT_TOPIC", "audit.events.v1")
+
+	config, err := LoadConfig()
+	require.NoError(t, err)
+	// Should fall back to default (25)
+	assert.Equal(t, 25, config.Database.MaxOpenConns)
+}
+
+func TestGetEnvAsInt_OutOfInt32Range(t *testing.T) {
+	os.Clearenv()
+	os.Setenv("DB_MAX_OPEN_CONNS", "9999999999") // > MaxInt32
+	os.Setenv("SERVICE_NAME", "test")
+	os.Setenv("DATABASE_URL", "postgres://localhost/db")
+	os.Setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+	os.Setenv("AUDIT_TOPIC", "audit.events.v1")
+
+	config, err := LoadConfig()
+	require.NoError(t, err)
+	// Should fall back to default (25)
+	assert.Equal(t, 25, config.Database.MaxOpenConns)
+}
+
+func TestGetEnvAsDuration_InvalidFormat(t *testing.T) {
+	os.Clearenv()
+	os.Setenv("KAFKA_HANDLER_TIMEOUT", "not_a_duration")
+	os.Setenv("SERVICE_NAME", "test")
+	os.Setenv("DATABASE_URL", "postgres://localhost/db")
+	os.Setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+	os.Setenv("AUDIT_TOPIC", "audit.events.v1")
+
+	config, err := LoadConfig()
+	require.NoError(t, err)
+	// Should fall back to default (30s)
+	assert.Equal(t, 30*time.Second, config.Kafka.HandlerTimeout)
 }

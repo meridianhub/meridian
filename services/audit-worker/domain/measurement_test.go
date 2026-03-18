@@ -198,6 +198,98 @@ func TestMeasurement_IsLocked(t *testing.T) {
 	}
 }
 
+func TestMustPeriod(t *testing.T) {
+	t.Run("valid period does not panic", func(t *testing.T) {
+		start := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+		end := time.Date(2025, 1, 1, 12, 30, 0, 0, time.UTC)
+		p := MustPeriod(start, end)
+		assert.Equal(t, start, p.Start)
+		assert.Equal(t, end, p.End)
+	})
+
+	t.Run("valid instant does not panic", func(t *testing.T) {
+		ts := time.Date(2025, 6, 15, 9, 0, 0, 0, time.UTC)
+		p := MustPeriod(ts, ts)
+		assert.True(t, p.IsInstant())
+	})
+
+	t.Run("invalid period panics", func(t *testing.T) {
+		start := time.Date(2025, 1, 1, 12, 30, 0, 0, time.UTC)
+		end := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+		assert.Panics(t, func() {
+			MustPeriod(start, end)
+		})
+	})
+
+	t.Run("non-UTC timestamp panics", func(t *testing.T) {
+		start := time.Date(2025, 1, 1, 12, 0, 0, 0, time.FixedZone("EST", -5*3600))
+		end := time.Date(2025, 1, 1, 12, 30, 0, 0, time.UTC)
+		assert.Panics(t, func() {
+			MustPeriod(start, end)
+		})
+	})
+}
+
+func TestPeriod_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		period  Period
+		wantErr error
+	}{
+		{
+			name: "valid period",
+			period: Period{
+				Start: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
+				End:   time.Date(2025, 1, 1, 12, 30, 0, 0, time.UTC),
+			},
+			wantErr: nil,
+		},
+		{
+			name: "valid instant",
+			period: Period{
+				Start: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
+				End:   time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
+			},
+			wantErr: nil,
+		},
+		{
+			name: "start not UTC",
+			period: Period{
+				Start: time.Date(2025, 1, 1, 12, 0, 0, 0, time.FixedZone("EST", -5*3600)),
+				End:   time.Date(2025, 1, 1, 12, 30, 0, 0, time.UTC),
+			},
+			wantErr: ErrNonUTCTimestamp,
+		},
+		{
+			name: "end not UTC",
+			period: Period{
+				Start: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
+				End:   time.Date(2025, 1, 1, 12, 30, 0, 0, time.FixedZone("PST", -8*3600)),
+			},
+			wantErr: ErrNonUTCTimestamp,
+		},
+		{
+			name: "end before start",
+			period: Period{
+				Start: time.Date(2025, 1, 1, 12, 30, 0, 0, time.UTC),
+				End:   time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
+			},
+			wantErr: ErrInvalidPeriod,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.period.Validate()
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestMeasurement_FullModel(t *testing.T) {
 	// Test that we can create a complete measurement with all fields
 	accountID := uuid.New()

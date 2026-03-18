@@ -375,6 +375,11 @@ func TestProtoToOperation(t *testing.T) {
 			expected:  "DELETE",
 		},
 		{
+			name:      "INITIAL_IMPORT",
+			operation: auditv1.AuditOperation_AUDIT_OPERATION_INITIAL_IMPORT,
+			expected:  "INITIAL_IMPORT",
+		},
+		{
 			name:      "UNSPECIFIED",
 			operation: auditv1.AuditOperation_AUDIT_OPERATION_UNSPECIFIED,
 			expected:  "",
@@ -398,4 +403,68 @@ func TestConsumerStart_EmptyTopic(t *testing.T) {
 	err := consumer.Start("")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrEmptyTopic)
+}
+
+func TestIsRunning(t *testing.T) {
+	t.Run("default false", func(t *testing.T) {
+		c := &AuditConsumer{running: false}
+		assert.False(t, c.IsRunning())
+	})
+
+	t.Run("true after set", func(t *testing.T) {
+		c := &AuditConsumer{running: true}
+		assert.True(t, c.IsRunning())
+	})
+
+	t.Run("concurrent safety", func(t *testing.T) {
+		c := &AuditConsumer{running: false}
+		// Write and read concurrently should not race
+		done := make(chan struct{})
+		go func() {
+			c.mu.Lock()
+			c.running = true
+			c.mu.Unlock()
+			close(done)
+		}()
+		<-done
+		assert.True(t, c.IsRunning())
+	})
+}
+
+func TestNewAuditConsumer_MaxRetriesOutOfRange(t *testing.T) {
+	db := setupTestDB(t)
+	config := ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		Topic:            "audit.events.test.v1",
+		GroupID:          "test-group",
+		ClientID:         "test-client",
+		DB:               db,
+		MaxRetries:       2147483648, // math.MaxInt32 + 1
+	}
+
+	consumer, err := NewAuditConsumer(config)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMaxRetriesOutOfRange)
+	assert.Nil(t, consumer)
+}
+
+func TestHandleAuditEvent_CancelledContext(t *testing.T) {
+	db := setupTestDB(t)
+	consumer := &AuditConsumer{db: db}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = tenant.WithTenant(ctx, tenant.TenantID("tenant_cancel"))
+	cancel() // cancel before calling
+
+	event := &auditv1.AuditEvent{
+		EventId:   "evt_cancel",
+		TableName: "test_table",
+		Operation: auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+		RecordId:  "rec_1",
+		Timestamp: timestamppb.New(time.Now().UTC()),
+	}
+
+	err := consumer.handleAuditEvent(ctx, event)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }

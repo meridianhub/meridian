@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -202,5 +203,64 @@ func TestGetDBConnectionString_ReturnsErrorWhenMissing(t *testing.T) {
 	}
 	if !errors.Is(err, ErrDatabaseURLRequired) {
 		t.Errorf("Expected ErrDatabaseURLRequired, got: %v", err)
+	}
+}
+
+func TestGetAuditSchema_Present(t *testing.T) {
+	orig := os.Getenv("AUDIT_SCHEMA")
+	defer func() {
+		if orig != "" {
+			_ = os.Setenv("AUDIT_SCHEMA", orig)
+		} else {
+			_ = os.Unsetenv("AUDIT_SCHEMA")
+		}
+	}()
+
+	_ = os.Setenv("AUDIT_SCHEMA", "current_account")
+	schema, err := getAuditSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if schema != "current_account" {
+		t.Errorf("got %q, want %q", schema, "current_account")
+	}
+}
+
+func TestGetAuditSchema_Missing(t *testing.T) {
+	orig := os.Getenv("AUDIT_SCHEMA")
+	defer func() {
+		if orig != "" {
+			_ = os.Setenv("AUDIT_SCHEMA", orig)
+		} else {
+			_ = os.Unsetenv("AUDIT_SCHEMA")
+		}
+	}()
+
+	_ = os.Unsetenv("AUDIT_SCHEMA")
+	_, err := getAuditSchema()
+	if err == nil {
+		t.Fatal("expected error when AUDIT_SCHEMA is missing")
+	}
+	if !errors.Is(err, ErrAuditSchemaRequired) {
+		t.Errorf("expected ErrAuditSchemaRequired, got: %v", err)
+	}
+}
+
+func TestSetupDatabase_MissingURL(t *testing.T) {
+	orig := os.Getenv("DATABASE_URL")
+	defer func() {
+		if orig != "" {
+			_ = os.Setenv("DATABASE_URL", orig)
+		} else {
+			_ = os.Unsetenv("DATABASE_URL")
+		}
+	}()
+
+	_ = os.Unsetenv("DATABASE_URL")
+
+	ctx := context.Background()
+	_, err := setupDatabase(ctx)
+	if err == nil {
+		t.Fatal("expected error when DATABASE_URL is missing")
 	}
 }

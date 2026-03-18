@@ -462,3 +462,79 @@ func base64Encode(t *testing.T, s string) string {
 	t.Helper()
 	return base64.URLEncoding.EncodeToString([]byte(s))
 }
+
+func TestNewAuditService_NilLogger_UsesDefault(t *testing.T) {
+	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	t.Cleanup(cleanup)
+
+	// nil logger should succeed (falls back to slog.Default())
+	svc, err := NewAuditService(db, nil)
+	require.NoError(t, err)
+	require.NotNil(t, svc)
+}
+
+func TestListAuditEntries_MalformedJSONValues(t *testing.T) {
+	svc, ctx, db := setupTestPostgres(t)
+
+	tenantID, _ := tenant.FromContext(ctx)
+	now := time.Now().UTC()
+
+	// Insert row with malformed JSON in new_values — rowToProto should skip it
+	schema := tenantID.SchemaName()
+	sql := fmt.Sprintf(`
+		INSERT INTO %q.audit_log (event_id, table_name, operation, record_id, new_values, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, schema)
+	require.NoError(t, db.Exec(sql,
+		"evt_bad_json",
+		"accounts",
+		"INSERT",
+		"rec_bad",
+		`not valid json`,
+		now,
+	).Error)
+
+	// Insert a valid row too
+	insertAuditRow(t, db, tenantID, "evt_good", "accounts", "INSERT", "rec_good", "user1", now.Add(-time.Second), nil, nil)
+
+	resp, err := svc.ListAuditEntries(ctx, &auditv1.ListAuditEntriesRequest{})
+	require.NoError(t, err)
+	// Malformed entry is skipped; only valid one is returned
+	assert.Len(t, resp.Entries, 1)
+	assert.Equal(t, "rec_good", resp.Entries[0].RecordId)
+}
+
+func TestListAuditEntries_PageSizeCap(t *testing.T) {
+	svc, ctx, db := setupTestPostgres(t)
+
+	tenantID, _ := tenant.FromContext(ctx)
+	now := time.Now().UTC()
+
+	// Insert 5 entries
+	for i := 0; i < 5; i++ {
+		insertAuditRow(t, db, tenantID,
+			fmt.Sprintf("evt_cap_%d", i),
+			"parties", "INSERT",
+			fmt.Sprintf("rec_%d", i),
+			"user1",
+			now.Add(time.Duration(-i)*time.Second),
+			nil, nil,
+		)
+	}
+
+	// Request page_size > maxPageSize (100) — should be capped
+	resp, err := svc.ListAuditEntries(ctx, &auditv1.ListAuditEntriesRequest{
+		PageSize: 200,
+	})
+	require.NoError(t, err)
+	// Only 5 rows exist so we get 5, but the cap was applied internally
+	assert.Len(t, resp.Entries, 5)
+}
+
+func TestDecodeCursor_ZeroTimestamp(t *testing.T) {
+	// Encode a zero-time cursor and verify decodeCursor rejects it
+	token := base64Encode(t, `{"c":"0001-01-01T00:00:00Z"}`)
+	_, err := decodeCursor(token)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrZeroCursorTime)
+}

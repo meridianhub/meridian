@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -273,5 +275,60 @@ func TestContainer_DatabaseConnection(t *testing.T) {
 	}
 	if result != 1 {
 		t.Errorf("Database query result = %d, want 1", result)
+	}
+}
+
+func TestContainerCloseError_Error(t *testing.T) {
+	err := &ContainerCloseError{
+		Errors: []error{
+			fmt.Errorf("error 1"),
+			fmt.Errorf("error 2"),
+		},
+	}
+
+	msg := err.Error()
+	if msg != "errors during container close: 2 errors" {
+		t.Errorf("ContainerCloseError.Error() = %q, unexpected", msg)
+	}
+}
+
+func TestContainer_Close_EmptyContainer(t *testing.T) {
+	// Close a container with no DB or AuditConsumer initialized.
+	// This covers the nil-check branches in Close().
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	c := &Container{
+		Config: &Config{
+			Service: ServiceConfig{Name: "test"},
+		},
+		Logger:    logger,
+		done:      make(chan struct{}),
+		closeOnce: sync.Once{},
+		// DB and AuditConsumer intentionally nil
+	}
+
+	ctx := context.Background()
+	err := c.Close(ctx)
+	if err != nil {
+		t.Errorf("Close() on empty container returned error: %v", err)
+	}
+}
+
+func TestContainer_Close_Idempotent(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	c := &Container{
+		Config: &Config{
+			Service: ServiceConfig{Name: "test"},
+		},
+		Logger:    logger,
+		done:      make(chan struct{}),
+		closeOnce: sync.Once{},
+	}
+
+	ctx := context.Background()
+	// Should not panic on multiple calls
+	_ = c.Close(ctx)
+	err := c.Close(ctx)
+	if err != nil {
+		t.Errorf("second Close() returned error: %v", err)
 	}
 }
