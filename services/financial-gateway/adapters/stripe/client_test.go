@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/sony/gobreaker/v2"
 	stripego "github.com/stripe/stripe-go/v82"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
