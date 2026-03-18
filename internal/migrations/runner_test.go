@@ -7,44 +7,19 @@ import (
 	"os"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/meridianhub/meridian/internal/migrations"
-	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
 
-// setupTestCockroachDB starts a CockroachDB testcontainer and returns a
-// root DSN and cleanup function.
+// setupTestCockroachDB starts a CockroachDB testcontainer with retry logic
+// and returns a root DSN and cleanup function.
 func setupTestCockroachDB(t *testing.T) (string, func()) {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-
-	container, err := cockroachdb.Run(ctx,
-		"cockroachdb/cockroach:v24.3.0",
-		cockroachdb.WithDatabase("defaultdb"),
-		cockroachdb.WithUser("root"),
-		cockroachdb.WithInsecure(),
-	)
-	if err != nil {
-		t.Fatalf("start CockroachDB container: %v", err)
-	}
-
-	connConfig, err := container.ConnectionConfig(ctx)
-	if err != nil {
-		t.Fatalf("get connection config: %v", err)
-	}
-	dsn := fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=disable",
-		connConfig.User, connConfig.Host, connConfig.Port, connConfig.Database)
-
-	cleanup := func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cleanupCancel()
-		_ = container.Terminate(cleanupCtx)
-	}
-
+	container, cleanup := testdb.StartCockroachContainer(t, "defaultdb")
+	dsn := testdb.CockroachDSN(t, container)
 	return dsn, cleanup
 }
 
