@@ -17,6 +17,7 @@ ignore:
   - "**/mocks/**"
   - "utilities/**"
   - "frontend/src/api/gen/**"
+  - "services/mcp-server/cmd/wire.go"
 
 comment:
   layout: "condensed_header, condensed_files, condensed_footer"
