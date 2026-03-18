@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -495,8 +496,8 @@ func TestSendControlActionWebhook_FreezeWithTenant(_ *testing.T) {
 	}
 	// Freeze with valid tenant context should send webhook (async)
 	svc.sendControlActionWebhook(ctx, req, &account, time.Now())
-	// Allow goroutine to complete
-	time.Sleep(50 * time.Millisecond)
+	// Yield to allow fire-and-forget goroutine to execute
+	runtime.Gosched()
 }
 
 func TestSendControlActionWebhook_CloseWithTenant(_ *testing.T) {
@@ -516,8 +517,8 @@ func TestSendControlActionWebhook_CloseWithTenant(_ *testing.T) {
 		Reason:        "account closure requested",
 	}
 	svc.sendControlActionWebhook(ctx, req, &account, time.Now())
-	// Allow goroutine to complete
-	time.Sleep(50 * time.Millisecond)
+	// Yield to allow fire-and-forget goroutine to execute
+	runtime.Gosched()
 }
 
 // =============================================================================

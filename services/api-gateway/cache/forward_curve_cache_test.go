@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -493,11 +494,22 @@ func TestForwardCurveCache_GetRange_WithL2(t *testing.T) {
 	_, err = cache.Get(ctx, "ELEC_PEAK", start)
 	require.NoError(t, err)
 
-	// Wait for L1 expiry
-	time.Sleep(60 * time.Millisecond)
-
-	// GetRange should find observation in L2
-	obs, err := cache.GetRange(ctx, "ELEC_PEAK", start, start)
+	// Poll until L1 expires and L2 serves the data
+	var obs []*Observation
+	err = await.New().
+		AtMost(1 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		UntilNoError(func() error {
+			var getErr error
+			obs, getErr = cache.GetRange(ctx, "ELEC_PEAK", start, start)
+			if getErr != nil {
+				return getErr
+			}
+			if len(obs) == 0 {
+				return fmt.Errorf("no observations yet")
+			}
+			return nil
+		})
 	require.NoError(t, err)
 	assert.Len(t, obs, 1)
 	assert.Equal(t, "45.5", obs[0].Value.String())
@@ -532,10 +544,7 @@ func TestForwardCurveCache_GetRange_L1Expiry(t *testing.T) {
 	_, err = cache.Get(ctx, "ELEC_PEAK", start)
 	require.NoError(t, err)
 
-	// Wait for L1 expiry
-	time.Sleep(60 * time.Millisecond)
-
-	// Add range obs for the fallback
+	// Add range obs for the fallback (ready before L1 expires)
 	rangeKey := "ELEC_PEAK:" + start.Format(time.RFC3339) + "-" + start.Add(time.Hour).Format(time.RFC3339)
 	source.rangeObs[rangeKey] = []*Observation{
 		{
@@ -545,8 +554,22 @@ func TestForwardCurveCache_GetRange_L1Expiry(t *testing.T) {
 		},
 	}
 
-	// GetRange should detect expired L1 entry, remove it, and fetch from source
-	obs, err := cache.GetRange(ctx, "ELEC_PEAK", start, start)
+	// Poll until L1 expires and GetRange detects it, falling back to source
+	var obs []*Observation
+	err = await.New().
+		AtMost(1 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		UntilNoError(func() error {
+			var getErr error
+			obs, getErr = cache.GetRange(ctx, "ELEC_PEAK", start, start)
+			if getErr != nil {
+				return getErr
+			}
+			if len(obs) == 0 {
+				return fmt.Errorf("L1 not yet expired")
+			}
+			return nil
+		})
 	require.NoError(t, err)
 	assert.Len(t, obs, 1)
 }
