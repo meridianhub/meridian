@@ -227,7 +227,9 @@ func TestWorker_ContextCancellation(t *testing.T) {
 
 func TestWorker_FetchError(t *testing.T) {
 	// Server returns error
+	var fetchCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetchCount.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("internal error"))
 	}))
@@ -243,8 +245,11 @@ func TestWorker_FetchError(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	//nolint:forbidigo // Intentional: verifying no observations recorded on fetch error (negative assertion) requires waiting
-	time.Sleep(200 * time.Millisecond)
+	// Wait until the worker has made at least one fetch attempt before asserting
+	err := await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return fetchCount.Load() >= 1
+	})
+	require.NoError(t, err, "worker should make at least one fetch attempt")
 
 	worker.Stop()
 
@@ -255,7 +260,9 @@ func TestWorker_FetchError(t *testing.T) {
 
 func TestWorker_ParseError(t *testing.T) {
 	// Server returns invalid CSV
+	var fetchCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetchCount.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("invalid,csv,format"))
 	}))
@@ -271,8 +278,11 @@ func TestWorker_ParseError(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	//nolint:forbidigo // Intentional: verifying no observations recorded on parse error (negative assertion) requires waiting
-	time.Sleep(200 * time.Millisecond)
+	// Wait until the worker has made at least one fetch attempt before asserting
+	err := await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return fetchCount.Load() >= 1
+	})
+	require.NoError(t, err, "worker should make at least one fetch attempt")
 
 	worker.Stop()
 
@@ -478,7 +488,9 @@ func TestWorker_ObservationAttributes(t *testing.T) {
 }
 
 func TestWorker_RateLimited(t *testing.T) {
+	var fetchCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetchCount.Add(1)
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte("rate limited"))
 	}))
@@ -494,8 +506,11 @@ func TestWorker_RateLimited(t *testing.T) {
 	ctx := context.Background()
 	worker.Start(ctx)
 
-	//nolint:forbidigo // Intentional: verifying no observations recorded on rate limiting (negative assertion) requires waiting
-	time.Sleep(200 * time.Millisecond)
+	// Wait until the worker has made at least one fetch attempt before asserting
+	err := await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return fetchCount.Load() >= 1
+	})
+	require.NoError(t, err, "worker should make at least one fetch attempt")
 
 	worker.Stop()
 
@@ -641,8 +656,8 @@ func TestWorker_ImmediateFailureOnPermanentError(t *testing.T) {
 		})
 	require.NoError(t, err)
 
-	//nolint:forbidigo // Intentional: verifying no retries for permanent error (negative assertion) requires waiting
-	time.Sleep(500 * time.Millisecond)
+	//nolint:forbidigo // Intentional: wait past first retry backoff (~1s) to verify no retry occurs for permanent error
+	time.Sleep(1500 * time.Millisecond)
 
 	worker.Stop()
 

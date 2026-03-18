@@ -342,35 +342,45 @@ func seedSystemInstrument(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	require.NoError(t, tx.Commit(ctx))
 }
 
-// insertPosition inserts a position record directly via SQL.
-func insertPosition(t *testing.T, pool *pgxpool.Pool, ctx context.Context, accountID, instrumentCode, bucketKey string, amount decimal.Decimal, dimension string, attributes map[string]string) uuid.UUID {
-	t.Helper()
-
+// insertPositionErr inserts a position record directly via SQL, returning any error.
+// Use this variant when calling from goroutines (to avoid t.Fatal from a non-test goroutine).
+func insertPositionErr(pool *pgxpool.Pool, ctx context.Context, accountID, instrumentCode, bucketKey string, amount decimal.Decimal, dimension string, attributes map[string]string) (uuid.UUID, error) {
 	tenantID, _ := tenant.FromContext(ctx)
 	schemaName := tenantID.SchemaName()
 
 	id := uuid.New()
 
 	tx, err := pool.Begin(ctx)
-	require.NoError(t, err)
+	if err != nil {
+		return uuid.Nil, err
+	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
-	require.NoError(t, err)
+	if _, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName))); err != nil {
+		return uuid.Nil, err
+	}
 
 	var attrsJSON interface{}
 	if attributes != nil {
 		attrsJSON = attributes
 	}
 
-	_, err = tx.Exec(ctx, `
+	if _, err = tx.Exec(ctx, `
 		INSERT INTO position (id, created_at, created_by, account_id, instrument_code, bucket_key, amount, dimension, attributes)
 		VALUES ($1, NOW(), 'test-system', $2, $3, $4, $5, $6, $7)`,
 		id, accountID, instrumentCode, bucketKey, amount, dimension, attrsJSON,
-	)
-	require.NoError(t, err)
+	); err != nil {
+		return uuid.Nil, err
+	}
 
-	require.NoError(t, tx.Commit(ctx))
+	return id, tx.Commit(ctx)
+}
+
+// insertPosition inserts a position record directly via SQL.
+func insertPosition(t *testing.T, pool *pgxpool.Pool, ctx context.Context, accountID, instrumentCode, bucketKey string, amount decimal.Decimal, dimension string, attributes map[string]string) uuid.UUID {
+	t.Helper()
+	id, err := insertPositionErr(pool, ctx, accountID, instrumentCode, bucketKey, amount, dimension, attributes)
+	require.NoError(t, err)
 	return id
 }
 
@@ -1079,11 +1089,14 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 	})
 
 	t.Run("Wait for position to appear", func(t *testing.T) {
-		// Simulate async position creation
+		// Simulate async position creation; use a channel to propagate errors
+		// back to the main goroutine (avoid t.Fatal from non-test goroutines).
+		insertErrCh := make(chan error, 1)
 		go func() {
 			time.Sleep(150 * time.Millisecond) //nolint:forbidigo // simulates async position creation delay
-			insertPosition(t, pool, ctx, "ASYNC-ACC", "ASYNC_TEST", "bucket",
+			_, err := insertPositionErr(pool, ctx, "ASYNC-ACC", "ASYNC_TEST", "bucket",
 				decimal.NewFromFloat(123.45), "Custom", nil)
+			insertErrCh <- err
 		}()
 
 		// Use await to poll for position
@@ -1104,6 +1117,7 @@ func TestE2E_AsyncOperationsWithAwait(t *testing.T) {
 			})
 
 		require.NoError(t, err, "position should be created")
+		require.NoError(t, <-insertErrCh, "async insertPosition should succeed")
 		assert.True(t, decimal.NewFromFloat(123.45).Equal(finalTotal))
 		assert.Equal(t, int64(1), finalCount)
 	})
