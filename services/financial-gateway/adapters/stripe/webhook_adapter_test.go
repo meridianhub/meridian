@@ -1,8 +1,8 @@
 package stripe
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
