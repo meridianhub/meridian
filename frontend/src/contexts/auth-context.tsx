@@ -107,15 +107,6 @@ function getUserLens(claims: JWTClaims | null): 'platform' | 'tenant' {
   const isPlatformLevel =
     claims.roles.includes('platform-admin') || claims.roles.includes('super-admin')
   if (isPlatformLevel) return 'platform'
-  // In demo mode, standard OIDC tokens lack tenant and role claims.
-  // Default to 'platform' lens only on the root domain so
-  // DevTenantAutoSelector can pick a tenant. On a tenant subdomain the
-  // user is implicitly scoped to that tenant and should see tenant lens
-  // (no tenant selector dropdown).
-  if (import.meta.env.VITE_DEMO_MODE === 'true') {
-    const slug = getTenantSlugFromSubdomain(window.location.hostname)
-    if (!slug) return 'platform'
-  }
   return 'tenant'
 }
 
