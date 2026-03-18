@@ -50,14 +50,13 @@ codebase isn't self-describing enough.
 - Rewriting service internals or changing architecture
 - New feature development
 - Performance optimization
-- Large file refactoring (covered in PRD-012)
 - Test coverage improvements (covered in PRD-048)
 
 ## Complexity Assessment
 
-Total estimated complexity: **21 story points** across 5 streams.
+Total estimated complexity: **47 story points** across 7 streams.
 
-Streams 1-4 are independent. Stream 5 depends on Stream 4.
+Streams 1-4, 6, 7 are independent. Stream 5 depends on Stream 4.
 
 ```mermaid
 graph LR
@@ -66,6 +65,8 @@ graph LR
     S3["Stream 3: Service Naming<br/>3 pts"] --> DONE
     S4["Stream 4: Convention Documentation<br/>5 pts"] --> S5
     S5["Stream 5: Checklist Update<br/>3 pts"] --> DONE
+    S6["Stream 6: Large File Refactoring<br/>13 pts"] --> DONE
+    S7["Stream 7: Shared Test Infrastructure<br/>13 pts"] --> DONE
 ```
 
 Stream 5 depends on Stream 4 (conventions must be documented before the checklist encodes them).
@@ -400,24 +401,195 @@ in this PRD and ADR-015.
 
 ---
 
+## Stream 6: Large File Refactoring (13 pts)
+
+### Rationale
+
+25 Go files exceed 800 lines. Large files degrade AI performance
+(context window pressure), increase edit collision risk, and indicate
+mixed concerns. This stream targets the 10 largest non-generated files
+for decomposition.
+
+### Task 6.1: Refactor manifest_validator.go (2753 lines)
+
+**Problem**: Largest non-generated file in the codebase. Mixes
+CEL type-checking, Starlark compilation, cross-reference validation,
+and schema validation in a single file.
+
+**File**: `services/control-plane/internal/validator/manifest_validator.go`
+
+**Acceptance Criteria**:
+
+1. Split into focused validators (e.g., `cel_validator.go`,
+   `starlark_validator.go`, `crossref_validator.go`)
+2. No file exceeds 600 lines
+3. All existing tests pass unchanged
+4. No public API changes
+
+### Task 6.2: Refactor postgres_repository.go (1518 lines)
+
+**File**: `services/position-keeping/adapters/persistence/postgres_repository.go`
+
+**Acceptance Criteria**:
+
+1. Split by concern (e.g., `position_log_repository.go`,
+   `balance_queries.go`, `batch_operations.go`)
+2. No file exceeds 600 lines
+3. All existing tests pass unchanged
+
+### Task 6.3: Refactor party grpc_service.go (1359 lines)
+
+**File**: `services/party/service/grpc_service.go`
+
+**Acceptance Criteria**:
+
+1. Split into `server.go` (constructor + registration) and
+   handler endpoint files per operation group
+2. No file exceeds 600 lines
+3. All existing tests pass unchanged
+
+### Task 6.4: Refactor lien_service.go (1322 lines)
+
+**File**: `services/current-account/service/lien_service.go`
+
+**Acceptance Criteria**:
+
+1. Split into focused modules (lifecycle, compensation, queries)
+2. No file exceeds 600 lines
+3. All existing tests pass unchanged
+
+### Task 6.5: Refactor remaining >1000 LOC files
+
+**Files** (each a sub-task):
+
+- `services/reference-data/accounttype/postgres_registry.go` (1120)
+- `services/reference-data/saga/reference_validator.go` (1069)
+- `services/payment-order/cmd/main.go` (1068)
+- `services/control-plane/internal/differ/manifest_differ.go` (1063)
+- `services/reconciliation/service/service.go` (999)
+- `services/party/adapters/persistence/repository.go` (965)
+
+**Acceptance Criteria**:
+
+1. Each file split so no resulting file exceeds 600 lines
+2. All existing tests pass unchanged
+3. No public API changes
+
+---
+
+## Stream 7: Shared Test Infrastructure (13 pts)
+
+### Rationale
+
+73 implementations of `setupTestDB` across the codebase, each with
+slightly different signatures. 41 `time.Sleep` violations in tests.
+277 inline mock struct definitions. This duplication makes writing
+new tests slow and inconsistent.
+
+### Task 7.1: Standardize Test DB Setup
+
+**Problem**: 73 `setupTestDB` functions with inconsistent signatures.
+Some return `*gorm.DB`, some return `(*gorm.DB, func())`, some use
+SQLite, some use testcontainers. `shared/platform/testdb` exists but
+many services don't use it.
+
+**Files Affected**:
+
+- `shared/platform/testdb/` (enhance existing package)
+- All service `*_test.go` files with `setupTestDB` functions
+
+**Acceptance Criteria**:
+
+1. `shared/platform/testdb` provides a single `SetupTestDB(t)`
+   function with consistent return signature: `(*gorm.DB, func())`
+2. Function handles CockroachDB testcontainer setup, migration
+   running, and tenant context injection
+3. Migrate at least 5 high-traffic services to use the shared
+   helper (current-account, financial-accounting, party,
+   payment-order, reconciliation)
+4. Document the pattern in `shared/platform/testdb/doc.go`
+5. Remaining services tracked as follow-up
+
+### Task 7.2: Migrate time.Sleep to await
+
+**Problem**: 41 instances of `time.Sleep` in tests violate the
+guideline in CLAUDE.md. These create flaky tests (sleep too short)
+or slow CI (sleep too long).
+
+**Files Affected**: 41 test files across services and shared/
+
+**Acceptance Criteria**:
+
+1. All `time.Sleep` in test files replaced with `await.Until()`
+   or `await.UntilNoError()`
+2. Exception: `time.Sleep` in `await/await_test.go` itself is
+   acceptable (testing the await package)
+3. Exception: `time.Sleep` used to simulate delays (not to wait
+   for conditions) may be retained with a comment explaining why
+4. CI time does not increase
+
+### Task 7.3: Extract Shared Test Context Helpers
+
+**Problem**: `tenant.WithTenant(context.Background(), ...)` pattern
+repeated 4900+ times across test files. No centralized context
+builder for tests.
+
+**Files Affected**:
+
+- `shared/platform/testdb/context.go` (new)
+
+**Acceptance Criteria**:
+
+1. Create `testdb.ContextWithTenant(t, tenantID)` that returns
+   a context with tenant, deadline, and test cleanup
+2. Create `testdb.ContextWithDefaultTenant(t)` for tests that
+   don't care about specific tenant ID
+3. Migrate at least 3 services to use the shared helpers
+4. Document in `shared/platform/testdb/doc.go`
+
+### Task 7.4: Extract Common Service Test Helpers Per Service
+
+**Problem**: Only 3 of 16+ services have `testhelpers/` packages.
+Other services inline test setup, entity factories, and mock
+definitions in test files.
+
+**Files Affected**:
+
+- `services/*/domain/testfixtures/` or `testhelpers/` (new per
+  service as needed)
+
+**Acceptance Criteria**:
+
+1. Create `testhelpers/` package for 5 highest-traffic services
+   that lack one (current-account, financial-accounting,
+   payment-order, reconciliation, tenant)
+2. Extract entity factory functions (`NewTest*`) into testhelpers
+3. Each testhelpers package has a `doc.go` explaining purpose
+4. Remaining services tracked as follow-up
+
+---
+
 ## Parallelization Summary
 
 | Stream | Points | Dependencies | Parallelizable With |
 |--------|--------|-------------|-------------------|
-| 1. Proto Files | 5 | None | 2, 3, 4 |
-| 2. Package Docs | 5 | None | 1, 3, 4 |
-| 3. Service Naming | 3 | None | 1, 2, 4 |
-| 4. Convention Docs | 5 | None | 1, 2, 3 |
-| 5. Checklist Update | 3 | Stream 4 | 1, 2, 3 (after 4) |
+| 1. Proto Files | 5 | None | All except 5 |
+| 2. Package Docs | 5 | None | All except 5 |
+| 3. Service Naming | 3 | None | All except 5 |
+| 4. Convention Docs | 5 | None | All except 5 |
+| 5. Checklist Update | 3 | Stream 4 | After 4 |
+| 6. Large File Refactoring | 13 | None | All except 5 |
+| 7. Test Infrastructure | 13 | None | All except 5 |
 
 **Critical path**: Stream 4 (5 pts) -> Stream 5 (3 pts) = 8 pts.
-With parallelization, streams 1-4 run concurrently, then Stream 5 follows.
+Streams 1-4, 6, 7 run concurrently, then Stream 5 follows.
 
 ## Task Master Parsing Guidance
 
 When parsing this PRD into Task Master tasks:
 
-- **Create exactly 13 tasks** corresponding to the 13 numbered tasks (1.1 through 5.2)
+- **Create exactly 22 tasks** corresponding to the numbered tasks
+  (1.1 through 7.4)
 - Each task maps to a single PR-able unit of work
 - Preserve stream grouping in task numbering
 - Mark Stream 5 tasks as depending on Stream 4 tasks
@@ -433,19 +605,31 @@ When parsing this PRD into Task Master tasks:
 | 4 | Task 2.1: Add doc.go to shared/pkg/ | Package Docs |
 | 5 | Task 2.2: Add doc.go to shared/platform/ | Package Docs |
 | 6 | Task 2.3: Add shared/ Navigation README | Package Docs |
-| 7 | Task 3.1: Rename Variant Service Files to server.go | Service Naming |
-| 8 | Task 3.2: Standardize Handler File Splitting Convention | Service Naming |
+| 7 | Task 3.1: Rename Variant Service Files to server.go | Naming |
+| 8 | Task 3.2: Standardize Handler File Splitting | Naming |
 | 9 | Task 4.1: Document Error Naming Convention | Convention Docs |
 | 10 | Task 4.2: Document Repository Pattern Convention | Convention Docs |
 | 11 | Task 4.3: Document Value Type Hierarchy | Convention Docs |
-| 12 | Task 5.1: Update New Service Checklist | Checklist Update |
-| 13 | Task 5.2: Add Service Consistency Verification Script | Checklist Update |
+| 12 | Task 5.1: Update New Service Checklist | Checklist |
+| 13 | Task 5.2: Add Service Consistency Script | Checklist |
+| 14 | Task 6.1: Refactor manifest_validator.go | Refactoring |
+| 15 | Task 6.2: Refactor postgres_repository.go | Refactoring |
+| 16 | Task 6.3: Refactor party grpc_service.go | Refactoring |
+| 17 | Task 6.4: Refactor lien_service.go | Refactoring |
+| 18 | Task 6.5: Refactor remaining >1000 LOC files | Refactoring |
+| 19 | Task 7.1: Standardize Test DB Setup | Test Infra |
+| 20 | Task 7.2: Migrate time.Sleep to await | Test Infra |
+| 21 | Task 7.3: Extract Shared Test Context Helpers | Test Infra |
+| 22 | Task 7.4: Extract Service Test Helpers | Test Infra |
 
 ## Success Criteria
 
-1. `go build ./...` succeeds from a clean clone without running `buf generate`
-2. Every `shared/` package has a `doc.go` that explains its purpose in < 15 lines
+1. `go build ./...` succeeds from a clean clone without `buf generate`
+2. Every `shared/` package has a `doc.go` (< 15 lines)
 3. Every service uses `server.go` as the main service file per ADR-015
 4. Convention docs exist for errors, repositories, and value types
 5. New service checklist references all established conventions
-6. Verification script passes for all existing services (or documents known exceptions)
+6. Verification script passes for all services (or documents exceptions)
+7. No Go file exceeds 600 lines (excluding generated code)
+8. Zero `time.Sleep` in test files (except await package tests)
+9. Top 5 services use shared `testdb.SetupTestDB(t)` helper
