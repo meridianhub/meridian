@@ -405,7 +405,9 @@ func TestGetProviderHealth_Healthy(t *testing.T) {
 
 	h := setupHarness(t, creator, defaultConfigProvider())
 
-	resp, err := h.client.GetProviderHealth(context.Background(), &financialgatewayv1.GetProviderHealthRequest{
+	// Per-tenant circuit breakers require tenant context for health checks.
+	ctx := tenantContext("tenant_e2e")
+	resp, err := h.client.GetProviderHealth(ctx, &financialgatewayv1.GetProviderHealthRequest{
 		Rail: financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE,
 	})
 	require.NoError(t, err)
@@ -413,6 +415,25 @@ func TestGetProviderHealth_Healthy(t *testing.T) {
 	assert.Equal(t, financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE, resp.Rail)
 	assert.Equal(t, financialgatewayv1.ProviderHealth_PROVIDER_HEALTH_HEALTHY, resp.Health)
 	assert.NotNil(t, resp.LastCheckedAt)
+}
+
+func TestGetProviderHealth_NoTenantContext(t *testing.T) {
+	creator := &stubPaymentIntentCreator{
+		createFn: func(_ context.Context, _ *stripego.PaymentIntentCreateParams) (*stripego.PaymentIntent, error) {
+			return &stripego.PaymentIntent{ID: "pi_health", Status: stripego.PaymentIntentStatusSucceeded}, nil
+		},
+	}
+
+	h := setupHarness(t, creator, defaultConfigProvider())
+
+	// Without tenant context, health check returns UNSPECIFIED.
+	resp, err := h.client.GetProviderHealth(context.Background(), &financialgatewayv1.GetProviderHealthRequest{
+		Rail: financialgatewayv1.PaymentRail_PAYMENT_RAIL_STRIPE,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, financialgatewayv1.ProviderHealth_PROVIDER_HEALTH_UNSPECIFIED, resp.Health)
+	assert.Contains(t, resp.Message, "tenant context required")
 }
 
 func TestGetProviderHealth_UnsupportedRail(t *testing.T) {
