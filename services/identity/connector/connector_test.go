@@ -338,6 +338,165 @@ func TestLogin_MissingTenantContext_ReturnsError(t *testing.T) {
 	assert.False(t, valid)
 }
 
+// --- Login: save error during failed attempt ---
+
+func TestLogin_SaveErrorOnFailedAttempt_StillReturnsFalse(t *testing.T) {
+	identity := makeActiveIdentity(t, "saveerr@example.com")
+	repo := &mockRepo{
+		identity: identity,
+		saveErr:  errors.New("db write error"),
+	}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Login(ctx, nil, "saveerr@example.com", "WrongPassword999!")
+
+	require.NoError(t, err)
+	assert.False(t, valid)
+}
+
+func TestLogin_SaveErrorOnSuccessfulLogin_StillReturnsTrue(t *testing.T) {
+	identity := makeActiveIdentity(t, "saveerr2@example.com")
+	repo := &mockRepo{
+		identity: identity,
+		saveErr:  errors.New("db write error"),
+	}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	got, valid, err := c.Login(ctx, nil, "saveerr2@example.com", testPassword)
+
+	require.NoError(t, err)
+	assert.True(t, valid)
+	assert.Equal(t, identity.ID().String(), got.UserID)
+}
+
+// --- Resolve tests ---
+
+func TestResolve_Success(t *testing.T) {
+	identity := makeActiveIdentity(t, "resolve@example.com")
+
+	adminAssign := domain.ReconstructRoleAssignment(
+		uuid.New(), identity.ID(), uuid.New(),
+		domain.RoleAdmin, nil, nil, nil,
+		now(), now(),
+	)
+
+	repo := &mockRepo{
+		identity:    identity,
+		assignments: []*domain.RoleAssignment{adminAssign},
+	}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	got, valid, err := c.Resolve(ctx, "resolve@example.com")
+
+	require.NoError(t, err)
+	assert.True(t, valid)
+	assert.Equal(t, identity.ID().String(), got.UserID)
+	assert.Equal(t, "resolve@example.com", got.Email)
+	assert.True(t, got.EmailVerified)
+	assert.Equal(t, []string{"ADMIN"}, got.Groups)
+}
+
+func TestResolve_IdentityNotFound_ReturnsFalse(t *testing.T) {
+	repo := &mockRepo{} // identity is nil
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Resolve(ctx, "nobody@example.com")
+
+	require.NoError(t, err)
+	assert.False(t, valid)
+}
+
+func TestResolve_RepositoryError_ReturnsError(t *testing.T) {
+	repo := &mockRepo{findByEmailErr: errors.New("db connection lost")}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Resolve(ctx, "err@example.com")
+
+	require.Error(t, err)
+	assert.False(t, valid)
+}
+
+func TestResolve_NonActiveAccount_ReturnsFalse(t *testing.T) {
+	// NewIdentity starts in PENDING_INVITE — not active
+	id, err := domain.NewIdentity("pending-resolve@example.com")
+	require.NoError(t, err)
+
+	repo := &mockRepo{identity: id}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Resolve(ctx, "pending-resolve@example.com")
+
+	require.NoError(t, err)
+	assert.False(t, valid)
+}
+
+func TestResolve_SuspendedAccount_ReturnsFalse(t *testing.T) {
+	id := makeActiveIdentity(t, "suspended-resolve@example.com")
+	require.NoError(t, id.Suspend())
+
+	repo := &mockRepo{identity: id}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Resolve(ctx, "suspended-resolve@example.com")
+
+	require.NoError(t, err)
+	assert.False(t, valid)
+}
+
+func TestResolve_LockedAccount_ReturnsFalse(t *testing.T) {
+	id := makeActiveIdentity(t, "locked-resolve@example.com")
+	// Lock via 5 failed attempts
+	for range 5 {
+		_ = id.RecordLoginAttempt(false)
+	}
+	require.True(t, id.IsLocked())
+
+	repo := &mockRepo{identity: id}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Resolve(ctx, "locked-resolve@example.com")
+
+	require.NoError(t, err)
+	assert.False(t, valid)
+}
+
+func TestResolve_RoleQueryError_ReturnsError(t *testing.T) {
+	// Unlike Login (where role errors are non-fatal), Resolve treats role
+	// errors as fatal because missing roles could grant incorrect permissions.
+	identity := makeActiveIdentity(t, "role-err-resolve@example.com")
+	repo := &mockRepo{
+		identity:    identity,
+		findRoleErr: errors.New("role service unavailable"),
+	}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Resolve(ctx, "role-err-resolve@example.com")
+
+	require.Error(t, err)
+	assert.False(t, valid)
+}
+
+func TestResolve_MissingTenantContext_ReturnsError(t *testing.T) {
+	identity := makeActiveIdentity(t, "notenant-resolve@example.com")
+	repo := &mockRepo{identity: identity}
+	c := newConnector(t, repo)
+	ctx := context.Background() // no tenant
+
+	_, valid, err := c.Resolve(ctx, "notenant-resolve@example.com")
+
+	require.Error(t, err)
+	assert.False(t, valid)
+}
+
 // --- Tenant propagation ---
 
 func TestLogin_TenantContextPropagation(t *testing.T) {

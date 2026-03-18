@@ -238,6 +238,7 @@ func (m *TenantResolverMiddleware) HandlerOptionalTenant(next http.Handler) http
 
 		r.Header.Set(tenant.TenantIDKey, string(tenantID))
 		ctx = tenant.WithTenant(ctx, tenantID)
+		ctx = tenant.WithSlug(ctx, slug)
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
@@ -284,8 +285,9 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 		// Step 5: Inject tenant ID into request header
 		r.Header.Set(tenant.TenantIDKey, string(tenantID))
 
-		// Step 6: Add tenant to context
+		// Step 6: Add tenant ID and slug to context
 		ctx = tenant.WithTenant(ctx, tenantID)
+		ctx = tenant.WithSlug(ctx, slug)
 
 		// Step 7: Update request with new context
 		r = r.WithContext(ctx)

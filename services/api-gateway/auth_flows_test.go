@@ -293,7 +293,7 @@ func TestAuthFlow_BFFSSOInitiate_RedirectsToTenantScopedDex(t *testing.T) {
 	u, err := url.Parse(location)
 	require.NoError(t, err)
 
-	assert.Equal(t, "acme_corp."+authFlowBaseDomain, u.Host,
+	assert.Equal(t, "acme."+authFlowBaseDomain, u.Host,
 		"redirect must include tenant subdomain in Dex URL")
 	assert.Equal(t, "/dex/auth/meridian", u.Path)
 	assert.Equal(t, "https", u.Scheme)
@@ -462,7 +462,7 @@ func TestAuthFlow_BFFSSOInitiate_DifferentConnectors(t *testing.T) {
 
 			assert.Equal(t, "/dex/auth/"+connID, u.Path,
 				"redirect path should contain connector ID")
-			assert.Equal(t, "acme_corp."+authFlowBaseDomain, u.Host,
+			assert.Equal(t, "acme."+authFlowBaseDomain, u.Host,
 				"redirect host should include tenant subdomain")
 		})
 	}

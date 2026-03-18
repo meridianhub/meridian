@@ -19,6 +19,7 @@ var ErrStateStoreFull = errors.New("state store: capacity limit reached")
 type StateData struct {
 	CodeVerifier string
 	TenantID     tenant.TenantID
+	TenantSlug   string // subdomain slug for JWT claims (may differ from TenantID)
 	ReturnURL    string
 }
 

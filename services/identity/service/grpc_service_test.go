@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -1339,4 +1340,548 @@ func TestRoleAssignmentToProto_Nil(t *testing.T) {
 
 func TestInvitationToProto_Nil(t *testing.T) {
 	assert.Nil(t, invitationToProto(nil))
+}
+
+func TestInvitationToProto_AcceptedInvitation(t *testing.T) {
+	identity, err := domain.NewIdentity("inv-proto@example.com")
+	require.NoError(t, err)
+	inv, _, err := domain.NewInvitation(identity.ID(), uuid.New())
+	require.NoError(t, err)
+
+	// Accept the invitation to cover the AcceptedAt path
+	require.NoError(t, inv.Accept())
+
+	proto := invitationToProto(inv)
+	assert.NotNil(t, proto)
+	assert.NotNil(t, proto.AcceptedAt)
+}
+
+func TestInvitationToProto_PendingInvitation(t *testing.T) {
+	identity, err := domain.NewIdentity("inv-pending-proto@example.com")
+	require.NoError(t, err)
+	inv, _, err := domain.NewInvitation(identity.ID(), uuid.New())
+	require.NoError(t, err)
+
+	proto := invitationToProto(inv)
+	assert.NotNil(t, proto)
+	assert.Nil(t, proto.AcceptedAt)
+}
+
+// --- Additional coverage tests ---
+
+func TestCreateIdentity_InternalError(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+	repo.saveErr = errors.New("db unavailable")
+
+	_, err := svc.CreateIdentity(ctx, &pb.CreateIdentityRequest{
+		Email: "internal@example.com",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestUpdateIdentity_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.UpdateIdentity(ctx, &pb.UpdateIdentityRequest{
+		Id:      uuid.New().String(),
+		Version: 1,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestUpdateIdentity_InvalidID(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.UpdateIdentity(ctx, &pb.UpdateIdentityRequest{
+		Id: "not-a-uuid",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestUpdateIdentity_EmailChangeRejected(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+
+	identity, err := domain.NewIdentity("immutable@example.com")
+	require.NoError(t, err)
+	repo.addIdentity(identity)
+
+	_, err = svc.UpdateIdentity(ctx, &pb.UpdateIdentityRequest{
+		Id:      identity.ID().String(),
+		Version: int32(identity.Version()),
+		Email:   "changed@example.com",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+	assert.Contains(t, err.Error(), "immutable")
+}
+
+func TestListIdentities_PaginationUnsupported(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.ListIdentities(ctx, &pb.ListIdentitiesRequest{
+		PageSize: 10,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestListIdentities_InternalError(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+	repo.listByTenantErr = errors.New("db down")
+
+	_, err := svc.ListIdentities(ctx, &pb.ListIdentitiesRequest{})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestAuthenticate_InternalError(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+	repo.findByEmailErr = errors.New("db down")
+
+	_, err := svc.Authenticate(ctx, &pb.AuthenticateRequest{
+		Email:    "err@example.com",
+		Password: "anything",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestAuthenticate_PendingInviteAccount(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+
+	identity, err := domain.NewIdentity("pending@example.com")
+	require.NoError(t, err)
+	repo.addIdentity(identity)
+
+	resp, err := svc.Authenticate(ctx, &pb.AuthenticateRequest{
+		Email:    "pending@example.com",
+		Password: "anything",
+	})
+
+	require.NoError(t, err)
+	assert.False(t, resp.Authenticated)
+	assert.Equal(t, pb.AuthenticationFailureReason_AUTHENTICATION_FAILURE_REASON_ACCOUNT_NOT_ACTIVE, resp.FailureReason)
+}
+
+func TestSetPassword_ExpiredInvitation(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+
+	identity, err := domain.NewIdentity("expired-setpw@example.com")
+	require.NoError(t, err)
+	repo.addIdentity(identity)
+
+	expiredInv := domain.ReconstructInvitation(
+		uuid.New(),
+		identity.ID(),
+		uuid.New(),
+		tokens.HashToken("expired-setpw-token"),
+		time.Now().Add(-1*time.Hour),
+		domain.InvitationStatusPending,
+		time.Now().Add(-2*time.Hour),
+		time.Now().Add(-2*time.Hour),
+	)
+	repo.addInvitation(expiredInv)
+
+	_, err = svc.SetPassword(ctx, &pb.SetPasswordRequest{
+		Token:    "expired-setpw-token",
+		Password: "NewSecurePass1!",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+func TestSetPassword_AlreadyAcceptedInvitation(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+
+	identity, err := domain.NewIdentity("already-accepted@example.com")
+	require.NoError(t, err)
+	repo.addIdentity(identity)
+
+	inv, plaintext, err := domain.NewInvitation(identity.ID(), uuid.New())
+	require.NoError(t, err)
+	require.NoError(t, inv.Accept())
+	repo.addInvitation(inv)
+
+	_, err = svc.SetPassword(ctx, &pb.SetPasswordRequest{
+		Token:    plaintext,
+		Password: "NewSecurePass1!",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+func TestSetPassword_InternalFindInvitationError(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+	repo.findInvitationErr = errors.New("db down")
+
+	_, err := svc.SetPassword(ctx, &pb.SetPasswordRequest{
+		Token:    "some-token",
+		Password: "NewSecurePass1!",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestChangePassword_WeakNewPassword(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	password := "OldSecurePass1!"
+	identity := makeActiveIdentity(t, "changepw-weak@example.com", password)
+	repo.addIdentity(identity)
+
+	ctx := contextWithAuth(identity.ID(), []string{"ADMIN"})
+
+	_, err := svc.ChangePassword(ctx, &pb.ChangePasswordRequest{
+		CurrentPassword: password,
+		NewPassword:     "weak",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestRequestPasswordReset_InternalError(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+	repo.findByEmailErr = errors.New("db down")
+
+	_, err := svc.RequestPasswordReset(ctx, &pb.RequestPasswordResetRequest{
+		Email: "err@example.com",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestRequestPasswordReset_SaveInvitationError(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+
+	identity := makeActiveIdentity(t, "reset-save-err@example.com", "SecurePass123!")
+	repo.addIdentity(identity)
+	repo.saveInvitationErr = errors.New("db write error")
+
+	_, err := svc.RequestPasswordReset(ctx, &pb.RequestPasswordResetRequest{
+		Email: "reset-save-err@example.com",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestCompletePasswordReset_WeakPassword(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
+		ResetToken:  "any-token",
+		NewPassword: "weak",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestCompletePasswordReset_AlreadyUsedToken(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+
+	identity := makeActiveIdentity(t, "reset-used@example.com", "OldPassword123!")
+	repo.addIdentity(identity)
+
+	inv, plaintext, err := domain.NewInvitation(identity.ID(), identity.ID())
+	require.NoError(t, err)
+	require.NoError(t, inv.Accept())
+	repo.addInvitation(inv)
+
+	_, err = svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
+		ResetToken:  plaintext,
+		NewPassword: "NewSecurePass1!",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+func TestGrantRole_InvalidIdentityID(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err := svc.GrantRole(ctx, &pb.GrantRoleRequest{
+		IdentityId: "not-a-uuid",
+		Role:       pb.Role_ROLE_OPERATOR,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestGrantRole_SaveError(t *testing.T) {
+	svc, repo := newTestService(t)
+
+	targetIdentity, err := domain.NewIdentity("saveerr@example.com")
+	require.NoError(t, err)
+	repo.addIdentity(targetIdentity)
+	repo.saveRoleErr = errors.New("db write error")
+
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err = svc.GrantRole(ctx, &pb.GrantRoleRequest{
+		IdentityId: targetIdentity.ID().String(),
+		Role:       pb.Role_ROLE_OPERATOR,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestRevokeRole_NoAuthContext(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.RevokeRole(ctx, &pb.RevokeRoleRequest{
+		IdentityId:       uuid.New().String(),
+		RoleAssignmentId: uuid.New().String(),
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
+func TestRevokeRole_InvalidIdentityID(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err := svc.RevokeRole(ctx, &pb.RevokeRoleRequest{
+		IdentityId:       "not-a-uuid",
+		RoleAssignmentId: uuid.New().String(),
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestRevokeRole_InvalidAssignmentID(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err := svc.RevokeRole(ctx, &pb.RevokeRoleRequest{
+		IdentityId:       uuid.New().String(),
+		RoleAssignmentId: "not-a-uuid",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestListRoleAssignments_InvalidIdentityID(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.ListRoleAssignments(ctx, &pb.ListRoleAssignmentsRequest{
+		IdentityId: "not-a-uuid",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestListRoleAssignments_InternalError(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := context.Background()
+	repo.findRolesErr = errors.New("db down")
+
+	_, err := svc.ListRoleAssignments(ctx, &pb.ListRoleAssignmentsRequest{
+		IdentityId: uuid.New().String(),
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+func TestInviteUser_InvalidEmail(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err := svc.InviteUser(ctx, &pb.InviteUserRequest{
+		Email: "not-an-email",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestInviteUser_NoRole(t *testing.T) {
+	svc, repo := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	resp, err := svc.InviteUser(ctx, &pb.InviteUserRequest{
+		Email: "norole@example.com",
+		Role:  pb.Role_ROLE_UNSPECIFIED,
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, resp.Identity)
+	assert.NotNil(t, resp.Invitation)
+	// No role assignment should have been created
+	assert.Empty(t, repo.roles)
+}
+
+func TestSuspendIdentity_InvalidID(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err := svc.SuspendIdentity(ctx, &pb.SuspendIdentityRequest{
+		Id:     "not-a-uuid",
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestReactivateIdentity_InvalidID(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err := svc.ReactivateIdentity(ctx, &pb.ReactivateIdentityRequest{
+		Id:     "not-a-uuid",
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestReactivateIdentity_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
+
+	_, err := svc.ReactivateIdentity(ctx, &pb.ReactivateIdentityRequest{
+		Id:     uuid.New().String(),
+		Reason: "test",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestDomainRoleToProto(t *testing.T) {
+	tests := []struct {
+		domain domain.Role
+		proto  pb.Role
+	}{
+		{domain.RoleViewer, pb.Role_ROLE_AUDITOR},
+		{domain.RoleOperator, pb.Role_ROLE_OPERATOR},
+		{domain.RoleAdmin, pb.Role_ROLE_ADMIN},
+		{domain.RoleTenantOwner, pb.Role_ROLE_TENANT_OWNER},
+		{domain.RolePlatform, pb.Role_ROLE_PLATFORM_ADMIN},
+		{"UNKNOWN_ROLE", pb.Role_ROLE_UNSPECIFIED},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.domain), func(t *testing.T) {
+			assert.Equal(t, tt.proto, domainRoleToProto(tt.domain))
+		})
+	}
+}
+
+func TestMapDomainError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected codes.Code
+	}{
+		{"identity not found", domain.ErrIdentityNotFound, codes.NotFound},
+		{"email already exists", domain.ErrEmailAlreadyExists, codes.AlreadyExists},
+		{"account locked", domain.ErrAccountLocked, codes.FailedPrecondition},
+		{"invalid status transition", domain.ErrInvalidStatusTransition, codes.FailedPrecondition},
+		{"invitation not found", domain.ErrInvitationNotFound, codes.NotFound},
+		{"invitation expired", domain.ErrInvitationExpired, codes.FailedPrecondition},
+		{"invitation already accepted", domain.ErrInvitationAlreadyAccepted, codes.FailedPrecondition},
+		{"version conflict", domain.ErrVersionConflict, codes.Aborted},
+		{"unknown error", errors.New("unknown"), codes.Internal},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := mapDomainError(tt.err, "test")
+			assert.Equal(t, tt.expected, status.Code(err))
+		})
+	}
+}
+
+func TestGetCallerHighestRole_NoRoles(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	role := svc.getCallerHighestRole(ctx)
+	assert.Empty(t, role)
+}
+
+func TestGetCallerHighestRole_MultipleRoles(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"VIEWER", "ADMIN", "OPERATOR"})
+
+	role := svc.getCallerHighestRole(ctx)
+	assert.Equal(t, "ADMIN", role)
+}
+
+func TestGetCallerHighestRole_SingleRole(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := contextWithAuth(uuid.New(), []string{"OPERATOR"})
+
+	role := svc.getCallerHighestRole(ctx)
+	assert.Equal(t, "OPERATOR", role)
+}
+
+func TestRoleAssignmentToProto_WithExpiry(t *testing.T) {
+	expiry := time.Now().Add(24 * time.Hour)
+	assignment := domain.ReconstructRoleAssignment(
+		uuid.New(), uuid.New(), uuid.New(),
+		domain.RoleOperator, &expiry, nil, nil,
+		time.Now(), time.Now(),
+	)
+
+	proto := roleAssignmentToProto(assignment)
+	assert.NotNil(t, proto.ExpiresAt)
+}
+
+func TestRoleAssignmentToProto_WithRevocation(t *testing.T) {
+	revokedAt := time.Now()
+	revokedBy := uuid.New()
+	assignment := domain.ReconstructRoleAssignment(
+		uuid.New(), uuid.New(), uuid.New(),
+		domain.RoleOperator, nil, &revokedAt, &revokedBy,
+		time.Now(), time.Now(),
+	)
+
+	proto := roleAssignmentToProto(assignment)
+	assert.True(t, proto.Revoked)
+	assert.NotNil(t, proto.RevokedAt)
+	assert.Equal(t, revokedBy.String(), proto.RevokedBy)
 }

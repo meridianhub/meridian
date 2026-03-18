@@ -2,6 +2,7 @@ package stripe
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -170,4 +171,93 @@ func TestNewReconciliationService_Validation(t *testing.T) {
 		_, err := NewReconciliationService(&mockStripeSource{}, nil, nil)
 		assert.ErrorIs(t, err, ErrNilLedgerSource)
 	})
+}
+
+func TestReconciliation_MissingInStripe(t *testing.T) {
+	// Ledger has an extra entry not in Stripe
+	svc, err := NewReconciliationService(
+		&mockStripeSource{
+			charges: []ChargeRecord{
+				{ChargeID: "ch_1", AmountCents: 10000, Currency: "gbp"},
+			},
+		},
+		&mockLedgerSource{
+			entries: []LedgerRecord{
+				{LogID: "log-1", ExternalReferenceID: "ch_1", AmountCents: 10000, Currency: "gbp"},
+				{LogID: "log-2", ExternalReferenceID: "ch_orphan", AmountCents: 3000, Currency: "gbp"},
+			},
+		},
+		nil,
+	)
+	require.NoError(t, err)
+
+	report, err := svc.RunDailyReconciliation(context.Background(), time.Now())
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, report.StripeChargeCount)
+	assert.Equal(t, 2, report.LedgerEntryCount)
+	assert.Contains(t, report.MissingInStripe, "ch_orphan")
+	assert.Empty(t, report.MissingInLedger)
+}
+
+func TestReconciliation_StripeSourceError(t *testing.T) {
+	svc, err := NewReconciliationService(
+		&mockStripeSource{err: errors.New("stripe API timeout")},
+		&mockLedgerSource{},
+		nil,
+	)
+	require.NoError(t, err)
+
+	_, err = svc.RunDailyReconciliation(context.Background(), time.Now())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to fetch stripe charges")
+}
+
+func TestReconciliation_LedgerSourceError(t *testing.T) {
+	svc, err := NewReconciliationService(
+		&mockStripeSource{
+			charges: []ChargeRecord{
+				{ChargeID: "ch_1", AmountCents: 10000, Currency: "gbp"},
+			},
+		},
+		&mockLedgerSource{err: errors.New("db connection refused")},
+		nil,
+	)
+	require.NoError(t, err)
+
+	_, err = svc.RunDailyReconciliation(context.Background(), time.Now())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to fetch ledger entries")
+}
+
+func TestReconciliation_BothThresholdsExceeded(t *testing.T) {
+	// Create scenario where both absolute AND percentage thresholds are exceeded
+	// 100 GBP total, 25 GBP variance = 25% (exceeds 1%) and 25 GBP (exceeds 10 GBP)
+	svc, err := NewReconciliationService(
+		&mockStripeSource{
+			charges: []ChargeRecord{
+				{ChargeID: "ch_1", AmountCents: 10000, Currency: "gbp"},
+			},
+		},
+		&mockLedgerSource{
+			entries: []LedgerRecord{
+				{LogID: "log-1", ExternalReferenceID: "ch_1", AmountCents: 7500, Currency: "gbp"},
+			},
+		},
+		nil,
+	)
+	require.NoError(t, err)
+
+	report, err := svc.RunDailyReconciliation(context.Background(), time.Now())
+	require.NoError(t, err)
+
+	assert.True(t, report.VarianceExceedsThreshold)
+	assert.Contains(t, report.AlertMessage, "absolute variance")
+	assert.Contains(t, report.AlertMessage, "relative variance")
+}
+
+func TestAbs(t *testing.T) {
+	assert.Equal(t, int64(5), abs(5))
+	assert.Equal(t, int64(5), abs(-5))
+	assert.Equal(t, int64(0), abs(0))
 }

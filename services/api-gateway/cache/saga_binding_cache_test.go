@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -364,4 +365,92 @@ func (m *mockSagaBindingSource) refreshCount(tenantID string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.calls[tenantID]
+}
+
+// --- Option Tests ---
+
+func TestSagaBindingCache_WithSagaBindingTTL(t *testing.T) {
+	t.Parallel()
+
+	source := &mockSagaBindingSource{
+		bindings: map[string]map[string]string{},
+	}
+
+	cache := NewSagaBindingCache(source, WithSagaBindingTTL(10*time.Minute))
+	assert.Equal(t, 10*time.Minute, cache.ttl)
+}
+
+func TestSagaBindingCache_WithSagaBindingTTL_NegativeIgnored(t *testing.T) {
+	t.Parallel()
+
+	source := &mockSagaBindingSource{
+		bindings: map[string]map[string]string{},
+	}
+
+	cache := NewSagaBindingCache(source, WithSagaBindingTTL(-1*time.Minute))
+	assert.Equal(t, DefaultSagaBindingTTL, cache.ttl)
+}
+
+func TestSagaBindingCache_WithSagaBindingLogger(t *testing.T) {
+	t.Parallel()
+
+	source := &mockSagaBindingSource{
+		bindings: map[string]map[string]string{},
+	}
+
+	logger := slog.Default()
+	cache := NewSagaBindingCache(source, WithSagaBindingLogger(logger))
+	assert.Equal(t, logger, cache.logger)
+}
+
+func TestSagaBindingCache_Refresh_ClearsAndReloads(t *testing.T) {
+	t.Parallel()
+
+	source := &mockSagaBindingSource{
+		bindings: map[string]map[string]string{
+			"tenant-1": {
+				"/v1/payments": "process_payment",
+			},
+		},
+	}
+
+	cache := NewSagaBindingCache(source, WithSagaBindingTTL(5*time.Minute))
+
+	ctx := tenant.WithTenant(context.Background(), "tenant-1")
+
+	// Populate cache
+	sagaName, found, err := cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "process_payment", sagaName)
+
+	// Update source
+	source.mu.Lock()
+	source.bindings["tenant-1"]["/v1/payments"] = "process_payment_v3"
+	source.mu.Unlock()
+
+	// Refresh forces reload
+	err = cache.Refresh(ctx, "tenant-1")
+	require.NoError(t, err)
+
+	// Should get updated binding
+	sagaName, found, err = cache.Get(ctx, "tenant-1", "/v1/payments")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "process_payment_v3", sagaName)
+}
+
+func TestSagaBindingCache_Refresh_SourceError(t *testing.T) {
+	t.Parallel()
+
+	source := &errorSagaBindingSource{
+		err: fmt.Errorf("database unavailable"),
+	}
+
+	cache := NewSagaBindingCache(source, WithSagaBindingTTL(5*time.Minute))
+	ctx := tenant.WithTenant(context.Background(), "tenant-1")
+
+	err := cache.Refresh(ctx, "tenant-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database unavailable")
 }
