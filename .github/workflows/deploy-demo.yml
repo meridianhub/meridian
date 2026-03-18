@@ -130,6 +130,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_BASE_URL: https://demo.meridianhub.cloud
+          VITE_BASE_DOMAIN: demo.meridianhub.cloud
           VITE_DEMO_MODE: "true"
           VITE_BUILD_VERSION: ${{ github.ref_name }}
           VITE_BUILD_COMMIT: ${{ github.sha }}
