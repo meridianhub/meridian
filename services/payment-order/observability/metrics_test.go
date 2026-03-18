@@ -381,3 +381,97 @@ func TestMetricsLabels(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Tests for previously uncovered metric functions
+// =============================================================================
+
+func TestSetNoopIdempotencyActive(t *testing.T) {
+	SetNoopIdempotencyActive(true)
+	count := testutil.CollectAndCount(noopIdempotencyActive)
+	if count == 0 {
+		t.Error("Expected noop idempotency active metric to be recorded")
+	}
+
+	SetNoopIdempotencyActive(false)
+	count = testutil.CollectAndCount(noopIdempotencyActive)
+	if count == 0 {
+		t.Error("Expected noop idempotency active metric to be recorded after deactivation")
+	}
+}
+
+func TestRecordServiceDegradation(t *testing.T) {
+	serviceDegradationEvents.Reset()
+
+	RecordServiceDegradation("idempotency", "noop_fallback")
+
+	count := testutil.CollectAndCount(serviceDegradationEvents)
+	if count == 0 {
+		t.Error("Expected service degradation metric to be recorded")
+	}
+}
+
+func TestRecordLienExecutionStatusUpdateExhausted(t *testing.T) {
+	RecordLienExecutionStatusUpdateExhausted()
+
+	count := testutil.CollectAndCount(lienExecutionStatusUpdateExhausted)
+	if count == 0 {
+		t.Error("Expected lien execution status update exhausted metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountCacheHit(t *testing.T) {
+	RecordClearingAccountCacheHit()
+
+	count := testutil.CollectAndCount(clearingAccountCacheHits)
+	if count == 0 {
+		t.Error("Expected clearing account cache hit metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountCacheMiss(t *testing.T) {
+	RecordClearingAccountCacheMiss()
+
+	count := testutil.CollectAndCount(clearingAccountCacheMisses)
+	if count == 0 {
+		t.Error("Expected clearing account cache miss metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountLookupDuration(t *testing.T) {
+	RecordClearingAccountLookupDuration(100 * time.Millisecond)
+
+	count := testutil.CollectAndCount(clearingAccountLookupDuration)
+	if count == 0 {
+		t.Error("Expected clearing account lookup duration metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountLookupError(t *testing.T) {
+	clearingAccountLookupErrors.Reset()
+
+	RecordClearingAccountLookupError("settlement")
+
+	count := testutil.CollectAndCount(clearingAccountLookupErrors)
+	if count == 0 {
+		t.Error("Expected clearing account lookup error metric to be recorded")
+	}
+}
+
+func TestRecordLienExecutionLockContention(t *testing.T) {
+	RecordLienExecutionLockContention()
+
+	count := testutil.CollectAndCount(lienExecutionLockContentions)
+	if count == 0 {
+		t.Error("Expected lien execution lock contention metric to be recorded")
+	}
+}
+
+func TestRecordLienExecutionLockWaitDuration(t *testing.T) {
+	RecordLienExecutionLockWaitDuration(0.5)
+
+	count := testutil.CollectAndCount(lienExecutionLockWaitDuration)
+	if count == 0 {
+		t.Error("Expected lien execution lock wait duration metric to be recorded")
+	}
+}

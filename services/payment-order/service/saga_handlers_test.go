@@ -450,6 +450,53 @@ func TestPostLedgerEntriesHandler(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "orchestrator not configured")
 	})
+
+	t.Run("succeeds with valid orchestrator", func(t *testing.T) {
+		fa := &MockFinancialAccountingClient{}
+		gwConfig := testGatewayAccountConfig()
+
+		orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
+			Logger:                    testLogger(),
+			Repo:                      NewMockRepository(),
+			FinancialAccountingClient: fa,
+			GatewayAccountConfig:      gwConfig,
+			CurrentAccountClient:      &MockCurrentAccountClient{},
+			PaymentGateway:            &MockPaymentGateway{},
+		})
+		require.NoError(t, err)
+
+		registry := saga.NewHandlerRegistry()
+		deps := &PaymentOrderHandlerDeps{
+			Orchestrator: orchestrator,
+			Logger:       testLogger(),
+		}
+		regErr := RegisterPaymentOrderHandlers(registry, deps)
+		require.NoError(t, regErr)
+
+		handler, getErr := registry.Get("payment_order.post_ledger_entries")
+		require.NoError(t, getErr)
+
+		ctx := &saga.StarlarkContext{
+			Context:         context.Background(),
+			SagaExecutionID: uuid.New(),
+			Logger:          testLogger(),
+		}
+
+		result, handlerErr := handler(ctx, map[string]any{
+			"payment_order_id":     uuid.New().String(),
+			"debtor_account_id":    "account-123",
+			"gateway_reference_id": "GW-ref-456",
+			"amount_cents":         int64(10000),
+			"currency":             "GBP",
+			"idempotency_key":      "idemp-key",
+		})
+
+		require.NoError(t, handlerErr)
+		resultMap, ok := result.(map[string]any)
+		require.True(t, ok)
+		assert.NotEmpty(t, resultMap["booking_log_id"])
+		assert.Equal(t, "POSTED", resultMap["status"])
+	})
 }
 
 // TestMustNewMoney tests the helper function.
