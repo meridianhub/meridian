@@ -439,7 +439,6 @@ func TestTerminateLien_Integration_AlreadyExecuted_NotActive(t *testing.T) {
 	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 }
 
-
 // ---------------------------------------------------------------------------
 // HealthChecker.Check – all-components path (triggers logHealthCheck + DatabaseHealthChecker.Check)
 // Uses a real DB so DatabaseHealthChecker.Ping() does not panic.

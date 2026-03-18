@@ -209,7 +209,7 @@ func TestNewValuationFeatureRepository(t *testing.T) {
 // helpers
 // ---------------------------------------------------------------------------
 
-// createTestAccountWithOrg creates a test account associated with an organisation party.
+// createTestAccountWithOrg creates a test account associated with an organization party.
 func createTestAccountWithOrg(t *testing.T, accountID, accountCode, name string, accountType domain.AccountType, orgID uuid.UUID) domain.InternalAccount {
 	t.Helper()
 	account, err := domain.NewInternalAccount(

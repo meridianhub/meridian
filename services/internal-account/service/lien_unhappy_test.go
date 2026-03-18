@@ -45,7 +45,7 @@ func TestInitiateLien_LienRepoNil(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "10.00",
@@ -62,9 +62,9 @@ func TestInitiateLien_NilInput(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "PAY-001",
-		Input:                nil,
+		Input:                 nil,
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -76,7 +76,7 @@ func TestInitiateLien_EmptyInputAmount(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "",
@@ -94,7 +94,7 @@ func TestInitiateLien_EmptyInstrumentCode(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "10.00",
@@ -112,7 +112,7 @@ func TestInitiateLien_EmptyPaymentOrderReference(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "10.00",
@@ -130,7 +130,7 @@ func TestInitiateLien_WhitespacePaymentOrderReference(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "   ",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "10.00",
@@ -147,7 +147,7 @@ func TestInitiateLien_InvalidAmountString(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "not-a-number",
@@ -164,7 +164,7 @@ func TestInitiateLien_ZeroAmount(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "0",
@@ -182,7 +182,7 @@ func TestInitiateLien_NegativeAmount(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(),
+		AccountId:             uuid.New().String(),
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "-5.00",
@@ -200,7 +200,7 @@ func TestInitiateLien_AccountNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(), // valid UUID not in repo
+		AccountId:             uuid.New().String(), // valid UUID not in repo
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "10.00",
@@ -219,7 +219,7 @@ func TestInitiateLien_AccountRepositoryError(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.InitiateLien(lienTestCtx(), &pb.InitiateLienRequest{
-		AccountId:            uuid.New().String(), // UUID format → hits FindByID → returns error
+		AccountId:             uuid.New().String(), // UUID format → hits FindByID → returns error
 		PaymentOrderReference: "PAY-001",
 		Input: &quantityv1.InstrumentAmount{
 			Amount:         "10.00",

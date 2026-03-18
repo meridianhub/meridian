@@ -18,7 +18,7 @@ import (
 
 const lienTestTenantID = "lien_test_tenant"
 
-// setupLienTestDB initialises a CockroachDB testcontainer with both the
+// setupLienTestDB initializes a CockroachDB testcontainer with both the
 // internal_account and lien tables created in the tenant schema.
 func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
@@ -471,17 +471,17 @@ func TestLienRepository_SumActiveAmountByAccountIDAndBucket(t *testing.T) {
 	accountID := uuid.New()
 
 	// Add liens in different buckets
-	bucketA_lien1, err := domain.NewLien(accountID, 1000, "GBP", "bucket-A", "PAY-BUCKET-A-001", nil)
+	bucketALien1, err := domain.NewLien(accountID, 1000, "GBP", "bucket-A", "PAY-BUCKET-A-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(ctx, bucketA_lien1))
+	require.NoError(t, repo.Create(ctx, bucketALien1))
 
-	bucketA_lien2, err := domain.NewLien(accountID, 2000, "GBP", "bucket-A", "PAY-BUCKET-A-002", nil)
+	bucketALien2, err := domain.NewLien(accountID, 2000, "GBP", "bucket-A", "PAY-BUCKET-A-002", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(ctx, bucketA_lien2))
+	require.NoError(t, repo.Create(ctx, bucketALien2))
 
-	bucketB_lien, err := domain.NewLien(accountID, 5000, "GBP", "bucket-B", "PAY-BUCKET-B-001", nil)
+	bucketBLien, err := domain.NewLien(accountID, 5000, "GBP", "bucket-B", "PAY-BUCKET-B-001", nil)
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(ctx, bucketB_lien))
+	require.NoError(t, repo.Create(ctx, bucketBLien))
 
 	// Bucket A sum
 	total, err := repo.SumActiveAmountByAccountIDAndBucket(ctx, accountID, "bucket-A")

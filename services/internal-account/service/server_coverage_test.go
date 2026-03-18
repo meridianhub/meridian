@@ -253,9 +253,9 @@ func TestUpdateInternalAccount_InvalidCounterpartyDetails(t *testing.T) {
 	_, err = svc.UpdateInternalAccount(context.Background(), &pb.UpdateInternalAccountRequest{
 		AccountId: "IBA-CPTY-INVAL-001",
 		CounterpartyDetails: &pb.CounterpartyDetails{
-			CounterpartyId:           "",
-			CounterpartyName:         "Some Name",
-			CounterpartyExternalRef:  "ext-001",
+			CounterpartyId:          "",
+			CounterpartyName:        "Some Name",
+			CounterpartyExternalRef: "ext-001",
 		},
 	})
 	require.Error(t, err)
