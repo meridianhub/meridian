@@ -1,6 +1,6 @@
 ---
 name: prd-codebase-consistency
-description: Standardize naming, patterns, and documentation across services to improve AI navigability and developer onboarding
+description: Standardize naming, patterns, and docs across services for AI navigability
 triggers:
   - Improving codebase consistency or standardization
   - Adding doc.go files or package documentation
@@ -56,7 +56,7 @@ codebase isn't self-describing enough.
 
 Total estimated complexity: **21 story points** across 5 streams.
 
-All streams are independent with zero inter-stream dependencies.
+Streams 1-4 are independent. Stream 5 depends on Stream 4.
 
 ```mermaid
 graph LR
@@ -102,7 +102,8 @@ and every AI session must regenerate them before types are readable.
 1. Run `buf generate api/proto` and commit all generated `.pb.go` files
 2. Verify `.gitignore` does not exclude `*.pb.go` in the `api/proto/` tree
 3. `go build ./...` succeeds from a clean checkout without running `buf generate`
-4. Document in CONTRIBUTING.md: "Run `buf generate api/proto` after modifying `.proto` files and commit the generated output"
+4. Document in CONTRIBUTING.md: "Run `buf generate api/proto` after
+   modifying `.proto` files and commit the generated output"
 
 ### Task 1.2: Document Proto Import Alias Convention
 
@@ -161,7 +162,9 @@ A `doc.go` file costs 5-15 lines and saves hundreds of lines of exploratory read
 **Acceptance Criteria**:
 
 1. Every package under `shared/pkg/` has a `doc.go` file
-2. Each `doc.go` contains: package purpose (1 sentence), key types/functions (2-3 lines), usage example or "see X for usage" pointer
+2. Each `doc.go` contains: package purpose (1 sentence),
+   key types/functions (2-3 lines),
+   usage example or "see X for usage" pointer
 3. Format follows Go convention: `// Package X provides...`
 4. No implementation code in `doc.go` files
 
@@ -202,10 +205,16 @@ Developers don't know where to add new shared code.
 
 **Acceptance Criteria**:
 
-1. Explains the two-tier split: `pkg/` = domain logic shared across services, `platform/` = infrastructure utilities
-2. Decision guide: "If it knows about business concepts (money, sagas, instruments) -> pkg/. If it's infrastructure plumbing (DB, auth, events) -> platform/"
-3. Lists all packages with one-line descriptions (can be generated from doc.go files)
-4. Notes the canonical value type: `shared/platform/quantity.Quantity[D]` is the primary dimensional type; `shared/pkg/money` and `shared/pkg/amount` are convenience wrappers
+1. Explains the two-tier split: `pkg/` = domain logic shared across services,
+   `platform/` = infrastructure utilities
+2. Decision guide: "If it knows about business concepts
+   (money, sagas, instruments) -> pkg/.
+   If it's infrastructure plumbing (DB, auth, events) -> platform/"
+3. Lists all packages with one-line descriptions
+   (can be generated from doc.go files)
+4. Notes the canonical value type: `shared/platform/quantity.Quantity[D]`
+   is the primary dimensional type; `shared/pkg/money` and
+   `shared/pkg/amount` are convenience wrappers
 
 ---
 
@@ -225,21 +234,23 @@ Three different names for the same concept:
 
 This means "find the gRPC handler registration" requires checking 2-3 filenames per service.
 
-### Task 3.1: Rename Variant Service Files to grpc_service.go
+### Task 3.1: Rename Variant Service Files to server.go
 
-**Problem**: `server.go` and `{service}_service.go` variants create navigation ambiguity.
-`grpc_service.go` is the most common pattern (used by 8+ services) and should be canonical.
+**Problem**: `grpc_service.go` and `{service}_service.go` variants create
+navigation ambiguity. ADR-015 establishes `server.go` as the canonical name
+for the gRPC service implementation file. Several services diverge from this.
 
 **Files Affected** (verify current state before implementing):
 
-- `services/internal-account/service/server.go` -> rename to `grpc_service.go`
-- `services/reconciliation/service/server.go` -> rename to `grpc_service.go`
-- `services/financial-accounting/service/financial_accounting_service.go` -> rename to `grpc_service.go`
-- Any other services using non-standard names
+- `services/current-account/service/grpc_service.go` -> rename to `server.go`
+- `services/party/service/grpc_service.go` -> rename to `server.go`
+- `services/financial-accounting/service/financial_accounting_service.go`
+  -> rename to `server.go`
+- Any other services not using `server.go`
 
 **Acceptance Criteria**:
 
-1. All services use `grpc_service.go` as the main gRPC service implementation file
+1. All services use `server.go` as the main gRPC service file per ADR-015
 2. All imports and references updated
 3. All tests pass
 4. `git log --follow` preserves file history (use `git mv`)
@@ -255,8 +266,10 @@ inline everything. No convention for when to split.
 
 **Acceptance Criteria**:
 
-1. Document the convention: split into `grpc_{operation}_endpoints.go` when `grpc_service.go` exceeds 400 LOC
-2. Document the naming pattern: `grpc_service.go` (constructor + registration), `grpc_{operation}_endpoints.go` (handler implementations)
+1. Document the convention: split into `grpc_{operation}_endpoints.go`
+   when `server.go` exceeds 400 LOC
+2. Document the naming pattern: `server.go` (constructor + registration),
+   `grpc_{operation}_endpoints.go` (handler implementations)
 3. List the current state of each service for reference
 4. Do NOT refactor existing services in this task (documentation only - refactoring is in PRD-012)
 
@@ -281,7 +294,9 @@ names without reading each service's `errors.go`.
 
 **Acceptance Criteria**:
 
-1. Establish the canonical pattern: entity-prefixed errors (`Err{Entity}NotFound`) for domain errors, generic errors (`ErrNotFound`) only in shared packages
+1. Establish the canonical pattern: entity-prefixed errors
+   (`Err{Entity}NotFound`) for domain errors,
+   generic errors (`ErrNotFound`) only in shared packages
 2. Document the standard error set every domain should define: `NotFound`, `Conflict`, `InvalidStatus`, `OptimisticLock`
 3. Document gRPC status code mapping convention (e.g., `ErrNotFound` -> `codes.NotFound`)
 4. Include examples from existing services
@@ -317,8 +332,11 @@ names without reading each service's `errors.go`.
 
 **Acceptance Criteria**:
 
-1. Document the hierarchy: `Quantity[D]` is the foundational type (dimensional safety), `Money` wraps `Quantity[Currency]` for convenience, `Amount` provides decimal arithmetic
-2. Decision guide: use `Quantity[D]` for multi-asset contexts, `Money` for currency-only contexts, `Amount` for raw decimal operations
+1. Document the hierarchy: `Quantity[D]` is the foundational type
+   (dimensional safety), `Money` wraps `Quantity[Currency]`
+   for convenience, `Amount` provides decimal arithmetic
+2. Decision guide: use `Quantity[D]` for multi-asset contexts,
+   `Money` for currency-only contexts, `Amount` for raw decimals
 3. Note which is used where (e.g., position-keeping uses `Quantity[D]`, current-account uses both)
 4. Flag `shared/pkg/money/` as a thin wrapper with 2 imports - candidate for future removal
 
@@ -342,7 +360,7 @@ in this PRD and ADR-015.
 
 1. Add task: "Create `doc.go` for every new package" with format example
 2. Add task: "Create `errors.go` in `domain/` with entity-prefixed errors" referencing error-conventions.md
-3. Update Task 7 (gRPC Service Handler) to mandate `grpc_service.go` naming
+3. Update Task 7 (gRPC Service Handler) to mandate `server.go` naming per ADR-015
 4. Add task: "Regenerate proto files and commit" after proto definition task
 5. Add task: "Create service README.md with YAML frontmatter"
 6. Reference the new convention docs (error-conventions.md, repository-conventions.md, value-types.md)
@@ -359,7 +377,7 @@ in this PRD and ADR-015.
 **Acceptance Criteria**:
 
 1. Script accepts a service name and checks:
-   - `grpc_service.go` exists in `service/`
+   - `server.go` exists in `service/` (per ADR-015)
    - `domain/errors.go` exists
    - `doc.go` exists in each package
    - `README.md` exists with YAML frontmatter
@@ -387,7 +405,7 @@ With parallelization, streams 1-4 run concurrently, then Stream 5 follows.
 
 When parsing this PRD into Task Master tasks:
 
-- **Create exactly 12 tasks** corresponding to the 12 numbered tasks (1.1 through 5.2)
+- **Create exactly 13 tasks** corresponding to the 13 numbered tasks (1.1 through 5.2)
 - Each task maps to a single PR-able unit of work
 - Preserve stream grouping in task numbering
 - Mark Stream 5 tasks as depending on Stream 4 tasks
@@ -403,7 +421,7 @@ When parsing this PRD into Task Master tasks:
 | 4 | Task 2.1: Add doc.go to shared/pkg/ | Package Docs |
 | 5 | Task 2.2: Add doc.go to shared/platform/ | Package Docs |
 | 6 | Task 2.3: Add shared/ Navigation README | Package Docs |
-| 7 | Task 3.1: Rename Variant Service Files | Service Naming |
+| 7 | Task 3.1: Rename Variant Service Files to server.go | Service Naming |
 | 8 | Task 3.2: Standardize Handler File Splitting Convention | Service Naming |
 | 9 | Task 4.1: Document Error Naming Convention | Convention Docs |
 | 10 | Task 4.2: Document Repository Pattern Convention | Convention Docs |
@@ -415,7 +433,7 @@ When parsing this PRD into Task Master tasks:
 
 1. `go build ./...` succeeds from a clean clone without running `buf generate`
 2. Every `shared/` package has a `doc.go` that explains its purpose in < 15 lines
-3. Every service uses `grpc_service.go` as the main service file
+3. Every service uses `server.go` as the main service file per ADR-015
 4. Convention docs exist for errors, repositories, and value types
 5. New service checklist references all established conventions
 6. Verification script passes for all existing services (or documents known exceptions)
