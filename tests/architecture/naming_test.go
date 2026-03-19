@@ -28,6 +28,7 @@ func TestDomainErrorNaming(t *testing.T) {
 
 	for _, path := range errFiles {
 		relPath, _ := filepath.Rel(root, path)
+		relPath = filepath.ToSlash(relPath)
 
 		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
@@ -127,6 +128,7 @@ func TestRepositoryMethodVerbs(t *testing.T) {
 					if !hasStandardVerb(methodName) {
 						pos := fset.Position(method.Pos())
 						relPath, _ := filepath.Rel(root, path)
+						relPath = filepath.ToSlash(relPath)
 						violations = append(violations, fmt.Sprintf(
 							"%s:%d: repository method %s.%s does not start with a standard verb (%s). See docs/guides/service-file-conventions.md",
 							relPath, pos.Line, ts.Name.Name, methodName, strings.Join(repositoryMethodVerbs, "/"),
@@ -255,6 +257,7 @@ func TestInterfaceComplianceDeclarations(t *testing.T) {
 		}
 
 		relPath, _ := filepath.Rel(root, path)
+		relPath = filepath.ToSlash(relPath)
 		for name := range structNames {
 			if hasComplianceCheck[name] {
 				continue
@@ -277,8 +280,16 @@ func TestInterfaceComplianceDeclarations(t *testing.T) {
 
 func hasStandardVerb(methodName string) bool {
 	for _, verb := range repositoryMethodVerbs {
-		if strings.HasPrefix(methodName, verb) {
+		if methodName == verb {
 			return true
+		}
+		if strings.HasPrefix(methodName, verb) {
+			// Verify the character after the verb is uppercase (word boundary).
+			// This prevents "Is" from matching "Issue" or "Soft" from matching "Software".
+			rest := methodName[len(verb):]
+			if len(rest) > 0 && rest[0] >= 'A' && rest[0] <= 'Z' {
+				return true
+			}
 		}
 	}
 	return false

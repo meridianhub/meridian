@@ -102,12 +102,15 @@ func TestNoInternalCrossServiceImports(t *testing.T) {
 			if !strings.HasPrefix(importPath, modulePath+"/services/") {
 				continue
 			}
-			if !strings.Contains(importPath, "/internal/") && !strings.Contains(importPath, "/internal") {
+
+			// Check if import path contains /internal/ as a full path segment
+			// (not just a prefix like "internal-account").
+			remainder := strings.TrimPrefix(importPath, modulePath+"/services/")
+			parts := strings.SplitN(remainder, "/", 2)
+			importedService := parts[0]
+			if len(parts) < 2 || !hasInternalSegment(parts[1]) {
 				continue
 			}
-
-			remainder := strings.TrimPrefix(importPath, modulePath+"/services/")
-			importedService := strings.SplitN(remainder, "/", 2)[0]
 
 			if importedService != ownerService {
 				if knownCrossServiceInternalImports[relPath] {
@@ -206,6 +209,7 @@ func TestSharedNeverImportsServices(t *testing.T) {
 		}
 
 		relPath, _ := filepath.Rel(root, path)
+		relPath = filepath.ToSlash(relPath)
 		for _, imp := range file.Imports {
 			importPath := strings.Trim(imp.Path.Value, `"`)
 			if strings.HasPrefix(importPath, modulePath+"/services/") {
@@ -259,6 +263,7 @@ func TestAdaptersNeverImportService(t *testing.T) {
 			}
 
 			relPath, _ := filepath.Rel(root, path)
+			relPath = filepath.ToSlash(relPath)
 			for _, imp := range file.Imports {
 				importPath := strings.Trim(imp.Path.Value, `"`)
 				if strings.HasPrefix(importPath, serviceImportPrefix) {
@@ -292,4 +297,14 @@ func listServiceDirs(t *testing.T, servicesDir string) []string {
 		}
 	}
 	return services
+}
+
+// hasInternalSegment returns true if the path contains "internal" as a full path segment.
+func hasInternalSegment(subPath string) bool {
+	for _, seg := range strings.Split(subPath, "/") {
+		if seg == "internal" {
+			return true
+		}
+	}
+	return false
 }

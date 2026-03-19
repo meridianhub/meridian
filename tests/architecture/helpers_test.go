@@ -74,6 +74,8 @@ func walkGoFiles(t *testing.T, root string, fn func(path string, relPath string)
 		if err != nil {
 			return err
 		}
+		// Normalize to forward slashes so allowlist keys work cross-platform.
+		relPath = filepath.ToSlash(relPath)
 		fn(path, relPath)
 		return nil
 	})

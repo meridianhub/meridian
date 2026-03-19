@@ -51,6 +51,16 @@ func TestServiceServerGoExists(t *testing.T) {
 	}
 }
 
+// knownMissingDocGo tracks shared packages that currently lack doc.go.
+// Do NOT add new entries — create doc.go for new packages.
+var knownMissingDocGo = map[string]bool{
+	"shared/pkg/saga/schema":                 true,
+	"shared/pkg/saga/validation":             true,
+	"shared/pkg/valuation/internal/builtins": true,
+	"shared/platform/events/topics":          true,
+	"shared/platform/quantity/currency":      true,
+}
+
 // TestSharedPackagesHaveDocGo validates that all shared/pkg/ and shared/platform/
 // packages have a doc.go file for package documentation.
 func TestSharedPackagesHaveDocGo(t *testing.T) {
@@ -91,44 +101,50 @@ func TestServiceDirectoryLayout(t *testing.T) {
 func checkDocGo(t *testing.T, root string, dir string) {
 	t.Helper()
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
-		t.Fatalf("failed to read directory %s: %v", dir, err)
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+		if !info.IsDir() {
+			return nil
 		}
-		if shouldSkipDir(e.Name()) {
-			continue
+		if shouldSkipDir(info.Name()) {
+			return filepath.SkipDir
 		}
-
-		pkgDir := filepath.Join(dir, e.Name())
+		// Skip the root directory itself.
+		if path == dir {
+			return nil
+		}
 
 		// Only check directories that contain .go files (are Go packages).
-		hasGoFiles := false
-		subEntries, err := os.ReadDir(pkgDir)
-		if err != nil {
-			continue
+		entries, readErr := os.ReadDir(path)
+		if readErr != nil {
+			return readErr
 		}
-		for _, sub := range subEntries {
-			if !sub.IsDir() && filepath.Ext(sub.Name()) == ".go" {
+		hasGoFiles := false
+		for _, e := range entries {
+			if !e.IsDir() && filepath.Ext(e.Name()) == ".go" {
 				hasGoFiles = true
 				break
 			}
 		}
 		if !hasGoFiles {
-			continue
+			return nil
 		}
 
-		docPath := filepath.Join(pkgDir, "doc.go")
-		if _, err := os.Stat(docPath); os.IsNotExist(err) {
-			relPath, _ := filepath.Rel(root, pkgDir)
+		docPath := filepath.Join(path, "doc.go")
+		if _, statErr := os.Stat(docPath); os.IsNotExist(statErr) {
+			relPath, _ := filepath.Rel(root, path)
+			relPath = filepath.ToSlash(relPath)
+			if knownMissingDocGo[relPath] {
+				t.Logf("KNOWN: %s: missing doc.go", relPath)
+				return nil
+			}
 			t.Errorf("%s: missing doc.go", relPath)
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to walk %s: %v", dir, err)
 	}
 }
