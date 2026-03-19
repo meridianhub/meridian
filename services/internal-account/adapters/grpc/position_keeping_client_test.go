@@ -25,6 +25,7 @@ type mockPositionKeepingServer struct {
 	positionkeepingv1.UnimplementedPositionKeepingServiceServer
 
 	getAccountBalancesFunc func(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error)
+	getAccountBalanceFunc  func(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error)
 	callCount              atomic.Int32
 }
 
@@ -52,6 +53,23 @@ func (s *mockPositionKeepingServer) GetAccountBalances(ctx context.Context, req 
 					Version:        1,
 				},
 			},
+		},
+		AsOf: timestamppb.Now(),
+	}, nil
+}
+
+func (s *mockPositionKeepingServer) GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	s.callCount.Add(1)
+	if s.getAccountBalanceFunc != nil {
+		return s.getAccountBalanceFunc(ctx, req)
+	}
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId:   req.AccountId,
+		BalanceType: req.BalanceType,
+		Amount: &quantityv1.InstrumentAmount{
+			InstrumentCode: req.InstrumentCode,
+			Amount:         "1000.00",
+			Version:        1,
 		},
 		AsOf: timestamppb.Now(),
 	}, nil
