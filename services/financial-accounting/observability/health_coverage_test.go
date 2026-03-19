@@ -167,8 +167,8 @@ func TestGormDatabaseHealthChecker_Check_Timeout(t *testing.T) {
 	// it should report unhealthy
 	assert.NotNil(t, result)
 
-	// Clean up mock expectations (may have pending expectations from slow ping)
-	_ = mock.ExpectationsWereMet()
+	// In a timeout scenario the delayed ping may or may not execute,
+	// so we intentionally do not assert ExpectationsWereMet here.
 }
 
 func TestHealthChecker_Check_UnhealthyComponentLogging(t *testing.T) {

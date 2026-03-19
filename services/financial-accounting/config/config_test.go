@@ -18,7 +18,13 @@ func TestDefaultIdempotencyCleanupConfig(t *testing.T) {
 }
 
 func TestLoadIdempotencyCleanupConfig_Defaults(t *testing.T) {
-	// With no env vars set, should return defaults
+	// Ensure env vars are unset so we get pure defaults
+	t.Setenv("IDEMPOTENCY_CLEANUP_ENABLED", "")
+	t.Setenv("IDEMPOTENCY_CLEANUP_STALE_THRESHOLD", "")
+	t.Setenv("IDEMPOTENCY_CLEANUP_RUN_INTERVAL", "")
+	t.Setenv("IDEMPOTENCY_CLEANUP_BATCH_SIZE", "")
+	t.Setenv("IDEMPOTENCY_CLEANUP_KEY_PATTERN", "")
+
 	cfg := LoadIdempotencyCleanupConfig()
 
 	defaults := DefaultIdempotencyCleanupConfig()

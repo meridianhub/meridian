@@ -50,15 +50,11 @@ func TestHealthChecker_Watch_ContextCanceled(t *testing.T) {
 		CheckTimeout: 100 * time.Millisecond,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Use a short timeout so Watch returns after the initial send
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
 
 	stream := &mockHealthWatchStream{ctx: ctx}
-
-	// Cancel context after a short delay to allow initial send
-	go func() {
-		time.Sleep(50 * time.Millisecond) //nolint:forbidigo // deliberate delay to test context cancellation
-		cancel()
-	}()
 
 	err := checker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 
