@@ -1,5 +1,7 @@
 // Package applier provides the ApplyManifest gRPC handler that orchestrates
 // manifest validation, diffing, planning, and execution.
+//
+//meridian:large-file - known oversized file; split tracked in backlog
 package applier
 
 import (

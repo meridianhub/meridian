@@ -1,4 +1,6 @@
 // Package registry provides the InstrumentRegistry implementation backed by PostgreSQL.
+//
+//meridian:large-file - known oversized file; split tracked in backlog
 package registry
 
 import (

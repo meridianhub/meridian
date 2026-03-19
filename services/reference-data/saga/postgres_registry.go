@@ -1,4 +1,6 @@
 // Package saga provides the SagaRegistry implementation backed by PostgreSQL.
+//
+//meridian:large-file - known oversized file; split tracked in backlog
 package saga
 
 import (
