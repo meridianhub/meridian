@@ -139,8 +139,10 @@ func TestContainer_InitializeAuditPublisher_KafkaEnabled_InvalidBrokers(t *testi
 		Logger: testLogger(),
 	}
 
-	// Should not panic
 	c.initializeAuditPublisher()
+	// Invalid broker may or may not fail — audit publisher degrades gracefully
+	// We just verify initialization doesn't panic
+	t.Log("audit publisher initialized without panic")
 }
 
 func TestContainer_InitializeEventPublisher_KafkaDisabled(t *testing.T) {

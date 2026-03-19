@@ -281,4 +281,3 @@ func TestPostgresRepository_CreateBatch_LargeBatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, listed, 5)
 }
-

@@ -68,10 +68,10 @@ func setupMeasurementTestContainer(t *testing.T) (*testContainer, *persistence.M
 }
 
 // persistTestLog creates and persists a FinancialPositionLog, returning its LogID.
-func persistTestLog(t *testing.T, tc *testContainer, accountID string) uuid.UUID {
+func persistTestLog(ctx context.Context, t *testing.T, tc *testContainer, accountID string) uuid.UUID {
 	t.Helper()
 	log := createTestLog(t, accountID)
-	err := tc.repo.Create(context.Background(), log)
+	err := tc.repo.Create(ctx, log)
 	require.NoError(t, err)
 	return log.LogID
 }
@@ -81,7 +81,7 @@ func TestMeasurementRepository_Create(t *testing.T) {
 	defer tc.cleanup(t)
 
 	ctx := context.Background()
-	logID := persistTestLog(t, tc, testAccountID)
+	logID := persistTestLog(ctx, t, tc, testAccountID)
 
 	t.Run("successful create", func(t *testing.T) {
 		m := createTestMeasurement(t, logID)
@@ -109,7 +109,7 @@ func TestMeasurementRepository_Create(t *testing.T) {
 		assert.ErrorIs(t, err, domain.ErrNotFound)
 	})
 
-	t.Run("nil metadata serialises correctly", func(t *testing.T) {
+	t.Run("nil metadata serializes correctly", func(t *testing.T) {
 		m := createTestMeasurement(t, logID)
 		m.Metadata = nil
 		err := repo.Create(ctx, m)
@@ -133,7 +133,7 @@ func TestMeasurementRepository_FindByID(t *testing.T) {
 	defer tc.cleanup(t)
 
 	ctx := context.Background()
-	logID := persistTestLog(t, tc, testAccountID)
+	logID := persistTestLog(ctx, t, tc, testAccountID)
 
 	t.Run("found", func(t *testing.T) {
 		m := createTestMeasurement(t, logID)
@@ -173,7 +173,7 @@ func TestMeasurementRepository_FindByPositionLogID(t *testing.T) {
 	defer tc.cleanup(t)
 
 	ctx := context.Background()
-	logID := persistTestLog(t, tc, testAccountID)
+	logID := persistTestLog(ctx, t, tc, testAccountID)
 
 	t.Run("returns measurements ordered by timestamp desc", func(t *testing.T) {
 		now := time.Now().UTC()
@@ -198,7 +198,7 @@ func TestMeasurementRepository_FindByPositionLogID(t *testing.T) {
 	})
 
 	t.Run("no measurements returns empty", func(t *testing.T) {
-		emptyLogID := persistTestLog(t, tc, "GB33BUKB20201555555556")
+		emptyLogID := persistTestLog(ctx, t, tc, "GB33BUKB20201555555556")
 		measurements, err := repo.FindByPositionLogID(ctx, emptyLogID)
 		require.NoError(t, err)
 		assert.Empty(t, measurements)
@@ -210,7 +210,7 @@ func TestMeasurementRepository_CreateWithTx(t *testing.T) {
 	defer tc.cleanup(t)
 
 	ctx := context.Background()
-	logID := persistTestLog(t, tc, testAccountID)
+	logID := persistTestLog(ctx, t, tc, testAccountID)
 
 	t.Run("successful create within tx", func(t *testing.T) {
 		tx, err := repo.BeginTx(ctx)
@@ -268,7 +268,7 @@ func TestMeasurementRepository_GetDBPositionLogID(t *testing.T) {
 	defer tc.cleanup(t)
 
 	ctx := context.Background()
-	logID := persistTestLog(t, tc, testAccountID)
+	logID := persistTestLog(ctx, t, tc, testAccountID)
 
 	t.Run("found", func(t *testing.T) {
 		tx, err := repo.BeginTx(ctx)
