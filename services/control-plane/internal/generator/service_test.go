@@ -949,8 +949,8 @@ func TestConvertYAMLToJSONCompatible(t *testing.T) {
 
 	t.Run("map[interface{}]interface{}", func(t *testing.T) {
 		input := map[interface{}]interface{}{
-			"key":   "value",
-			42:      "numeric-key",
+			"key": "value",
+			42:    "numeric-key",
 			"nested": map[interface{}]interface{}{
 				"inner": "data",
 			},

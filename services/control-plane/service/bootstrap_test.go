@@ -209,7 +209,7 @@ func TestRegisterEconomyGeneratorService_WithOptions(t *testing.T) {
 	err := RegisterEconomyGeneratorService(server, EconomyGeneratorConfig{
 		SchemaRegistry: schema.NewRegistry(),
 		LLMClient:      &fakeLLMClient{},
-		Validator:       &fakeManifestValidator{},
+		Validator:      &fakeManifestValidator{},
 	})
 	require.NoError(t, err)
 }

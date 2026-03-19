@@ -228,9 +228,9 @@ func TestExportCSV_DeepNesting(t *testing.T) {
 	assert.Equal(t, "2", records[3][0]) // grandchild
 
 	// Verify parent saga chain
-	assert.Equal(t, "", records[1][11])                                          // root has no parent
-	assert.Equal(t, "11111111-1111-1111-1111-111111111111", records[2][11])      // child's parent is root
-	assert.Equal(t, "22222222-2222-2222-2222-222222222222", records[3][11])      // grandchild's parent is child
+	assert.Equal(t, "", records[1][11])                                     // root has no parent
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", records[2][11]) // child's parent is root
+	assert.Equal(t, "22222222-2222-2222-2222-222222222222", records[3][11]) // grandchild's parent is child
 }
 
 func TestFlattenTree_NilKnowledgeAt(t *testing.T) {
