@@ -2,7 +2,9 @@ package accounttype
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/cel-go/cel"
@@ -133,7 +135,8 @@ func (r *PostgresRegistry) buildValidationInput(attrs AttributeBag) map[string]a
 }
 
 func (r *PostgresRegistry) getOrCompile(code string, version int, exprType string, expr string, compileFn func(string) (cel.Program, error)) (cel.Program, error) {
-	cacheKey := fmt.Sprintf("%s:%d:%s", code, version, exprType)
+	exprHash := sha256.Sum256([]byte(expr))
+	cacheKey := fmt.Sprintf("%s:%d:%s:%x", code, version, exprType, exprHash)
 
 	r.programCacheMu.RLock()
 	prg, ok := r.programCache[cacheKey]
@@ -159,7 +162,10 @@ func (r *PostgresRegistry) invalidateCache(code string, version int) {
 	r.programCacheMu.Lock()
 	defer r.programCacheMu.Unlock()
 
-	delete(r.programCache, fmt.Sprintf("%s:%d:validation", code, version))
-	delete(r.programCache, fmt.Sprintf("%s:%d:eligibility", code, version))
-	delete(r.programCache, fmt.Sprintf("%s:%d:bucketing", code, version))
+	prefix := fmt.Sprintf("%s:%d:", code, version)
+	for key := range r.programCache {
+		if strings.HasPrefix(key, prefix) {
+			delete(r.programCache, key)
+		}
+	}
 }

@@ -130,14 +130,26 @@ func sagaMap(sagas []*controlplanev1.SagaDefinition) map[string]*controlplanev1.
 	return m
 }
 
-// partyTypeKey produces a stable identifier for a party type definition.
-// The key is (tenant_id, party_type) to match uniqueness constraints.
-func partyTypeKey(tenantID, partyType string) string {
-	return tenantID + ":" + partyType
+// partyTypeKeyT is a collision-safe composite key for party type definitions.
+// Using a struct key instead of string concatenation prevents collisions when
+// either field contains the separator character.
+type partyTypeKeyT struct {
+	TenantID  string
+	PartyType string
 }
 
-func partyTypeMap(defs []*partyv1.PartyTypeDefinition) map[string]*partyv1.PartyTypeDefinition {
-	m := make(map[string]*partyv1.PartyTypeDefinition, len(defs))
+// String returns a human-readable representation for display purposes.
+func (k partyTypeKeyT) String() string {
+	return k.TenantID + ":" + k.PartyType
+}
+
+// partyTypeKey produces a collision-safe identifier for a party type definition.
+func partyTypeKey(tenantID, partyType string) partyTypeKeyT {
+	return partyTypeKeyT{TenantID: tenantID, PartyType: partyType}
+}
+
+func partyTypeMap(defs []*partyv1.PartyTypeDefinition) map[partyTypeKeyT]*partyv1.PartyTypeDefinition {
+	m := make(map[partyTypeKeyT]*partyv1.PartyTypeDefinition, len(defs))
 	for _, d := range defs {
 		m[partyTypeKey(d.GetTenantId(), d.GetPartyType())] = d
 	}

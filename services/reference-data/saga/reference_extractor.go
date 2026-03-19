@@ -106,6 +106,19 @@ func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 					}
 				}
 
+				// Fall back to keyword argument saga_name=
+				if sagaName == "" {
+					for _, kwarg := range ex.Args {
+						if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
+							if nameIdent, ok := binExpr.X.(*syntax.Ident); ok && nameIdent.Name == "saga_name" {
+								if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
+									sagaName = strings.Trim(lit.Raw, `"'`)
+								}
+							}
+						}
+					}
+				}
+
 				if sagaName != "" {
 					e.references = append(e.references, Reference{
 						Type:       ReferenceTypeSaga,
@@ -184,9 +197,16 @@ func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 				attrKey := strings.Trim(lit.Raw, `"'`)
 				// Try to extract instrument code from the expression
 				instrumentCode := e.extractInstrumentCode(ex.X)
+				// Compose a collision-safe key: include instrument code when known
+				// so that USD.attributes["status"] and EUR.attributes["status"]
+				// produce distinct reference keys.
+				refKey := attrKey
+				if instrumentCode != "" {
+					refKey = instrumentCode + ":" + attrKey
+				}
 				e.references = append(e.references, Reference{
 					Type:           ReferenceTypeAttribute,
-					Key:            attrKey,
+					Key:            refKey,
 					AttributeKey:   attrKey,
 					InstrumentCode: instrumentCode,
 					LineNumber:     int(lit.TokenPos.Line),

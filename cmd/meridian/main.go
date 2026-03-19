@@ -215,7 +215,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Provisioning Worker (optional) ─────────────────────────────────
 
-	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, conns.gormDB("tenant"), conns.gormDB("identity"), logger)
+	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, baseDSN, conns.gormDB("tenant"), conns.gormDB("identity"), logger)
 	if err != nil {
 		return fmt.Errorf("provisioning worker: %w", err)
 	}
@@ -241,7 +241,10 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Start Gateway HTTP Server ───────────────────────────────────────
 
-	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
+	platformDSN, err := replaceDSNDatabase(baseDSN, "meridian_platform")
+	if err != nil {
+		return fmt.Errorf("platform DSN: %w", err)
+	}
 
 	eventRouter, extraGWOpts := wireEventStream(conns.gormDB("financial-accounting"), logger)
 
@@ -315,7 +318,10 @@ func runBootstrap(baseDSN string, logger *slog.Logger) error {
 	ctx := context.Background()
 
 	// Both tenant and control-plane share meridian_platform database.
-	platformDSN := replaceDSNDatabase(baseDSN, "meridian_platform")
+	platformDSN, err := replaceDSNDatabase(baseDSN, "meridian_platform")
+	if err != nil {
+		return fmt.Errorf("platform DSN: %w", err)
+	}
 	cfg := bootstrap.DatabaseConfig{
 		DSN:             platformDSN,
 		MaxOpenConns:    5,

@@ -286,6 +286,7 @@ func createRedisClient(logger *slog.Logger) (*redis.Client, error) {
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
 		return nil, fmt.Errorf("failed to ping Redis: %w", err)
 	}
 

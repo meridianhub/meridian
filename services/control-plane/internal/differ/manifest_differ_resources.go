@@ -188,40 +188,42 @@ func (d *ManifestDiffer) diffPartyTypes(lastApplied, newManifest *controlplanev1
 	newMap := partyTypeMap(newManifest.GetPartyTypes())
 
 	for key, updated := range newMap {
+		keyStr := key.String()
 		prev, exists := oldMap[key]
 		if !exists {
 			plan.Actions = append(plan.Actions, PlannedAction{
 				ResourceType: ResourcePartyType,
-				ResourceCode: key,
+				ResourceCode: keyStr,
 				Action:       ActionCreate,
-				Description:  fmt.Sprintf("Create party type %s", key),
+				Description:  fmt.Sprintf("Create party type %s", keyStr),
 			})
 			continue
 		}
 		if !proto.Equal(prev, updated) {
 			plan.Actions = append(plan.Actions, PlannedAction{
 				ResourceType: ResourcePartyType,
-				ResourceCode: key,
+				ResourceCode: keyStr,
 				Action:       ActionUpdate,
-				Description:  describePartyTypeChanges(key, prev, updated),
+				Description:  describePartyTypeChanges(keyStr, prev, updated),
 			})
 		} else {
 			plan.Actions = append(plan.Actions, PlannedAction{
 				ResourceType: ResourcePartyType,
-				ResourceCode: key,
+				ResourceCode: keyStr,
 				Action:       ActionNoChange,
-				Description:  fmt.Sprintf("Party type %s unchanged", key),
+				Description:  fmt.Sprintf("Party type %s unchanged", keyStr),
 			})
 		}
 	}
 
 	for key := range oldMap {
 		if _, exists := newMap[key]; !exists {
+			keyStr := key.String()
 			plan.Actions = append(plan.Actions, PlannedAction{
 				ResourceType: ResourcePartyType,
-				ResourceCode: key,
+				ResourceCode: keyStr,
 				Action:       ActionDelete,
-				Description:  fmt.Sprintf("Delete party type %s", key),
+				Description:  fmt.Sprintf("Delete party type %s", keyStr),
 			})
 		}
 	}

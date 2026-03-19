@@ -48,7 +48,8 @@ var serviceNames = []string{
 	"meridian.payment_order.v1.PaymentOrderService",
 	"meridian.reconciliation.v1.AccountReconciliationService",
 	"meridian.saga.v1.SagaRegistryService",
-	"meridian.saga.v1.SagaAdminService",
+	// NOTE: SagaAdminService is not yet wired in wire_services.go;
+	// add it here once AdminHandler is registered with the gRPC server.
 	"meridian.control_plane.v1.ApplyManifestService",
 	"meridian.control_plane.v1.ManifestHistoryService",
 	"meridian.reference_data.v1.AccountTypeRegistryService",

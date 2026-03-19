@@ -27,13 +27,13 @@ import (
 // ─── Per-Service Database Connections ────────────────────────────────────────
 
 // replaceDSNDatabase replaces the database name in a PostgreSQL/CockroachDB DSN URL.
-func replaceDSNDatabase(baseDSN, database string) string {
+func replaceDSNDatabase(baseDSN, database string) (string, error) {
 	parsed, err := url.Parse(baseDSN)
 	if err != nil {
-		return baseDSN
+		return "", fmt.Errorf("parse base DSN: %w", err)
 	}
 	parsed.Path = "/" + database
-	return parsed.String()
+	return parsed.String(), nil
 }
 
 // serviceConns holds per-database connections for the unified binary.
@@ -104,7 +104,11 @@ func newServiceConns(ctx context.Context, baseDSN string, logger *slog.Logger) (
 		if _, exists := conns.gormDBs[sdb.Database]; exists {
 			continue
 		}
-		dsn := replaceDSNDatabase(baseDSN, sdb.Database)
+		dsn, err := replaceDSNDatabase(baseDSN, sdb.Database)
+		if err != nil {
+			conns.closeAll(logger)
+			return nil, fmt.Errorf("dsn for %s: %w", sdb.Database, err)
+		}
 		cfg := bootstrap.DatabaseConfig{
 			DSN:             dsn,
 			MaxOpenConns:    10,
@@ -127,7 +131,11 @@ func newServiceConns(ctx context.Context, baseDSN string, logger *slog.Logger) (
 		if _, exists := conns.pgxPools[sdb.Database]; exists {
 			continue
 		}
-		dsn := replaceDSNDatabase(baseDSN, sdb.Database)
+		dsn, err := replaceDSNDatabase(baseDSN, sdb.Database)
+		if err != nil {
+			conns.closeAll(logger)
+			return nil, fmt.Errorf("dsn for %s: %w", sdb.Database, err)
+		}
 		pool, err := connectPgxPool(ctx, dsn, logger)
 		if err != nil {
 			conns.closeAll(logger)

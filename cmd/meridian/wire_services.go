@@ -316,24 +316,27 @@ func wireTenant(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 // SCHEMA_PROVISIONING_ENABLED=true. It returns the worker (for graceful Stop)
 // and a cleanup function that closes provisioner database connections.
 // When provisioning is disabled both return values are nil.
-func startProvisioningWorker(ctx context.Context, platformDB *gorm.DB, identityDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
+func startProvisioningWorker(ctx context.Context, baseDSN string, platformDB *gorm.DB, identityDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
 	if env.GetEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false") != "true" {
 		logger.Info("provisioning worker disabled",
 			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
 		return nil, nil, nil
 	}
 
-	// Create provisioner config and derive service DSNs from DATABASE_URL.
+	// Create provisioner config and derive service DSNs from the resolved baseDSN.
 	// DefaultConfig() falls back to cockroachdb:26257 when per-service env vars
 	// are unset. The unified binary derives all connections from a single base DSN,
 	// so we override each service's DatabaseURL to match.
 	config := tenantprovisioner.DefaultConfig()
-	baseDSN := env.GetEnvOrDefault("DATABASE_URL", "")
 	if baseDSN != "" {
 		for i := range config.Services {
 			svc := &config.Services[i]
 			if sdb, ok := migrations.ServiceDatabases[svc.Name]; ok {
-				svc.DatabaseURL = replaceDSNDatabase(baseDSN, sdb.Database)
+				dsn, dsnErr := replaceDSNDatabase(baseDSN, sdb.Database)
+				if dsnErr != nil {
+					return nil, nil, fmt.Errorf("provisioner dsn for %s: %w", svc.Name, dsnErr)
+				}
+				svc.DatabaseURL = dsn
 			}
 		}
 	}
