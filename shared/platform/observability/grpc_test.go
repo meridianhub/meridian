@@ -194,7 +194,10 @@ func TestStreamServerInterceptor_SendRecv(t *testing.T) {
 		}
 		// Receive a message (will get EOF from mock)
 		var msg interface{}
-		_ = stream.RecvMsg(&msg)
+		err := stream.RecvMsg(&msg)
+		if err != nil && err != io.EOF {
+			return err
+		}
 		return nil
 	}
 
