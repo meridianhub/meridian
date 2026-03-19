@@ -30,9 +30,8 @@ func TestExtract(t *testing.T) {
 		assert.False(t, r.Exists())
 	})
 
-	t.Run("empty path returns whole doc", func(t *testing.T) {
+	t.Run("empty path returns no result", func(t *testing.T) {
 		r := Extract(json, "")
-		// gjson with empty path returns nothing
 		assert.False(t, r.Exists())
 	})
 }
