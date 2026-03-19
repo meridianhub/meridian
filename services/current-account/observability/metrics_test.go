@@ -366,16 +366,28 @@ func TestRecordServiceDegradation(t *testing.T) {
 }
 
 func TestRecordClearingAccountCacheHit(t *testing.T) {
-	// Just verify it does not panic
+	// Verify it does not panic and the metric is collected
 	RecordClearingAccountCacheHit()
+	count := testutil.ToFloat64(clearingAccountCacheHits)
+	if count == 0 {
+		t.Error("Expected cache hit metric to be recorded")
+	}
 }
 
 func TestRecordClearingAccountCacheMiss(t *testing.T) {
 	RecordClearingAccountCacheMiss()
+	count := testutil.ToFloat64(clearingAccountCacheMisses)
+	if count == 0 {
+		t.Error("Expected cache miss metric to be recorded")
+	}
 }
 
 func TestRecordClearingAccountLookupDuration(t *testing.T) {
 	RecordClearingAccountLookupDuration(50 * time.Millisecond)
+	count := testutil.CollectAndCount(clearingAccountLookupDuration)
+	if count == 0 {
+		t.Error("Expected lookup duration metric to be recorded")
+	}
 }
 
 func TestRecordClearingAccountLookupError(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewOutboxPublisher(t *testing.T) {
@@ -32,10 +33,8 @@ func TestTopicToEventType_AllMappingsExist(t *testing.T) {
 
 	for _, topic := range expectedTopics {
 		eventType, ok := topicToEventType[topic]
-		if ok {
-			assert.NotEmpty(t, eventType, "event type should not be empty for topic %s", topic)
-		}
-		// Some topics might use different constants - that's OK
+		require.True(t, ok, "expected topic %q to exist in topicToEventType map", topic)
+		assert.NotEmpty(t, eventType, "event type should not be empty for topic %s", topic)
 	}
 
 	// Verify the map has 7 entries

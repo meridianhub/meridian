@@ -274,6 +274,9 @@ func TestEntityDomainConversion_RoundTrip(t *testing.T) {
 	assert.Equal(t, record.Attempts, domain.Attempts)
 	assert.Equal(t, record.LastError, domain.LastError)
 	assert.Equal(t, record.ResponseCode, domain.ResponseCode)
+	assert.Equal(t, record.CreatedAt, domain.CreatedAt)
+	assert.Equal(t, record.LastAttemptAt, domain.LastAttemptAt)
+	assert.Equal(t, record.CompletedAt, domain.CompletedAt)
 }
 
 func TestToEntity_NilOptionalFields(t *testing.T) {

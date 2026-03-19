@@ -39,10 +39,13 @@ func TestLoadFromEnv_EmptyGatewayID(t *testing.T) {
 	// Don't set any GATEWAY_*_ACCOUNT_ID vars
 	// The function may see unrelated GATEWAY_ vars, but without the _ACCOUNT_ID suffix
 
-	_, err := loadFromEnv()
-	// Should either return empty config error or succeed with found vars
+	cfg, err := loadFromEnv()
 	if err != nil {
+		// Without any GATEWAY_*_ACCOUNT_ID env vars, should return ErrEmptyConfig
 		assert.ErrorIs(t, err, ErrEmptyConfig)
+	} else {
+		// If env vars happen to exist, config should be non-nil
+		assert.NotNil(t, cfg)
 	}
 }
 
