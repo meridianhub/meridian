@@ -132,9 +132,12 @@ func TestHealthChecker_Watch_PeriodicSendError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "send failed on purpose")
 
-	// At least the initial ping expectation should have been consumed
-	// (the second may or may not fire depending on timing)
-	_ = mock.ExpectationsWereMet()
+	// The initial ping expectation is always consumed.
+	// The second ping may or may not fire before the send error,
+	// so we tolerate unmet expectations here.
+	if meetErr := mock.ExpectationsWereMet(); meetErr != nil {
+		t.Logf("Some mock expectations not met (expected due to timing): %v", meetErr)
+	}
 }
 
 // failAfterNStream fails Send after N successful sends.
