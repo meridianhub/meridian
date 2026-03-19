@@ -190,11 +190,11 @@ func TestMeasurementRepository_FindByPositionLogID(t *testing.T) {
 		now := time.Now().UTC()
 		// Insert in non-chronological order to prove sorting is by timestamp, not insertion order
 		timestamps := []time.Duration{
-			-2 * time.Hour,  // oldest
+			-2 * time.Hour,    // oldest
 			-30 * time.Minute, // newest
 			-90 * time.Minute, // middle
 		}
-		var ids []uuid.UUID
+		ids := make([]uuid.UUID, 0, len(timestamps))
 		for _, offset := range timestamps {
 			m := createTestMeasurement(t, logID)
 			m.Timestamp = now.Add(offset)
