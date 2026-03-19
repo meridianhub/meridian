@@ -51,6 +51,8 @@ linters:
     # Code hygiene linters
     - nolintlint     # Require specific linter names and explanations on //nolint directives
     - godox          # Reject TODO/FIXME/HACK in committed code
+    - funlen         # Reject overly long functions
+    - cyclop         # Package-level cyclomatic complexity
 
     # Architecture linters
     - depguard       # Enforce dependency constraints and block dangerous packages
@@ -84,6 +86,8 @@ linters:
           - nilnil           # Tests may use (nil, nil) for mock implementations
           - govet            # unusedwrite and nilness checks too strict for test scaffolding
           - err113           # Tests need dynamic errors to test error pattern matching
+          - funlen           # Tests can be verbose with setup/assertions
+          - cyclop           # Tests can have complex control flow
 
       # Allow context-as-argument after *testing.T in test helper functions
       - path: _test\.go
@@ -91,12 +95,14 @@ linters:
         linters:
           - revive
 
-      # Exclude linters for testdb package (test support utilities)
-      - path: shared/platform/testdb/
+      # Exclude linters for test support utilities
+      - path: (testdb/|testhelpers/|testfixtures/)
         linters:
           - gocyclo
           - gocognit
           - gocritic
+          - funlen
+          - cyclop
 
       # Exclude complexity linters for gRPC service implementations
       # These have inherently complex request handling with validation, conversion, and persistence
@@ -104,30 +110,96 @@ linters:
         linters:
           - gocyclo
           - gocognit
+          - funlen
+          - cyclop
 
       # Exclude complexity linters for repository implementations (complex query building)
       - path: services/.*/repository/.*\.go
         linters:
           - gocyclo
           - gocognit
+          - funlen
+          - cyclop
 
       # Exclude complexity linters for adapter implementations (mapping logic)
       - path: services/.*/adapters/.*\.go
         linters:
           - gocyclo
           - gocognit
+          - funlen
+          - cyclop
 
       # Exclude complexity linters for Kafka implementations (complex message handling)
       - path: shared/platform/kafka/.*\.go
         linters:
           - gocyclo
           - gocognit
+          - funlen
+          - cyclop
 
       # Exclude complexity linters for auth config (complex switch statements for auth modes)
       - path: shared/platform/auth/.*\.go
         linters:
           - gocyclo
           - gocognit
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for saga packages (AST walkers, orchestration, step execution)
+      - path: (shared/pkg/saga|services/reference-data/saga)/.*\.go
+        linters:
+          - gocyclo
+          - gocognit
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for internal service packages (appliers, validators, handlers)
+      - path: services/.*/internal/.*\.go
+        linters:
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for service handler packages (gRPC handler wiring)
+      - path: services/.*/handler/.*\.go
+        linters:
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for service client packages (Starlark handler registration)
+      - path: services/.*/client/.*\.go
+        linters:
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for service worker packages (batch processing)
+      - path: services/.*/worker/.*\.go
+        linters:
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for service connector packages (external integrations)
+      - path: services/.*/connector/.*\.go
+        linters:
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for Starlark runner packages (script execution + timeout logic)
+      - path: services/.*/starlark/.*\.go
+        linters:
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for tenant provisioner (multi-step provisioning)
+      - path: services/tenant/provisioner/.*\.go
+        linters:
+          - funlen
+          - cyclop
+
+      # Exclude complexity linters for API gateway auth handlers (multi-step OAuth flows)
+      - path: services/api-gateway/auth_.*\.go
+        linters:
+          - funlen
+          - cyclop
 
       # Exclude all linters for integration tests (require external services)
       - path: test/integration/
@@ -150,16 +222,18 @@ linters:
           - all
 
       # Allow main() to have unchecked errors for flag parsing
-      - path: (services/.*/cmd/|utilities/)
+      - path: (cmd/|services/.*/cmd/|utilities/)
         text: "Error return value of.*is not checked"
         linters:
           - errcheck
 
-      # Allow long functions in main packages for setup
-      - path: (services/.*/cmd/|utilities/)
+      # Allow long/complex functions in main/cmd packages for setup and CLI orchestration
+      - path: (cmd/|services/.*/cmd/|utilities/)
         linters:
           - gocyclo
           - gocognit
+          - funlen
+          - cyclop
 
       # Exclude var-naming for http adapter packages (intentionally named 'http' for clarity)
       - path: services/.*/adapters/http/
@@ -274,6 +348,13 @@ linters:
         - HACK
         - BUG
         - XXX
+
+    funlen:
+      lines: 80
+      statements: 60
+
+    cyclop:
+      max-complexity: 15
 
     errorlint:
       errorf: true

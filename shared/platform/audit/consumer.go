@@ -81,6 +81,25 @@ type ConsumerConfig struct {
 	MaxRetries int
 }
 
+// applyDefaults fills zero-valued fields with sensible defaults.
+func (c *ConsumerConfig) applyDefaults() {
+	if c.GroupID == "" {
+		c.GroupID = kafka.AuditConsumerGroup
+	}
+	if c.Topic == "" {
+		c.Topic = kafka.AuditEventsTopic
+	}
+	if c.DLQTopicSuffix == "" {
+		c.DLQTopicSuffix = ".dlq" // Results in "audit.events.v1.dlq"
+	}
+	if c.HandlerTimeout == 0 {
+		c.HandlerTimeout = defaults.DefaultRPCTimeout
+	}
+	if c.MaxRetries == 0 {
+		c.MaxRetries = 3
+	}
+}
+
 // NewConsumer creates a new audit Consumer.
 func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if config.BootstrapServers == "" {
@@ -90,22 +109,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		return nil, ErrNilDatabase
 	}
 
-	// Apply defaults
-	if config.GroupID == "" {
-		config.GroupID = kafka.AuditConsumerGroup
-	}
-	if config.Topic == "" {
-		config.Topic = kafka.AuditEventsTopic
-	}
-	if config.DLQTopicSuffix == "" {
-		config.DLQTopicSuffix = ".dlq" // Results in "audit.events.v1.dlq"
-	}
-	if config.HandlerTimeout == 0 {
-		config.HandlerTimeout = defaults.DefaultRPCTimeout
-	}
-	if config.MaxRetries == 0 {
-		config.MaxRetries = 3
-	}
+	config.applyDefaults()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
