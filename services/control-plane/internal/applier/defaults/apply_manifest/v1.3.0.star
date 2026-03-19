@@ -146,7 +146,7 @@ def execute_apply_manifest():
         step(name="activate_data_set_" + dataset["code"])
         market_information.activate_data_set(
             code=dataset["code"],
-            version=ds_result.get("version", 1),
+            version=getattr(ds_result, "version", 1),
         )
 
         registered_market_data_sets.append({
@@ -246,7 +246,7 @@ def execute_apply_manifest():
         )
         registered_connections.append({
             "connection_id": conn["connection_id"],
-            "status": result.get("status", "UPSERTED"),
+            "status": getattr(result, "status", "UPSERTED"),
         })
 
     for route in instruction_routes:
@@ -262,7 +262,7 @@ def execute_apply_manifest():
         )
         registered_routes.append({
             "instruction_type": route["instruction_type"],
-            "status": result.get("status", "UPSERTED"),
+            "status": getattr(result, "status", "UPSERTED"),
         })
 
     result = {
