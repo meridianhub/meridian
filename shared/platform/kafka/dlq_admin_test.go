@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -268,7 +269,7 @@ func TestNewDLQInspector_Validation(t *testing.T) {
 		_, err := NewDLQInspector(DLQInspectorConfig{
 			DLQTopics: []string{"test-dlq"},
 		})
-		if err != ErrEmptyBootstrapServers {
+		if !errors.Is(err, ErrEmptyBootstrapServers) {
 			t.Errorf("expected ErrEmptyBootstrapServers, got %v", err)
 		}
 	})

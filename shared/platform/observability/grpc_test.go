@@ -133,7 +133,7 @@ func (s *mockServerStream) SendMsg(m interface{}) error {
 	return nil
 }
 
-func (s *mockServerStream) RecvMsg(m interface{}) error {
+func (s *mockServerStream) RecvMsg(_ interface{}) error {
 	if s.recvErr != nil {
 		return s.recvErr
 	}
@@ -149,7 +149,7 @@ func TestStreamServerInterceptor_Success(t *testing.T) {
 
 	interceptor := tracer.StreamServerInterceptor()
 
-	handler := func(srv interface{}, stream grpc.ServerStream) error {
+	handler := func(_ interface{}, stream grpc.ServerStream) error {
 		return nil
 	}
 
@@ -170,7 +170,7 @@ func TestStreamServerInterceptor_Error(t *testing.T) {
 	interceptor := tracer.StreamServerInterceptor()
 
 	handlerErr := errors.New("stream handler failed")
-	handler := func(srv interface{}, stream grpc.ServerStream) error {
+	handler := func(_ interface{}, stream grpc.ServerStream) error {
 		return handlerErr
 	}
 
@@ -190,7 +190,7 @@ func TestStreamServerInterceptor_SendRecv(t *testing.T) {
 
 	interceptor := tracer.StreamServerInterceptor()
 
-	handler := func(srv interface{}, stream grpc.ServerStream) error {
+	handler := func(_ interface{}, stream grpc.ServerStream) error {
 		// Send a message
 		if err := stream.SendMsg("hello"); err != nil {
 			return err
@@ -217,7 +217,7 @@ func TestStreamServerInterceptor_RecvError(t *testing.T) {
 
 	interceptor := tracer.StreamServerInterceptor()
 
-	handler := func(srv interface{}, stream grpc.ServerStream) error {
+	handler := func(_ interface{}, stream grpc.ServerStream) error {
 		var msg interface{}
 		return stream.RecvMsg(&msg)
 	}
@@ -281,11 +281,11 @@ func (s *mockClientStream) CloseSend() error {
 }
 func (s *mockClientStream) Context() context.Context { return s.ctx }
 
-func (s *mockClientStream) SendMsg(m interface{}) error {
+func (s *mockClientStream) SendMsg(_ interface{}) error {
 	return s.sendErr
 }
 
-func (s *mockClientStream) RecvMsg(m interface{}) error {
+func (s *mockClientStream) RecvMsg(_ interface{}) error {
 	if s.recvErr != nil {
 		return s.recvErr
 	}

@@ -184,7 +184,6 @@ func TestPgxOutboxRepository_FetchAndLockForProcessing(t *testing.T) {
 	ctx := context.Background()
 
 	// Insert entries.
-	var ids []uuid.UUID
 	for i := 0; i < 3; i++ {
 		entry := NewEventOutbox("event.type", "agg", "Type", []byte(`{}`), "topic", "lock-svc", "", "")
 		_, err := repo.pool.Exec(ctx,
@@ -194,7 +193,6 @@ func TestPgxOutboxRepository_FetchAndLockForProcessing(t *testing.T) {
 			StatusPending, entry.Topic, entry.CreatedAt, 0, entry.ServiceName, "",
 		)
 		require.NoError(t, err)
-		ids = append(ids, entry.ID)
 	}
 
 	t.Run("fetches and marks as processing", func(t *testing.T) {

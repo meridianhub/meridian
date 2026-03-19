@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"errors"
 	"testing"
 
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
@@ -102,7 +103,7 @@ func TestProtoToOperation(t *testing.T) {
 func TestNewConsumer_Validation(t *testing.T) {
 	t.Run("empty bootstrap servers", func(t *testing.T) {
 		_, err := NewConsumer(ConsumerConfig{})
-		if err != ErrEmptyBootstrapServers {
+		if !errors.Is(err, ErrEmptyBootstrapServers) {
 			t.Errorf("expected ErrEmptyBootstrapServers, got %v", err)
 		}
 	})
@@ -111,7 +112,7 @@ func TestNewConsumer_Validation(t *testing.T) {
 		_, err := NewConsumer(ConsumerConfig{
 			BootstrapServers: "localhost:9092",
 		})
-		if err != ErrNilDatabase {
+		if !errors.Is(err, ErrNilDatabase) {
 			t.Errorf("expected ErrNilDatabase, got %v", err)
 		}
 	})
