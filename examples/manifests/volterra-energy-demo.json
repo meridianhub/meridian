@@ -107,7 +107,7 @@
     "datasets": [
       {
         "code": "WHOLESALE_ENERGY_GBP_KWH",
-        "category": "ENERGY_PRICE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
         "unit": "GBP/kWh",
         "sourceCode": "SEED_DEMO",
         "displayName": "UK Wholesale Electricity Price",
@@ -115,7 +115,7 @@
       },
       {
         "code": "CARBON_MARKET",
-        "category": "CARBON_PRICE",
+        "category": "DATA_CATEGORY_CARBON_PRICE",
         "unit": "GBP/TONNE_CO2E",
         "sourceCode": "SEED_DEMO",
         "displayName": "Carbon Credit Market Price",
