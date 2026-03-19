@@ -538,7 +538,200 @@ func TestNewForecastBuiltins_NilLogger(t *testing.T) {
 	assert.Contains(t, builtins, "Decimal")
 }
 
+// --- sumBuiltin with DecimalValue input ---
+
+func TestSumBuiltin_WithDecimalValues(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("sum", sumBuiltin)
+
+	dv1, err := saga.NewDecimalValue("10.5")
+	require.NoError(t, err)
+	dv2, err := saga.NewDecimalValue("20.3")
+	require.NoError(t, err)
+
+	list := starlarklib.NewList([]starlarklib.Value{dv1, dv2})
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{list}, nil)
+	require.NoError(t, err)
+	result, ok := val.(*saga.DecimalValue)
+	require.True(t, ok)
+	assert.Equal(t, "30.8", result.GetDecimal().String())
+}
+
+// --- filterByHourBuiltin happy path ---
+
+func TestFilterByHourBuiltin_MatchingHour(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("filter_by_hour", filterByHourBuiltin)
+
+	d1 := starlarklib.NewDict(1)
+	_ = d1.SetKey(starlarklib.String("timestamp"), starlarklib.String("2026-02-10T10:00:00Z"))
+	d2 := starlarklib.NewDict(1)
+	_ = d2.SetKey(starlarklib.String("timestamp"), starlarklib.String("2026-02-10T14:00:00Z"))
+	d3 := starlarklib.NewDict(1)
+	_ = d3.SetKey(starlarklib.String("timestamp"), starlarklib.String("2026-02-10T10:30:00Z"))
+
+	list := starlarklib.NewList([]starlarklib.Value{d1, d2, d3})
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{list, starlarklib.MakeInt(10)}, nil)
+	require.NoError(t, err)
+	result, ok := val.(*starlarklib.List)
+	require.True(t, ok)
+	assert.Equal(t, 2, result.Len(), "expected two observations at hour 10")
+}
+
+func TestFilterByHourBuiltin_NoMatch(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("filter_by_hour", filterByHourBuiltin)
+
+	d1 := starlarklib.NewDict(1)
+	_ = d1.SetKey(starlarklib.String("timestamp"), starlarklib.String("2026-02-10T10:00:00Z"))
+	list := starlarklib.NewList([]starlarklib.Value{d1})
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{list, starlarklib.MakeInt(14)}, nil)
+	require.NoError(t, err)
+	result, ok := val.(*starlarklib.List)
+	require.True(t, ok)
+	assert.Equal(t, 0, result.Len())
+}
+
+// --- groupByHourBuiltin happy path ---
+
+func TestGroupByHourBuiltin_GroupsCorrectly(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("group_by_hour", groupByHourBuiltin)
+
+	d1 := starlarklib.NewDict(1)
+	_ = d1.SetKey(starlarklib.String("timestamp"), starlarklib.String("2026-02-10T10:00:00Z"))
+	d2 := starlarklib.NewDict(1)
+	_ = d2.SetKey(starlarklib.String("timestamp"), starlarklib.String("2026-02-10T10:30:00Z"))
+	d3 := starlarklib.NewDict(1)
+	_ = d3.SetKey(starlarklib.String("timestamp"), starlarklib.String("2026-02-10T14:00:00Z"))
+
+	list := starlarklib.NewList([]starlarklib.Value{d1, d2, d3})
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{list}, nil)
+	require.NoError(t, err)
+	dict, ok := val.(*starlarklib.Dict)
+	require.True(t, ok)
+	assert.Equal(t, 2, dict.Len(), "expected two groups: hour 10 and hour 14")
+
+	// Check hour 10 has 2 items
+	hour10Val, found, err := dict.Get(starlarklib.MakeInt(10))
+	require.NoError(t, err)
+	require.True(t, found)
+	hour10List, ok := hour10Val.(*starlarklib.List)
+	require.True(t, ok)
+	assert.Equal(t, 2, hour10List.Len())
+
+	// Check hour 14 has 1 item
+	hour14Val, found, err := dict.Get(starlarklib.MakeInt(14))
+	require.NoError(t, err)
+	require.True(t, found)
+	hour14List, ok := hour14Val.(*starlarklib.List)
+	require.True(t, ok)
+	assert.Equal(t, 1, hour14List.Len())
+}
+
+// --- addSecondsBuiltin success case ---
+
+func TestAddSecondsBuiltin_Success(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("add_seconds", addSecondsBuiltin)
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{
+		starlarklib.String("2026-02-10T00:00:00Z"),
+		starlarklib.MakeInt(3600),
+	}, nil)
+	require.NoError(t, err)
+	result, ok := val.(starlarklib.String)
+	require.True(t, ok)
+	assert.Equal(t, "2026-02-10T01:00:00Z", string(result))
+}
+
+func TestAddSecondsBuiltin_NegativeSeconds(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("add_seconds", addSecondsBuiltin)
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{
+		starlarklib.String("2026-02-10T01:00:00Z"),
+		starlarklib.MakeInt(-3600),
+	}, nil)
+	require.NoError(t, err)
+	result, ok := val.(starlarklib.String)
+	require.True(t, ok)
+	assert.Equal(t, "2026-02-10T00:00:00Z", string(result))
+}
+
 // --- durationBuiltin edge cases ---
+
+func TestDurationBuiltin_InvalidArgType(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("duration", durationBuiltin)
+
+	// Pass a positional string arg where int is expected
+	_, err := starlarklib.Call(thread, b, starlarklib.Tuple{starlarklib.String("bad")}, nil)
+	require.Error(t, err)
+}
+
+func TestDurationBuiltin_OnlyHours(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("duration", durationBuiltin)
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{}, []starlarklib.Tuple{
+		{starlarklib.String("hours"), starlarklib.MakeInt(2)},
+	})
+	require.NoError(t, err)
+	i, ok := val.(starlarklib.Int)
+	require.True(t, ok)
+	i64, ok := i.Int64()
+	require.True(t, ok)
+	assert.Equal(t, int64(7200), i64)
+}
+
+func TestDurationBuiltin_OnlyMinutes(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("duration", durationBuiltin)
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{}, []starlarklib.Tuple{
+		{starlarklib.String("minutes"), starlarklib.MakeInt(45)},
+	})
+	require.NoError(t, err)
+	i, ok := val.(starlarklib.Int)
+	require.True(t, ok)
+	i64, ok := i.Int64()
+	require.True(t, ok)
+	assert.Equal(t, int64(2700), i64)
+}
+
+func TestDurationBuiltin_OnlySeconds(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("duration", durationBuiltin)
+
+	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{}, []starlarklib.Tuple{
+		{starlarklib.String("seconds"), starlarklib.MakeInt(90)},
+	})
+	require.NoError(t, err)
+	i, ok := val.(starlarklib.Int)
+	require.True(t, ok)
+	i64, ok := i.Int64()
+	require.True(t, ok)
+	assert.Equal(t, int64(90), i64)
+}
+
+// --- print builtin ---
+
+func TestPrintBuiltin(t *testing.T) {
+	builtins := newForecastBuiltins(nil)
+	thread := &starlarklib.Thread{Name: "test-print"}
+
+	printFn := builtins["print"]
+	val, err := starlarklib.Call(thread, printFn, starlarklib.Tuple{
+		starlarklib.String("hello"),
+		starlarklib.MakeInt(42),
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, starlarklib.None, val)
+}
 
 func TestDurationBuiltin_AllParameters(t *testing.T) {
 	thread := &starlarklib.Thread{Name: "test"}
@@ -555,6 +748,50 @@ func TestDurationBuiltin_AllParameters(t *testing.T) {
 	i64, ok := i.Int64()
 	require.True(t, ok)
 	assert.Equal(t, int64(3600+1800+45), i64)
+}
+
+// --- toDecimal/toFloat64 overflow cases ---
+
+func TestToDecimal_IntegerTooLarge(t *testing.T) {
+	// Create a Starlark integer that overflows int64
+	bigInt := starlarklib.MakeInt64(1)
+	for i := 0; i < 65; i++ {
+		bigInt = bigInt.Add(bigInt) // 2^65, larger than int64 max
+	}
+	_, err := toDecimal(bigInt)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrConversion)
+	assert.Contains(t, err.Error(), "integer too large")
+}
+
+func TestToFloat64_IntegerTooLarge(t *testing.T) {
+	bigInt := starlarklib.MakeInt64(1)
+	for i := 0; i < 65; i++ {
+		bigInt = bigInt.Add(bigInt) // 2^65
+	}
+	_, err := toFloat64(bigInt)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrConversion)
+	assert.Contains(t, err.Error(), "integer too large")
+}
+
+// --- addSecondsBuiltin overflow ---
+
+func TestAddSecondsBuiltin_SecondsOverflow(t *testing.T) {
+	thread := &starlarklib.Thread{Name: "test"}
+	b := starlarklib.NewBuiltin("add_seconds", addSecondsBuiltin)
+
+	bigInt := starlarklib.MakeInt64(1)
+	for i := 0; i < 65; i++ {
+		bigInt = bigInt.Add(bigInt)
+	}
+
+	_, err := starlarklib.Call(thread, b, starlarklib.Tuple{
+		starlarklib.String("2026-02-10T00:00:00Z"),
+		bigInt,
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "seconds value too large")
 }
 
 func TestDurationBuiltin_NoArgs(t *testing.T) {

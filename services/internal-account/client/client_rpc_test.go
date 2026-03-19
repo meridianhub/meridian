@@ -244,8 +244,30 @@ func TestGetBalance_SuccessPath(t *testing.T) {
 }
 
 func TestClose_WithActiveConnection(t *testing.T) {
-	c := setupBufconnClient(t)
+	listener := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	go func() { _ = srv.Serve(listener) }()
 
-	err := c.Close()
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+
+	c := &Client{
+		conn:            conn,
+		internalAccount: internalaccountv1.NewInternalAccountServiceClient(conn),
+		timeout:         5 * time.Second,
+	}
+
+	err = c.Close()
 	assert.NoError(t, err)
+
+	t.Cleanup(func() {
+		srv.GracefulStop()
+		listener.Close()
+	})
 }

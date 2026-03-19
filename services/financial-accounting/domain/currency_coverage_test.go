@@ -49,7 +49,7 @@ func TestMustCurrencyToInstrument_ValidCurrency(t *testing.T) {
 }
 
 func TestMustCurrencyToInstrument_InvalidCurrency_Panics(t *testing.T) {
-	assert.Panics(t, func() {
+	assert.PanicsWithError(t, ErrInvalidDimension.Error(), func() {
 		MustCurrencyToInstrument(Currency("INVALID"))
 	})
 }
