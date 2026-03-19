@@ -3,16 +3,12 @@ package persistence
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
-
-	"github.com/lib/pq"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,52 +20,10 @@ const repoTestTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
-
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(repoTestTenantID)
-	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create the account table in the tenant schema (matches CurrentAccountEntity.TableName() = "account")
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.account (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		account_id VARCHAR(100) NOT NULL UNIQUE,
-		account_identification VARCHAR(34) NOT NULL UNIQUE,
-		account_type VARCHAR(50) NOT NULL DEFAULT 'current',
-		instrument_code VARCHAR(32) NOT NULL DEFAULT 'GBP',
-		dimension VARCHAR(20) NOT NULL DEFAULT 'CURRENCY',
-		precision INT NOT NULL DEFAULT 2,
-		status VARCHAR(20) NOT NULL DEFAULT 'active',
-		party_id UUID NOT NULL,
-		org_party_id UUID NULL,
-		overdraft_limit BIGINT NOT NULL DEFAULT 0,
-		overdraft_rate NUMERIC(5,4) NOT NULL DEFAULT 0,
-		product_type_code VARCHAR(50) NULL,
-		product_type_version INT NULL,
-		behavior_class VARCHAR(50) NULL,
-		opened_at TIMESTAMP WITH TIME ZONE,
-		closed_at TIMESTAMP WITH TIME ZONE,
-		freeze_reason VARCHAR(1000),
-		status_history JSONB NOT NULL DEFAULT '[]',
-		version BIGINT NOT NULL DEFAULT 1,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		created_by VARCHAR(100) NOT NULL DEFAULT 'test',
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		updated_by VARCHAR(100) NOT NULL DEFAULT 'test',
-		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Set default search_path to include tenant schema so Create/Update work in the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create context with tenant
-	ctx := tenant.WithTenant(context.Background(), tid)
-
-	return db, ctx, cleanup
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(&CurrentAccountEntity{}),
+		testdb.WithTenant(repoTestTenantID),
+	)
 }
 
 func TestSaveNewAccount(t *testing.T) {

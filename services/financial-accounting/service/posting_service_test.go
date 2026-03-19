@@ -3,20 +3,16 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
-
-	"github.com/lib/pq"
 
 	"github.com/google/uuid"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
@@ -27,91 +23,14 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{
-		&persistence.LedgerPostingEntity{},
-		&persistence.FinancialBookingLogEntity{},
-		&audit.AuditOutbox{},
-	})
-
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(testTenantID)
-	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create tables in tenant schema (singular names to match production)
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.financial_booking_log (
-		id UUID PRIMARY KEY,
-		financial_account_type VARCHAR(50) NOT NULL,
-		product_service_reference VARCHAR(255) NOT NULL,
-		business_unit_reference VARCHAR(255) NOT NULL,
-		chart_of_accounts_rules TEXT NOT NULL,
-		base_currency VARCHAR(32) NOT NULL,
-		status VARCHAR(20) NOT NULL,
-		idempotency_key VARCHAR(255) NOT NULL UNIQUE,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		created_by VARCHAR(255),
-		updated_by VARCHAR(255),
-		version BIGINT NOT NULL DEFAULT 1,
-		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.ledger_posting (
-		id UUID PRIMARY KEY,
-		financial_booking_log_id UUID NOT NULL,
-		posting_direction VARCHAR(20) NOT NULL,
-		amount_cents BIGINT NOT NULL,
-		currency VARCHAR(32) NOT NULL,
-		dimension_type VARCHAR(20) DEFAULT 'CURRENCY',
-		instrument_version INTEGER DEFAULT 1,
-		instrument_precision INTEGER DEFAULT 2,
-		attributes JSONB DEFAULT '{}',
-		account_id VARCHAR(255) NOT NULL,
-		account_service_domain VARCHAR(20) NOT NULL DEFAULT '',
-		value_date TIMESTAMP WITH TIME ZONE NOT NULL,
-		posting_result TEXT,
-		status VARCHAR(20) NOT NULL,
-		correlation_id VARCHAR(255),
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		created_by VARCHAR(255),
-		updated_by VARCHAR(255),
-		deleted_at TIMESTAMP WITH TIME ZONE
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create audit_outbox table for GORM hooks
-	// Note: Uses TEXT instead of JSONB for old_values/new_values for compatibility with
-	// the shared audit infrastructure which writes empty strings when values are nil.
-	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		table_name VARCHAR(100) NOT NULL,
-		operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
-		record_id VARCHAR(50) NOT NULL,
-		old_values TEXT,
-		new_values TEXT,
-		status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		retry_count INT NOT NULL DEFAULT 0,
-		last_error TEXT,
-		changed_by VARCHAR(100),
-		transaction_id VARCHAR(100),
-		client_ip VARCHAR(45),
-		user_agent TEXT
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create context with tenant
-	ctx := tenant.WithTenant(context.Background(), tid)
-
-	return db, ctx, cleanup
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(
+			&persistence.FinancialBookingLogEntity{},
+			&persistence.LedgerPostingEntity{},
+			&audit.AuditOutbox{},
+		),
+		testdb.WithTenant(testTenantID),
+	)
 }
 
 func TestProcessDeposit(t *testing.T) {

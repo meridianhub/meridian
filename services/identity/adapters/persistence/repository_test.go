@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
@@ -19,63 +20,42 @@ const (
 	secondTenantID = "test_tenant_b"
 )
 
-func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
-	t.Helper()
-	db, cleanup := testdb.SetupCockroachDB(t, nil)
-
-	tid := tenant.TenantID(testTenantID)
-	ctx := setupTenantSchema(t, db, tid)
-
-	return db, ctx, cleanup
+var identityModels = []interface{}{
+	&IdentityEntity{},
+	&RoleAssignmentEntity{},
+	&InvitationEntity{},
 }
 
-// setupTenantSchema creates the identity tables in a tenant schema and returns a context with tenant.
+func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
+	t.Helper()
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(identityModels...),
+		testdb.WithTenant(testTenantID),
+	)
+}
+
+// setupTenantSchema creates an additional tenant schema with the identity tables.
+// Used for multi-tenant isolation tests. Uses db.Transaction to pin a single
+// connection for the SET search_path + AutoMigrate + restore sequence.
 func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.Context {
 	t.Helper()
 	schemaName := tid.SchemaName()
 
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.identity (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		email VARCHAR(255) NOT NULL,
-		status VARCHAR(30) NOT NULL DEFAULT 'PENDING_INVITE',
-		password_hash VARCHAR(255) NOT NULL DEFAULT '',
-		external_idp VARCHAR(100) NOT NULL DEFAULT '',
-		external_sub VARCHAR(255) NOT NULL DEFAULT '',
-		failed_attempts INT NOT NULL DEFAULT 0,
-		version BIGINT NOT NULL DEFAULT 1,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		deleted_at TIMESTAMP WITH TIME ZONE,
-		UNIQUE (email) WHERE deleted_at IS NULL
-	)`, schemaName)).Error
-	require.NoError(t, err)
-
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.role_assignment (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		identity_id UUID NOT NULL,
-		granted_by UUID NOT NULL,
-		role VARCHAR(50) NOT NULL,
-		expires_at TIMESTAMP WITH TIME ZONE,
-		revoked_at TIMESTAMP WITH TIME ZONE,
-		revoked_by UUID,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-	)`, schemaName)).Error
-	require.NoError(t, err)
-
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.invitation (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		identity_id UUID NOT NULL,
-		invited_by UUID NOT NULL,
-		token_hash VARCHAR(64) NOT NULL UNIQUE,
-		expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-	)`, schemaName)).Error
+	// Wrap in transaction to guarantee session affinity for search_path operations
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error; err != nil {
+			return err
+		}
+		if err := tx.AutoMigrate(identityModels...); err != nil {
+			return err
+		}
+		// Restore search_path to the primary tenant schema
+		primarySchema := tenant.TenantID(testTenantID).SchemaName()
+		return tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
+	})
 	require.NoError(t, err)
 
 	return tenant.WithTenant(context.Background(), tid)

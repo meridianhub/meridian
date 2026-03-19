@@ -20,68 +20,10 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{
-		&InternalAccountEntity{},
-		&StatusHistoryEntity{},
-	})
-
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(testTenantID)
-	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create the internal_account table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.internal_account (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-		created_by VARCHAR(100) NOT NULL,
-		updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-		updated_by VARCHAR(100) NOT NULL,
-		deleted_at TIMESTAMPTZ,
-		account_id VARCHAR(100) NOT NULL UNIQUE,
-		account_code VARCHAR(50) NOT NULL,
-		name VARCHAR(255) NOT NULL,
-		account_type VARCHAR(20) NOT NULL,
-		clearing_purpose VARCHAR(32) NULL,
-		org_party_id UUID NULL,
-		product_type_code VARCHAR(100) NULL,
-		product_type_version INTEGER NULL,
-		instrument_code VARCHAR(32) NOT NULL,
-		dimension VARCHAR(20) NOT NULL,
-		status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-		counterparty_id VARCHAR(50),
-		counterparty_name VARCHAR(255),
-		counterparty_external_ref VARCHAR(100),
-		attributes JSONB NOT NULL DEFAULT '{}',
-		version BIGINT NOT NULL DEFAULT 1
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create the status history table
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.internal_account_status_history (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		account_id VARCHAR(100) NOT NULL,
-		from_status VARCHAR(20) NOT NULL,
-		to_status VARCHAR(20) NOT NULL,
-		reason TEXT,
-		changed_by VARCHAR(100) NOT NULL,
-		changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create index on account_code
-	err = db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_account_code ON %s.internal_account (account_code)`, pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	// Create context with tenant
-	ctx := tenant.WithTenant(context.Background(), tid)
-
-	return db, ctx, cleanup
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(&InternalAccountEntity{}, &StatusHistoryEntity{}),
+		testdb.WithTenant(testTenantID),
+	)
 }
 
 func createTestAccount(t *testing.T, accountID, accountCode, name string, accountType domain.AccountType) domain.InternalAccount {

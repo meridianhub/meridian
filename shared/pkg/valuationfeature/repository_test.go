@@ -2,13 +2,11 @@ package valuationfeature
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,48 +18,18 @@ const testTenantID = "test_tenant"
 
 func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, cleanup := testdb.SetupPostgres(t, []interface{}{&Entity{}})
+	gormDB, ctx, cleanup := testdb.SetupTestDB(t,
+		testdb.WithModels(&Entity{}),
+		testdb.WithTenant(testTenantID),
+	)
 
-	// Create the tenant schema for tests
-	tid := tenant.TenantID(testTenantID)
-	schemaName := tid.SchemaName()
-	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaName)).Error
+	// Create partial unique index for active features (not expressible via GORM tags)
+	err := gormDB.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_valuation_feature_account_instrument_active
+		ON valuation_features (account_id, instrument_code)
+		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`).Error
 	require.NoError(t, err)
 
-	// Create the valuation_features table in the tenant schema
-	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.valuation_features (
-		id UUID PRIMARY KEY,
-		account_id UUID NOT NULL,
-		instrument_code VARCHAR(32) NOT NULL,
-		valuation_method_id UUID NOT NULL,
-		valuation_method_version INT NOT NULL,
-		parameters JSONB,
-		lifecycle_status VARCHAR(16) NOT NULL,
-		valid_from TIMESTAMP WITH TIME ZONE NOT NULL,
-		valid_to TIMESTAMP WITH TIME ZONE NOT NULL,
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		created_by VARCHAR(100) NOT NULL,
-		updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-		updated_by VARCHAR(100) NOT NULL,
-		version INT NOT NULL DEFAULT 1,
-		CONSTRAINT chk_valuation_feature_lifecycle_status CHECK (lifecycle_status IN ('INITIATED','ACTIVE','TERMINATED'))
-	)`, schemaName)).Error
-	require.NoError(t, err)
-
-	// Create unique index for active features
-	err = db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX idx_valuation_feature_account_instrument_active
-		ON %q.valuation_features (account_id, instrument_code)
-		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, schemaName)).Error
-	require.NoError(t, err)
-
-	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
-	require.NoError(t, err)
-
-	// Create context with tenant
-	ctx := tenant.WithTenant(context.Background(), tid)
-
-	return db, ctx, cleanup
+	return gormDB, ctx, cleanup
 }
 
 func TestRepository_Create(t *testing.T) {
