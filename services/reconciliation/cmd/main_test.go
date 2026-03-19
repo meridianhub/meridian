@@ -630,6 +630,37 @@ func TestMainWiring_HealthCheckWithRedis(t *testing.T) {
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.Status)
 }
 
+func TestBuildValuationComponents_NoRefDataURL(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := &config.Config{
+		Services: config.ServiceURLsConfig{
+			ReferenceDataURL: "",
+		},
+	}
+
+	engine, provider, conn := buildValuationComponents(cfg, logger)
+	assert.NotNil(t, engine, "valuation engine should always be created")
+	assert.NotNil(t, provider, "reference data provider should always be created")
+	assert.Nil(t, conn, "connection should be nil when no URL configured")
+}
+
+func TestBuildValuationComponents_WithRefDataURL(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := &config.Config{
+		Services: config.ServiceURLsConfig{
+			ReferenceDataURL: "localhost:50099",
+		},
+	}
+
+	engine, provider, conn := buildValuationComponents(cfg, logger)
+	assert.NotNil(t, engine, "valuation engine should always be created")
+	assert.NotNil(t, provider, "reference data provider should always be created")
+	assert.NotNil(t, conn, "connection should be created when URL is configured")
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
 func TestMainWiring_HealthCheckWithRedisDown(t *testing.T) {
 	db, cleanup := setupIntegrationDB(t)
 	defer cleanup()

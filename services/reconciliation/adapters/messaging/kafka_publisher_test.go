@@ -55,6 +55,13 @@ func TestDeprecatedTopicFor(t *testing.T) {
 	assert.Empty(t, deprecatedTopicFor("unknown.topic"))
 }
 
+// accountIDEvent implements the hasAccountID interface used by extractPartitionKey.
+type accountIDEvent struct {
+	accountID string
+}
+
+func (e accountIDEvent) GetAccountID() string { return e.accountID }
+
 func TestExtractPartitionKey(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -62,7 +69,12 @@ func TestExtractPartitionKey(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "event with account_id",
+			name:     "event implementing hasAccountID interface",
+			event:    accountIDEvent{accountID: "acct-direct"},
+			expected: "acct-direct",
+		},
+		{
+			name:     "event with account_id in JSON map",
 			event:    map[string]string{"account_id": "acct-123", "run_id": "run-456"},
 			expected: "acct-123",
 		},
@@ -79,6 +91,11 @@ func TestExtractPartitionKey(t *testing.T) {
 		{
 			name:     "nil event",
 			event:    nil,
+			expected: "",
+		},
+		{
+			name:     "unmarshalable event",
+			event:    make(chan int),
 			expected: "",
 		},
 	}

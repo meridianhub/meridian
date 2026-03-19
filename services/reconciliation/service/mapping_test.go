@@ -691,3 +691,57 @@ func TestDecodeCursorNegativeOffset(t *testing.T) {
 	_, err := decodeCursor(encoded)
 	assert.Error(t, err)
 }
+
+func TestToDomainRunStatus(t *testing.T) {
+	tests := []struct {
+		name  string
+		proto reconciliationv1.RunStatus
+		want  domain.RunStatus
+	}{
+		{"unspecified defaults to pending", reconciliationv1.RunStatus_RUN_STATUS_UNSPECIFIED, domain.RunStatusPending},
+		{"pending", reconciliationv1.RunStatus_RUN_STATUS_PENDING, domain.RunStatusPending},
+		{"running", reconciliationv1.RunStatus_RUN_STATUS_RUNNING, domain.RunStatusRunning},
+		{"completed", reconciliationv1.RunStatus_RUN_STATUS_COMPLETED, domain.RunStatusCompleted},
+		{"failed", reconciliationv1.RunStatus_RUN_STATUS_FAILED, domain.RunStatusFailed},
+		{"cancelled", reconciliationv1.RunStatus_RUN_STATUS_CANCELLED, domain.RunStatusCancelled},
+		{"paused", reconciliationv1.RunStatus_RUN_STATUS_PAUSED, domain.RunStatusPaused},
+		{"unknown defaults to pending", reconciliationv1.RunStatus(999), domain.RunStatusPending},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toDomainRunStatus(tt.proto)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestToDomainDisputeStatusFilter(t *testing.T) {
+	tests := []struct {
+		name  string
+		proto reconciliationv1.DisputeStatus
+		want  *domain.DisputeStatus
+	}{
+		{"open", reconciliationv1.DisputeStatus_DISPUTE_STATUS_OPEN, ptrD(domain.DisputeStatusOpen)},
+		{"under review", reconciliationv1.DisputeStatus_DISPUTE_STATUS_UNDER_REVIEW, ptrD(domain.DisputeStatusUnderReview)},
+		{"escalated", reconciliationv1.DisputeStatus_DISPUTE_STATUS_ESCALATED, ptrD(domain.DisputeStatusEscalated)},
+		{"resolved", reconciliationv1.DisputeStatus_DISPUTE_STATUS_RESOLVED, ptrD(domain.DisputeStatusResolved)},
+		{"rejected", reconciliationv1.DisputeStatus_DISPUTE_STATUS_REJECTED, ptrD(domain.DisputeStatusRejected)},
+		{"unspecified returns nil", reconciliationv1.DisputeStatus_DISPUTE_STATUS_UNSPECIFIED, nil},
+		{"unknown returns nil", reconciliationv1.DisputeStatus(999), nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toDomainDisputeStatusFilter(tt.proto)
+			if tt.want == nil {
+				assert.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				assert.Equal(t, *tt.want, *got)
+			}
+		})
+	}
+}
+
+func ptrD(s domain.DisputeStatus) *domain.DisputeStatus { return &s }
