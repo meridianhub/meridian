@@ -68,7 +68,7 @@ func TestParseInt(t *testing.T) {
 		{"100", 100},
 		{"", 0},
 		{"abc", 0},
-		{"1a2b3", 123},
+		{"1a2b3", 123}, // parseInt extracts all digits; versions are pre-split by "."
 		{"v2", 2},
 	}
 
@@ -128,8 +128,7 @@ func TestLoadEmbeddedApplyManifest_ReturnsLatestVersion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1.3.0", version)
 	assert.NotEmpty(t, script)
-	// Script should not have leading/trailing whitespace (TrimSpace applied)
-	assert.Equal(t, script, script) // sanity check it's not empty
+	// Verify TrimSpace was applied: no leading whitespace
 	assert.NotEqual(t, ' ', rune(script[0]))
 }
 
