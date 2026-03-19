@@ -123,12 +123,19 @@ func (c *MarketInformationClient) ActivateDataSet(ctx *saga.StarlarkContext, par
 }
 
 // parseDataCategory converts a string category name to the proto enum value.
+// Accepts both prefixed ("DATA_CATEGORY_ENERGY_PRICE") and stripped ("ENERGY_PRICE") forms,
+// since the Starlark handler schema uses stripped names while proto uses prefixed names.
 // Returns an error for non-empty strings that do not match a known category.
 func parseDataCategory(s string) (marketinformationv1.DataCategory, error) {
 	if s == "" {
 		return marketinformationv1.DataCategory_DATA_CATEGORY_UNSPECIFIED, nil
 	}
+	// Try the value as-is first (handles both prefixed and stripped forms).
 	if v, ok := marketinformationv1.DataCategory_value[s]; ok {
+		return marketinformationv1.DataCategory(v), nil
+	}
+	// Try with the DATA_CATEGORY_ prefix added (handles stripped form like "ENERGY_PRICE").
+	if v, ok := marketinformationv1.DataCategory_value["DATA_CATEGORY_"+s]; ok {
 		return marketinformationv1.DataCategory(v), nil
 	}
 	return 0, fmt.Errorf("%w: %q", ErrUnknownDataCategory, s)

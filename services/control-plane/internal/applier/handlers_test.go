@@ -802,7 +802,7 @@ func TestRegisterDataSetHandler(t *testing.T) {
 	ctx := newTestStarlarkContext()
 	params := map[string]any{
 		"code":     "USD_EUR_FX",
-		"category": "DATA_CATEGORY_FX_RATE",
+		"category": "FX_RATE",
 		"unit":     "USD/EUR",
 	}
 
