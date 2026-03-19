@@ -582,6 +582,214 @@ func TestPostgresAccountTypeRegistry_GetProductFeatures(t *testing.T) {
 	assert.Equal(t, 0.05, features["interest_rate"])
 }
 
+func TestPostgresRegistry_GetDefinitionByID(t *testing.T) {
+	reg, pool := setupTestAccountTypeRegistry(t)
+	ctx := setupAccountTypeTenantContext(t, pool, "test-tenant-at-getbyid")
+
+	t.Run("returns existing definition by ID", func(t *testing.T) {
+		def := newTestDefinition("GETBYID_OK", "GBP")
+		require.NoError(t, reg.CreateDraft(ctx, def))
+
+		result, err := reg.GetDefinitionByID(ctx, def.ID)
+		require.NoError(t, err)
+		assert.Equal(t, def.ID, result.ID)
+		assert.Equal(t, "GETBYID_OK", result.Code)
+		assert.Equal(t, 1, result.Version)
+		assert.Equal(t, accounttype.StatusDraft, result.Status)
+	})
+
+	t.Run("returns ErrNotFound for non-existent ID", func(t *testing.T) {
+		_, err := reg.GetDefinitionByID(ctx, uuid.New())
+		require.ErrorIs(t, err, accounttype.ErrNotFound)
+	})
+}
+
+func TestPostgresRegistry_ActivateWithValuationMethods(t *testing.T) {
+	reg, pool := setupTestAccountTypeRegistry(t)
+	ctx := setupAccountTypeTenantContext(t, pool, "test-tenant-at-valmethod")
+
+	seedInstrument(t, pool, ctx, "GBP")
+	seedInstrument(t, pool, ctx, "USD")
+
+	// Seed a valuation method so the activation pre-check succeeds
+	seedValuationMethod(t, pool, ctx)
+
+	t.Run("creates draft with valuation method templates and activates", func(t *testing.T) {
+		vmID := getSeededValuationMethodID(t, pool, ctx)
+
+		def := newTestDefinition("VM_ACTIVATE", "GBP")
+		def.ValuationMethods = []accounttype.ValuationMethodTemplate{
+			{
+				InputInstrument:        "USD",
+				ValuationMethodID:      vmID,
+				ValuationMethodVersion: 1,
+				Parameters:             map[string]any{"margin": 0.01},
+			},
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+
+		// Activate should succeed (valuation method and instruments are valid)
+		err := reg.ActivateAccountType(ctx, "VM_ACTIVATE", 1)
+		require.NoError(t, err)
+
+		// Fetch and verify valuation methods are present and ACTIVE
+		result, err := reg.GetDefinitionByID(ctx, def.ID)
+		require.NoError(t, err)
+		assert.Equal(t, accounttype.StatusActive, result.Status)
+		require.Len(t, result.ValuationMethods, 1)
+		assert.Equal(t, accounttype.StatusActive, result.ValuationMethods[0].Status)
+		assert.Equal(t, "USD", result.ValuationMethods[0].InputInstrument)
+	})
+
+	t.Run("activation fails when valuation method does not exist", func(t *testing.T) {
+		def := newTestDefinition("VM_BAD_METHOD", "GBP")
+		def.ValuationMethods = []accounttype.ValuationMethodTemplate{
+			{
+				InputInstrument:        "USD",
+				ValuationMethodID:      uuid.New(), // non-existent
+				ValuationMethodVersion: 1,
+			},
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+
+		err := reg.ActivateAccountType(ctx, "VM_BAD_METHOD", 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "valuation method")
+	})
+
+	t.Run("activation fails when valuation method instrument is not active", func(t *testing.T) {
+		vmID := getSeededValuationMethodID(t, pool, ctx)
+
+		def := newTestDefinition("VM_BAD_INST", "GBP")
+		def.ValuationMethods = []accounttype.ValuationMethodTemplate{
+			{
+				InputInstrument:        "NONEXISTENT_CURRENCY",
+				ValuationMethodID:      vmID,
+				ValuationMethodVersion: 1,
+			},
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+
+		err := reg.ActivateAccountType(ctx, "VM_BAD_INST", 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "instrument")
+	})
+}
+
+func TestPostgresRegistry_SchemaValidation(t *testing.T) {
+	reg, pool := setupTestAccountTypeRegistry(t)
+	ctx := setupAccountTypeTenantContext(t, pool, "test-tenant-at-schema")
+
+	seedInstrument(t, pool, ctx, "GBP")
+
+	t.Run("valid schema and matching attributes pass activation", func(t *testing.T) {
+		def := newTestDefinition("SCHEMA_OK", "GBP")
+		def.AttributeSchema = json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"tier": {"type": "string"},
+				"limit": {"type": "number"}
+			},
+			"required": ["tier"]
+		}`)
+		def.Attributes = map[string]any{
+			"tier":  "GOLD",
+			"limit": float64(5000),
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+
+		err := reg.ActivateAccountType(ctx, "SCHEMA_OK", 1)
+		require.NoError(t, err)
+	})
+
+	t.Run("invalid JSON schema is rejected at draft creation", func(t *testing.T) {
+		def := newTestDefinition("SCHEMA_BAD", "GBP")
+		def.AttributeSchema = json.RawMessage(`{"type": "not-a-real-type"}`)
+
+		err := reg.CreateDraft(ctx, def)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, accounttype.ErrInvalidAttributeSchema)
+	})
+
+	t.Run("attributes not matching schema fail activation", func(t *testing.T) {
+		def := newTestDefinition("SCHEMA_MISMATCH", "GBP")
+		def.AttributeSchema = json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"tier": {"type": "string"}
+			},
+			"required": ["tier"]
+		}`)
+		// Missing required "tier" field
+		def.Attributes = map[string]any{
+			"other_field": "value",
+		}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+
+		err := reg.ActivateAccountType(ctx, "SCHEMA_MISMATCH", 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "attribute")
+	})
+
+	t.Run("empty schema allows activation without attribute validation", func(t *testing.T) {
+		def := newTestDefinition("SCHEMA_EMPTY", "GBP")
+		def.AttributeSchema = json.RawMessage(`{}`)
+		def.Attributes = map[string]any{"anything": "goes"}
+		require.NoError(t, reg.CreateDraft(ctx, def))
+
+		err := reg.ActivateAccountType(ctx, "SCHEMA_EMPTY", 1)
+		require.NoError(t, err)
+	})
+}
+
+// seedValuationMethod inserts a minimal valuation method record so activation pre-checks pass.
+func seedValuationMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context) {
+	t.Helper()
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	query := `
+		INSERT INTO valuation_method (
+			id, name, version, input_instrument, output_instrument,
+			logic_script, logic_hash, lifecycle_status, is_system,
+			created_at, valid_from
+		) VALUES (
+			gen_random_uuid(), 'TEST_VM', 1, 'USD', 'GBP',
+			'return input', 'abc123', 'ACTIVE', false,
+			NOW(), NOW()
+		) ON CONFLICT DO NOTHING`
+
+	_, err = tx.Exec(ctx, query)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+}
+
+// getSeededValuationMethodID retrieves the ID of the seeded valuation method.
+func getSeededValuationMethodID(t *testing.T, pool *pgxpool.Pool, ctx context.Context) uuid.UUID {
+	t.Helper()
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	var vmID uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT id FROM valuation_method WHERE name = 'TEST_VM' AND version = 1`).Scan(&vmID)
+	require.NoError(t, err)
+
+	return vmID
+}
+
 func TestPostgresAccountTypeRegistry_LifecycleTimestamps(t *testing.T) {
 	reg, pool := setupTestAccountTypeRegistry(t)
 	ctx := setupAccountTypeTenantContext(t, pool, "test-tenant-at-timestamps")

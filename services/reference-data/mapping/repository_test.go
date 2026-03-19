@@ -218,6 +218,35 @@ func TestRepository_GetLatestActive(t *testing.T) {
 	assert.Equal(t, mapping.StatusActive, got.Status)
 }
 
+func TestRepository_GetByNameAndVersion(t *testing.T) {
+	pool := testdb.NewTestPool(t, testdb.WithMigrations("reference-data"))
+	ctx, cleanup := testdb.SetupTenantSchemaForPgx(t, pool, "testtenant13", "reference-data")
+	defer cleanup()
+
+	repo := mapping.NewPostgresRepository(pool)
+
+	t.Run("returns existing definition", func(t *testing.T) {
+		def := newTestDef()
+		require.NoError(t, repo.Create(ctx, def))
+
+		got, err := repo.GetByNameAndVersion(ctx, "test-mapping", 1)
+		require.NoError(t, err)
+		assert.Equal(t, def.ID, got.ID)
+		assert.Equal(t, "test-mapping", got.Name)
+		assert.Equal(t, 1, got.Version)
+	})
+
+	t.Run("returns ErrNotFound for non-existent name", func(t *testing.T) {
+		_, err := repo.GetByNameAndVersion(ctx, "does-not-exist", 1)
+		assert.ErrorIs(t, err, mapping.ErrNotFound)
+	})
+
+	t.Run("returns ErrNotFound for non-existent version", func(t *testing.T) {
+		_, err := repo.GetByNameAndVersion(ctx, "test-mapping", 999)
+		assert.ErrorIs(t, err, mapping.ErrNotFound)
+	})
+}
+
 func TestRepository_OptimisticLock(t *testing.T) {
 	pool := testdb.NewTestPool(t, testdb.WithMigrations("reference-data"))
 	ctx, cleanup := testdb.SetupTenantSchemaForPgx(t, pool, "testtenant12", "reference-data")
