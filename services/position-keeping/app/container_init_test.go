@@ -142,9 +142,8 @@ func TestContainer_InitializeAuditPublisher_KafkaEnabled_InvalidBrokers(t *testi
 	}
 
 	c.initializeAuditPublisher()
-	// Invalid broker may or may not fail — audit publisher degrades gracefully
-	// We just verify initialization doesn't panic
-	t.Log("audit publisher initialized without panic")
+	// Invalid broker should fail producer creation — auditPublisher stays nil (outbox fallback only)
+	assert.Nil(t, c.auditPublisher, "expected nil audit publisher when kafka broker is invalid")
 }
 
 func TestContainer_InitializeEventPublisher_KafkaDisabled(t *testing.T) {

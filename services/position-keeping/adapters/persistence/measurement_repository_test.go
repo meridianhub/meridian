@@ -122,6 +122,17 @@ func TestMeasurementRepository_Create(t *testing.T) {
 		err := repo.Create(ctx, m)
 		require.NoError(t, err)
 
+		// Verify at the SQL level that bucket_id is actually NULL, not ''
+		var isNull bool
+		err = tc.pool.QueryRow(
+			ctx,
+			`SELECT bucket_id IS NULL FROM position_keeping.measurement WHERE id = $1`,
+			m.ID,
+		).Scan(&isNull)
+		require.NoError(t, err)
+		assert.True(t, isNull, "expected bucket_id to be SQL NULL, not empty string")
+
+		// Also verify round-trip returns empty string
 		found, err := repo.FindByID(ctx, m.ID)
 		require.NoError(t, err)
 		assert.Empty(t, found.BucketID)
@@ -177,18 +188,28 @@ func TestMeasurementRepository_FindByPositionLogID(t *testing.T) {
 
 	t.Run("returns measurements ordered by timestamp desc", func(t *testing.T) {
 		now := time.Now().UTC()
-		for i := 0; i < 3; i++ {
+		// Insert in non-chronological order to prove sorting is by timestamp, not insertion order
+		timestamps := []time.Duration{
+			-2 * time.Hour,  // oldest
+			-30 * time.Minute, // newest
+			-90 * time.Minute, // middle
+		}
+		var ids []uuid.UUID
+		for _, offset := range timestamps {
 			m := createTestMeasurement(t, logID)
-			m.Timestamp = now.Add(time.Duration(i) * time.Hour)
+			m.Timestamp = now.Add(offset)
 			err := repo.Create(ctx, m)
 			require.NoError(t, err)
+			ids = append(ids, m.ID)
 		}
 
 		measurements, err := repo.FindByPositionLogID(ctx, logID)
 		require.NoError(t, err)
 		assert.Len(t, measurements, 3)
-		// Should be desc order
-		assert.True(t, measurements[0].Timestamp.After(measurements[2].Timestamp))
+		// Expect desc order: newest (-30m), middle (-90m), oldest (-2h)
+		assert.Equal(t, ids[1], measurements[0].ID, "first should be newest (-30m)")
+		assert.Equal(t, ids[2], measurements[1].ID, "second should be middle (-90m)")
+		assert.Equal(t, ids[0], measurements[2].ID, "third should be oldest (-2h)")
 	})
 
 	t.Run("nonexistent log returns empty slice", func(t *testing.T) {

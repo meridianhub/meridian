@@ -91,18 +91,25 @@ func TestPostgresRepository_List_CombinedFilters(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create logs with different accounts and statuses
+	// log1: target — testAccountID, pending status
 	log1 := createTestLog(t, testAccountID)
+
+	// log2: different account — should be excluded by AccountID filter
 	log2 := createTestLog(t, "GB33BUKB20201555555556")
-	err := log2.MarkPosted("Posted", nil)
+
+	// log3: same account but posted status — should be excluded by Status filter
+	log3 := createTestLog(t, testAccountID)
+	err := log3.MarkPosted("Posted", nil)
 	require.NoError(t, err)
 
 	err = tc.repo.Create(ctx, log1)
 	require.NoError(t, err)
 	err = tc.repo.Create(ctx, log2)
 	require.NoError(t, err)
+	err = tc.repo.Create(ctx, log3)
+	require.NoError(t, err)
 
-	// Combine account + status + date
+	// Combine account + status + date — should match only log1
 	accountID := testAccountID
 	statusPending := domain.TransactionStatusPending
 	pastDate := time.Now().UTC().Add(-1 * time.Hour)
@@ -119,6 +126,7 @@ func TestPostgresRepository_List_CombinedFilters(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, logs, 1)
 	assert.Equal(t, testAccountID, logs[0].AccountID)
+	assert.Equal(t, log1.LogID, logs[0].LogID)
 }
 
 func TestPostgresRepository_CreateBatch_DuplicateLogIDs(t *testing.T) {
