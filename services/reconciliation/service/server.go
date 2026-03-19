@@ -1,3 +1,4 @@
+//meridian:large-file — known oversized file; split tracked in backlog
 // Package service implements the gRPC AccountReconciliationService.
 //
 // Dispute RPCs are implemented in dispute_handler.go. The AssertBalance RPC

@@ -1,3 +1,4 @@
+//meridian:large-file — known oversized file; split tracked in backlog
 // Package schema provides YAML-based handler schema definitions for saga orchestration.
 // It enables compile-time validation and IDE support for handler references in Starlark scripts.
 package schema

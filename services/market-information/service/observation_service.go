@@ -1,3 +1,4 @@
+//meridian:large-file — known oversized file; split tracked in backlog
 // Package service provides gRPC service implementations for the Market Information service.
 // BIAN Service Domain: Market Information Management
 //

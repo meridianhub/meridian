@@ -1,3 +1,4 @@
+//meridian:large-file — known oversized file; split tracked in backlog
 // Package saga provides gRPC handlers for saga definition management.
 package saga
 
