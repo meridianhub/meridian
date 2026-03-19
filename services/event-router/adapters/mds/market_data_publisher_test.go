@@ -863,6 +863,23 @@ func TestMarketDataPublisher_PartialFailureRequeuesFailedOnly(t *testing.T) {
 	assert.Equal(t, 1, pub.BufferSize(), "failed observation should be re-queued")
 }
 
+// --- classifyError tests ---
+
+func TestClassifyError_CircuitBreakerOpen(t *testing.T) {
+	result := classifyError(ErrCircuitBreakerOpen)
+	assert.Equal(t, "circuit_breaker_open", result)
+}
+
+func TestClassifyError_PublishFailed(t *testing.T) {
+	result := classifyError(status.Errorf(codes.Unavailable, "unavailable"))
+	assert.Equal(t, "publish_failed", result)
+}
+
+func TestClassifyError_GenericError(t *testing.T) {
+	result := classifyError(fmt.Errorf("some error"))
+	assert.Equal(t, "publish_failed", result)
+}
+
 // --- Config normalization ---
 
 func TestNewMarketDataPublisher_ConfigNormalization(t *testing.T) {

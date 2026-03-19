@@ -231,3 +231,41 @@ func TestResultConstants(t *testing.T) {
 	assert.Equal(t, "success", ResultSuccess)
 	assert.Equal(t, "error", ResultError)
 }
+
+func TestRecordInstrumentValidation(t *testing.T) {
+	// Get initial counts
+	initialSuccess := testutil.ToFloat64(instrumentValidation.WithLabelValues("success"))
+	initialNotFound := testutil.ToFloat64(instrumentValidation.WithLabelValues("not_found"))
+
+	// Record instrument validation
+	RecordInstrumentValidation("success", 10*time.Millisecond)
+	RecordInstrumentValidation("not_found", 5*time.Millisecond)
+
+	// Verify counters incremented
+	assert.Equal(t, initialSuccess+1, testutil.ToFloat64(instrumentValidation.WithLabelValues("success")))
+	assert.Equal(t, initialNotFound+1, testutil.ToFloat64(instrumentValidation.WithLabelValues("not_found")))
+}
+
+func TestRecordCircuitBreakerState(t *testing.T) {
+	// Record circuit breaker states
+	RecordCircuitBreakerState("position-keeping", CircuitBreakerStateClosed)
+	assert.Equal(t, float64(CircuitBreakerStateClosed), testutil.ToFloat64(circuitBreakerState.WithLabelValues("position-keeping")))
+
+	RecordCircuitBreakerState("position-keeping", CircuitBreakerStateOpen)
+	assert.Equal(t, float64(CircuitBreakerStateOpen), testutil.ToFloat64(circuitBreakerState.WithLabelValues("position-keeping")))
+
+	RecordCircuitBreakerState("position-keeping", CircuitBreakerStateHalfOpen)
+	assert.Equal(t, float64(CircuitBreakerStateHalfOpen), testutil.ToFloat64(circuitBreakerState.WithLabelValues("position-keeping")))
+}
+
+func TestRecordCircuitBreakerStateChange(t *testing.T) {
+	// Get initial count
+	initial := testutil.ToFloat64(circuitBreakerStateChanges.WithLabelValues("position-keeping", "closed", "open"))
+
+	// Record state change
+	RecordCircuitBreakerStateChange("position-keeping", "closed", "open")
+
+	// Verify counter incremented
+	newCount := testutil.ToFloat64(circuitBreakerStateChanges.WithLabelValues("position-keeping", "closed", "open"))
+	assert.Equal(t, initial+1, newCount, "circuit breaker state change counter should increment by 1")
+}

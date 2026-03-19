@@ -136,6 +136,31 @@ func TestRecordEventProcessingDuration(_ *testing.T) {
 	// In practice, histogram observations are validated via Prometheus queries
 }
 
+func TestRecordMDSPublish(t *testing.T) {
+	mdsPublishTotal.Reset()
+
+	RecordMDSPublish("success")
+	RecordMDSPublish("success")
+	RecordMDSPublish("error")
+
+	successCount := testutil.ToFloat64(mdsPublishTotal.WithLabelValues("success"))
+	if successCount != 2.0 {
+		t.Errorf("RecordMDSPublish(success) count = %v, want 2.0", successCount)
+	}
+
+	errorCount := testutil.ToFloat64(mdsPublishTotal.WithLabelValues("error"))
+	if errorCount != 1.0 {
+		t.Errorf("RecordMDSPublish(error) count = %v, want 1.0", errorCount)
+	}
+}
+
+func TestRecordDualOutputLatency(_ *testing.T) {
+	// Smoke test to ensure the function doesn't panic and records observations
+	RecordDualOutputLatency("pk", 0.005)
+	RecordDualOutputLatency("mds", 0.010)
+	RecordDualOutputLatency("pk", 0.025)
+}
+
 func TestMetricsLabels(t *testing.T) {
 	tests := []struct {
 		name   string

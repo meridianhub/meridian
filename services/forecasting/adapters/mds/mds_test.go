@@ -37,6 +37,18 @@ func TestQualityToString_Unknown(t *testing.T) {
 	assert.Equal(t, "UNSPECIFIED", qualityToString(marketinformationv1.QualityLevel(999)))
 }
 
+// --- Constructor tests ---
+
+func TestNewMISAdapter(t *testing.T) {
+	adapter := NewMISAdapter(nil)
+	require.NotNil(t, adapter)
+}
+
+func TestNewPublisherAdapter(t *testing.T) {
+	adapter := NewPublisherAdapter(nil)
+	require.NotNil(t, adapter)
+}
+
 // --- NoOpRefDataClient tests ---
 
 func TestNoOpRefDataClient_GetNodeByResolutionKey_ReturnsError(t *testing.T) {

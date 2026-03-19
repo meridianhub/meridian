@@ -869,6 +869,45 @@ func TestAuditConsumer_DualOutput_MultipleEvents(t *testing.T) {
 	require.NoError(t, err, "Both PK and MDS should receive all %d events", eventCount)
 }
 
+func TestAuditConsumer_Start_EmptyTopics(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		GroupID:          "test-group",
+	}, transformer, mockPK)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	err = consumer.Start([]string{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNoTopics)
+}
+
+func TestAuditConsumer_Stop(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		GroupID:          "test-group",
+	}, transformer, mockPK)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	// Stop should not panic even if not started
+	consumer.Stop()
+}
+
 // TestPlatformMeteringHandler_ImplementsEventHandler verifies the interface contract.
 func TestPlatformMeteringHandler_ImplementsEventHandler(t *testing.T) {
 	transformer := newTestTransformer()

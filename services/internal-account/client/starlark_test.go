@@ -392,6 +392,123 @@ func TestInitiateHandler_MissingRequiredFields(t *testing.T) {
 	}
 }
 
+func TestConvertAccountStatusToString(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   internalaccountv1.InternalAccountStatus
+		expected string
+	}{
+		{"ACTIVE", internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE, "ACTIVE"},
+		{"SUSPENDED", internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_SUSPENDED, "SUSPENDED"},
+		{"CLOSED", internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_CLOSED, "CLOSED"},
+		{"UNSPECIFIED", internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_UNSPECIFIED, "UNSPECIFIED"},
+		{"unknown numeric value", internalaccountv1.InternalAccountStatus(99), "UNSPECIFIED"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertAccountStatusToString(tt.status)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestAddCounterpartyDetails_NoCounterpartyID(t *testing.T) {
+	req := &internalaccountv1.InitiateInternalAccountRequest{}
+	params := map[string]any{
+		"account_code": "TEST-001",
+	}
+
+	err := addCounterpartyDetails(req, params, "NOSTRO_USD")
+	require.NoError(t, err)
+	assert.Nil(t, req.CounterpartyDetails, "no counterparty when counterparty_id is absent")
+}
+
+func TestAddCounterpartyDetails_NostroType(t *testing.T) {
+	req := &internalaccountv1.InitiateInternalAccountRequest{}
+	params := map[string]any{
+		"counterparty_id":           "CHASE001",
+		"counterparty_name":         "JPMorgan Chase",
+		"counterparty_external_ref": "EXT-REF-001",
+	}
+
+	err := addCounterpartyDetails(req, params, "NOSTRO_USD")
+	require.NoError(t, err)
+	require.NotNil(t, req.CounterpartyDetails)
+	assert.Equal(t, "CHASE001", req.CounterpartyDetails.CounterpartyId)
+	assert.Equal(t, "JPMorgan Chase", req.CounterpartyDetails.CounterpartyName)
+	assert.Equal(t, "EXT-REF-001", req.CounterpartyDetails.CounterpartyExternalRef)
+	assert.Equal(t, internalaccountv1.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO, req.CounterpartyDetails.CounterpartyType)
+}
+
+func TestAddCounterpartyDetails_VostroType(t *testing.T) {
+	req := &internalaccountv1.InitiateInternalAccountRequest{}
+	params := map[string]any{
+		"counterparty_id": "DB001",
+	}
+
+	err := addCounterpartyDetails(req, params, "VOSTRO_EUR")
+	require.NoError(t, err)
+	require.NotNil(t, req.CounterpartyDetails)
+	assert.Equal(t, internalaccountv1.CounterpartyType_COUNTERPARTY_TYPE_VOSTRO, req.CounterpartyDetails.CounterpartyType)
+}
+
+func TestAddCounterpartyDetails_WithAttributes(t *testing.T) {
+	req := &internalaccountv1.InitiateInternalAccountRequest{}
+	params := map[string]any{
+		"counterparty_id": "BANK001",
+		"counterparty_attributes": map[string]any{
+			"swift_code": "CHASUS33",
+			"bic_code":   "BOFAUS3N",
+		},
+	}
+
+	err := addCounterpartyDetails(req, params, "NOSTRO_USD")
+	require.NoError(t, err)
+	require.NotNil(t, req.CounterpartyDetails)
+	assert.Equal(t, "CHASUS33", req.CounterpartyDetails.Attributes["swift_code"])
+	assert.Equal(t, "BOFAUS3N", req.CounterpartyDetails.Attributes["bic_code"])
+}
+
+func TestAddCounterpartyDetails_InvalidAttributesType(t *testing.T) {
+	req := &internalaccountv1.InitiateInternalAccountRequest{}
+	params := map[string]any{
+		"counterparty_id":         "BANK001",
+		"counterparty_attributes": "not-a-map",
+	}
+
+	err := addCounterpartyDetails(req, params, "NOSTRO_USD")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCounterpartyAttributesNotMap)
+}
+
+func TestAddCounterpartyDetails_InvalidAttributeValue(t *testing.T) {
+	req := &internalaccountv1.InitiateInternalAccountRequest{}
+	params := map[string]any{
+		"counterparty_id": "BANK001",
+		"counterparty_attributes": map[string]any{
+			"swift_code": 12345, // not a string
+		},
+	}
+
+	err := addCounterpartyDetails(req, params, "NOSTRO_USD")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCounterpartyAttributeValueNotString)
+}
+
+func TestAddCounterpartyDetails_ShortProductTypeCode(t *testing.T) {
+	// Product type code shorter than 6 chars should default to NOSTRO
+	req := &internalaccountv1.InitiateInternalAccountRequest{}
+	params := map[string]any{
+		"counterparty_id": "BANK001",
+	}
+
+	err := addCounterpartyDetails(req, params, "SHORT")
+	require.NoError(t, err)
+	require.NotNil(t, req.CounterpartyDetails)
+	assert.Equal(t, internalaccountv1.CounterpartyType_COUNTERPARTY_TYPE_NOSTRO, req.CounterpartyDetails.CounterpartyType)
+}
+
 func TestHandlerMetadata(t *testing.T) {
 	c, _, cleanup := setupTestClient(t)
 	defer cleanup()

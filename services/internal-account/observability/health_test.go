@@ -350,3 +350,78 @@ func TestHealthChecker_CustomTimeout(t *testing.T) {
 
 	assert.Equal(t, customTimeout, healthChecker.checkTimeout)
 }
+
+// mockWatchStream implements grpc_health_v1.Health_WatchServer for testing Watch().
+type mockWatchStream struct {
+	grpc_health_v1.Health_WatchServer
+	ctx       context.Context
+	responses []*grpc_health_v1.HealthCheckResponse
+	sendErr   error
+}
+
+func (m *mockWatchStream) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockWatchStream) Send(resp *grpc_health_v1.HealthCheckResponse) error {
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.responses = append(m.responses, resp)
+	return nil
+}
+
+func TestHealthChecker_Watch_SendsInitialAndCancels(t *testing.T) {
+	gormDB, mock := setupMockDB(t)
+	// Expect ping for the initial health check
+	mock.ExpectPing()
+
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
+		DB:           gormDB,
+		CheckTimeout: 1 * time.Second,
+	})
+	require.NoError(t, err)
+
+	// Create a context that cancels immediately after initial send
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stream := &mockWatchStream{ctx: ctx}
+
+	// Cancel after a short delay to allow initial send but stop the loop
+	go func() {
+		// Wait for initial response to be sent
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
+	assert.NoError(t, err)
+
+	// Should have received at least the initial response
+	require.GreaterOrEqual(t, len(stream.responses), 1)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, stream.responses[0].Status)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHealthChecker_Watch_SendError(t *testing.T) {
+	gormDB, mock := setupMockDB(t)
+	mock.ExpectPing()
+
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
+		DB:           gormDB,
+		CheckTimeout: 1 * time.Second,
+	})
+	require.NoError(t, err)
+
+	stream := &mockWatchStream{
+		ctx:     context.Background(),
+		sendErr: assert.AnError,
+	}
+
+	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to send initial health status")
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}

@@ -266,6 +266,18 @@ func TestInstruments_FractionalDimensionsHaveHigherPrecision(t *testing.T) {
 	}
 }
 
+func TestMustInstrument_PanicsOnInvalidCode(t *testing.T) {
+	assert.Panics(t, func() {
+		mustInstrument("", 1, "COUNT", 0) // empty code is invalid
+	})
+}
+
+func TestMustInstrument_PanicsOnInvalidDimension(t *testing.T) {
+	assert.Panics(t, func() {
+		mustInstrument("VALID_CODE", 1, "", 0) // empty dimension is invalid
+	})
+}
+
 func TestInstruments_Version(t *testing.T) {
 	// All instruments should use version 1
 	for _, inst := range AllInstruments() {
