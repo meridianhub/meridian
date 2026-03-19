@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -426,6 +427,204 @@ func (m *paginatedMockPKClient) ListFinancialPositionLogs(_ context.Context, req
 
 func (m *paginatedMockPKClient) GetAccountBalance(_ context.Context, _ *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
 	return nil, nil
+}
+
+func TestGetBalanceSheet_ServiceError(t *testing.T) {
+	client := &mockPKClient{err: fmt.Errorf("rpc error: unavailable")}
+	svc := NewBalanceSheetService(client, nil)
+
+	_, err := svc.GetBalanceSheet(context.Background(), "acme", time.Now().UTC())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fetch position logs")
+}
+
+func TestGetPositionDetails_ServiceError(t *testing.T) {
+	client := &mockPKClient{err: fmt.Errorf("rpc error: unavailable")}
+	svc := NewBalanceSheetService(client, nil)
+
+	_, err := svc.GetPositionDetails(context.Background(), "acme", "CASH", "GBP", time.Now().UTC())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fetch position logs")
+}
+
+func TestExportBalanceSheetCSV_ServiceError(t *testing.T) {
+	client := &mockPKClient{err: fmt.Errorf("rpc error: unavailable")}
+	svc := NewBalanceSheetService(client, nil)
+
+	_, err := svc.ExportBalanceSheetCSV(context.Background(), "acme", time.Now().UTC())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fetch position logs")
+}
+
+func TestSanitizeCSVCell(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"empty string", "", ""},
+		{"normal text", "CASH", "CASH"},
+		{"equals formula", "=SUM(A1:A10)", "'=SUM(A1:A10)"},
+		{"plus formula", "+1+2", "'+1+2"},
+		{"minus formula", "-1-2", "'-1-2"},
+		{"at formula", "@SUM(A1)", "'@SUM(A1)"},
+		{"normal number", "5000", "5000"},
+		{"normal with spaces", "ACCOUNTS PAYABLE", "ACCOUNTS PAYABLE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeCSVCell(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetBalanceSheet_ZeroAsOf(t *testing.T) {
+	// When asOf is zero, the service should default to now (not error)
+	client := &mockPKClient{logs: nil}
+	svc := NewBalanceSheetService(client, nil)
+
+	bs, err := svc.GetBalanceSheet(context.Background(), "acme", time.Time{})
+	require.NoError(t, err)
+	require.NotNil(t, bs)
+	// asOf should have been set to approximately now
+	assert.False(t, bs.AsOf.IsZero())
+}
+
+func TestGetBalanceSheet_UnixEpochAsOf(t *testing.T) {
+	// A nil proto Timestamp converts to Unix epoch — should be treated as "now"
+	client := &mockPKClient{logs: nil}
+	svc := NewBalanceSheetService(client, nil)
+
+	epoch := time.Unix(0, 0)
+	bs, err := svc.GetBalanceSheet(context.Background(), "acme", epoch)
+	require.NoError(t, err)
+	require.NotNil(t, bs)
+	assert.NotEqual(t, int64(0), bs.AsOf.Unix())
+}
+
+func TestExtractInstrument_NilAmount(t *testing.T) {
+	// Log with an entry whose Amount is nil
+	log := &positionkeepingv1.FinancialPositionLog{
+		LogId:     "log-nil-amount",
+		AccountId: "test_CASH_001",
+		TransactionLogEntries: []*positionkeepingv1.TransactionLogEntry{
+			{
+				EntryId:   "entry-1",
+				Amount:    nil,
+				Direction: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+			},
+		},
+		CreatedAt: timestamppb.Now(),
+		UpdatedAt: timestamppb.Now(),
+	}
+	assert.Equal(t, instrumentUnknown, extractInstrument(log))
+}
+
+func TestExtractInstrument_EmptyCurrencyCode(t *testing.T) {
+	log := makeLog("test_CASH_001", "log-1", "",
+		txnEntry{units: 100, nanos: 0, direction: "DEBIT"},
+	)
+	// makeLog uses "" as the currency code, extractInstrument should return UNKNOWN
+	assert.Equal(t, instrumentUnknown, extractInstrument(log))
+}
+
+func TestEntryAmount_NilEntry(t *testing.T) {
+	// Entry with nil Amount
+	entry := &positionkeepingv1.TransactionLogEntry{
+		Amount: nil,
+	}
+	result := entryAmount(entry)
+	assert.True(t, result.IsZero())
+}
+
+func TestEntryAmount_NilMoney(t *testing.T) {
+	// Entry with MoneyAmount but nil inner Amount
+	entry := &positionkeepingv1.TransactionLogEntry{
+		Amount: &commonv1.MoneyAmount{
+			Amount: nil,
+		},
+	}
+	result := entryAmount(entry)
+	assert.True(t, result.IsZero())
+}
+
+func TestComputeLogBalance_UnspecifiedDirection(t *testing.T) {
+	// Entries with UNSPECIFIED direction should be ignored
+	log := &positionkeepingv1.FinancialPositionLog{
+		LogId:     "log-unspecified",
+		AccountId: "test_CASH_001",
+		TransactionLogEntries: []*positionkeepingv1.TransactionLogEntry{
+			{
+				EntryId: "entry-1",
+				Amount: &commonv1.MoneyAmount{
+					Amount: &money.Money{
+						CurrencyCode: "GBP",
+						Units:        100,
+						Nanos:        0,
+					},
+				},
+				Direction: commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED,
+			},
+			{
+				EntryId: "entry-2",
+				Amount: &commonv1.MoneyAmount{
+					Amount: &money.Money{
+						CurrencyCode: "GBP",
+						Units:        200,
+						Nanos:        0,
+					},
+				},
+				Direction: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
+			},
+		},
+		CreatedAt: timestamppb.Now(),
+		UpdatedAt: timestamppb.Now(),
+	}
+	result := computeLogBalance(log)
+	// Only the DEBIT entry should count
+	assert.True(t, result.Equal(decimal.NewFromInt(200)))
+}
+
+func TestExtractAccountType_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		accountID string
+		expected  string
+	}{
+		{"single segment no underscore", "simple", "simple"},
+		{"tenant with trailing numeric only", "acme_001", "001"},
+		{"empty segments", "acme__CASH__001", "CASH"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractAccountType(tt.accountID)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsUpperAlpha(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"CASH", true},
+		{"Cash", false},
+		{"cash", false},
+		{"123", false},
+		{"CASH1", false},
+		{"", false},
+		{"A", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isUpperAlpha(tt.input))
+		})
+	}
 }
 
 func TestGetBalanceSheet_Pagination(t *testing.T) {

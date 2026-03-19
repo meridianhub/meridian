@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -217,6 +218,62 @@ func TestClassificationToProto(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestBalanceSheetHandler_GetBalanceSheet_ServiceError(t *testing.T) {
+	client := &mockPKClient{err: fmt.Errorf("database unavailable")}
+	svc := NewBalanceSheetService(client, nil)
+	handler := NewBalanceSheetHandler(svc, nil)
+
+	req := &controlplanev1.GetBalanceSheetRequest{
+		TenantId: "acme",
+	}
+
+	_, err := handler.GetBalanceSheet(context.Background(), req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to generate balance sheet")
+}
+
+func TestBalanceSheetHandler_GetPositionDetails_ServiceError(t *testing.T) {
+	client := &mockPKClient{err: fmt.Errorf("connection refused")}
+	svc := NewBalanceSheetService(client, nil)
+	handler := NewBalanceSheetHandler(svc, nil)
+
+	req := &controlplanev1.GetPositionDetailsRequest{
+		TenantId:    "acme",
+		AccountType: "CASH",
+		Instrument:  "GBP",
+	}
+
+	_, err := handler.GetPositionDetails(context.Background(), req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to get position details")
+}
+
+func TestBalanceSheetHandler_ExportBalanceSheetCSV_ServiceError(t *testing.T) {
+	client := &mockPKClient{err: fmt.Errorf("timeout")}
+	svc := NewBalanceSheetService(client, nil)
+	handler := NewBalanceSheetHandler(svc, nil)
+
+	req := &controlplanev1.ExportBalanceSheetCSVRequest{
+		TenantId: "acme",
+	}
+
+	_, err := handler.ExportBalanceSheetCSV(context.Background(), req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to export balance sheet CSV")
 }
 
 func TestNormalBalanceToProto(t *testing.T) {

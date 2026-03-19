@@ -822,6 +822,300 @@ func TestGenerateManifest_PatternNamesPopulated(t *testing.T) {
 	assert.True(t, resp.Valid)
 }
 
+// --- extractManifestMetadata tests (via export_test.go) ---
+
+func TestExtractManifestMetadata_ValidYAML(t *testing.T) {
+	yamlStr := `
+instruments:
+  - code: GBP
+    name: British Pound
+  - code: EUR
+    name: Euro
+account_types:
+  - code: CURRENT
+    name: Current Account
+  - code: SAVINGS
+    name: Savings Account
+sagas:
+  - name: transfer_funds
+  - name: settle_trade
+`
+	meta, err := generator.ExtractManifestMetadata(yamlStr)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	assert.Equal(t, []string{"GBP", "EUR"}, meta.InstrumentsCreated)
+	assert.Equal(t, []string{"CURRENT", "SAVINGS"}, meta.AccountTypesCreated)
+	assert.Equal(t, []string{"transfer_funds", "settle_trade"}, meta.SagasCreated)
+}
+
+func TestExtractManifestMetadata_EmptyYAML(t *testing.T) {
+	yamlStr := `
+instruments: []
+account_types: []
+sagas: []
+`
+	meta, err := generator.ExtractManifestMetadata(yamlStr)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	assert.Empty(t, meta.InstrumentsCreated)
+	assert.Empty(t, meta.AccountTypesCreated)
+	assert.Empty(t, meta.SagasCreated)
+}
+
+func TestExtractManifestMetadata_InvalidYAML(t *testing.T) {
+	_, err := generator.ExtractManifestMetadata("{{{{not valid yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse manifest YAML")
+}
+
+// --- patternNames tests ---
+
+func TestPatternNames_Empty(t *testing.T) {
+	result := generator.PatternNames(nil)
+	assert.Nil(t, result)
+
+	result = generator.PatternNames([]generator.PatternMatch{})
+	assert.Nil(t, result)
+}
+
+func TestPatternNames_WithItems(t *testing.T) {
+	patterns := []generator.PatternMatch{
+		{Name: "energy-settlement"},
+		{Name: "carbon-offset"},
+		{Name: "neobank-payments"},
+	}
+	result := generator.PatternNames(patterns)
+	assert.Equal(t, []string{"energy-settlement", "carbon-offset", "neobank-payments"}, result)
+}
+
+// --- toProtoValidationErrors tests ---
+
+func TestToProtoValidationErrors_Empty(t *testing.T) {
+	result := generator.ToProtoValidationErrors(nil)
+	assert.Nil(t, result)
+
+	result = generator.ToProtoValidationErrors([]generator.ValidationError{})
+	assert.Nil(t, result)
+}
+
+func TestToProtoValidationErrors_WithItems(t *testing.T) {
+	errs := []generator.ValidationError{
+		{
+			Code:         "ERR_001",
+			Path:         "instruments[0].code",
+			Message:      "invalid code",
+			Suggestion:   "use uppercase",
+			ResourceType: "instrument",
+			ResourceID:   "gbp",
+		},
+		{
+			Code:    "ERR_002",
+			Path:    "sagas[0]",
+			Message: "unknown handler",
+		},
+	}
+	result := generator.ToProtoValidationErrors(errs)
+	require.Len(t, result, 2)
+	assert.Equal(t, "ERR_001", result[0].Code)
+	assert.Equal(t, "instruments[0].code", result[0].Path)
+	assert.Equal(t, "invalid code", result[0].Message)
+	assert.Equal(t, "use uppercase", result[0].Suggestion)
+	assert.Equal(t, "instrument", result[0].ResourceType)
+	assert.Equal(t, "gbp", result[0].ResourceId)
+
+	assert.Equal(t, "ERR_002", result[1].Code)
+	assert.Equal(t, "sagas[0]", result[1].Path)
+	assert.Equal(t, "unknown handler", result[1].Message)
+}
+
+// --- convertYAMLToJSONCompatible tests ---
+
+func TestConvertYAMLToJSONCompatible(t *testing.T) {
+	t.Run("map[string]interface{}", func(t *testing.T) {
+		input := map[string]interface{}{
+			"key": "value",
+			"nested": map[string]interface{}{
+				"inner": "data",
+			},
+		}
+		result := generator.ConvertYAMLToJSONCompatible(input)
+		m, ok := result.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "value", m["key"])
+		nested, ok := m["nested"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "data", nested["inner"])
+	})
+
+	t.Run("map[interface{}]interface{}", func(t *testing.T) {
+		input := map[interface{}]interface{}{
+			"key": "value",
+			42:    "numeric-key",
+			"nested": map[interface{}]interface{}{
+				"inner": "data",
+			},
+		}
+		result := generator.ConvertYAMLToJSONCompatible(input)
+		m, ok := result.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "value", m["key"])
+		assert.Equal(t, "numeric-key", m["42"])
+		nested, ok := m["nested"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "data", nested["inner"])
+	})
+
+	t.Run("[]interface{}", func(t *testing.T) {
+		input := []interface{}{
+			"a",
+			map[string]interface{}{"b": "c"},
+			42,
+		}
+		result := generator.ConvertYAMLToJSONCompatible(input)
+		arr, ok := result.([]interface{})
+		require.True(t, ok)
+		require.Len(t, arr, 3)
+		assert.Equal(t, "a", arr[0])
+		m, ok := arr[1].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "c", m["b"])
+		assert.Equal(t, 42, arr[2])
+	})
+
+	t.Run("scalar values pass through", func(t *testing.T) {
+		assert.Equal(t, "hello", generator.ConvertYAMLToJSONCompatible("hello"))
+		assert.Equal(t, 42, generator.ConvertYAMLToJSONCompatible(42))
+		assert.Equal(t, true, generator.ConvertYAMLToJSONCompatible(true))
+		assert.Nil(t, generator.ConvertYAMLToJSONCompatible(nil))
+	})
+}
+
+// --- yamlToProtoManifest tests ---
+
+func TestYamlToProtoManifest_Valid(t *testing.T) {
+	yamlStr := `
+version: "1.0"
+metadata:
+  name: test-economy
+instruments:
+  - code: GBP
+    name: British Pound
+`
+	m, err := generator.YAMLToProtoManifest(yamlStr)
+	require.NoError(t, err)
+	require.NotNil(t, m)
+	assert.Equal(t, "1.0", m.Version)
+	assert.Equal(t, "test-economy", m.Metadata.GetName())
+	require.Len(t, m.Instruments, 1)
+	assert.Equal(t, "GBP", m.Instruments[0].Code)
+}
+
+func TestYamlToProtoManifest_InvalidYAML(t *testing.T) {
+	_, err := generator.YAMLToProtoManifest("{{{{not valid yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse manifest YAML")
+}
+
+// --- applyAmendImpact tests ---
+
+func TestApplyAmendImpact_AdditionsAndRemovals(t *testing.T) {
+	originalYAML := `
+instruments:
+  - code: GBP
+  - code: USD
+account_types:
+  - code: CURRENT
+sagas:
+  - name: transfer
+`
+	amendedYAML := `
+instruments:
+  - code: GBP
+  - code: EUR
+account_types:
+  - code: CURRENT
+  - code: SAVINGS
+sagas:
+  - name: transfer
+`
+	meta := &controlplanev1.GenerationMetadata{}
+	warnings := generator.ApplyAmendImpactFn(originalYAML, amendedYAML, meta)
+
+	// USD was removed, so we expect a removal warning.
+	var removedPaths []string
+	for _, w := range warnings {
+		if w.Code == "AMEND_RESOURCE_REMOVED" {
+			removedPaths = append(removedPaths, w.Path)
+		}
+	}
+	assert.Contains(t, removedPaths, "instrument:USD")
+
+	// Decisions should be populated.
+	assert.NotEmpty(t, meta.Decisions)
+}
+
+func TestApplyAmendImpact_NoRemovals(t *testing.T) {
+	originalYAML := `
+instruments:
+  - code: GBP
+`
+	amendedYAML := `
+instruments:
+  - code: GBP
+  - code: EUR
+`
+	meta := &controlplanev1.GenerationMetadata{}
+	warnings := generator.ApplyAmendImpactFn(originalYAML, amendedYAML, meta)
+
+	// No removals, so no AMEND_RESOURCE_REMOVED warnings.
+	for _, w := range warnings {
+		assert.NotEqual(t, "AMEND_RESOURCE_REMOVED", w.Code)
+	}
+	assert.NotEmpty(t, meta.Decisions)
+}
+
+// --- GenerateManifest error path: LLM fix error ---
+
+func TestGenerateManifest_CreateMode_LLMFixError(t *testing.T) {
+	val := &mockValidatorSequence{
+		responses: []*generator.ValidationResult{
+			{
+				Valid: false,
+				Errors: []generator.ValidationError{
+					{Code: "ERR", Path: "x", Message: "bad"},
+				},
+			},
+		},
+	}
+	llm := &mockGenerateLLMClient{
+		generateResponse: minimalValidYAML,
+		fixErr:           errors.New("fix API down"),
+	}
+	svc := buildService(t, llm, val)
+
+	_, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description:      "A bank",
+		MaxFixIterations: 1,
+	})
+	// The validate-fix loop should propagate the fix error.
+	require.Error(t, err)
+}
+
+// --- GenerateManifest: validator error on initial pass ---
+
+func TestGenerateManifest_CreateMode_ValidatorError(t *testing.T) {
+	val := &mockValidatorSequence{
+		errs: []error{errors.New("validator backend down")},
+	}
+	llm := &mockGenerateLLMClient{generateResponse: minimalValidYAML}
+	svc := buildService(t, llm, val)
+
+	_, err := svc.GenerateManifest(context.Background(), &controlplanev1.GenerateManifestRequest{
+		Description: "A bank",
+	})
+	require.Error(t, err)
+}
+
 // cookbookWithOnePattern returns a minimal cookbook FS with one energy-related pattern.
 func cookbookWithOnePattern() fstest.MapFS {
 	return fstest.MapFS{

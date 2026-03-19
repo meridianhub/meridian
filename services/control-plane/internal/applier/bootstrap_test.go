@@ -66,6 +66,10 @@ func TestParseInt(t *testing.T) {
 		{"1", 1},
 		{"42", 42},
 		{"100", 100},
+		{"", 0},
+		{"abc", 0},
+		{"1a2b3", 123}, // parseInt extracts all digits; versions are pre-split by "."
+		{"v2", 2},
 	}
 
 	for _, tt := range tests {
@@ -73,4 +77,61 @@ func TestParseInt(t *testing.T) {
 			assert.Equal(t, tt.expected, parseInt(tt.input))
 		})
 	}
+}
+
+func TestVersionFilenamePattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		matches bool
+		version string
+	}{
+		{"valid version", "v1.0.0.star", true, "1.0.0"},
+		{"valid higher version", "v2.10.3.star", true, "2.10.3"},
+		{"no v prefix", "1.0.0.star", false, ""},
+		{"wrong extension", "v1.0.0.txt", false, ""},
+		{"directory name", "v1.0.0", false, ""},
+		{"non-numeric", "vx.y.z.star", false, ""},
+		{"partial version", "v1.0.star", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches := versionFilenamePattern.FindStringSubmatch(tt.input)
+			if tt.matches {
+				require.NotNil(t, matches)
+				assert.Equal(t, tt.version, matches[1])
+			} else {
+				assert.Nil(t, matches)
+			}
+		})
+	}
+}
+
+func TestIsSemverGreater_EqualVersions(t *testing.T) {
+	// Equal versions should return false
+	assert.False(t, isSemverGreater("1.0.0", "1.0.0"))
+	assert.False(t, isSemverGreater("0.0.0", "0.0.0"))
+	assert.False(t, isSemverGreater("99.99.99", "99.99.99"))
+}
+
+func TestIsSemverGreater_EmptyB(t *testing.T) {
+	// When b is empty, always returns true (any version is greater than nothing)
+	assert.True(t, isSemverGreater("", ""))
+	assert.True(t, isSemverGreater("0.0.0", ""))
+}
+
+func TestLoadEmbeddedApplyManifest_ReturnsLatestVersion(t *testing.T) {
+	// The embedded defaults contain v1.0.0, v1.1.0, v1.2.0, v1.3.0
+	// loadEmbeddedApplyManifest should return v1.3.0 as the latest
+	script, version, err := loadEmbeddedApplyManifest()
+	require.NoError(t, err)
+	assert.Equal(t, "1.3.0", version)
+	assert.NotEmpty(t, script)
+	// Verify TrimSpace was applied: no leading whitespace
+	assert.NotEqual(t, ' ', rune(script[0]))
+}
+
+func TestErrNoEmbeddedScript(t *testing.T) {
+	assert.EqualError(t, ErrNoEmbeddedScript, "embedded apply_manifest saga script not found")
 }

@@ -65,3 +65,18 @@ func (c *ClaudeLLMClient) Model() string {
 
 // YAMLToProtoManifest is the exported test hook for yamlToProtoManifest.
 var YAMLToProtoManifest = yamlToProtoManifest
+
+// ExtractManifestMetadata is the exported test hook for extractManifestMetadata.
+var ExtractManifestMetadata = extractManifestMetadata
+
+// PatternNames is the exported test hook for patternNames.
+var PatternNames = patternNames
+
+// ToProtoValidationErrors is the exported test hook for toProtoValidationErrors.
+var ToProtoValidationErrors = toProtoValidationErrors
+
+// ConvertYAMLToJSONCompatible is the exported test hook for convertYAMLToJSONCompatible.
+var ConvertYAMLToJSONCompatible = convertYAMLToJSONCompatible
+
+// ApplyAmendImpact is the exported test hook for applyAmendImpact.
+var ApplyAmendImpactFn = applyAmendImpact

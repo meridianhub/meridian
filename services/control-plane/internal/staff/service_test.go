@@ -296,6 +296,69 @@ func TestStaffService(t *testing.T) {
 		})
 	})
 
+	t.Run("ValidateAPIKeyFull", func(t *testing.T) {
+		// Create an active user for full validation tests
+		fullUser, err := svc.InviteStaff(ctx, "full-validate@example.com", "Full User", "admin")
+		require.NoError(t, err)
+		err = svc.ActivateStaff(ctx, fullUser.ID, "auth0|fullvalidate")
+		require.NoError(t, err)
+
+		t.Run("validate_full_success", func(t *testing.T) {
+			result, err := svc.CreateAPIKey(ctx, fullUser.ID, "acme", "full-key", []string{"read", "write"}, 0)
+			require.NoError(t, err)
+
+			validated, err := svc.ValidateAPIKeyFull(ctx, result.KeyPrefix, result.PlaintextKey)
+			require.NoError(t, err)
+			require.NotNil(t, validated)
+
+			assert.Equal(t, fullUser.ID, validated.User.ID)
+			assert.Equal(t, "full-validate@example.com", validated.User.Email)
+			assert.Equal(t, "admin", validated.User.Role)
+			assert.Equal(t, "active", validated.User.Status)
+			assert.Equal(t, []string{"read", "write"}, validated.Scopes)
+			assert.Equal(t, 100, validated.RateLimitRPS)
+		})
+
+		t.Run("validate_full_wrong_key", func(t *testing.T) {
+			result, err := svc.CreateAPIKey(ctx, fullUser.ID, "acme", "full-wrong", nil, 0)
+			require.NoError(t, err)
+
+			_, err = svc.ValidateAPIKeyFull(ctx, result.KeyPrefix, "pk_acme_completely_wrong")
+			require.ErrorIs(t, err, staff.ErrInvalidAPIKey)
+		})
+
+		t.Run("validate_full_expired", func(t *testing.T) {
+			result, err := svc.CreateAPIKey(ctx, fullUser.ID, "acme", "full-expired", nil, 1*time.Millisecond)
+			require.NoError(t, err)
+
+			time.Sleep(10 * time.Millisecond) //nolint:forbidigo // triggers API key expiry (1ms TTL)
+
+			_, err = svc.ValidateAPIKeyFull(ctx, result.KeyPrefix, result.PlaintextKey)
+			require.ErrorIs(t, err, staff.ErrAPIKeyExpired)
+		})
+
+		t.Run("validate_full_suspended_staff", func(t *testing.T) {
+			suspUser, err := svc.InviteStaff(ctx, "full-susp@example.com", "FullSusp", "operator")
+			require.NoError(t, err)
+			err = svc.ActivateStaff(ctx, suspUser.ID, "auth0|fullsusp")
+			require.NoError(t, err)
+
+			result, err := svc.CreateAPIKey(ctx, suspUser.ID, "acme", "full-susp-key", nil, 0)
+			require.NoError(t, err)
+
+			err = svc.SuspendStaff(ctx, suspUser.ID)
+			require.NoError(t, err)
+
+			_, err = svc.ValidateAPIKeyFull(ctx, result.KeyPrefix, result.PlaintextKey)
+			require.ErrorIs(t, err, staff.ErrStaffSuspended)
+		})
+
+		t.Run("validate_full_not_found", func(t *testing.T) {
+			_, err := svc.ValidateAPIKeyFull(ctx, "pk_nonexistent_12345678", "pk_nonexistent_12345678abcdef")
+			require.ErrorIs(t, err, staff.ErrAPIKeyNotFound)
+		})
+	})
+
 	t.Run("MapRoleToAuth", func(t *testing.T) {
 		tests := []struct {
 			staffRole string
@@ -364,4 +427,13 @@ func TestStaffIsolation_DifferentTenants(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, usersB, 1)
 	assert.Equal(t, "Alice B", usersB[0].Name)
+}
+
+func TestNewService_NilLogger(t *testing.T) {
+	gormDB, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	// Should not panic when logger is nil; falls back to slog.Default()
+	svc := staff.NewService(gormDB, nil)
+	require.NotNil(t, svc)
 }
