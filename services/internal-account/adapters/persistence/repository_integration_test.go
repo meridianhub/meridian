@@ -20,6 +20,7 @@ import (
 	"github.com/meridianhub/meridian/services/internal-account/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1671,8 +1672,7 @@ func TestIntegration_LoadTest_ConcurrentCreation(t *testing.T) {
 	tc := setupIntegrationTestContainer(t)
 	defer tc.cleanup(t)
 
-	tid := defaultTestTenantID
-	ctx := tenant.WithTenant(context.Background(), tid)
+	ctx := testdb.ContextWithTenant(t, string(defaultTestTenantID))
 	ctx = context.WithValue(ctx, auth.UserIDContextKey, "load-test-user")
 
 	const numAccounts = 1000

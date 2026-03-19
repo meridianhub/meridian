@@ -15,7 +15,7 @@ import (
 
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
 
 // mockGRPCClient implements the ReferenceDataServiceClient interface for testing.
@@ -58,10 +58,6 @@ func (m *mockGRPCClient) GetAttributeSchema(_ context.Context, _ *referencedatav
 	return nil, status.Errorf(codes.Unimplemented, "not implemented")
 }
 
-func newTestContext(tenantID string) context.Context {
-	return tenant.WithTenant(context.Background(), tenant.MustNewTenantID(tenantID))
-}
-
 func TestGRPCSource_GetDefinition_Success(t *testing.T) {
 	instrumentID := uuid.New()
 	successorID := uuid.New()
@@ -99,7 +95,7 @@ func TestGRPCSource_GetDefinition_Success(t *testing.T) {
 	}
 
 	source := NewGRPCSource(mock)
-	ctx := newTestContext("tenant1")
+	ctx := testdb.ContextWithTenant(t, "tenant1")
 
 	def, err := source.GetDefinition(ctx, "USD", 1)
 	require.NoError(t, err)
@@ -135,7 +131,7 @@ func TestGRPCSource_GetDefinition_NotFound(t *testing.T) {
 	}
 
 	source := NewGRPCSource(mock)
-	ctx := newTestContext("tenant1")
+	ctx := testdb.ContextWithTenant(t, "tenant1")
 
 	def, err := source.GetDefinition(ctx, "NOTFOUND", 1)
 	assert.Nil(t, def)
@@ -150,7 +146,7 @@ func TestGRPCSource_GetDefinition_OtherError(t *testing.T) {
 	}
 
 	source := NewGRPCSource(mock)
-	ctx := newTestContext("tenant1")
+	ctx := testdb.ContextWithTenant(t, "tenant1")
 
 	def, err := source.GetDefinition(ctx, "USD", 1)
 	assert.Nil(t, def)
@@ -191,7 +187,7 @@ func TestGRPCSource_GetDefinition_AllDimensions(t *testing.T) {
 			}
 
 			source := NewGRPCSource(mock)
-			ctx := newTestContext("tenant1")
+			ctx := testdb.ContextWithTenant(t, "tenant1")
 
 			def, err := source.GetDefinition(ctx, "TEST", 1)
 			require.NoError(t, err)
@@ -229,7 +225,7 @@ func TestGRPCSource_GetDefinition_AllStatuses(t *testing.T) {
 			}
 
 			source := NewGRPCSource(mock)
-			ctx := newTestContext("tenant1")
+			ctx := testdb.ContextWithTenant(t, "tenant1")
 
 			def, err := source.GetDefinition(ctx, "TEST", 1)
 			require.NoError(t, err)
@@ -258,7 +254,7 @@ func TestGRPCSource_GetDefinition_NilTimestamps(t *testing.T) {
 	}
 
 	source := NewGRPCSource(mock)
-	ctx := newTestContext("tenant1")
+	ctx := testdb.ContextWithTenant(t, "tenant1")
 
 	def, err := source.GetDefinition(ctx, "USD", 1)
 	require.NoError(t, err)
@@ -277,7 +273,7 @@ func TestGRPCSource_GetDefinition_NilInstrument(t *testing.T) {
 	}
 
 	source := NewGRPCSource(mock)
-	ctx := newTestContext("tenant1")
+	ctx := testdb.ContextWithTenant(t, "tenant1")
 
 	def, err := source.GetDefinition(ctx, "USD", 1)
 	require.NoError(t, err)

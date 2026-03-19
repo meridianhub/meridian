@@ -11,7 +11,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
 
 // Test sentinel errors for wrapping.
@@ -61,7 +61,7 @@ func (m *mockFungibilityKeyProgram) Eval(activation interface{}) (interface{}, e
 
 func TestFungibilityValidator_ValidateDoubleEntry_FullyFungible(t *testing.T) {
 	// Instrument with empty fungibility_key_expression is fully fungible
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	mock := &mockInstrumentGetter{
 		instruments: map[string]*cache.CachedInstrument{
@@ -84,7 +84,7 @@ func TestFungibilityValidator_ValidateDoubleEntry_FullyFungible(t *testing.T) {
 
 func TestFungibilityValidator_ValidateDoubleEntry_MatchingKeys(t *testing.T) {
 	// Instrument with fungibility_key_expression where attributes produce matching keys
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	mock := &mockInstrumentGetter{
 		instruments: map[string]*cache.CachedInstrument{
@@ -118,7 +118,7 @@ func TestFungibilityValidator_ValidateDoubleEntry_MatchingKeys(t *testing.T) {
 
 func TestFungibilityValidator_ValidateDoubleEntry_MismatchedKeys(t *testing.T) {
 	// Instrument with fungibility_key_expression where attributes produce different keys
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	mock := &mockInstrumentGetter{
 		instruments: map[string]*cache.CachedInstrument{
@@ -150,7 +150,7 @@ func TestFungibilityValidator_ValidateDoubleEntry_MismatchedKeys(t *testing.T) {
 }
 
 func TestFungibilityValidator_ValidateDoubleEntry_InstrumentNotFound(t *testing.T) {
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	mock := &mockInstrumentGetter{
 		instruments: map[string]*cache.CachedInstrument{}, // Empty - no instruments
@@ -164,7 +164,7 @@ func TestFungibilityValidator_ValidateDoubleEntry_InstrumentNotFound(t *testing.
 }
 
 func TestFungibilityValidator_ValidateDoubleEntry_InstrumentLookupError(t *testing.T) {
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	mock := &mockInstrumentGetter{
 		err: fmt.Errorf("lookup failed: %w", errFungibilityTestConnRefused),
@@ -179,7 +179,7 @@ func TestFungibilityValidator_ValidateDoubleEntry_InstrumentLookupError(t *testi
 
 func TestFungibilityValidator_ValidateDoubleEntry_NilAttributes(t *testing.T) {
 	// Test that nil attributes are handled gracefully
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	mock := &mockInstrumentGetter{
 		instruments: map[string]*cache.CachedInstrument{
@@ -208,7 +208,7 @@ func TestFungibilityValidator_ValidateDoubleEntry_NilAttributes(t *testing.T) {
 }
 
 func TestFungibilityValidator_ValidateDoubleEntry_CELEvaluationError(t *testing.T) {
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	mock := &mockInstrumentGetter{
 		instruments: map[string]*cache.CachedInstrument{
@@ -247,7 +247,7 @@ func TestNewFungibilityValidator(t *testing.T) {
 
 func TestFungibilityValidator_UseCELProgramFromInstrument(t *testing.T) {
 	// Test that when no custom evaluator is set, the validator uses the instrument's BucketKeyProgram
-	ctx := tenant.WithTenant(context.Background(), "test-tenant")
+	ctx := testdb.ContextWithTenant(t, "test-tenant")
 
 	// This test verifies the production path works when BucketKeyProgram is nil (fully fungible)
 	mock := &mockInstrumentGetter{
