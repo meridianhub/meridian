@@ -139,12 +139,15 @@ check_time_sleep() {
     echo "       Fix: replace with await.Until() or await.UntilNoError()"
     echo "            import: github.com/meridianhub/meridian/shared/platform/await"
 
-    # List files when running interactively or when there are few of them
-    if [ "${#files[@]}" -le 10 ] || [ -t 1 ]; then
+    # List files interactively (capped at 10 to avoid flooding the terminal)
+    if [ -t 1 ]; then
+        local shown=0
         for f in "${files[@]}"; do
+            [ "$shown" -ge 10 ] && break
             echo "       - ${f}"
+            shown=$((shown + 1))
         done
-        if [ "${#files[@]}" -gt 10 ] && [ -t 1 ]; then
+        if [ "${#files[@]}" -gt 10 ]; then
             echo "       (showing first 10 of ${count})"
         fi
     fi
@@ -205,22 +208,24 @@ check_proto_freshness() {
     cd "$REPO_ROOT"
 
     # Regenerate protos in place, then check if the working tree changed.
-    # Restore any modified files afterwards so the script is side-effect-free.
+    # buf.gen.yaml outputs to api/proto (pb.go files) and api/openapi (Swagger).
+    # Restore all generated outputs afterwards so the script is side-effect-free.
     if ! buf generate 2>/dev/null; then
         log_warn "buf generate failed — cannot check proto freshness"
         return
     fi
 
-    if git diff --quiet -- "*.pb.go" "*.pb.gw.go" 2>/dev/null; then
+    # Check all outputs declared in buf.gen.yaml: api/proto and api/openapi
+    if git diff --quiet -- api/proto/ api/openapi/ 2>/dev/null; then
         log_ok "Generated proto files are up to date"
     else
-        log_error "Generated proto files are stale — proto sources have changed"
-        echo "       Fix: run 'buf generate api/proto' and commit the result"
-        git diff --name-only -- "*.pb.go" "*.pb.gw.go" 2>/dev/null | while IFS= read -r f; do
+        log_error "Generated files are stale — run 'buf generate' and commit the result"
+        echo "       Fix: buf generate"
+        git diff --name-only -- api/proto/ api/openapi/ 2>/dev/null | while IFS= read -r f; do
             echo "       - ${f}"
         done
         # Restore files to leave working tree clean
-        git checkout -- "*.pb.go" "*.pb.gw.go" 2>/dev/null || true
+        git checkout -- api/proto/ api/openapi/ 2>/dev/null || true
     fi
 }
 
