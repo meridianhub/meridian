@@ -174,18 +174,18 @@ func TestLogIterationComplete_SuccessWithBuckets(t *testing.T) {
 	w.logIterationComplete(time.Now(), 5, 25, nil)
 }
 
-func TestMetrics_RecordBucketCompacted(t *testing.T) {
+func TestMetrics_RecordBucketCompacted(_ *testing.T) {
 	// Should not panic
 	RecordBucketCompacted()
 }
 
-func TestMetrics_RecordRowsConsolidated(t *testing.T) {
+func TestMetrics_RecordRowsConsolidated(_ *testing.T) {
 	// Should not panic
 	RecordRowsConsolidated(10)
 	RecordRowsConsolidated(0)
 }
 
-func TestMetrics_SetFragmentedBucketsCount(t *testing.T) {
+func TestMetrics_SetFragmentedBucketsCount(_ *testing.T) {
 	// Should not panic
 	SetFragmentedBucketsCount(5)
 	SetFragmentedBucketsCount(0)

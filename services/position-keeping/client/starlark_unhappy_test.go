@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -159,16 +158,6 @@ func TestRegisterStarlarkHandlers_DuplicateRegistration(t *testing.T) {
 	// Second registration should fail (duplicate handler names)
 	err = RegisterStarlarkHandlers(registry, client)
 	require.Error(t, err)
-}
-
-// mockPositionKeepingServerForInitiate is a variant of the mock that returns specific initiate errors
-type mockPositionKeepingServerForInitiate struct {
-	positionkeepingv1.UnimplementedPositionKeepingServiceServer
-	initiateErr error
-}
-
-func (m *mockPositionKeepingServerForInitiate) InitiateFinancialPositionLog(_ context.Context, _ *positionkeepingv1.InitiateFinancialPositionLogRequest) (*positionkeepingv1.InitiateFinancialPositionLogResponse, error) {
-	return nil, m.initiateErr
 }
 
 func TestInitiateLogHandler_ContextCancelled(t *testing.T) {
