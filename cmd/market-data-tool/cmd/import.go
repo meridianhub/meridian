@@ -379,7 +379,6 @@ func executeDryRun(
 }
 
 // executeLiveImport performs the actual import with checkpoint persistence.
-//
 func executeLiveImport(
 	ctx context.Context,
 	cfg *importConfig,

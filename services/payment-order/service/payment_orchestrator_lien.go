@@ -25,7 +25,6 @@ import (
 // 2. Uses exponential backoff for retries with the existing sharedclients.Retry infrastructure
 // 3. Updates the payment order's lien execution status on success or final failure
 // 4. Logs all attempts for monitoring and alerting
-//
 func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, paymentOrderID uuid.UUID, lienID string) {
 	// Defensive check: guard against nil currentAccountClient even though callers currently check
 	if o.currentAccountClient == nil {
@@ -50,7 +49,7 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 			}
 			panicCtx, panicCancel := context.WithTimeout(panicCtx, 10*time.Second)
 			defer panicCancel()
-			po, findErr := o.repo.FindByID(panicCtx, paymentOrderID)
+			po, findErr := o.repo.FindByID(panicCtx, paymentOrderID) //nolint:contextcheck // intentional fresh context for panic recovery
 			if findErr != nil {
 				o.logger.Error("failed to fetch payment order after panic",
 					"payment_order_id", paymentOrderID.String(),
@@ -58,7 +57,7 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 				return
 			}
 			po.SetLienExecutionFailed(fmt.Sprintf("panic: %v", r))
-			if updateErr := o.repo.Update(panicCtx, po); updateErr != nil {
+			if updateErr := o.repo.Update(panicCtx, po); updateErr != nil { //nolint:contextcheck // intentional fresh context for panic recovery
 				o.logger.Error("failed to update payment order status after panic",
 					"payment_order_id", paymentOrderID.String(),
 					"error", updateErr)
@@ -123,7 +122,6 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 // Uses distributed locking to prevent concurrent updates across service instances, combined with
 // optimistic locking (version conflict retry) for additional safety.
 // Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
-//
 func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	parentCtx context.Context,
 	paymentOrderID uuid.UUID,

@@ -55,7 +55,6 @@ func (e *referenceExtractor) walkStmt(stmt syntax.Stmt) {
 }
 
 // walkExpr walks an expression node and extracts references.
-//
 func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 	if expr == nil {
 		return
@@ -280,7 +279,6 @@ func (e *referenceExtractor) isAttributeAccess(expr *syntax.IndexExpr) bool {
 }
 
 // extractInstrumentCode tries to extract instrument code from attribute access context.
-//
 func (e *referenceExtractor) extractInstrumentCode(expr syntax.Expr) string {
 	// Look for patterns like:
 	// - instrument.attributes["key"] where instrument is a variable

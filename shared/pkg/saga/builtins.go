@@ -54,7 +54,6 @@ var (
 // Safe stdlib functions included from starlark.Universe.
 //
 // BLOCKED: load(), print() (redirected), time.now(), random(), exec(), compile(), open(), http
-//
 func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	if logger == nil {
 		logger = slog.Default()

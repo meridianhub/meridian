@@ -33,7 +33,6 @@ var (
 //     hasattr, getattr, dir, type, repr, hash
 //   - Forecasting: avg, sum, percentile, filter_by_hour, group_by_hour, duration
 //   - Decimal: Decimal() for arbitrary-precision arithmetic
-//
 func newForecastBuiltins(logger *slog.Logger) starlarklib.StringDict {
 	if logger == nil {
 		logger = slog.Default()

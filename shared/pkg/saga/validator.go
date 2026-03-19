@@ -143,7 +143,6 @@ func (v *validationVisitor) walkFile(file *syntax.File) error {
 }
 
 // walkStmt walks a statement node.
-//
 func (v *validationVisitor) walkStmt(stmt syntax.Stmt) error {
 	switch s := stmt.(type) {
 	case *syntax.ExprStmt:
@@ -233,7 +232,6 @@ func (v *validationVisitor) walkStmt(stmt syntax.Stmt) error {
 }
 
 // walkExpr walks an expression node.
-//
 func (v *validationVisitor) walkExpr(expr syntax.Expr) error {
 	if expr == nil {
 		return nil

@@ -119,7 +119,6 @@ type ValidationResult struct {
 }
 
 // FormatReport generates a human-readable validation report.
-//
 func (r *ValidationResult) FormatReport() string {
 	var b strings.Builder
 
@@ -438,7 +437,6 @@ type Dependency struct {
 }
 
 // checkReference validates a single reference and adds any errors to the result.
-//
 func (v *ReferenceValidator) checkReference(ctx context.Context, ref Reference, strict bool, result *ValidationResult) error {
 	switch ref.Type {
 	case ReferenceTypeStepHandler:

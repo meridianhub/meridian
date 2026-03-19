@@ -14,7 +14,6 @@ import (
 type Currency = money.Currency
 
 // Supported currency codes following ISO 4217 standard.
-//
 const (
 	CurrencyGBP = money.CurrencyGBP
 	CurrencyUSD = money.CurrencyUSD

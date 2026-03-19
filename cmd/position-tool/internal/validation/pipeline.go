@@ -115,7 +115,6 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 
 // ValidateRow validates a single row through all validation layers.
 // Returns a RowValidationError containing all errors found.
-//
 func (p *Pipeline) ValidateRow(ctx context.Context, row *ImportRow) *RowValidationError {
 	atomic.AddInt64(&p.totalRows, 1)
 
@@ -237,7 +236,6 @@ func (p *Pipeline) ValidateBatch(ctx context.Context, rows []ImportRow) map[int]
 
 // ValidateWithCallback validates rows and calls the callback for each row.
 // Returns the first error if failFast is true and validation fails.
-//
 func (p *Pipeline) ValidateWithCallback(
 	ctx context.Context,
 	rows []ImportRow,

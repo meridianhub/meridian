@@ -363,7 +363,7 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 	// Determine the starting phase by checking the run's checkpoint.
 	startIndex := 0
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout)
-	run, err := s.runRepo.FindByID(persistCtx, runID)                                      //nolint:contextcheck // uses persist context created above
+	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck // uses persist context created above
 	persistCancel()
 	if err != nil {
 		slog.Error("failed to retrieve run for pipeline start", "run_id", runID, "error", err)
@@ -540,7 +540,6 @@ func phaseIndex(phase domain.ReconciliationPhase) int {
 }
 
 // resumePipeline re-launches the pipeline from the run's checkpoint.
-//
 func (s *AccountReconciliationService) resumePipeline(runID uuid.UUID) {
 	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout)
 	go func() {
@@ -743,7 +742,7 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 			Run: toProtoRunSummary(run),
 		}
 		// Re-launch the pipeline from the checkpoint
-		s.resumePipeline(run.RunID)
+		s.resumePipeline(run.RunID) //nolint:contextcheck // resumePipeline creates its own background context for the async pipeline
 		slog.InfoContext(ctx, "settlement run resumed",
 			"run_id", runID,
 			"action", action.String(),

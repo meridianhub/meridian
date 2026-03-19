@@ -188,7 +188,7 @@ func handleManifestDiff(_ context.Context, differ ManifestDiffer, params json.Ra
 
 	result, err := differ.Diff(p.Current, p.Proposed)
 	if err != nil {
-		return map[string]interface{}{
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response, not returned as a Go error
 			"error": err.Error(),
 		}, nil
 	}
@@ -305,7 +305,8 @@ func handleValuationSimulate(ctx context.Context, simulator ValuationSimulator, 
 
 	resp, err := simulator.Simulate(ctx, req)
 	if err != nil {
-		return map[string]interface{}{			"error": err.Error(),
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response
+			"error": err.Error(),
 		}, nil
 	}
 	if resp == nil {
@@ -408,7 +409,8 @@ func handleSagaSimulate(ctx context.Context, simulator SagaSimulator, params jso
 
 	result, err := simulator.Simulate(ctx, p.Script, p.InputData)
 	if err != nil {
-		return map[string]interface{}{			"error": err.Error(),
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response
+			"error": err.Error(),
 		}, nil
 	}
 

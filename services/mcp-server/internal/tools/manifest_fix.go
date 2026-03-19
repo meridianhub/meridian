@@ -73,7 +73,7 @@ func handleManifestFix(_ context.Context, schemaRegistry *schema.Registry, param
 
 	conversions, err := fixManifestSagas(manifest, schemaRegistry)
 	if err != nil {
-		return map[string]interface{}{
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response, not returned as a Go error
 			"error": err.Error(),
 		}, nil
 	}

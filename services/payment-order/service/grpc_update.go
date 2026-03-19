@@ -279,7 +279,7 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		if tenantID, hasTenant := tenant.FromContext(ctx); hasTenant {
 			asyncCtx = tenant.WithTenant(asyncCtx, tenantID)
 		}
-		go s.orchestrator.ExecuteLienWithRetry(asyncCtx, po.ID, po.LienID)
+		go s.orchestrator.ExecuteLienWithRetry(asyncCtx, po.ID, po.LienID) //nolint:contextcheck // intentional background context for async retry after webhook response
 	}
 
 	// Publish PaymentOrderCompleted event

@@ -60,7 +60,7 @@ func TestConnectionRegistry_Unregister(t *testing.T) {
 	assert.Empty(t, reg.GetByTenant("tenant-A"))
 }
 
-func TestConnectionRegistry_Unregister_NonExistent_NoPanic(t *testing.T) {
+func TestConnectionRegistry_Unregister_NonExistent_NoPanic(t *testing.T) { //nolint:revive // t is required by testing framework signature
 	reg := eventstream.NewConnectionRegistry()
 	// Should not panic
 	reg.Unregister("nonexistent-conn-id")

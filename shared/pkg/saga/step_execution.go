@@ -109,7 +109,6 @@ func (e *StepExecutor) WithLogger(logger *slog.Logger) *StepExecutor {
 // Returns:
 //   - The step result (from cache or fresh execution)
 //   - Error if execution or persistence fails
-//
 func (e *StepExecutor) ExecuteStep(
 	ctx context.Context,
 	instance *SagaInstance,
@@ -284,7 +283,6 @@ func (e *TransactionalStepExecutor) WithEventPublisher(publisher EventPublisher)
 //  3. Both in SAME transaction
 //
 // On commit failure, no partial state is persisted.
-//
 func (e *TransactionalStepExecutor) ExecuteStepInTx(
 	ctx context.Context,
 	instance *SagaInstance,
@@ -407,7 +405,6 @@ func (e *TransactionalStepExecutor) ExecuteStepInTx(
 // The outbox entry is processed by a background worker that publishes to Kafka.
 // If the pod crashes between Kafka publish and marking the entry as processed,
 // the entry will be republished (at-least-once, with idempotency).
-//
 func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
 	ctx context.Context,
 	instance *SagaInstance,

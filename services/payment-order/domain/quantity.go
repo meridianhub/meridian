@@ -52,7 +52,6 @@ type Money = quantity.Money
 type Instrument = quantity.Instrument
 
 // Re-export currency instruments for convenient access.
-//
 var (
 	InstrumentGBP = currency.InstrumentGBP
 	InstrumentUSD = currency.InstrumentUSD

@@ -252,7 +252,6 @@ func (s *SuspendService) SuspendSaga(
 // Lookup strategy:
 // 1. First, try to find a saga that's still WAITING_FOR_EVENT with matching idempotency key
 // 2. If not found, check if we already processed this by looking at step results
-//
 func (s *SuspendService) CompleteSagaStep(
 	ctx context.Context,
 	req *CompleteSagaStepRequest,
