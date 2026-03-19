@@ -1,280 +1,37 @@
-// Package main is a demo data seeder for the Meridian energy platform demo.
-//
-// It connects to the Meridian gRPC server and seeds:
-//   - An energy company tenant ("volterra-energy")
-//   - The Volterra Energy demo manifest via ApplyManifest (structural provisioning):
-//   - Instruments: GBP, KWH, CARBON_CREDIT
-//   - Account types: ENERGY_TRADING, INVENTORY_KWH, CARBON_INVENTORY, SETTLEMENT
-//   - Market data source: SEED_DEMO
-//   - Market data set: WHOLESALE_ENERGY_GBP_KWH
-//   - Valuation rules: KWH→GBP, CARBON_CREDIT→GBP
-//   - Organizations: UK Power Networks (DNO) + 4 Grid Supply Points
-//   - Internal accounts: 4 GSP KWH inventory accounts (one per GSP)
-//   - 10 residential customers each with:
-//   - A GBP billing account (charges in pounds sterling)
-//   - A KWH consumption tracking account (meter reading credits)
-//   - 30 days of simulated meter reads using double-entry:
-//   - CREDIT customer KWH account (asset: energy consumed)
-//   - DEBIT GSP KWH inventory account (liability: energy owed to grid)
-//   - 30 days of GBP billing at fixed retail tariff (24.5p/kWh)
-//   - A wholesale energy price dataset with 30 days of historical prices
-//
-// Structural provisioning (instruments, account types, market data, organizations,
-// and internal accounts) is handled entirely via ApplyManifest. This ensures
-// idempotent reapply returns NO_CHANGE for structural resources without separate
-// gRPC calls.
-//
-// Operational seeding (customer parties, accounts, deposits, and price observations)
-// continues via direct gRPC calls since these are runtime data, not structural config.
-//
-// All operations are idempotent — safe to run multiple times.
-//
-// Usage:
-//
-//	seed-demo --grpc-addr=localhost:50051 --gateway-url=http://localhost:8090
-package main
+// Package cmd implements the seed-dev CLI commands.
+package cmd
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
-	"net/http"
-	"os"
 	"time"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
-	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	marketv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
-	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
-	"github.com/meridianhub/meridian/shared/platform/await"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const (
-	tenantID   = "volterra_energy"
-	tenantSlug = "volterra-energy"
-)
-
-// Sentinel errors for idempotent lookups.
+// Sentinel errors for idempotent fixture lookups.
 var (
 	errPartyNotFoundInListing   = fmt.Errorf("party reported as existing but not found in listing")
 	errAccountNotFoundInListing = fmt.Errorf("account reported as existing but not found in listing")
-	errManifestValidationFailed = fmt.Errorf("manifest validation failed")
 )
 
-var (
-	gatewayURL string
-	grpcAddr   string
-)
-
-func main() {
-	flag.StringVar(&gatewayURL, "gateway-url", envOrDefault("GATEWAY_URL", "http://localhost:8090"), "Gateway HTTP URL for health check")
-	flag.StringVar(&grpcAddr, "grpc-addr", envOrDefault("GRPC_ADDR", "localhost:50051"), "gRPC server address")
-	flag.Parse()
-
-	if err := run(); err != nil {
-		log.Fatalf("seed-demo failed: %v", err)
-	}
-}
-
-func run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// 1. Wait for gateway health
-	fmt.Printf("Waiting for gateway at %s ...\n", gatewayURL)
-	err := await.New().
-		AtMost(60 * time.Second).
-		PollInterval(2 * time.Second).
-		WithContext(ctx).
-		Until(func() bool {
-			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, gatewayURL+"/healthz", nil)
-			if reqErr != nil {
-				return false
-			}
-			resp, reqErr := http.DefaultClient.Do(req)
-			if reqErr != nil {
-				return false
-			}
-			_ = resp.Body.Close()
-			return resp.StatusCode == http.StatusOK
-		})
-	if err != nil {
-		return fmt.Errorf("gateway not healthy: %w", err)
-	}
-	fmt.Println("Gateway is healthy.")
-
-	// 2. Connect to gRPC
-	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fmt.Errorf("gRPC connect: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	// 3. Create tenant
-	fmt.Println("\n=== Step 1: Create Energy Tenant ===")
-	if err := createTenant(ctx, conn); err != nil {
-		return fmt.Errorf("create tenant: %w", err)
-	}
-
-	// 4. Apply demo manifest (structural provisioning via ApplyManifest).
-	// This provisions all structural resources: instruments, account types,
-	// market data sources/sets, valuation rules, organizations (DNO + GSPs),
-	// and GSP KWH inventory internal accounts.
-	// Re-running is idempotent: unchanged resources return NO_CHANGE status.
-	fmt.Println("\n=== Step 2: Apply Demo Manifest (structural provisioning) ===")
-	tCtx := withTenant(ctx)
-	if err := applyManifest(tCtx, conn); err != nil {
-		return fmt.Errorf("apply manifest: %w", err)
-	}
-
-	// 5. Resolve GSP KWH internal account IDs provisioned by the manifest.
-	// Accounts are identified by the codes defined in volterra-energy-demo.json.
-	fmt.Println("\n=== Step 3: Resolve GSP Internal Account IDs ===")
-	gspKwhAccountIDs, err := resolveGSPInternalAccountIDs(tCtx, conn)
-	if err != nil {
-		return fmt.Errorf("resolve GSP internal accounts: %w", err)
-	}
-
-	// 6. Register customer parties (operational data — not in manifest).
-	fmt.Println("\n=== Step 4: Register Customer Parties ===")
-	customerPartyIDs, err := registerCustomerParties(tCtx, conn)
-	if err != nil {
-		return fmt.Errorf("register customer parties: %w", err)
-	}
-
-	// 7. Resolve the DNO party ID for the manifest-provisioned UKPN organization.
-	// Customer current accounts reference the owning org via OrgPartyId.
-	fmt.Println("\n=== Step 5: Resolve DNO Party ID ===")
-	dnoPartyID, err := resolveOrganizationPartyID(tCtx, conn, "UKPNDNO001")
-	if err != nil {
-		return fmt.Errorf("resolve DNO party ID: %w", err)
-	}
-	fmt.Printf("  DNO party ID: %s\n", dnoPartyID)
-
-	// 8. Create customer current accounts (operational data — not in manifest).
-	fmt.Println("\n=== Step 6: Create Customer Accounts ===")
-	customerAccounts, err := createAccounts(tCtx, conn, dnoPartyID, customerPartyIDs, gspKwhAccountIDs)
-	if err != nil {
-		return fmt.Errorf("create accounts: %w", err)
-	}
-
-	// 9. Deposit meter reads and billing amounts (operational data — not in manifest).
-	fmt.Println("\n=== Step 7: Seed Account Balances ===")
-	if err := seedBalances(tCtx, conn, customerAccounts); err != nil {
-		return fmt.Errorf("seed balances: %w", err)
-	}
-
-	// 10. Record wholesale energy price observations (operational data — not in manifest).
-	// The WHOLESALE_ENERGY_GBP_KWH dataset was provisioned by ApplyManifest;
-	// only observations are recorded here.
-	fmt.Println("\n=== Step 8: Record Wholesale Energy Prices ===")
-	if err := recordWholesalePrices(tCtx, conn); err != nil {
-		return fmt.Errorf("record wholesale prices: %w", err)
-	}
-
-	fmt.Println("\n=== Demo Seed Complete ===")
-	fmt.Printf("Tenant:       %s (slug: %s)\n", tenantID, tenantSlug)
-	fmt.Printf("Manifest:     structural resources applied via ApplyManifest\n")
-	fmt.Printf("GSPs:         %d grid supply points with KWH inventory accounts\n", len(gspKwhAccountIDs))
-	fmt.Printf("Customers:    %d customers with GBP billing + KWH consumption accounts\n", len(customerPartyIDs))
-	fmt.Printf("Double-entry: each KWH meter read DEBITs GSP inventory, CREDITs customer account\n")
-	fmt.Printf("Market:       30 days of wholesale energy prices\n")
-	return nil
-}
-
-// ─── Tenant Creation ─────────────────────────────────────────────────────────
-
-func createTenant(ctx context.Context, conn *grpc.ClientConn) error {
-	client := tenantv1.NewTenantServiceClient(conn)
-
-	resp, err := client.InitiateTenant(ctx, &tenantv1.InitiateTenantRequest{
-		TenantId:        tenantID,
-		DisplayName:     "Volterra Energy",
-		SettlementAsset: "GBP",
-		Subdomain:       tenantSlug + ".demo.meridianhub.cloud",
-		Slug:            tenantSlug,
-	})
-	if err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-			fmt.Println("  Tenant already exists (idempotent).")
-			return nil
-		}
-		return err
-	}
-	fmt.Printf("  Created tenant: %s\n", resp.GetTenant().GetTenantId())
-	return nil
-}
-
-// ─── Manifest Application ────────────────────────────────────────────────────
-
-// applyManifest loads the Volterra Energy demo manifest and submits it to
-// ApplyManifestService. This provisions all structural resources:
-//   - Instruments (GBP, KWH, CARBON_CREDIT)
-//   - Account types (ENERGY_TRADING, INVENTORY_KWH, CARBON_INVENTORY, SETTLEMENT)
-//   - Market data source (SEED_DEMO) and dataset (WHOLESALE_ENERGY_GBP_KWH)
-//   - Valuation rules (KWH→GBP, CARBON_CREDIT→GBP)
-//   - Organizations (UK Power Networks DNO, 4 Grid Supply Points)
-//   - Internal accounts (4 GSP KWH inventory accounts)
-//
-// Re-running is idempotent: unchanged resources return NO_CHANGE status.
-func applyManifest(ctx context.Context, conn *grpc.ClientConn) error {
-	data, err := os.ReadFile("examples/manifests/volterra-energy-demo.json")
-	if err != nil {
-		// Try path relative to binary location (container deployments).
-		data, err = os.ReadFile("/app/examples/manifests/volterra-energy-demo.json")
-		if err != nil {
-			return fmt.Errorf("read manifest: %w (tried ./examples/manifests/volterra-energy-demo.json and /app/examples/manifests/volterra-energy-demo.json)", err)
-		}
-	}
-
-	var manifest controlplanev1.Manifest
-	if err := protojson.Unmarshal(data, &manifest); err != nil {
-		return fmt.Errorf("parse manifest: %w", err)
-	}
-
-	client := controlplanev1.NewApplyManifestServiceClient(conn)
-
-	resp, err := client.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
-		Manifest:  &manifest,
-		DryRun:    false,
-		AppliedBy: "seed-demo",
-	})
-	if err != nil {
-		return fmt.Errorf("ApplyManifest: %w", err)
-	}
-
-	fmt.Printf("  Manifest applied (job: %s, status: %s)\n", resp.GetJobId(), resp.GetStatus().String())
-	if diff := resp.GetDiffSummary(); diff != "" {
-		fmt.Printf("  Changes: %s\n", diff)
-	}
-	if resp.GetStatus() == controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_VALIDATION_FAILED {
-		for _, ve := range resp.GetValidationErrors() {
-			fmt.Printf("  VALIDATION ERROR: [%s] %s — %s\n", ve.GetCode(), ve.GetPath(), ve.GetMessage())
-		}
-		return fmt.Errorf("%w: %d errors", errManifestValidationFailed, len(resp.GetValidationErrors()))
-	}
-	return nil
-}
-
-// ─── GSP Internal Account Resolution ─────────────────────────────────────────
+// ─── Fixture Data Definitions ────────────────────────────────────────────────
 
 // gspAccountCodes maps GSP region codes to their manifest-defined internal account codes.
-// These codes must match the internalAccounts[].code values in volterra-energy-demo.json.
+// These codes must match the internalAccounts[].code values in the manifest JSON.
 var gspAccountCodes = []struct {
 	region      string
 	accountCode string
@@ -285,9 +42,101 @@ var gspAccountCodes = []struct {
 	{region: "SOUT", accountCode: "GSP_KWH_SOUT"},
 }
 
+type customerInfo struct {
+	legalName string
+	gspIndex  int // index into gspAccountCodes (0=SEEB, 1=EELC, 2=LOND, 3=SOUT)
+}
+
+var customerDefinitions = []customerInfo{
+	{legalName: "James Mitchell", gspIndex: 0},
+	{legalName: "Sarah Thompson", gspIndex: 0},
+	{legalName: "David Williams", gspIndex: 1},
+	{legalName: "Emma Richardson", gspIndex: 1},
+	{legalName: "Michael Clarke", gspIndex: 2},
+	{legalName: "Rebecca Foster", gspIndex: 2},
+	{legalName: "Andrew Patel", gspIndex: 2},
+	{legalName: "Charlotte Davies", gspIndex: 3},
+	{legalName: "Thomas Brown", gspIndex: 3},
+	{legalName: "Olivia Hughes", gspIndex: 3},
+}
+
+type customerAccountPair struct {
+	customerName    string
+	partyID         string
+	gbpAccountID    string
+	kwhAccountID    string
+	gspRegion       string
+	gspKwhAccountID string // GSP internal account for the debit side of KWH double-entry
+}
+
+// ─── Fixture Entry Point ─────────────────────────────────────────────────────
+
+// runFixtures seeds operational demo data (customers, accounts, meter reads,
+// wholesale prices) via gRPC API calls. All operations are idempotent.
+func runFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) error {
+	tCtx := withTenantCtx(ctx, tid)
+
+	// 1. Resolve GSP KWH internal account IDs provisioned by the manifest.
+	fmt.Println("\n--- Resolve GSP Internal Account IDs ---")
+	gspKwhAccountIDs, err := resolveGSPInternalAccountIDs(tCtx, conn)
+	if err != nil {
+		return fmt.Errorf("resolve GSP internal accounts: %w", err)
+	}
+
+	// 2. Register customer parties.
+	fmt.Println("\n--- Register Customer Parties ---")
+	customerPartyIDs, err := registerCustomerParties(tCtx, conn)
+	if err != nil {
+		return fmt.Errorf("register customer parties: %w", err)
+	}
+
+	// 3. Resolve the DNO party ID for the manifest-provisioned UKPN organization.
+	fmt.Println("\n--- Resolve DNO Party ID ---")
+	dnoPartyID, err := resolveOrganizationPartyID(tCtx, conn, "UKPNDNO001")
+	if err != nil {
+		return fmt.Errorf("resolve DNO party ID: %w", err)
+	}
+	fmt.Printf("  DNO party ID: %s\n", dnoPartyID)
+
+	// 4. Create customer current accounts.
+	fmt.Println("\n--- Create Customer Accounts ---")
+	customerAccounts, err := createCustomerAccounts(tCtx, conn, dnoPartyID, customerPartyIDs, gspKwhAccountIDs)
+	if err != nil {
+		return fmt.Errorf("create accounts: %w", err)
+	}
+
+	// 5. Deposit meter reads and billing amounts.
+	fmt.Println("\n--- Seed Account Balances ---")
+	if err := seedBalances(tCtx, conn, customerAccounts); err != nil {
+		return fmt.Errorf("seed balances: %w", err)
+	}
+
+	// 6. Record wholesale energy price observations.
+	fmt.Println("\n--- Record Wholesale Energy Prices ---")
+	if err := recordWholesalePrices(tCtx, conn); err != nil {
+		return fmt.Errorf("record wholesale prices: %w", err)
+	}
+
+	fmt.Println("\n=== Fixture Seed Complete ===")
+	fmt.Printf("  GSPs:         %d grid supply points with KWH inventory accounts\n", len(gspKwhAccountIDs))
+	fmt.Printf("  Customers:    %d customers with GBP billing + KWH consumption accounts\n", len(customerPartyIDs))
+	fmt.Printf("  Double-entry: each KWH meter read DEBITs GSP inventory, CREDITs customer account\n")
+	fmt.Printf("  Market:       30 days of wholesale energy prices\n")
+	return nil
+}
+
+// ─── Tenant Context ──────────────────────────────────────────────────────────
+
+func withTenantCtx(ctx context.Context, tid string) context.Context {
+	md := metadata.Pairs("x-tenant-id", tid)
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// ─── GSP Internal Account Resolution ─────────────────────────────────────────
+
 // resolveGSPInternalAccountIDs looks up the account IDs for the GSP KWH inventory
 // accounts provisioned by ApplyManifest. Returns IDs in GSP region order
-// (SEEB, EELC, LOND, SOUT) matching the gspAccountCodes slice used by createAccounts.
+// (SEEB, EELC, LOND, SOUT) matching the gspAccountCodes slice used by createCustomerAccounts.
 func resolveGSPInternalAccountIDs(ctx context.Context, conn *grpc.ClientConn) ([]string, error) {
 	client := internalaccountv1.NewInternalAccountServiceClient(conn)
 
@@ -329,8 +178,7 @@ func findInternalAccountByCode(ctx context.Context, client internalaccountv1.Int
 // ─── DNO Party Resolution ─────────────────────────────────────────────────────
 
 // resolveOrganizationPartyID finds the party ID for an organization provisioned by
-// ApplyManifest, identified by external reference. Paginates through all parties
-// to ensure the organization is found even in tenants with many parties.
+// ApplyManifest, identified by external reference.
 func resolveOrganizationPartyID(ctx context.Context, conn *grpc.ClientConn, externalRef string) (string, error) {
 	client := partyv1.NewPartyServiceClient(conn)
 	var pageToken string
@@ -356,24 +204,6 @@ func resolveOrganizationPartyID(ctx context.Context, conn *grpc.ClientConn, exte
 }
 
 // ─── Customer Party Registration ─────────────────────────────────────────────
-
-type customerInfo struct {
-	legalName string
-	gspIndex  int // index into gspAccountCodes (0=SEEB, 1=EELC, 2=LOND, 3=SOUT)
-}
-
-var customerDefinitions = []customerInfo{
-	{legalName: "James Mitchell", gspIndex: 0},
-	{legalName: "Sarah Thompson", gspIndex: 0},
-	{legalName: "David Williams", gspIndex: 1},
-	{legalName: "Emma Richardson", gspIndex: 1},
-	{legalName: "Michael Clarke", gspIndex: 2},
-	{legalName: "Rebecca Foster", gspIndex: 2},
-	{legalName: "Andrew Patel", gspIndex: 2},
-	{legalName: "Charlotte Davies", gspIndex: 3},
-	{legalName: "Thomas Brown", gspIndex: 3},
-	{legalName: "Olivia Hughes", gspIndex: 3},
-}
 
 func registerCustomerParties(ctx context.Context, conn *grpc.ClientConn) ([]string, error) {
 	client := partyv1.NewPartyServiceClient(conn)
@@ -424,16 +254,7 @@ func findPartyByExternalRef(ctx context.Context, client partyv1.PartyServiceClie
 
 // ─── Account Creation ────────────────────────────────────────────────────────
 
-type customerAccountPair struct {
-	customerName    string
-	partyID         string
-	gbpAccountID    string
-	kwhAccountID    string
-	gspRegion       string
-	gspKwhAccountID string // GSP internal account for the debit side of KWH double-entry
-}
-
-func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID string, customerPartyIDs []string, gspKwhAccountIDs []string) ([]customerAccountPair, error) {
+func createCustomerAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID string, customerPartyIDs []string, gspKwhAccountIDs []string) ([]customerAccountPair, error) {
 	client := currentaccountv1.NewCurrentAccountServiceClient(conn)
 
 	accounts := make([]customerAccountPair, len(customerPartyIDs))
@@ -466,7 +287,6 @@ func createAccounts(ctx context.Context, conn *grpc.ClientConn, dnoPartyID strin
 
 func createAccountIdempotent(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, partyID, extID, instrument, orgPartyID string) (string, error) {
 	// Check if account already exists first (idempotent).
-	// Only suppress "not found" errors — propagate real failures.
 	existingID, err := findAccountByExternalID(ctx, client, extID)
 	if err == nil && existingID != "" {
 		return existingID, nil
@@ -585,8 +405,6 @@ func depositIdempotent(ctx context.Context, client currentaccountv1.CurrentAccou
 
 // recordWholesalePrices seeds 30 days of synthetic wholesale energy prices into the
 // WHOLESALE_ENERGY_GBP_KWH dataset provisioned by ApplyManifest.
-// The data source (SEED_DEMO) and dataset are already registered by the manifest;
-// this function only records observations (operational data).
 func recordWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 	client := marketv1.NewMarketInformationServiceClient(conn)
 
@@ -633,20 +451,7 @@ func recordWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-func withTenant(ctx context.Context) context.Context {
-	md := metadata.Pairs("x-tenant-id", tenantID)
-	return metadata.NewOutgoingContext(ctx, md)
-}
-
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
 // toMoney creates a MoneyAmount proto from a float amount and currency code.
-// Uses google.type.Money (units + nanos) as required by the proto definition.
 func toMoney(amount float64, currencyCode string) *commonv1.MoneyAmount {
 	units := int64(amount)
 	nanos := int32(math.Round((amount - float64(units)) * 1e9))

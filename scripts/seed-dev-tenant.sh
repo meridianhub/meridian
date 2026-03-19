@@ -16,6 +16,7 @@
 #   MANIFEST_PATH    - Path to manifest JSON file (default: examples/manifests/energy.json)
 #   TENANT_ID        - Tenant ID to create (default: dev_tenant)
 #   TENANT_SLUG      - Tenant URL slug (default: dev-tenant)
+#   SEED_FIXTURES    - Set to "true" to seed demo fixture data (customers, accounts, etc.)
 #
 # Legacy variable support:
 #   GATEWAY_HOST     - If set and GATEWAY_URL is not, derived as http://${GATEWAY_HOST}
@@ -37,4 +38,9 @@ if [ ! -f "${BIN}" ]; then
   (cd "${REPO_ROOT}" && go build -o bin/seed-dev ./cmd/seed-dev)
 fi
 
-exec "${BIN}" "$@"
+FIXTURES_FLAG=""
+if [ "${SEED_FIXTURES:-false}" = "true" ]; then
+  FIXTURES_FLAG="--with-fixtures"
+fi
+
+exec "${BIN}" ${FIXTURES_FLAG} "$@"

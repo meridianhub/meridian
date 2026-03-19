@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -36,6 +37,9 @@ var (
 	tenantSlug       string
 	timeout          time.Duration
 	skipManifest     bool
+	withFixtures     bool
+	displayName      string
+	subdomain        string
 )
 
 var rootCmd = &cobra.Command{
@@ -95,6 +99,12 @@ func init() {
 		"Overall operation timeout")
 	rootCmd.Flags().BoolVar(&skipManifest, "skip-manifest", false,
 		"Skip manifest application (tenant creation only)")
+	rootCmd.Flags().BoolVar(&withFixtures, "with-fixtures", false,
+		"Seed demo fixture data (customers, accounts, balances, market data) after manifest application")
+	rootCmd.Flags().StringVar(&displayName, "display-name", "",
+		"Tenant display name (default: derived from tenant slug)")
+	rootCmd.Flags().StringVar(&subdomain, "subdomain", "",
+		"Tenant subdomain (default: <tenant-slug>.localhost)")
 }
 
 func runSeed(_ *cobra.Command, _ []string) error {
@@ -151,6 +161,13 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("apply manifest: %w", err)
 	}
 
+	if withFixtures {
+		fmt.Println("\n=== Seeding Fixture Data ===")
+		if err := runFixtures(ctx, conn, tenantID); err != nil {
+			return fmt.Errorf("seed fixtures: %w", err)
+		}
+	}
+
 	fmt.Println("Seed complete.")
 	return nil
 }
@@ -169,11 +186,24 @@ func checkHealth(gwURL string) bool {
 func createTenant(ctx context.Context, conn *grpc.ClientConn, id, slug string) error {
 	client := tenantv1.NewTenantServiceClient(conn)
 
+	// Derive display name from slug if not explicitly set.
+	dn := displayName
+	if dn == "" {
+		dn = strings.ReplaceAll(slug, "-", " ")
+		dn = strings.Title(dn) //nolint:staticcheck // strings.Title is fine for simple slug capitalization
+	}
+
+	// Derive subdomain if not explicitly set.
+	sd := subdomain
+	if sd == "" {
+		sd = slug + ".localhost"
+	}
+
 	req := &tenantv1.InitiateTenantRequest{
 		TenantId:        id,
-		DisplayName:     "Dev Tenant",
+		DisplayName:     dn,
 		SettlementAsset: "GBP",
-		Subdomain:       id + ".localhost",
+		Subdomain:       sd,
 		Slug:            slug,
 	}
 
