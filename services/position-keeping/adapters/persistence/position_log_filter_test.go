@@ -185,6 +185,7 @@ func TestPostgresRepository_TransactionLineageWithParent(t *testing.T) {
 	retrieved, err := tc.repo.FindByID(ctx, log.LogID)
 	require.NoError(t, err)
 	require.NotNil(t, retrieved.TransactionLineage)
+	require.NotNil(t, retrieved.TransactionLineage.ParentTransactionID())
 	assert.Equal(t, parentID, *retrieved.TransactionLineage.ParentTransactionID())
 	assert.Len(t, retrieved.TransactionLineage.ChildTransactionIDs(), 1)
 	assert.Len(t, retrieved.TransactionLineage.RelatedTransactionIDs(), 1)

@@ -111,7 +111,9 @@ func TestContainer_InitializeEventPublisher_KafkaEnabled_InvalidBrokers(t *testi
 
 	c.initializeEventPublisher()
 	// Should fallback to NoOp on producer creation failure
-	assert.NotNil(t, c.EventPublisher)
+	require.NotNil(t, c.EventPublisher)
+	_, isNoOp := c.EventPublisher.(*domain.NoOpEventPublisher)
+	assert.True(t, isNoOp, "expected NoOp publisher when kafka broker is invalid")
 }
 
 func TestContainer_InitializeAuditPublisher_KafkaDisabled(t *testing.T) {
@@ -354,7 +356,7 @@ func TestContainer_InitializeDatabase_UnreachableHost(t *testing.T) {
 	c := &Container{
 		Config: &Config{
 			Database: DatabaseConfig{
-				URL:                 "postgres://test:test@127.0.0.1:59999/testdb?connect_timeout=1",
+				URL:                 "postgres://test:test@198.51.100.1:5432/testdb?connect_timeout=1",
 				MaxOpenConns:        5,
 				MaxIdleConns:        2,
 				ConnMaxLifetime:     5 * time.Minute,
