@@ -115,8 +115,14 @@ func TestExchangeDemographics_ProductionSafety(t *testing.T) {
 			expectErrorCode: codes.OK,
 		},
 		{
-			name:            "staging without provider should return stub",
+			name:            "staging without provider should reject",
 			environment:     "staging",
+			expectError:     true,
+			expectErrorCode: codes.Unimplemented,
+		},
+		{
+			name:            "test without provider should return stub",
+			environment:     "test",
 			expectError:     false,
 			expectErrorCode: codes.OK,
 		},
