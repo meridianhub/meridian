@@ -5,10 +5,10 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
+	"github.com/meridianhub/meridian/services/reconciliation/testhelpers"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -168,16 +168,7 @@ func (m *mockSnapshotRepo) snapshotCount() int {
 
 func newTestRun(t *testing.T) *domain.SettlementRun {
 	t.Helper()
-	run, err := domain.NewSettlementRun(
-		"ACC-001",
-		domain.ReconciliationScopeAccount,
-		domain.SettlementTypeDaily,
-		time.Now().Add(-24*time.Hour),
-		time.Now(),
-		"test-user",
-	)
-	require.NoError(t, err)
-	return run
+	return testhelpers.NewSettlementRun(t)
 }
 
 // --- Tests ---

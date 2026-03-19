@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/await"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
@@ -39,7 +39,7 @@ func TestInterceptor_AllowsUpToBurstSize(t *testing.T) {
 	interceptor := NewInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("test_tenant"))
+	ctx := testdb.ContextWithTenant(t, "test_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Write"}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -69,8 +69,8 @@ func TestInterceptor_PerTenantIsolation(t *testing.T) {
 	interceptor := NewInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctxA := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("tenant_a"))
-	ctxB := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("tenant_b"))
+	ctxA := testdb.ContextWithTenant(t, "tenant_a")
+	ctxB := testdb.ContextWithTenant(t, "tenant_b")
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Write"}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -101,7 +101,7 @@ func TestInterceptor_PerMethodIsolation(t *testing.T) {
 	interceptor := NewInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("test_tenant"))
+	ctx := testdb.ContextWithTenant(t, "test_tenant")
 	infoA := &grpc.UnaryServerInfo{FullMethod: "/test.Service/MethodA"}
 	infoB := &grpc.UnaryServerInfo{FullMethod: "/test.Service/MethodB"}
 	handler := interceptor.UnaryServerInterceptor()
@@ -133,7 +133,7 @@ func TestInterceptor_MethodFilter(t *testing.T) {
 	interceptor := NewInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("test_tenant"))
+	ctx := testdb.ContextWithTenant(t, "test_tenant")
 	handler := interceptor.UnaryServerInterceptor()
 
 	// Non-configured method is never rate limited
@@ -186,7 +186,7 @@ func TestInterceptor_ConcurrentAccess(t *testing.T) {
 	interceptor := NewInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("concurrent_tenant"))
+	ctx := testdb.ContextWithTenant(t, "concurrent_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Write"}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -224,7 +224,7 @@ func TestInterceptor_CleanupIdleLimiters(t *testing.T) {
 	interceptor := NewInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("cleanup_tenant"))
+	ctx := testdb.ContextWithTenant(t, "cleanup_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Write"}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -253,7 +253,7 @@ func TestInterceptor_Metrics(t *testing.T) {
 	interceptor := NewInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("metrics_tenant"))
+	ctx := testdb.ContextWithTenant(t, "metrics_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Write"}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -307,7 +307,7 @@ func TestInterceptor_NilMetrics(t *testing.T) {
 	interceptor := NewInterceptor(config, nil)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("test_tenant"))
+	ctx := testdb.ContextWithTenant(t, "test_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Write"}
 	handler := interceptor.UnaryServerInterceptor()
 

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/shared/platform/await"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +41,7 @@ func TestRateLimitInterceptor_AllowsUpToBurstSize(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("test_tenant"))
+	ctx := testdb.ContextWithTenant(t, "test_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: RegisterInstrumentMethod}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -73,7 +73,7 @@ func TestRateLimitInterceptor_ReturnsResourceExhausted(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("tenant_a"))
+	ctx := testdb.ContextWithTenant(t, "tenant_a")
 	info := &grpc.UnaryServerInfo{FullMethod: RegisterInstrumentMethod}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -100,7 +100,7 @@ func TestRateLimitInterceptor_BypassesReadOperations(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("read_tenant"))
+	ctx := testdb.ContextWithTenant(t, "read_tenant")
 	handler := interceptor.UnaryServerInterceptor()
 
 	// Read operations should never be rate limited
@@ -132,8 +132,8 @@ func TestRateLimitInterceptor_PerTenantIsolation(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctxA := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("tenant_a"))
-	ctxB := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("tenant_b"))
+	ctxA := testdb.ContextWithTenant(t, "tenant_a")
+	ctxB := testdb.ContextWithTenant(t, "tenant_b")
 	info := &grpc.UnaryServerInfo{FullMethod: RegisterInstrumentMethod}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -191,7 +191,7 @@ func TestRateLimitInterceptor_TokenReplenishment(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("replenish_tenant"))
+	ctx := testdb.ContextWithTenant(t, "replenish_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: RegisterInstrumentMethod}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -225,7 +225,7 @@ func TestRateLimitInterceptor_ConcurrentAccess(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("concurrent_tenant"))
+	ctx := testdb.ContextWithTenant(t, "concurrent_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: RegisterInstrumentMethod}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -266,7 +266,7 @@ func TestRateLimitInterceptor_CleanupIdleLimiters(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("cleanup_tenant"))
+	ctx := testdb.ContextWithTenant(t, "cleanup_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: RegisterInstrumentMethod}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -299,7 +299,7 @@ func TestRateLimitMetrics_Increment(t *testing.T) {
 	interceptor := NewRateLimitInterceptor(config, metrics)
 	defer interceptor.Stop()
 
-	ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("metrics_tenant"))
+	ctx := testdb.ContextWithTenant(t, "metrics_tenant")
 	info := &grpc.UnaryServerInfo{FullMethod: RegisterInstrumentMethod}
 	handler := interceptor.UnaryServerInterceptor()
 
@@ -339,7 +339,7 @@ func TestRateLimitMetrics_ActiveLimitersGauge(t *testing.T) {
 
 	// Create limiters for 3 tenants
 	for i := 0; i < 3; i++ {
-		ctx := tenant.WithTenant(context.Background(), tenant.MustNewTenantID("tenant_"+string(rune('a'+i))))
+		ctx := testdb.ContextWithTenant(t, "tenant_"+string(rune('a'+i)))
 		handler(ctx, nil, info, testHandler)
 	}
 
