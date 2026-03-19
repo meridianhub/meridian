@@ -134,10 +134,10 @@ func TestNewServer_DefaultValues(t *testing.T) {
 
 	// Zero values for rate limit should get defaults
 	server, err := NewServer(ServerConfig{
-		Port:               8080,
-		WebhookHandler:     webhookHandler,
-		RateLimitPerSecond: 0,
-		RateLimitBurst:     0,
+		Port:                8080,
+		WebhookHandler:      webhookHandler,
+		RateLimitPerSecond:  0,
+		RateLimitBurst:      0,
 		RateLimitMaxEntries: 0,
 	})
 	require.NoError(t, err)
