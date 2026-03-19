@@ -56,17 +56,24 @@ done"
 ssh "${DEMO_HOST}" "docker exec meridian-postgres-1 psql -U meridian -d meridian -f /docker-entrypoint-initdb.d/init-databases.sql"
 
 echo ""
-echo "=== Step 3: Start meridian and run migrations ==="
+echo "=== Step 3: Run pre-migration scripts ==="
+# PostgreSQL requires ALTER TABLE DROP CONSTRAINT for constraint-backed unique indexes.
+# CockroachDB uses DROP INDEX CASCADE instead. This pre-migration resolves the divergence.
+# See deploy/demo/pg-pre-migration.sql for details.
+ssh "${DEMO_HOST}" 'docker exec meridian-postgres-1 psql -U meridian -d meridian_reference_data -c "ALTER TABLE IF EXISTS public.platform_saga_definition DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;"'
+
+echo ""
+echo "=== Step 4: Start meridian and run migrations ==="
 ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose up -d meridian"
 sleep 3
 ssh "${DEMO_HOST}" "docker exec meridian-meridian-1 /meridian --migrate"
 
 echo ""
-echo "=== Step 4: Restart meridian (post-migration) ==="
+echo "=== Step 5: Restart meridian (post-migration) ==="
 ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose restart meridian"
 
 echo ""
-echo "=== Step 5: Seed demo tenant with fixtures ==="
+echo "=== Step 6: Seed demo tenant with fixtures ==="
 # seed-dev has its own gateway health polling (60s timeout, 2s interval)
 # so no sleep needed between restart and seed
 ssh "${DEMO_HOST}" "docker exec meridian-meridian-1 /seed-dev \
@@ -80,7 +87,7 @@ ssh "${DEMO_HOST}" "docker exec meridian-meridian-1 /seed-dev \
   --with-fixtures"
 
 echo ""
-echo "=== Step 6: Start mcp-server ==="
+echo "=== Step 7: Start mcp-server ==="
 ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose up -d mcp-server"
 
 echo ""
