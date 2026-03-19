@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 

@@ -45,4 +45,3 @@ func NewValuationPolicy(name string) *valuation.Policy {
 		Description:   fmt.Sprintf("Test policy: %s", name),
 	}
 }
-
