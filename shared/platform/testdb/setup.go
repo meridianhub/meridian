@@ -54,7 +54,7 @@ func WithSetupLogLevel(level logger.LogLevel) Option {
 	}
 }
 
-// SetupTestDB creates a CockroachDB testcontainer and configures it according
+// SetupTestDB creates a PostgreSQL testcontainer and configures it according
 // to the provided options. It returns a GORM database, a context (with tenant
 // if WithTenant was specified), and a cleanup function.
 //
@@ -87,8 +87,8 @@ func SetupTestDB(t *testing.T, opts ...Option) (*gorm.DB, context.Context, func(
 		opt(cfg)
 	}
 
-	// Start CockroachDB container with GORM connection
-	db, cleanup := SetupCockroachDB(t, nil, WithLogLevel(cfg.logLevel))
+	// Start PostgreSQL container with GORM connection
+	db, cleanup := SetupPostgres(t, nil, WithLogLevel(cfg.logLevel))
 
 	// Pin to a single connection so session-level SET search_path persists
 	// across all subsequent Exec/AutoMigrate calls.

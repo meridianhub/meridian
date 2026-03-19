@@ -22,7 +22,7 @@ func TestSetupTestDB_NoOptions(t *testing.T) {
 	var version string
 	err := db.Raw("SELECT version()").Scan(&version).Error
 	require.NoError(t, err)
-	require.Contains(t, version, "CockroachDB")
+	require.Contains(t, version, "PostgreSQL")
 
 	// Context should not have tenant
 	_, ok := tenant.FromContext(ctx)
