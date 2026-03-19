@@ -591,3 +591,86 @@ func (m *mockGRPCHealthClient) Watch(_ context.Context, _ *grpc_health_v1.Health
 func (m *mockGRPCHealthClient) List(_ context.Context, _ *grpc_health_v1.HealthListRequest, _ ...grpc.CallOption) (*grpc_health_v1.HealthListResponse, error) {
 	return nil, errNotImplemented
 }
+
+// =============================================================================
+// Additional health checker tests for coverage
+// =============================================================================
+
+func TestPositionKeepingHealthChecker_NotServing(t *testing.T) {
+	healthClient := &mockGRPCHealthClient{
+		status: grpc_health_v1.HealthCheckResponse_NOT_SERVING,
+	}
+	checker := NewPositionKeepingHealthChecker(healthClient, 5*time.Second)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, "positionkeeping", result.Name)
+	assert.Equal(t, health.StatusDegraded, result.Status)
+	assert.Contains(t, result.Message, "not serving")
+}
+
+func TestPositionKeepingHealthChecker_Error(t *testing.T) {
+	healthClient := &mockGRPCHealthClient{
+		err: errConnectionRefused,
+	}
+	checker := NewPositionKeepingHealthChecker(healthClient, 5*time.Second)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, health.StatusDegraded, result.Status)
+	assert.Contains(t, result.Message, "unreachable")
+	assert.Error(t, result.Error)
+}
+
+func TestFinancialAccountingHealthChecker_NotServing(t *testing.T) {
+	healthClient := &mockGRPCHealthClient{
+		status: grpc_health_v1.HealthCheckResponse_NOT_SERVING,
+	}
+	checker := NewFinancialAccountingHealthChecker(healthClient, 5*time.Second)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, "financialaccounting", result.Name)
+	assert.Equal(t, health.StatusDegraded, result.Status)
+	assert.Contains(t, result.Message, "not serving")
+}
+
+func TestFinancialAccountingHealthChecker_Error(t *testing.T) {
+	healthClient := &mockGRPCHealthClient{
+		err: errTimeout,
+	}
+	checker := NewFinancialAccountingHealthChecker(healthClient, 5*time.Second)
+
+	result := checker.Check(context.Background())
+
+	assert.Equal(t, health.StatusDegraded, result.Status)
+	assert.Contains(t, result.Message, "unreachable")
+	assert.Error(t, result.Error)
+}
+
+func TestHealthChecker_Watch_InitialSendFails(t *testing.T) {
+	repo := setupTestRepository(t)
+
+	checker := mustNewHealthChecker(t, HealthCheckerConfig{
+		Repository:   repo,
+		Logger:       slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		CheckTimeout: 100 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel immediately so Send returns an error
+	cancel()
+
+	stream := &mockHealthWatchServer{
+		ctx:       ctx,
+		cancel:    cancel,
+		responses: make([]*grpc_health_v1.HealthCheckResponse, 0),
+	}
+
+	err := checker.Watch(&grpc_health_v1.HealthCheckRequest{
+		Service: "current-account",
+	}, stream)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to send initial health status")
+}

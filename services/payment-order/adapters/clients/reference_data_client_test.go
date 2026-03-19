@@ -211,3 +211,19 @@ func TestReferenceDataClientWrapper_RetrieveInstrument_NilResponse(t *testing.T)
 	assert.Nil(t, result)
 	assert.ErrorIs(t, err, ErrInstrumentNotFound)
 }
+
+func TestNewReferenceDataClient_NilConn(t *testing.T) {
+	// NewReferenceDataClient with nil conn should not panic
+	// (gRPC clients are lazy - they don't connect until a call is made)
+	client := NewReferenceDataClient(nil)
+	require.NotNil(t, client)
+}
+
+func TestReferenceDataClientWrapper_Close_NilConn(t *testing.T) {
+	client := &ReferenceDataClientWrapper{
+		conn: nil,
+	}
+
+	err := client.Close()
+	assert.NoError(t, err)
+}

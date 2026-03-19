@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"math"
 	"testing"
 
@@ -11,9 +13,24 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/config"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/services/payment-order/domain/testfixtures"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
+
+// mockKafkaPublisher implements KafkaPublisher for testing.
+type mockKafkaPublisher struct {
+	lastTopic string
+	lastKey   string
+	err       error
+}
+
+func (m *mockKafkaPublisher) Publish(_ context.Context, topic string, key string, _ proto.Message) error {
+	m.lastTopic = topic
+	m.lastKey = key
+	return m.err
+}
 
 // =============================================================================
 // LockClient
@@ -230,7 +247,7 @@ func TestHandlePendingStatus_ExecutingState_Success(t *testing.T) {
 }
 
 // =============================================================================
-// publishEvent — nil publisher
+// publishEvent — nil publisher, success, and error paths
 // =============================================================================
 
 func TestPublishEvent_NilPublisher(t *testing.T) {
@@ -241,6 +258,230 @@ func TestPublishEvent_NilPublisher(t *testing.T) {
 
 	// Should not panic
 	s.publishEvent(context.Background(), "topic", "key", nil)
+}
+
+func TestPublishEvent_Success(t *testing.T) {
+	t.Parallel()
+
+	s := newTestServiceWithMocks(t)
+	mock := &mockKafkaPublisher{}
+	s.kafkaPublisher = mock
+
+	s.publishEvent(context.Background(), "test-topic", "test-key", nil)
+
+	assert.Equal(t, "test-topic", mock.lastTopic)
+	assert.Equal(t, "test-key", mock.lastKey)
+}
+
+func TestPublishEvent_Error(t *testing.T) {
+	t.Parallel()
+
+	s := newTestServiceWithMocks(t)
+	mock := &mockKafkaPublisher{err: errors.New("kafka unavailable")}
+	s.kafkaPublisher = mock
+
+	// Should not panic, error is logged
+	s.publishEvent(context.Background(), "test-topic", "test-key", nil)
+
+	assert.Equal(t, "test-topic", mock.lastTopic)
+}
+
+// =============================================================================
+// resultToString — additional type coverage
+// =============================================================================
+
+func TestResultToString_Uint(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	evaluator, err := NewBucketEvaluator(logger)
+	require.NoError(t, err)
+
+	// CEL uint literal
+	result, err := evaluator.Evaluate(context.Background(), `42u`, BucketEvalContext{
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "42", result)
+}
+
+func TestResultToString_Double(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	evaluator, err := NewBucketEvaluator(logger)
+	require.NoError(t, err)
+
+	// CEL double literal
+	result, err := evaluator.Evaluate(context.Background(), `3.14`, BucketEvalContext{
+		InstrumentCode: "USD",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "3.14", result)
+}
+
+func TestResultToString_List(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	evaluator, err := NewBucketEvaluator(logger)
+	require.NoError(t, err)
+
+	_, err = evaluator.Evaluate(context.Background(), `["a", "b"]`, BucketEvalContext{
+		InstrumentCode: "USD",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CEL result conversion failed")
+}
+
+func TestResultToString_Map(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	evaluator, err := NewBucketEvaluator(logger)
+	require.NoError(t, err)
+
+	_, err = evaluator.Evaluate(context.Background(), `{"key": "value"}`, BucketEvalContext{
+		InstrumentCode: "USD",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CEL result conversion failed")
+}
+
+// =============================================================================
+// PaymentOrchestrator.publishEvent — success and error
+// =============================================================================
+
+func TestOrchestratorPublishEvent_NilPublisher(t *testing.T) {
+	t.Parallel()
+
+	o := testOrchestrator(NewMockRepository(), &MockCurrentAccountClient{}, nil, nil)
+	o.kafkaPublisher = nil
+
+	// Should not panic
+	o.publishEvent(context.Background(), "topic", "key", nil)
+}
+
+func TestOrchestratorPublishEvent_Success(t *testing.T) {
+	t.Parallel()
+
+	o := testOrchestrator(NewMockRepository(), &MockCurrentAccountClient{}, nil, nil)
+	mock := &mockKafkaPublisher{}
+	o.kafkaPublisher = mock
+
+	o.publishEvent(context.Background(), "orch-topic", "orch-key", nil)
+
+	assert.Equal(t, "orch-topic", mock.lastTopic)
+	assert.Equal(t, "orch-key", mock.lastKey)
+}
+
+func TestOrchestratorPublishEvent_Error(t *testing.T) {
+	t.Parallel()
+
+	o := testOrchestrator(NewMockRepository(), &MockCurrentAccountClient{}, nil, nil)
+	mock := &mockKafkaPublisher{err: errors.New("broker down")}
+	o.kafkaPublisher = mock
+
+	// Should not panic, error is logged
+	o.publishEvent(context.Background(), "orch-topic", "orch-key", nil)
+
+	assert.Equal(t, "orch-topic", mock.lastTopic)
+}
+
+// =============================================================================
+// storeIdempotencyFailure — error path
+// =============================================================================
+
+func TestStoreIdempotencyFailure_StoreError(t *testing.T) {
+	t.Parallel()
+
+	idempSvc := NewMockIdempotencyService()
+	idempSvc.storeErr = errors.New("redis connection lost")
+
+	s, err := NewService(NewMockRepository(), idempSvc)
+	require.NoError(t, err)
+	s.logger = testLogger()
+
+	key := idempotency.Key{
+		TenantID:  "tenant-1",
+		Namespace: "payment-order",
+		Operation: "initiate",
+		EntityID:  "acc-123",
+		RequestID: "req-abc",
+	}
+
+	// Should not panic — error is only logged
+	s.storeIdempotencyFailure(context.Background(), key, "validation failed")
+}
+
+func TestStoreIdempotencyFailure_Success(t *testing.T) {
+	t.Parallel()
+
+	idempSvc := NewMockIdempotencyService()
+
+	s, err := NewService(NewMockRepository(), idempSvc)
+	require.NoError(t, err)
+	s.logger = testLogger()
+
+	key := idempotency.Key{
+		TenantID:  "tenant-1",
+		Namespace: "payment-order",
+		Operation: "initiate",
+		EntityID:  "acc-123",
+		RequestID: "req-def",
+	}
+
+	s.storeIdempotencyFailure(context.Background(), key, "some error")
+
+	// Verify result was stored
+	result, checkErr := idempSvc.Check(context.Background(), key)
+	require.NoError(t, checkErr)
+	assert.Equal(t, idempotency.StatusFailed, result.Status)
+}
+
+// =============================================================================
+// handleRejectedStatus — idempotent path (already failed)
+// =============================================================================
+
+func TestHandleRejectedStatus_AlreadyFailed(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMockRepository()
+	po := testfixtures.NewPaymentOrderInStatus(t, domain.PaymentOrderStatusFailed,
+		testfixtures.WithFailureReason("previous failure"),
+		testfixtures.WithErrorCode("PREV_ERROR"),
+	)
+	require.NoError(t, repo.Create(context.Background(), po))
+
+	s := newTestServiceWithMocksAndRepo(t, repo, &testMockClients{})
+
+	result, err := s.handleRejectedStatus(context.Background(), po, "gateway rejected again")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.isIdempotent)
+	assert.Equal(t, domain.PaymentOrderStatusFailed, result.po.Status)
+}
+
+func TestHandleRejectedStatus_ExecutingState(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMockRepository()
+	po := testfixtures.NewPaymentOrderInStatus(t, domain.PaymentOrderStatusExecuting,
+		testfixtures.WithGatewayReferenceID("GW-rej-123"),
+	)
+	require.NoError(t, repo.Create(context.Background(), po))
+
+	s := newTestServiceWithMocksAndRepo(t, repo, &testMockClients{})
+
+	result, err := s.handleRejectedStatus(context.Background(), po, "insufficient funds")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.isIdempotent)
+
+	// Verify PO was marked as failed
+	updated, findErr := repo.FindByID(context.Background(), po.ID)
+	require.NoError(t, findErr)
+	assert.Equal(t, domain.PaymentOrderStatusFailed, updated.Status)
 }
 
 // =============================================================================

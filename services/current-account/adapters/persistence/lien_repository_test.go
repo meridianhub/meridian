@@ -2,12 +2,14 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/current-account/domain"
@@ -1003,4 +1005,198 @@ func TestLienRepository_TenantIsolation_FindByPaymentOrderReference_CrossTenantN
 	_, err = repo.FindByPaymentOrderReference(ctxStranger, paymentOrderRef)
 	assert.ErrorIs(t, err, ErrLienNotFound,
 		"FindByPaymentOrderReference from wrong tenant should return ErrLienNotFound")
+}
+
+// =============================================================================
+// WithTx tests
+// =============================================================================
+
+func TestLienRepository_WithTx(t *testing.T) {
+	db, _, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	txRepo := repo.WithTx(db)
+	assert.NotNil(t, txRepo, "WithTx should return a non-nil repository")
+}
+
+// =============================================================================
+// toLienEntity / toLienDomain valuation field round-trip tests
+// =============================================================================
+
+func TestToLienEntity_WithValuationFields(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 35000)
+	require.NoError(t, err)
+
+	lien, err := domain.NewLien(accountID, amount, "", "PO-VAL-001", nil)
+	require.NoError(t, err)
+
+	// Set valuation fields
+	lien.ReservedQuantity = &domain.InstrumentAmount{
+		Amount:         decimal.NewFromInt(100),
+		InstrumentCode: "KWH",
+	}
+	lien.ValuedAmount = &domain.InstrumentAmount{
+		Amount:         decimal.NewFromFloat(35.00),
+		InstrumentCode: "GBP",
+	}
+	lien.ValuationAnalysis = json.RawMessage(`{"method":"spot","rate":"0.35"}`)
+
+	entity := toLienEntity(lien)
+
+	// Verify valuation fields are marshaled
+	assert.NotNil(t, entity.ReservedQuantity, "ReservedQuantity should be marshaled")
+	assert.NotNil(t, entity.ValuedAmount, "ValuedAmount should be marshaled")
+	assert.NotNil(t, entity.ValuationAnalysis, "ValuationAnalysis should be set")
+}
+
+func TestToLienEntity_WithoutValuationFields(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 10000)
+	require.NoError(t, err)
+
+	lien, err := domain.NewLien(accountID, amount, "", "PO-NOVAL-001", nil)
+	require.NoError(t, err)
+
+	entity := toLienEntity(lien)
+
+	// Verify valuation fields are nil when not set
+	assert.Nil(t, entity.ReservedQuantity)
+	assert.Nil(t, entity.ValuedAmount)
+	assert.Nil(t, entity.ValuationAnalysis)
+}
+
+func TestToLienDomain_WithValuationFields(t *testing.T) {
+	rqJSON, err := json.Marshal(domain.InstrumentAmount{
+		Amount:         decimal.NewFromInt(100),
+		InstrumentCode: "KWH",
+	})
+	require.NoError(t, err)
+
+	vaJSON, err := json.Marshal(domain.InstrumentAmount{
+		Amount:         decimal.NewFromFloat(35.00),
+		InstrumentCode: "GBP",
+	})
+	require.NoError(t, err)
+
+	analysisJSON := json.RawMessage(`{"method":"spot","rate":"0.35"}`)
+
+	entity := &LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             uuid.New(),
+		AmountCents:           35000,
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
+		BucketID:              "",
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-VAL-002",
+		ReservedQuantity:      JSONBMap(rqJSON),
+		ValuedAmount:          JSONBMap(vaJSON),
+		ValuationAnalysis:     JSONBMap(analysisJSON),
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+
+	lien, err := toLienDomain(entity)
+	require.NoError(t, err)
+
+	require.NotNil(t, lien.ReservedQuantity, "ReservedQuantity should be unmarshaled")
+	assert.Equal(t, "KWH", lien.ReservedQuantity.InstrumentCode)
+	assert.True(t, lien.ReservedQuantity.Amount.Equal(decimal.NewFromInt(100)))
+
+	require.NotNil(t, lien.ValuedAmount, "ValuedAmount should be unmarshaled")
+	assert.Equal(t, "GBP", lien.ValuedAmount.InstrumentCode)
+
+	require.NotNil(t, lien.ValuationAnalysis, "ValuationAnalysis should be set")
+	assert.Contains(t, string(lien.ValuationAnalysis), "spot")
+}
+
+func TestToLienDomain_CorruptedReservedQuantity(t *testing.T) {
+	entity := &LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             uuid.New(),
+		AmountCents:           10000,
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-CORRUPT-RQ",
+		ReservedQuantity:      JSONBMap(`{invalid json`),
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+
+	_, err := toLienDomain(entity)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reserved_quantity")
+}
+
+func TestToLienDomain_CorruptedValuedAmount(t *testing.T) {
+	entity := &LienEntity{
+		ID:                    uuid.New(),
+		AccountID:             uuid.New(),
+		AmountCents:           10000,
+		InstrumentCode:        "GBP",
+		Dimension:             "CURRENCY",
+		Precision:             2,
+		Status:                "ACTIVE",
+		PaymentOrderReference: "PO-CORRUPT-VA",
+		ValuedAmount:          JSONBMap(`not valid json`),
+		Version:               1,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+
+	_, err := toLienDomain(entity)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "valued_amount")
+}
+
+// =============================================================================
+// Valuation fields DB round-trip integration test
+// =============================================================================
+
+func TestLienRepository_ValuationFieldsRoundTrip(t *testing.T) {
+	db, ctx, cleanup := setupLienTestDB(t)
+	defer cleanup()
+
+	repo := NewLienRepository(db)
+	accountID := uuid.New()
+	amount, err := domain.NewMoney("GBP", 35000)
+	require.NoError(t, err)
+
+	lien, err := domain.NewLien(accountID, amount, "", "PO-VF-RT-001", nil)
+	require.NoError(t, err)
+
+	// Set valuation fields before creation
+	lien.ReservedQuantity = &domain.InstrumentAmount{
+		Amount:         decimal.NewFromInt(100),
+		InstrumentCode: "KWH",
+	}
+	lien.ValuedAmount = &domain.InstrumentAmount{
+		Amount:         decimal.NewFromFloat(35.00),
+		InstrumentCode: "GBP",
+	}
+	lien.ValuationAnalysis = json.RawMessage(`{"method_id":"spot-v1","rate":"0.35"}`)
+
+	err = repo.Create(ctx, lien)
+	require.NoError(t, err)
+
+	// Retrieve and verify round-trip
+	retrieved, err := repo.FindByID(ctx, lien.ID)
+	require.NoError(t, err)
+
+	require.NotNil(t, retrieved.ReservedQuantity)
+	assert.Equal(t, "KWH", retrieved.ReservedQuantity.InstrumentCode)
+	assert.True(t, retrieved.ReservedQuantity.Amount.Equal(decimal.NewFromInt(100)))
+
+	require.NotNil(t, retrieved.ValuedAmount)
+	assert.Equal(t, "GBP", retrieved.ValuedAmount.InstrumentCode)
+
+	require.NotNil(t, retrieved.ValuationAnalysis)
+	assert.Contains(t, string(retrieved.ValuationAnalysis), "spot-v1")
 }

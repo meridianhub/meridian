@@ -624,3 +624,85 @@ func TestPaymentOrderRepository_FindByDebtorAccountID_CorruptedData_ReturnsError
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "database")
 }
+
+func TestPaymentOrderRepository_FindByDebtorAccountIDWithCursor_Empty(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	result, err := repo.FindByDebtorAccountIDWithCursor(ctx, "nonexistent-account", 10, Cursor{})
+	require.NoError(t, err)
+	assert.Empty(t, result.PaymentOrders)
+	assert.Equal(t, int64(0), result.TotalCount)
+	assert.False(t, result.HasMore)
+	assert.Empty(t, result.NextCursor)
+}
+
+func TestPaymentOrderRepository_FindByDebtorAccountIDWithCursor_FirstPage(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	// Create 3 payment orders for the same account
+	for i := 0; i < 3; i++ {
+		amount, err := domain.NewMoney("GBP", int64((i+1)*1000))
+		require.NoError(t, err)
+
+		po, err := domain.NewPaymentOrder(
+			"acc-cursor-test",
+			"ref-"+uuid.New().String()[:8],
+			amount,
+			"idem-cursor-"+uuid.New().String()[:8],
+			"corr-cursor",
+		)
+		require.NoError(t, err)
+		require.NoError(t, repo.Create(ctx, po))
+	}
+
+	// First page with limit 2 (should return 2 and hasMore=true)
+	result, err := repo.FindByDebtorAccountIDWithCursor(ctx, "acc-cursor-test", 2, Cursor{})
+	require.NoError(t, err)
+	assert.Len(t, result.PaymentOrders, 2)
+	assert.Equal(t, int64(3), result.TotalCount)
+	assert.True(t, result.HasMore)
+	assert.NotEmpty(t, result.NextCursor)
+}
+
+func TestPaymentOrderRepository_FindByDebtorAccountIDWithCursor_SecondPage(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewPaymentOrderRepository(db)
+
+	// Create 3 payment orders
+	for i := 0; i < 3; i++ {
+		amount, err := domain.NewMoney("GBP", int64((i+1)*1000))
+		require.NoError(t, err)
+
+		po, err := domain.NewPaymentOrder(
+			"acc-cursor-page2",
+			"ref-"+uuid.New().String()[:8],
+			amount,
+			"idem-p2-"+uuid.New().String()[:8],
+			"corr-p2",
+		)
+		require.NoError(t, err)
+		require.NoError(t, repo.Create(ctx, po))
+	}
+
+	// First page
+	page1, err := repo.FindByDebtorAccountIDWithCursor(ctx, "acc-cursor-page2", 2, Cursor{})
+	require.NoError(t, err)
+	require.True(t, page1.HasMore)
+
+	// Decode cursor and get second page
+	cursor, err := DecodeCursor(page1.NextCursor)
+	require.NoError(t, err)
+
+	page2, err := repo.FindByDebtorAccountIDWithCursor(ctx, "acc-cursor-page2", 2, cursor)
+	require.NoError(t, err)
+	assert.Len(t, page2.PaymentOrders, 1)
+	assert.False(t, page2.HasMore)
+}

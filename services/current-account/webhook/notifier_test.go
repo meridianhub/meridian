@@ -310,6 +310,41 @@ func TestHTTPNotifier_RejectsHTTPURLs(t *testing.T) {
 	assert.Empty(t, recorder.records)
 }
 
+func TestMapEventType(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    EventType
+		expected string
+	}{
+		{"frozen event", EventTypeAccountFrozen, "account_frozen"},
+		{"closed event", EventTypeAccountClosed, "account_closed"},
+		{"unknown event", EventType("unknown.event"), "unknown.event"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapEventType(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHTTPNotifier_URLProviderError(t *testing.T) {
+	urlProvider := &mockURLProvider{
+		err: assert.AnError,
+	}
+
+	notifier := NewHTTPNotifier(Config{
+		URLProvider: urlProvider,
+	})
+
+	ctx := context.Background()
+	err := notifier.NotifyAccountFrozen(ctx, "tenant-456", "account-123", "reason", time.Now())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "webhook URL")
+}
+
 func TestHTTPNotifier_DefaultConfig(t *testing.T) {
 	urlProvider := &mockURLProvider{
 		urls: map[string]string{},

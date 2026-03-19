@@ -713,6 +713,233 @@ func TestLienLifecycle(t *testing.T) {
 	})
 }
 
+func TestConvertDecimalToMoney(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        decimal.Decimal
+		currency     string
+		wantUnits    int64
+		wantNanos    int32
+		wantCurrency string
+	}{
+		{
+			name:         "whole number",
+			input:        decimal.NewFromInt(100),
+			currency:     "USD",
+			wantUnits:    100,
+			wantNanos:    0,
+			wantCurrency: "USD",
+		},
+		{
+			name:         "with fractional part",
+			input:        decimal.NewFromFloat(123.456),
+			currency:     "GBP",
+			wantUnits:    123,
+			wantNanos:    456000000,
+			wantCurrency: "GBP",
+		},
+		{
+			name:         "zero",
+			input:        decimal.Zero,
+			currency:     "EUR",
+			wantUnits:    0,
+			wantNanos:    0,
+			wantCurrency: "EUR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertDecimalToMoney(tt.input, tt.currency)
+			assert.Equal(t, tt.wantUnits, result.Units)
+			assert.Equal(t, tt.wantNanos, result.Nanos)
+			assert.Equal(t, tt.wantCurrency, result.CurrencyCode)
+		})
+	}
+}
+
+func TestConvertMoneyToDecimal(t *testing.T) {
+	t.Run("nil money returns zero", func(t *testing.T) {
+		result := convertMoneyToDecimal(nil)
+		assert.True(t, result.Equal(decimal.Zero))
+	})
+
+	t.Run("whole number", func(t *testing.T) {
+		result := convertMoneyToDecimal(&money.Money{
+			Units:        100,
+			Nanos:        0,
+			CurrencyCode: "USD",
+		})
+		assert.True(t, result.Equal(decimal.NewFromInt(100)))
+	})
+
+	t.Run("with nanos", func(t *testing.T) {
+		result := convertMoneyToDecimal(&money.Money{
+			Units:        123,
+			Nanos:        456000000,
+			CurrencyCode: "GBP",
+		})
+		expected := decimal.NewFromFloat(123.456)
+		assert.True(t, result.Equal(expected), "expected %s, got %s", expected, result)
+	})
+}
+
+func TestFormatTimestamp(t *testing.T) {
+	ts := timestamppb.New(time.Date(2026, 3, 15, 14, 30, 0, 0, time.UTC))
+	result := formatTimestamp(ts)
+	assert.Equal(t, "2026-03-15T14:30:00Z", result)
+}
+
+func TestConvertValuationAnalysisToMap_EmptyFields(t *testing.T) {
+	// Test with minimal fields (no optional fields set)
+	va := &currentaccountv1.ValuationAnalysis{
+		MethodId:      "simple_method",
+		MethodVersion: "1.0",
+	}
+
+	result := ConvertValuationAnalysisToMap(va)
+	assert.Equal(t, "simple_method", result["method_id"])
+	assert.Equal(t, "1.0", result["method_version"])
+	assert.Equal(t, false, result["degraded_mode"])
+
+	// Optional fields should not be present
+	_, hasRates := result["applied_rates"]
+	assert.False(t, hasRates)
+	_, hasObs := result["observation_ids"]
+	assert.False(t, hasObs)
+	_, hasWarnings := result["warnings"]
+	assert.False(t, hasWarnings)
+	_, hasQualities := result["market_data_qualities"]
+	assert.False(t, hasQualities)
+}
+
+func TestSaveHandler_GRPCError(t *testing.T) {
+	mockServer := &mockCurrentAccountServer{
+		shouldError:  true,
+		errorMessage: "internal server error",
+	}
+	client, cleanup := setupMockServer(t, mockServer)
+	defer cleanup()
+
+	handler := saveHandler(client)
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		IdempotencyKey: "test-key",
+		KnowledgeAt:    time.Now(),
+		CorrelationID:  uuid.New(),
+	}
+
+	params := map[string]any{
+		"account_id": "acc-123",
+	}
+
+	_, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "current_account.save")
+}
+
+func TestExecuteLienHandler_GRPCError(t *testing.T) {
+	mockServer := &mockCurrentAccountServer{
+		shouldError:  true,
+		errorMessage: "lien not found",
+	}
+	client, cleanup := setupMockServer(t, mockServer)
+	defer cleanup()
+
+	handler := executeLienHandler(client)
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		IdempotencyKey: "test-key",
+		KnowledgeAt:    time.Now(),
+		CorrelationID:  uuid.New(),
+	}
+
+	params := map[string]any{
+		"lien_id": "lien-123",
+	}
+
+	_, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "current_account.execute_lien")
+}
+
+func TestTerminateLienHandler_GRPCError(t *testing.T) {
+	mockServer := &mockCurrentAccountServer{
+		shouldError:  true,
+		errorMessage: "lien not found",
+	}
+	client, cleanup := setupMockServer(t, mockServer)
+	defer cleanup()
+
+	handler := terminateLienHandler(client)
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		IdempotencyKey: "test-key",
+		KnowledgeAt:    time.Now(),
+		CorrelationID:  uuid.New(),
+	}
+
+	params := map[string]any{
+		"lien_id": "lien-123",
+	}
+
+	_, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "current_account.terminate_lien")
+}
+
+func TestTerminateLienHandler_WithoutReason(t *testing.T) {
+	mockServer := &mockCurrentAccountServer{}
+	client, cleanup := setupMockServer(t, mockServer)
+	defer cleanup()
+
+	handler := terminateLienHandler(client)
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		IdempotencyKey: "test-key",
+		KnowledgeAt:    time.Now(),
+		CorrelationID:  uuid.New(),
+	}
+
+	// No reason parameter
+	params := map[string]any{
+		"lien_id": "lien-123",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+	assert.True(t, mockServer.terminateLienCalled)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "TERMINATED", resultMap["status"])
+}
+
+func TestCreateLienHandler_WithPaymentOrderReference(t *testing.T) {
+	mockServer := &mockCurrentAccountServer{}
+	client, cleanup := setupMockServer(t, mockServer)
+	defer cleanup()
+
+	handler := createLienHandler(client)
+	ctx := &saga.StarlarkContext{
+		Context:        context.Background(),
+		IdempotencyKey: "test-key",
+		KnowledgeAt:    time.Now(),
+		CorrelationID:  uuid.New(),
+	}
+
+	params := map[string]any{
+		"account_id":              "acc-123",
+		"amount":                  decimal.NewFromFloat(50.00),
+		"currency":                "USD",
+		"payment_order_reference": "PO-001",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
 func TestControlHandler(t *testing.T) {
 	// Use deterministic UUIDs for account IDs (ValidatePartyAccessFromString requires UUID format)
 	freezeAccountID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("freeze-test")).String()

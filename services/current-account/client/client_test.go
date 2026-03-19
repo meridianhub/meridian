@@ -203,6 +203,179 @@ func TestExecuteDeposit_InvalidAccountID(t *testing.T) {
 	}
 }
 
+func TestConn_ReturnsUnderlyingConnection(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50051",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	conn := client.Conn()
+	assert.NotNil(t, conn)
+	assert.Equal(t, client.conn, conn)
+}
+
+func TestUpdateCurrentAccount_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50051",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.UpdateCurrentAccount(context.Background(), &currentaccountv1.UpdateCurrentAccountRequest{
+		AccountId: "",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestControlCurrentAccount_InvalidAccountID(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target: "localhost:50051",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.ControlCurrentAccount(context.Background(), &currentaccountv1.ControlCurrentAccountRequest{
+		AccountId: "",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestInitiateCurrentAccount_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.InitiateCurrentAccount(context.Background(), &currentaccountv1.InitiateCurrentAccountRequest{})
+	// Should fail because no real gRPC server is running, but code path is covered
+	assert.Error(t, err)
+}
+
+func TestRetrieveLien_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.RetrieveLien(context.Background(), &currentaccountv1.RetrieveLienRequest{})
+	assert.Error(t, err)
+}
+
+func TestGetActiveAmountBlocks_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.GetActiveAmountBlocks(context.Background(), &currentaccountv1.GetActiveAmountBlocksRequest{})
+	assert.Error(t, err)
+}
+
+func TestExecuteDeposit_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	// Valid account ID passes validation, fails on gRPC call
+	_, err = client.ExecuteDeposit(context.Background(), &currentaccountv1.ExecuteDepositRequest{
+		AccountId: "ACC-123",
+	})
+	assert.Error(t, err)
+}
+
+func TestRetrieveCurrentAccount_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	// Valid account ID passes validation, fails on gRPC call
+	_, err = client.RetrieveCurrentAccount(context.Background(), &currentaccountv1.RetrieveCurrentAccountRequest{
+		AccountId: "ACC-123",
+	})
+	assert.Error(t, err)
+}
+
+func TestExecuteLien_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.ExecuteLien(context.Background(), &currentaccountv1.ExecuteLienRequest{})
+	assert.Error(t, err)
+}
+
+func TestTerminateLien_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.TerminateLien(context.Background(), &currentaccountv1.TerminateLienRequest{})
+	assert.Error(t, err)
+}
+
+func TestControlCurrentAccount_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.ControlCurrentAccount(context.Background(), &currentaccountv1.ControlCurrentAccountRequest{
+		AccountId: "ACC-123",
+	})
+	assert.Error(t, err)
+}
+
+func TestUpdateCurrentAccount_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.UpdateCurrentAccount(context.Background(), &currentaccountv1.UpdateCurrentAccountRequest{
+		AccountId: "ACC-123",
+	})
+	assert.Error(t, err)
+}
+
+func TestInitiateLien_NoServer(t *testing.T) {
+	client, cleanup, err := New(Config{
+		Target:  "localhost:50051",
+		Timeout: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	_, err = client.InitiateLien(context.Background(), &currentaccountv1.InitiateLienRequest{
+		AccountId: "ACC-123",
+	})
+	assert.Error(t, err)
+}
+
 func TestInitiateLien_InvalidAccountID(t *testing.T) {
 	client, cleanup, err := New(Config{
 		Target: "localhost:50051",
