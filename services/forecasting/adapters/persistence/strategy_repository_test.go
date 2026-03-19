@@ -428,3 +428,53 @@ func TestStrategyRepository_LifecycleTransitions(t *testing.T) {
 	assert.Equal(t, domain.StrategyStatusDeprecated, retrieved.Status())
 	assert.Equal(t, int64(3), retrieved.Version())
 }
+
+func TestStrategyRepository_ListAllActive(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+
+	// Create a DRAFT strategy (should not appear)
+	draft := createTestStrategy(t, "tenant-1", "Draft Strategy")
+	err := tc.Repo.Save(ctx, draft)
+	require.NoError(t, err)
+
+	// Create and activate two strategies across different tenants
+	s1 := createTestStrategy(t, "tenant-1", "Active Strategy 1")
+	err = tc.Repo.Save(ctx, s1)
+	require.NoError(t, err)
+	activated1, err := s1.Activate()
+	require.NoError(t, err)
+	err = tc.Repo.Save(ctx, activated1)
+	require.NoError(t, err)
+
+	s2 := createTestStrategy(t, "tenant-2", "Active Strategy 2")
+	err = tc.Repo.Save(ctx, s2)
+	require.NoError(t, err)
+	activated2, err := s2.Activate()
+	require.NoError(t, err)
+	err = tc.Repo.Save(ctx, activated2)
+	require.NoError(t, err)
+
+	// ListAllActive should return only the two active strategies
+	results, err := tc.Repo.ListAllActive(ctx)
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+
+	// Verify all returned strategies are ACTIVE
+	for _, s := range results {
+		assert.Equal(t, domain.StrategyStatusActive, s.Status())
+	}
+}
+
+func TestStrategyRepository_ListAllActive_Empty(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+
+	results, err := tc.Repo.ListAllActive(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}

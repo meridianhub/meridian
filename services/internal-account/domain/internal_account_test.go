@@ -1311,6 +1311,52 @@ func TestIsScopedToOrganization(t *testing.T) {
 	})
 }
 
+func TestProductTypeCodeAndVersion(t *testing.T) {
+	t.Run("zero values when not set", func(t *testing.T) {
+		account := createTestAccount(t, AccountTypeClearing)
+		assert.Empty(t, account.ProductTypeCode(), "default ProductTypeCode should be empty")
+		assert.Equal(t, 0, account.ProductTypeVersion(), "default ProductTypeVersion should be 0")
+	})
+
+	t.Run("values set via builder", func(t *testing.T) {
+		account := NewInternalAccountBuilder().
+			WithID(uuid.New()).
+			WithAccountID("IBA-001").
+			WithAccountCode("CLR-001").
+			WithName("Test").
+			WithAccountType(AccountTypeClearing).
+			WithProductTypeCode("CLEARING_GBP_V2").
+			WithProductTypeVersion(3).
+			WithVersion(1).
+			Build()
+
+		assert.Equal(t, "CLEARING_GBP_V2", account.ProductTypeCode())
+		assert.Equal(t, 3, account.ProductTypeVersion())
+	})
+
+	t.Run("product type fields are immutable across status changes", func(t *testing.T) {
+		account := NewInternalAccountBuilder().
+			WithID(uuid.New()).
+			WithAccountID("IBA-001").
+			WithAccountCode("CLR-001").
+			WithName("Test").
+			WithAccountType(AccountTypeClearing).
+			WithStatus(AccountStatusActive).
+			WithProductTypeCode("NOSTRO_USD").
+			WithProductTypeVersion(5).
+			WithVersion(1).
+			WithCreatedAt(time.Now()).
+			WithUpdatedAt(time.Now()).
+			Build()
+
+		suspended, err := account.Suspend("test")
+		require.NoError(t, err)
+
+		assert.Equal(t, "NOSTRO_USD", suspended.ProductTypeCode())
+		assert.Equal(t, 5, suspended.ProductTypeVersion())
+	})
+}
+
 func TestBuilder_WithOrgPartyID_Nil(t *testing.T) {
 	account := NewInternalAccountBuilder().
 		WithID(uuid.New()).

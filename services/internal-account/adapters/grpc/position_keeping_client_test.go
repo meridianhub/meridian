@@ -25,6 +25,7 @@ type mockPositionKeepingServer struct {
 	positionkeepingv1.UnimplementedPositionKeepingServiceServer
 
 	getAccountBalancesFunc func(ctx context.Context, req *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error)
+	getAccountBalanceFunc  func(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error)
 	callCount              atomic.Int32
 }
 
@@ -52,6 +53,23 @@ func (s *mockPositionKeepingServer) GetAccountBalances(ctx context.Context, req 
 					Version:        1,
 				},
 			},
+		},
+		AsOf: timestamppb.Now(),
+	}, nil
+}
+
+func (s *mockPositionKeepingServer) GetAccountBalance(ctx context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+	s.callCount.Add(1)
+	if s.getAccountBalanceFunc != nil {
+		return s.getAccountBalanceFunc(ctx, req)
+	}
+	return &positionkeepingv1.GetAccountBalanceResponse{
+		AccountId:   req.AccountId,
+		BalanceType: req.BalanceType,
+		Amount: &quantityv1.InstrumentAmount{
+			InstrumentCode: req.InstrumentCode,
+			Amount:         "1000.00",
+			Version:        1,
 		},
 		AsOf: timestamppb.Now(),
 	}, nil
@@ -455,4 +473,200 @@ func TestClose(t *testing.T) {
 	client.conn = nil
 	err = client.Close()
 	require.NoError(t, err)
+}
+
+func TestGetAccountBalance_Success(t *testing.T) {
+	mock := &mockPositionKeepingServer{}
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client := createTestClient(t, addr)
+	defer func() {
+		_ = client.Close()
+	}()
+
+	req := &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:      "test-account-123",
+		BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+		InstrumentCode: "GBP",
+	}
+
+	resp, err := client.GetAccountBalance(context.Background(), req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "test-account-123", resp.AccountId)
+	assert.Equal(t, positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT, resp.BalanceType)
+	assert.NotNil(t, resp.Amount)
+	assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
+	assert.Equal(t, int32(1), mock.callCount.Load())
+}
+
+func TestGetAccountBalance_Error(t *testing.T) {
+	mock := &mockPositionKeepingServer{
+		getAccountBalanceFunc: func(_ context.Context, _ *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+			return nil, status.Error(codes.NotFound, "position not found")
+		},
+	}
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client := createTestClient(t, addr)
+	defer func() {
+		_ = client.Close()
+	}()
+
+	req := &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:      "nonexistent",
+		BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+		InstrumentCode: "GBP",
+	}
+
+	resp, err := client.GetAccountBalance(context.Background(), req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestGetAccountBalance_RetryOnUnavailable(t *testing.T) {
+	callCount := &atomic.Int32{}
+	mock := &mockPositionKeepingServer{
+		getAccountBalanceFunc: func(_ context.Context, req *positionkeepingv1.GetAccountBalanceRequest) (*positionkeepingv1.GetAccountBalanceResponse, error) {
+			count := callCount.Add(1)
+			if count < 2 {
+				return nil, status.Error(codes.Unavailable, "service unavailable")
+			}
+			return &positionkeepingv1.GetAccountBalanceResponse{
+				AccountId:   req.AccountId,
+				BalanceType: req.BalanceType,
+				Amount: &quantityv1.InstrumentAmount{
+					InstrumentCode: req.InstrumentCode,
+					Amount:         "500.00",
+					Version:        1,
+				},
+				AsOf: timestamppb.Now(),
+			}, nil
+		},
+	}
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client := createTestClient(t, addr)
+	defer func() {
+		_ = client.Close()
+	}()
+
+	req := &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:      "test-account",
+		BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE,
+		InstrumentCode: "USD",
+	}
+
+	resp, err := client.GetAccountBalance(context.Background(), req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, int32(2), callCount.Load())
+}
+
+func TestHandleGetAccountBalancesError_DeadlineExceeded(t *testing.T) {
+	mock := &mockPositionKeepingServer{
+		getAccountBalancesFunc: func(_ context.Context, _ *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+			return nil, status.Error(codes.DeadlineExceeded, "deadline exceeded")
+		},
+	}
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client := createTestClient(t, addr)
+	defer func() {
+		_ = client.Close()
+	}()
+
+	req := &positionkeepingv1.GetAccountBalancesRequest{
+		AccountId:      "test-account",
+		InstrumentCode: "GBP",
+	}
+
+	resp, err := client.GetAccountBalances(context.Background(), req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.DeadlineExceeded, st.Code())
+}
+
+func TestHandleGetAccountBalancesError_ResourceExhausted(t *testing.T) {
+	mock := &mockPositionKeepingServer{
+		getAccountBalancesFunc: func(_ context.Context, _ *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+			return nil, status.Error(codes.ResourceExhausted, "rate limited")
+		},
+	}
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client := createTestClient(t, addr)
+	defer func() {
+		_ = client.Close()
+	}()
+
+	req := &positionkeepingv1.GetAccountBalancesRequest{
+		AccountId:      "test-account",
+		InstrumentCode: "GBP",
+	}
+
+	resp, err := client.GetAccountBalances(context.Background(), req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.ResourceExhausted, st.Code())
+}
+
+func TestHandleGetAccountBalancesError_UnknownCode(t *testing.T) {
+	mock := &mockPositionKeepingServer{
+		getAccountBalancesFunc: func(_ context.Context, _ *positionkeepingv1.GetAccountBalancesRequest) (*positionkeepingv1.GetAccountBalancesResponse, error) {
+			return nil, status.Error(codes.PermissionDenied, "permission denied")
+		},
+	}
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client := createTestClient(t, addr)
+	defer func() {
+		_ = client.Close()
+	}()
+
+	req := &positionkeepingv1.GetAccountBalancesRequest{
+		AccountId:      "test-account",
+		InstrumentCode: "GBP",
+	}
+
+	resp, err := client.GetAccountBalances(context.Background(), req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+}
+
+func TestHandleGetAccountBalancesError_NonGRPCError(_ *testing.T) {
+	// Test the non-gRPC error path by directly calling the handler
+	client := &PositionKeepingGRPCClient{
+		logger: slog.Default(),
+	}
+
+	// A plain error (not wrapped in gRPC status) exercises the non-gRPC branch
+	client.handleGetAccountBalancesError(assert.AnError, "test-account")
+	// No panic means success - the method logs and returns
 }

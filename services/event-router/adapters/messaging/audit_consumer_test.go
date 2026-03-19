@@ -869,6 +869,45 @@ func TestAuditConsumer_DualOutput_MultipleEvents(t *testing.T) {
 	require.NoError(t, err, "Both PK and MDS should receive all %d events", eventCount)
 }
 
+func TestAuditConsumer_Start_EmptyTopics(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		GroupID:          "test-group",
+	}, transformer, mockPK)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	err = consumer.Start([]string{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNoTopics)
+}
+
+func TestAuditConsumer_Stop(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		GroupID:          "test-group",
+	}, transformer, mockPK)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	// Stop should not panic even if not started
+	consumer.Stop()
+}
+
 // TestPlatformMeteringHandler_ImplementsEventHandler verifies the interface contract.
 func TestPlatformMeteringHandler_ImplementsEventHandler(t *testing.T) {
 	transformer := newTestTransformer()
@@ -879,4 +918,187 @@ func TestPlatformMeteringHandler_ImplementsEventHandler(t *testing.T) {
 
 	// Verify it implements domain.EventHandler
 	var _ domain.EventHandler = handler
+}
+
+// --- PlatformMeteringHandler unit tests (no Kafka required) ---
+
+func TestPlatformMeteringHandler_Handle_WrongMessageType(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	handler, err := NewPlatformMeteringHandler(transformer, mockPK)
+	require.NoError(t, err)
+
+	// Pass a timestamppb.Timestamp instead of *AuditEvent
+	wrongMsg := timestamppb.Now()
+	err = handler.Handle(context.Background(), "audit.events", wrongMsg, nil)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnexpectedMessageType)
+	assert.Contains(t, err.Error(), "expected *AuditEvent")
+}
+
+func TestPlatformMeteringHandler_HandleAuditEvent_EmptyChannel(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	handler, err := NewPlatformMeteringHandler(transformer, mockPK)
+	require.NoError(t, err)
+
+	event := &auditv1.AuditEvent{
+		EventId:       "550e8400-e29b-41d4-a716-446655440030",
+		SchemaName:    "current_account",
+		TableName:     "current_account",
+		Operation:     auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+		RecordId:      "rec-empty-channel",
+		ChangedBy:     "test-user",
+		CorrelationId: "corr-empty-channel",
+		Timestamp:     timestamppb.Now(),
+		Metadata: map[string]string{
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
+		},
+	}
+
+	// Empty channel should derive topic from schema name
+	err = handler.Handle(context.Background(), "", event, nil)
+	require.NoError(t, err)
+
+	measurements := mockPK.getMeasurements()
+	require.Len(t, measurements, 1)
+	assert.Equal(t, "MERIDIAN-CURRENT-ACCOUNT-OPS", measurements[0].AssetCode)
+}
+
+func TestPlatformMeteringHandler_HandleAuditEvent_TransformError(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	handler, err := NewPlatformMeteringHandler(transformer, mockPK)
+	require.NoError(t, err)
+
+	// Use a tenant_id that is not in the transformer's tenant account map
+	event := &auditv1.AuditEvent{
+		EventId:       "550e8400-e29b-41d4-a716-446655440031",
+		SchemaName:    "current_account",
+		TableName:     "current_account",
+		Operation:     auditv1.AuditOperation_AUDIT_OPERATION_INSERT,
+		RecordId:      "rec-transform-err",
+		ChangedBy:     "test-user",
+		CorrelationId: "corr-transform-err",
+		Timestamp:     timestamppb.Now(),
+		Metadata: map[string]string{
+			"tenant_id": "99999999-9999-9999-9999-999999999999",
+		},
+	}
+
+	err = handler.Handle(context.Background(), "audit.events", event, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to transform audit event")
+	assert.Empty(t, mockPK.getMeasurements(), "No measurements should be recorded on transform error")
+}
+
+func TestPlatformMeteringHandler_HasMDSPublisher(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	t.Run("without MDS publisher", func(t *testing.T) {
+		handler, err := NewPlatformMeteringHandler(transformer, mockPK)
+		require.NoError(t, err)
+		assert.False(t, handler.HasMDSPublisher())
+	})
+
+	t.Run("with MDS publisher", func(t *testing.T) {
+		mockMDS := newMockUtilizationPublisher()
+		handler, err := NewPlatformMeteringHandler(transformer, mockPK, WithMeteringMDSPublisher(mockMDS))
+		require.NoError(t, err)
+		assert.True(t, handler.HasMDSPublisher())
+	})
+}
+
+func TestNewPlatformMeteringHandler_NilTransformer(t *testing.T) {
+	mockPK := newMockPositionKeepingClient()
+	handler, err := NewPlatformMeteringHandler(nil, mockPK)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilTransformer)
+	assert.Nil(t, handler)
+}
+
+func TestNewPlatformMeteringHandler_NilPositionKeepingClient(t *testing.T) {
+	transformer := newTestTransformer()
+	handler, err := NewPlatformMeteringHandler(transformer, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilPositionKeepingClient)
+	assert.Nil(t, handler)
+}
+
+func TestPlatformMeteringHandler_Handle_NilMessage(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	handler, err := NewPlatformMeteringHandler(transformer, mockPK)
+	require.NoError(t, err)
+
+	// Passing a typed nil *AuditEvent - the type assertion succeeds but
+	// protovalidate will reject it
+	var nilEvent *auditv1.AuditEvent
+	err = handler.Handle(context.Background(), "audit.events", nilEvent, nil)
+
+	// The type assertion check won't catch this since it's typed nil,
+	// but validation should catch it
+	require.Error(t, err)
+}
+
+func TestPlatformMeteringHandler_HandleAuditEvent_MDSPublishSuccess(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+	mockMDS := newMockUtilizationPublisher()
+
+	handler, err := NewPlatformMeteringHandler(transformer, mockPK, WithMeteringMDSPublisher(mockMDS))
+	require.NoError(t, err)
+
+	event := &auditv1.AuditEvent{
+		EventId:       "550e8400-e29b-41d4-a716-446655440032",
+		SchemaName:    "current_account",
+		TableName:     "current_account",
+		Operation:     auditv1.AuditOperation_AUDIT_OPERATION_UPDATE,
+		RecordId:      "rec-mds-ok",
+		ChangedBy:     "test-user",
+		CorrelationId: "corr-mds-ok",
+		Timestamp:     timestamppb.Now(),
+		Metadata: map[string]string{
+			"tenant_id": "00000000-0000-0000-0000-000000000000",
+		},
+	}
+
+	err = handler.Handle(context.Background(), "audit.events", event, nil)
+	require.NoError(t, err)
+
+	// Both PK and MDS should have received measurements
+	pkMeasurements := mockPK.getMeasurements()
+	require.Len(t, pkMeasurements, 1)
+
+	mdsMeasurements := mockMDS.getMeasurements()
+	require.Len(t, mdsMeasurements, 1)
+	assert.Equal(t, "current_account", mdsMeasurements[0].ServiceName)
+	assert.Equal(t, "UPDATE", mdsMeasurements[0].OperationType)
+}
+
+func TestAuditConsumer_Start_NilTopics(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	consumer, err := NewAuditConsumer(kafka.ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		GroupID:          "test-group",
+	}, transformer, mockPK)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	defer func() {
+		_ = consumer.Close()
+	}()
+
+	err = consumer.Start(nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNoTopics)
 }

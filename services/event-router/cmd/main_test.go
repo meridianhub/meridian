@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -73,6 +74,71 @@ func TestCreateHTTPServer(t *testing.T) {
 	if server.Handler == nil {
 		t.Error("Expected Handler to be set, got nil")
 	}
+}
+
+func TestCreateHTTPServer_Handlers(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	readiness := &readinessState{}
+	readinessMu := &sync.RWMutex{}
+
+	server := createHTTPServer("18083", readiness, readinessMu, logger)
+
+	t.Run("healthz returns OK", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		server.Handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+		if w.Body.String() != "OK" {
+			t.Errorf("Expected body 'OK', got '%s'", w.Body.String())
+		}
+	})
+
+	t.Run("ready returns NOT_READY when not initialized", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+		w := httptest.NewRecorder()
+		server.Handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("Expected status 503, got %d", w.Code)
+		}
+		if w.Body.String() != "NOT_READY" {
+			t.Errorf("Expected body 'NOT_READY', got '%s'", w.Body.String())
+		}
+	})
+
+	t.Run("ready returns READY when initialized", func(t *testing.T) {
+		readinessMu.Lock()
+		readiness.consumerInitialized = true
+		readinessMu.Unlock()
+
+		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+		w := httptest.NewRecorder()
+		server.Handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+		if w.Body.String() != "READY" {
+			t.Errorf("Expected body 'READY', got '%s'", w.Body.String())
+		}
+	})
+
+	t.Run("metrics endpoint responds", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+		w := httptest.NewRecorder()
+		server.Handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "# HELP") || !strings.Contains(body, "# TYPE") {
+			t.Error("Expected Prometheus format metrics output")
+		}
+	})
 }
 
 func TestHealthEndpoint_Integration(t *testing.T) {

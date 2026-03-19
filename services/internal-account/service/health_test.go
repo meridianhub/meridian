@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -182,6 +183,90 @@ func TestHealthCheck_RequiresPositionKeeping_ErrorMentionsPositionKeeping(t *tes
 	assert.Equal(t, health.StatusDegraded, result.Status)
 	assert.Contains(t, result.Message, "positionkeeping")
 	assert.Error(t, result.Error)
+}
+
+// =============================================================================
+// Watch Tests
+// =============================================================================
+
+// mockServiceWatchStream implements grpc_health_v1.Health_WatchServer for testing.
+type mockServiceWatchStream struct {
+	grpc_health_v1.Health_WatchServer
+	ctx       context.Context
+	responses []*grpc_health_v1.HealthCheckResponse
+	sendErr   error
+}
+
+func (m *mockServiceWatchStream) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockServiceWatchStream) Send(resp *grpc_health_v1.HealthCheckResponse) error {
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.responses = append(m.responses, resp)
+	return nil
+}
+
+func TestWatch_SendError(t *testing.T) {
+	// Use a healthy PK checker as the only dependency (no DB needed for this test path)
+	pkChecker := NewPositionKeepingHealthChecker(
+		&mockGRPCHealthClient{
+			resp: &grpc_health_v1.HealthCheckResponse{
+				Status: grpc_health_v1.HealthCheckResponse_SERVING,
+			},
+		},
+		5*time.Second,
+	)
+
+	// Build HealthChecker with only PK checker (bypass DB)
+	aggregator := health.NewAggregator([]health.Checker{pkChecker})
+	hc := &HealthChecker{
+		aggregator:   aggregator,
+		logger:       slog.Default(),
+		serviceName:  "internal-account",
+		checkTimeout: 1 * time.Second,
+	}
+
+	stream := &mockServiceWatchStream{
+		ctx:     context.Background(),
+		sendErr: assert.AnError,
+	}
+
+	err := hc.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to send initial health status")
+}
+
+func TestWatch_SendsInitialThenCancels(t *testing.T) {
+	pkChecker := NewPositionKeepingHealthChecker(
+		&mockGRPCHealthClient{
+			resp: &grpc_health_v1.HealthCheckResponse{
+				Status: grpc_health_v1.HealthCheckResponse_SERVING,
+			},
+		},
+		5*time.Second,
+	)
+
+	aggregator := health.NewAggregator([]health.Checker{pkChecker})
+	hc := &HealthChecker{
+		aggregator:   aggregator,
+		logger:       slog.Default(),
+		serviceName:  "internal-account",
+		checkTimeout: 100 * time.Millisecond,
+	}
+
+	// Use a short timeout so Watch returns after the initial send
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	stream := &mockServiceWatchStream{ctx: ctx}
+
+	err := hc.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+
+	require.GreaterOrEqual(t, len(stream.responses), 1)
 }
 
 // =============================================================================
