@@ -42,16 +42,11 @@ func TestHealthChecker_Watch_SendsInitialAndCancels(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create a context that cancels immediately after initial send
-	ctx, cancel := context.WithCancel(context.Background())
+	// Use a short timeout so Watch returns after the initial send
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
 
 	stream := &mockWatchStream{ctx: ctx}
-
-	// Cancel after a short delay to let the initial send complete
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
 
 	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 
@@ -97,14 +92,10 @@ func TestHealthChecker_Watch_PeriodicUpdate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Use a timeout long enough for one tick cycle
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
 	stream := &mockWatchStream{ctx: ctx}
-
-	// Cancel after enough time for one tick
-	go func() {
-		time.Sleep(80 * time.Millisecond)
-		cancel()
-	}()
 
 	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 	assert.NoError(t, err)
@@ -169,7 +160,7 @@ func TestGormDatabaseHealthChecker_Check_Timeout(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
-	time.Sleep(2 * time.Millisecond) // ensure context expires
+	// Let context expire by using a negligible deadline (1ms is already expired by the time Check runs)
 
 	result := checker.Check(ctx)
 	// The checker should create its own timeout context, but with an already-expired parent

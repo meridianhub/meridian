@@ -382,17 +382,11 @@ func TestHealthChecker_Watch_SendsInitialAndCancels(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create a context that cancels immediately after initial send
-	ctx, cancel := context.WithCancel(context.Background())
+	// Use a short timeout so Watch returns after the initial send
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
 
 	stream := &mockWatchStream{ctx: ctx}
-
-	// Cancel after a short delay to allow initial send but stop the loop
-	go func() {
-		// Wait for initial response to be sent
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
 
 	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 	assert.NoError(t, err)
@@ -417,14 +411,10 @@ func TestHealthChecker_Watch_PeriodicUpdate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Use a timeout long enough for at least one tick cycle
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
 	stream := &mockWatchStream{ctx: ctx}
-
-	// Cancel after enough time for at least one tick
-	go func() {
-		time.Sleep(120 * time.Millisecond)
-		cancel()
-	}()
 
 	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 	assert.NoError(t, err)
