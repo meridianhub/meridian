@@ -21,19 +21,19 @@ func TestRecordKafkaMetrics(t *testing.T) {
 		RecordKafkaConsumed("test_schema", "DELETE", "failure")
 	})
 
-	t.Run("RecordKafkaPublishDuration", func(t *testing.T) {
+	t.Run("RecordKafkaPublishDuration", func(_ *testing.T) {
 		RecordKafkaPublishDuration(0.123)
 	})
 
-	t.Run("RecordKafkaConsumeDuration", func(t *testing.T) {
+	t.Run("RecordKafkaConsumeDuration", func(_ *testing.T) {
 		RecordKafkaConsumeDuration(0.456)
 	})
 
-	t.Run("RecordKafkaConsumerLag", func(t *testing.T) {
+	t.Run("RecordKafkaConsumerLag", func(_ *testing.T) {
 		RecordKafkaConsumerLag(42.0)
 	})
 
-	t.Run("RecordKafkaDLQ", func(t *testing.T) {
+	t.Run("RecordKafkaDLQ", func(_ *testing.T) {
 		RecordKafkaDLQ("test_schema", "max_retries_exceeded")
 	})
 }

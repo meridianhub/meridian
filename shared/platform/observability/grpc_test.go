@@ -238,7 +238,7 @@ func TestUnaryClientInterceptor_Success(t *testing.T) {
 
 	interceptor := tracer.UnaryClientInterceptor()
 
-	invoker := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+	invoker := func(_ context.Context, _ string, _, _ interface{}, _ *grpc.ClientConn, _ ...grpc.CallOption) error {
 		return nil
 	}
 
@@ -252,7 +252,7 @@ func TestUnaryClientInterceptor_Error(t *testing.T) {
 	interceptor := tracer.UnaryClientInterceptor()
 
 	invokeErr := errors.New("rpc failed")
-	invoker := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+	invoker := func(_ context.Context, _ string, _, _ interface{}, _ *grpc.ClientConn, _ ...grpc.CallOption) error {
 		return invokeErr
 	}
 
@@ -299,7 +299,7 @@ func TestStreamClientInterceptor_Success(t *testing.T) {
 	interceptor := tracer.StreamClientInterceptor()
 
 	mockStream := &mockClientStream{ctx: context.Background()}
-	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	streamer := func(_ context.Context, _ *grpc.StreamDesc, _ *grpc.ClientConn, _ string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
 		return mockStream, nil
 	}
 
@@ -326,7 +326,7 @@ func TestStreamClientInterceptor_StreamerError(t *testing.T) {
 
 	interceptor := tracer.StreamClientInterceptor()
 
-	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	streamer := func(_ context.Context, _ *grpc.StreamDesc, _ *grpc.ClientConn, _ string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
 		return nil, errors.New("connection failed")
 	}
 
@@ -342,7 +342,7 @@ func TestStreamClientInterceptor_RecvError(t *testing.T) {
 
 	recvErr := errors.New("receive failed")
 	mockStream := &mockClientStream{ctx: context.Background(), recvErr: recvErr}
-	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	streamer := func(_ context.Context, _ *grpc.StreamDesc, _ *grpc.ClientConn, _ string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
 		return mockStream, nil
 	}
 
@@ -363,7 +363,7 @@ func TestStreamClientInterceptor_RecvSuccess(t *testing.T) {
 		ctx:      context.Background(),
 		recvMsgs: []interface{}{"msg1", "msg2"},
 	}
-	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	streamer := func(_ context.Context, _ *grpc.StreamDesc, _ *grpc.ClientConn, _ string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
 		return mockStream, nil
 	}
 
