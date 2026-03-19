@@ -722,8 +722,3 @@ func TestGjsonToInterface_Types(t *testing.T) {
 	}
 }
 
-// --- Helpers ---
-
-func strPtr(s string) *string {
-	return &s
-}
