@@ -83,7 +83,8 @@ func TestMakeCircuitBreakerCallback(t *testing.T) {
 
 func freePort(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "localhost:0")
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "tcp", "localhost:0")
 	require.NoError(t, err)
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()

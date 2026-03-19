@@ -924,7 +924,7 @@ func TestFindByIDForUpdate_WithinTransaction(t *testing.T) {
 	// Use a manual gorm.DB.Begin() to create a real transaction, ensuring isInTransaction() returns true
 	tx := repo.DB().Begin()
 	require.NoError(t, tx.Error)
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	txRepo := repo.WithTx(tx)
 	found, err := txRepo.FindByIDForUpdate(ctx, accountID)
@@ -951,7 +951,7 @@ func TestFindByUUIDForUpdate_WithinTransaction(t *testing.T) {
 	// Use a manual gorm.DB.Begin() to create a real transaction, ensuring isInTransaction() returns true
 	tx := repo.DB().Begin()
 	require.NoError(t, tx.Error)
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	txRepo := repo.WithTx(tx)
 	found, err := txRepo.FindByUUIDForUpdate(ctx, saved.ID())
@@ -966,7 +966,7 @@ func TestIsInTransaction_TrueForBegunTx(t *testing.T) {
 	repo := NewRepository(db)
 	tx := repo.DB().Begin()
 	require.NoError(t, tx.Error)
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	txRepo := repo.WithTx(tx)
 	assert.True(t, txRepo.isInTransaction(), "Repository created with Begin() tx should be in transaction")
