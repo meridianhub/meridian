@@ -137,7 +137,6 @@ func TestContextHelpers(t *testing.T) {
 	})
 
 	t.Run("handles nil context", func(t *testing.T) {
-		//nolint:staticcheck // Testing nil context handling
 		assert.Empty(t, getTransactionIDFromContext(nil)) //nolint:staticcheck // SA1012: Intentionally testing nil context handling
 		assert.Empty(t, getCorrelationIDFromContext(nil)) //nolint:staticcheck // SA1012: Intentionally testing nil context handling
 	})

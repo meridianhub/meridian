@@ -32,7 +32,7 @@ func NewTenantCircuitBreakerRegistry(settings gobreaker.Settings) *TenantCircuit
 // return the same breaker instance.
 func (r *TenantCircuitBreakerRegistry) Get(tenantID tenant.TenantID) *gobreaker.CircuitBreaker[TenantConfig] {
 	if val, ok := r.breakers.Load(tenantID); ok {
-		cb, _ := val.(*gobreaker.CircuitBreaker[TenantConfig]) //nolint:errcheck // sync.Map only stores this type
+		cb, _ := val.(*gobreaker.CircuitBreaker[TenantConfig])
 		return cb
 	}
 
@@ -51,7 +51,7 @@ func (r *TenantCircuitBreakerRegistry) Get(tenantID tenant.TenantID) *gobreaker.
 
 	newCB := gobreaker.NewCircuitBreaker[TenantConfig](s)
 	actual, _ := r.breakers.LoadOrStore(tenantID, newCB)
-	cb, _ := actual.(*gobreaker.CircuitBreaker[TenantConfig]) //nolint:errcheck // sync.Map only stores this type
+	cb, _ := actual.(*gobreaker.CircuitBreaker[TenantConfig])
 	return cb
 }
 
@@ -60,7 +60,7 @@ func (r *TenantCircuitBreakerRegistry) Get(tenantID tenant.TenantID) *gobreaker.
 // initial state for a new breaker).
 func (r *TenantCircuitBreakerRegistry) State(tenantID tenant.TenantID) gobreaker.State {
 	if val, ok := r.breakers.Load(tenantID); ok {
-		cb, _ := val.(*gobreaker.CircuitBreaker[TenantConfig]) //nolint:errcheck // sync.Map only stores this type
+		cb, _ := val.(*gobreaker.CircuitBreaker[TenantConfig])
 		return cb.State()
 	}
 	return gobreaker.StateClosed

@@ -380,7 +380,6 @@ func executeDryRun(
 
 // executeLiveImport performs the actual import with checkpoint persistence.
 //
-//nolint:gocognit,gocyclo // complexity is acceptable for this import orchestration function
 func executeLiveImport(
 	ctx context.Context,
 	cfg *importConfig,
@@ -525,7 +524,7 @@ func handleImportInterrupt(
 	logger *slog.Logger,
 ) *importResult {
 	// Use fresh context for cleanup since the original may be canceled.
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:contextcheck // fresh context for cleanup after signal/cancellation
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if flushErr := batchInserter.Flush(cleanupCtx); flushErr != nil { //nolint:contextcheck // uses cleanup context created above

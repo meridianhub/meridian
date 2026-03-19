@@ -55,7 +55,6 @@ var (
 //
 // BLOCKED: load(), print() (redirected), time.now(), random(), exec(), compile(), open(), http
 //
-//nolint:gocognit,gocyclo // This function deliberately configures many builtins; complexity is unavoidable
 func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	if logger == nil {
 		logger = slog.Default()

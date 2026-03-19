@@ -28,7 +28,6 @@ type updateResult struct {
 
 // UpdatePaymentOrder handles asynchronous gateway callbacks.
 // Implements idempotency, audit logging, and observability per task 11 requirements.
-//nolint:gocognit // Gateway callback handling requires multiple state transitions and idempotency checks
 func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentOrderRequest) (*pb.UpdatePaymentOrderResponse, error) {
 	start := time.Now()
 	operationStatus := opStatusSuccess
@@ -218,7 +217,6 @@ func (s *Service) lookupPaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 // handleSettledStatus processes a SETTLED gateway callback.
 // Implements idempotency: returns success if already COMPLETED.
 // Posts double-entry ledger journal entries BEFORE completing the payment.
-//nolint:gocognit // Payment completion requires ledger posting, state transition, and event publishing
 func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrder) (*updateResult, error) {
 	// Idempotency check: if already completed, return success without modification
 	if po.Status == domain.PaymentOrderStatusCompleted {
@@ -281,7 +279,7 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		if tenantID, hasTenant := tenant.FromContext(ctx); hasTenant {
 			asyncCtx = tenant.WithTenant(asyncCtx, tenantID)
 		}
-		go s.orchestrator.ExecuteLienWithRetry(asyncCtx, po.ID, po.LienID) //nolint:contextcheck // Async operation outlives request context
+		go s.orchestrator.ExecuteLienWithRetry(asyncCtx, po.ID, po.LienID)
 	}
 
 	// Publish PaymentOrderCompleted event

@@ -19,7 +19,6 @@ func TestGetUserFromContext_WithUserID(t *testing.T) {
 
 func TestGetUserFromContext_WithNilContext(t *testing.T) {
 	// Test that the function handles nil context gracefully
-	//nolint:staticcheck,revive // intentionally testing nil context handling
 	var nilCtx context.Context
 	result := GetUserFromContext(nilCtx)
 

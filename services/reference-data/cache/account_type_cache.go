@@ -384,7 +384,7 @@ func (c *LocalAccountTypeCache) backgroundRefresh(ctx context.Context, tenantID 
 		}
 
 		c.Put(ctx, entry)
-		return entry, nil //nolint:nilnil // singleflight callback, return value unused
+		return entry, nil
 	})
 }
 

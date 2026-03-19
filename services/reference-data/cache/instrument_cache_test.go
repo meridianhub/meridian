@@ -527,7 +527,7 @@ func TestInstrumentCache_GetOrLoad_LoadError(t *testing.T) {
 	cache := NewInstrumentCache()
 	ctx := newTestContext("tenant1")
 
-	expectedErr := errors.New("database error") //nolint:err113 // test sentinel error
+	expectedErr := errors.New("database error")
 
 	result, err := cache.GetOrLoad(ctx, "USD", 1, func() (*CachedInstrument, error) {
 		return nil, expectedErr

@@ -362,7 +362,7 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 
 	// Determine the starting phase by checking the run's checkpoint.
 	startIndex := 0
-	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck // fresh context so persistence succeeds after pipeline cancellation
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout)
 	run, err := s.runRepo.FindByID(persistCtx, runID)                                      //nolint:contextcheck // uses persist context created above
 	persistCancel()
 	if err != nil {
@@ -422,7 +422,7 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 
 	// Pipeline succeeded: transition to COMPLETED.
 	// Use a fresh context so persistence succeeds even if the pipeline context has expired.
-	completeCtx, completeCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck // fresh context so completion persists after pipeline context expires
+	completeCtx, completeCancel := context.WithTimeout(context.Background(), persistTimeout)
 	defer completeCancel()
 	run, err = s.runRepo.FindByID(completeCtx, runID) //nolint:contextcheck // uses completion context created above
 	if err != nil {
@@ -444,7 +444,7 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 // updateCheckpoint persists the last completed phase on the settlement run.
 // It uses a fresh context so persistence succeeds even if the pipeline context has expired.
 func (s *AccountReconciliationService) updateCheckpoint(_ context.Context, runID uuid.UUID, phase domain.ReconciliationPhase) {
-	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck // fresh context so checkpoint persists after pipeline cancellation
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout)
 	defer persistCancel()
 	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck // uses persist context created above
 	if err != nil {
@@ -460,7 +460,7 @@ func (s *AccountReconciliationService) updateCheckpoint(_ context.Context, runID
 // failRun transitions a settlement run to FAILED with the given error message.
 // It uses a fresh context so persistence succeeds even if the pipeline context has expired.
 func (s *AccountReconciliationService) failRun(_ context.Context, runID uuid.UUID, errMsg string) {
-	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout) //nolint:contextcheck // fresh context so failure state persists after pipeline cancellation
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout)
 	defer persistCancel()
 	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck // uses persist context created above
 	if err != nil {
@@ -541,9 +541,8 @@ func phaseIndex(phase domain.ReconciliationPhase) int {
 
 // resumePipeline re-launches the pipeline from the run's checkpoint.
 //
-//nolint:contextcheck // Intentionally uses background context for async pipeline that outlives the RPC
 func (s *AccountReconciliationService) resumePipeline(runID uuid.UUID) {
-	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout) //nolint:contextcheck // covered by function-level nolint above
+	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout)
 	go func() {
 		defer pipelineCancel()
 		s.executePipeline(pipelineCtx, runID)

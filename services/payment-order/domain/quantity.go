@@ -24,7 +24,7 @@ import (
 	"fmt"
 
 	"github.com/meridianhub/meridian/shared/platform/quantity"
-	"github.com/meridianhub/meridian/shared/platform/quantity/currency" //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
+	"github.com/meridianhub/meridian/shared/platform/quantity/currency"
 	"github.com/shopspring/decimal"
 )
 
@@ -53,7 +53,6 @@ type Instrument = quantity.Instrument
 
 // Re-export currency instruments for convenient access.
 //
-//nolint:staticcheck // Will migrate to refdata.InstrumentResolver
 var (
 	InstrumentGBP = currency.InstrumentGBP
 	InstrumentUSD = currency.InstrumentUSD
@@ -71,7 +70,7 @@ var (
 //
 //	money, err := NewMoney("GBP", 10000) // Creates £100.00
 func NewMoney(currencyCode string, amountCents int64) (Money, error) {
-	inst, ok := currency.ByCode(currencyCode) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
+	inst, ok := currency.ByCode(currencyCode)
 	if !ok {
 		return Money{}, ErrInvalidCurrency
 	}

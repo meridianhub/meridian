@@ -25,7 +25,7 @@ import (
 // testErr creates a test error by wrapping a message.
 // This avoids err113 linter warnings about dynamic error creation in tests.
 func testErr(msg string) error {
-	return fmt.Errorf("%s", msg) //nolint:err113 // test helper for dynamic error messages
+	return fmt.Errorf("%s", msg)
 }
 
 // testWorkerConfig creates a default Config for tests.

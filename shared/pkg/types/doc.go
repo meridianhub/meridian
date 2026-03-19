@@ -56,4 +56,4 @@
 //   - Zero overhead: Benchmarks show no performance cost vs traditional patterns
 //
 // For more details, see: https://github.com/samber/mo
-package types //nolint:revive // "types" is intentional, similar to go/types in stdlib
+package types

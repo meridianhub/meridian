@@ -1,4 +1,4 @@
-package types //nolint:revive // "types" is intentional, similar to go/types in stdlib
+package types
 
 import (
 	"errors"

@@ -157,7 +157,6 @@ func (r *CausationTreeRepository) GetCausationTree(ctx context.Context, rootSaga
 
 // buildTreeFromRows constructs the nested tree structure from the flat query result set.
 //
-//nolint:gocognit,gocyclo // Complexity is inherent to tree construction from flat row data; extraction would reduce clarity
 func (r *CausationTreeRepository) buildTreeFromRows(rows *sql.Rows, rootSagaID uuid.UUID) (*CausationTreeNode, error) {
 	// Map to store all saga nodes by their ID
 	sagaNodes := make(map[uuid.UUID]*CausationTreeNode)

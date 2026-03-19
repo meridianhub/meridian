@@ -233,7 +233,6 @@ func buildValidationStruct(name string, node *handlerTree, schemaRegistry *Regis
 // wrapValidationHandler creates a Starlark builtin that validates handler call
 // parameters against the schema without executing the real handler.
 //
-//nolint:gocognit // Handler validation inherently checks multiple conditions
 func wrapValidationHandler(fullName string, handlerDef *HandlerDef, callLog *[]HandlerCallInfo) *starlark.Builtin {
 	return starlark.NewBuiltin(fullName, func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		if len(args) > 0 {

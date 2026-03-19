@@ -1,4 +1,3 @@
-//nolint:goconst // Test data uses string literals for clarity
 package main
 
 import (

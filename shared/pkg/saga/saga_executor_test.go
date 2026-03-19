@@ -1,7 +1,6 @@
 package saga
 
 // Tests for saga executor require dynamic errors to simulate different failure scenarios.
-//nolint:err113 // Dynamic errors are required for testing transient/fatal error patterns
 
 import (
 	"context"

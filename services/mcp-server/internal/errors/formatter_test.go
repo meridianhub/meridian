@@ -129,11 +129,7 @@ func TestFormatGRPCError_TypoSuggestions(t *testing.T) {
 		typo       string
 		suggestion string
 	}{
-		{"atributes", "attributes"},   //nolint:misspell // intentional typo for testing
-		{"ammount", "amount"},         //nolint:misspell // intentional typo for testing
-		{"instruement", "instrument"}, //nolint:misspell // intentional typo for testing
-		{"bukket_id", "bucket_id"},    //nolint:misspell // intentional typo for testing
-	}
+		{"atributes", "attributes"},  		{"ammount", "amount"},        		{"instruement", "instrument"},		{"bukket_id", "bucket_id"},   	}
 
 	for _, tc := range tests {
 		t.Run(tc.typo, func(t *testing.T) {

@@ -110,7 +110,6 @@ func (e *StepExecutor) WithLogger(logger *slog.Logger) *StepExecutor {
 //   - The step result (from cache or fresh execution)
 //   - Error if execution or persistence fails
 //
-//nolint:gocognit,gocyclo // Complexity is inherent to idempotency and concurrent execution handling
 func (e *StepExecutor) ExecuteStep(
 	ctx context.Context,
 	instance *SagaInstance,
@@ -286,7 +285,6 @@ func (e *TransactionalStepExecutor) WithEventPublisher(publisher EventPublisher)
 //
 // On commit failure, no partial state is persisted.
 //
-//nolint:gocognit,gocyclo // Complexity is inherent to transaction handling; extraction would reduce clarity
 func (e *TransactionalStepExecutor) ExecuteStepInTx(
 	ctx context.Context,
 	instance *SagaInstance,
@@ -410,7 +408,6 @@ func (e *TransactionalStepExecutor) ExecuteStepInTx(
 // If the pod crashes between Kafka publish and marking the entry as processed,
 // the entry will be republished (at-least-once, with idempotency).
 //
-//nolint:gocognit,gocyclo // Complexity is inherent to transactional outbox pattern
 func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
 	ctx context.Context,
 	instance *SagaInstance,

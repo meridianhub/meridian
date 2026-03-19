@@ -2,7 +2,6 @@ package saga
 
 // Tests for error classification require dynamic errors to test pattern matching.
 // This is intentional and cannot be avoided for comprehensive testing.
-//nolint:err113 // Dynamic errors are required for testing error message pattern matching
 
 import (
 	"context"

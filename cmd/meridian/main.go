@@ -140,7 +140,6 @@ func connectPgxPool(ctx context.Context, dsn string, logger *slog.Logger) (*pgxp
 	return pool, nil
 }
 
-//nolint:gocyclo // Sequential initialization steps; splitting would obscure startup order.
 func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	ctx := context.Background()
 

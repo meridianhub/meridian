@@ -144,7 +144,6 @@ func (v *validationVisitor) walkFile(file *syntax.File) error {
 
 // walkStmt walks a statement node.
 //
-//nolint:gocognit,gocyclo // AST walking requires handling many statement types; complexity is inherent
 func (v *validationVisitor) walkStmt(stmt syntax.Stmt) error {
 	switch s := stmt.(type) {
 	case *syntax.ExprStmt:
@@ -235,7 +234,6 @@ func (v *validationVisitor) walkStmt(stmt syntax.Stmt) error {
 
 // walkExpr walks an expression node.
 //
-//nolint:gocognit,gocyclo // AST walking requires handling many expression types; complexity is inherent
 func (v *validationVisitor) walkExpr(expr syntax.Expr) error {
 	if expr == nil {
 		return nil

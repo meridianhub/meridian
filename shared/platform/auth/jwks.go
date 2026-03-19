@@ -139,7 +139,7 @@ func (p *JWKSProvider) GetKey(ctx context.Context, kid string) (*rsa.PublicKey, 
 
 	// Start auto-refresh goroutine after first successful fetch
 	if p.refreshTTL > 0 {
-		refreshCtx := ctx //nolint:contextcheck // auto-refresh runs independently of the triggering request
+		refreshCtx := ctx
 		p.autoRefreshOnce.Do(func() {
 			go p.autoRefresh(refreshCtx)
 		})
