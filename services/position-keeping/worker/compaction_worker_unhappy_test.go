@@ -201,20 +201,20 @@ func TestMetrics_RecordCompactionError_AllTypes(t *testing.T) {
 	}
 
 	for _, errType := range errorTypes {
-		t.Run(errType, func(t *testing.T) {
+		t.Run(errType, func(_ *testing.T) {
 			// Should not panic
 			RecordCompactionError(errType)
 		})
 	}
 }
 
-func TestMetrics_ObserveCompactionDuration(t *testing.T) {
+func TestMetrics_ObserveCompactionDuration(_ *testing.T) {
 	// Should not panic
 	ObserveCompactionDuration(1.5)
 	ObserveCompactionDuration(0.0)
 }
 
-func TestMetrics_RecordCompactionRun(t *testing.T) {
+func TestMetrics_RecordCompactionRun(_ *testing.T) {
 	// Should not panic
 	RecordCompactionRun()
 }
