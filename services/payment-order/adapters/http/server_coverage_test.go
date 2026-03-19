@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -190,8 +192,19 @@ func TestServer_Start_And_Shutdown(t *testing.T) {
 		errCh <- server.Start()
 	}()
 
-	// Give it a moment to start, then shut down
-	time.Sleep(100 * time.Millisecond)
+	// Wait for server to start accepting connections
+	awaitErr := await.New().
+		AtMost(2 * time.Second).
+		PollInterval(10 * time.Millisecond).
+		UntilNoError(func() error {
+			conn, dialErr := net.DialTimeout("tcp", server.Addr(), 50*time.Millisecond)
+			if dialErr != nil {
+				return dialErr
+			}
+			conn.Close()
+			return nil
+		})
+	require.NoError(t, awaitErr, "server did not start in time")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

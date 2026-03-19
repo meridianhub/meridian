@@ -6,62 +6,41 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
-func setupTestDB(t *testing.T) *gorm.DB {
+func setupWebhookTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	require.NoError(t, err)
-
-	// Create table manually to avoid gen_random_uuid() which is PostgreSQL-specific
-	err = db.Exec(`CREATE TABLE webhook_deliveries (
-		id TEXT PRIMARY KEY,
-		event_id TEXT NOT NULL,
-		event_type TEXT NOT NULL,
-		tenant_id TEXT NOT NULL,
-		account_id TEXT NOT NULL,
-		webhook_url TEXT NOT NULL,
-		status TEXT NOT NULL DEFAULT 'pending',
-		attempts INTEGER NOT NULL DEFAULT 0,
-		last_attempt_at DATETIME,
-		last_error TEXT,
-		response_code INTEGER,
-		created_at DATETIME NOT NULL,
-		completed_at DATETIME
-	)`).Error
-	require.NoError(t, err)
-
-	return db
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(&DeliveryEntity{}),
+	)
 }
 
 func TestNewRepository(t *testing.T) {
-	db := setupTestDB(t)
+	db, _, cleanup := setupWebhookTestDB(t)
+	defer cleanup()
 	repo := NewRepository(db)
 	assert.NotNil(t, repo)
 }
 
 func TestRepository_RecordDelivery(t *testing.T) {
-	db := setupTestDB(t)
+	db, ctx, cleanup := setupWebhookTestDB(t)
+	defer cleanup()
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	record := &DeliveryRecord{
-		ID:        uuid.New(),
-		EventID:   "event-001",
-		EventType: EventTypeAccountFrozen,
-		TenantID:  "tenant-1",
-		AccountID: "account-1",
+		ID:         uuid.New(),
+		EventID:    "event-001",
+		EventType:  EventTypeAccountFrozen,
+		TenantID:   "tenant-1",
+		AccountID:  "account-1",
 		WebhookURL: "https://example.com/hook",
-		Status:    DeliveryStatusPending,
-		Attempts:  0,
-		CreatedAt: time.Now().Truncate(time.Second),
+		Status:     DeliveryStatusPending,
+		Attempts:   0,
+		CreatedAt:  time.Now().Truncate(time.Microsecond),
 	}
 
 	err := repo.RecordDelivery(ctx, record)
@@ -78,21 +57,21 @@ func TestRepository_RecordDelivery(t *testing.T) {
 }
 
 func TestRepository_RecordDelivery_Update(t *testing.T) {
-	db := setupTestDB(t)
+	db, ctx, cleanup := setupWebhookTestDB(t)
+	defer cleanup()
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	id := uuid.New()
 	record := &DeliveryRecord{
-		ID:        id,
-		EventID:   "event-001",
-		EventType: EventTypeAccountFrozen,
-		TenantID:  "tenant-1",
-		AccountID: "account-1",
+		ID:         id,
+		EventID:    "event-001",
+		EventType:  EventTypeAccountFrozen,
+		TenantID:   "tenant-1",
+		AccountID:  "account-1",
 		WebhookURL: "https://example.com/hook",
-		Status:    DeliveryStatusPending,
-		Attempts:  0,
-		CreatedAt: time.Now().Truncate(time.Second),
+		Status:     DeliveryStatusPending,
+		Attempts:   0,
+		CreatedAt:  time.Now().Truncate(time.Microsecond),
 	}
 
 	require.NoError(t, repo.RecordDelivery(ctx, record))
@@ -100,7 +79,7 @@ func TestRepository_RecordDelivery_Update(t *testing.T) {
 	// Update the record
 	record.Status = DeliveryStatusSuccess
 	record.Attempts = 1
-	now := time.Now().Truncate(time.Second)
+	now := time.Now().Truncate(time.Microsecond)
 	record.CompletedAt = &now
 
 	require.NoError(t, repo.RecordDelivery(ctx, record))
@@ -113,7 +92,8 @@ func TestRepository_RecordDelivery_Update(t *testing.T) {
 }
 
 func TestRepository_GetByID_NotFound(t *testing.T) {
-	db := setupTestDB(t)
+	db, _, cleanup := setupWebhookTestDB(t)
+	defer cleanup()
 	repo := NewRepository(db)
 
 	_, err := repo.GetByID(context.Background(), uuid.New())
@@ -121,32 +101,32 @@ func TestRepository_GetByID_NotFound(t *testing.T) {
 }
 
 func TestRepository_ListByTenant(t *testing.T) {
-	db := setupTestDB(t)
+	db, ctx, cleanup := setupWebhookTestDB(t)
+	defer cleanup()
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	// Create records for two tenants
 	for i := 0; i < 3; i++ {
 		require.NoError(t, repo.RecordDelivery(ctx, &DeliveryRecord{
-			ID:        uuid.New(),
-			EventID:   "event-" + uuid.New().String()[:8],
-			EventType: EventTypeAccountFrozen,
-			TenantID:  "tenant-A",
-			AccountID: "account-1",
+			ID:         uuid.New(),
+			EventID:    "event-" + uuid.New().String()[:8],
+			EventType:  EventTypeAccountFrozen,
+			TenantID:   "tenant-A",
+			AccountID:  "account-1",
 			WebhookURL: "https://example.com/hook",
-			Status:    DeliveryStatusPending,
-			CreatedAt: time.Now().Truncate(time.Second),
+			Status:     DeliveryStatusPending,
+			CreatedAt:  time.Now().Truncate(time.Microsecond),
 		}))
 	}
 	require.NoError(t, repo.RecordDelivery(ctx, &DeliveryRecord{
-		ID:        uuid.New(),
-		EventID:   "event-other",
-		EventType: EventTypeAccountClosed,
-		TenantID:  "tenant-B",
-		AccountID: "account-2",
+		ID:         uuid.New(),
+		EventID:    "event-other",
+		EventType:  EventTypeAccountClosed,
+		TenantID:   "tenant-B",
+		AccountID:  "account-2",
 		WebhookURL: "https://example.com/hook",
-		Status:    DeliveryStatusSuccess,
-		CreatedAt: time.Now().Truncate(time.Second),
+		Status:     DeliveryStatusSuccess,
+		CreatedAt:  time.Now().Truncate(time.Microsecond),
 	}))
 
 	records, err := repo.ListByTenant(ctx, "tenant-A", 10)
@@ -160,29 +140,29 @@ func TestRepository_ListByTenant(t *testing.T) {
 }
 
 func TestRepository_ListByAccount(t *testing.T) {
-	db := setupTestDB(t)
+	db, ctx, cleanup := setupWebhookTestDB(t)
+	defer cleanup()
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	require.NoError(t, repo.RecordDelivery(ctx, &DeliveryRecord{
-		ID:        uuid.New(),
-		EventID:   "event-1",
-		EventType: EventTypeAccountFrozen,
-		TenantID:  "tenant-1",
-		AccountID: "account-A",
+		ID:         uuid.New(),
+		EventID:    "event-1",
+		EventType:  EventTypeAccountFrozen,
+		TenantID:   "tenant-1",
+		AccountID:  "account-A",
 		WebhookURL: "https://example.com/hook",
-		Status:    DeliveryStatusPending,
-		CreatedAt: time.Now().Truncate(time.Second),
+		Status:     DeliveryStatusPending,
+		CreatedAt:  time.Now().Truncate(time.Microsecond),
 	}))
 	require.NoError(t, repo.RecordDelivery(ctx, &DeliveryRecord{
-		ID:        uuid.New(),
-		EventID:   "event-2",
-		EventType: EventTypeAccountClosed,
-		TenantID:  "tenant-1",
-		AccountID: "account-B",
+		ID:         uuid.New(),
+		EventID:    "event-2",
+		EventType:  EventTypeAccountClosed,
+		TenantID:   "tenant-1",
+		AccountID:  "account-B",
 		WebhookURL: "https://example.com/hook",
-		Status:    DeliveryStatusSuccess,
-		CreatedAt: time.Now().Truncate(time.Second),
+		Status:     DeliveryStatusSuccess,
+		CreatedAt:  time.Now().Truncate(time.Microsecond),
 	}))
 
 	records, err := repo.ListByAccount(ctx, "account-A", 10)
@@ -192,21 +172,21 @@ func TestRepository_ListByAccount(t *testing.T) {
 }
 
 func TestRepository_CountByStatus(t *testing.T) {
-	db := setupTestDB(t)
+	db, ctx, cleanup := setupWebhookTestDB(t)
+	defer cleanup()
 	repo := NewRepository(db)
-	ctx := context.Background()
 
 	// Create mixed-status records
 	for _, status := range []DeliveryStatus{DeliveryStatusPending, DeliveryStatusPending, DeliveryStatusSuccess} {
 		require.NoError(t, repo.RecordDelivery(ctx, &DeliveryRecord{
-			ID:        uuid.New(),
-			EventID:   "event-" + uuid.New().String()[:8],
-			EventType: EventTypeAccountFrozen,
-			TenantID:  "tenant-1",
-			AccountID: "account-1",
+			ID:         uuid.New(),
+			EventID:    "event-" + uuid.New().String()[:8],
+			EventType:  EventTypeAccountFrozen,
+			TenantID:   "tenant-1",
+			AccountID:  "account-1",
 			WebhookURL: "https://example.com/hook",
-			Status:    status,
-			CreatedAt: time.Now().Truncate(time.Second),
+			Status:     status,
+			CreatedAt:  time.Now().Truncate(time.Microsecond),
 		}))
 	}
 
@@ -281,11 +261,11 @@ func TestEntityDomainConversion_RoundTrip(t *testing.T) {
 
 func TestToEntity_NilOptionalFields(t *testing.T) {
 	record := &DeliveryRecord{
-		ID:        uuid.New(),
-		EventID:   "event-456",
-		EventType: EventTypeAccountFrozen,
-		TenantID:  "tenant-test",
-		AccountID: "account-test",
+		ID:         uuid.New(),
+		EventID:    "event-456",
+		EventType:  EventTypeAccountFrozen,
+		TenantID:   "tenant-test",
+		AccountID:  "account-test",
 		WebhookURL: "https://example.com/hook",
 		Status:     DeliveryStatusPending,
 		Attempts:   0,
@@ -301,11 +281,11 @@ func TestToEntity_NilOptionalFields(t *testing.T) {
 
 func TestToDomain_NilOptionalFields(t *testing.T) {
 	entity := &DeliveryEntity{
-		ID:        uuid.New(),
-		EventID:   "event-789",
-		EventType: string(EventTypeAccountClosed),
-		TenantID:  "tenant-test",
-		AccountID: "account-test",
+		ID:         uuid.New(),
+		EventID:    "event-789",
+		EventType:  string(EventTypeAccountClosed),
+		TenantID:   "tenant-test",
+		AccountID:  "account-test",
 		WebhookURL: "https://example.com/hook",
 		Status:     string(DeliveryStatusSuccess),
 		Attempts:   1,
