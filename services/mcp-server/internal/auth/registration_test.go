@@ -166,6 +166,26 @@ func TestRegisteredClient_HasRedirectURI(t *testing.T) {
 	assert.False(t, client.HasRedirectURI("https://c.com/cb"))
 }
 
+func TestRegisteredClient_MatchRedirectURI(t *testing.T) {
+	client := auth.RegisteredClient{
+		RedirectURIs: []string{"https://a.com/cb", "https://b.com/cb"},
+	}
+
+	// Match returns the registered URI from the trusted list.
+	uri, ok := client.MatchRedirectURI("https://a.com/cb")
+	assert.True(t, ok)
+	assert.Equal(t, "https://a.com/cb", uri)
+
+	uri, ok = client.MatchRedirectURI("https://b.com/cb")
+	assert.True(t, ok)
+	assert.Equal(t, "https://b.com/cb", uri)
+
+	// No match returns empty string and false.
+	uri, ok = client.MatchRedirectURI("https://evil.com/cb")
+	assert.False(t, ok)
+	assert.Empty(t, uri)
+}
+
 func TestRegistrationHandler_RejectsOversizedBody(t *testing.T) {
 	registry := newTestRegistry(t)
 	handler := auth.NewRegistrationHandler(registry, slog.Default())

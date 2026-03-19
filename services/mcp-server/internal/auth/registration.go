@@ -149,6 +149,19 @@ func (c RegisteredClient) HasRedirectURI(uri string) bool {
 	return false
 }
 
+// MatchRedirectURI returns the registered redirect URI that matches the
+// candidate, sourced from the trusted registration list rather than from
+// user input. This prevents open-redirect attacks even when a URI passes
+// HasRedirectURI validation.
+func (c RegisteredClient) MatchRedirectURI(candidate string) (string, bool) {
+	for _, u := range c.RedirectURIs {
+		if u == candidate {
+			return u, true
+		}
+	}
+	return "", false
+}
+
 // generateClientID returns a random hex-encoded client identifier.
 func generateClientID() (string, error) {
 	b := make([]byte, clientIDBytes)

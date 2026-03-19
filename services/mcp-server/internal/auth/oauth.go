@@ -310,10 +310,8 @@ func (h *AuthorizationHandler) resolveClient(clientID, redirectURI string) (stri
 		if redirectURI != "" && redirectURI != h.cfg.RedirectURI {
 			return "", errMsgRedirectURIMismatch
 		}
-		if redirectURI == "" {
-			return h.cfg.RedirectURI, ""
-		}
-		return redirectURI, ""
+		// Always return the trusted configured URI, not the user-supplied value.
+		return h.cfg.RedirectURI, ""
 	}
 	if h.registry != nil {
 		client, ok := h.registry.Lookup(clientID)
@@ -323,10 +321,12 @@ func (h *AuthorizationHandler) resolveClient(clientID, redirectURI string) (stri
 		if redirectURI == "" {
 			return "", errMsgRedirectURIRequired
 		}
-		if !client.HasRedirectURI(redirectURI) {
+		// Return the registered URI from the trusted list, not user input.
+		registered, matched := client.MatchRedirectURI(redirectURI)
+		if !matched {
 			return "", errMsgRedirectURIMismatch
 		}
-		return redirectURI, ""
+		return registered, ""
 	}
 	return "", errMsgInvalidClientID
 }
