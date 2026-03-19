@@ -215,17 +215,25 @@ check_proto_freshness() {
         return
     fi
 
-    # Check all outputs declared in buf.gen.yaml: api/proto and api/openapi
-    if git diff --quiet -- api/proto/ api/openapi/ 2>/dev/null; then
+    # Check all outputs declared in buf.gen.yaml: api/proto and api/openapi.
+    # Use git status --short to catch both modified tracked files AND new
+    # untracked files (e.g. a new .proto generates a new .pb.go that was
+    # never committed). git diff alone misses untracked files.
+    local stale_files
+    stale_files=$(git status --short -- api/proto/ api/openapi/ 2>/dev/null | awk '{print $2}')
+
+    if [ -z "$stale_files" ]; then
         log_ok "Generated proto files are up to date"
     else
         log_error "Generated files are stale — run 'buf generate' and commit the result"
         echo "       Fix: buf generate"
-        git diff --name-only -- api/proto/ api/openapi/ 2>/dev/null | while IFS= read -r f; do
+        echo "$stale_files" | while IFS= read -r f; do
             echo "       - ${f}"
         done
-        # Restore files to leave working tree clean
+        # Restore tracked files and remove untracked generated files to leave
+        # the working tree clean.
         git checkout -- api/proto/ api/openapi/ 2>/dev/null || true
+        git clean -f -- api/proto/ api/openapi/ 2>/dev/null || true
     fi
 }
 
