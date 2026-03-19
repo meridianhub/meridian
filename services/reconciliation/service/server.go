@@ -540,6 +540,8 @@ func phaseIndex(phase domain.ReconciliationPhase) int {
 }
 
 // resumePipeline re-launches the pipeline from the run's checkpoint.
+//
+//nolint:contextcheck // Intentionally uses background context for async pipeline that outlives the RPC
 func (s *AccountReconciliationService) resumePipeline(runID uuid.UUID) {
 	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout)
 	go func() {
