@@ -37,7 +37,10 @@ func TestProcessMessage_Success(t *testing.T) {
 	handler := func(ctx context.Context, key []byte, msg proto.Message) error {
 		receivedKey = key
 		receivedMsg = msg
-		tid, _ := tenant.RequireFromContext(ctx)
+		tid, err := tenant.RequireFromContext(ctx)
+		if err != nil {
+			return err
+		}
 		receivedTenant = tid
 		return nil
 	}

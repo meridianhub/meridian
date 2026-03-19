@@ -50,7 +50,7 @@ func TestPostgresSetupFunctions(t *testing.T) {
 
 	t.Run("CreateTable", func(t *testing.T) {
 		// Reset search_path for clean slate
-		_ = db.Exec("SET search_path TO public")
+		require.NoError(t, db.Exec("SET search_path TO public").Error)
 		tc := SetupTenantSchema(t, db, "tbl_tenant")
 		defer tc.Cleanup()
 
@@ -65,7 +65,7 @@ func TestPostgresSetupFunctions(t *testing.T) {
 	})
 
 	t.Run("CreateAuditTables", func(t *testing.T) {
-		_ = db.Exec("SET search_path TO public")
+		require.NoError(t, db.Exec("SET search_path TO public").Error)
 		CreateAuditTables(t, db)
 
 		err := db.Exec(`INSERT INTO audit_outbox (table_name, operation, record_id) VALUES ('test', 'INSERT', '1')`).Error
