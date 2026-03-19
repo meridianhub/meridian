@@ -721,4 +721,3 @@ func TestGjsonToInterface_Types(t *testing.T) {
 		})
 	}
 }
-
