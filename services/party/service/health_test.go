@@ -55,7 +55,7 @@ func TestLogHealthCheck(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			report := &health.Report{
 				Components: []health.ComponentResult{
 					{Name: "database", Status: tt.status, Message: "test"},
@@ -67,7 +67,7 @@ func TestLogHealthCheck(t *testing.T) {
 		})
 	}
 
-	t.Run("logs component failures for unhealthy", func(t *testing.T) {
+	t.Run("logs component failures for unhealthy", func(_ *testing.T) {
 		report := &health.Report{
 			Components: []health.ComponentResult{
 				{Name: "database", Status: health.StatusUnhealthy, Message: "connection refused"},

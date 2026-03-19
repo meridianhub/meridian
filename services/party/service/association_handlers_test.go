@@ -19,13 +19,13 @@ import (
 // associationMockRepository extends mockRepository with configurable association behavior.
 type associationMockRepository struct {
 	mockRepository
-	checkCircularResult bool
-	checkCircularErr    error
-	saveAssocErr        error
-	findAssocResult     []persistence.PartyAssociationEntity
-	findAssocErr        error
-	updateAssocResult   *persistence.PartyAssociationEntity
-	updateAssocErr      error
+	checkCircularResult    bool
+	checkCircularErr       error
+	saveAssocErr           error
+	findAssocResult        []persistence.PartyAssociationEntity
+	findAssocErr           error
+	updateAssocResult      *persistence.PartyAssociationEntity
+	updateAssocErr         error
 	listParticipantsResult []persistence.PartyAssociationEntity
 	listParticipantsErr    error
 	getStructuringResult   map[string]interface{}
