@@ -374,7 +374,7 @@ func (p *PostgresProvisioner) markProvisioningFailed(_ context.Context, status *
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.saveProvisioningStatus(cleanupCtx, status); err != nil {
+	if err := p.saveProvisioningStatus(cleanupCtx, status); err != nil { //nolint:contextcheck // cleanupCtx intentionally derived from Background() for cleanup after parent timeout
 		p.logger.Warn("failed to save failed status",
 			"tenant_id", status.TenantID.String(),
 			"error", err)

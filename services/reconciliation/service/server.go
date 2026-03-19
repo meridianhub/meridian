@@ -742,7 +742,7 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 			Run: toProtoRunSummary(run),
 		}
 		// Re-launch the pipeline from the checkpoint
-		s.resumePipeline(run.RunID)
+		s.resumePipeline(run.RunID) //nolint:contextcheck // resumePipeline intentionally creates a detached context for background pipeline execution
 		slog.InfoContext(ctx, "settlement run resumed",
 			"run_id", runID,
 			"action", action.String(),

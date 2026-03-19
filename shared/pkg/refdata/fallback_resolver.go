@@ -191,7 +191,7 @@ func (r *FallbackResolver) Start(ctx context.Context) error {
 	r.done = make(chan struct{})
 	r.cancel = cancel
 	r.started = true
-	r.startSnapshotLoop(bgCtx)
+	r.startSnapshotLoop(bgCtx) //nolint:contextcheck // intentional detached context for background snapshot loop
 
 	return nil
 }
