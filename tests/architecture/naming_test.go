@@ -97,9 +97,9 @@ func TestRepositoryMethodVerbs(t *testing.T) {
 			return nil
 		}
 
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
-		if parseErr != nil {
-			return nil
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return nil //nolint:nilerr // intentionally skip unparseable files
 		}
 
 		for _, decl := range file.Decls {
@@ -149,22 +149,22 @@ func TestRepositoryMethodVerbs(t *testing.T) {
 // knownMissingComplianceDeclarations tracks repository structs that are currently
 // missing interface compliance declarations. Do NOT add new entries.
 var knownMissingComplianceDeclarations = map[string]bool{
-	"services/current-account/adapters/persistence/lien_repository.go::LienRepository":                     true,
-	"services/current-account/adapters/persistence/repository.go::Repository":                              true,
-	"services/current-account/adapters/persistence/withdrawal_repository.go::WithdrawalRepository":         true,
-	"services/financial-accounting/adapters/persistence/repository.go::LedgerRepository":                   true,
-	"services/identity/adapters/persistence/repository.go::Repository":                                     true,
-	"services/internal-account/adapters/persistence/lien_repository.go::LienRepository":                    true,
-	"services/market-information/adapters/persistence/base_repository.go::baseRepository":                  true,
-	"services/operational-gateway/adapters/persistence/connection_repository.go::ConnectionRepository":     true,
-	"services/operational-gateway/adapters/persistence/instruction_repository.go::InstructionRepository":   true,
-	"services/operational-gateway/adapters/persistence/route_repository.go::RouteRepository":               true,
+	"services/current-account/adapters/persistence/lien_repository.go::LienRepository":                       true,
+	"services/current-account/adapters/persistence/repository.go::Repository":                                true,
+	"services/current-account/adapters/persistence/withdrawal_repository.go::WithdrawalRepository":           true,
+	"services/financial-accounting/adapters/persistence/repository.go::LedgerRepository":                     true,
+	"services/identity/adapters/persistence/repository.go::Repository":                                       true,
+	"services/internal-account/adapters/persistence/lien_repository.go::LienRepository":                      true,
+	"services/market-information/adapters/persistence/base_repository.go::baseRepository":                    true,
+	"services/operational-gateway/adapters/persistence/connection_repository.go::ConnectionRepository":       true,
+	"services/operational-gateway/adapters/persistence/instruction_repository.go::InstructionRepository":     true,
+	"services/operational-gateway/adapters/persistence/route_repository.go::RouteRepository":                 true,
 	"services/party/adapters/persistence/party_type_definition_repository.go::PartyTypeDefinitionRepository": true,
-	"services/party/adapters/persistence/payment_method_repository.go::PaymentMethodRepository":            true,
-	"services/party/adapters/persistence/repository.go::Repository":                                        true,
-	"services/party/adapters/persistence/verification_repository.go::VerificationRepository":               true,
-	"services/payment-order/adapters/persistence/saga_execution_repository.go::SagaExecutionRepository":   true,
-	"services/position-keeping/adapters/persistence/postgres_repository.go::PostgresRepository":            true,
+	"services/party/adapters/persistence/payment_method_repository.go::PaymentMethodRepository":              true,
+	"services/party/adapters/persistence/repository.go::Repository":                                          true,
+	"services/party/adapters/persistence/verification_repository.go::VerificationRepository":                 true,
+	"services/payment-order/adapters/persistence/saga_execution_repository.go::SagaExecutionRepository":      true,
+	"services/position-keeping/adapters/persistence/postgres_repository.go::PostgresRepository":              true,
 }
 
 // TestInterfaceComplianceDeclarations validates that persistence repository implementations
@@ -191,9 +191,9 @@ func TestInterfaceComplianceDeclarations(t *testing.T) {
 			return nil
 		}
 
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
-		if parseErr != nil {
-			return nil
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return nil //nolint:nilerr // intentionally skip unparseable files
 		}
 
 		// Find struct types that look like repository implementations.

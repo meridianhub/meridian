@@ -15,14 +15,14 @@ const modulePath = "github.com/meridianhub/meridian"
 // because they wire the application together.
 var compositionRootAllowlist = map[string]bool{
 	"cmd/meridian/wire_services.go": true,
-	"cmd/meridian/main.go":         true,
+	"cmd/meridian/main.go":          true,
 }
 
 // knownCrossServiceInternalImports tracks existing cross-service internal/ imports.
 // Do NOT add new entries — use gRPC clients instead of direct imports.
 var knownCrossServiceInternalImports = map[string]bool{
-	"cmd/ibactl/cmd/provision_defaults.go":       true,
-	"cmd/ibactl/cmd/root.go":                     true,
+	"cmd/ibactl/cmd/provision_defaults.go":        true,
+	"cmd/ibactl/cmd/root.go":                      true,
 	"services/control-plane/cmd/validate/main.go": true,
 	"services/current-account/cmd/main.go":        true,
 	"services/financial-accounting/cmd/main.go":   true,
@@ -32,11 +32,11 @@ var knownCrossServiceInternalImports = map[string]bool{
 // knownCrossServiceDomainImports tracks existing cross-service domain imports.
 // Do NOT add new entries — use gRPC clients instead of direct imports.
 var knownCrossServiceDomainImports = map[string]bool{
-	"services/api-gateway/auth_handler.go":                                   true,
-	"services/api-gateway/auth_sso_handler.go":                               true,
-	"services/api-gateway/cmd/main.go":                                       true,
-	"services/current-account/service/deposit_orchestrator.go":               true,
-	"services/current-account/service/fungibility_validator.go":              true,
+	"services/api-gateway/auth_handler.go":                                  true,
+	"services/api-gateway/auth_sso_handler.go":                              true,
+	"services/api-gateway/cmd/main.go":                                      true,
+	"services/current-account/service/deposit_orchestrator.go":              true,
+	"services/current-account/service/fungibility_validator.go":             true,
 	"services/current-account/service/grpc_account_endpoints.go":            true,
 	"services/current-account/service/server.go":                            true,
 	"services/current-account/service/withdrawal_orchestrator.go":           true,
@@ -54,19 +54,19 @@ var knownCrossServiceDomainImports = map[string]bool{
 // knownSharedImportsServices tracks shared/ files that currently import services/.
 // Do NOT add new entries — shared packages must never depend on services.
 var knownSharedImportsServices = map[string]bool{
-	"shared/pkg/valuationfeature/resolution.go": true,
-	"shared/pkg/valuationfeature/seeder.go":     true,
+	"shared/pkg/valuationfeature/resolution.go":  true,
+	"shared/pkg/valuationfeature/seeder.go":      true,
 	"shared/platform/gateway/tenant_resolver.go": true,
 }
 
 // knownAdapterImportsService tracks adapter files that import their service layer.
 // Do NOT add new entries — adapters should depend on domain, not service.
 var knownAdapterImportsService = map[string]bool{
-	"services/financial-accounting/adapters/messaging/deposit_consumer.go":    true,
-	"services/internal-account/adapters/grpc/position_keeping_client.go":     true,
-	"services/party/adapters/http/verification_webhook.go":                   true,
-	"services/payment-order/adapters/clients/reference_data_client.go":      true,
-	"services/payment-order/adapters/lock/redis_lock_client.go":             true,
+	"services/financial-accounting/adapters/messaging/deposit_consumer.go": true,
+	"services/internal-account/adapters/grpc/position_keeping_client.go":   true,
+	"services/party/adapters/http/verification_webhook.go":                 true,
+	"services/payment-order/adapters/clients/reference_data_client.go":     true,
+	"services/payment-order/adapters/lock/redis_lock_client.go":            true,
 }
 
 // TestNoInternalCrossServiceImports validates that no service imports another service's
@@ -200,9 +200,9 @@ func TestSharedNeverImportsServices(t *testing.T) {
 			return nil
 		}
 
-		file, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if parseErr != nil {
-			return nil
+		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if err != nil {
+			return nil //nolint:nilerr // intentionally skip unparseable files
 		}
 
 		relPath, _ := filepath.Rel(root, path)
