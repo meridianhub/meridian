@@ -7,6 +7,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,6 +17,104 @@ func TestNewOutboxEventPublisher_NilRepo(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, messaging.ErrNilProducer)
 	assert.Nil(t, publisher)
+}
+
+func TestNewOutboxEventPublisher_Success(t *testing.T) {
+	repo := events.NewPgxOutboxRepository(nil)
+	publisher, err := messaging.NewOutboxEventPublisher(repo)
+	require.NoError(t, err)
+	assert.NotNil(t, publisher)
+}
+
+func TestOutboxEventPublisher_Publish_ReturnsNotSupported(t *testing.T) {
+	repo := events.NewPgxOutboxRepository(nil)
+	publisher, err := messaging.NewOutboxEventPublisher(repo)
+	require.NoError(t, err)
+
+	event := &mockDomainEvent{
+		eventType:   "position_keeping.transaction_captured.v1",
+		aggregateID: "test-id",
+		occurredAt:  time.Now().UTC(),
+	}
+
+	err = publisher.Publish(context.Background(), event)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, messaging.ErrOutboxPublishNotSupported)
+}
+
+func TestOutboxEventPublisher_PublishBatch_ReturnsNotSupported(t *testing.T) {
+	repo := events.NewPgxOutboxRepository(nil)
+	publisher, err := messaging.NewOutboxEventPublisher(repo)
+	require.NoError(t, err)
+
+	evts := []domain.DomainEvent{
+		&mockDomainEvent{
+			eventType:   "position_keeping.transaction_captured.v1",
+			aggregateID: "test-id",
+			occurredAt:  time.Now().UTC(),
+		},
+	}
+
+	err = publisher.PublishBatch(context.Background(), evts)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, messaging.ErrOutboxPublishNotSupported)
+}
+
+func TestOutboxEventPublisher_BuildOutboxFn_NilEvent(t *testing.T) {
+	repo := events.NewPgxOutboxRepository(nil)
+	publisher, err := messaging.NewOutboxEventPublisher(repo)
+	require.NoError(t, err)
+
+	fn := publisher.BuildOutboxFn(context.Background(), []domain.DomainEvent{nil})
+	err = fn(nil)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, messaging.ErrNilEvent)
+	assert.Contains(t, err.Error(), "failed to write event at index 0 to outbox")
+}
+
+func TestOutboxEventPublisher_BuildOutboxFn_UnknownEventType(t *testing.T) {
+	repo := events.NewPgxOutboxRepository(nil)
+	publisher, err := messaging.NewOutboxEventPublisher(repo)
+	require.NoError(t, err)
+
+	unknownEvent := &mockDomainEvent{
+		eventType:   "unknown.event.type",
+		aggregateID: "test-id",
+		occurredAt:  time.Now().UTC(),
+	}
+
+	fn := publisher.BuildOutboxFn(context.Background(), []domain.DomainEvent{unknownEvent})
+	err = fn(nil)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, messaging.ErrUnknownEventType)
+}
+
+func TestOutboxEventPublisher_BuildOutboxFn_InvalidProtoEvent(t *testing.T) {
+	repo := events.NewPgxOutboxRepository(nil)
+	publisher, err := messaging.NewOutboxEventPublisher(repo)
+	require.NoError(t, err)
+
+	// mockDomainEvent returns nil from ToProto(), which doesn't implement proto.Message
+	invalidEvent := &mockDomainEvent{
+		eventType:   "position_keeping.transaction_captured.v1",
+		aggregateID: "test-id",
+		occurredAt:  time.Now().UTC(),
+	}
+
+	fn := publisher.BuildOutboxFn(context.Background(), []domain.DomainEvent{invalidEvent})
+	err = fn(nil)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, messaging.ErrInvalidProtoEvent)
+}
+
+func TestOutboxEventPublisher_BuildOutboxFn_EmptyEvents(t *testing.T) {
+	repo := events.NewPgxOutboxRepository(nil)
+	publisher, err := messaging.NewOutboxEventPublisher(repo)
+	require.NoError(t, err)
+
+	fn := publisher.BuildOutboxFn(context.Background(), []domain.DomainEvent{})
+	err = fn(nil)
+	assert.NoError(t, err)
 }
 
 func TestOutboxEventPublisher_ErrorVariables(t *testing.T) {
