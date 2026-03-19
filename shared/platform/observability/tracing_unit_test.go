@@ -57,4 +57,3 @@ func TestNewTracer_EnabledWithInvalidEndpoint(t *testing.T) {
 	err = tracer.Shutdown(context.Background())
 	assert.NoError(t, err)
 }
-

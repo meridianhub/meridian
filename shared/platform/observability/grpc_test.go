@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/meridianhub/meridian/shared/platform/observability"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -31,7 +30,7 @@ func TestUnaryServerInterceptor_Success(t *testing.T) {
 
 	interceptor := tracer.UnaryServerInterceptor()
 
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+	handler := func(_ context.Context, _ interface{}) (interface{}, error) {
 		return "ok", nil
 	}
 
@@ -52,7 +51,7 @@ func TestUnaryServerInterceptor_Error(t *testing.T) {
 	interceptor := tracer.UnaryServerInterceptor()
 
 	handlerErr := errors.New("handler failed")
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+	handler := func(_ context.Context, _ interface{}) (interface{}, error) {
 		return nil, handlerErr
 	}
 
@@ -72,9 +71,7 @@ func TestUnaryServerInterceptor_WithTenant(t *testing.T) {
 
 	interceptor := tracer.UnaryServerInterceptor()
 
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		// Simulate auth middleware setting tenant
-		ctx = tenant.WithTenant(ctx, "acme_bank")
+	handler := func(_ context.Context, _ interface{}) (interface{}, error) {
 		return "ok", nil
 	}
 
@@ -94,7 +91,7 @@ func TestUnaryServerInterceptor_UnparsableMethod(t *testing.T) {
 
 	interceptor := tracer.UnaryServerInterceptor()
 
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+	handler := func(_ context.Context, _ interface{}) (interface{}, error) {
 		return "ok", nil
 	}
 
@@ -123,7 +120,7 @@ type mockServerStream struct {
 func (s *mockServerStream) SetHeader(metadata.MD) error  { return nil }
 func (s *mockServerStream) SendHeader(metadata.MD) error { return nil }
 func (s *mockServerStream) SetTrailer(metadata.MD)       {}
-func (s *mockServerStream) Context() context.Context      { return s.ctx }
+func (s *mockServerStream) Context() context.Context     { return s.ctx }
 
 func (s *mockServerStream) SendMsg(m interface{}) error {
 	if s.sendErr != nil {
@@ -149,7 +146,7 @@ func TestStreamServerInterceptor_Success(t *testing.T) {
 
 	interceptor := tracer.StreamServerInterceptor()
 
-	handler := func(_ interface{}, stream grpc.ServerStream) error {
+	handler := func(_ interface{}, _ grpc.ServerStream) error {
 		return nil
 	}
 
@@ -170,7 +167,7 @@ func TestStreamServerInterceptor_Error(t *testing.T) {
 	interceptor := tracer.StreamServerInterceptor()
 
 	handlerErr := errors.New("stream handler failed")
-	handler := func(_ interface{}, stream grpc.ServerStream) error {
+	handler := func(_ interface{}, _ grpc.ServerStream) error {
 		return handlerErr
 	}
 

@@ -279,7 +279,7 @@ func TestNewDLQInspector_Validation(t *testing.T) {
 			BootstrapServers: "localhost:9092",
 			DLQTopics:        []string{},
 		})
-		if err != ErrEmptyTopics {
+		if !errors.Is(err, ErrEmptyTopics) {
 			t.Errorf("expected ErrEmptyTopics, got %v", err)
 		}
 	})

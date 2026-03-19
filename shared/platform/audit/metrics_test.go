@@ -7,16 +7,16 @@ import (
 func TestRecordKafkaMetrics(t *testing.T) {
 	// These are simple counter/gauge/histogram wrappers.
 	// Test that they don't panic when called with valid arguments.
-	t.Run("RecordPollInterval", func(t *testing.T) {
+	t.Run("RecordPollInterval", func(_ *testing.T) {
 		RecordPollInterval("test_schema", 5.0)
 	})
 
-	t.Run("RecordKafkaPublished", func(t *testing.T) {
+	t.Run("RecordKafkaPublished", func(_ *testing.T) {
 		RecordKafkaPublished("test_schema", "INSERT", "success")
 		RecordKafkaPublished("test_schema", "UPDATE", "failure")
 	})
 
-	t.Run("RecordKafkaConsumed", func(t *testing.T) {
+	t.Run("RecordKafkaConsumed", func(_ *testing.T) {
 		RecordKafkaConsumed("test_schema", "INSERT", "success")
 		RecordKafkaConsumed("test_schema", "DELETE", "failure")
 	})

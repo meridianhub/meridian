@@ -167,4 +167,3 @@ func TestWithSetupLogLevel(t *testing.T) {
 	opt(cfg)
 	assert.Equal(t, logger.Warn, cfg.logLevel)
 }
-
