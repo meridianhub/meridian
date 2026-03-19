@@ -571,3 +571,61 @@ func TestUpdateVerification_WithMetadata(t *testing.T) {
 	require.Len(t, eventPublisher.publishedEvents, 1)
 	assert.Equal(t, "APPROVED", eventPublisher.publishedEvents[0].Status)
 }
+
+func TestGetVerification_Success(t *testing.T) {
+	partyRepo := &mockPartyRepository{}
+	verificationRepo := newMockVerificationRepository()
+	provider := &mockProvider{}
+
+	svc, err := NewVerificationService(partyRepo, verificationRepo, provider, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create a verification
+	entity := &persistence.PartyVerificationEntity{
+		PartyID:        uuid.New(),
+		VerificationID: "prov-get-test",
+		Provider:       "onfido",
+		Status:         "PENDING",
+	}
+	err = verificationRepo.CreateVerification(ctx, entity)
+	require.NoError(t, err)
+
+	// Retrieve it
+	result, err := svc.GetVerification(ctx, entity.ID)
+	require.NoError(t, err)
+	assert.Equal(t, entity.ID, result.ID)
+	assert.Equal(t, "prov-get-test", result.VerificationID)
+}
+
+func TestGetVerification_NotFound(t *testing.T) {
+	partyRepo := &mockPartyRepository{}
+	verificationRepo := newMockVerificationRepository()
+	provider := &mockProvider{}
+
+	svc, err := NewVerificationService(partyRepo, verificationRepo, provider, nil, nil)
+	require.NoError(t, err)
+
+	_, err = svc.GetVerification(context.Background(), uuid.New())
+	assert.ErrorIs(t, err, persistence.ErrVerificationNotFound)
+}
+
+func TestIsTerminalStatus(t *testing.T) {
+	tests := []struct {
+		status   verification.Status
+		terminal bool
+	}{
+		{verification.StatusPending, false},
+		{verification.StatusApproved, true},
+		{verification.StatusRejected, true},
+		{verification.StatusManualReview, true},
+		{verification.Status("UNKNOWN"), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.status), func(t *testing.T) {
+			assert.Equal(t, tc.terminal, isTerminalStatus(tc.status))
+		})
+	}
+}
