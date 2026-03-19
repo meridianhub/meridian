@@ -77,7 +77,7 @@ skip_service() {
 # ---------------------------------------------------------------------------
 # Check 1: File size (error >800 lines for non-test, non-pb Go files)
 #
-# Files with a //meridian:large-file comment in the first 10 lines are exempt.
+# Files with a //meridian:large-file comment anywhere in the file are exempt.
 # Note: tests/architecture/size_test.go enforces the same limit via a known-
 # oversize allowlist. This check provides fast feedback before running Go tests.
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ check_file_size() {
         if [ "$lines" -gt 800 ]; then
             log_error "${file} has ${lines} lines (limit: 800)"
             echo "       Fix: split into smaller files or extract helpers"
-            echo "       Exempt: add '//meridian:large-file' comment in first 10 lines"
+            echo "       Exempt: add '//meridian:large-file' comment anywhere in the file"
             found=1
         fi
     done < <(
