@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestLoadFromEnv_NoGatewayEnvVars(t *testing.T) {
 func TestLoadGatewayAccountConfig_PrefersFile(t *testing.T) {
 	// When GATEWAY_ACCOUNT_MAPPING_FILE is set to non-existent file,
 	// it should try to load from file rather than falling back to env vars
-	t.Setenv("GATEWAY_ACCOUNT_MAPPING_FILE", "/tmp/nonexistent-gateway-config.json")
+	t.Setenv("GATEWAY_ACCOUNT_MAPPING_FILE", filepath.Join(t.TempDir(), "nonexistent-gateway-config.json"))
 	t.Setenv("GATEWAY_STRIPE_ACCOUNT_ID", "uuid-stripe")
 	t.Setenv("GATEWAY_STRIPE_ACCOUNT_TYPE", "NOSTRO")
 

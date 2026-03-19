@@ -85,7 +85,7 @@ func TestBillingExecutor_Execute_UpdateError(t *testing.T) {
 	}
 
 	err := executor.Execute(context.Background(), schedule)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "update billing run")
 }
 
@@ -133,7 +133,7 @@ func TestProcessInvoices_GeneratorError(t *testing.T) {
 	require.NoError(t, run.StartProcessing())
 
 	err = executor.processInvoices(context.Background(), run)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invoice generation")
 	// Billing run should be marked as failed
 	assert.Equal(t, domain.BillingRunStatusFailed, run.Status)
@@ -251,7 +251,7 @@ func TestExecute_CreateError(t *testing.T) {
 	}
 
 	err := executor.Execute(context.Background(), schedule)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "persist billing run")
 }
 

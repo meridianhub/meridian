@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
 	"testing"
 	"time"
 
@@ -79,9 +81,18 @@ func TestMakeCircuitBreakerCallback(t *testing.T) {
 	})
 }
 
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	return fmt.Sprintf("localhost:%d", port)
+}
+
 func TestNewPartyClientWrapper(t *testing.T) {
 	client, cleanup, err := partyclient.New(partyclient.Config{
-		Target:  "localhost:50055",
+		Target:  freePort(t),
 		Timeout: 100 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -93,7 +104,7 @@ func TestNewPartyClientWrapper(t *testing.T) {
 
 func TestPartyClientWrapper_ValidateParty_NoServer(t *testing.T) {
 	client, cleanup, err := partyclient.New(partyclient.Config{
-		Target:  "localhost:50055",
+		Target:  freePort(t),
 		Timeout: 100 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -107,7 +118,7 @@ func TestPartyClientWrapper_ValidateParty_NoServer(t *testing.T) {
 
 func TestPartyClientWrapper_GetParty_NoServer(t *testing.T) {
 	client, cleanup, err := partyclient.New(partyclient.Config{
-		Target:  "localhost:50055",
+		Target:  freePort(t),
 		Timeout: 100 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -120,7 +131,7 @@ func TestPartyClientWrapper_GetParty_NoServer(t *testing.T) {
 
 func TestPartyClientWrapper_Close(t *testing.T) {
 	client, cleanup, err := partyclient.New(partyclient.Config{
-		Target:  "localhost:50055",
+		Target:  freePort(t),
 		Timeout: 100 * time.Millisecond,
 	})
 	require.NoError(t, err)
