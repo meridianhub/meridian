@@ -800,7 +800,7 @@ func extractMarketData(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
 	for _, ds := range md.GetDatasets() {
 		input.MarketDataSets = append(input.MarketDataSets, MarketDataSetInput{
 			Code:        ds.GetCode(),
-			Category:    ds.GetCategory().String(),
+			Category:    stripEnumPrefix(ds.GetCategory().String(), "DATA_CATEGORY_"),
 			Unit:        ds.GetUnit(),
 			SourceCode:  ds.GetSourceCode(),
 			DisplayName: ds.GetDisplayName(),
