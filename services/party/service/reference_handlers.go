@@ -83,7 +83,11 @@ func (s *Service) RetrieveReference(ctx context.Context, req *pb.RetrieveReferen
 		return nil, status.Errorf(codes.Internal, "failed to retrieve references: %v", err)
 	}
 
-	// Build response from references by type
+	// Build response from references by type.
+	// Note: the response proto uses singular fields per reference type, so when multiple
+	// references of the same type exist (allowed by the append-only write path), only
+	// the last iterated row is returned. This is the current proto contract — supporting
+	// multiple references per type requires a proto schema change.
 	resp := &pb.RetrieveReferenceResponse{
 		PartyId: req.PartyId,
 	}

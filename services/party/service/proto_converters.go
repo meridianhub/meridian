@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
@@ -22,21 +23,23 @@ func fromJSONB(s string) string {
 	return s
 }
 
-// protoToPartyStatus converts a proto PartyStatus to domain string
-func protoToPartyStatus(s pb.PartyStatus) string {
+// protoToPartyStatus converts a proto PartyStatus to domain string.
+// Returns an error for unknown enum values.
+func protoToPartyStatus(s pb.PartyStatus) (string, error) {
 	switch s {
 	case pb.PartyStatus_PARTY_STATUS_ACTIVE:
-		return string(domain.PartyStatusActive)
+		return string(domain.PartyStatusActive), nil
 	case pb.PartyStatus_PARTY_STATUS_RESTRICTED:
-		return string(domain.PartyStatusRestricted)
+		return string(domain.PartyStatusRestricted), nil
 	case pb.PartyStatus_PARTY_STATUS_SUSPENDED:
-		return string(domain.PartyStatusSuspended)
+		return string(domain.PartyStatusSuspended), nil
 	case pb.PartyStatus_PARTY_STATUS_TERMINATED:
-		return string(domain.PartyStatusTerminated)
+		return string(domain.PartyStatusTerminated), nil
 	case pb.PartyStatus_PARTY_STATUS_UNSPECIFIED:
-		return ""
+		return "", nil
+	default:
+		return "", fmt.Errorf("unknown party status: %v", s)
 	}
-	return ""
 }
 
 // domainToProto converts a domain Party to a proto Party message.
@@ -183,19 +186,20 @@ const (
 	associationStatusTerminated = "TERMINATED"
 )
 
-// protoAssociationStatusToString converts proto AssociationStatus to string
-func protoAssociationStatusToString(s pb.AssociationStatus) string {
+// protoAssociationStatusToString converts proto AssociationStatus to string.
+// Returns an error for unknown enum values.
+func protoAssociationStatusToString(s pb.AssociationStatus) (string, error) {
 	switch s {
 	case pb.AssociationStatus_ASSOCIATION_STATUS_ACTIVE:
-		return associationStatusActive
+		return associationStatusActive, nil
 	case pb.AssociationStatus_ASSOCIATION_STATUS_SUSPENDED:
-		return associationStatusSuspended
+		return associationStatusSuspended, nil
 	case pb.AssociationStatus_ASSOCIATION_STATUS_TERMINATED:
-		return associationStatusTerminated
+		return associationStatusTerminated, nil
 	case pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED:
-		return associationStatusActive
+		return associationStatusActive, nil
 	default:
-		return associationStatusActive
+		return "", fmt.Errorf("unknown association status: %v", s)
 	}
 }
 
@@ -242,27 +246,28 @@ func associationStatusToProto(status string) pb.AssociationStatus {
 	}
 }
 
-// protoToRelationshipType converts proto RelationshipType to domain string
-func protoToRelationshipType(rt pb.RelationshipType) string {
+// protoToRelationshipType converts proto RelationshipType to domain string.
+// Returns an error for unknown enum values.
+func protoToRelationshipType(rt pb.RelationshipType) (string, error) {
 	switch rt {
 	case pb.RelationshipType_RELATIONSHIP_TYPE_UNSPECIFIED:
-		return "UNSPECIFIED"
+		return "UNSPECIFIED", nil
 	case pb.RelationshipType_RELATIONSHIP_TYPE_SPOUSE:
-		return string(domain.RelationshipTypeSpouse)
+		return string(domain.RelationshipTypeSpouse), nil
 	case pb.RelationshipType_RELATIONSHIP_TYPE_DEPENDENT:
-		return string(domain.RelationshipTypeDependent)
+		return string(domain.RelationshipTypeDependent), nil
 	case pb.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER:
-		return string(domain.RelationshipTypeBusinessPartner)
+		return string(domain.RelationshipTypeBusinessPartner), nil
 	case pb.RelationshipType_RELATIONSHIP_TYPE_GUARANTOR:
-		return string(domain.RelationshipTypeGuarantor)
+		return string(domain.RelationshipTypeGuarantor), nil
 	case pb.RelationshipType_RELATIONSHIP_TYPE_BENEFICIAL_OWNER:
-		return string(domain.RelationshipTypeBeneficialOwner)
+		return string(domain.RelationshipTypeBeneficialOwner), nil
 	case pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_PARTICIPANT:
-		return string(domain.RelationshipTypeSyndicateParticipant)
+		return string(domain.RelationshipTypeSyndicateParticipant), nil
 	case pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_HOST:
-		return string(domain.RelationshipTypeSyndicateHost)
+		return string(domain.RelationshipTypeSyndicateHost), nil
 	default:
-		return "UNSPECIFIED"
+		return "", fmt.Errorf("unknown relationship type: %v", rt)
 	}
 }
 

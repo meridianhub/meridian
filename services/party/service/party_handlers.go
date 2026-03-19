@@ -222,7 +222,11 @@ func (s *Service) ListParties(ctx context.Context, req *pb.ListPartiesRequest) (
 	}
 
 	if req.Status != pb.PartyStatus_PARTY_STATUS_UNSPECIFIED {
-		params.Status = protoToPartyStatus(req.Status)
+		statusStr, err := protoToPartyStatus(req.Status)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid status: %v", err)
+		}
+		params.Status = statusStr
 	}
 
 	result, err := s.repo.ListParties(ctx, params)
@@ -289,6 +293,10 @@ func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (
 				s.logger.Error("invalid display name", "error", err)
 				return nil, status.Errorf(codes.InvalidArgument, "invalid display name: %v", err)
 			}
+		}
+		if len(req.Attributes) > 0 {
+			party.SetAttributes(protoAttributesToDomain(req.Attributes))
+			attributesUpdated = true
 		}
 	}
 
@@ -415,6 +423,10 @@ func (s *Service) ControlParty(ctx context.Context, req *pb.ControlPartyRequest)
 			Topic:         topics.PartyControlledV1,
 		})
 	}); err != nil {
+		if errors.Is(err, persistence.ErrVersionConflict) {
+			s.logger.Warn("version conflict on save", "party_id", req.PartyId)
+			return nil, status.Errorf(codes.Aborted, "version conflict: party was modified by another transaction")
+		}
 		s.logger.Error("failed to save party after control action", "party_id", req.PartyId, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save party: %v", err)
 	}

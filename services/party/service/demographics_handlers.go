@@ -77,14 +77,15 @@ func (s *Service) ExchangeDemographics(ctx context.Context, req *pb.ExchangeDemo
 // In production, this returns Unimplemented to prevent operating without a real provider.
 // In development/test environments, it returns a stub VERIFIED response.
 func (s *Service) exchangeDemographicsStub(partyID string) (*pb.ExchangeDemographicsResponse, error) {
-	if os.Getenv("ENVIRONMENT") == "production" {
+	env := os.Getenv("ENVIRONMENT")
+	if env != "development" && env != "test" {
 		return nil, status.Error(codes.Unimplemented,
 			"KYC/AML verification not implemented - no verification provider configured")
 	}
 
 	s.logger.Warn("using stub KYC verification - no provider configured",
 		"party_id", partyID,
-		"environment", os.Getenv("ENVIRONMENT"))
+		"environment", env)
 
 	return &pb.ExchangeDemographicsResponse{
 		PartyId:               partyID,

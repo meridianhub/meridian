@@ -55,19 +55,27 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 	}
 
 	// Build association input with optional fields
-	relationshipType := protoToRelationshipType(req.RelationshipType)
+	relationshipType, err := protoToRelationshipType(req.RelationshipType)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid relationship type: %v", err)
+	}
 	var input *persistence.AssociationInput
 	if req.Metadata != nil || req.Status != pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED || req.EffectiveFrom != nil || req.EffectiveTo != nil {
 		input = &persistence.AssociationInput{}
 		if req.Metadata != nil {
 			metadataBytes, marshalErr := json.Marshal(req.Metadata.AsMap())
-			if marshalErr == nil {
-				metadataStr := string(metadataBytes)
-				input.Metadata = &metadataStr
+			if marshalErr != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid metadata: %v", marshalErr)
 			}
+			metadataStr := string(metadataBytes)
+			input.Metadata = &metadataStr
 		}
 		if req.Status != pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED {
-			input.Status = protoAssociationStatusToString(req.Status)
+			assocStatus, statusErr := protoAssociationStatusToString(req.Status)
+			if statusErr != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid association status: %v", statusErr)
+			}
+			input.Status = assocStatus
 		}
 		if req.EffectiveFrom != nil {
 			ef := req.EffectiveFrom.AsTime()
@@ -116,7 +124,10 @@ func (s *Service) UpdateAssociations(ctx context.Context, req *pb.UpdateAssociat
 		return nil, status.Errorf(codes.InvalidArgument, "invalid association ID format: %v", err)
 	}
 
-	relationshipType := protoToRelationshipType(req.RelationshipType)
+	relationshipType, err := protoToRelationshipType(req.RelationshipType)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid relationship type: %v", err)
+	}
 	entity, err := s.repo.UpdateAssociation(ctx, associationID, relationshipType)
 	if err != nil {
 		s.logger.Error("failed to update association", "association_id", req.AssociationId, "error", err)
@@ -168,7 +179,10 @@ func (s *Service) ListParticipants(ctx context.Context, req *pb.ListParticipants
 		return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id format: %v", err)
 	}
 
-	relationshipType := protoToRelationshipType(req.RelationshipType)
+	relationshipType, err := protoToRelationshipType(req.RelationshipType)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid relationship type: %v", err)
+	}
 
 	associations, err := s.repo.ListParticipants(ctx, orgPartyID, relationshipType)
 	if err != nil {
@@ -200,7 +214,10 @@ func (s *Service) GetStructuringData(ctx context.Context, req *pb.GetStructuring
 		return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id format: %v", err)
 	}
 
-	relationshipType := protoToRelationshipType(req.RelationshipType)
+	relationshipType, err := protoToRelationshipType(req.RelationshipType)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid relationship type: %v", err)
+	}
 
 	metadata, err := s.repo.GetStructuringData(ctx, partyID, orgPartyID, relationshipType)
 	if err != nil {
