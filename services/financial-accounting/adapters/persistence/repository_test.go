@@ -494,16 +494,17 @@ func TestForeignKeyOnDeleteRestrict(t *testing.T) {
 // Audit Integration Tests
 // ====================
 
-// setupTestDBWithAudit creates test database with audit tables
+// setupTestDBWithAudit creates test database with audit tables.
+// Uses WithAuditTables (raw DDL) instead of WithModels for audit entities
+// to preserve CHECK constraints on status and operation columns.
 func setupTestDBWithAudit(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
 	return testdb.SetupTestDB(t,
 		testdb.WithModels(
 			&FinancialBookingLogEntity{},
 			&LedgerPostingEntity{},
-			&audit.AuditOutbox{},
-			&audit.AuditLog{},
 		),
+		testdb.WithAuditTables(),
 		testdb.WithTenant(testTenantID),
 	)
 }

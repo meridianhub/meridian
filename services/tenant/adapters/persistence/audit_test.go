@@ -15,12 +15,13 @@ import (
 	"gorm.io/gorm"
 )
 
-// setupTestDBWithAudit creates a CockroachDB container with GORM for testing
-// and sets up the audit_outbox table required for GORM hooks.
+// setupTestDBWithAudit creates a test database with GORM for testing
+// and sets up the audit_outbox table (via DDL) required for GORM hooks.
 func setupTestDBWithAudit(t *testing.T) (*gorm.DB, func()) {
 	t.Helper()
 	db, _, cleanup := testdb.SetupTestDB(t,
-		testdb.WithModels(&TenantEntity{}, &audit.AuditOutbox{}),
+		testdb.WithModels(&TenantEntity{}),
+		testdb.WithAuditTables(),
 	)
 	return db, cleanup
 }
