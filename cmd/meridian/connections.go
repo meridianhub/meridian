@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/meridianhub/meridian/internal/migrations"
+	faclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 	financialaccountingservice "github.com/meridianhub/meridian/services/financial-accounting/service"
 	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
-	faclient "github.com/meridianhub/meridian/services/financial-accounting/client"
 	pkclient "github.com/meridianhub/meridian/services/position-keeping/client"
 
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"

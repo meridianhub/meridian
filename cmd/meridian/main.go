@@ -41,7 +41,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/observability"
 
 	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
-
 )
 
 // Version information injected at build time via ldflags.

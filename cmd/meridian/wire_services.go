@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -90,8 +91,6 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"gorm.io/gorm"
-
-	"log/slog"
 )
 
 // registerServices wires all gRPC services into the shared server in tier dependency order,
