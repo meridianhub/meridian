@@ -73,22 +73,10 @@ func TestBillingExecutor_Execute_UpdateError(t *testing.T) {
 	}
 	defer func() { NowFunc = origNow }()
 
-	// First update (to processing) will succeed, second (to completed) will fail
-	callCount := 0
-	origUpdate := repo.updateErr
-	repo.updateErr = nil
-
 	executor := NewBillingExecutor(repo, redisClient, metrics, BillingExecutorConfig{}, logger)
 
-	// Wrap the repo to fail on second update
-	repo.updateErr = nil
-	_ = origUpdate
-
-	// Use a custom approach: let update succeed once then fail
-	// We can't easily do this with the current mock, but we can test the create error path
-	// which is already tested. Instead test the update error on processing transition.
+	// Set update to fail - this will fail the first UpdateBillingRun call (to processing)
 	repo.updateErr = errors.New("update failed")
-	_ = callCount
 
 	schedule := scheduler.Schedule{
 		ID:       "billing:tenant-upd-err",
