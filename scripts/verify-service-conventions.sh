@@ -19,8 +19,9 @@
 #   1 - one or more errors detected
 #
 # Escape hatches:
-#   //meridian:large-file  Add as a comment at the top of a file to exempt
-#                           it from the 800-line limit. Use sparingly.
+#   //meridian:large-file  Add anywhere in a file (gofmt may place it after
+#                           the package doc block) to exempt it from the
+#                           800-line limit. Use sparingly.
 
 set -euo pipefail
 
@@ -90,8 +91,10 @@ check_file_size() {
         # Skip if service filter is active and file doesn't match
         skip_service "$file" && continue
 
-        # Honour escape hatch: //meridian:large-file in first 10 lines
-        if head -n 10 "${REPO_ROOT}/${file}" 2>/dev/null | grep -q "//meridian:large-file"; then
+        # Honour escape hatch: //meridian:large-file anywhere in the file.
+        # gofmt may place this comment after the package doc block, so we
+        # scan the whole file rather than just the first N lines.
+        if grep -q "//meridian:large-file" "${REPO_ROOT}/${file}" 2>/dev/null; then
             continue
         fi
 

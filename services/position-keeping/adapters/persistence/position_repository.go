@@ -1,5 +1,6 @@
-//meridian:large-file — known oversized file; split tracked in backlog
 // Package persistence provides PostgreSQL persistence implementation for Position Keeping domain.
+//
+//meridian:large-file — known oversized file; split tracked in backlog
 package persistence
 
 import (

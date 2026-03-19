@@ -1,5 +1,6 @@
-//meridian:large-file — known oversized file; split tracked in backlog
 // Package service implements gRPC handlers for the identity and access management domain.
+//
+//meridian:large-file — known oversized file; split tracked in backlog
 package service
 
 import (

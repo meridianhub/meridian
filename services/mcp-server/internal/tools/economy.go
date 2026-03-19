@@ -1,5 +1,6 @@
-//meridian:large-file — known oversized file; split tracked in backlog
 // Package tools provides the tool registry for the MCP server.
+//
+//meridian:large-file — known oversized file; split tracked in backlog
 package tools
 
 import (
