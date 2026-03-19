@@ -278,6 +278,8 @@ func TestClient_RegisterParty_WithResilience(t *testing.T) {
 	require.Error(t, err)
 	// Error comes from resilience wrapper, not the "failed to register party" wrapper
 	assert.NotContains(t, err.Error(), "failed to register party")
+	// Positive check: the underlying Unavailable error is preserved
+	assert.Contains(t, err.Error(), "service down")
 }
 
 // --- RetrieveParty ---
@@ -324,6 +326,7 @@ func TestClient_RetrieveParty_WithResilience(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "failed to retrieve party")
+	assert.Contains(t, err.Error(), "service down")
 }
 
 // --- GetDefaultPaymentMethod ---
@@ -369,6 +372,7 @@ func TestClient_GetDefaultPaymentMethod_WithResilience(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "failed to get default payment method")
+	assert.Contains(t, err.Error(), "service down")
 }
 
 // --- ListParticipants ---
@@ -414,6 +418,7 @@ func TestClient_ListParticipants_WithResilience(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "failed to list participants")
+	assert.Contains(t, err.Error(), "service down")
 }
 
 // --- GetStructuringData ---
@@ -462,6 +467,7 @@ func TestClient_GetStructuringData_WithResilience(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "failed to get structuring data")
+	assert.Contains(t, err.Error(), "service down")
 }
 
 // --- Conn ---
@@ -500,7 +506,6 @@ func TestClient_Close_DoubleClose(t *testing.T) {
 
 	// Second close on an already-closed connection returns an error wrapped with context
 	err = c.Close()
-	if err != nil {
-		assert.Contains(t, err.Error(), "failed to close party client connection")
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to close party client connection")
 }
