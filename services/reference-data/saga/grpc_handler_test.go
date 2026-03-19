@@ -2,6 +2,8 @@ package saga
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -876,4 +878,401 @@ func TestRegistryHandler_ExistingTests_StillPass_WithValidator(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_DEPRECATED, deprecateResp.Saga.Status)
 	})
+}
+
+func TestRegistryHandler_CreateSagaDraft_NegativeVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	req := &sagav1.CreateSagaDraftRequest{
+		Name:    "negative_version_saga",
+		Version: -1,
+		Script:  `saga(name="negative_version_saga")`,
+	}
+
+	_, err := handler.CreateSagaDraft(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "version must be non-negative")
+}
+
+func TestRegistryHandler_DeprecateSaga_InvalidIDs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("invalid saga UUID", func(t *testing.T) {
+		req := &sagav1.DeprecateSagaRequest{
+			Id: "not-a-uuid",
+		}
+
+		_, err := handler.DeprecateSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "invalid saga id")
+	})
+
+	t.Run("invalid successor UUID", func(t *testing.T) {
+		// Create and activate a saga so we have a valid saga ID
+		createResp, err := handler.CreateSagaDraft(ctx, &sagav1.CreateSagaDraftRequest{
+			Name:   "deprecate_invalid_successor",
+			Script: `saga(name="deprecate_invalid_successor")`,
+		})
+		require.NoError(t, err)
+		_, err = handler.ActivateSaga(ctx, &sagav1.ActivateSagaRequest{Id: createResp.Saga.Id})
+		require.NoError(t, err)
+
+		req := &sagav1.DeprecateSagaRequest{
+			Id:          createResp.Saga.Id,
+			SuccessorId: "not-a-uuid",
+		}
+
+		_, err = handler.DeprecateSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "invalid successor_id")
+	})
+}
+
+func TestRegistryHandler_GetSaga_ErrorPaths(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("invalid UUID", func(t *testing.T) {
+		req := &sagav1.GetSagaRequest{
+			Id: "not-a-uuid",
+		}
+
+		_, err := handler.GetSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("negative version", func(t *testing.T) {
+		req := &sagav1.GetSagaRequest{
+			Name:    "some_saga",
+			Version: -1,
+		}
+
+		_, err := handler.GetSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "version must be >= 0")
+	})
+
+	t.Run("version zero triggers active lookup", func(t *testing.T) {
+		// Version 0 means "get active version" — non-existent name returns NotFound
+		req := &sagav1.GetSagaRequest{
+			Name:    "nonexistent_active_saga",
+			Version: 0,
+		}
+
+		_, err := handler.GetSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.NotFound, st.Code())
+	})
+
+	t.Run("non-existent saga by name", func(t *testing.T) {
+		req := &sagav1.GetSagaRequest{
+			Name:    "absolutely_does_not_exist",
+			Version: 1,
+		}
+
+		_, err := handler.GetSaga(ctx, req)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.NotFound, st.Code())
+	})
+}
+
+func TestRegistryHandler_ListSagas_Pagination(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	handler := NewRegistryHandler(registry, nil, nil, nil)
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Seed some sagas
+	for i := 0; i < 5; i++ {
+		_, err := handler.CreateSagaDraft(ctx, &sagav1.CreateSagaDraftRequest{
+			Name:   "pagination_saga_" + strconv.Itoa(i),
+			Script: `saga(name="pagination")`,
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("pageSize 0 defaults to 50", func(t *testing.T) {
+		resp, err := handler.ListSagas(ctx, &sagav1.ListSagasRequest{
+			PageSize: 0,
+		})
+		require.NoError(t, err)
+		// With only 5 sagas, all should be returned (50 > 5) and no next token
+		assert.GreaterOrEqual(t, len(resp.Sagas), 5)
+		assert.Empty(t, resp.NextPageToken)
+	})
+
+	t.Run("pageSize over 100 caps to 100", func(t *testing.T) {
+		resp, err := handler.ListSagas(ctx, &sagav1.ListSagasRequest{
+			PageSize: 200,
+		})
+		require.NoError(t, err)
+		// All 5 sagas fit within the capped page size of 100
+		assert.GreaterOrEqual(t, len(resp.Sagas), 5)
+		assert.Empty(t, resp.NextPageToken)
+	})
+
+	t.Run("invalid page_token", func(t *testing.T) {
+		_, err := handler.ListSagas(ctx, &sagav1.ListSagasRequest{
+			PageToken: "not-a-number",
+		})
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "invalid page_token")
+	})
+
+	t.Run("ExcludeSystem filter", func(t *testing.T) {
+		// Insert a system saga directly
+		schemaName := tenantID.SchemaName()
+		_, err := pool.Exec(ctx, `
+			INSERT INTO `+schemaName+`.saga_definition
+				(name, version, script, status, is_system)
+			VALUES
+				('system_list_test', 1, 'saga(name="system")', 'DRAFT', true)`)
+		require.NoError(t, err)
+
+		// Without ExcludeSystem — system saga should be present
+		allResp, err := handler.ListSagas(ctx, &sagav1.ListSagasRequest{
+			ExcludeSystem: false,
+		})
+		require.NoError(t, err)
+		hasSystem := false
+		for _, s := range allResp.Sagas {
+			if s.Name == "system_list_test" {
+				hasSystem = true
+				break
+			}
+		}
+		assert.True(t, hasSystem, "system saga should be included when ExcludeSystem=false")
+
+		// With ExcludeSystem — system saga should be excluded
+		filteredResp, err := handler.ListSagas(ctx, &sagav1.ListSagasRequest{
+			ExcludeSystem: true,
+		})
+		require.NoError(t, err)
+		for _, s := range filteredResp.Sagas {
+			assert.False(t, s.IsSystem, "no system saga should be returned when ExcludeSystem=true")
+		}
+	})
+}
+
+func TestRegistryHandler_DescribeHandlers(t *testing.T) {
+	t.Run("no schema returns empty response", func(t *testing.T) {
+		handler := NewRegistryHandler(nil, nil, nil, nil)
+
+		resp, err := handler.DescribeHandlers(context.Background(), &sagav1.DescribeHandlersRequest{})
+		require.NoError(t, err)
+		assert.Empty(t, resp.Services)
+	})
+
+	t.Run("with schema returns handlers grouped by service", func(t *testing.T) {
+		reg := schema.NewRegistry()
+		yamlData := []byte(`
+service: test
+version: 1.0
+handlers:
+  position_keeping.initiate_log:
+    description: Initiate a position log entry
+    compensation_strategy: none
+    params:
+      amount:
+        type: Decimal
+        required: true
+      direction:
+        type: enum
+        values: [DEBIT, CREDIT]
+        required: true
+    returns:
+      log_id:
+        type: string
+  payment.create_lien:
+    description: Create payment lien
+    compensation_strategy: none
+    params:
+      amount:
+        type: string
+        required: true
+    returns:
+      lien_id:
+        type: string
+`)
+		require.NoError(t, reg.LoadFromYAML(yamlData))
+
+		handler := NewRegistryHandler(nil, nil, nil, nil).WithSchemaRegistry(reg)
+
+		resp, err := handler.DescribeHandlers(context.Background(), &sagav1.DescribeHandlersRequest{})
+		require.NoError(t, err)
+		require.Len(t, resp.Services, 2)
+
+		// Services should be sorted alphabetically
+		assert.Equal(t, "payment", resp.Services[0].Name)
+		assert.Equal(t, "position_keeping", resp.Services[1].Name)
+
+		// Check payment service handlers
+		require.Len(t, resp.Services[0].Handlers, 1)
+		assert.Equal(t, "create_lien", resp.Services[0].Handlers[0].Name)
+		assert.Equal(t, "Create payment lien", resp.Services[0].Handlers[0].Description)
+
+		// Check position_keeping service handlers
+		require.Len(t, resp.Services[1].Handlers, 1)
+		assert.Equal(t, "initiate_log", resp.Services[1].Handlers[0].Name)
+		require.Len(t, resp.Services[1].Handlers[0].Parameters, 2)
+	})
+}
+
+func TestRegistryHandler_MapDomainError(t *testing.T) {
+	handler := NewRegistryHandler(nil, nil, nil, nil)
+
+	tests := []struct {
+		name         string
+		err          error
+		expectedCode codes.Code
+	}{
+		{"ErrNotFound", ErrNotFound, codes.NotFound},
+		{"ErrSystemSagaReadOnly", ErrSystemSagaReadOnly, codes.PermissionDenied},
+		{"ErrOptimisticLock", ErrOptimisticLock, codes.Aborted},
+		{"ErrValidationFailed", ErrValidationFailed, codes.FailedPrecondition},
+		{"ErrSuccessorInvalid", ErrSuccessorInvalid, codes.FailedPrecondition},
+		{"ErrNotDraft", ErrNotDraft, codes.FailedPrecondition},
+		{"ErrNotActive", ErrNotActive, codes.FailedPrecondition},
+		{"ErrAlreadyExists", ErrAlreadyExists, codes.AlreadyExists},
+		{"ErrInvalidStateTransition", ErrInvalidStateTransition, codes.FailedPrecondition},
+		{"unknown error", errors.New("something unexpected"), codes.Internal},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := handler.mapDomainError(tc.err, "TestOp", "test-id")
+			st, ok := status.FromError(result)
+			require.True(t, ok)
+			assert.Equal(t, tc.expectedCode, st.Code())
+		})
+	}
+}
+
+func TestRegistryHandler_ValidateSagaDraft_ErrorPaths(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	pool, tenantID, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	registry := NewPostgresRegistry(pool, nil)
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	t.Run("invalid UUID", func(t *testing.T) {
+		handler := NewRegistryHandler(registry, nil, nil, nil)
+
+		_, err := handler.ValidateSagaDraft(ctx, &sagav1.ValidateSagaDraftRequest{
+			Id: "not-a-uuid",
+		})
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("non-existent saga", func(t *testing.T) {
+		handler := NewRegistryHandler(registry, nil, nil, nil)
+
+		_, err := handler.ValidateSagaDraft(ctx, &sagav1.ValidateSagaDraftRequest{
+			Id: uuid.New().String(),
+		})
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.NotFound, st.Code())
+	})
+
+	t.Run("no validator returns READY status", func(t *testing.T) {
+		handler := NewRegistryHandler(registry, nil, nil, nil)
+
+		// Create a saga to validate
+		createResp, err := handler.CreateSagaDraft(ctx, &sagav1.CreateSagaDraftRequest{
+			Name:   "validate_no_validator",
+			Script: `saga(name="validate_no_validator")`,
+		})
+		require.NoError(t, err)
+
+		resp, err := handler.ValidateSagaDraft(ctx, &sagav1.ValidateSagaDraftRequest{
+			Id: createResp.Saga.Id,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "READY", resp.Validation.Status)
+		assert.Equal(t, "No validator configured", resp.Report)
+	})
+}
+
+func TestRegistryHandler_AnalyzeDeprecationImpact_NoValidator(t *testing.T) {
+	handler := NewRegistryHandler(nil, nil, nil, nil)
+
+	resp, err := handler.AnalyzeDeprecationImpact(context.Background(), &sagav1.AnalyzeDeprecationImpactRequest{
+		InstrumentCode: "GBP",
+	})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Dependencies)
+	assert.Equal(t, int32(0), resp.TotalCount)
 }
