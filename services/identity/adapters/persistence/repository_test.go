@@ -35,8 +35,8 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 }
 
 // setupTenantSchema creates an additional tenant schema with the identity tables.
-// Used for multi-tenant isolation tests. Session affinity for SET search_path is
-// guaranteed because SetupTestDB pins the connection pool to MaxOpenConns(1).
+// Used for multi-tenant isolation tests. Uses db.Transaction to pin a single
+// connection for the SET search_path + AutoMigrate + restore sequence.
 func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.Context {
 	t.Helper()
 	schemaName := tid.SchemaName()
@@ -44,16 +44,18 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.C
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	// Temporarily switch search_path to new tenant schema for AutoMigrate
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(identityModels...)
-	require.NoError(t, err)
-
-	// Restore search_path to the primary tenant schema
-	primarySchema := tenant.TenantID(testTenantID).SchemaName()
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
+	// Wrap in transaction to guarantee session affinity for search_path operations
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error; err != nil {
+			return err
+		}
+		if err := tx.AutoMigrate(identityModels...); err != nil {
+			return err
+		}
+		// Restore search_path to the primary tenant schema
+		primarySchema := tenant.TenantID(testTenantID).SchemaName()
+		return tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
+	})
 	require.NoError(t, err)
 
 	return tenant.WithTenant(context.Background(), tid)
