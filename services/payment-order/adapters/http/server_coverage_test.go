@@ -197,7 +197,8 @@ func TestServer_Start_And_Shutdown(t *testing.T) {
 		AtMost(2 * time.Second).
 		PollInterval(10 * time.Millisecond).
 		UntilNoError(func() error {
-			conn, dialErr := net.DialTimeout("tcp", server.Addr(), 50*time.Millisecond)
+			dialer := &net.Dialer{Timeout: 50 * time.Millisecond}
+			conn, dialErr := dialer.DialContext(context.Background(), "tcp", server.Addr())
 			if dialErr != nil {
 				return dialErr
 			}

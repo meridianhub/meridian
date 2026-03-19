@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -76,7 +77,7 @@ func TestSagaExecutionRepository_PersistExecution_NilExecution(t *testing.T) {
 
 	repo := NewSagaExecutionRepository(db)
 
-	err := repo.PersistExecution(nil, nil)
+	err := repo.PersistExecution(context.TODO(), nil)
 	_ = db // avoid unused
 	assert.ErrorIs(t, err, ErrNilSagaExecution)
 }
