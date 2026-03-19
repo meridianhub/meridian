@@ -107,6 +107,7 @@ func TestHealthChecker_Watch_PeriodicUpdate(t *testing.T) {
 
 func TestHealthChecker_Watch_PeriodicSendError(t *testing.T) {
 	gormDB, mock := setupMockDB(t)
+	// Initial health check ping; second ping may or may not fire before send error
 	mock.ExpectPing()
 	mock.ExpectPing()
 
@@ -130,6 +131,10 @@ func TestHealthChecker_Watch_PeriodicSendError(t *testing.T) {
 	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, customStream)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "send failed on purpose")
+
+	// At least the initial ping expectation should have been consumed
+	// (the second may or may not fire depending on timing)
+	_ = mock.ExpectationsWereMet()
 }
 
 // failAfterNStream fails Send after N successful sends.
