@@ -7,6 +7,8 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestNew_WithTarget(t *testing.T) {
@@ -131,4 +133,96 @@ func TestNew_WithoutResilience(t *testing.T) {
 
 	// Verify resilient client was not created
 	assert.Nil(t, client.resilient)
+}
+
+func TestConn(t *testing.T) {
+	c, cleanup, err := New(Config{
+		Target: "localhost:50056",
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	conn := c.Conn()
+	assert.NotNil(t, conn)
+	assert.Equal(t, c.conn, conn)
+}
+
+func TestNew_WithCustomDialOpts(t *testing.T) {
+	c, cleanup, err := New(Config{
+		Target: "localhost:50056",
+		DialOptions: []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	defer cleanup()
+}
+
+func TestNew_ServiceNameWithCustomDialOpts(t *testing.T) {
+	c, cleanup, err := New(Config{
+		ServiceName: "tenant",
+		DialOptions: []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	defer cleanup()
+}
+
+func TestNew_DefaultTimeoutApplied(t *testing.T) {
+	c, cleanup, err := New(Config{
+		ServiceName: "tenant",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	defer cleanup()
+
+	// Default timeout should be applied
+	assert.Equal(t, DefaultTimeout, c.timeout)
+}
+
+func TestNew_CustomTimeout(t *testing.T) {
+	c, cleanup, err := New(Config{
+		Target:  "localhost:50056",
+		Timeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	assert.Equal(t, 5*time.Second, c.timeout)
+}
+
+func TestClose_Succeeds(t *testing.T) {
+	c, _, err := New(Config{
+		Target: "localhost:50056",
+	})
+	require.NoError(t, err)
+
+	err = c.Close()
+	assert.NoError(t, err)
+}
+
+func TestNew_WithResilienceAndServiceName(t *testing.T) {
+	resilienceConfig := clients.DefaultResilientClientConfig("tenant-client")
+	c, cleanup, err := New(Config{
+		ServiceName: "tenant",
+		Resilience:  &resilienceConfig,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	defer cleanup()
+
+	assert.NotNil(t, c.resilient)
+}
+
+func TestNew_TargetWithNilDialOpts(t *testing.T) {
+	// When DialOptions is nil, default insecure credentials should be applied
+	c, cleanup, err := New(Config{
+		Target: "localhost:50056",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	defer cleanup()
 }

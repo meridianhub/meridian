@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 )
 
@@ -183,6 +185,165 @@ func TestCachedRegistry_Started_ReturnsFalseAfterContextCancelled(t *testing.T) 
 	})
 	if err != nil {
 		t.Error("Expected Started() to return false after context is cancelled")
+	}
+}
+
+func TestDefaultCachedRegistryConfig(t *testing.T) {
+	config := DefaultCachedRegistryConfig()
+
+	if config.RefreshInterval <= 0 {
+		t.Error("Expected positive RefreshInterval")
+	}
+	if config.RefreshTimeout <= 0 {
+		t.Error("Expected positive RefreshTimeout")
+	}
+	if config.Logger == nil {
+		t.Error("Expected non-nil Logger")
+	}
+}
+
+func TestCachedRegistry_IsActive(t *testing.T) {
+	db, dbCleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	defer dbCleanup()
+	testdb.CreateAuditTables(t, db)
+
+	repo := persistence.NewRepository(db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	config := CachedRegistryConfig{
+		RefreshInterval: 50 * time.Millisecond,
+		RefreshTimeout:  5 * time.Second,
+		Logger:          logger,
+	}
+	registry := NewCachedRegistry(repo, config)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create a tenant
+	tid, _ := tenant.NewTenantID("active_test")
+	tenantObj := &domain.Tenant{
+		ID:              tid,
+		DisplayName:     "Active Test",
+		SettlementAsset: "GBP",
+		Status:          domain.StatusActive,
+		CreatedAt:       time.Now(),
+		Version:         1,
+	}
+	err := repo.Create(ctx, tenantObj)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Start the registry to load cache
+	registry.Start(ctx)
+
+	// Wait for cache to load
+	err = await.New().AtMost(2 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return registry.Count() > 0
+	})
+	if err != nil {
+		t.Fatal("Cache never loaded")
+	}
+
+	// Check IsActive for cached tenant
+	active, err := registry.IsActive(ctx, tid)
+	if err != nil {
+		t.Fatalf("IsActive failed: %v", err)
+	}
+	if !active {
+		t.Error("Expected active tenant to return true")
+	}
+
+	// Check IsActive for non-existent tenant (cache miss, falls through to DB)
+	unknownID, _ := tenant.NewTenantID("unknown_tenant")
+	active, err = registry.IsActive(ctx, unknownID)
+	// DB returns error for non-existent tenant - that's expected
+	if err == nil {
+		if active {
+			t.Error("Expected unknown tenant to not be active")
+		}
+	}
+	// Whether error or false, the tenant should not be considered active
+}
+
+func TestCachedRegistry_GetTenant(t *testing.T) {
+	registry, cleanup := setupCachedRegistry(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Before start, cache is empty
+	tid := tenant.MustNewTenantID("nonexistent")
+	result := registry.GetTenant(tid)
+	if result != nil {
+		t.Error("Expected nil for empty cache")
+	}
+
+	registry.Start(ctx)
+
+	// Still nil for non-existent tenant
+	result = registry.GetTenant(tid)
+	if result != nil {
+		t.Error("Expected nil for non-existent tenant")
+	}
+}
+
+func TestCachedRegistry_LastRefreshError(t *testing.T) {
+	registry, cleanup := setupCachedRegistry(t)
+	defer cleanup()
+
+	// Before start, no error
+	err := registry.LastRefreshError()
+	if err != nil {
+		t.Errorf("Expected nil error before start, got %v", err)
+	}
+}
+
+func TestCachedRegistry_Count(t *testing.T) {
+	registry, cleanup := setupCachedRegistry(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Before start, count is 0
+	if registry.Count() != 0 {
+		t.Errorf("Expected count 0 before start, got %d", registry.Count())
+	}
+
+	registry.Start(ctx)
+
+	// Count should be 0 (empty DB)
+	err := await.New().AtMost(1 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+		return registry.LastRefresh().After(time.Time{})
+	})
+	if err != nil {
+		t.Fatal("Registry never refreshed")
+	}
+
+	if registry.Count() != 0 {
+		t.Errorf("Expected count 0 with empty DB, got %d", registry.Count())
+	}
+}
+
+func TestNewCachedRegistry_Defaults(t *testing.T) {
+	db, dbCleanup := testdb.SetupPostgres(t, []interface{}{&persistence.TenantEntity{}})
+	defer dbCleanup()
+	testdb.CreateAuditTables(t, db)
+	repo := persistence.NewRepository(db)
+
+	// Pass zero-value config - should use defaults
+	registry := NewCachedRegistry(repo, CachedRegistryConfig{})
+
+	if registry.refreshInterval <= 0 {
+		t.Error("Expected positive default refreshInterval")
+	}
+	if registry.refreshTimeout <= 0 {
+		t.Error("Expected positive default refreshTimeout")
+	}
+	if registry.logger == nil {
+		t.Error("Expected non-nil default logger")
 	}
 }
 

@@ -433,6 +433,177 @@ func TestMockProvisioner_Reset(t *testing.T) {
 	assert.ErrorIs(t, err, ErrProvisioningStatusNotFound)
 }
 
+func TestGetServiceDatabaseURL(t *testing.T) {
+	t.Run("returns env var when set", func(t *testing.T) {
+		t.Setenv("PARTY_DATABASE_URL", "postgres://test:test@localhost:5432/party")
+		url := getServiceDatabaseURL("party")
+		assert.Equal(t, "postgres://test:test@localhost:5432/party", url)
+	})
+
+	t.Run("returns fallback URL when env var not set", func(t *testing.T) {
+		url := getServiceDatabaseURL("party")
+		assert.Contains(t, url, "meridian_party")
+		assert.Contains(t, url, "cockroachdb:26257")
+	})
+
+	t.Run("handles hyphens in service name", func(t *testing.T) {
+		t.Setenv("CURRENT_ACCOUNT_DATABASE_URL", "postgres://test@localhost/ca")
+		url := getServiceDatabaseURL("current-account")
+		assert.Equal(t, "postgres://test@localhost/ca", url)
+	})
+
+	t.Run("fallback with hyphens replaced", func(t *testing.T) {
+		url := getServiceDatabaseURL("current-account")
+		assert.Contains(t, url, "meridian_current_account")
+	})
+}
+
+func TestProvisioningStatus_GetServiceStatus(t *testing.T) {
+	status := &ProvisioningStatus{
+		Services: []ServiceSchemaStatus{
+			{ServiceName: "party", State: ServiceStateMigrated},
+			{ServiceName: "account", State: ServiceStatePending},
+		},
+	}
+
+	t.Run("found", func(t *testing.T) {
+		svc := status.getServiceStatus("party")
+		require.NotNil(t, svc)
+		assert.Equal(t, ServiceStateMigrated, svc.State)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		svc := status.getServiceStatus("nonexistent")
+		assert.Nil(t, svc)
+	})
+}
+
+func TestMockProvisioner_ReconcileMigrations_SingleTenant(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "services/party/migrations"},
+	}
+	prov := NewMockProvisioner(services)
+
+	tenantID := tenant.MustNewTenantID("reconcile_tenant")
+	// Provision first to have an active tenant
+	err := prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Reconcile single tenant
+	count, errs := prov.ReconcileMigrations(context.Background(), &tenantID)
+	assert.Equal(t, 1, count)
+	assert.Empty(t, errs)
+}
+
+func TestMockProvisioner_ReconcileMigrations_NonActiveTenant(t *testing.T) {
+	prov := NewMockProvisioner(nil)
+
+	tenantID := tenant.MustNewTenantID("inactive_tenant")
+	// Don't provision - tenant doesn't exist
+	count, errs := prov.ReconcileMigrations(context.Background(), &tenantID)
+	assert.Equal(t, 0, count)
+	assert.Empty(t, errs)
+}
+
+func TestMockProvisioner_GetRequiredSchemas(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "/path"},
+		{Name: "account", MigrationPath: "/path"},
+	}
+	prov := NewMockProvisioner(services)
+
+	schemas := prov.GetRequiredSchemas()
+	assert.Equal(t, []string{"party", "account"}, schemas)
+}
+
+func TestMockProvisioner_GetRequiredSchemas_Empty(t *testing.T) {
+	prov := NewMockProvisioner(nil)
+	schemas := prov.GetRequiredSchemas()
+	assert.Empty(t, schemas)
+}
+
+func TestMockProvisioner_InitializeProvisioningStatus(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "/path"},
+	}
+	prov := NewMockProvisioner(services)
+
+	tenantID := tenant.MustNewTenantID("init_status")
+	err := prov.InitializeProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StatePending, status.State)
+}
+
+func TestMockProvisioner_InitializeProvisioningStatus_Idempotent(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "/path"},
+	}
+	prov := NewMockProvisioner(services)
+
+	tenantID := tenant.MustNewTenantID("idempotent_init")
+
+	err := prov.InitializeProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Second call should be no-op
+	err = prov.InitializeProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+}
+
+func TestMockProvisioner_GetProvisioningCallCount(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "/path"},
+	}
+	prov := NewMockProvisioner(services)
+
+	assert.Equal(t, 0, prov.GetProvisioningCallCount())
+
+	tenantID := tenant.MustNewTenantID("call_count")
+	_ = prov.ProvisionSchemas(context.Background(), tenantID)
+
+	assert.Equal(t, 1, prov.GetProvisioningCallCount())
+}
+
+func TestMockProvisioner_GetProvisioningCallCountForTenant(t *testing.T) {
+	services := []ServiceConfig{
+		{Name: "party", MigrationPath: "/path"},
+	}
+	prov := NewMockProvisioner(services)
+
+	t1 := tenant.MustNewTenantID("tenant_a")
+	t2 := tenant.MustNewTenantID("tenant_b")
+
+	_ = prov.ProvisionSchemas(context.Background(), t1)
+	_ = prov.ProvisionSchemas(context.Background(), t2)
+	_ = prov.ProvisionSchemas(context.Background(), t1) // second call for t1
+
+	assert.Equal(t, 2, prov.GetProvisioningCallCountForTenant("tenant_a"))
+	assert.Equal(t, 1, prov.GetProvisioningCallCountForTenant("tenant_b"))
+	assert.Equal(t, 0, prov.GetProvisioningCallCountForTenant("tenant_c"))
+}
+
+func TestMockProvisioner_ClearFailure(t *testing.T) {
+	prov := NewMockProvisioner(nil)
+	prov.FailProvisioningFor["tenant_a"] = ErrTestGeneric
+
+	assert.True(t, prov.ClearFailure("tenant_a"))
+	assert.False(t, prov.ClearFailure("tenant_a")) // already cleared
+	assert.False(t, prov.ClearFailure("tenant_b")) // never existed
+}
+
+func TestDefaultConfig_WithCustomBasePath(t *testing.T) {
+	t.Setenv("MIGRATIONS_BASE_PATH", "/custom/migrations")
+	config := DefaultConfig()
+
+	for _, svc := range config.Services {
+		assert.True(t, len(svc.MigrationPath) > 0)
+		assert.Contains(t, svc.MigrationPath, "/custom/migrations/")
+	}
+}
+
 func TestMockProvisioner_SetStatus(t *testing.T) {
 	provisioner := NewMockProvisioner(nil)
 
