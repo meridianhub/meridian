@@ -639,9 +639,7 @@ func TestTransformOutbound_AttributeFlatten(t *testing.T) {
 				ExternalPath: "attrs",
 				Transform: &mappingv1.FieldTransform{
 					Transform: &mappingv1.FieldTransform_AttributeFlatten{
-						AttributeFlatten: &mappingv1.AttributeFlatten{
-							SourceKeys: []string{"k1"},
-						},
+						AttributeFlatten: &mappingv1.AttributeFlatten{},
 					},
 				},
 			},
