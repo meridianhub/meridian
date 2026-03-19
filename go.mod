@@ -223,7 +223,7 @@ require (
 	gorm.io/driver/sqlserver v1.6.0 // indirect
 )
 
-// Force all OpenTelemetry packages to use v1.40.0 to avoid schema URL conflicts
+// Force all OpenTelemetry packages to use v1.42.0 to avoid schema URL conflicts
 replace (
 	go.opentelemetry.io/otel => go.opentelemetry.io/otel v1.42.0
 	go.opentelemetry.io/otel/metric => go.opentelemetry.io/otel/metric v1.42.0
