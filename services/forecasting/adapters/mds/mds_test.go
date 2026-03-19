@@ -26,7 +26,7 @@ const bufSize = 1024 * 1024
 type fakeMISServer struct {
 	marketinformationv1.UnimplementedMarketInformationServiceServer
 
-	listObservationsFn     func(ctx context.Context, req *marketinformationv1.ListObservationsRequest) (*marketinformationv1.ListObservationsResponse, error)
+	listObservationsFn       func(ctx context.Context, req *marketinformationv1.ListObservationsRequest) (*marketinformationv1.ListObservationsResponse, error)
 	recordObservationBatchFn func(ctx context.Context, req *marketinformationv1.RecordObservationBatchRequest) (*marketinformationv1.RecordObservationBatchResponse, error)
 }
 
