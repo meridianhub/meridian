@@ -163,9 +163,9 @@ func TestParseDataSetStatus_AllBranches(t *testing.T) {
 		{"DRAFT", domain.DataSetStatusDraft},
 		{"ACTIVE", domain.DataSetStatusActive},
 		{"DEPRECATED", domain.DataSetStatusDeprecated},
-		{"UNKNOWN", domain.DataSetStatusDraft},   // default
-		{"", domain.DataSetStatusDraft},           // default
-		{"draft", domain.DataSetStatusDraft},      // case-sensitive, falls to default
+		{"UNKNOWN", domain.DataSetStatusDraft}, // default
+		{"", domain.DataSetStatusDraft},        // default
+		{"draft", domain.DataSetStatusDraft},   // case-sensitive, falls to default
 	}
 
 	for _, tt := range tests {
@@ -183,9 +183,9 @@ func TestParseAccessLevel_AllBranches(t *testing.T) {
 		{"PUBLIC", domain.AccessLevelPublic},
 		{"PRIVATE", domain.AccessLevelPrivate},
 		{"RESTRICTED", domain.AccessLevelRestricted},
-		{"UNKNOWN", domain.AccessLevelPrivate},    // invalid, default to PRIVATE
-		{"", domain.AccessLevelPrivate},            // invalid, default to PRIVATE
-		{"public", domain.AccessLevelPrivate},      // case-sensitive, invalid
+		{"UNKNOWN", domain.AccessLevelPrivate}, // invalid, default to PRIVATE
+		{"", domain.AccessLevelPrivate},        // invalid, default to PRIVATE
+		{"public", domain.AccessLevelPrivate},  // case-sensitive, invalid
 	}
 
 	for _, tt := range tests {

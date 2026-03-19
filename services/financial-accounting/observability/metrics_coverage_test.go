@@ -26,7 +26,7 @@ func TestRecordClearingAccountCacheMiss(t *testing.T) {
 	assert.Equal(t, initial+1, newCount, "cache miss counter should increment by 1")
 }
 
-func TestRecordClearingAccountLookupDuration(t *testing.T) {
+func TestRecordClearingAccountLookupDuration(_ *testing.T) {
 	// Verify it doesn't panic when recording a duration
 	RecordClearingAccountLookupDuration(50 * time.Millisecond)
 	RecordClearingAccountLookupDuration(200 * time.Millisecond)

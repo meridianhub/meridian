@@ -40,7 +40,7 @@ func TestHandleRecordMeasurementError_AllBranches(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			// Should not panic
 			client.handleRecordMeasurementError(tt.err, measurement)
 		})
@@ -70,7 +70,7 @@ func TestHandleError_AllBranches(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			// Should not panic
 			client.handleError(tt.err, "test_saga")
 		})

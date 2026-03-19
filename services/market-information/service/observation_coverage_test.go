@@ -84,4 +84,3 @@ func TestDomainObservationToProto(t *testing.T) {
 		assert.Equal(t, supersededByID.String(), proto.SupersededById)
 	})
 }
-

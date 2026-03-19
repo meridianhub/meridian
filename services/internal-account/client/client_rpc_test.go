@@ -8,6 +8,7 @@ import (
 
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
+	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -241,6 +242,92 @@ func TestGetBalance_SuccessPath(t *testing.T) {
 	assert.Equal(t, "IBA-001", resp.GetAccountId())
 	assert.Equal(t, "500.00", resp.GetCurrentBalance().GetAmount())
 	assert.Equal(t, "USD", resp.GetCurrentBalance().GetInstrumentCode())
+}
+
+func setupBufconnClientWithResilience(t *testing.T) *Client {
+	t.Helper()
+
+	c := setupBufconnClient(t)
+	resilienceConfig := clients.DefaultResilientClientConfig("test-internal-account")
+	c.resilient = clients.NewResilientClient(resilienceConfig)
+
+	return c
+}
+
+func TestControlInternalAccount_WithResilience(t *testing.T) {
+	c := setupBufconnClientWithResilience(t)
+
+	resp, err := c.ControlInternalAccount(context.Background(), &internalaccountv1.ControlInternalAccountRequest{
+		AccountId:     "IBA-001",
+		ControlAction: internalaccountv1.ControlAction_CONTROL_ACTION_SUSPEND,
+		Reason:        "Maintenance period for testing",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "IBA-001", resp.GetFacility().GetAccountId())
+}
+
+func TestUpdateInternalAccount_WithResilience(t *testing.T) {
+	c := setupBufconnClientWithResilience(t)
+
+	resp, err := c.UpdateInternalAccount(context.Background(), &internalaccountv1.UpdateInternalAccountRequest{
+		AccountId: "IBA-001",
+		Name:      "Updated Account",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "IBA-001", resp.GetFacility().GetAccountId())
+}
+
+func TestListInternalAccounts_WithResilience(t *testing.T) {
+	c := setupBufconnClientWithResilience(t)
+
+	resp, err := c.ListInternalAccounts(context.Background(), &internalaccountv1.ListInternalAccountsRequest{})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.GetFacilities(), 2)
+}
+
+func TestInitiateInternalAccount_WithResilience(t *testing.T) {
+	c := setupBufconnClientWithResilience(t)
+
+	resp, err := c.InitiateInternalAccount(context.Background(), &internalaccountv1.InitiateInternalAccountRequest{
+		AccountCode:     "NOSTRO-USD-001",
+		Name:            "USD Nostro",
+		ProductTypeCode: "NOSTRO_USD",
+		InstrumentCode:  "USD",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "generated-id-001", resp.GetAccountId())
+}
+
+func TestRetrieveInternalAccount_WithResilience(t *testing.T) {
+	c := setupBufconnClientWithResilience(t)
+
+	resp, err := c.RetrieveInternalAccount(context.Background(), &internalaccountv1.RetrieveInternalAccountRequest{
+		AccountId: "IBA-001",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "IBA-001", resp.GetFacility().GetAccountId())
+}
+
+func TestGetBalance_WithResilience(t *testing.T) {
+	c := setupBufconnClientWithResilience(t)
+
+	resp, err := c.GetBalance(context.Background(), &internalaccountv1.GetBalanceRequest{
+		AccountId: "IBA-001",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "IBA-001", resp.GetAccountId())
 }
 
 func TestClose_WithActiveConnection(t *testing.T) {

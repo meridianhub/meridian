@@ -664,6 +664,405 @@ func TestListObservations_Success(t *testing.T) {
 	assert.Equal(t, int32(10), resp.TotalCount)
 }
 
+// setupMockServerWithResilience creates a bufconn-based mock server and returns a client
+// with resilience configured.
+func setupMockServerWithResilience(t *testing.T, mock *mockServer) (*Client, func()) {
+	t.Helper()
+
+	lis := bufconn.Listen(bufSize)
+	server := grpc.NewServer()
+	marketinformationv1.RegisterMarketInformationServiceServer(server, mock)
+
+	go func() {
+		_ = server.Serve(lis)
+	}()
+
+	bufDialer := func(context.Context, string) (net.Conn, error) {
+		return lis.Dial()
+	}
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(bufDialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+
+	resilientCfg := clients.DefaultResilientClientConfig("market-information-test")
+	resilientCfg.MaxRetries = 3
+	resilientCfg.InitialInterval = 10 * time.Millisecond
+
+	client := &Client{
+		conn:       conn,
+		grpcClient: marketinformationv1.NewMarketInformationServiceClient(conn),
+		resilient:  clients.NewResilientClient(resilientCfg),
+		timeout:    DefaultTimeout,
+	}
+
+	cleanup := func() {
+		conn.Close()
+		server.Stop()
+		lis.Close()
+	}
+
+	return client, cleanup
+}
+
+func TestGetRateWithKnowledgeTime_NotFound(t *testing.T) {
+	mock := &mockServer{
+		listObservationsResp: &marketinformationv1.ListObservationsResponse{
+			Observations: []*marketinformationv1.MarketPriceObservation{},
+		},
+	}
+
+	client, cleanup := setupMockServer(t, mock)
+	defer cleanup()
+
+	asOf := time.Date(2024, 11, 15, 0, 0, 0, 0, time.UTC)
+	knowledgeTime := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := client.GetRateWithKnowledgeTime(context.Background(), "USD_EUR_FX", "spot",
+		asOf, knowledgeTime, marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrObservationNotFound)
+}
+
+func TestGetRateWithKnowledgeTime_GRPCError(t *testing.T) {
+	mock := &mockServer{
+		listObservationsErr: status.Error(codes.Unavailable, "service unavailable"),
+	}
+
+	client, cleanup := setupMockServer(t, mock)
+	defer cleanup()
+
+	asOf := time.Date(2024, 11, 15, 0, 0, 0, 0, time.UTC)
+	knowledgeTime := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := client.GetRateWithKnowledgeTime(context.Background(), "USD_EUR_FX", "spot",
+		asOf, knowledgeTime, marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get rate with knowledge time")
+}
+
+func TestGetRate_WithResilience_Success(t *testing.T) {
+	now := time.Now()
+	mock := &mockServer{
+		listObservationsResp: &marketinformationv1.ListObservationsResponse{
+			Observations: []*marketinformationv1.MarketPriceObservation{
+				{Id: "obs-1", DatasetCode: "USD_EUR_FX", Value: "1.0856", ObservedAt: timestamppb.New(now)},
+			},
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	obs, err := client.GetRate(context.Background(), "USD_EUR_FX", "spot", now,
+		marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.NoError(t, err)
+	assert.Equal(t, "1.0856", obs.Value)
+}
+
+func TestGetRate_WithResilience_NotFound(t *testing.T) {
+	mock := &mockServer{
+		listObservationsResp: &marketinformationv1.ListObservationsResponse{
+			Observations: []*marketinformationv1.MarketPriceObservation{},
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	_, err := client.GetRate(context.Background(), "USD_EUR_FX", "spot", time.Now(),
+		marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrObservationNotFound)
+}
+
+func TestGetRate_WithResilience_GRPCError(t *testing.T) {
+	mock := &mockServer{
+		listObservationsErr: status.Error(codes.Internal, "internal error"),
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	_, err := client.GetRate(context.Background(), "USD_EUR_FX", "spot", time.Now(),
+		marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get rate")
+}
+
+func TestGetRateWithKnowledgeTime_WithResilience_Success(t *testing.T) {
+	asOf := time.Date(2024, 11, 15, 0, 0, 0, 0, time.UTC)
+	knowledgeTime := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
+
+	mock := &mockServer{
+		listObservationsResp: &marketinformationv1.ListObservationsResponse{
+			Observations: []*marketinformationv1.MarketPriceObservation{
+				{Id: "obs-1", DatasetCode: "USD_EUR_FX", Value: "1.0800", ObservedAt: timestamppb.New(asOf)},
+			},
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	obs, err := client.GetRateWithKnowledgeTime(context.Background(), "USD_EUR_FX", "spot",
+		asOf, knowledgeTime, marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.NoError(t, err)
+	assert.Equal(t, "1.0800", obs.Value)
+}
+
+func TestGetRateWithKnowledgeTime_WithResilience_NotFound(t *testing.T) {
+	mock := &mockServer{
+		listObservationsResp: &marketinformationv1.ListObservationsResponse{
+			Observations: []*marketinformationv1.MarketPriceObservation{},
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	asOf := time.Date(2024, 11, 15, 0, 0, 0, 0, time.UTC)
+	knowledgeTime := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := client.GetRateWithKnowledgeTime(context.Background(), "USD_EUR_FX", "spot",
+		asOf, knowledgeTime, marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrObservationNotFound)
+}
+
+func TestGetRateWithKnowledgeTime_WithResilience_GRPCError(t *testing.T) {
+	mock := &mockServer{
+		listObservationsErr: status.Error(codes.Internal, "internal error"),
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	asOf := time.Date(2024, 11, 15, 0, 0, 0, 0, time.UTC)
+	knowledgeTime := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := client.GetRateWithKnowledgeTime(context.Background(), "USD_EUR_FX", "spot",
+		asOf, knowledgeTime, marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get rate with knowledge time")
+}
+
+func TestRecordObservation_WithResilience_Success(t *testing.T) {
+	mock := &mockServer{
+		recordObservationResp: &marketinformationv1.RecordObservationResponse{
+			Observation: &marketinformationv1.MarketPriceObservation{
+				Id:          "obs-new",
+				DatasetCode: "USD_EUR_FX",
+				Value:       "1.0856",
+			},
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	resp, err := client.RecordObservation(context.Background(), &marketinformationv1.RecordObservationRequest{
+		DatasetCode: "USD_EUR_FX",
+		ObservedAt:  timestamppb.Now(),
+		ValidFrom:   timestamppb.Now(),
+		Value:       "1.0856",
+		Quality:     marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL,
+		SourceCode:  "BLOOMBERG",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "obs-new", resp.Observation.Id)
+}
+
+func TestRecordObservationBatch_WithResilience_Success(t *testing.T) {
+	mock := &mockServer{
+		batchResp: &marketinformationv1.RecordObservationBatchResponse{
+			BatchId:      "batch-1",
+			TotalCount:   1,
+			SuccessCount: 1,
+			FailureCount: 0,
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	entries := []*marketinformationv1.BatchObservationEntry{
+		{DatasetCode: "ELEC_TARIFF", ObservedAt: timestamppb.Now(), ValidFrom: timestamppb.Now(), Value: "0.15", Quality: marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL, SourceCode: "GRID"},
+	}
+
+	resp, err := client.RecordObservationBatch(context.Background(), entries)
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), resp.TotalCount)
+}
+
+func TestGetDataSet_WithResilience_Success(t *testing.T) {
+	mock := &mockServer{
+		retrieveDataSetResp: &marketinformationv1.RetrieveDataSetResponse{
+			Dataset: &marketinformationv1.DataSetDefinition{
+				Id:      "ds-1",
+				Code:    "USD_EUR_FX",
+				Version: 1,
+			},
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	dataset, err := client.GetDataSet(context.Background(), "USD_EUR_FX", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "USD_EUR_FX", dataset.Code)
+}
+
+func TestGetDataSet_WithResilience_WithVersion(t *testing.T) {
+	mock := &mockServer{
+		retrieveDataSetResp: &marketinformationv1.RetrieveDataSetResponse{
+			Dataset: &marketinformationv1.DataSetDefinition{
+				Id:      "ds-1",
+				Code:    "USD_EUR_FX",
+				Version: 3,
+			},
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	version := int32(3)
+	dataset, err := client.GetDataSet(context.Background(), "USD_EUR_FX", &version)
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), dataset.Version)
+}
+
+func TestGetDataSet_WithResilience_Error(t *testing.T) {
+	mock := &mockServer{
+		retrieveDataSetErr: status.Error(codes.NotFound, "not found"),
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	_, err := client.GetDataSet(context.Background(), "NONEXISTENT", nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get dataset")
+}
+
+func TestListObservations_WithResilience_Success(t *testing.T) {
+	mock := &mockServer{
+		listObservationsResp: &marketinformationv1.ListObservationsResponse{
+			Observations: []*marketinformationv1.MarketPriceObservation{
+				{Id: "obs-1", DatasetCode: "USD_EUR_FX", Value: "1.0850"},
+			},
+			TotalCount: 1,
+		},
+	}
+
+	client, cleanup := setupMockServerWithResilience(t, mock)
+	defer cleanup()
+
+	resp, err := client.ListObservations(context.Background(), &marketinformationv1.ListObservationsRequest{
+		DatasetCode: "USD_EUR_FX",
+	})
+
+	require.NoError(t, err)
+	assert.Len(t, resp.Observations, 1)
+}
+
+func TestClose_NilConn(t *testing.T) {
+	client := &Client{
+		conn:    nil,
+		timeout: DefaultTimeout,
+	}
+
+	err := client.Close()
+	require.NoError(t, err)
+}
+
+func TestConfig_ApplyDefaults(t *testing.T) {
+	cfg := Config{}
+	cfg.applyDefaults()
+
+	assert.Equal(t, DefaultTimeout, cfg.Timeout)
+	assert.Equal(t, DefaultPort, cfg.Port)
+	assert.Equal(t, DefaultNamespace, cfg.Namespace)
+}
+
+func TestConfig_ApplyDefaults_NoOverwrite(t *testing.T) {
+	cfg := Config{
+		Timeout:   5 * time.Second,
+		Port:      9090,
+		Namespace: "production",
+	}
+	cfg.applyDefaults()
+
+	assert.Equal(t, 5*time.Second, cfg.Timeout)
+	assert.Equal(t, 9090, cfg.Port)
+	assert.Equal(t, "production", cfg.Namespace)
+}
+
+func TestNew_WithTarget_CreatesClient(t *testing.T) {
+	client, cleanup, err := New(context.Background(), Config{
+		Target: "localhost:50051",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	require.NotNil(t, cleanup)
+
+	assert.NotNil(t, client.conn)
+	assert.NotNil(t, client.grpcClient)
+	assert.Equal(t, DefaultTimeout, client.timeout)
+	assert.Nil(t, client.resilient)
+
+	err = cleanup()
+	require.NoError(t, err)
+}
+
+func TestNew_WithTarget_AndResilience(t *testing.T) {
+	resilientCfg := clients.DefaultResilientClientConfig("test")
+	client, cleanup, err := New(context.Background(), Config{
+		Target:     "localhost:50051",
+		Resilience: &resilientCfg,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.NotNil(t, client.resilient)
+
+	err = cleanup()
+	require.NoError(t, err)
+}
+
+func TestNew_WithTarget_CustomDialOptions(t *testing.T) {
+	client, cleanup, err := New(context.Background(), Config{
+		Target: "localhost:50051",
+		DialOptions: []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+
+	err = cleanup()
+	require.NoError(t, err)
+}
+
 func TestWithResilience_RetryOnTransientError(t *testing.T) {
 	mock := &mockServer{
 		failsRemain:  atomic.Int32{},

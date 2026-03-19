@@ -404,6 +404,35 @@ func TestHealthChecker_Watch_SendsInitialAndCancels(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestHealthChecker_Watch_PeriodicUpdate(t *testing.T) {
+	gormDB, mock := setupMockDB(t)
+	// Expect pings for initial + periodic health checks
+	mock.ExpectPing()
+	mock.ExpectPing()
+	mock.ExpectPing()
+
+	healthChecker, err := NewHealthChecker(HealthCheckerConfig{
+		DB:           gormDB,
+		CheckTimeout: 50 * time.Millisecond, // Short timeout = fast ticks
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &mockWatchStream{ctx: ctx}
+
+	// Cancel after enough time for at least one tick
+	go func() {
+		time.Sleep(120 * time.Millisecond)
+		cancel()
+	}()
+
+	err = healthChecker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
+	assert.NoError(t, err)
+
+	// Should have initial + at least 1 periodic response
+	assert.GreaterOrEqual(t, len(stream.responses), 2, "should have initial + periodic responses")
+}
+
 func TestHealthChecker_Watch_SendError(t *testing.T) {
 	gormDB, mock := setupMockDB(t)
 	mock.ExpectPing()
