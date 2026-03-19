@@ -241,6 +241,12 @@ linters:
         linters:
           - revive
 
+      # "types" package name is intentional (similar to go/types in stdlib)
+      - path: ^shared/pkg/types/
+        text: "var-naming: avoid meaningless package names"
+        linters:
+          - revive
+
       # Exclude deprecatedComment for current-account clients (backward compat layer)
       - path: services/current-account/clients/
         text: "deprecatedComment"
