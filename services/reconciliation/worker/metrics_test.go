@@ -49,4 +49,8 @@ func TestSchedulerMetrics_RecordCatchUp(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewSchedulerMetricsWithRegistry(reg)
 	m.RecordCatchUp(3)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	assert.NotEmpty(t, families)
 }
