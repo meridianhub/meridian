@@ -4,7 +4,7 @@
 // is implemented with cross-account balance assertion logic. Other RPCs
 // currently return UNIMPLEMENTED status and will be added in subsequent tasks.
 //
-//meridian:large-file — known oversized file; split tracked in backlog
+//meridian:large-file - known oversized file; split tracked in backlog
 package service
 
 import (

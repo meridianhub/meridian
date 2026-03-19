@@ -3,7 +3,7 @@
 //
 // This file implements the Observation-related gRPC methods for the MarketInformationService.
 //
-//meridian:large-file — known oversized file; split tracked in backlog
+//meridian:large-file - known oversized file; split tracked in backlog
 package service
 
 import (
