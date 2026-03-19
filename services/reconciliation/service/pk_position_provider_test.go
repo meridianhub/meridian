@@ -155,7 +155,7 @@ func TestMoneyToDecimal(t *testing.T) {
 		{"units only", &money.Money{Units: 100, Nanos: 0}, "100", nil},
 		{"units and nanos", &money.Money{Units: 42, Nanos: 750000000}, "42.75", nil},
 		{"zero", &money.Money{Units: 0, Nanos: 0}, "0", nil},
-		{"negative", &money.Money{Units: -10, Nanos: 500000000}, "-9.5", nil},
+		{"negative", &money.Money{Units: -10, Nanos: -500000000}, "-10.5", nil},
 		{"nil returns error", nil, "0", ErrNilMoneyValue},
 	}
 

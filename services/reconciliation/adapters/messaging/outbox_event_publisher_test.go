@@ -96,11 +96,11 @@ func TestOutboxEventPublisher_PositionLockRequested_WrongType(t *testing.T) {
 type mockDisputeCreatedEvent struct{}
 
 func (m mockDisputeCreatedEvent) GetDisputeID() string  { return "disp-001" }
-func (m mockDisputeCreatedEvent) GetVarianceID() string  { return "var-001" }
-func (m mockDisputeCreatedEvent) GetRunID() string       { return "run-001" }
-func (m mockDisputeCreatedEvent) GetAccountID() string   { return "ACC-001" }
-func (m mockDisputeCreatedEvent) GetReason() string      { return "test reason" }
-func (m mockDisputeCreatedEvent) GetRaisedBy() string    { return "user-001" }
+func (m mockDisputeCreatedEvent) GetVarianceID() string { return "var-001" }
+func (m mockDisputeCreatedEvent) GetRunID() string      { return "run-001" }
+func (m mockDisputeCreatedEvent) GetAccountID() string  { return "ACC-001" }
+func (m mockDisputeCreatedEvent) GetReason() string     { return "test reason" }
+func (m mockDisputeCreatedEvent) GetRaisedBy() string   { return "user-001" }
 
 // mockDisputeResolvedEvent implements the disputeResolvedEvent interface.
 type mockDisputeResolvedEvent struct{}
@@ -128,11 +128,10 @@ func TestOutboxEventPublisher_DisputeCreated_ValidEvent(t *testing.T) {
 	publisher := events.NewOutboxPublisher("reconciliation")
 
 	p := NewOutboxEventPublisher(db, publisher)
-	// This will fail on the outbox Publish call because the outbox table schema
-	// doesn't match exactly, but it exercises the proto creation path
+	// May error on outbox table schema mismatch, but proves the type assertion
+	// passed and the proto was built (not errUnexpectedType).
 	err := p.Publish(context.Background(), TopicDisputeCreated, mockDisputeCreatedEvent{})
-	// The error may be from outbox table mismatch, but proto creation path is covered
-	_ = err
+	assert.NotErrorIs(t, err, errUnexpectedType)
 }
 
 func TestOutboxEventPublisher_DisputeResolved_ValidEvent(t *testing.T) {
@@ -141,7 +140,7 @@ func TestOutboxEventPublisher_DisputeResolved_ValidEvent(t *testing.T) {
 
 	p := NewOutboxEventPublisher(db, publisher)
 	err := p.Publish(context.Background(), TopicDisputeResolved, mockDisputeResolvedEvent{})
-	_ = err
+	assert.NotErrorIs(t, err, errUnexpectedType)
 }
 
 func TestOutboxEventPublisher_PositionLockRequested_ValidEvent(t *testing.T) {
@@ -150,5 +149,5 @@ func TestOutboxEventPublisher_PositionLockRequested_ValidEvent(t *testing.T) {
 
 	p := NewOutboxEventPublisher(db, publisher)
 	err := p.Publish(context.Background(), TopicPositionLockRequested, mockPositionLockEvent{})
-	_ = err
+	assert.NotErrorIs(t, err, errUnexpectedType)
 }

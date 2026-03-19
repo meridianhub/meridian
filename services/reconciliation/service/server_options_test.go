@@ -13,7 +13,9 @@ import (
 // Minimal stubs for option tests.
 
 type stubDisputeRepo struct{ domain.DisputeRepository }
+
 type stubRunRepo struct{ domain.SettlementRunRepository }
+
 type stubVarianceFinder struct{}
 
 func (stubVarianceFinder) FindByID(_ context.Context, _ uuid.UUID) (*domain.Variance, error) {
