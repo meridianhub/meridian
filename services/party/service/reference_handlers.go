@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
@@ -31,6 +32,13 @@ func (s *Service) UpdateReference(ctx context.Context, req *pb.UpdateReferenceRe
 			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
+	}
+
+	// Validate expiry date format if provided
+	if req.ExpiryDate != "" {
+		if _, err := time.Parse("2006-01-02", req.ExpiryDate); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid expiry_date format, expected YYYY-MM-DD: %v", err)
+		}
 	}
 
 	// Collect references to save in a single transaction
