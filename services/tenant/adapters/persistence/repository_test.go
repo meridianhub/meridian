@@ -1102,6 +1102,163 @@ func TestRepository_ListByStatusOlderThan_OrderedByCreatedAt(t *testing.T) {
 	assert.Equal(t, "tenant_2", tenants[3].ID.String()) // 2 hours ago (newest)
 }
 
+func TestRepository_UpdateStatusWithError(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create a tenant
+	tenantObj := newTestTenant("error_test")
+	err := repo.Create(ctx, tenantObj)
+	require.NoError(t, err)
+
+	// Update status with error message
+	updated, err := repo.UpdateStatusWithError(ctx, tenantObj.ID, domain.StatusProvisioningFailed, "migration failed: syntax error", 1)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+
+	assert.Equal(t, domain.StatusProvisioningFailed, updated.Status)
+	assert.Equal(t, 2, updated.Version)
+}
+
+func TestRepository_UpdateStatusWithError_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	nonExistentID, _ := tenant.NewTenantID("nonexistent")
+	_, err := repo.UpdateStatusWithError(ctx, nonExistentID, domain.StatusProvisioningFailed, "error msg", 1)
+	assert.ErrorIs(t, err, ErrTenantNotFound)
+}
+
+func TestRepository_UpdateStatusWithError_VersionConflict(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	tenantObj := newTestTenant("version_conflict")
+	err := repo.Create(ctx, tenantObj)
+	require.NoError(t, err)
+
+	// Use wrong version
+	_, err = repo.UpdateStatusWithError(ctx, tenantObj.ID, domain.StatusProvisioningFailed, "error", 99)
+	assert.ErrorIs(t, err, ErrVersionConflict)
+}
+
+func TestRepository_ListByStatus(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Create tenants with different statuses
+	active := newTestTenant("active_one")
+	active.Status = domain.StatusActive
+	require.NoError(t, repo.Create(ctx, active))
+
+	pending := newTestTenant("pending_one")
+	pending.Status = domain.StatusProvisioningPending
+	require.NoError(t, repo.Create(ctx, pending))
+
+	pending2 := newTestTenant("pending_two")
+	pending2.Status = domain.StatusProvisioningPending
+	require.NoError(t, repo.Create(ctx, pending2))
+
+	// List pending
+	results, err := repo.ListByStatus(ctx, domain.StatusProvisioningPending, 10)
+	require.NoError(t, err)
+	assert.Len(t, results, 2)
+
+	// List active
+	results, err = repo.ListByStatus(ctx, domain.StatusActive, 10)
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+
+	// List with limit
+	results, err = repo.ListByStatus(ctx, domain.StatusProvisioningPending, 1)
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+}
+
+func TestRepository_ListByStatus_DefaultLimit(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Zero limit should use default (10)
+	results, err := repo.ListByStatus(ctx, domain.StatusActive, 0)
+	require.NoError(t, err)
+	assert.Empty(t, results)
+
+	// Negative limit should use default
+	results, err = repo.ListByStatus(ctx, domain.StatusActive, -5)
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestRepository_ListByStatus_MaxLimit(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Limit > 1000 should be capped
+	results, err := repo.ListByStatus(ctx, domain.StatusActive, 5000)
+	require.NoError(t, err)
+	assert.Empty(t, results) // no tenants, just verifying limit handling
+}
+
+func TestRepository_DB(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	result := repo.DB()
+	assert.NotNil(t, result)
+	assert.Equal(t, db, result)
+}
+
+func TestRepository_WithTx(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	// Start a transaction
+	tx := db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+
+	txRepo := repo.WithTx(tx)
+	assert.NotNil(t, txRepo)
+
+	// Create a tenant within the transaction
+	tenantObj := newTestTenant("tx_test")
+	err := txRepo.Create(ctx, tenantObj)
+	require.NoError(t, err)
+
+	// Before commit, should be visible in the tx
+	retrieved, err := txRepo.GetByID(ctx, tenantObj.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "tx_test", retrieved.ID.String())
+
+	tx.Rollback()
+
+	// After rollback, should not be visible
+	_, err = repo.GetByID(ctx, tenantObj.ID)
+	assert.ErrorIs(t, err, ErrTenantNotFound)
+}
+
 func TestRepository_ConnBypassesTenantGuard(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

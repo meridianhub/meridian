@@ -7,6 +7,127 @@ import (
 	"time"
 )
 
+func TestParseLogLevel(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected slog.Level
+	}{
+		{"debug", slog.LevelDebug},
+		{"DEBUG", slog.LevelDebug},
+		{"info", slog.LevelInfo},
+		{"INFO", slog.LevelInfo},
+		{"warn", slog.LevelWarn},
+		{"WARN", slog.LevelWarn},
+		{"warning", slog.LevelWarn},
+		{"WARNING", slog.LevelWarn},
+		{"error", slog.LevelError},
+		{"ERROR", slog.LevelError},
+		{"", slog.LevelInfo},           // empty defaults to info
+		{"unknown", slog.LevelInfo},    // unknown defaults to info
+		{"trace", slog.LevelInfo},      // unsupported defaults to info
+		{"Debug", slog.LevelDebug},     // mixed case
+		{"WaRnInG", slog.LevelWarn},    // mixed case
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseLogLevel(tt.input)
+			if got != tt.expected {
+				t.Errorf("parseLogLevel(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetConfigSource(t *testing.T) {
+	t.Run("returns env when set", func(t *testing.T) {
+		t.Setenv("TEST_CONFIG_SOURCE_VAR", "somevalue")
+		got := getConfigSource("TEST_CONFIG_SOURCE_VAR")
+		if got != "env" {
+			t.Errorf("getConfigSource() = %q, want %q", got, "env")
+		}
+	})
+
+	t.Run("returns default when not set", func(t *testing.T) {
+		got := getConfigSource("NONEXISTENT_CONFIG_VAR_12345")
+		if got != "default" {
+			t.Errorf("getConfigSource() = %q, want %q", got, "default")
+		}
+	})
+
+	t.Run("returns default for empty string value", func(t *testing.T) {
+		t.Setenv("EMPTY_CONFIG_VAR", "")
+		got := getConfigSource("EMPTY_CONFIG_VAR")
+		if got != "default" {
+			t.Errorf("getConfigSource() = %q, want %q for empty env var", got, "default")
+		}
+	})
+}
+
+func TestWorkerConfig_Validate_RetryBaseDelayEqualToMax(t *testing.T) {
+	config := WorkerConfig{
+		PollInterval:   5 * time.Second,
+		MaxRetries:     5,
+		RetryBaseDelay: 5 * time.Second,
+		RetryMaxDelay:  5 * time.Second,
+		MaxConcurrent:  10,
+	}
+	err := config.Validate()
+	if err == nil {
+		t.Error("expected error when retry base delay equals max delay")
+	}
+}
+
+func TestWorkerConfig_Validate_NegativeRetryBaseDelay(t *testing.T) {
+	config := WorkerConfig{
+		PollInterval:   5 * time.Second,
+		MaxRetries:     5,
+		RetryBaseDelay: -1 * time.Second,
+		RetryMaxDelay:  5 * time.Second,
+		MaxConcurrent:  10,
+	}
+	err := config.Validate()
+	if err == nil {
+		t.Error("expected error for negative retry base delay")
+	}
+}
+
+func TestWorkerConfig_Validate_NegativeRetryMaxDelay(t *testing.T) {
+	config := WorkerConfig{
+		PollInterval:   5 * time.Second,
+		MaxRetries:     5,
+		RetryBaseDelay: 2 * time.Second,
+		RetryMaxDelay:  -1 * time.Second,
+		MaxConcurrent:  10,
+	}
+	err := config.Validate()
+	if err == nil {
+		t.Error("expected error for negative retry max delay")
+	}
+}
+
+func TestWorkerConfig_Validate_NegativeMaxConcurrent(t *testing.T) {
+	config := WorkerConfig{
+		PollInterval:   5 * time.Second,
+		MaxRetries:     5,
+		RetryBaseDelay: 2 * time.Second,
+		RetryMaxDelay:  5 * time.Second,
+		MaxConcurrent:  -1,
+	}
+	err := config.Validate()
+	if err == nil {
+		t.Error("expected error for negative max concurrent")
+	}
+}
+
+func TestLoadWorkerConfig_MaxConcurrentOutOfRange(t *testing.T) {
+	t.Setenv("PROVISIONING_MAX_CONCURRENT", "200")
+	_, err := loadWorkerConfig()
+	if err == nil {
+		t.Error("expected error for max concurrent out of range")
+	}
+}
+
 func TestLoadWorkerConfig(t *testing.T) {
 	tests := []struct {
 		name    string

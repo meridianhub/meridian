@@ -134,6 +134,126 @@ func TestTenant_CanTransitionTo(t *testing.T) {
 	}
 }
 
+func TestTenant_IsActive(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   Status
+		expected bool
+	}{
+		{"active tenant", StatusActive, true},
+		{"suspended tenant", StatusSuspended, false},
+		{"deprovisioned tenant", StatusDeprovisioned, false},
+		{"provisioning tenant", StatusProvisioning, false},
+		{"provisioning_pending tenant", StatusProvisioningPending, false},
+		{"provisioning_failed tenant", StatusProvisioningFailed, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tenantObj := &Tenant{ID: tenant.TenantID("test"), Status: tt.status}
+			if got := tenantObj.IsActive(); got != tt.expected {
+				t.Errorf("Tenant.IsActive() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestTenant_CanOperate(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   Status
+		expected bool
+	}{
+		{"active can operate", StatusActive, true},
+		{"suspended cannot operate", StatusSuspended, false},
+		{"deprovisioned cannot operate", StatusDeprovisioned, false},
+		{"provisioning cannot operate", StatusProvisioning, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tenantObj := &Tenant{ID: tenant.TenantID("test"), Status: tt.status}
+			if got := tenantObj.CanOperate(); got != tt.expected {
+				t.Errorf("Tenant.CanOperate() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestTenant_SchemaName(t *testing.T) {
+	tid, _ := tenant.NewTenantID("acme_bank")
+	tenantObj := &Tenant{ID: tid}
+	got := tenantObj.SchemaName()
+	if got != "org_acme_bank" {
+		t.Errorf("SchemaName() = %q, want %q", got, "org_acme_bank")
+	}
+}
+
+func TestTenant_CanTransitionTo_AllPaths(t *testing.T) {
+	// Test remaining transitions not covered by the existing test
+	tests := []struct {
+		name            string
+		currentStatus   Status
+		targetStatus    Status
+		expectedAllowed bool
+	}{
+		// provisioning_failed transitions
+		{"provisioning_failed can retry provisioning", StatusProvisioningFailed, StatusProvisioning, true},
+		{"provisioning_failed cannot go to active", StatusProvisioningFailed, StatusActive, false},
+		{"provisioning_failed cannot go to suspended", StatusProvisioningFailed, StatusSuspended, false},
+		// active transitions
+		{"active can be suspended", StatusActive, StatusSuspended, true},
+		{"active can be deprovisioned", StatusActive, StatusDeprovisioned, true},
+		{"active cannot go to provisioning", StatusActive, StatusProvisioning, false},
+		// suspended transitions
+		{"suspended can be reactivated", StatusSuspended, StatusActive, true},
+		{"suspended can be deprovisioned", StatusSuspended, StatusDeprovisioned, true},
+		{"suspended cannot go to provisioning", StatusSuspended, StatusProvisioning, false},
+		// deprovisioned transitions
+		{"deprovisioned is terminal", StatusDeprovisioned, StatusActive, false},
+		{"deprovisioned cannot be suspended", StatusDeprovisioned, StatusSuspended, false},
+		{"deprovisioned self-transition allowed", StatusDeprovisioned, StatusDeprovisioned, true},
+		// unknown status
+		{"unknown status returns false", Status("unknown"), StatusActive, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tenantObj := &Tenant{
+				ID:     tenant.TenantID("test_tenant"),
+				Status: tt.currentStatus,
+			}
+			result := tenantObj.CanTransitionTo(tt.targetStatus)
+			if result != tt.expectedAllowed {
+				t.Errorf("Tenant with status %q transitioning to %q: got %v, expected %v",
+					tt.currentStatus, tt.targetStatus, result, tt.expectedAllowed)
+			}
+		})
+	}
+}
+
+func TestServiceProvisioningStatus_IsValid(t *testing.T) {
+	tests := []struct {
+		status   ServiceProvisioningStatus
+		expected bool
+	}{
+		{ServiceStatusPending, true},
+		{ServiceStatusInProgress, true},
+		{ServiceStatusCompleted, true},
+		{ServiceStatusFailed, true},
+		{ServiceProvisioningStatus("unknown"), false},
+		{ServiceProvisioningStatus(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			if got := tt.status.IsValid(); got != tt.expected {
+				t.Errorf("ServiceProvisioningStatus(%q).IsValid() = %v, want %v", tt.status, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestValidateSlug(t *testing.T) {
 	tests := []struct {
 		name    string
