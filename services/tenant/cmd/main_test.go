@@ -22,11 +22,11 @@ func TestParseLogLevel(t *testing.T) {
 		{"WARNING", slog.LevelWarn},
 		{"error", slog.LevelError},
 		{"ERROR", slog.LevelError},
-		{"", slog.LevelInfo},           // empty defaults to info
-		{"unknown", slog.LevelInfo},    // unknown defaults to info
-		{"trace", slog.LevelInfo},      // unsupported defaults to info
-		{"Debug", slog.LevelDebug},     // mixed case
-		{"WaRnInG", slog.LevelWarn},    // mixed case
+		{"", slog.LevelInfo},        // empty defaults to info
+		{"unknown", slog.LevelInfo}, // unknown defaults to info
+		{"trace", slog.LevelInfo},   // unsupported defaults to info
+		{"Debug", slog.LevelDebug},  // mixed case
+		{"WaRnInG", slog.LevelWarn}, // mixed case
 	}
 
 	for _, tt := range tests {

@@ -171,7 +171,7 @@ func TestNew_ServiceNameWithCustomDialOpts(t *testing.T) {
 	defer cleanup()
 }
 
-func TestNew_DefaultNamespaceApplied(t *testing.T) {
+func TestNew_DefaultTimeoutApplied(t *testing.T) {
 	c, cleanup, err := New(Config{
 		ServiceName: "tenant",
 	})
@@ -194,13 +194,12 @@ func TestNew_CustomTimeout(t *testing.T) {
 	assert.Equal(t, 5*time.Second, c.timeout)
 }
 
-func TestClose_AfterClose(t *testing.T) {
+func TestClose_Succeeds(t *testing.T) {
 	c, _, err := New(Config{
 		Target: "localhost:50056",
 	})
 	require.NoError(t, err)
 
-	// First close should succeed
 	err = c.Close()
 	assert.NoError(t, err)
 }

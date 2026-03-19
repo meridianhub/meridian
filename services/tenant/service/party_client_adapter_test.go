@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	partyclient "github.com/meridianhub/meridian/services/party/client"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestNewPartyClientAdapter(t *testing.T) {
@@ -42,41 +40,21 @@ func TestPartyClientAdapter_Close_NilCleanup(t *testing.T) {
 	}
 }
 
-func TestPartyClientAdapter_RegisterParty_ErrorCodes(t *testing.T) {
-	tests := []struct {
-		name        string
-		grpcCode    codes.Code
-		expectedErr error
+func TestSentinelErrors_AreDistinct(t *testing.T) {
+	sentinels := []struct {
+		name string
+		err  error
 	}{
-		{"already exists", codes.AlreadyExists, ErrPartyRegistrationFailed},
-		{"invalid argument", codes.InvalidArgument, ErrPartyRegistrationFailed},
-		{"unavailable", codes.Unavailable, ErrPartyServiceUnavailable},
-		{"deadline exceeded", codes.DeadlineExceeded, ErrPartyServiceTimeout},
-		{"internal error", codes.Internal, ErrPartyRegistrationFailed},
+		{"ErrPartyRegistrationFailed", ErrPartyRegistrationFailed},
+		{"ErrPartyServiceUnavailable", ErrPartyServiceUnavailable},
+		{"ErrPartyServiceTimeout", ErrPartyServiceTimeout},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.expectedErr == nil {
-				t.Error("Expected non-nil sentinel error")
+	for i, a := range sentinels {
+		for j, b := range sentinels {
+			if i != j && errors.Is(a.err, b.err) {
+				t.Errorf("%s should not match %s", a.name, b.name)
 			}
-		})
+		}
 	}
-}
-
-func TestSentinelErrors(t *testing.T) {
-	// Verify sentinel errors are distinct
-	if errors.Is(ErrPartyRegistrationFailed, ErrPartyServiceUnavailable) {
-		t.Error("ErrPartyRegistrationFailed should not match ErrPartyServiceUnavailable")
-	}
-	if errors.Is(ErrPartyRegistrationFailed, ErrPartyServiceTimeout) {
-		t.Error("ErrPartyRegistrationFailed should not match ErrPartyServiceTimeout")
-	}
-	if errors.Is(ErrPartyServiceUnavailable, ErrPartyServiceTimeout) {
-		t.Error("ErrPartyServiceUnavailable should not match ErrPartyServiceTimeout")
-	}
-
-	// Verify wrapping works
-	wrapped := status.Error(codes.Unavailable, "test")
-	_ = wrapped
 }

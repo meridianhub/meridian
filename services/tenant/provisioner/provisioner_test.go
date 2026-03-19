@@ -590,8 +590,8 @@ func TestMockProvisioner_ClearFailure(t *testing.T) {
 	prov.FailProvisioningFor["tenant_a"] = ErrTestGeneric
 
 	assert.True(t, prov.ClearFailure("tenant_a"))
-	assert.False(t, prov.ClearFailure("tenant_a"))  // already cleared
-	assert.False(t, prov.ClearFailure("tenant_b"))   // never existed
+	assert.False(t, prov.ClearFailure("tenant_a")) // already cleared
+	assert.False(t, prov.ClearFailure("tenant_b")) // never existed
 }
 
 func TestDefaultConfig_WithCustomBasePath(t *testing.T) {
