@@ -17,6 +17,7 @@ This directory contains how-to guides and usage documentation for Meridian devel
 | [Saga Validation](saga-validation.md) | Automatic validation workflow, error interpretation, and troubleshooting |
 | [Starlark Style Guide](starlark-style-guide.md) | Writing conventions and syntax for Starlark saga scripts |
 | [Starlark Built-ins Reference](starlark-built-ins-reference.md) | Available functions, types, and DSL built-ins |
+| [Service File Conventions](service-file-conventions.md) | When and how to split server.go into separate gRPC handler endpoint files |
 
 ## Documentation Organization
 
