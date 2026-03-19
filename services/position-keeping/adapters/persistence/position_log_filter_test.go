@@ -250,9 +250,9 @@ func TestPostgresRepository_Update_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	log := createTestLog(t, testAccountID)
-	// Don't persist — update should fail
+	// Don't persist — update should fail with not found
 	err := tc.repo.Update(ctx, log)
-	assert.ErrorIs(t, err, domain.ErrOptimisticLock)
+	assert.ErrorIs(t, err, domain.ErrNotFound)
 }
 
 func TestPostgresRepository_CreateBatch_LargeBatch(t *testing.T) {
