@@ -413,8 +413,11 @@ func TestTransformInbound_AttributeFlatten(t *testing.T) {
 	}
 	result, err := e.TransformInbound(def, []byte(`{"color":"red","size":"large"}`))
 	require.NoError(t, err)
-	assert.Contains(t, string(result.ProtoJSON), "color")
-	assert.Contains(t, string(result.ProtoJSON), "red")
+	assert.Contains(t, string(result.ProtoJSON), `"attributes":`)
+	assert.Contains(t, string(result.ProtoJSON), `"key":"color"`)
+	assert.Contains(t, string(result.ProtoJSON), `"value":"red"`)
+	assert.Contains(t, string(result.ProtoJSON), `"key":"size"`)
+	assert.Contains(t, string(result.ProtoJSON), `"value":"large"`)
 }
 
 // --- TransformOutbound ---
@@ -648,8 +651,10 @@ func TestTransformOutbound_AttributeFlatten(t *testing.T) {
 	input := `{"attributes":[{"key":"color","value":"red"},{"key":"size","value":"L"}]}`
 	result, err := e.TransformOutbound(def, []byte(input))
 	require.NoError(t, err)
-	assert.Contains(t, string(result), "color")
-	assert.Contains(t, string(result), "red")
+	assert.Contains(t, string(result), `"attrs":`)
+	assert.Contains(t, string(result), `"color":"red"`)
+	assert.Contains(t, string(result), `"size":"L"`)
+	assert.NotContains(t, string(result), `"attributes":`)
 }
 
 func TestTransformOutbound_MissingFieldSkipped(t *testing.T) {
@@ -661,8 +666,8 @@ func TestTransformOutbound_MissingFieldSkipped(t *testing.T) {
 	}
 	result, err := e.TransformOutbound(def, []byte(`{"other":"val"}`))
 	require.NoError(t, err)
-	// Field is skipped, original value preserved
 	assert.Contains(t, string(result), `"other":"val"`)
+	assert.NotContains(t, string(result), `"out":`)
 }
 
 // --- CEL cache ---
