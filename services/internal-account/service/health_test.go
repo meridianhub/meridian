@@ -257,13 +257,10 @@ func TestWatch_SendsInitialThenCancels(t *testing.T) {
 		checkTimeout: 100 * time.Millisecond,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Use a short timeout so Watch returns after the initial send
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
 	stream := &mockServiceWatchStream{ctx: ctx}
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
 
 	err := hc.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 	require.Error(t, err)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 )
@@ -58,7 +59,7 @@ func TestHealthChecker_Watch_ContextCanceled(t *testing.T) {
 
 	err := checker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cancel")
 	// Should have sent at least the initial response
 	assert.GreaterOrEqual(t, len(stream.responses), 1)
@@ -81,7 +82,7 @@ func TestHealthChecker_Watch_SendError(t *testing.T) {
 
 	err := checker.Watch(&grpc_health_v1.HealthCheckRequest{}, stream)
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to send initial health status")
 }
 

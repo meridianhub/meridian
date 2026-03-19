@@ -115,9 +115,12 @@ func TestHealthChecker_Watch_PeriodicSendError(t *testing.T) {
 	require.NoError(t, err)
 
 	sendCount := 0
+	// Use a bounded context to prevent hangs if send error path doesn't exit
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	// Use a custom stream that fails after first send
 	customStream := &failAfterNStream{
-		ctx:     context.Background(),
+		ctx:     ctx,
 		failAt:  1,
 		current: &sendCount,
 	}
