@@ -101,6 +101,8 @@ func TestHealthChecker_Watch_PeriodicUpdate(t *testing.T) {
 	assert.NoError(t, err)
 	// Should have initial + at least 1 periodic response
 	assert.GreaterOrEqual(t, len(stream.responses), 2)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestHealthChecker_Watch_PeriodicSendError(t *testing.T) {
