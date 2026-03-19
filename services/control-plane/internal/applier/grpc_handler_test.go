@@ -706,3 +706,580 @@ func TestPhaseStatusMapToResponseProto_Populated(t *testing.T) {
 	assert.Equal(t, "FAILED", proto["phase_2"].Status)
 	assert.Equal(t, "something failed", proto["phase_2"].Error)
 }
+
+// --- runPostApplyHooks tests ---
+
+func TestRunPostApplyHooks_NoHooks(t *testing.T) {
+	handler := newTestHandler(t)
+	// Should not panic with no hooks
+	handler.runPostApplyHooks(context.Background(), "tenant-1", handler.logger)
+}
+
+func TestRunPostApplyHooks_MultipleHooks(t *testing.T) {
+	v, err := validator.New()
+	require.NoError(t, err)
+
+	var calls []string
+	hook1 := PostApplyHook(func(_ context.Context, tid string) {
+		calls = append(calls, "hook1:"+tid)
+	})
+	hook2 := PostApplyHook(func(_ context.Context, tid string) {
+		calls = append(calls, "hook2:"+tid)
+	})
+
+	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
+		Validator:      v,
+		Differ:         differ.New(nil, nil),
+		Planner:        planner.NewManifestPlanner(),
+		PostApplyHooks: []PostApplyHook{hook1, hook2},
+	})
+	require.NoError(t, err)
+
+	handler.runPostApplyHooks(context.Background(), "test-tenant", handler.logger)
+	assert.Equal(t, []string{"hook1:test-tenant", "hook2:test-tenant"}, calls)
+}
+
+func TestRunPostApplyHooks_PanicRecovery(t *testing.T) {
+	v, err := validator.New()
+	require.NoError(t, err)
+
+	var calls []string
+	panicHook := PostApplyHook(func(_ context.Context, _ string) {
+		panic("hook exploded")
+	})
+	normalHook := PostApplyHook(func(_ context.Context, tid string) {
+		calls = append(calls, "survived:"+tid)
+	})
+
+	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
+		Validator:      v,
+		Differ:         differ.New(nil, nil),
+		Planner:        planner.NewManifestPlanner(),
+		PostApplyHooks: []PostApplyHook{panicHook, normalHook},
+	})
+	require.NoError(t, err)
+
+	// Should not panic; second hook should still run
+	handler.runPostApplyHooks(context.Background(), "test-tenant", handler.logger)
+	assert.Equal(t, []string{"survived:test-tenant"}, calls)
+}
+
+// --- checkBlockedDeletions tests ---
+
+func TestCheckBlockedDeletions_NoBlockedDeletions(t *testing.T) {
+	handler := newTestHandler(t)
+	plan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{Action: differ.ActionCreate, ResourceCode: "GBP"},
+		},
+	}
+	result := handler.checkBlockedDeletions(plan, false, handler.logger)
+	assert.Nil(t, result)
+}
+
+func TestCheckBlockedDeletions_BlockedDeletions_NoForce(t *testing.T) {
+	handler := newTestHandler(t)
+	plan := &differ.DiffPlan{
+		BlockedDeletions: []differ.BlockedDeletion{
+			{ResourceType: "instrument", ResourceCode: "GBP", Reason: "has active positions"},
+			{ResourceType: "account_type", ResourceCode: "CURRENT", Reason: "in use"},
+		},
+	}
+	result := handler.checkBlockedDeletions(plan, false, handler.logger)
+	require.NotNil(t, result)
+	assert.Equal(t, "safety_check", result.StepName)
+	assert.Equal(t, controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED, result.Status)
+	assert.Contains(t, result.Message, "force=true")
+	assert.Len(t, result.Details, 2)
+}
+
+func TestCheckBlockedDeletions_BlockedDeletions_WithForce(t *testing.T) {
+	handler := newTestHandler(t)
+	plan := &differ.DiffPlan{
+		BlockedDeletions: []differ.BlockedDeletion{
+			{ResourceType: "instrument", ResourceCode: "GBP", Reason: "has active positions"},
+		},
+	}
+	result := handler.checkBlockedDeletions(plan, true, handler.logger)
+	assert.Nil(t, result, "force=true should override blocked deletions")
+}
+
+// --- instrumentTypeToDimension tests ---
+
+func TestInstrumentTypeToDimension(t *testing.T) {
+	tests := []struct {
+		name     string
+		instType controlplanev1.InstrumentType
+		unit     string
+		want     string
+	}{
+		{"fiat", controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT, "GBP", "CURRENCY"},
+		{"voucher", controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER, "POINTS", "COUNT"},
+		{"commodity with known unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "energy", "ENERGY"},
+		{"commodity with unknown unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "unknown_unit", ""},
+		{"unspecified with known unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED, "energy", "ENERGY"},
+		{"unspecified with unknown unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED, "xyz", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := instrumentTypeToDimension(tt.instType, tt.unit)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// --- stripEnumPrefix tests ---
+
+func TestStripEnumPrefix(t *testing.T) {
+	assert.Equal(t, "DEBIT", stripEnumPrefix("NORMAL_BALANCE_DEBIT", "NORMAL_BALANCE_"))
+	assert.Equal(t, "CREDIT", stripEnumPrefix("NORMAL_BALANCE_CREDIT", "NORMAL_BALANCE_"))
+	assert.Equal(t, "UNSPECIFIED", stripEnumPrefix("UNSPECIFIED", "NORMAL_BALANCE_"))
+}
+
+// --- extractAuthConfig tests ---
+
+func TestExtractAuthConfig_Nil(t *testing.T) {
+	authType, config := extractAuthConfig(nil)
+	assert.Empty(t, authType)
+	assert.Nil(t, config)
+}
+
+func TestExtractAuthConfig_ApiKey(t *testing.T) {
+	auth := &controlplanev1.AuthConfigManifest{
+		AuthConfig: &controlplanev1.AuthConfigManifest_ApiKey{
+			ApiKey: &controlplanev1.ApiKeyAuthConfig{
+				HeaderName:      "X-API-Key",
+				ApiKeySecretRef: "secret/api-key",
+			},
+		},
+	}
+	authType, config := extractAuthConfig(auth)
+	assert.Equal(t, "api_key", authType)
+	assert.Equal(t, "X-API-Key", config["header_name"])
+	assert.Equal(t, "secret/api-key", config["secret_ref"])
+}
+
+func TestExtractAuthConfig_Basic(t *testing.T) {
+	auth := &controlplanev1.AuthConfigManifest{
+		AuthConfig: &controlplanev1.AuthConfigManifest_Basic{
+			Basic: &controlplanev1.BasicAuthConfig{
+				Username:          "user",
+				PasswordSecretRef: "secret/password",
+			},
+		},
+	}
+	authType, config := extractAuthConfig(auth)
+	assert.Equal(t, "basic", authType)
+	assert.Equal(t, "user", config["username"])
+	assert.Equal(t, "secret/password", config["password_ref"])
+}
+
+func TestExtractAuthConfig_Oauth2(t *testing.T) {
+	auth := &controlplanev1.AuthConfigManifest{
+		AuthConfig: &controlplanev1.AuthConfigManifest_Oauth2{
+			Oauth2: &controlplanev1.OAuth2AuthConfig{
+				TokenUrl:        "https://auth.example.com/token",
+				ClientId:        "client-123",
+				ClientSecretRef: "secret/oauth",
+				Scopes:          []string{"read", "write"},
+			},
+		},
+	}
+	authType, config := extractAuthConfig(auth)
+	assert.Equal(t, "oauth2", authType)
+	assert.Equal(t, "https://auth.example.com/token", config["token_url"])
+	assert.Equal(t, "client-123", config["client_id"])
+	assert.Equal(t, "secret/oauth", config["client_secret_ref"])
+	assert.Equal(t, []string{"read", "write"}, config["scopes"])
+}
+
+func TestExtractAuthConfig_Hmac(t *testing.T) {
+	auth := &controlplanev1.AuthConfigManifest{
+		AuthConfig: &controlplanev1.AuthConfigManifest_Hmac{
+			Hmac: &controlplanev1.HMACAuthConfig{
+				Algorithm:       "SHA256",
+				SecretRef:       "secret/hmac",
+				SignatureHeader: "X-Signature",
+			},
+		},
+	}
+	authType, config := extractAuthConfig(auth)
+	assert.Equal(t, "hmac", authType)
+	assert.Equal(t, "SHA256", config["algorithm"])
+	assert.Equal(t, "secret/hmac", config["secret_ref"])
+	assert.Equal(t, "X-Signature", config["signature_header"])
+}
+
+func TestExtractAuthConfig_Mtls(t *testing.T) {
+	auth := &controlplanev1.AuthConfigManifest{
+		AuthConfig: &controlplanev1.AuthConfigManifest_Mtls{
+			Mtls: &controlplanev1.MTLSAuthConfig{
+				ClientCertSecretRef: "secret/cert",
+				ClientKeySecretRef:  "secret/key",
+				CaCertSecretRef:     "secret/ca",
+			},
+		},
+	}
+	authType, config := extractAuthConfig(auth)
+	assert.Equal(t, "mtls", authType)
+	assert.Equal(t, "secret/cert", config["client_cert_ref"])
+	assert.Equal(t, "secret/key", config["client_key_ref"])
+	assert.Equal(t, "secret/ca", config["ca_cert_ref"])
+}
+
+// --- buildExecutorInput operational gateway tests ---
+
+func TestBuildExecutorInput_OperationalGateway(t *testing.T) {
+	mf := newTestManifest()
+	mf.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{
+				ConnectionId: "stripe-conn",
+				ProviderName: "Stripe",
+				ProviderType: "payment_processor",
+				Protocol:     controlplanev1.ProviderProtocol_PROVIDER_PROTOCOL_HTTPS,
+				BaseUrl:      "https://api.stripe.com",
+				Auth: &controlplanev1.AuthConfigManifest{
+					AuthConfig: &controlplanev1.AuthConfigManifest_ApiKey{
+						ApiKey: &controlplanev1.ApiKeyAuthConfig{
+							HeaderName:      "Authorization",
+							ApiKeySecretRef: "secret/stripe-key",
+						},
+					},
+				},
+				RetryPolicy: &controlplanev1.RetryPolicyConfig{
+					MaxAttempts:           3,
+					InitialBackoffSeconds: 1,
+					MaxBackoffSeconds:     30,
+					BackoffMultiplier:     2.0,
+				},
+				RateLimit: &controlplanev1.RateLimitConfig{
+					RequestsPerSecond: 100,
+					BurstSize:         200,
+				},
+			},
+		},
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
+			{
+				InstructionType:      "PAYMENT",
+				ConnectionId:         "stripe-conn",
+				FallbackConnectionId: "backup-conn",
+				OutboundMappingId:    "map-out-1",
+				InboundMappingId:     "map-in-1",
+				HttpMethod:           "POST",
+				PathTemplate:         "/v1/charges",
+			},
+		},
+	}
+
+	input := buildExecutorInput(mf)
+
+	require.Len(t, input.ProviderConnections, 1)
+	pc := input.ProviderConnections[0]
+	assert.Equal(t, "stripe-conn", pc.ConnectionID)
+	assert.Equal(t, "Stripe", pc.ProviderName)
+	assert.Equal(t, "payment_processor", pc.ProviderType)
+	assert.Equal(t, "PROVIDER_PROTOCOL_HTTPS", pc.Protocol)
+	assert.Equal(t, "https://api.stripe.com", pc.BaseURL)
+	assert.Equal(t, "api_key", pc.AuthType)
+	assert.Equal(t, "Authorization", pc.AuthConfig["header_name"])
+	assert.NotNil(t, pc.RetryPolicy)
+	assert.EqualValues(t, 3, pc.RetryPolicy["max_attempts"])
+	assert.NotNil(t, pc.RateLimitConfig)
+	assert.EqualValues(t, 100, pc.RateLimitConfig["requests_per_second"])
+
+	require.Len(t, input.InstructionRoutes, 1)
+	route := input.InstructionRoutes[0]
+	assert.Equal(t, "PAYMENT", route.InstructionType)
+	assert.Equal(t, "stripe-conn", route.ConnectionID)
+	assert.Equal(t, "backup-conn", route.FallbackConnectionID)
+	assert.Equal(t, "map-out-1", route.OutboundMapping)
+	assert.Equal(t, "map-in-1", route.InboundMapping)
+	assert.Equal(t, "POST", route.HTTPMethod)
+	assert.Equal(t, "/v1/charges", route.PathTemplate)
+}
+
+func TestBuildExecutorInput_NilOperationalGateway(t *testing.T) {
+	mf := newTestManifest()
+	mf.OperationalGateway = nil
+
+	input := buildExecutorInput(mf)
+	assert.Empty(t, input.ProviderConnections)
+	assert.Empty(t, input.InstructionRoutes)
+}
+
+func TestBuildExecutorInput_ConnectionWithoutRetryOrRateLimit(t *testing.T) {
+	mf := newTestManifest()
+	mf.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
+			{
+				ConnectionId: "simple-conn",
+				ProviderName: "Simple",
+				ProviderType: "webhook",
+				BaseUrl:      "https://example.com",
+			},
+		},
+	}
+
+	input := buildExecutorInput(mf)
+	require.Len(t, input.ProviderConnections, 1)
+	assert.Nil(t, input.ProviderConnections[0].RetryPolicy)
+	assert.Nil(t, input.ProviderConnections[0].RateLimitConfig)
+}
+
+func TestBuildExecutorInput_AccountTypeUnspecifiedNormalBalance(t *testing.T) {
+	mf := newTestManifest()
+	mf.AccountTypes[0].NormalBalance = controlplanev1.NormalBalance_NORMAL_BALANCE_UNSPECIFIED
+
+	input := buildExecutorInput(mf)
+	require.Len(t, input.AccountTypes, 1)
+	assert.Equal(t, "DEBIT", input.AccountTypes[0].NormalBalance, "UNSPECIFIED should default to DEBIT")
+}
+
+func TestBuildExecutorInput_AccountTypeNoInstruments(t *testing.T) {
+	mf := newTestManifest()
+	mf.AccountTypes[0].AllowedInstruments = nil
+
+	input := buildExecutorInput(mf)
+	require.Len(t, input.AccountTypes, 1)
+	assert.Empty(t, input.AccountTypes[0].InstrumentCode, "no instruments should yield empty instrument code")
+}
+
+func TestBuildExecutorInput_NilMarketData(t *testing.T) {
+	mf := newTestManifest()
+	mf.MarketData = nil
+
+	input := buildExecutorInput(mf)
+	assert.Empty(t, input.MarketDataSources)
+	assert.Empty(t, input.MarketDataSets)
+}
+
+func TestBuildExecutorInput_InstrumentFallbackDimension(t *testing.T) {
+	mf := newTestManifest()
+	// Unspecified type with unknown unit - dimension will be empty, fallback to CURRENCY
+	mf.Instruments[0].Type = controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED
+	mf.Instruments[0].Dimensions.Unit = "unknown_xyz"
+
+	input := buildExecutorInput(mf)
+	require.Len(t, input.Instruments, 1)
+	assert.Equal(t, "CURRENCY", input.Instruments[0].Dimension, "empty dimension should fallback to CURRENCY")
+}
+
+// --- execute tests ---
+
+func TestExecute_NilExecutor(t *testing.T) {
+	handler := newTestHandler(t)
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments, ResourceID: "GBP"},
+		},
+	}
+
+	result := handler.execute(context.Background(), &controlplanev1.ApplyManifestRequest{
+		Manifest:  newTestManifest(),
+		AppliedBy: "test",
+	}, plan)
+
+	assert.Error(t, result.err)
+	assert.ErrorIs(t, result.err, ErrExecutorNotConfigured)
+	assert.Equal(t, "execute", result.stepResult.StepName)
+	assert.Equal(t, controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED, result.stepResult.Status)
+	assert.Contains(t, result.stepResult.Message, "Executor not configured")
+}
+
+// --- recordHistory tests ---
+
+func TestRecordHistory_NilHistoryService(t *testing.T) {
+	handler := newTestHandler(t)
+
+	snapshot, err := handler.recordHistory(
+		context.Background(),
+		newTestManifest(),
+		"admin",
+		"",
+		manifest.ApplyStatusApplied,
+		nil,
+		0,
+	)
+
+	assert.Nil(t, snapshot)
+	assert.NoError(t, err)
+}
+
+func TestRecordHistoryWithPhaseStatus_NilHistoryService(t *testing.T) {
+	handler := newTestHandler(t)
+
+	snapshot, err := handler.recordHistoryWithPhaseStatus(
+		context.Background(),
+		newTestManifest(),
+		"admin",
+		"",
+		manifest.ApplyStatusFailed,
+		nil,
+		0,
+		manifest.PhaseStatusMap{"phase_1": {Status: manifest.PhaseStatusFailed}},
+	)
+
+	assert.Nil(t, snapshot)
+	assert.NoError(t, err)
+}
+
+// --- updatePhaseStatus edge case tests ---
+
+func TestUpdatePhaseStatus_NilResult_ErrorOnly(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments},
+			{Phase: planner.PhaseAccountTypes},
+		},
+	}
+	ps := buildInitialPhaseStatus(plan)
+
+	updatePhaseStatus(ps, plan, nil, fmt.Errorf("connection refused"))
+
+	// With nil result, findFailedPhase returns 0 - all phases should be marked FAILED
+	for _, entry := range ps {
+		assert.Equal(t, manifest.PhaseStatusFailed, entry.Status)
+		assert.Equal(t, "connection refused", entry.Error)
+	}
+}
+
+func TestFindFailedPhase_AllSuccess(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments},
+		},
+	}
+	result := &ApplyManifestResult{
+		StepResults: []saga.StepResult{
+			{StepName: "step1", Success: true},
+		},
+	}
+	assert.Equal(t, planner.Phase(0), findFailedPhase(plan, result))
+}
+
+func TestFindFailedPhase_FailedStepBeyondCalls(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments},
+		},
+	}
+	// More step results than planned calls
+	result := &ApplyManifestResult{
+		StepResults: []saga.StepResult{
+			{StepName: "step1", Success: true},
+			{StepName: "extra", Success: false},
+		},
+	}
+	// Index 1 is beyond plan.Calls, so returns 0
+	assert.Equal(t, planner.Phase(0), findFailedPhase(plan, result))
+}
+
+func TestFindFailedPhase_EmptyStepResults(t *testing.T) {
+	plan := &planner.ExecutionPlan{
+		Calls: []planner.PlannedCall{
+			{Phase: planner.PhaseInstruments},
+		},
+	}
+	result := &ApplyManifestResult{
+		StepResults: []saga.StepResult{},
+	}
+	assert.Equal(t, planner.Phase(0), findFailedPhase(plan, result))
+}
+
+// --- classifyFailure edge case ---
+
+func TestClassifyFailure_EmptyMap(t *testing.T) {
+	ps := manifest.PhaseStatusMap{}
+	applyStatus, protoStatus := classifyFailure(ps)
+	assert.Equal(t, manifest.ApplyStatusFailed, applyStatus)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED, protoStatus)
+}
+
+func TestClassifyFailure_OnlyCompleted(t *testing.T) {
+	ps := manifest.PhaseStatusMap{
+		"phase_1": {Status: manifest.PhaseStatusCompleted},
+		"phase_2": {Status: manifest.PhaseStatusCompleted},
+	}
+	applyStatus, protoStatus := classifyFailure(ps)
+	// All completed without any failed - should return Failed since this function
+	// is only called on failure paths
+	assert.Equal(t, manifest.ApplyStatusFailed, applyStatus)
+	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED, protoStatus)
+}
+
+// --- extractMarketData tests ---
+
+func TestExtractMarketData_WithDatasets(t *testing.T) {
+	mf := newTestManifest()
+	mf.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{
+				Code:        "EXCHANGE_A",
+				Name:        "Exchange A",
+				Description: "Primary exchange",
+				TrustLevel:  85,
+			},
+		},
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{
+				Code:        "FX_RATE_1",
+				Unit:        "USD/EUR",
+				SourceCode:  "EXCHANGE_A",
+				DisplayName: "USD/EUR Rate",
+				Description: "Spot exchange rate",
+			},
+		},
+	}
+
+	input := buildExecutorInput(mf)
+
+	require.Len(t, input.MarketDataSources, 1)
+	assert.Equal(t, "EXCHANGE_A", input.MarketDataSources[0].Code)
+	assert.Equal(t, 85, input.MarketDataSources[0].TrustLevel)
+
+	require.Len(t, input.MarketDataSets, 1)
+	assert.Equal(t, "FX_RATE_1", input.MarketDataSets[0].Code)
+	assert.NotEmpty(t, input.MarketDataSets[0].Code)
+	assert.Equal(t, "USD/EUR", input.MarketDataSets[0].Unit)
+	assert.Equal(t, "EXCHANGE_A", input.MarketDataSets[0].SourceCode)
+}
+
+// --- buildExecutorInput with sagas ---
+
+func TestBuildExecutorInput_MultipleSagas(t *testing.T) {
+	mf := newTestManifest()
+	mf.Sagas = []*controlplanev1.SagaDefinition{
+		{Name: "saga_1", Script: "def execute(ctx): pass"},
+		{Name: "saga_2", Script: "def execute(ctx): return"},
+	}
+
+	input := buildExecutorInput(mf)
+	require.Len(t, input.SagaDefinitions, 2)
+	assert.Equal(t, "saga_1", input.SagaDefinitions[0].Name)
+	assert.Equal(t, "saga_2", input.SagaDefinitions[1].Name)
+}
+
+// --- buildExecutorInput with valuation rules ---
+
+func TestBuildExecutorInput_ValuationRules(t *testing.T) {
+	mf := newTestManifest()
+	mf.ValuationRules = []*controlplanev1.ValuationRule{
+		{
+			FromInstrument: "GBP",
+			ToInstrument:   "USD",
+			Method:         controlplanev1.ValuationMethod_VALUATION_METHOD_SPOT_RATE,
+		},
+		{
+			FromInstrument: "EUR",
+			ToInstrument:   "GBP",
+			Method:         controlplanev1.ValuationMethod_VALUATION_METHOD_FIXED,
+		},
+	}
+
+	input := buildExecutorInput(mf)
+	require.Len(t, input.ValuationRules, 2)
+	assert.Equal(t, "VALUATION_METHOD_SPOT_RATE", input.ValuationRules[0].RuleType)
+	assert.Equal(t, "VALUATION_METHOD_FIXED", input.ValuationRules[1].RuleType)
+}
