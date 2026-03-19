@@ -253,9 +253,9 @@ func TestAdaptersNeverImportService(t *testing.T) {
 				return nil
 			}
 
-			file, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-			if parseErr != nil {
-				return nil
+			file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+			if err != nil {
+				return nil //nolint:nilerr // intentionally skip unparseable files
 			}
 
 			relPath, _ := filepath.Rel(root, path)
