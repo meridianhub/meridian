@@ -540,8 +540,6 @@ func phaseIndex(phase domain.ReconciliationPhase) int {
 }
 
 // resumePipeline re-launches the pipeline from the run's checkpoint.
-//
-//nolint:contextcheck // Intentionally uses background context for async pipeline that outlives the RPC
 func (s *AccountReconciliationService) resumePipeline(runID uuid.UUID) {
 	pipelineCtx, pipelineCancel := context.WithTimeout(context.Background(), pipelineTimeout)
 	go func() {
@@ -744,7 +742,7 @@ func (s *AccountReconciliationService) ControlAccountReconciliation(
 			Run: toProtoRunSummary(run),
 		}
 		// Re-launch the pipeline from the checkpoint
-		s.resumePipeline(run.RunID) //nolint:contextcheck // resumePipeline creates its own background context for the async pipeline
+		s.resumePipeline(run.RunID)
 		slog.InfoContext(ctx, "settlement run resumed",
 			"run_id", runID,
 			"action", action.String(),

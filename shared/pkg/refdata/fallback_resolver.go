@@ -187,11 +187,11 @@ func (r *FallbackResolver) Start(ctx context.Context) error {
 
 	// The snapshot loop must outlive the Start() call's context and is controlled
 	// by Stop() via the cancel function.
-	bgCtx, cancel := context.WithCancel(context.Background())
+	bgCtx, cancel := context.WithCancel(context.Background()) //nolint:contextcheck // intentional detached context
 	r.done = make(chan struct{})
 	r.cancel = cancel
 	r.started = true
-	r.startSnapshotLoop(bgCtx)
+	r.startSnapshotLoop(bgCtx) //nolint:contextcheck // detached context is intentional
 
 	return nil
 }
