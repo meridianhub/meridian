@@ -104,6 +104,7 @@ func (s *Service) RetrieveReference(ctx context.Context, req *pb.RetrieveReferen
 			resp.UpdatedAt = timestamppb.New(ref.CreatedAt)
 		case "TAX_REFERENCE":
 			resp.TaxReference = ref.ReferenceValue
+			resp.UpdatedAt = timestamppb.New(ref.CreatedAt)
 		}
 	}
 
