@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
@@ -38,7 +37,7 @@ func protoToPartyStatus(s pb.PartyStatus) (string, error) {
 	case pb.PartyStatus_PARTY_STATUS_UNSPECIFIED:
 		return "", nil
 	default:
-		return "", fmt.Errorf("unknown party status: %v", s)
+		return "", ErrUnknownPartyStatus
 	}
 }
 
@@ -199,7 +198,7 @@ func protoAssociationStatusToString(s pb.AssociationStatus) (string, error) {
 	case pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED:
 		return associationStatusActive, nil
 	default:
-		return "", fmt.Errorf("unknown association status: %v", s)
+		return "", ErrUnknownAssociationStatus
 	}
 }
 
@@ -267,7 +266,7 @@ func protoToRelationshipType(rt pb.RelationshipType) (string, error) {
 	case pb.RelationshipType_RELATIONSHIP_TYPE_SYNDICATE_HOST:
 		return string(domain.RelationshipTypeSyndicateHost), nil
 	default:
-		return "", fmt.Errorf("unknown relationship type: %v", rt)
+		return "", ErrUnknownRelationshipType
 	}
 }
 

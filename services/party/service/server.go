@@ -30,6 +30,12 @@ var (
 	ErrControlActionUnspecified = errors.New("control action unspecified")
 	// ErrUnknownControlAction is returned for unknown control actions
 	ErrUnknownControlAction = errors.New("unknown control action")
+	// ErrUnknownPartyStatus is returned for unrecognized party status enum values
+	ErrUnknownPartyStatus = errors.New("unknown party status")
+	// ErrUnknownAssociationStatus is returned for unrecognized association status enum values
+	ErrUnknownAssociationStatus = errors.New("unknown association status")
+	// ErrUnknownRelationshipType is returned for unrecognized relationship type enum values
+	ErrUnknownRelationshipType = errors.New("unknown relationship type")
 )
 
 // Repository defines the interface for party persistence operations.
