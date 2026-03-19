@@ -660,7 +660,7 @@ func TestHandleGetAccountBalancesError_UnknownCode(t *testing.T) {
 	assert.Equal(t, codes.PermissionDenied, st.Code())
 }
 
-func TestHandleGetAccountBalancesError_NonGRPCError(t *testing.T) {
+func TestHandleGetAccountBalancesError_NonGRPCError(_ *testing.T) {
 	// Test the non-gRPC error path by directly calling the handler
 	client := &PositionKeepingGRPCClient{
 		logger: slog.Default(),
