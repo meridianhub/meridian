@@ -341,7 +341,8 @@ func (h *OIDCHandler) validateAuthorizeClient(clientID, redirectURI string) (str
 		if redirectURI != h.oauthCfg.RedirectURI {
 			return "", errMsgRedirectURIMismatch
 		}
-		return redirectURI, ""
+		// Always return the trusted configured URI, not the user-supplied value.
+		return h.oauthCfg.RedirectURI, ""
 	}
 
 	if h.registry == nil {
@@ -354,10 +355,12 @@ func (h *OIDCHandler) validateAuthorizeClient(clientID, redirectURI string) (str
 	if redirectURI == "" {
 		return "", errMsgRedirectURIRequired
 	}
-	if !client.HasRedirectURI(redirectURI) {
+	// Return the registered URI from the trusted list, not user input.
+	registered, matched := client.MatchRedirectURI(redirectURI)
+	if !matched {
 		return "", errMsgRedirectURIMismatch
 	}
-	return redirectURI, ""
+	return registered, ""
 }
 
 // HandleAuthorize handles GET /oauth/authorize from the MCP client.
