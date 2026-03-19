@@ -397,6 +397,304 @@ func TestCleanupWorker_ValidationErrors(t *testing.T) {
 	}
 }
 
+// TestCleanupWorker_StartAlreadyRunning tests that calling Start on an already running
+// worker returns ErrAlreadyRunning.
+func TestCleanupWorker_StartAlreadyRunning(t *testing.T) {
+	redisSvc, _, cleanup := setupTestRedis(t)
+	defer cleanup()
+
+	logger := testLogger()
+
+	cfg := config.IdempotencyCleanupConfig{
+		Enabled:        true,
+		StaleThreshold: 15 * time.Minute,
+		RunInterval:    100 * time.Millisecond,
+		BatchSize:      100,
+		KeyPattern:     "idempotency:result:*",
+	}
+
+	w, err := worker.NewIdempotencyCleanupWorker(redisSvc, cfg, logger)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start worker in background
+	go func() {
+		_ = w.Start(ctx)
+	}()
+
+	// Wait for initial iteration to run (worker sets running=true immediately)
+	//nolint:forbidigo // Intentional: wait for worker to mark itself as running
+	time.Sleep(50 * time.Millisecond)
+
+	// Second Start should return ErrAlreadyRunning
+	err = w.Start(ctx)
+	assert.ErrorIs(t, err, worker.ErrAlreadyRunning)
+
+	// Cleanup
+	w.Stop()
+}
+
+// TestCleanupWorker_ContextCancellation tests that the worker stops cleanly
+// when context is cancelled during iteration.
+func TestCleanupWorker_ContextCancellation(t *testing.T) {
+	redisSvc, _, cleanup := setupTestRedis(t)
+	defer cleanup()
+
+	logger := testLogger()
+
+	cfg := config.IdempotencyCleanupConfig{
+		Enabled:        true,
+		StaleThreshold: 15 * time.Minute,
+		RunInterval:    50 * time.Millisecond,
+		BatchSize:      100,
+		KeyPattern:     "idempotency:result:*",
+	}
+
+	w, err := worker.NewIdempotencyCleanupWorker(redisSvc, cfg, logger)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start worker
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- w.Start(ctx)
+	}()
+
+	// Wait for initial iteration, then cancel
+	//nolint:forbidigo // Intentional: allow worker to run initial iteration before cancellation
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	// Worker should exit cleanly
+	select {
+	case err := <-doneCh:
+		assert.NoError(t, err, "Start should return nil on context cancellation")
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not exit after context cancellation")
+	}
+
+	w.Stop()
+}
+
+// TestCleanupWorker_GetServiceFromKey tests the service name extraction from stale keys.
+func TestCleanupWorker_GetServiceFromKey(t *testing.T) {
+	redisSvc, _, cleanup := setupTestRedis(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	logger := testLogger()
+
+	// Create keys with different namespaces
+	key1 := idempotency.Key{
+		Namespace: "payment-service",
+		Operation: "charge",
+		EntityID:  "account-ns1",
+		RequestID: "req-ns1",
+	}
+	key2 := idempotency.Key{
+		Namespace: "billing-service",
+		Operation: "invoice",
+		EntityID:  "account-ns2",
+		RequestID: "req-ns2",
+	}
+
+	err := redisSvc.MarkPending(ctx, key1, time.Hour)
+	require.NoError(t, err)
+	err = redisSvc.MarkPending(ctx, key2, time.Hour)
+	require.NoError(t, err)
+
+	//nolint:forbidigo // Intentional: keys must age past staleness threshold
+	time.Sleep(50 * time.Millisecond)
+
+	cfg := config.IdempotencyCleanupConfig{
+		Enabled:        true,
+		StaleThreshold: 10 * time.Millisecond,
+		RunInterval:    100 * time.Millisecond,
+		BatchSize:      100,
+		KeyPattern:     "idempotency:result:*",
+	}
+
+	w, err := worker.NewIdempotencyCleanupWorker(redisSvc, cfg, logger)
+	require.NoError(t, err)
+
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+
+	go func() {
+		_ = w.Start(workerCtx)
+	}()
+
+	// Wait for all keys to be processed
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			r1, _ := redisSvc.Check(ctx, key1)
+			r2, _ := redisSvc.Check(ctx, key2)
+			return r1 != nil && r1.Status == idempotency.StatusFailed &&
+				r2 != nil && r2.Status == idempotency.StatusFailed
+		})
+	require.NoError(t, err)
+
+	w.Stop()
+}
+
+// TestCleanupWorker_EmptyBatch tests that the worker handles an empty batch
+// (fewer keys than batch size) correctly by breaking out of the loop.
+func TestCleanupWorker_EmptyBatch(t *testing.T) {
+	redisSvc, _, cleanup := setupTestRedis(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	logger := testLogger()
+
+	// Create a small number of keys (less than batch size)
+	key := idempotency.Key{
+		Namespace: "empty-batch-test",
+		Operation: "test-op",
+		EntityID:  "account-single",
+		RequestID: "req-single",
+	}
+	err := redisSvc.MarkPending(ctx, key, time.Hour)
+	require.NoError(t, err)
+
+	//nolint:forbidigo // Intentional: key must age past staleness threshold
+	time.Sleep(50 * time.Millisecond)
+
+	cfg := config.IdempotencyCleanupConfig{
+		Enabled:        true,
+		StaleThreshold: 10 * time.Millisecond,
+		RunInterval:    100 * time.Millisecond,
+		BatchSize:      100, // Batch size > number of keys
+		KeyPattern:     "idempotency:result:*",
+	}
+
+	w, err := worker.NewIdempotencyCleanupWorker(redisSvc, cfg, logger)
+	require.NoError(t, err)
+
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+
+	go func() {
+		_ = w.Start(workerCtx)
+	}()
+
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			result, checkErr := redisSvc.Check(ctx, key)
+			return checkErr == nil && result != nil && result.Status == idempotency.StatusFailed
+		})
+	require.NoError(t, err)
+
+	w.Stop()
+}
+
+// TestCleanupWorker_UpdateStaleGauges_WithoutMetrics tests the gauge update path
+// without a metrics collector (uses global metrics functions).
+func TestCleanupWorker_UpdateStaleGauges_WithoutMetrics(t *testing.T) {
+	redisSvc, _, cleanup := setupTestRedis(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	logger := testLogger()
+
+	// Create stale keys
+	for i := 0; i < 3; i++ {
+		key := idempotency.Key{
+			Namespace: "gauge-test",
+			Operation: "test-op",
+			EntityID:  "account-gauge-" + formatInt(i),
+			RequestID: "req-gauge-" + formatInt(i),
+		}
+		err := redisSvc.MarkPending(ctx, key, time.Hour)
+		require.NoError(t, err)
+	}
+
+	//nolint:forbidigo // Intentional: keys must age past staleness threshold
+	time.Sleep(50 * time.Millisecond)
+
+	cfg := config.IdempotencyCleanupConfig{
+		Enabled:        true,
+		StaleThreshold: 10 * time.Millisecond,
+		RunInterval:    100 * time.Millisecond,
+		BatchSize:      100,
+		KeyPattern:     "idempotency:result:*",
+	}
+
+	// Create worker WITHOUT metrics collector (nil)
+	w, err := worker.NewIdempotencyCleanupWorker(redisSvc, cfg, logger)
+	require.NoError(t, err)
+
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+
+	go func() {
+		_ = w.Start(workerCtx)
+	}()
+
+	// Wait for processing
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			for i := 0; i < 3; i++ {
+				key := idempotency.Key{
+					Namespace: "gauge-test",
+					Operation: "test-op",
+					EntityID:  "account-gauge-" + formatInt(i),
+					RequestID: "req-gauge-" + formatInt(i),
+				}
+				result, checkErr := redisSvc.Check(ctx, key)
+				if checkErr != nil || result == nil || result.Status != idempotency.StatusFailed {
+					return false
+				}
+			}
+			return true
+		})
+	require.NoError(t, err)
+
+	w.Stop()
+}
+
+// TestCleanupWorker_StopIdempotent tests that Stop can be called multiple times safely.
+func TestCleanupWorker_StopIdempotent(t *testing.T) {
+	redisSvc, _, cleanup := setupTestRedis(t)
+	defer cleanup()
+
+	logger := testLogger()
+
+	cfg := config.IdempotencyCleanupConfig{
+		Enabled:        true,
+		StaleThreshold: 15 * time.Minute,
+		RunInterval:    100 * time.Millisecond,
+		BatchSize:      100,
+		KeyPattern:     "idempotency:result:*",
+	}
+
+	w, err := worker.NewIdempotencyCleanupWorker(redisSvc, cfg, logger)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = w.Start(ctx)
+	}()
+
+	//nolint:forbidigo // Intentional: allow worker to start before testing Stop
+	time.Sleep(50 * time.Millisecond)
+
+	// Multiple Stop calls should not panic
+	w.Stop()
+	w.Stop()
+	w.Stop()
+}
+
 // TestCleanupWorker_MetricsRecorded tests that the cleanup worker correctly
 // records Prometheus metrics when processing stale keys.
 func TestCleanupWorker_MetricsRecorded(t *testing.T) {

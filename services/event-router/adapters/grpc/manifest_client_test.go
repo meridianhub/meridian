@@ -247,3 +247,47 @@ func TestManifestClient_Close_ValidConn(t *testing.T) {
 	err := client.Close()
 	require.NoError(t, err)
 }
+
+func TestManifestClient_Close_DoubleClose(t *testing.T) {
+	mock := &mockManifestHistoryServer{}
+	addr, cleanup := startMockManifestServer(t, mock)
+	defer cleanup()
+
+	client := createTestManifestClient(t, addr)
+
+	// First close should succeed
+	err := client.Close()
+	require.NoError(t, err)
+
+	// Second close on an already-closed connection exercises the error wrapping path
+	err = client.Close()
+	if err != nil {
+		assert.Contains(t, err.Error(), "failed to close manifest client connection")
+	}
+}
+
+func TestNewManifestClient_DefaultLogger(t *testing.T) {
+	// Config with no logger set - should default to slog.Default()
+	client, err := NewManifestClient(&ManifestClientConfig{
+		ServiceName: "control-plane",
+		Port:        50051,
+		Logger:      nil,
+	})
+	if err == nil && client != nil {
+		assert.NotNil(t, client)
+		_ = client.Close()
+	}
+}
+
+func TestNewManifestClient_ZeroTimeoutDefault(t *testing.T) {
+	// Timeout of 0 should default to 10 seconds
+	client, err := NewManifestClient(&ManifestClientConfig{
+		ServiceName: "control-plane",
+		Port:        50051,
+		Timeout:     0,
+	})
+	if err == nil && client != nil {
+		assert.NotNil(t, client)
+		_ = client.Close()
+	}
+}

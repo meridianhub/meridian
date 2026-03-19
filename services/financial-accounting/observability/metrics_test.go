@@ -205,6 +205,84 @@ func TestOperationTimer(t *testing.T) {
 	})
 }
 
+func TestOperationTimer_DoubleObserve(t *testing.T) {
+	t.Run("double_success", func(t *testing.T) {
+		initialInFlight := testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationListLedgerPostings))
+
+		timer := NewOperationTimer(OperationListLedgerPostings)
+		assert.Equal(t, initialInFlight+1, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationListLedgerPostings)))
+
+		// First observe
+		timer.ObserveSuccess()
+		assert.Equal(t, initialInFlight, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationListLedgerPostings)))
+
+		// Second observe should be a no-op (should not double-decrement)
+		timer.ObserveSuccess()
+		assert.Equal(t, initialInFlight, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationListLedgerPostings)),
+			"double ObserveSuccess should not decrement in-flight gauge again")
+	})
+
+	t.Run("double_error", func(t *testing.T) {
+		initialInFlight := testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationInitiateBookingLog))
+		initialErrors := testutil.ToFloat64(errorsTotal.WithLabelValues(ErrorCategoryInternal, OperationInitiateBookingLog))
+
+		timer := NewOperationTimer(OperationInitiateBookingLog)
+		assert.Equal(t, initialInFlight+1, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationInitiateBookingLog)))
+
+		// First observe
+		timer.ObserveError(ErrorCategoryInternal)
+		assert.Equal(t, initialInFlight, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationInitiateBookingLog)))
+		assert.Equal(t, initialErrors+1, testutil.ToFloat64(errorsTotal.WithLabelValues(ErrorCategoryInternal, OperationInitiateBookingLog)))
+
+		// Second observe should be a no-op
+		timer.ObserveError(ErrorCategoryInternal)
+		assert.Equal(t, initialInFlight, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationInitiateBookingLog)),
+			"double ObserveError should not decrement in-flight gauge again")
+		assert.Equal(t, initialErrors+1, testutil.ToFloat64(errorsTotal.WithLabelValues(ErrorCategoryInternal, OperationInitiateBookingLog)),
+			"double ObserveError should not increment error counter again")
+	})
+
+	t.Run("success_then_error", func(t *testing.T) {
+		initialInFlight := testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationUpdateBookingLog))
+
+		timer := NewOperationTimer(OperationUpdateBookingLog)
+
+		// Observe success first
+		timer.ObserveSuccess()
+		assert.Equal(t, initialInFlight, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationUpdateBookingLog)))
+
+		// Then error should be a no-op
+		timer.ObserveError(ErrorCategoryValidation)
+		assert.Equal(t, initialInFlight, testutil.ToFloat64(operationsInFlight.WithLabelValues(OperationUpdateBookingLog)),
+			"ObserveError after ObserveSuccess should be a no-op")
+	})
+}
+
+func TestRecordClearingAccountMetrics(t *testing.T) {
+	// Test cache hit
+	initialHits := testutil.ToFloat64(clearingAccountCacheHits)
+	RecordClearingAccountCacheHit()
+	assert.Equal(t, initialHits+1, testutil.ToFloat64(clearingAccountCacheHits))
+
+	// Test cache miss
+	initialMisses := testutil.ToFloat64(clearingAccountCacheMisses)
+	RecordClearingAccountCacheMiss()
+	assert.Equal(t, initialMisses+1, testutil.ToFloat64(clearingAccountCacheMisses))
+
+	// Test lookup duration - should not panic
+	RecordClearingAccountLookupDuration(50 * time.Millisecond)
+
+	// Test lookup error
+	initialLookupErrors := testutil.ToFloat64(clearingAccountLookupErrors.WithLabelValues("DEPOSIT"))
+	RecordClearingAccountLookupError("DEPOSIT")
+	assert.Equal(t, initialLookupErrors+1, testutil.ToFloat64(clearingAccountLookupErrors.WithLabelValues("DEPOSIT")))
+
+	// Test resolver fallback
+	initialFallbacks := testutil.ToFloat64(resolverFallbackTotal.WithLabelValues("GBP", "DEPOSIT"))
+	RecordResolverFallback("GBP", "DEPOSIT")
+	assert.Equal(t, initialFallbacks+1, testutil.ToFloat64(resolverFallbackTotal.WithLabelValues("GBP", "DEPOSIT")))
+}
+
 func TestErrorCategoryConstants(t *testing.T) {
 	// Verify all error category constants are non-empty
 	categories := []string{
