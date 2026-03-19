@@ -278,6 +278,117 @@ func TestAuthorizationHandler_NonGetMethod_ReturnsMethodNotAllowed(t *testing.T)
 }
 
 // -----------------------------------------------------------------------
+// AuthorizationHandler — dynamic client registration
+// -----------------------------------------------------------------------
+
+func TestAuthorizationHandler_DynamicClient_GeneratesCode(t *testing.T) {
+	registry := newTestRegistry(t)
+
+	// Register a dynamic client.
+	client, err := registry.Register(auth.RegisteredClient{
+		ClientName:   "dynamic-test",
+		RedirectURIs: []string{"https://dynamic.example.com/callback"},
+	})
+	require.NoError(t, err)
+
+	store := newTestStore(t)
+	cfg := auth.OAuthConfig{
+		ClientID:    "static-client",
+		RedirectURI: "http://localhost:8090/oauth/callback",
+	}
+	handler := auth.NewAuthorizationHandler(cfg, store, registry)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {client.ClientID},
+		"redirect_uri":          {"https://dynamic.example.com/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"state":                 {"dyn-state"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+
+	location := resp.Header.Get("Location")
+	require.NotEmpty(t, location)
+
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+	assert.NotEmpty(t, redirectURL.Query().Get("code"))
+	assert.Equal(t, "dyn-state", redirectURL.Query().Get("state"))
+	// Redirect must go to the registered URI, not an attacker-controlled one.
+	assert.Equal(t, "dynamic.example.com", redirectURL.Hostname())
+}
+
+func TestAuthorizationHandler_DynamicClient_WrongRedirectURI(t *testing.T) {
+	registry := newTestRegistry(t)
+
+	client, err := registry.Register(auth.RegisteredClient{
+		ClientName:   "dynamic-test",
+		RedirectURIs: []string{"https://dynamic.example.com/callback"},
+	})
+	require.NoError(t, err)
+
+	store := newTestStore(t)
+	cfg := auth.OAuthConfig{
+		ClientID:    "static-client",
+		RedirectURI: "http://localhost:8090/oauth/callback",
+	}
+	handler := auth.NewAuthorizationHandler(cfg, store, registry)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {client.ClientID},
+		"redirect_uri":          {"https://evil.example.com/steal"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "redirect_uri")
+}
+
+func TestAuthorizationHandler_DynamicClient_MissingRedirectURI(t *testing.T) {
+	registry := newTestRegistry(t)
+
+	client, err := registry.Register(auth.RegisteredClient{
+		ClientName:   "dynamic-test",
+		RedirectURIs: []string{"https://dynamic.example.com/callback"},
+	})
+	require.NoError(t, err)
+
+	store := newTestStore(t)
+	cfg := auth.OAuthConfig{
+		ClientID:    "static-client",
+		RedirectURI: "http://localhost:8090/oauth/callback",
+	}
+	handler := auth.NewAuthorizationHandler(cfg, store, registry)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {client.ClientID},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "redirect_uri")
+}
+
+// -----------------------------------------------------------------------
 // TokenHandler
 // -----------------------------------------------------------------------
 
