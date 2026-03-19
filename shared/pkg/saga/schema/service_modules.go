@@ -265,8 +265,6 @@ func buildServiceStruct(name string, node *handlerTree, registry *saga.HandlerRe
 
 // wrapHandler creates a Starlark builtin that wraps a Go Handler.
 // It handles parameter validation against the schema and type conversion.
-//
-//nolint:gocognit,gocyclo // Handler wrapping inherently requires checking multiple conditions
 func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) *starlark.Builtin {
 	return starlark.NewBuiltin(fullName, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		// Handle positional args (should be empty for handlers) - check first for fast fail
@@ -471,8 +469,6 @@ func getStarlarkContext(thread *starlark.Thread) *saga.StarlarkContext {
 }
 
 // starlarkToGoValue converts a Starlark value to a Go value.
-//
-//nolint:gocognit // Type switch for Starlark values requires checking multiple types
 func starlarkToGoValue(v starlark.Value) (any, error) {
 	switch val := v.(type) {
 	case starlark.String:
@@ -608,8 +604,6 @@ func goToStarlarkResult(handlerName string, result any) (starlark.Value, error) 
 }
 
 // goToStarlarkValue converts a Go value to a Starlark value.
-//
-//nolint:gocyclo // Type switch for Go values requires checking multiple types
 func goToStarlarkValue(v any) (starlark.Value, error) {
 	if v == nil {
 		return starlark.None, nil

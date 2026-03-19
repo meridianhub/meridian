@@ -107,7 +107,7 @@ func patchResource(base *controlplanev1.Manifest, req *controlplanev1.ApplyResou
 type resourcePatcherFunc func(patched *controlplanev1.Manifest, req *controlplanev1.ApplyResourceRequest) error
 
 // resourcePatchers maps manifest resource types to their patching functions.
-var resourcePatchers = map[controlplanev1.ManifestResourceType]resourcePatcherFunc{ //nolint:exhaustive // UNSPECIFIED is rejected by proto validation
+var resourcePatchers = map[controlplanev1.ManifestResourceType]resourcePatcherFunc{
 	controlplanev1.ManifestResourceType_MANIFEST_RESOURCE_TYPE_INSTRUMENT:          patchInstrument,
 	controlplanev1.ManifestResourceType_MANIFEST_RESOURCE_TYPE_ACCOUNT_TYPE:        patchAccountType,
 	controlplanev1.ManifestResourceType_MANIFEST_RESOURCE_TYPE_VALUATION_RULE:      patchValuationRule,

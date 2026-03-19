@@ -39,7 +39,7 @@ func (*noCopy) Unlock() {}
 // The zero value is safe to use; fields are lazily initialized on first method
 // call. However, using NewWorkerLifecycle is preferred to supply a logger.
 type WorkerLifecycle struct {
-	noCopy  noCopy //nolint:unused // Detected by go vet -copylocks
+	noCopy  noCopy
 	mu      sync.Mutex
 	wg      sync.WaitGroup
 	running bool

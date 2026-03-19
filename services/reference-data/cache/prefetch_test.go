@@ -102,7 +102,7 @@ func TestPrefetcher_Prefetch_MissingTenantContext(t *testing.T) {
 func TestPrefetcher_Prefetch_RegistryError(t *testing.T) {
 	cache := NewInstrumentCache()
 	loader := newMockRegistryLoader()
-	loader.listActiveErr = errors.New("database connection failed") //nolint:err113 // test sentinel
+	loader.listActiveErr = errors.New("database connection failed")
 
 	prefetcher := NewPrefetcher(cache, loader)
 	ctx := newTestContext("tenant1")
@@ -122,7 +122,7 @@ func TestPrefetcher_Prefetch_CELCompilationError(t *testing.T) {
 
 	// Make CEL compilation fail
 	loader.compileProgramsFn = func(_ *registry.InstrumentDefinition) (cel.Program, cel.Program, error) {
-		return nil, nil, errors.New("invalid CEL expression") //nolint:err113 // test sentinel
+		return nil, nil, errors.New("invalid CEL expression")
 	}
 
 	prefetcher := NewPrefetcher(cache, loader)
@@ -220,7 +220,7 @@ func TestPrefetcher_PrefetchMultipleTenants_PartialFailure(t *testing.T) {
 	loader.compileProgramsFn = func(def *registry.InstrumentDefinition) (cel.Program, cel.Program, error) {
 		callCount++
 		if def.Code == "FAIL" {
-			return nil, nil, errors.New("compilation error") //nolint:err113 // test sentinel
+			return nil, nil, errors.New("compilation error")
 		}
 		return nil, nil, nil
 	}

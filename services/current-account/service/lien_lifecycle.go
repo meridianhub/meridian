@@ -228,7 +228,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 				Amount:         valuationResult.OutputAmount,
 				InstrumentCode: valuationResult.OutputCode,
 			}
-			analysisJSONB, _ := protojson.Marshal(valuationResult.Analysis) //nolint:errcheck // best-effort serialization for audit trail
+			analysisJSONB, _ := protojson.Marshal(valuationResult.Analysis)
 			lien, err = domain.NewValuedLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil, reservedQty, valuedAmt, analysisJSONB)
 		} else {
 			lien, err = domain.NewLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil)

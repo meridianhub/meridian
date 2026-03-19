@@ -328,7 +328,7 @@ func wireBFFSSO(config *gateway.Config, logger *slog.Logger) (gateway.ServerOpti
 	dexIssuerURL := os.Getenv("SSO_DEX_ISSUER_URL")
 	if dexIssuerURL == "" {
 		logger.Info("SSO_DEX_ISSUER_URL not set, BFF SSO disabled")
-		return nil, nil, nil //nolint:nilnil // SSO is optional; absent config intentionally returns no option and no error
+		return nil, nil, nil
 	}
 
 	privateKeyPEM := os.Getenv("JWT_SIGNING_KEY")

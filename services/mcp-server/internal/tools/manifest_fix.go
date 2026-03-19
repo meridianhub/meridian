@@ -66,14 +66,14 @@ func handleManifestFix(_ context.Context, schemaRegistry *schema.Registry, param
 	// Parse the manifest as a generic map
 	var manifest map[string]interface{}
 	if err := json.Unmarshal(p.Manifest, &manifest); err != nil {
-		return map[string]interface{}{ //nolint:nilerr // unmarshal error is surfaced in the tool response
+		return map[string]interface{}{
 			"error": fmt.Sprintf("invalid manifest JSON: %v", err),
 		}, nil
 	}
 
 	conversions, err := fixManifestSagas(manifest, schemaRegistry)
 	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // fix error is surfaced in the tool response
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response, not returned as a Go error
 			"error": err.Error(),
 		}, nil
 	}

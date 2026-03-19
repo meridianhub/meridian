@@ -267,7 +267,7 @@ func (s *PostgresService) tryAcquire(ctx context.Context, lk, token string, expi
 	if err != nil {
 		return false, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit returns ErrTxClosed, safe to ignore
 
 	// First, clean up any expired lock
 	_, err = tx.Exec(ctx,

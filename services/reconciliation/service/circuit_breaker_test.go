@@ -91,7 +91,7 @@ func TestCircuitBreakerRegistry_IndependentBreakers(t *testing.T) {
 
 	// Trip PK circuit breaker
 	for i := 0; i < circuitBreakerFailureThreshold; i++ {
-		registry.Execute(ServicePositionKeeping, func() (any, error) { //nolint:errcheck // intentional
+		registry.Execute(ServicePositionKeeping, func() (any, error) {
 			return nil, simulatedErr
 		})
 	}

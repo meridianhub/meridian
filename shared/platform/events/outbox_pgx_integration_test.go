@@ -483,7 +483,7 @@ func TestPgxOutboxPublisher_Publish_Integration(t *testing.T) {
 	t.Run("nil event returns error", func(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback(ctx) //nolint:errcheck
+		defer tx.Rollback(ctx)
 
 		err = publisher.Publish(ctx, tx, nil, PublishConfig{
 			EventType:     "test.event.v1",
@@ -497,7 +497,7 @@ func TestPgxOutboxPublisher_Publish_Integration(t *testing.T) {
 	t.Run("empty event type returns error", func(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback(ctx) //nolint:errcheck
+		defer tx.Rollback(ctx)
 
 		err = publisher.Publish(ctx, tx, timestamppb.Now(), PublishConfig{
 			AggregateID:   "agg-1",
@@ -510,7 +510,7 @@ func TestPgxOutboxPublisher_Publish_Integration(t *testing.T) {
 	t.Run("empty topic returns error", func(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback(ctx) //nolint:errcheck
+		defer tx.Rollback(ctx)
 
 		err = publisher.Publish(ctx, tx, timestamppb.Now(), PublishConfig{
 			EventType:     "test.event.v1",
@@ -523,7 +523,7 @@ func TestPgxOutboxPublisher_Publish_Integration(t *testing.T) {
 	t.Run("empty aggregate ID returns error", func(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback(ctx) //nolint:errcheck
+		defer tx.Rollback(ctx)
 
 		err = publisher.Publish(ctx, tx, timestamppb.Now(), PublishConfig{
 			EventType:     "test.event.v1",
@@ -536,7 +536,7 @@ func TestPgxOutboxPublisher_Publish_Integration(t *testing.T) {
 	t.Run("empty aggregate type returns error", func(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback(ctx) //nolint:errcheck
+		defer tx.Rollback(ctx)
 
 		err = publisher.Publish(ctx, tx, timestamppb.Now(), PublishConfig{
 			EventType:   "test.event.v1",

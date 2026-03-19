@@ -320,7 +320,7 @@ func TestTieredInstrumentCache_ColdStartResilience_SourceUnavailable_L2Hit(t *te
 	compiler := newMockCELCompiler()
 
 	// Simulate source unavailable
-	source.loadErr = errors.New("source unavailable") //nolint:err113 // test error
+	source.loadErr = errors.New("source unavailable")
 
 	tiered := NewTieredInstrumentCache(l1, l2, source, compiler)
 	ctx := newTestContext("tenant1")
@@ -350,7 +350,7 @@ func TestTieredInstrumentCache_SourceUnavailable_L2Miss_ReturnsError(t *testing.
 	compiler := newMockCELCompiler()
 
 	// Simulate source unavailable
-	sourceErr := errors.New("source unavailable") //nolint:err113 // test error
+	sourceErr := errors.New("source unavailable")
 	source.loadErr = sourceErr
 
 	tiered := NewTieredInstrumentCache(l1, l2, source, compiler)
@@ -723,7 +723,7 @@ func TestTieredInstrumentCache_CELCompilationError(t *testing.T) {
 
 	// Compiler that returns error
 	compiler := newMockCELCompiler()
-	compileErr := errors.New("CEL compilation failed") //nolint:err113 // test error
+	compileErr := errors.New("CEL compilation failed")
 	compiler.compileValidationFn = func(_ string) (cel.Program, error) {
 		return nil, compileErr
 	}

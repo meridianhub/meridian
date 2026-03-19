@@ -52,8 +52,7 @@ func TestRecordTenantMismatch(t *testing.T) {
 
 func TestExtractClientIP(t *testing.T) {
 	t.Run("returns empty string for nil context", func(t *testing.T) {
-		// nolint:staticcheck // SA1012: Intentionally testing nil context behavior
-		var nilCtx context.Context //nolint:staticcheck // SA1012: Intentionally testing nil context behavior
+		var nilCtx context.Context
 		ip := extractClientIP(nilCtx)
 		assert.Empty(t, ip)
 	})

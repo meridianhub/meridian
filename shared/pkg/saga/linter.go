@@ -270,8 +270,6 @@ type lintVisitor struct {
 }
 
 // walkStmt walks a statement node.
-//
-//nolint:gocognit,gocyclo // AST walking requires handling many statement types
 func (v *lintVisitor) walkStmt(stmt syntax.Stmt) {
 	switch s := stmt.(type) {
 	case *syntax.ExprStmt:
@@ -339,8 +337,6 @@ func (v *lintVisitor) walkStmt(stmt syntax.Stmt) {
 }
 
 // walkExpr walks an expression node.
-//
-//nolint:gocognit,gocyclo // AST walking requires handling many expression types
 func (v *lintVisitor) walkExpr(expr syntax.Expr) {
 	if expr == nil {
 		return

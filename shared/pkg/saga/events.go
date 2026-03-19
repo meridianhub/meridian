@@ -11,8 +11,6 @@ import (
 )
 
 // EventType identifies the type of saga event.
-//
-//nolint:revive // EventType naming is intentional for clarity at call sites (saga.EventTypeProgress)
 type EventType string
 
 const (
@@ -33,8 +31,6 @@ const (
 )
 
 // Event is the interface for all saga events.
-//
-//nolint:revive // SagaEvent naming is intentional for clarity at call sites
 type Event interface {
 	// EventType returns the type identifier for this event.
 	EventType() EventType
@@ -48,8 +44,6 @@ type Event interface {
 
 // ProgressEvent represents a progress update during saga execution.
 // These events are emitted to provide visibility into long-running operations.
-//
-//nolint:revive // SagaProgressEvent naming is intentional for clarity
 type ProgressEvent struct {
 	SagaInstanceID uuid.UUID `json:"saga_instance_id"`
 	CorrelationID  uuid.UUID `json:"correlation_id"`
@@ -96,8 +90,6 @@ func NewProgressEvent(
 }
 
 // StepCompletedEvent represents successful step completion.
-//
-//nolint:revive // SagaStepCompletedEvent naming is intentional for clarity
 type StepCompletedEvent struct {
 	SagaInstanceID uuid.UUID `json:"saga_instance_id"`
 	CorrelationID  uuid.UUID `json:"correlation_id"`
@@ -144,8 +136,6 @@ func NewStepCompletedEvent(
 }
 
 // StepFailedEvent represents step failure.
-//
-//nolint:revive // SagaStepFailedEvent naming is intentional for clarity
 type StepFailedEvent struct {
 	SagaInstanceID uuid.UUID     `json:"saga_instance_id"`
 	CorrelationID  uuid.UUID     `json:"correlation_id"`
@@ -195,8 +185,6 @@ func NewStepFailedEvent(
 }
 
 // EventPublisher publishes saga events to the event bus.
-//
-//nolint:revive // SagaEventPublisher naming is intentional for clarity
 type EventPublisher interface {
 	// Publish sends a saga event to the event bus.
 	Publish(ctx context.Context, event Event) error
@@ -225,8 +213,6 @@ type OutboxWriter interface {
 // OutboxEventPublisher publishes saga events via the transactional outbox pattern.
 // Events are written to the outbox table within the same transaction as the saga state change,
 // ensuring exactly-once delivery semantics.
-//
-//nolint:revive // OutboxSagaEventPublisher naming is intentional for clarity
 type OutboxEventPublisher struct {
 	writer      OutboxWriter
 	topic       string

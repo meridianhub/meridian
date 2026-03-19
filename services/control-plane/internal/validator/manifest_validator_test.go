@@ -429,7 +429,7 @@ func TestValidate_EventTrigger_InvalidChannel_SuggestsClose(t *testing.T) {
 	m := validManifest()
 	m.Sagas = append(m.Sagas, &controlplanev1.SagaDefinition{
 		Name:    "on_transaction_captured_typo",
-		Trigger: "event:position-keeping.transacton-captured.v1", //nolint:misspell
+		Trigger: "event:position-keeping.transacton-captured.v1",
 		Script:  "def execute(ctx):\n    return {}\n",
 	})
 

@@ -222,7 +222,7 @@ func (s *Service) saveWithOutboxEvent(
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// Save the account state using a transaction-scoped repository
 		txRepo := s.repo.WithTx(tx)
-		if err := txRepo.Save(ctx, *account); err != nil { //nolint:govet // account is a pointer to domain value
+		if err := txRepo.Save(ctx, *account); err != nil {
 			return err
 		}
 

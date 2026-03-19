@@ -87,7 +87,7 @@ func handleCELValidate(_ context.Context, params json.RawMessage) (interface{}, 
 		return map[string]interface{}{
 			"valid":  false,
 			"errors": formatErrorDetails(formatted.Errors),
-		}, nil //nolint:nilerr // envErr is surfaced in the tool response, not returned as a Go error
+		}, nil
 	}
 
 	ast, issues := env.Compile(input.Expression)
@@ -96,7 +96,7 @@ func handleCELValidate(_ context.Context, params json.RawMessage) (interface{}, 
 		// fmt.Errorf with %w produces a non-dynamic wrapped error.
 		celErr := fmt.Errorf("cel compilation failed: %w", issues.Err())
 		formatted := mcperrors.FormatGRPCError(celErr)
-		return map[string]interface{}{ //nolint:nilerr // issues.Err() is surfaced in result
+		return map[string]interface{}{ //nolint:nilerr // compilation error is surfaced in the tool response
 			"valid":  false,
 			"errors": formatErrorDetails(formatted.Errors),
 		}, nil

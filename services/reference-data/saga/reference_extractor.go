@@ -55,8 +55,6 @@ func (e *referenceExtractor) walkStmt(stmt syntax.Stmt) {
 }
 
 // walkExpr walks an expression node and extracts references.
-//
-//nolint:gocognit,gocyclo // AST walking requires handling many expression types
 func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 	if expr == nil {
 		return
@@ -281,8 +279,6 @@ func (e *referenceExtractor) isAttributeAccess(expr *syntax.IndexExpr) bool {
 }
 
 // extractInstrumentCode tries to extract instrument code from attribute access context.
-//
-//nolint:gocognit // Nested type assertions for AST pattern matching have inherent complexity
 func (e *referenceExtractor) extractInstrumentCode(expr syntax.Expr) string {
 	// Look for patterns like:
 	// - instrument.attributes["key"] where instrument is a variable

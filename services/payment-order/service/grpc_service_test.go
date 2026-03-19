@@ -523,7 +523,8 @@ func (m *MockFinancialAccountingClient) Close() error {
 }
 
 // Helper to create a valid InitiatePaymentOrderRequest
-// nolint:unparam // debtorAccountID is parameterized for test clarity even if currently constant
+//
+//nolint:unparam // debtorAccountID is parameterized for test clarity even if currently constant
 func newInitiateRequest(idempotencyKey, debtorAccountID, creditorRef string, amountCents int64) *pb.InitiatePaymentOrderRequest {
 	return &pb.InitiatePaymentOrderRequest{
 		DebtorAccountId:   debtorAccountID,

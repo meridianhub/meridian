@@ -314,7 +314,7 @@ x = 42
 // will succeed silently — this is a known gap. The forecasting runtime uses a
 // frozen dict and correctly rejects mutations.
 //
-// TODO: freeze the ctx dict in defaultStarlarkRuntime.buildScriptContext so that
+// FUTURE: freeze the ctx dict in defaultStarlarkRuntime.buildScriptContext so that
 // mutations are rejected at runtime (matching forecasting behavior).
 func TestValuationSecurityContextImmutability(t *testing.T) {
 	t.Skip("ctx dict is not frozen in valuation runtime — script mutations succeed silently; see TODO in starlark_runtime.go")

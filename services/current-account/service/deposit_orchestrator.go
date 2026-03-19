@@ -1,6 +1,4 @@
 // Package service implements gRPC services for the current account domain
-//
-//nolint:staticcheck // Uses AmountCents() for logging (deprecated for backward compatibility)
 package service
 
 import (

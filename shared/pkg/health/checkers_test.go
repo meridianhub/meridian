@@ -236,7 +236,7 @@ func TestKafkaChecker_Check_Healthy(t *testing.T) {
 	}
 
 	// Create a simple check function that returns nil (healthy)
-	errNoBrokers := errors.New("no brokers available") //nolint:err113 // test error
+	errNoBrokers := errors.New("no brokers available")
 	checkFunc := func(_ context.Context) error {
 		// In real implementation, this would check Kafka connectivity
 		// For now, just verify we can reach it
@@ -262,7 +262,7 @@ func TestKafkaChecker_Check_Healthy(t *testing.T) {
 
 // TestKafkaChecker_Check_Unhealthy tests failed Kafka check
 func TestKafkaChecker_Check_Unhealthy(t *testing.T) {
-	errKafkaFailed := errors.New("kafka connection failed") //nolint:err113 // test error
+	errKafkaFailed := errors.New("kafka connection failed")
 	checkFunc := func(_ context.Context) error {
 		return errKafkaFailed
 	}

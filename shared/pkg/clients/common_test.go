@@ -334,7 +334,6 @@ func TestPropagateOrganization_NoOrganization(t *testing.T) {
 func TestPropagateOrganization_NilContext(t *testing.T) {
 	t.Parallel()
 
-	//nolint:staticcheck // Testing nil context handling intentionally
 	var nilCtx context.Context
 
 	assert.NotPanics(t, func() {

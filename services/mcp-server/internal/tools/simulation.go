@@ -188,7 +188,7 @@ func handleManifestDiff(_ context.Context, differ ManifestDiffer, params json.Ra
 
 	result, err := differ.Diff(p.Current, p.Proposed)
 	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // differ error is surfaced in the tool response, not returned as a Go error
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response, not returned as a Go error
 			"error": err.Error(),
 		}, nil
 	}
@@ -285,7 +285,7 @@ func handleValuationSimulate(ctx context.Context, simulator ValuationSimulator, 
 
 	inputAmount, err := decimal.NewFromString(p.InputAmount)
 	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // parse error surfaced in tool response
+		return map[string]interface{}{
 			"error": fmt.Sprintf("invalid input_amount: %v", err),
 		}, nil
 	}
@@ -305,7 +305,7 @@ func handleValuationSimulate(ctx context.Context, simulator ValuationSimulator, 
 
 	resp, err := simulator.Simulate(ctx, req)
 	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // simulator error is surfaced in the tool response, not returned as a Go error
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response
 			"error": err.Error(),
 		}, nil
 	}
@@ -409,7 +409,7 @@ func handleSagaSimulate(ctx context.Context, simulator SagaSimulator, params jso
 
 	result, err := simulator.Simulate(ctx, p.Script, p.InputData)
 	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // simulator error is surfaced in the tool response, not returned as a Go error
+		return map[string]interface{}{ //nolint:nilerr // error is surfaced in the tool response
 			"error": err.Error(),
 		}, nil
 	}

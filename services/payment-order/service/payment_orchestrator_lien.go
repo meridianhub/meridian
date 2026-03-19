@@ -25,8 +25,6 @@ import (
 // 2. Uses exponential backoff for retries with the existing sharedclients.Retry infrastructure
 // 3. Updates the payment order's lien execution status on success or final failure
 // 4. Logs all attempts for monitoring and alerting
-//
-// nolint:contextcheck // Context is intentionally created fresh for async operation
 func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, paymentOrderID uuid.UUID, lienID string) {
 	// Defensive check: guard against nil currentAccountClient even though callers currently check
 	if o.currentAccountClient == nil {
@@ -49,9 +47,9 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 			if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
 				panicCtx = tenant.WithTenant(panicCtx, tenantID)
 			}
-			panicCtx, panicCancel := context.WithTimeout(panicCtx, 10*time.Second) //nolint:contextcheck
+			panicCtx, panicCancel := context.WithTimeout(panicCtx, 10*time.Second)
 			defer panicCancel()
-			po, findErr := o.repo.FindByID(panicCtx, paymentOrderID) //nolint:contextcheck
+			po, findErr := o.repo.FindByID(panicCtx, paymentOrderID) //nolint:contextcheck // intentional fresh context for panic recovery
 			if findErr != nil {
 				o.logger.Error("failed to fetch payment order after panic",
 					"payment_order_id", paymentOrderID.String(),
@@ -59,7 +57,7 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 				return
 			}
 			po.SetLienExecutionFailed(fmt.Sprintf("panic: %v", r))
-			if updateErr := o.repo.Update(panicCtx, po); updateErr != nil { //nolint:contextcheck
+			if updateErr := o.repo.Update(panicCtx, po); updateErr != nil { //nolint:contextcheck // intentional fresh context for panic recovery
 				o.logger.Error("failed to update payment order status after panic",
 					"payment_order_id", paymentOrderID.String(),
 					"error", updateErr)
@@ -137,7 +135,6 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	// Use a fresh context to ensure status update isn't cancelled by parent timeout.
 	// This is intentional - the parent context may have timed out during retries,
 	// but we must still persist the final status for reconciliation purposes.
-	//nolint:contextcheck // Intentionally using fresh context to ensure status persistence
 	updateCtx := context.Background()
 	if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
 		updateCtx = tenant.WithTenant(updateCtx, tenantID)
@@ -153,7 +150,6 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 		lockStart := time.Now()
 
 		var lockErr error
-		//nolint:contextcheck // updateCtx is intentionally fresh to outlive parent context
 		lock, lockErr = o.lockClient.Obtain(updateCtx, lockKey, 30*time.Second)
 
 		// Record lock wait duration
@@ -198,7 +194,7 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 		}
 
 		// Fetch the current payment order (fresh version)
-		po, err := o.repo.FindByID(updateCtx, paymentOrderID) //nolint:contextcheck
+		po, err := o.repo.FindByID(updateCtx, paymentOrderID)
 		if err != nil {
 			logger.Error("failed to fetch payment order for lien execution status update",
 				"error", err,
@@ -228,7 +224,7 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 		}
 
 		// Persist the updated status
-		updateErr := o.repo.Update(updateCtx, po) //nolint:contextcheck
+		updateErr := o.repo.Update(updateCtx, po)
 		if updateErr == nil {
 			// Record metrics only after successful persistence to avoid double-counting
 			// on version conflict retries

@@ -289,8 +289,6 @@ func DetermineFailureAction(category ErrorCategory, replayCount, maxReplays int)
 
 // RecordStepFailure records a step failure metric.
 // This is a placeholder that calls the metrics system.
-//
-//nolint:revive // Parameters kept for future implementation
 func RecordStepFailure(_, _ string) {
 	// The metrics package already has recording functions
 	// This is a convenience wrapper for step-specific failures

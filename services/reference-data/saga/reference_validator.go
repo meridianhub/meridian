@@ -119,8 +119,6 @@ type ValidationResult struct {
 }
 
 // FormatReport generates a human-readable validation report.
-//
-//nolint:gocognit // Report formatting has inherent complexity from multiple sections
 func (r *ValidationResult) FormatReport() string {
 	var b strings.Builder
 
@@ -439,8 +437,6 @@ type Dependency struct {
 }
 
 // checkReference validates a single reference and adds any errors to the result.
-//
-//nolint:gocognit // Reference checking has inherent complexity from multiple reference types
 func (v *ReferenceValidator) checkReference(ctx context.Context, ref Reference, strict bool, result *ValidationResult) error {
 	switch ref.Type {
 	case ReferenceTypeStepHandler:

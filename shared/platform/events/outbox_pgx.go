@@ -140,7 +140,7 @@ func (r *PgxOutboxRepository) FetchAndLockForProcessing(ctx context.Context, ser
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit returns ErrTxClosed, safe to ignore
 
 	// Raw SQL with FOR UPDATE SKIP LOCKED for proper locking
 	selectQuery := `

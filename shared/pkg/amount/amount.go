@@ -72,7 +72,7 @@ func NewFromInstrument(code, dimension string, precision int, amountMinorUnits i
 	var inst quantity.Instrument
 	if normalizedDim == quantity.DimensionCurrency {
 		// For currency, look up canonical instrument (ignores caller-supplied precision).
-		currInst, ok := currency.ByCode(strings.ToUpper(code)) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
+		currInst, ok := currency.ByCode(strings.ToUpper(code))
 		if !ok {
 			return Amount{}, fmt.Errorf("%w: unrecognized currency code %s", ErrInvalidDimension, code)
 		}

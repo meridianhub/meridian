@@ -159,7 +159,7 @@ func TestMustFromContext_Success(t *testing.T) {
 	expected := tenant.MustNewTenantID("test_tenant")
 	ctx := tenant.WithTenant(context.Background(), expected)
 
-	got := tenant.MustFromContext(ctx) //nolint:staticcheck // intentionally testing deprecated function
+	got := tenant.MustFromContext(ctx)
 	if got != expected {
 		t.Errorf("MustFromContext returned %q, want %q", got, expected)
 	}
@@ -172,7 +172,7 @@ func TestMustFromContext_Panics(t *testing.T) {
 		}
 	}()
 
-	tenant.MustFromContext(context.Background()) //nolint:staticcheck // intentionally testing deprecated function's panic behavior
+	tenant.MustFromContext(context.Background())
 }
 
 func TestContextOverwrite(t *testing.T) {

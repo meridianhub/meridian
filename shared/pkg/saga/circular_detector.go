@@ -111,8 +111,6 @@ func (d *CircularDetector) extractFromStmt(stmt syntax.Stmt) []string {
 }
 
 // extractFromExpr extracts invoke_saga calls from an expression.
-//
-//nolint:gocyclo,gocognit // AST walking requires handling many expression types
 func (d *CircularDetector) extractFromExpr(expr syntax.Expr) []string {
 	if expr == nil {
 		return nil
@@ -199,8 +197,6 @@ func (d *CircularDetector) extractFromExpr(expr syntax.Expr) []string {
 }
 
 // extractSagaNameArg extracts the saga_name argument from an invoke_saga call.
-//
-//nolint:gocognit // Nested type assertions are necessary for AST extraction
 func (d *CircularDetector) extractSagaNameArg(call *syntax.CallExpr) string {
 	// Check positional first argument
 	if len(call.Args) > 0 {

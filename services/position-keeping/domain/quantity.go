@@ -198,7 +198,7 @@ func NewMoneyFromMinorUnits(currencyCode string, minorUnits int64) (Money, error
 		return Money{}, err
 	}
 
-	decimalPlaces := cur.DecimalPlaces() //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
+	decimalPlaces := cur.DecimalPlaces()
 	amount := decimal.NewFromInt(minorUnits).Shift(-decimalPlaces)
 	inst := currencyToInstrument(cur)
 
@@ -285,7 +285,7 @@ func ZeroQty[D quantity.Dimension](instrument Instrument) Qty[D] {
 
 // ParseCurrency converts a string to a Currency type with validation.
 func ParseCurrency(s string) (Currency, error) {
-	return money.ParseCurrency(s) //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
+	return money.ParseCurrency(s)
 }
 
 // NewMoneyFromInstrumentCode creates a Money value from any instrument code (currency or non-currency).
@@ -303,7 +303,7 @@ func NewMoneyFromInstrumentCode(amount decimal.Decimal, code string) (Money, err
 
 	// Try currency path first (preserves correct precision for fiat)
 	cur := Currency(code)
-	if cur.IsValid() { //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
+	if cur.IsValid() {
 		return NewMoney(amount, cur)
 	}
 
@@ -345,7 +345,7 @@ func MoneyToMinorUnits(m Money) (int64, error) {
 	maxInt64 := decimal.NewFromInt(9223372036854775807)  // math.MaxInt64
 	minInt64 := decimal.NewFromInt(-9223372036854775808) // math.MinInt64
 	if rounded.GreaterThan(maxInt64) || rounded.LessThan(minInt64) {
-		return 0, money.ErrOverflow //nolint:staticcheck // Will migrate to refdata.InstrumentResolver
+		return 0, money.ErrOverflow
 	}
 
 	return rounded.IntPart(), nil

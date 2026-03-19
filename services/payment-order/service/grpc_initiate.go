@@ -22,7 +22,6 @@ import (
 )
 
 // InitiatePaymentOrder creates a new payment order and begins the saga.
-// nolint:gocognit // Complexity justified by validation, idempotency handling (TOCTOU), event publishing, and saga startup
 func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaymentOrderRequest) (*pb.InitiatePaymentOrderResponse, error) {
 	start := time.Now()
 	defer func() {
@@ -209,7 +208,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 
 	// Start saga orchestration asynchronously
 	// The saga runs in the background after returning the response
-	// nolint:contextcheck // Intentionally using background context for async saga orchestration
+	//nolint:contextcheck // Intentionally using background context for async saga orchestration
 	go func(paymentOrderID uuid.UUID, tid tenant.TenantID, hasTenantCtx bool) {
 		// Recover from panics to prevent silent goroutine termination
 		defer func() {
@@ -263,7 +262,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 
 	// Prevent accidental access to po after goroutine launch - the goroutine
 	// reloads fresh state from DB, so any access to po here would be stale
-	po = nil //nolint:ineffassign // Intentional: prevent future code from accidentally using stale po
+	po = nil
 
 	return &pb.InitiatePaymentOrderResponse{
 		PaymentOrder: responseProto,

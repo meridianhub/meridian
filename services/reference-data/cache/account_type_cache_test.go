@@ -476,7 +476,7 @@ func TestLocalAccountTypeCache_InvalidateAll(t *testing.T) {
 
 func TestLocalAccountTypeCache_LoadError(t *testing.T) {
 	loader := newMockAccountTypeLoader()
-	loader.loadErr = errors.New("gRPC unavailable") //nolint:err113 // test sentinel
+	loader.loadErr = errors.New("gRPC unavailable")
 	compiler := &mockAccountTypeCELCompiler{}
 	cache := newTestCache(loader, compiler)
 

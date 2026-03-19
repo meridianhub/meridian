@@ -538,13 +538,13 @@ func initImportDependencies(ctx context.Context, cfg *importConfig, pool *pgxpoo
 func handleImportInterrupt(_ context.Context, deps *importDependencies, cp *checkpoint.Checkpoint, checkpointMgr *checkpoint.PostgresManager, result *importResult, logger *slog.Logger) *importResult {
 	// Use fresh context for cleanup since the original may be canceled.
 	// This is intentional - we need cleanup to succeed even when the parent context is done.
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:contextcheck
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if flushErr := deps.batchInserter.Flush(cleanupCtx); flushErr != nil { //nolint:contextcheck
+	if flushErr := deps.batchInserter.Flush(cleanupCtx); flushErr != nil { //nolint:contextcheck // uses cleanup context created above
 		logger.Warn("failed to flush batch on interrupt", "error", flushErr)
 	}
-	if cancelErr := checkpointMgr.Cancel(cleanupCtx, cp); cancelErr != nil { //nolint:contextcheck
+	if cancelErr := checkpointMgr.Cancel(cleanupCtx, cp); cancelErr != nil { //nolint:contextcheck // uses cleanup context created above
 		logger.Warn("failed to save checkpoint on interrupt", "error", cancelErr)
 	}
 	result.Interrupted = true

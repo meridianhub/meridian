@@ -322,38 +322,44 @@ func (e *Executor) ExecuteWithFailedState(ctx context.Context, key Key, ttl time
 	resultData, execErr := fn(ctx)
 
 	if execErr != nil {
-		// Record pending duration and failure
-		if e.metrics != nil {
-			e.metrics.RecordPendingDuration(key.Operation, time.Since(pendingStart))
-			e.metrics.RecordFailed(key.Operation, MetricReasonInternal)
-		}
-
-		// Mark as FAILED instead of deleting
-		failedResult := Result{
-			Key:         key,
-			Status:      StatusFailed,
-			Error:       execErr.Error(),
-			CompletedAt: time.Now(),
-			TTL:         ttl,
-		}
-
-		if storeErr := e.checker.StoreResult(ctx, failedResult); storeErr != nil {
-			slog.Error("failed to store failed idempotency result",
-				"key", key.String(),
-				"operation_error", execErr.Error(),
-				"store_error", storeErr.Error())
-		}
-
-		return nil, execErr
+		return nil, e.handleFailedExecution(ctx, key, ttl, pendingStart, execErr)
 	}
 
-	// Record pending duration and completion
+	return e.handleSuccessfulExecution(ctx, key, ttl, pendingStart, resultData), nil
+}
+
+// handleFailedExecution records failure metrics and persists the failed state.
+func (e *Executor) handleFailedExecution(ctx context.Context, key Key, ttl time.Duration, pendingStart time.Time, execErr error) error {
+	if e.metrics != nil {
+		e.metrics.RecordPendingDuration(key.Operation, time.Since(pendingStart))
+		e.metrics.RecordFailed(key.Operation, MetricReasonInternal)
+	}
+
+	failedResult := Result{
+		Key:         key,
+		Status:      StatusFailed,
+		Error:       execErr.Error(),
+		CompletedAt: time.Now(),
+		TTL:         ttl,
+	}
+
+	if storeErr := e.checker.StoreResult(ctx, failedResult); storeErr != nil {
+		slog.Error("failed to store failed idempotency result",
+			"key", key.String(),
+			"operation_error", execErr.Error(),
+			"store_error", storeErr.Error())
+	}
+
+	return execErr
+}
+
+// handleSuccessfulExecution records completion metrics and persists the result.
+func (e *Executor) handleSuccessfulExecution(ctx context.Context, key Key, ttl time.Duration, pendingStart time.Time, resultData []byte) *ExecuteResult {
 	if e.metrics != nil {
 		e.metrics.RecordPendingDuration(key.Operation, time.Since(pendingStart))
 		e.metrics.RecordCompleted(key.Operation)
 	}
 
-	// Step 4: Store successful result
 	result := Result{
 		Key:         key,
 		Status:      StatusCompleted,
@@ -372,5 +378,5 @@ func (e *Executor) ExecuteWithFailedState(ctx context.Context, key Key, ttl time
 		Data:      resultData,
 		FromCache: false,
 		Status:    StatusCompleted,
-	}, nil
+	}
 }

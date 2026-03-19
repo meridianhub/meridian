@@ -104,7 +104,7 @@ type economyGenerateContextParams struct {
 func handleEconomyGenerateContext(ctx context.Context, client EconomyGeneratorClient, params json.RawMessage) (interface{}, error) {
 	var p economyGenerateContextParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
+		return mcperrors.FormatGRPCError(err), nil
 	}
 
 	if p.IncludeCurrentEconomy && p.TenantID == "" {
@@ -129,7 +129,7 @@ func handleEconomyGenerateContext(ctx context.Context, client EconomyGeneratorCl
 		if IsServiceUnavailable(err) {
 			return map[string]interface{}{"message": generatorUnavailableMessage}, nil
 		}
-		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
+		return mcperrors.FormatGRPCError(err), nil
 	}
 
 	result := map[string]interface{}{
@@ -287,7 +287,7 @@ func buildGenerationMetadata(m *controlplanev1.GenerationMetadata) map[string]in
 func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, params json.RawMessage) (interface{}, error) {
 	var p economyGenerateParams
 	if err := json.Unmarshal(params, &p); err != nil {
-		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
+		return mcperrors.FormatGRPCError(err), nil
 	}
 
 	mode, errResp := resolveGenerationMode(p.Mode, p.TenantID)
@@ -315,7 +315,7 @@ func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, p
 		if IsServiceUnavailable(err) {
 			return map[string]interface{}{"message": generatorUnavailableMessage}, nil
 		}
-		return mcperrors.FormatGRPCError(err), nil //nolint:nilerr // err is surfaced in the tool response
+		return mcperrors.FormatGRPCError(err), nil
 	}
 
 	result := map[string]interface{}{

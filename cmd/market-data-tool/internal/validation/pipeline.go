@@ -71,8 +71,6 @@ func NewPipeline(cfg PipelineConfig) *Pipeline {
 }
 
 // ValidateRow validates a single row through all validation layers.
-//
-//nolint:gocognit // complexity is acceptable for multi-layer validation orchestration
 func (p *Pipeline) ValidateRow(ctx context.Context, row *ObservationRow) *RowValidationError {
 	atomic.AddInt64(&p.totalRows, 1)
 

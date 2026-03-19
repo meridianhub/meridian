@@ -550,7 +550,7 @@ func TestListDataSources_Success(t *testing.T) {
 
 	t.Run("returns all sources when activeOnly filter not yet implemented in repository", func(t *testing.T) {
 		// Create a fresh server for this test
-		freshServer, _, freshCleanup := setupTestServerForSource(t) //nolint:contextcheck
+		freshServer, _, freshCleanup := setupTestServerForSource(t) //nolint:contextcheck // Test helper creates its own context for DB setup
 		defer freshCleanup()
 
 		// Register one source

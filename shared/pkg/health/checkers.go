@@ -31,7 +31,7 @@ func NewDatabaseChecker(pool *db.PostgresPool) *DatabaseChecker {
 
 // Name returns the component name.
 func (d *DatabaseChecker) Name() string {
-	return "database" //nolint:goconst // component name
+	return "database"
 }
 
 // Check performs a database health check by pinging the connection pool.
@@ -126,7 +126,7 @@ func NewKafkaChecker(checkFunc KafkaCheckFunc) *KafkaChecker {
 
 // Name returns the component name.
 func (k *KafkaChecker) Name() string {
-	return "kafka" //nolint:goconst // component name
+	return "kafka"
 }
 
 // Check performs a Kafka health check using the configured check function.

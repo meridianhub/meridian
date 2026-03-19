@@ -113,14 +113,14 @@ func TestHTTPHandler_ReadinessHandler_Unhealthy(t *testing.T) {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if response.Status != "unhealthy" { //nolint:goconst // test fixture
+	if response.Status != "unhealthy" {
 		t.Errorf("Status = %v, want unhealthy", response.Status)
 	}
 
 	// Find the redis component
 	var redisComp *ComponentStatusJSON
 	for i := range response.Components {
-		if response.Components[i].Name == "redis" { //nolint:goconst // test fixture
+		if response.Components[i].Name == "redis" {
 			redisComp = &response.Components[i]
 			break
 		}
