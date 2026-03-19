@@ -99,6 +99,11 @@ func TestIsAlreadyExistsError(t *testing.T) {
 		assert.True(t, isAlreadyExistsError(err))
 	})
 
+	t.Run("PgError with unrecognized code falls through to string matching", func(t *testing.T) {
+		pgErr := &pgconn.PgError{Code: "23505", Message: "duplicate key value"}
+		assert.True(t, isAlreadyExistsError(pgErr))
+	})
+
 	t.Run("generic error returns false", func(t *testing.T) {
 		err := errors.New("connection refused")
 		assert.False(t, isAlreadyExistsError(err))
