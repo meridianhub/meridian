@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -200,6 +199,5 @@ func TestInitiateLogHandler_InvalidAccountIDType(t *testing.T) {
 
 	_, err := handler(ctx, params)
 	require.Error(t, err)
-	// RequireStringParam should reject non-string values
-	fmt.Println("Error:", err)
+	assert.Contains(t, err.Error(), "account_id")
 }
