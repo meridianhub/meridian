@@ -48,6 +48,10 @@ linters:
     - gocritic       # Additional safety diagnostics
     - bodyclose      # HTTP response bodies must be closed
 
+    # Code hygiene linters
+    - nolintlint     # Require specific linter names and explanations on //nolint directives
+    - godox          # Reject TODO/FIXME/HACK in committed code
+
     # Architecture linters
     - depguard       # Enforce dependency constraints and block dangerous packages
 
@@ -258,6 +262,18 @@ linters:
         - name: unused-parameter
         - name: unreachable-code
         - name: redefines-builtin-id
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    godox:
+      keywords:
+        - TODO
+        - FIXME
+        - HACK
+        - BUG
+        - XXX
 
     errorlint:
       errorf: true

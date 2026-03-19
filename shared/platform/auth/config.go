@@ -44,7 +44,7 @@ func defaultHTTPClient() *http.Client {
 }
 
 // AuthMode defines the authentication mode for the service
-// nolint:revive // AuthMode is more descriptive than Mode for auth.AuthMode
+//nolint:revive // AuthMode is more descriptive than Mode for auth.AuthMode
 type AuthMode string
 
 const (

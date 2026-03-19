@@ -60,7 +60,7 @@ func TestConnectionRegistry_Unregister(t *testing.T) {
 	assert.Empty(t, reg.GetByTenant("tenant-A"))
 }
 
-func TestConnectionRegistry_Unregister_NonExistent_NoPanic(t *testing.T) { //nolint:revive
+func TestConnectionRegistry_Unregister_NonExistent_NoPanic(t *testing.T) { //nolint:revive // Long test name describes specific scenario
 	reg := eventstream.NewConnectionRegistry()
 	// Should not panic
 	reg.Unregister("nonexistent-conn-id")
@@ -93,7 +93,7 @@ func TestConnectionRegistry_UnregisterOneOfMany(t *testing.T) {
 	assert.Equal(t, "conn-2", conns[0].ID())
 }
 
-func TestConnectionRegistry_ConcurrentAccess(t *testing.T) { //nolint:revive
+func TestConnectionRegistry_ConcurrentAccess(t *testing.T) { //nolint:revive // Long test name describes specific scenario
 	reg := eventstream.NewConnectionRegistry()
 
 	var wg sync.WaitGroup

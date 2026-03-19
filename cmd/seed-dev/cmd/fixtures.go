@@ -409,7 +409,7 @@ func recordWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 	client := marketv1.NewMarketInformationServiceClient(conn)
 
 	const sourceCode = "SEED_DEMO"
-	rng := rand.New(rand.NewSource(42)) //nolint:gosec
+	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic seed for reproducible fixture data
 	now := time.Now().UTC()
 	basePrice := 0.22 // 22p/kWh base wholesale price
 

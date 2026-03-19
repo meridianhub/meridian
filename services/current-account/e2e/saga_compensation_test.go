@@ -68,7 +68,7 @@ func setupE2EEnvironment(t *testing.T, _ context.Context) *E2ETestEnvironment {
 	t.Helper()
 
 	// Create CockroachDB testcontainer
-	db, cleanup := testdb.SetupCockroachDB(t, nil) //nolint:contextcheck
+	db, cleanup := testdb.SetupCockroachDB(t, nil) //nolint:contextcheck // Test setup creates fresh context for DB initialization
 
 	// Create tenant schema
 	tenantID := tenant.TenantID(fmt.Sprintf("e2e_saga_%d", time.Now().UnixNano()))
@@ -79,8 +79,8 @@ func setupE2EEnvironment(t *testing.T, _ context.Context) *E2ETestEnvironment {
 	account2ID := "ACC-E2E-002"
 
 	// Initialize accounts in the database
-	createTestAccount(t, db, tenantCtx, accountID, "USD", "50.00")   //nolint:contextcheck
-	createTestAccount(t, db, tenantCtx, account2ID, "USD", "100.00") //nolint:contextcheck
+	createTestAccount(t, db, tenantCtx, accountID, "USD", "50.00")   //nolint:contextcheck // Uses tenant context from test setup, not parent context
+	createTestAccount(t, db, tenantCtx, account2ID, "USD", "100.00") //nolint:contextcheck // Uses tenant context from test setup, not parent context
 
 	env := &E2ETestEnvironment{
 		DB:         db,

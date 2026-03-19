@@ -244,7 +244,7 @@ func (p *ExecutionPlan) Visualize() string {
 	fmt.Fprintf(&b, "Total calls: %d\n\n", len(p.Calls))
 
 	byPhase := p.ByPhase()
-	for phase := PhaseInstruments; phase <= PhaseInternalAccounts; phase++ { //nolint:intrange
+	for phase := PhaseInstruments; phase <= PhaseInternalAccounts; phase++ { //nolint:intrange // iterating over typed enum range, not a plain int
 		calls, ok := byPhase[phase]
 		if !ok {
 			continue

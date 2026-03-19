@@ -525,13 +525,13 @@ func handleImportInterrupt(
 	logger *slog.Logger,
 ) *importResult {
 	// Use fresh context for cleanup since the original may be canceled.
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:contextcheck
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:contextcheck // fresh context for cleanup after signal/cancellation
 	defer cancel()
 
-	if flushErr := batchInserter.Flush(cleanupCtx); flushErr != nil { //nolint:contextcheck
+	if flushErr := batchInserter.Flush(cleanupCtx); flushErr != nil { //nolint:contextcheck // uses cleanup context created above
 		logger.Warn("failed to flush batch on interrupt", "error", flushErr)
 	}
-	if cancelErr := checkpointMgr.Cancel(cleanupCtx, cp); cancelErr != nil { //nolint:contextcheck
+	if cancelErr := checkpointMgr.Cancel(cleanupCtx, cp); cancelErr != nil { //nolint:contextcheck // uses cleanup context created above
 		logger.Warn("failed to save checkpoint on interrupt", "error", cancelErr)
 	}
 	result.Interrupted = true

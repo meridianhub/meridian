@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
-	"github.com/meridianhub/meridian/services/api-gateway/internal/mapping" //nolint:depguard
+	"github.com/meridianhub/meridian/services/api-gateway/internal/mapping" //nolint:depguard // Test needs direct access to internal mapping package
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
