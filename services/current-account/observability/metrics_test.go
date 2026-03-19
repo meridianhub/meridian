@@ -303,3 +303,109 @@ func TestMetricsLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordWithdrawal(t *testing.T) {
+	withdrawalsTotal.Reset()
+
+	RecordWithdrawal("GBP")
+
+	count := testutil.CollectAndCount(withdrawalsTotal)
+	if count == 0 {
+		t.Error("Expected withdrawal metric to be recorded")
+	}
+}
+
+func TestRecordPartyValidationDuration(t *testing.T) {
+	partyValidationDuration.Reset()
+
+	RecordPartyValidationDuration(100*time.Millisecond, true)
+	RecordPartyValidationDuration(200*time.Millisecond, false)
+
+	count := testutil.CollectAndCount(partyValidationDuration)
+	if count == 0 {
+		t.Error("Expected party validation duration metric to be recorded")
+	}
+}
+
+func TestRecordInlineCompensationFailure(t *testing.T) {
+	inlineCompensationFailuresTotal.Reset()
+
+	RecordInlineCompensationFailure("deposit", "clearing_leg")
+
+	count := testutil.CollectAndCount(inlineCompensationFailuresTotal)
+	if count == 0 {
+		t.Error("Expected inline compensation failure metric to be recorded")
+	}
+}
+
+func TestSetNoopIdempotencyActive(t *testing.T) {
+	noopIdempotencyActive.Set(0) // Reset
+
+	SetNoopIdempotencyActive(true)
+	val := testutil.ToFloat64(noopIdempotencyActive)
+	if val != 1 {
+		t.Errorf("Expected noop idempotency gauge to be 1 when active, got %f", val)
+	}
+
+	SetNoopIdempotencyActive(false)
+	val = testutil.ToFloat64(noopIdempotencyActive)
+	if val != 0 {
+		t.Errorf("Expected noop idempotency gauge to be 0 when inactive, got %f", val)
+	}
+}
+
+func TestRecordServiceDegradation(t *testing.T) {
+	serviceDegradationEvents.Reset()
+
+	RecordServiceDegradation(ComponentIdempotency, DegradationReasonStartupFallback)
+
+	count := testutil.CollectAndCount(serviceDegradationEvents)
+	if count == 0 {
+		t.Error("Expected service degradation metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountCacheHit(t *testing.T) {
+	// Verify it does not panic and the metric is collected
+	RecordClearingAccountCacheHit()
+	count := testutil.ToFloat64(clearingAccountCacheHits)
+	if count == 0 {
+		t.Error("Expected cache hit metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountCacheMiss(t *testing.T) {
+	RecordClearingAccountCacheMiss()
+	count := testutil.ToFloat64(clearingAccountCacheMisses)
+	if count == 0 {
+		t.Error("Expected cache miss metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountLookupDuration(t *testing.T) {
+	RecordClearingAccountLookupDuration(50 * time.Millisecond)
+	count := testutil.CollectAndCount(clearingAccountLookupDuration)
+	if count == 0 {
+		t.Error("Expected lookup duration metric to be recorded")
+	}
+}
+
+func TestRecordClearingAccountLookupError(t *testing.T) {
+	clearingAccountLookupErrors.Reset()
+
+	RecordClearingAccountLookupError("deposit")
+
+	count := testutil.CollectAndCount(clearingAccountLookupErrors)
+	if count == 0 {
+		t.Error("Expected clearing account lookup error metric to be recorded")
+	}
+}
+
+func TestDegradationConstants(t *testing.T) {
+	if ComponentIdempotency != "idempotency" {
+		t.Errorf("ComponentIdempotency should be 'idempotency', got '%s'", ComponentIdempotency)
+	}
+	if DegradationReasonStartupFallback != "startup_fallback" {
+		t.Errorf("DegradationReasonStartupFallback should be 'startup_fallback', got '%s'", DegradationReasonStartupFallback)
+	}
+}

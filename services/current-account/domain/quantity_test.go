@@ -294,3 +294,22 @@ func TestNewAmountFromInstrument_InvalidDimension_ReturnsError(t *testing.T) {
 	// NewAmountFromInstrument returns ErrInvalidDimension from shared/pkg/amount for invalid dimensions
 	// (not ErrInstrumentMismatch which is for arithmetic on different instruments)
 }
+
+func TestNewMoneyFromInstrument_ValidCurrency(t *testing.T) {
+	m, err := NewMoneyFromInstrument("GBP", "CURRENCY", 5000)
+	assert.NoError(t, err)
+	assert.Equal(t, "GBP", m.InstrumentCode())
+	assert.Equal(t, int64(5000), toMinorUnits(m))
+}
+
+func TestNewMoneyFromInstrument_NonCurrencyDimension(t *testing.T) {
+	_, err := NewMoneyFromInstrument("KWH", "ENERGY", 100)
+	assert.ErrorIs(t, err, ErrInvalidCurrency)
+}
+
+func TestZeroMoney_ValidCurrency(t *testing.T) {
+	m, err := ZeroMoney("GBP")
+	assert.NoError(t, err)
+	assert.True(t, m.IsZero())
+	assert.Equal(t, "GBP", m.InstrumentCode())
+}

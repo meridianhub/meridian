@@ -30,8 +30,10 @@ import (
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
 	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
+	sharedamount "github.com/meridianhub/meridian/shared/pkg/amount"
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1628,14 +1630,15 @@ func TestGetAccount_WrongType(t *testing.T) {
 // =============================================================================
 
 func TestSafeMinorUnits_Overflow(t *testing.T) {
-	// Create a huge amount that will overflow int64 when converted to minor units.
-	// GBP has precision 2, so 10^17 * 100 = 10^19 > int64 max (~9.2*10^18).
-	hugeAmount, err := domain.NewAmountFromInstrument("GBP", "CURRENCY", 2, 0)
+	// Create an Amount with a huge decimal that overflows int64 when converted to minor units.
+	// GBP has precision 2. int64 max is ~9.2*10^18, so major units of 10^17
+	// => 10^17 * 100 = 10^19 > int64 max => triggers overflow.
+	inst, err := quantity.NewInstrument("GBP", 0, "CURRENCY", 2)
 	require.NoError(t, err)
-	// We can't easily create an overflowing amount through NewAmountFromInstrument,
-	// but we can test the normal path to verify it works.
+	hugeDecimal := decimal.NewFromFloat(1e17) // 100,000,000,000,000,000 GBP
+	hugeAmount := sharedamount.NewFromDecimal(inst, hugeDecimal)
 	result := safeMinorUnits(hugeAmount)
-	assert.Equal(t, int64(0), result)
+	assert.Equal(t, int64(0), result, "Overflowing amount should return 0")
 }
 
 func TestSafeMinorUnits_NormalAmount(t *testing.T) {

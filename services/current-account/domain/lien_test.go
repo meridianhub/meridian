@@ -1,10 +1,12 @@
 package domain
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -304,6 +306,121 @@ func TestNewLien_CarbonCreditAmountHelper(t *testing.T) {
 	assert.Equal(t, int64(50), toMinorUnits(lien.Amount))
 	assert.Equal(t, "CARBON_CREDIT", lien.Amount.InstrumentCode())
 	assert.Equal(t, "CARBON", lien.Amount.Dimension())
+}
+
+func TestInstrumentAmount_IsZero(t *testing.T) {
+	tests := []struct {
+		name     string
+		ia       InstrumentAmount
+		expected bool
+	}{
+		{"zero amount empty code", InstrumentAmount{}, true},
+		{"zero amount with code", InstrumentAmount{Amount: decimal.Zero, InstrumentCode: "GBP"}, false},
+		{"nonzero amount empty code", InstrumentAmount{Amount: decimal.NewFromInt(100), InstrumentCode: ""}, false},
+		{"nonzero amount with code", InstrumentAmount{Amount: decimal.NewFromInt(100), InstrumentCode: "GBP"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.ia.IsZero())
+		})
+	}
+}
+
+func TestNewValuedLien_Success(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewMoney("GBP", 3500)
+	require.NoError(t, err)
+
+	reserved := &InstrumentAmount{Amount: decimal.NewFromInt(100), InstrumentCode: "KWH"}
+	valued := &InstrumentAmount{Amount: decimal.NewFromFloat(35.00), InstrumentCode: "GBP"}
+	analysis := json.RawMessage(`{"method_id":"spot","version":1}`)
+
+	lien, err := NewValuedLien(accountID, amount, "bucket-1", "PO-001", nil, reserved, valued, analysis)
+
+	require.NoError(t, err)
+	assert.Equal(t, LienStatusActive, lien.Status)
+	assert.Equal(t, reserved, lien.ReservedQuantity)
+	assert.Equal(t, valued, lien.ValuedAmount)
+	assert.Equal(t, analysis, lien.ValuationAnalysis)
+	assert.True(t, lien.HasValuation())
+}
+
+func TestNewValuedLien_NilReservedQuantity(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewMoney("GBP", 3500)
+	require.NoError(t, err)
+
+	valued := &InstrumentAmount{Amount: decimal.NewFromFloat(35.00), InstrumentCode: "GBP"}
+
+	_, err = NewValuedLien(accountID, amount, "bucket-1", "PO-001", nil, nil, valued, nil)
+	assert.ErrorIs(t, err, ErrInvalidInstrumentAmount)
+}
+
+func TestNewValuedLien_EmptyReservedCode(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewMoney("GBP", 3500)
+	require.NoError(t, err)
+
+	reserved := &InstrumentAmount{Amount: decimal.NewFromInt(100), InstrumentCode: ""}
+	valued := &InstrumentAmount{Amount: decimal.NewFromFloat(35.00), InstrumentCode: "GBP"}
+
+	_, err = NewValuedLien(accountID, amount, "bucket-1", "PO-001", nil, reserved, valued, nil)
+	assert.ErrorIs(t, err, ErrInvalidInstrumentAmount)
+}
+
+func TestNewValuedLien_NilValuedAmount(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewMoney("GBP", 3500)
+	require.NoError(t, err)
+
+	reserved := &InstrumentAmount{Amount: decimal.NewFromInt(100), InstrumentCode: "KWH"}
+
+	_, err = NewValuedLien(accountID, amount, "bucket-1", "PO-001", nil, reserved, nil, nil)
+	assert.ErrorIs(t, err, ErrInvalidInstrumentAmount)
+}
+
+func TestNewValuedLien_ZeroReservedAmount(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewMoney("GBP", 3500)
+	require.NoError(t, err)
+
+	reserved := &InstrumentAmount{Amount: decimal.Zero, InstrumentCode: "KWH"}
+	valued := &InstrumentAmount{Amount: decimal.NewFromFloat(35.00), InstrumentCode: "GBP"}
+
+	_, err = NewValuedLien(accountID, amount, "bucket-1", "PO-001", nil, reserved, valued, nil)
+	assert.ErrorIs(t, err, ErrInvalidInstrumentAmount)
+}
+
+func TestNewValuedLien_InvalidBaseAmount(t *testing.T) {
+	accountID := uuid.New()
+	amount, err := NewMoney("GBP", 0) // Zero amount fails NewLien validation
+	require.NoError(t, err)
+
+	reserved := &InstrumentAmount{Amount: decimal.NewFromInt(100), InstrumentCode: "KWH"}
+	valued := &InstrumentAmount{Amount: decimal.NewFromFloat(35.00), InstrumentCode: "GBP"}
+
+	_, err = NewValuedLien(accountID, amount, "bucket-1", "PO-001", nil, reserved, valued, nil)
+	assert.ErrorIs(t, err, ErrInvalidLienAmount)
+}
+
+func TestLien_HasValuation(t *testing.T) {
+	t.Run("no valuation", func(t *testing.T) {
+		lien := createTestLien(t, LienStatusActive)
+		assert.False(t, lien.HasValuation())
+	})
+
+	t.Run("with valuation", func(t *testing.T) {
+		lien := createTestLien(t, LienStatusActive)
+		lien.ValuedAmount = &InstrumentAmount{Amount: decimal.NewFromFloat(35.00), InstrumentCode: "GBP"}
+		assert.True(t, lien.HasValuation())
+	})
+
+	t.Run("zero valued amount", func(t *testing.T) {
+		lien := createTestLien(t, LienStatusActive)
+		lien.ValuedAmount = &InstrumentAmount{}
+		assert.False(t, lien.HasValuation())
+	})
 }
 
 // createKWHTestAccount creates a KWH energy account with an optional initial balance for testing.

@@ -1397,3 +1397,94 @@ func TestNewCurrentAccount_TrustsCallerProvidedInstrument(t *testing.T) {
 	assert.Equal(t, "EXOTIC_CCY", account.InstrumentCode())
 	assert.Equal(t, "CURRENCY", account.Dimension())
 }
+
+func TestWithProductType(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "IBAN-001", "PARTY-001", "GBP",
+		WithProductType("SAVINGS_ACCOUNT", 3),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "SAVINGS_ACCOUNT", account.ProductTypeCode())
+	assert.Equal(t, 3, account.ProductTypeVersion())
+}
+
+func TestWithBehaviorClass(t *testing.T) {
+	account, err := NewCurrentAccount("ACC-001", "IBAN-001", "PARTY-001", "GBP",
+		WithBehaviorClass("high_value"),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "high_value", account.BehaviorClass())
+}
+
+func TestAccountGetters_BalanceUpdatedAt_CreatedAt(t *testing.T) {
+	now := time.Now()
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithBalanceUpdatedAt(now).
+		WithCreatedAt(now.Add(-time.Hour)).
+		WithProductTypeCode("CURRENT").
+		WithProductTypeVersion(2).
+		WithBehaviorClass("standard").
+		Build()
+
+	assert.Equal(t, now, account.BalanceUpdatedAt())
+	assert.Equal(t, now.Add(-time.Hour), account.CreatedAt())
+	assert.Equal(t, "CURRENT", account.ProductTypeCode())
+	assert.Equal(t, 2, account.ProductTypeVersion())
+	assert.Equal(t, "standard", account.BehaviorClass())
+}
+
+func TestBuilder_WithID_WithAccountIdentification(t *testing.T) {
+	id := uuid.New()
+	account := NewCurrentAccountBuilder().
+		WithID(id).
+		WithAccountIdentification("GB82WEST12345698765432").
+		Build()
+
+	assert.Equal(t, id, account.ID())
+	assert.Equal(t, "GB82WEST12345698765432", account.ExternalIdentifier())
+}
+
+func TestStatusHistory_NilReturnsNil(t *testing.T) {
+	account := NewCurrentAccountBuilder().Build()
+	assert.Nil(t, account.StatusHistory())
+}
+
+func TestPrepareForDebit_InvalidAmount(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithExternalIdentifier("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	// Zero amount
+	zeroAmount, _ := NewMoney("GBP", 0)
+	_, err := account.PrepareForDebit(zeroAmount)
+	assert.ErrorIs(t, err, ErrInvalidAmount)
+
+	// Negative amount
+	negAmount, _ := NewMoney("GBP", -500)
+	_, err = account.PrepareForDebit(negAmount)
+	assert.ErrorIs(t, err, ErrInvalidAmount)
+}
+
+func TestPrepareForDebit_InstrumentMismatch(t *testing.T) {
+	balance, _ := NewMoney("GBP", 10000)
+	account := NewCurrentAccountBuilder().
+		WithAccountID("ACC-001").
+		WithExternalIdentifier("GB82WEST12345698765432").
+		WithPartyID("PARTY-001").
+		WithBalance(balance).
+		WithAvailableBalance(balance).
+		WithStatus(AccountStatusActive).
+		WithVersion(1).
+		Build()
+
+	eurAmount, _ := NewMoney("EUR", 5000)
+	_, err := account.PrepareForDebit(eurAmount)
+	assert.ErrorIs(t, err, ErrInstrumentMismatch)
+}
