@@ -30,25 +30,17 @@ import (
 
 func main() {
 	manifestGlob := flag.String("manifest", "", "glob pattern for manifest files (e.g., examples/manifests/*.json)")
+	starlarkGlob := flag.String("starlark", "", "glob pattern for standalone Starlark files (e.g., cookbook/patterns/**/*.star)")
 	jsonOutput := flag.Bool("json", false, "output results as JSON")
 	flag.Parse()
 
-	if *manifestGlob == "" {
-		fmt.Fprintf(os.Stderr, "Usage: validate -manifest=<glob>\n")
-		fmt.Fprintf(os.Stderr, "  Validates manifest files against the Meridian schema.\n\n")
-		fmt.Fprintf(os.Stderr, "Example:\n")
+	if *manifestGlob == "" && *starlarkGlob == "" {
+		fmt.Fprintf(os.Stderr, "Usage: validate -manifest=<glob> [-starlark=<glob>] [-json]\n")
+		fmt.Fprintf(os.Stderr, "  Validates manifest and/or Starlark files against the Meridian schema.\n\n")
+		fmt.Fprintf(os.Stderr, "Examples:\n")
 		fmt.Fprintf(os.Stderr, "  validate -manifest='examples/manifests/*.json'\n")
-		os.Exit(1)
-	}
-
-	files, err := filepath.Glob(*manifestGlob)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: invalid glob pattern: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no files matched pattern: %s\n", *manifestGlob)
+		fmt.Fprintf(os.Stderr, "  validate -starlark='cookbook/patterns/**/*.star'\n")
+		fmt.Fprintf(os.Stderr, "  validate -manifest='examples/manifests/*.json' -starlark='cookbook/patterns/**/*.star'\n")
 		os.Exit(1)
 	}
 
@@ -59,17 +51,52 @@ func main() {
 		os.Exit(1)
 	}
 
+	hasFailures := false
+
+	// Validate manifest files if glob provided.
+	if *manifestGlob != "" {
+		failed := validateManifests(*manifestGlob, derivedSchema, *jsonOutput)
+		if failed {
+			hasFailures = true
+		}
+	}
+
+	// Validate standalone Starlark files if glob provided.
+	if *starlarkGlob != "" {
+		failed := validateStarlark(*starlarkGlob, derivedSchema, *jsonOutput)
+		if failed {
+			hasFailures = true
+		}
+	}
+
+	if hasFailures {
+		os.Exit(1)
+	}
+}
+
+// validateManifests validates manifest JSON files and returns true if any failures occurred.
+func validateManifests(glob string, derivedSchema *schema.Schema, jsonOut bool) bool {
+	files, err := filepath.Glob(glob)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid manifest glob pattern: %v\n", err)
+		return true
+	}
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no files matched manifest pattern: %s\n", glob)
+		return true
+	}
+
 	v, err := validator.New(validator.WithDerivedSchema(derivedSchema))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to create validator: %v\n", err)
-		os.Exit(1)
+		return true
 	}
 
 	hasFailures := false
 	for _, file := range files {
 		result, validErr := validateFile(v, file)
 		if validErr != nil {
-			if *jsonOutput {
+			if jsonOut {
 				out, _ := json.MarshalIndent(map[string]any{
 					"file":  file,
 					"error": validErr.Error(),
@@ -82,7 +109,7 @@ func main() {
 			continue
 		}
 
-		if *jsonOutput {
+		if jsonOut {
 			out, _ := json.MarshalIndent(map[string]any{
 				"file":   file,
 				"result": result,
@@ -96,10 +123,41 @@ func main() {
 			hasFailures = true
 		}
 	}
+	return hasFailures
+}
 
-	if hasFailures {
-		os.Exit(1)
+// validateStarlark validates standalone .star files and returns true if any failures occurred.
+func validateStarlark(glob string, derivedSchema *schema.Schema, jsonOut bool) bool {
+	results, err := validateStarlarkFiles(glob, derivedSchema)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return true
 	}
+
+	hasFailures := false
+	for _, r := range results {
+		if jsonOut {
+			out, _ := json.MarshalIndent(map[string]any{
+				"file":    r.File,
+				"pass":    r.Pass,
+				"skipped": r.Skipped,
+				"error":   r.Error,
+			}, "", "  ")
+			fmt.Println(string(out))
+		} else {
+			if r.Skipped {
+				fmt.Printf("SKIP %s\n", r.File)
+			} else if r.Pass {
+				fmt.Printf("PASS %s\n", r.File)
+			} else {
+				fmt.Fprintf(os.Stderr, "FAIL %s: %s\n", r.File, r.Error)
+			}
+		}
+		if !r.Pass && !r.Skipped {
+			hasFailures = true
+		}
+	}
+	return hasFailures
 }
 
 // buildDerivedSchema registers all service handlers and derives the schema from proto metadata.

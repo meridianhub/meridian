@@ -1,0 +1,529 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
+	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
+	"go.starlark.net/syntax"
+)
+
+// skipDirective is the comment that opts a .star file out of schema validation.
+const skipDirective = "# schema-validation: skip"
+
+// Sentinel errors for linter compliance.
+var (
+	errNoFilesMatched    = errors.New("no files matched pattern")
+	errDecimalArgCount   = errors.New("decimal: expected exactly 1 argument")
+	errDecimalOverflow   = errors.New("decimal: integer too large to convert")
+	errDecimalParse      = errors.New("decimal: cannot parse as a number")
+	errDecimalType       = errors.New("decimal: unsupported type")
+	errUnhashableDict    = errors.New("unhashable: dict")
+	errUnhashableModule  = errors.New("unhashable: open_service_module")
+	errUnhashableHybrid  = errors.New("unhashable: hybrid_service_module")
+	errUnhashableResult  = errors.New("unhashable: result")
+	errHandlerNotAllowed = errors.New("handler not registered and not in open fallback allowlist")
+)
+
+// collectStarlarkFiles resolves a glob pattern into a list of .star file paths.
+// Unlike filepath.Glob, this supports ** for recursive directory matching by
+// using filepath.WalkDir when the pattern contains **.
+func collectStarlarkFiles(glob string) ([]string, error) {
+	if !strings.Contains(glob, "**") {
+		// Simple glob without recursion - filepath.Glob works fine
+		return filepath.Glob(glob)
+	}
+
+	// Split pattern at ** to get the root directory and the file suffix pattern.
+	// E.g., "cookbook/patterns/**/*.star" -> root="cookbook/patterns", suffix="*.star"
+	parts := strings.SplitN(glob, "**", 2)
+	root := filepath.Clean(strings.TrimRight(parts[0], string(filepath.Separator)))
+	suffix := strings.TrimLeft(parts[1], string(filepath.Separator))
+
+	// Determine whether the suffix contains path separators.
+	// filepath.Match does not match across path separators, so for simple
+	// suffixes like "*.star" we match the basename; for multi-segment suffixes
+	// like "payments/*.star" we match the relative path from root.
+	matchRelative := strings.Contains(suffix, string(filepath.Separator))
+
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		var target string
+		if matchRelative {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return relErr
+			}
+			target = rel
+		} else {
+			target = filepath.Base(path)
+		}
+		matched, matchErr := filepath.Match(suffix, target)
+		if matchErr != nil {
+			return matchErr
+		}
+		if matched {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking directory %s: %w", root, err)
+	}
+	return files, nil
+}
+
+// hasSkipDirective checks whether a Starlark script contains the skip directive
+// as an actual comment line rather than inside a string literal.
+func hasSkipDirective(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == skipDirective {
+			return true
+		}
+	}
+	return false
+}
+
+// starlarkValidationResult holds the validation outcome for a single .star file.
+type starlarkValidationResult struct {
+	File    string
+	Pass    bool
+	Skipped bool
+	Error   string
+}
+
+// validateStarlarkFiles validates standalone .star files against the handler schema.
+// It builds validation modules from the derived schema and executes each script
+// to catch UNKNOWN_HANDLER, UNKNOWN_PARAM, MISSING_REQUIRED_PARAM, and WRONG_PARAM_TYPE errors.
+//
+// The glob parameter supports ** for recursive matching (e.g., "cookbook/patterns/**/*.star")
+// by using filepath.WalkDir instead of filepath.Glob, which does not support **.
+func validateStarlarkFiles(glob string, derivedSchema *schema.Schema) ([]starlarkValidationResult, error) {
+	files, err := collectStarlarkFiles(glob)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("%w: %s", errNoFilesMatched, glob)
+	}
+
+	schemaReg := schema.NewRegistryFromSchema(derivedSchema)
+
+	var results []starlarkValidationResult
+	for _, file := range files {
+		result := validateSingleStarlarkFile(file, schemaReg)
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+// validateSingleStarlarkFile validates one .star file against the handler schema.
+func validateSingleStarlarkFile(path string, schemaReg *schema.Registry) starlarkValidationResult {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return starlarkValidationResult{File: path, Error: fmt.Sprintf("failed to read file: %v", err)}
+	}
+	content := string(data)
+
+	// Honor skip directive - check actual comment lines only
+	if hasSkipDirective(content) {
+		return starlarkValidationResult{File: path, Pass: true, Skipped: true}
+	}
+
+	// Syntax check
+	fileOpts := &syntax.FileOptions{}
+	if _, parseErr := fileOpts.Parse(filepath.Base(path), content, 0); parseErr != nil {
+		return starlarkValidationResult{File: path, Error: fmt.Sprintf("syntax error: %v", parseErr)}
+	}
+
+	// Build predeclared environment with schema-validated modules
+	predeclared, err := buildStarlarkPredeclared(schemaReg)
+	if err != nil {
+		return starlarkValidationResult{File: path, Error: fmt.Sprintf("failed to build validation modules: %v", err)}
+	}
+
+	// Execute the script
+	thread := &starlark.Thread{
+		Name:  filepath.Base(path),
+		Print: func(_ *starlark.Thread, _ string) {},
+	}
+	if _, execErr := starlark.ExecFileOptions(fileOpts, thread, filepath.Base(path), content, predeclared); execErr != nil {
+		return starlarkValidationResult{File: path, Error: execErr.Error()}
+	}
+
+	return starlarkValidationResult{File: path, Pass: true}
+}
+
+// buildStarlarkPredeclared constructs the Starlark predeclared environment for
+// validating standalone cookbook scripts. It combines:
+//   - Schema-validated modules for all registered handlers (strict validation)
+//   - Open mock modules for service namespaces not yet in the handler registry
+//   - Standard builtins: saga, step, Decimal, input_data
+func buildStarlarkPredeclared(schemaReg *schema.Registry) (starlark.StringDict, error) {
+	// Build strict validation modules from the schema registry.
+	validationModules, err := schema.BuildValidationModules(schemaReg, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	predeclared := make(starlark.StringDict)
+	for name, module := range validationModules {
+		predeclared[name] = module
+	}
+
+	// Add open mock modules for namespaces not covered by the schema.
+	// These are service namespaces used in cookbook patterns that either:
+	// (a) have no registered handlers yet (experimental/aspirational)
+	// (b) use a different service module name than what's registered
+	cookbookNamespaces := []string{
+		"current_account",
+		"financial_accounting",
+		"financial_gateway",
+		"internal_account",
+		"market_data",
+		"market_information",
+		"operational_gateway",
+		"party",
+		"position_keeping",
+		"reconciliation",
+		"reference_data",
+		"repository",
+		"valuation_engine",
+	}
+
+	// Explicit allowlist of handlers not yet registered but used in cookbook scripts.
+	// Misspelled handler names NOT in this list will still fail validation.
+	openFallbackHandlers := map[string]map[string]struct{}{
+		"current_account": {
+			"evaluate_asset_valuation": {},
+			"execute_withdrawal":       {},
+		},
+		"party": {
+			"get": {},
+		},
+		"position_keeping": {
+			"get_balance":      {},
+			"list_accounts":    {},
+			"query_accounts":   {},
+			"query_logs":       {},
+			"query_positions":  {},
+			"retrieve_balance": {},
+		},
+		"reference_data": {
+			"get_account":      {},
+			"get_account_type": {},
+			"query":            {},
+		},
+	}
+
+	for _, ns := range cookbookNamespaces {
+		if _, registered := predeclared[ns]; !registered {
+			predeclared[ns] = &openServiceModule{name: ns}
+		} else {
+			// Wrap registered modules with hybrid fallback for known unregistered handlers
+			if fallbacks, ok := openFallbackHandlers[ns]; ok {
+				predeclared[ns] = &hybridServiceModule{
+					name:         ns,
+					strict:       predeclared[ns],
+					open:         &openServiceModule{name: ns},
+					openHandlers: fallbacks,
+				}
+			}
+		}
+	}
+
+	// Standard builtins
+
+	// saga(name) returns a mock saga object
+	predeclared["saga"] = starlark.NewBuiltin("saga", func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+		members := starlark.StringDict{"name": starlark.String("mock_saga")}
+		return starlarkstruct.FromStringDict(starlark.String("Saga"), members), nil
+	})
+
+	// step(name) is a no-op step marker
+	predeclared["step"] = starlark.NewBuiltin("step", func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+		return starlark.None, nil
+	})
+
+	// Decimal(s) returns a Float for arithmetic compatibility
+	predeclared["Decimal"] = decimalBuiltin()
+
+	// input_data is a permissive dict that returns sensible defaults for any key access.
+	predeclared["input_data"] = &permissiveInputDict{}
+
+	return predeclared, nil
+}
+
+// decimalBuiltin returns a Starlark builtin that converts string/int/float to Float.
+func decimalBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("Decimal", func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+		if len(args) != 1 {
+			return nil, fmt.Errorf("%w: got %d", errDecimalArgCount, len(args))
+		}
+		switch v := args[0].(type) {
+		case starlark.Float:
+			return v, nil
+		case starlark.Int:
+			i64, ok := v.Int64()
+			if !ok {
+				return nil, errDecimalOverflow
+			}
+			return starlark.Float(float64(i64)), nil
+		case starlark.String:
+			f, err := strconv.ParseFloat(string(v), 64)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %q", errDecimalParse, string(v))
+			}
+			return starlark.Float(f), nil
+		default:
+			return nil, fmt.Errorf("%w: %s", errDecimalType, args[0].Type())
+		}
+	})
+}
+
+// permissiveInputDict is a Starlark value that responds to both dict-style
+// access (x["key"]) and attribute access (x.get("key")), returning sensible
+// defaults for any key. This enables cookbook scripts to execute end-to-end
+// so handler parameter validation can fire.
+type permissiveInputDict struct{}
+
+func (d *permissiveInputDict) String() string        { return "input_data{}" }
+func (d *permissiveInputDict) Type() string          { return "dict" }
+func (d *permissiveInputDict) Freeze()               {}
+func (d *permissiveInputDict) Truth() starlark.Bool  { return starlark.True }
+func (d *permissiveInputDict) Hash() (uint32, error) { return 0, errUnhashableDict }
+
+// Get implements starlark.Mapping for x["key"] access.
+func (d *permissiveInputDict) Get(key starlark.Value) (v starlark.Value, found bool, err error) {
+	name, ok := key.(starlark.String)
+	if !ok {
+		return starlark.String(""), true, nil
+	}
+	return permissiveValue(string(name)), true, nil
+}
+
+// Attr implements starlark.HasAttrs for x.get("key") access.
+func (d *permissiveInputDict) Attr(name string) (starlark.Value, error) {
+	if name == "get" {
+		return starlark.NewBuiltin("get", func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			if len(args) >= 2 {
+				return args[1], nil
+			}
+			if len(args) >= 1 {
+				if keyStr, ok := args[0].(starlark.String); ok {
+					return permissiveValue(string(keyStr)), nil
+				}
+			}
+			return starlark.String(""), nil
+		}), nil
+	}
+	return starlark.None, nil
+}
+
+// AttrNames lists the available methods.
+func (d *permissiveInputDict) AttrNames() []string { return []string{"get"} }
+
+// permissiveValue returns a sensible default value for a given key name.
+// Integer fields return Int, decimal fields return Float, nested dicts
+// return a permissive struct, and everything else returns String.
+func permissiveValue(name string) starlark.Value {
+	// Integer fields - used where handlers expect int32/int64/uint32
+	intFields := map[string]bool{
+		"amount_cents": true, "max_members": true, "count": true,
+	}
+	if intFields[name] || strings.HasSuffix(name, "_cents") || strings.HasSuffix(name, "_minor_units") {
+		return starlark.MakeInt(10)
+	}
+	// Decimal/float fields - used where handlers expect TypeDecimal
+	numericFields := map[string]bool{
+		"amount": true, "total": true, "balance": true, "quantity": true,
+		"units": true, "unit_amount": true, "value": true, "stake_amount": true,
+		"gpu_hours": true, "amount_per_unit": true,
+	}
+	if numericFields[name] {
+		return starlark.Float(10.0)
+	}
+
+	nestedFields := map[string]bool{
+		"metadata": true, "instrument_amount": true, "attributes": true,
+	}
+	if nestedFields[name] {
+		return &permissiveResultValue{name: "input_data." + name}
+	}
+
+	return starlark.String("mock-" + name)
+}
+
+// openServiceModule is a Starlark value that responds to any attribute access
+// by returning a callable that accepts any kwargs and returns a permissive result.
+type openServiceModule struct {
+	name string
+}
+
+func (m *openServiceModule) String() string       { return m.name }
+func (m *openServiceModule) Type() string         { return "open_service_module" }
+func (m *openServiceModule) Freeze()              {}
+func (m *openServiceModule) Truth() starlark.Bool { return starlark.True }
+func (m *openServiceModule) Hash() (uint32, error) {
+	return 0, errUnhashableModule
+}
+
+func (m *openServiceModule) Attr(name string) (starlark.Value, error) {
+	fullName := m.name + "." + name
+	return starlark.NewBuiltin(fullName, func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+		return &permissiveResultValue{name: fullName + ".Result"}, nil
+	}), nil
+}
+
+func (m *openServiceModule) AttrNames() []string { return nil }
+
+// hybridServiceModule delegates to strict schema-validated module for
+// known handlers, falls back to open mock for handlers in openHandlers.
+type hybridServiceModule struct {
+	name         string
+	strict       starlark.Value
+	open         *openServiceModule
+	openHandlers map[string]struct{}
+}
+
+func (h *hybridServiceModule) String() string       { return h.name }
+func (h *hybridServiceModule) Type() string         { return "hybrid_service_module" }
+func (h *hybridServiceModule) Freeze()              {}
+func (h *hybridServiceModule) Truth() starlark.Bool { return starlark.True }
+func (h *hybridServiceModule) Hash() (uint32, error) {
+	return 0, errUnhashableHybrid
+}
+
+func (h *hybridServiceModule) Attr(name string) (starlark.Value, error) {
+	if hasAttr, ok := h.strict.(starlark.HasAttrs); ok {
+		val, err := hasAttr.Attr(name)
+		if err == nil && val != nil {
+			return val, nil
+		}
+	}
+	if _, allowed := h.openHandlers[name]; allowed {
+		return h.open.Attr(name)
+	}
+	return nil, fmt.Errorf("%s.%s: %w (possible misspelling?)", h.name, name, errHandlerNotAllowed)
+}
+
+func (h *hybridServiceModule) AttrNames() []string {
+	if hasAttr, ok := h.strict.(starlark.HasAttrs); ok {
+		return hasAttr.AttrNames()
+	}
+	return nil
+}
+
+// permissiveResultValue is a Starlark value that responds to any attribute access
+// or dict-style key access with a placeholder value. It also supports iteration.
+type permissiveResultValue struct {
+	name string
+}
+
+func (r *permissiveResultValue) String() string       { return r.name + "{}" }
+func (r *permissiveResultValue) Type() string         { return r.name }
+func (r *permissiveResultValue) Freeze()              {}
+func (r *permissiveResultValue) Truth() starlark.Bool { return starlark.True }
+
+func (r *permissiveResultValue) Hash() (uint32, error) {
+	return 0, errUnhashableResult
+}
+
+func (r *permissiveResultValue) Attr(name string) (starlark.Value, error) {
+	if name == "get" {
+		return starlark.NewBuiltin("get", func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			if len(args) >= 2 {
+				return args[1], nil
+			}
+			return starlark.String(""), nil
+		}), nil
+	}
+	return permissiveResultField(r.name, name), nil
+}
+
+func (r *permissiveResultValue) AttrNames() []string { return nil }
+
+// Get implements starlark.Mapping for x["key"] access.
+func (r *permissiveResultValue) Get(key starlark.Value) (v starlark.Value, found bool, err error) {
+	name, ok := key.(starlark.String)
+	if !ok {
+		return starlark.String(""), true, nil
+	}
+	return permissiveResultField(r.name, string(name)), true, nil
+}
+
+// Len implements starlark.Sequence for len(result).
+func (r *permissiveResultValue) Len() int { return 2 }
+
+// Index implements starlark.Indexable for result[i].
+func (r *permissiveResultValue) Index(i int) starlark.Value {
+	return &permissiveResultValue{name: fmt.Sprintf("%s[%d]", r.name, i)}
+}
+
+// Iterate implements starlark.Iterable for "for x in result".
+func (r *permissiveResultValue) Iterate() starlark.Iterator {
+	items := []starlark.Value{
+		&permissiveResultValue{name: r.name + "[0]"},
+		&permissiveResultValue{name: r.name + "[1]"},
+	}
+	return &resultIterator{items: items}
+}
+
+type resultIterator struct {
+	items []starlark.Value
+	index int
+}
+
+func (it *resultIterator) Next(p *starlark.Value) bool {
+	if it.index >= len(it.items) {
+		return false
+	}
+	*p = it.items[it.index]
+	it.index++
+	return true
+}
+
+func (it *resultIterator) Done() {}
+
+// permissiveResultField returns a placeholder value for a result field.
+func permissiveResultField(contextName, name string) starlark.Value {
+	listFields := map[string]bool{
+		"valuation_methods": true, "items": true, "results": true, "participants": true,
+	}
+	if listFields[name] {
+		return starlark.NewList([]starlark.Value{
+			&permissiveResultValue{name: contextName + "." + name + "[0]"},
+			&permissiveResultValue{name: contextName + "." + name + "[1]"},
+		})
+	}
+	intFields := map[string]bool{"count": true, "max_members": true}
+	if intFields[name] {
+		return starlark.MakeInt(0)
+	}
+	numericFields := map[string]bool{
+		"amount": true, "total": true, "balance": true, "quantity": true,
+		"units": true, "unit_amount": true, "value": true, "stake_amount": true,
+	}
+	if numericFields[name] {
+		return starlark.Float(0)
+	}
+	nestedFields := map[string]bool{
+		"metadata": true, "instrument_amount": true, "attributes": true,
+	}
+	if nestedFields[name] {
+		return &permissiveResultValue{name: contextName + "." + name}
+	}
+	return starlark.String("")
+}
