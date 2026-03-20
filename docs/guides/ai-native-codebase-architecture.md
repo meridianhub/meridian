@@ -196,10 +196,10 @@ The boundaries that matter for enforcement:
 - **service/** depends on both (wires them together) but is the only layer that does
 - **shared/** never imports services/ - dependency flows one direction only
 
-The specific pattern - hexagonal, clean architecture, vertical slices - matters less than two things:
+The specific pattern - hexagonal, clean architecture, vertical slices - matters less than:
 
-1. Every service uses the same one
-2. Architecture tests enforce it
+1. **Uniformity** - every service uses the same pattern, so navigating one means navigating all
+2. **Enforcement** - architecture tests from Layer 3 catch violations as build failures, not review comments
 
 Designate 2-3 services as **reference implementations** that agents should copy from.
 
