@@ -138,7 +138,7 @@ Checks include file size limits (with `//meridian:large-file` escape hatch), `ti
 
 ### Layer 5: Coverage Gates — Prevent Test Regression
 
-**Pattern**: Codecov enforces 75% project coverage and 70% patch coverage on every PR. Per-service coverage checks ensure no individual service drops below threshold.
+**Pattern**: Codecov enforces 75% project coverage and 70% patch coverage on every PR. Per-service coverage checks (configured via `component_management` in `codecov.yml`) ensure no individual service drops below 80%.
 
 **Why this matters for AI**: An agent implementing a feature might skip tests to save time. Coverage gates make this a blocking failure, not a suggestion.
 
