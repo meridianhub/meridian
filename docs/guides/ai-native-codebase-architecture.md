@@ -196,7 +196,12 @@ The boundaries that matter for enforcement:
 - **service/** depends on both (wires them together) but is the only layer that does
 - **shared/** never imports services/ - dependency flows one direction only
 
-The specific pattern - hexagonal, clean architecture, vertical slices - matters less than two things: (1) every service uses the same one, and (2) architecture tests enforce it. Designate 2-3 services as **reference implementations** that agents should copy from.
+The specific pattern - hexagonal, clean architecture, vertical slices - matters less than two things:
+
+1. Every service uses the same one
+2. Architecture tests enforce it
+
+Designate 2-3 services as **reference implementations** that agents should copy from.
 
 ### Denormalized Availability
 
