@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 
+	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestParseLogLevel(t *testing.T) {
@@ -79,6 +83,43 @@ func TestIsProductionEnvironmentDetection(t *testing.T) {
 			assert.Equal(t, tt.expected, result, "IsProduction() should be %v for ENVIRONMENT=%q", tt.expected, tt.envValue)
 		})
 	}
+}
+
+func TestNoopEventPublisher_Publish(t *testing.T) {
+	publisher := &noopEventPublisher{}
+	err := publisher.Publish(context.Background(), &emptypb.Empty{})
+	assert.NoError(t, err)
+}
+
+func TestNoopEventPublisher_PublishBatch(t *testing.T) {
+	publisher := &noopEventPublisher{}
+	err := publisher.PublishBatch(context.Background(), nil)
+	assert.NoError(t, err)
+}
+
+func TestCachedInstrumentResultAdapter_GetBucketKeyProgram(t *testing.T) {
+	cached := &cache.CachedInstrument{
+		BucketKeyProgram: nil,
+	}
+	adapter := &cachedInstrumentResultAdapter{cached: cached}
+	result := adapter.GetBucketKeyProgram()
+	assert.Nil(t, result)
+}
+
+func TestStaticErrors_Defined(t *testing.T) {
+	assert.NotNil(t, ErrBankCashAccountIDRequired)
+	assert.NotNil(t, ErrBankCashAccountIDInvalid)
+	assert.NotNil(t, ErrRedisRequiredInProduction)
+	assert.NotNil(t, ErrKafkaRequiredInProduction)
+}
+
+func TestCreateRedisClient_InvalidURL(t *testing.T) {
+	t.Setenv("REDIS_URL", "://not-a-valid-url")
+	logger := slog.Default()
+	client, err := createRedisClient(logger)
+	require.Error(t, err)
+	assert.Nil(t, client)
+	assert.Contains(t, err.Error(), "invalid REDIS_URL")
 }
 
 // Note: Full integration tests for production startup requirements would need

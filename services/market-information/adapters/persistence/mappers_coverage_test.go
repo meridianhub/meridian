@@ -194,3 +194,284 @@ func TestParseAccessLevel_AllBranches(t *testing.T) {
 		})
 	}
 }
+
+func TestDataSetDefinitionToEntity_AllFields(t *testing.T) {
+	now := time.Now().Truncate(time.Millisecond)
+	activatedAt := now.Add(-24 * time.Hour)
+	deprecatedAt := now.Add(-time.Hour)
+	id := uuid.New()
+
+	ds := domain.NewDataSetDefinitionBuilder().
+		WithID(id).
+		WithCode("FX_RATES").
+		WithVersion(2).
+		WithName("FX Rates Dataset").
+		WithDescription("Foreign exchange rates").
+		WithDataCategory(domain.DataCategoryPricing).
+		WithStatus(domain.DataSetStatusActive).
+		WithValidationExpression("amount > 0").
+		WithResolutionKeyExpression("base + '/' + quote").
+		WithErrorMessageExpression("amount must be positive").
+		WithIsShared(true).
+		WithAccessLevel(domain.AccessLevelPublic).
+		WithActivatedAt(&activatedAt).
+		WithDeprecatedAt(&deprecatedAt).
+		WithCreatedAt(now).
+		WithUpdatedAt(now).
+		Build()
+
+	entity := DataSetDefinitionToEntity(ds)
+
+	assert.Equal(t, id, entity.ID)
+	assert.Equal(t, "FX_RATES", entity.Code)
+	assert.Equal(t, 2, entity.Version)
+	assert.Equal(t, "FX Rates Dataset", entity.Name)
+	assert.True(t, entity.Description.Valid)
+	assert.Equal(t, "Foreign exchange rates", entity.Description.String)
+	assert.True(t, entity.DataCategory.Valid)
+	assert.Equal(t, "PRICING", entity.DataCategory.String)
+	assert.Equal(t, "ACTIVE", entity.Status)
+	assert.True(t, entity.ValidationExpression.Valid)
+	assert.Equal(t, "amount > 0", entity.ValidationExpression.String)
+	assert.Equal(t, "base + '/' + quote", entity.ResolutionKeyExpression)
+	assert.True(t, entity.ErrorMessageExpression.Valid)
+	assert.True(t, entity.IsShared)
+	assert.Equal(t, "PUBLIC", entity.AccessLevel)
+	assert.True(t, entity.ActivatedAt.Valid)
+	assert.True(t, entity.DeprecatedAt.Valid)
+}
+
+func TestDataSetDefinitionToEntity_MinimalFields(t *testing.T) {
+	now := time.Now()
+
+	ds := domain.NewDataSetDefinitionBuilder().
+		WithID(uuid.New()).
+		WithCode("MINIMAL").
+		WithVersion(1).
+		WithName("Minimal Dataset").
+		WithStatus(domain.DataSetStatusDraft).
+		WithResolutionKeyExpression("key").
+		WithIsShared(false).
+		WithAccessLevel(domain.AccessLevelPrivate).
+		WithCreatedAt(now).
+		WithUpdatedAt(now).
+		Build()
+
+	entity := DataSetDefinitionToEntity(ds)
+
+	assert.False(t, entity.Description.Valid)
+	assert.False(t, entity.DataCategory.Valid)
+	assert.False(t, entity.ValidationExpression.Valid)
+	assert.False(t, entity.ErrorMessageExpression.Valid)
+	assert.False(t, entity.ActivatedAt.Valid)
+	assert.False(t, entity.DeprecatedAt.Valid)
+}
+
+func TestEntityToDataSetDefinition_AllFields(t *testing.T) {
+	now := time.Now().Truncate(time.Millisecond)
+	id := uuid.New()
+	activatedAt := now.Add(-time.Hour)
+	deprecatedAt := now
+
+	entity := DataSetDefinitionEntity{
+		ID:                      id,
+		Code:                    "ENERGY_PRICES",
+		Version:                 3,
+		Name:                    "Energy Prices",
+		Description:             sql.NullString{String: "Energy market prices", Valid: true},
+		DataCategory:            sql.NullString{String: "PRICING", Valid: true},
+		Status:                  "ACTIVE",
+		ValidationExpression:    sql.NullString{String: "price >= 0", Valid: true},
+		ResolutionKeyExpression: "commodity + '_' + region",
+		ErrorMessageExpression:  sql.NullString{String: "price must be non-negative", Valid: true},
+		IsShared:                true,
+		AccessLevel:             "RESTRICTED",
+		ActivatedAt:             sql.NullTime{Time: activatedAt, Valid: true},
+		DeprecatedAt:            sql.NullTime{Time: deprecatedAt, Valid: true},
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+
+	ds := EntityToDataSetDefinition(entity)
+
+	assert.Equal(t, id, ds.ID())
+	assert.Equal(t, "ENERGY_PRICES", ds.Code())
+	assert.Equal(t, 3, ds.Version())
+	assert.Equal(t, "Energy Prices", ds.Name())
+	assert.Equal(t, "Energy market prices", ds.Description())
+	assert.Equal(t, domain.DataCategoryPricing, ds.DataCategory())
+	assert.Equal(t, domain.DataSetStatusActive, ds.Status())
+	assert.Equal(t, "price >= 0", ds.ValidationExpression())
+	assert.Equal(t, "commodity + '_' + region", ds.ResolutionKeyExpression())
+	assert.Equal(t, "price must be non-negative", ds.ErrorMessageExpression())
+	assert.True(t, ds.IsShared())
+	assert.Equal(t, domain.AccessLevelRestricted, ds.AccessLevel())
+	assert.NotNil(t, ds.ActivatedAt())
+	assert.NotNil(t, ds.DeprecatedAt())
+}
+
+func TestEntityToDataSetDefinition_MinimalFields(t *testing.T) {
+	now := time.Now()
+
+	entity := DataSetDefinitionEntity{
+		ID:                      uuid.New(),
+		Code:                    "MINIMAL",
+		Version:                 1,
+		Name:                    "Minimal",
+		Status:                  "DRAFT",
+		ResolutionKeyExpression: "key",
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+
+	ds := EntityToDataSetDefinition(entity)
+
+	assert.Equal(t, "", ds.Description())
+	assert.Nil(t, ds.ActivatedAt())
+	assert.Nil(t, ds.DeprecatedAt())
+}
+
+func TestDataSourceToEntity_WithDescription(t *testing.T) {
+	now := time.Now().Truncate(time.Millisecond)
+	id := uuid.New()
+
+	src := domain.NewDataSourceBuilder().
+		WithID(id).
+		WithCode("BLOOMBERG").
+		WithName("Bloomberg Data").
+		WithDescription("Bloomberg financial data feed").
+		WithTrustLevel(90).
+		WithIsActive(true).
+		WithCreatedAt(now).
+		WithUpdatedAt(now).
+		Build()
+
+	entity := DataSourceToEntity(src)
+
+	assert.Equal(t, id, entity.ID)
+	assert.Equal(t, "BLOOMBERG", entity.Code)
+	assert.Equal(t, "Bloomberg Data", entity.Name)
+	assert.Equal(t, 90, entity.TrustLevel)
+	assert.True(t, entity.Description.Valid)
+	assert.Equal(t, "Bloomberg financial data feed", entity.Description.String)
+}
+
+func TestDataSourceToEntity_EmptyDescription(t *testing.T) {
+	now := time.Now()
+
+	src := domain.NewDataSourceBuilder().
+		WithID(uuid.New()).
+		WithCode("INTERNAL").
+		WithName("Internal Feed").
+		WithTrustLevel(70).
+		WithIsActive(true).
+		WithCreatedAt(now).
+		WithUpdatedAt(now).
+		Build()
+
+	entity := DataSourceToEntity(src)
+
+	assert.False(t, entity.Description.Valid)
+}
+
+func TestEntityToDataSource_WithDescription(t *testing.T) {
+	now := time.Now().Truncate(time.Millisecond)
+	id := uuid.New()
+
+	entity := DataSourceEntity{
+		ID:          id,
+		Code:        "REUTERS",
+		Name:        "Reuters Data",
+		TrustLevel:  85,
+		Description: sql.NullString{String: "Reuters market data", Valid: true},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Version:     1,
+	}
+
+	src := EntityToDataSource(entity)
+
+	assert.Equal(t, id, src.ID())
+	assert.Equal(t, "REUTERS", src.Code())
+	assert.Equal(t, "Reuters Data", src.Name())
+	assert.Equal(t, 85, src.TrustLevel())
+	assert.Equal(t, "Reuters market data", src.Description())
+	assert.True(t, src.IsActive())
+}
+
+func TestEntityToDataSource_WithoutDescription(t *testing.T) {
+	now := time.Now()
+
+	entity := DataSourceEntity{
+		ID:         uuid.New(),
+		Code:       "MANUAL",
+		Name:       "Manual Entry",
+		TrustLevel: 50,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		Version:    1,
+	}
+
+	src := EntityToDataSource(entity)
+
+	assert.Equal(t, "", src.Description())
+	assert.True(t, src.IsActive()) // Always active from DB
+}
+
+// TestDataSetDefinitionRoundTrip verifies that domain -> entity -> domain preserves all fields.
+func TestDataSetDefinitionRoundTrip(t *testing.T) {
+	now := time.Now().Truncate(time.Millisecond)
+	id := uuid.New()
+
+	original := domain.NewDataSetDefinitionBuilder().
+		WithID(id).
+		WithCode("ROUND_TRIP").
+		WithVersion(1).
+		WithName("Round Trip Test").
+		WithDescription("test description").
+		WithDataCategory(domain.DataCategoryContextual).
+		WithStatus(domain.DataSetStatusDraft).
+		WithValidationExpression("val > 0").
+		WithResolutionKeyExpression("key").
+		WithIsShared(false).
+		WithAccessLevel(domain.AccessLevelPrivate).
+		WithCreatedAt(now).
+		WithUpdatedAt(now).
+		Build()
+
+	entity := DataSetDefinitionToEntity(original)
+	restored := EntityToDataSetDefinition(entity)
+
+	assert.Equal(t, original.ID(), restored.ID())
+	assert.Equal(t, original.Code(), restored.Code())
+	assert.Equal(t, original.Description(), restored.Description())
+	assert.Equal(t, original.DataCategory(), restored.DataCategory())
+	assert.Equal(t, original.Status(), restored.Status())
+	assert.Equal(t, original.ValidationExpression(), restored.ValidationExpression())
+}
+
+// TestDataSourceRoundTrip verifies that domain -> entity -> domain preserves all fields.
+func TestDataSourceRoundTrip(t *testing.T) {
+	now := time.Now().Truncate(time.Millisecond)
+	id := uuid.New()
+
+	original := domain.NewDataSourceBuilder().
+		WithID(id).
+		WithCode("SRC_RT").
+		WithName("Source Round Trip").
+		WithDescription("round trip desc").
+		WithTrustLevel(75).
+		WithIsActive(true).
+		WithCreatedAt(now).
+		WithUpdatedAt(now).
+		Build()
+
+	entity := DataSourceToEntity(original)
+	restored := EntityToDataSource(entity)
+
+	assert.Equal(t, original.ID(), restored.ID())
+	assert.Equal(t, original.Code(), restored.Code())
+	assert.Equal(t, original.Name(), restored.Name())
+	assert.Equal(t, original.Description(), restored.Description())
+	assert.Equal(t, original.TrustLevel(), restored.TrustLevel())
+}
