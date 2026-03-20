@@ -20,9 +20,10 @@ ignore:
   - "services/mcp-server/cmd/wire.go"
 
 comment:
-  layout: "condensed_header, condensed_files, condensed_footer"
+  layout: "condensed_header, condensed_files, components, condensed_footer"
   behavior: default
   require_changes: true
+  show_carryforward_flags: true
 
 flags:
   unittests:
@@ -39,3 +40,99 @@ flags:
     paths:
       - "frontend/src/"
     carryforward: true
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: 80%
+        threshold: 2%
+  individual_components:
+    - component_id: api-gateway
+      name: API Gateway
+      paths:
+        - services/api-gateway/**
+    - component_id: audit-worker
+      name: Audit Worker
+      paths:
+        - services/audit-worker/**
+    - component_id: control-plane
+      name: Control Plane
+      paths:
+        - services/control-plane/**
+    - component_id: current-account
+      name: Current Account
+      paths:
+        - services/current-account/**
+    - component_id: event-router
+      name: Event Router
+      paths:
+        - services/event-router/**
+    - component_id: financial-accounting
+      name: Financial Accounting
+      paths:
+        - services/financial-accounting/**
+    - component_id: financial-gateway
+      name: Financial Gateway
+      paths:
+        - services/financial-gateway/**
+    - component_id: forecasting
+      name: Forecasting
+      paths:
+        - services/forecasting/**
+    - component_id: identity
+      name: Identity
+      paths:
+        - services/identity/**
+    - component_id: internal-account
+      name: Internal Account
+      paths:
+        - services/internal-account/**
+    - component_id: market-information
+      name: Market Information
+      paths:
+        - services/market-information/**
+    - component_id: mcp-server
+      name: MCP Server
+      paths:
+        - services/mcp-server/**
+    - component_id: operational-gateway
+      name: Operational Gateway
+      paths:
+        - services/operational-gateway/**
+    - component_id: party
+      name: Party
+      paths:
+        - services/party/**
+    - component_id: payment-order
+      name: Payment Order
+      paths:
+        - services/payment-order/**
+    - component_id: position-keeping
+      name: Position Keeping
+      paths:
+        - services/position-keeping/**
+    - component_id: reconciliation
+      name: Reconciliation
+      paths:
+        - services/reconciliation/**
+    - component_id: reference-data
+      name: Reference Data
+      paths:
+        - services/reference-data/**
+    - component_id: tenant
+      name: Tenant
+      paths:
+        - services/tenant/**
+    - component_id: shared-platform
+      name: Shared Platform
+      paths:
+        - shared/platform/**
+    - component_id: shared-pkg
+      name: Shared Pkg
+      paths:
+        - shared/pkg/**
+    - component_id: shared-domain
+      name: Shared Domain
+      paths:
+        - shared/domain/**
