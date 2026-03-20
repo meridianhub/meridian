@@ -44,8 +44,6 @@ Layer 7: Automated Retros     - catches workflow drift   (end of cycle)
 
 No single layer is sufficient. The value is in the combination - each layer catches what the previous one missed. Layers 1-6 are automated enforcement. Layer 7 is the feedback loop that improves the contracts themselves.
 
-## The Patterns
-
 ### Breadcrumb-Driven Behavior - Start Here
 
 Project-level instruction files (loaded into AI agent context at session start) use specific phrases and keywords that activate preferred behavior. These act as "breadcrumbs" - compact triggers that reference larger patterns the agent should follow.
@@ -355,11 +353,7 @@ The cost is front-loaded. The payoff compounds - every new service, feature, and
 
 ## The Underlying Principle
 
-Every pattern in this guide follows one principle: **make the right thing easy and the wrong thing hard.**
-
-An AI agent (or a human in a hurry) will take the path of least resistance. If the easiest path produces correct, consistent code - because the type system prevents type errors, the linter rejects unexplained suppressions, the architecture tests enforce structure, and CI blocks violations - then quality becomes the default, not the exception.
-
-This is not about restricting what agents can do. It's about making a codebase that's **larger than any single context window** behave as if it fits in one - because every local decision is guided by structural constraints that encode the global design.
+This is not about restricting what agents can do. It's about making a codebase that's **larger than any single context window** behave as if it fits in one - because every local decision is guided by contracts that encode the global design.
 
 ## Further Reading
 
