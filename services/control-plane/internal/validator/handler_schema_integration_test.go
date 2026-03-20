@@ -124,11 +124,11 @@ func fullHandlerSchema() *schema.Schema {
 			// --- financial_gateway ---
 			"financial_gateway.dispatch_payment": {
 				Params: map[string]*schema.FieldDef{
-					"amount":          {Type: schema.TypeDecimal, Required: true},
-					"currency":        {Type: schema.TypeString, Required: true},
+					"amount":           {Type: schema.TypeDecimal, Required: true},
+					"currency":         {Type: schema.TypeString, Required: true},
 					"payment_order_id": {Type: schema.TypeString},
-					"idempotency_key": {Type: schema.TypeString},
-					"party_id":        {Type: schema.TypeString},
+					"idempotency_key":  {Type: schema.TypeString},
+					"party_id":         {Type: schema.TypeString},
 				},
 				Returns: map[string]*schema.FieldDef{
 					"payment_id": {Type: schema.TypeString},
@@ -487,13 +487,13 @@ func buildCookbookPredeclared(serviceModules starlark.StringDict) starlark.Strin
 
 	// saga(name=...) returns a no-op dict-like value
 	predeclared["saga"] = starlark.NewBuiltin("saga",
-		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
 			return starlark.NewDict(0), nil
 		})
 
 	// step(name=...) is a no-op
 	predeclared["step"] = starlark.NewBuiltin("step",
-		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
 			return starlark.None, nil
 		})
 
