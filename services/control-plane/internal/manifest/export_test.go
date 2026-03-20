@@ -611,6 +611,188 @@ func TestExportService_Export_FallbackOnlySections(t *testing.T) {
 	})
 }
 
+func TestExportService_Export_AccountTypeCollectorError(t *testing.T) {
+	fb := testFallbackManifest()
+
+	t.Run("account type collector error falls back with warning", func(t *testing.T) {
+		svc := &ExportService{
+			collectors: &ExportCollectors{
+				AccountTypes: &mockAccountTypeCollector{err: errors.New("db connection lost")},
+			},
+		}
+
+		result := &ExportResult{
+			Manifest:       &controlplanev1.Manifest{},
+			SectionSources: make(map[string]string),
+		}
+
+		svc.collectAccountTypes(context.Background(), result, fb, "1.0")
+		assert.Equal(t, fb.AccountTypes, result.Manifest.AccountTypes)
+		assert.Equal(t, "fallback:manifest-v1.0", result.SectionSources["account_types"])
+		require.Len(t, result.Warnings, 1)
+		assert.Contains(t, result.Warnings[0], "db connection lost")
+	})
+
+	t.Run("account type collector error without fallback", func(t *testing.T) {
+		svc := &ExportService{
+			collectors: &ExportCollectors{
+				AccountTypes: &mockAccountTypeCollector{err: errors.New("fail")},
+			},
+		}
+
+		result := &ExportResult{
+			Manifest:       &controlplanev1.Manifest{},
+			SectionSources: make(map[string]string),
+		}
+
+		svc.collectAccountTypes(context.Background(), result, nil, "")
+		assert.Nil(t, result.Manifest.AccountTypes)
+		require.Len(t, result.Warnings, 1)
+	})
+}
+
+func TestExportService_Export_OrganizationCollectorError(t *testing.T) {
+	fb := testFallbackManifest()
+	fb.Organizations = []*controlplanev1.OrganizationDefinition{
+		{Code: "ACME", Name: "Acme Corp"},
+	}
+
+	svc := &ExportService{
+		collectors: &ExportCollectors{
+			Organizations: &mockOrganizationCollector{err: errors.New("timeout")},
+		},
+	}
+
+	result := &ExportResult{
+		Manifest:       &controlplanev1.Manifest{},
+		SectionSources: make(map[string]string),
+	}
+
+	svc.collectOrganizations(context.Background(), result, fb, "1.0")
+	assert.Equal(t, fb.Organizations, result.Manifest.Organizations)
+	assert.Equal(t, "fallback:manifest-v1.0", result.SectionSources["organizations"])
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "timeout")
+}
+
+func TestExportService_Export_InternalAccountCollectorError(t *testing.T) {
+	fb := testFallbackManifest()
+	fb.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
+		{Code: "REVENUE_GBP", AccountType: "REVENUE"},
+	}
+
+	svc := &ExportService{
+		collectors: &ExportCollectors{
+			InternalAccounts: &mockInternalAccountCollector{err: errors.New("service unavailable")},
+		},
+	}
+
+	result := &ExportResult{
+		Manifest:       &controlplanev1.Manifest{},
+		SectionSources: make(map[string]string),
+	}
+
+	svc.collectInternalAccounts(context.Background(), result, fb, "1.0")
+	assert.Equal(t, fb.InternalAccounts, result.Manifest.InternalAccounts)
+	assert.Equal(t, "fallback:manifest-v1.0", result.SectionSources["internal_accounts"])
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "service unavailable")
+}
+
+func TestExportService_Export_MarketDataDatasetError(t *testing.T) {
+	fb := testFallbackManifest()
+	fb.MarketData = &controlplanev1.MarketDataConfig{
+		Datasets: []*controlplanev1.MarketDataSetDefinition{{Code: "FB_DS"}},
+	}
+
+	svc := &ExportService{
+		collectors: &ExportCollectors{
+			MarketData: &mockMarketDataCollector{dsErr: errors.New("dataset fail")},
+		},
+	}
+
+	result := &ExportResult{
+		Manifest:       &controlplanev1.Manifest{},
+		SectionSources: make(map[string]string),
+	}
+
+	svc.collectMarketData(context.Background(), result, fb, "1.0")
+	assert.Equal(t, fb.MarketData, result.Manifest.MarketData)
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "dataset fail")
+}
+
+func TestExportService_Export_MarketDataBothErrors(t *testing.T) {
+	svc := &ExportService{
+		collectors: &ExportCollectors{
+			MarketData: &mockMarketDataCollector{
+				srcErr: errors.New("src fail"),
+				dsErr:  errors.New("ds fail"),
+			},
+		},
+	}
+
+	result := &ExportResult{
+		Manifest:       &controlplanev1.Manifest{},
+		SectionSources: make(map[string]string),
+	}
+
+	svc.collectMarketData(context.Background(), result, nil, "")
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "src fail")
+	assert.Contains(t, result.Warnings[0], "ds fail")
+}
+
+func TestExportService_Export_OperationalGatewayRouteError(t *testing.T) {
+	fb := testFallbackManifest()
+	fb.OperationalGateway = &controlplanev1.OperationalGatewayConfig{
+		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{{InstructionType: "pay"}},
+	}
+
+	svc := &ExportService{
+		collectors: &ExportCollectors{
+			OperationalGateway: &mockOperationalGatewayCollector{routeErr: errors.New("route fail")},
+		},
+	}
+
+	result := &ExportResult{
+		Manifest:       &controlplanev1.Manifest{},
+		SectionSources: make(map[string]string),
+	}
+
+	svc.collectOperationalGateway(context.Background(), result, fb, "1.0")
+	assert.Equal(t, fb.OperationalGateway, result.Manifest.OperationalGateway)
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "route fail")
+}
+
+func TestExportService_Export_OperationalGatewayBothErrors(t *testing.T) {
+	svc := &ExportService{
+		collectors: &ExportCollectors{
+			OperationalGateway: &mockOperationalGatewayCollector{
+				connErr:  errors.New("conn fail"),
+				routeErr: errors.New("route fail"),
+			},
+		},
+	}
+
+	result := &ExportResult{
+		Manifest:       &controlplanev1.Manifest{},
+		SectionSources: make(map[string]string),
+	}
+
+	svc.collectOperationalGateway(context.Background(), result, nil, "")
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "conn fail")
+	assert.Contains(t, result.Warnings[0], "route fail")
+}
+
+func TestIsNotFound(t *testing.T) {
+	assert.True(t, isNotFound(ErrVersionNotFound))
+	assert.False(t, isNotFound(nil))
+	assert.False(t, isNotFound(errors.New("other error")))
+}
+
 func TestExportService_Export_SectionFiltering(t *testing.T) {
 	t.Run("include only instruments section", func(t *testing.T) {
 		liveInstruments := []*controlplanev1.InstrumentDefinition{
@@ -645,4 +827,35 @@ func TestExportService_Export_SectionFiltering(t *testing.T) {
 		assert.Equal(t, liveInstruments, result.Manifest.Instruments)
 		assert.Nil(t, result.Manifest.Sagas) // Sagas not included.
 	})
+}
+
+func TestParseSections_Empty(t *testing.T) {
+	sections := parseSections(nil)
+	assert.Len(t, sections, len(allSections))
+	for name := range allSections {
+		assert.True(t, sections[name], "expected %s in result", name)
+	}
+}
+
+func TestParseSections_ValidSubset(t *testing.T) {
+	sections := parseSections([]string{"instruments", "sagas"})
+	assert.Len(t, sections, 2)
+	assert.True(t, sections[SectionInstruments])
+	assert.True(t, sections[SectionSagas])
+}
+
+func TestParseSections_UnknownIgnored(t *testing.T) {
+	sections := parseSections([]string{"instruments", "nonexistent"})
+	assert.Len(t, sections, 1)
+	assert.True(t, sections[SectionInstruments])
+}
+
+func TestParseSections_AllUnknown(t *testing.T) {
+	sections := parseSections([]string{"bogus", "fake"})
+	assert.Empty(t, sections)
+}
+
+func TestParseSections_EmptySlice(t *testing.T) {
+	sections := parseSections([]string{})
+	assert.Len(t, sections, len(allSections))
 }

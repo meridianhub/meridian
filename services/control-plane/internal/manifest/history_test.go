@@ -476,3 +476,27 @@ func testManifest(version string) *controlplanev1.Manifest {
 		},
 	}
 }
+
+func TestVersionEntity_TableName(t *testing.T) {
+	entity := VersionEntity{}
+	assert.Equal(t, "manifest_versions", entity.TableName())
+}
+
+func TestVersionEntity_GetPhaseStatus_InvalidJSON(t *testing.T) {
+	bad := "not json"
+	entity := &VersionEntity{PhaseStatus: &bad}
+	_, err := entity.GetPhaseStatus()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal phase_status")
+}
+
+func TestUnmarshalManifest_Valid(t *testing.T) {
+	m, err := unmarshalManifest(`{"version":"1.0"}`)
+	require.NoError(t, err)
+	assert.Equal(t, "1.0", m.GetVersion())
+}
+
+func TestUnmarshalManifest_Invalid(t *testing.T) {
+	_, err := unmarshalManifest(`not valid json`)
+	assert.Error(t, err)
+}
