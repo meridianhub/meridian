@@ -173,10 +173,13 @@ def execute_apply_manifest():
     # Phase 55: Register organizations with Party service
     for org in organizations:
         step(name="register_organization_" + org["code"])
+        org_name = org.get("name", org["code"])
         party.register_organization(
-            code=org["code"],
-            name=org.get("name", org["code"]),
+            legal_name=org_name,
+            display_name=org_name,
             party_type=org.get("party_type", "ORGANIZATION"),
+            external_reference=org.get("code", ""),
+            external_reference_type="CUSTOM",
             attributes=org.get("attributes", {}),
         )
         registered_organizations.append({
