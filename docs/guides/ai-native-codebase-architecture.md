@@ -296,50 +296,6 @@ This is automated analysis with human-approved adaptation:
 
 The human gate is deliberate. Fully autonomous self-modification would be a trust problem - you'd need to verify every change to the orchestration template anyway, so keeping approval explicit keeps the review burden visible rather than hidden.
 
-Layers 1-6 are static guard rails. Layer 7 is what makes the system adaptive - the guard rails themselves improve over time based on observed failures. Without it, you catch the same category of error forever. With it, each work cycle leaves the system better calibrated for the next.
-
-## Planning for Parallel Delivery
-
-Code quality infrastructure is half the picture. The other half is how you plan and sequence work when multiple agents (or humans) work in parallel.
-
-### Map Dependencies Before Starting
-
-Before breaking work into parallel tasks, map the dependency tree. Tasks that look independent often share a database migration, a proto definition, or a shared utility. If two agents both modify the same migration file or proto, one of them will hit a merge conflict and waste a cycle.
-
-The planning sequence:
-
-1. **List all tasks** for the work package
-2. **Identify shared dependencies** - migrations, proto files, shared packages, config files
-3. **Sequence dependent tasks** so shared artifacts are created by one task and consumed by the rest
-4. **Parallelize only truly independent tasks** - different services, different features, no shared files
-
-### Identify Hot Files
-
-Hot files are files that multiple tasks need to modify. Common examples:
-
-- Database migration directories (sequential version numbers)
-- Proto definitions (adding fields or services)
-- Shared type registries or configuration files
-- Test fixtures or seed data
-- CI workflow definitions
-
-When you identify a hot file, you have three options:
-
-1. **Serialize** - assign all changes to that file to a single task, run it first
-2. **Batch** - collect all changes to the file into one task that runs after the others
-3. **Design away** - restructure so each task writes to its own file (e.g. per-service migration directories instead of a shared one)
-
-### Optimize for Concurrency
-
-The goal is maximum parallelism with zero merge conflicts. In practice this means:
-
-- **Group by service boundary** - tasks that touch different services can always run in parallel
-- **Front-load shared infrastructure** - if three tasks need a new shared package, one task creates it first, then the three tasks run in parallel
-- **Keep PRs small and focused** - a PR that touches 3 services is a PR that conflicts with everything. One PR per service per task.
-- **Merge in dependency order** - if task B depends on task A's shared package, merge A first and rebase B before pushing
-
-The parallel delivery patterns complement the code quality infrastructure. Architecture tests (Layer 3) enforce service boundaries that make parallelism safe. Predictable architecture means agents working on different services don't need to coordinate. CI catches merge conflicts early. The infrastructure enables the concurrency.
-
 ## Implementation Checklist
 
 If you're an AI agent asked to make a codebase ready for sustained AI delivery - or a human setting this up - work through these steps in order. Each step is independently valuable. You don't need all of them to see improvement, but the later steps compound on the earlier ones.
