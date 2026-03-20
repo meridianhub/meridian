@@ -190,7 +190,7 @@ instructions: |
 
 **Why this matters for AI**: An agent can programmatically search for relevant guides based on what it's doing. The `triggers` field acts as a semantic index — "I'm adding a repository, which guides apply?" — without requiring the agent to read every document.
 
-18 guides in `docs/guides/`, 37 ADRs in `docs/adr/`, all with this front-matter.
+19 guides in `docs/guides/`, 37 ADRs in `docs/adr/`, all with this front-matter.
 
 ### Hexagonal Architecture — Predictable Boundaries
 
@@ -308,7 +308,7 @@ This is not about restricting what agents can do. It's about making a codebase t
 
 ## Links
 
-* [ADR-015: Service Directory Structure](./0015-service-directory-structure.md)
+* [ADR-015: Standard Service Directory Structure](./0015-standard-service-directory-structure.md)
 * [ADR-035: Multi-Asset Purity](./0035-multi-asset-purity.md)
 * [docs/guides/README.md](../guides/README.md) — Convention guide index
 * [tests/architecture/](../../tests/architecture/) — Architecture test suites
