@@ -8,6 +8,7 @@ on:
       - 'api/jsonschema/**'
       - 'services/control-plane/**'
       - 'examples/manifests/**'
+      - 'cookbook/**'
       - 'buf.gen.jsonschema.yaml'
       - 'scripts/validate-manifest-jsonschema.sh'
       - '.github/workflows/control-plane-ci.yml'
@@ -18,6 +19,7 @@ on:
       - 'api/jsonschema/**'
       - 'services/control-plane/**'
       - 'examples/manifests/**'
+      - 'cookbook/**'
       - 'buf.gen.jsonschema.yaml'
       - 'scripts/validate-manifest-jsonschema.sh'
       - '.github/workflows/control-plane-ci.yml'
@@ -133,14 +135,19 @@ jobs:
       - name: Report validation failures
         if: failure()
         run: |
-          echo "::error::Example manifest validation failed."
+          echo "::error::Manifest or cookbook pattern validation failed."
           echo "::error::Check the output above for specific validation errors."
           echo ""
           echo "Manifests are validated against:"
           echo "  - Protobuf schema constraints (field types, required fields)"
           echo "  - CEL expression type-checking (policy expressions)"
           echo "  - Starlark script compilation (saga scripts)"
+          echo "  - Handler parameter validation (required params, types, enum values)"
           echo "  - Cross-reference integrity (instrument code references)"
+          echo ""
+          echo "Cookbook patterns (.star files) are validated against:"
+          echo "  - Starlark syntax"
+          echo "  - Handler parameter validation via schema-derived service modules"
 
   unit-tests:
     name: Control Plane Unit Tests

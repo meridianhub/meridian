@@ -519,11 +519,11 @@ asyncapi-validate:
 gen-event-publishers:
 	@$(GOCMD) run ./tools/gen-event-publishers
 
-## validate-manifests: Validate example manifests against protobuf schema, CEL, and Starlark
+## validate-manifests: Validate example manifests and cookbook patterns against schema
 validate-manifests:
-	@echo "Validating example manifests..."
-	@$(GOCMD) run ./services/control-plane/cmd/validate/ -manifest='examples/manifests/*.json'
-	@echo "All example manifests validated successfully"
+	@echo "Validating example manifests and cookbook patterns..."
+	@$(GOCMD) run ./services/control-plane/cmd/validate/ -manifest='examples/manifests/*.json' -starlark='cookbook/patterns/**/*.star'
+	@echo "All example manifests and cookbook patterns validated successfully"
 
 ## test-control-plane: Run control plane service unit tests
 test-control-plane:
