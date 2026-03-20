@@ -119,6 +119,14 @@ High-leverage lint rules for AI-heavy codebases:
 
 These rules target the specific shortcuts agents take when iterating quickly. The linter turns bad habits into blocked pushes.
 
+**Escape hatches matter.** Strict rules without explicit exceptions become "turn off the linter" rules. Design grep-able escape hatches for legitimate exceptions:
+
+```
+// myproject:large-file - this file contains generated lookup tables
+```
+
+The escape hatch serves three purposes: it makes the exception deliberate (not accidental), discoverable (grep for all exceptions across the codebase), and reviewable (the comment explains why). An agent encountering a rule violation can either fix the code or add an escape hatch with justification - both are better than suppressing the rule globally.
+
 ### Architecture Tests - Conventions as Contracts
 
 Write tests that scan the codebase and fail if conventions are violated.
@@ -164,14 +172,6 @@ A CI pipeline for sustained AI delivery should include:
 **Coverage gates deserve emphasis.** Without them, the fastest path for an agent is "implement the feature, push, move on." Coverage gates - both project-wide minimum (e.g. 75%) and per-PR patch coverage (e.g. 70%) - force the agent to write tests as part of the implementation, not as a follow-up that never happens. Per-component coverage thresholds (e.g. no service drops below 80%) prevent quality from concentrating in well-tested areas while new code ships untested.
 
 **Speed matters.** A CI pipeline that takes 30 minutes to return feedback is a pipeline that agents (and humans) learn to ignore. Optimize for fast feedback: parallelize test suites, cache dependencies, run the fastest checks first so failures surface early.
-
-**Escape hatches matter.** Strict rules without explicit exceptions become "turn off the linter" rules. Design grep-able escape hatches for legitimate exceptions:
-
-```
-// myproject:large-file - this file contains generated lookup tables
-```
-
-The escape hatch serves three purposes: it makes the exception deliberate (not accidental), discoverable (grep for all exceptions across the codebase), and reviewable (the comment explains why).
 
 ### Predictable Architecture - Every Service Looks the Same
 
