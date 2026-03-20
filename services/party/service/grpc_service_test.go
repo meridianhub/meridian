@@ -1050,4 +1050,32 @@ func TestListParties(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, codes.Internal, st.Code())
 	})
+
+	t.Run("returns InvalidArgument for unrecognized party_type enum", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{
+			PartyType: pb.PartyType(999),
+		})
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("returns InvalidArgument for unrecognized status enum", func(t *testing.T) {
+		mock := newMockRepository()
+		svc := newTestService(mock)
+
+		resp, err := svc.ListParties(ctx, &pb.ListPartiesRequest{
+			Status: pb.PartyStatus(999),
+		})
+		assert.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+	})
 }
