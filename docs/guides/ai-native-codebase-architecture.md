@@ -70,9 +70,15 @@ These aren't documentation - they're **behavioral programming**. LLMs respond to
 - **Positive framing where possible**: "Use constructor injection" rather than "Don't use singletons"
 - **Keep them current**: Stale breadcrumbs are worse than none - they train the agent on outdated patterns
 
-### Type System - Make Invalid States Unrepresentable
+### Make Bugs Self-Evident
 
-Use the type system to prevent errors at compile time, not runtime. Look for categories of runtime errors that could become compile-time errors. Dimensional types, generated API clients, and non-Turing-complete scripting languages are three high-leverage approaches.
+The goal is a codebase where incorrect code looks wrong - ideally at compile time, but at minimum on first read. Three strategies compound on each other:
+
+**Immutability by default.** Mutable state is where bugs hide. An AI agent that creates a mutable object and passes it through three functions has created three opportunities for something to silently modify it. Prefer value types, immutable data structures, and functions that return new values rather than modifying existing ones. When mutation is necessary, make it explicit and contained - a single method that owns the state transition, not scattered writes across a call chain.
+
+**Functional style where it fits.** Pure functions (same input, same output, no side effects) are inherently testable and easy to reason about in isolation. An agent can understand a pure function by reading it - no need to trace what else might have changed. Push side effects to the edges (entry points, adapters) and keep the core logic pure.
+
+**Type system as constraint.** Use the type system to prevent errors at compile time, not runtime. Look for categories of runtime errors that could become compile-time errors. Dimensional types, generated API clients, and non-Turing-complete scripting languages are three high-leverage approaches.
 
 Go generics can enforce dimensional safety on quantities:
 
