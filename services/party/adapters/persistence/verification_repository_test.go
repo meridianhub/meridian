@@ -431,3 +431,13 @@ func TestUpdateVerificationMetadata_NotFound(t *testing.T) {
 	err := repo.UpdateVerificationMetadata(ctx, uuid.New(), `{"test": "data"}`)
 	assert.ErrorIs(t, err, ErrVerificationNotFound)
 }
+
+func TestGetVerificationByID_NotFound(t *testing.T) {
+	db, ctx, cleanup := setupVerificationTestDB(t)
+	defer cleanup()
+
+	repo := NewVerificationRepository(db)
+
+	_, err := repo.GetVerificationByID(ctx, uuid.New())
+	assert.ErrorIs(t, err, ErrVerificationNotFound)
+}
