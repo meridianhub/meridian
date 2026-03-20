@@ -170,10 +170,12 @@ func fullHandlerSchema() *schema.Schema {
 			"reference_data.query": {
 				Params: map[string]*schema.FieldDef{
 					"entity_type": {Type: schema.TypeString},
+					"filter":      {Type: schema.TypeString},
 					"filters":     {Type: schema.TypeMap},
 				},
 				Returns: map[string]*schema.FieldDef{
 					"results": {Type: schema.TypeArray},
+					"count":   {Type: schema.TypeInt32},
 				},
 				CompensationStrategy: schema.CompensationStrategyNone,
 			},
@@ -301,8 +303,10 @@ func fullHandlerSchema() *schema.Schema {
 			},
 			"party.get_structuring_data": {
 				Params: map[string]*schema.FieldDef{
-					"party_id":    {Type: schema.TypeString, Required: true},
-					"entity_type": {Type: schema.TypeString},
+					"party_id":          {Type: schema.TypeString, Required: true},
+					"entity_type":       {Type: schema.TypeString},
+					"org_id":            {Type: schema.TypeString},
+					"relationship_type": {Type: schema.TypeString},
 				},
 				Returns: map[string]*schema.FieldDef{
 					"allocation_share": {Type: schema.TypeDecimal},
