@@ -67,7 +67,7 @@ No single layer is sufficient. The value is in the combination - each layer catc
 what the previous one missed. Layers 1-6 are automated enforcement. Layer 7 is the
 feedback loop that improves the contracts themselves.
 
-### Breadcrumb-Driven Behavior - Start Here
+### Breadcrumb-Driven Behavior
 
 Project-level instruction files (loaded into AI agent context at session start) use
 specific phrases and keywords that activate preferred behavior. These act as
@@ -110,6 +110,14 @@ contribution.
   "Don't use singletons"
 - **Keep them current**: Stale breadcrumbs are worse than none - they train the
   agent on outdated patterns
+
+**Breadcrumbs have a lifecycle.** They are not set-and-forget. A typical cycle:
+an agent uses `sleep 60` to wait for CI, a retrospective (Layer 7) catches the
+wasted time, a breadcrumb gets added ("use `gh pr checks --watch` instead of
+`sleep`"), and no agent makes that mistake again. The feedback loop between
+retrospectives and breadcrumbs is what keeps the behavioral contracts current.
+Without it, breadcrumbs drift from reality and become the norms you were trying
+to replace.
 
 ### Make Bugs Self-Evident
 
@@ -228,6 +236,12 @@ shell script that greps the source tree is better than nothing.
 An agent creating a new service or feature module will pattern-match from existing
 ones. Architecture tests guarantee that the pattern it copies is the canonical one,
 not an exception.
+
+**The ratchet pattern** makes architecture tests practical for brownfield codebases.
+Start strict for new code. Record existing violations as an explicit allowlist.
+The test passes if violations stay at or below the current count - never above.
+Over time, clean up existing violations and ratchet the allowlist down. This
+avoids the "turn it on, get 500 failures, turn it off" cycle that kills adoption.
 
 ### CI Pipeline - The Non-Negotiable Safety Net
 
@@ -482,12 +496,25 @@ on the earlier ones.
 
 ### Phase 5: Feedback loop (when running regular AI workflows)
 
+This phase is what turns a checklist into a system. Without it, contracts
+degrade over time as the codebase evolves and conventions shift. With it,
+the contracts stay current because failures feed back into improvements.
+
 - [ ] **Set up automated retrospectives.** At the end of each AI work cycle,
-  generate a structured retrospective identifying failure patterns. Propose rule
-  changes to the orchestration template. Gate changes on human approval.
-- [ ] **Review and update breadcrumbs** based on retrospective findings. If agents
-  keep making the same mistake, add a breadcrumb. If a breadcrumb is stale, update
-  or remove it.
+  generate a structured retrospective identifying failure patterns. Categorize
+  by layer: was this a missing breadcrumb (Layer 0), a linter gap (Layer 2),
+  a missing architecture test (Layer 3), or a CI blind spot (Layer 4)?
+- [ ] **Close the breadcrumb loop.** When a retrospective identifies a recurring
+  mistake, add a breadcrumb. When a breadcrumb no longer matches reality,
+  update or remove it. Track which breadcrumbs were added from retro findings
+  versus which were set up initially - retro-driven breadcrumbs are your
+  system learning.
+- [ ] **Ratchet architecture tests.** When a retro reveals a convention violation
+  that slipped through, write an architecture test for it. The violation count
+  only goes down.
+- [ ] **Propose orchestration changes.** If retros reveal workflow-level waste
+  (wrong model selection, merge ordering issues, CI timing problems), propose
+  changes to the orchestration template. Gate on human approval.
 
 ## Trade-offs
 
@@ -504,7 +531,10 @@ These patterns work, but they aren't free:
   feedback loops fast
 
 The cost is front-loaded. The payoff compounds - every new service, feature, and
-contributor benefits from guard rails that already exist.
+contributor benefits from contracts that already exist. The alternative - no
+contracts - is measurable: typical AI work sessions lose 15-45 minutes to
+convention drift, false signals, and rework that automated enforcement would
+have prevented. That cost recurs on every session, with every agent, forever.
 
 ## The Underlying Principle
 
