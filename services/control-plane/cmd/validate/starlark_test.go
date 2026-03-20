@@ -18,7 +18,7 @@ func TestCollectStarlarkFiles_SimpleGlob(t *testing.T) {
 	dir := t.TempDir()
 	// Create .star files
 	for _, name := range []string{"a.star", "b.star", "c.txt"} {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x = 1"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x = 1"), 0o644))
 	}
 
 	files, err := collectStarlarkFiles(filepath.Join(dir, "*.star"))
@@ -29,11 +29,11 @@ func TestCollectStarlarkFiles_SimpleGlob(t *testing.T) {
 func TestCollectStarlarkFiles_DoubleStarGlob(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub", "deep")
-	require.NoError(t, os.MkdirAll(sub, 0755))
+	require.NoError(t, os.MkdirAll(sub, 0o755))
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "top.star"), []byte("x = 1"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(sub, "nested.star"), []byte("x = 1"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(sub, "other.txt"), []byte("x = 1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "top.star"), []byte("x = 1"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "nested.star"), []byte("x = 1"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "other.txt"), []byte("x = 1"), 0o644))
 
 	files, err := collectStarlarkFiles(filepath.Join(dir, "**", "*.star"))
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestPermissiveInputDict_AttrNames(t *testing.T) {
 	assert.Equal(t, []string{"get"}, d.AttrNames())
 }
 
-func TestPermissiveInputDict_Freeze(t *testing.T) {
+func TestPermissiveInputDict_Freeze(_ *testing.T) {
 	d := &permissiveInputDict{}
 	d.Freeze() // should not panic
 }
@@ -305,7 +305,7 @@ func TestOpenServiceModule_AttrNames(t *testing.T) {
 	assert.Nil(t, m.AttrNames())
 }
 
-func TestOpenServiceModule_Freeze(t *testing.T) {
+func TestOpenServiceModule_Freeze(_ *testing.T) {
 	m := &openServiceModule{name: "test"}
 	m.Freeze() // should not panic
 }
@@ -399,7 +399,7 @@ func TestHybridServiceModule_AttrNames_NonHasAttrs(t *testing.T) {
 	assert.Nil(t, h.AttrNames())
 }
 
-func TestHybridServiceModule_Freeze(t *testing.T) {
+func TestHybridServiceModule_Freeze(_ *testing.T) {
 	h := &hybridServiceModule{name: "test"}
 	h.Freeze() // should not panic
 }
@@ -520,7 +520,7 @@ func TestPermissiveResultValue_Iterate(t *testing.T) {
 	assert.Len(t, items, 2)
 }
 
-func TestPermissiveResultValue_Freeze(t *testing.T) {
+func TestPermissiveResultValue_Freeze(_ *testing.T) {
 	r := &permissiveResultValue{name: "test"}
 	r.Freeze() // should not panic
 }
@@ -605,7 +605,7 @@ func TestValidateStarlarkFiles_SkipDirective(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "skip.star"),
 		[]byte("# schema-validation: skip\nx = 1"),
-		0644,
+		0o644,
 	))
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
@@ -621,7 +621,7 @@ func TestValidateStarlarkFiles_ValidScript(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "valid.star"),
 		[]byte("x = 1 + 2\ny = x * 3"),
-		0644,
+		0o644,
 	))
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
@@ -637,7 +637,7 @@ func TestValidateStarlarkFiles_SyntaxError(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "bad.star"),
 		[]byte("def foo(\n"),
-		0644,
+		0o644,
 	))
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
@@ -651,9 +651,9 @@ func TestValidateStarlarkFiles_SyntaxError(t *testing.T) {
 func TestValidateStarlarkFiles_UnreadableFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "unreadable.star")
-	require.NoError(t, os.WriteFile(path, []byte("x = 1"), 0644))
-	require.NoError(t, os.Chmod(path, 0000))
-	t.Cleanup(func() { os.Chmod(path, 0644) })
+	require.NoError(t, os.WriteFile(path, []byte("x = 1"), 0o644))
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { os.Chmod(path, 0o644) })
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
 	results, err := validateStarlarkFiles(filepath.Join(dir, "*.star"), s)
@@ -739,7 +739,7 @@ d = Decimal("100.50")
 val = input_data["amount"]
 name = input_data.get("name", "default")
 `
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte(script), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte(script), 0o644))
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
 	results, err := validateStarlarkFiles(filepath.Join(dir, "*.star"), s)
@@ -756,7 +756,7 @@ func TestValidateStarlarkFiles_OpenModuleUsage(t *testing.T) {
 result = valuation_engine.calculate(amount=Decimal("100"))
 status = result.status
 `
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte(script), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte(script), 0o644))
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
 	results, err := validateStarlarkFiles(filepath.Join(dir, "*.star"), s)
@@ -776,7 +776,7 @@ amt = input_data["amount"]
 name = input_data["name"]
 meta = input_data["metadata"]
 `
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte(script), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte(script), 0o644))
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
 	results, err := validateStarlarkFiles(filepath.Join(dir, "*.star"), s)
@@ -788,9 +788,9 @@ meta = input_data["metadata"]
 func TestValidateStarlarkFiles_MultipleFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.star"), []byte("x = 1"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.star"), []byte("y = 2"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.star"), []byte("def foo(\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.star"), []byte("x = 1"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.star"), []byte("y = 2"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.star"), []byte("def foo(\n"), 0o644))
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
 	results, err := validateStarlarkFiles(filepath.Join(dir, "*.star"), s)

@@ -80,7 +80,7 @@ func TestValidateFile_ValidManifest(t *testing.T) {
 	data, err := protojson.Marshal(manifest)
 	require.NoError(t, err)
 	path := filepath.Join(dir, "test.json")
-	require.NoError(t, os.WriteFile(path, data, 0644))
+	require.NoError(t, os.WriteFile(path, data, 0o644))
 
 	v, err := validator.New()
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestValidateFile_NonexistentFile(t *testing.T) {
 func TestValidateFile_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.json")
-	require.NoError(t, os.WriteFile(path, []byte("not json"), 0644))
+	require.NoError(t, os.WriteFile(path, []byte("not json"), 0o644))
 
 	v, err := validator.New()
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestValidateManifests_ValidFile(t *testing.T) {
 	manifest := minimalManifest()
 	data, err := protojson.Marshal(manifest)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.json"), data, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.json"), data, 0o644))
 
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestValidateManifests_JSONOutput(t *testing.T) {
 	manifest := minimalManifest()
 	data, err := protojson.Marshal(manifest)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.json"), data, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.json"), data, 0o644))
 
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestValidateManifests_JSONOutput(t *testing.T) {
 
 func TestValidateManifests_InvalidFileContent(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.json"), []byte("not json"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.json"), []byte("not json"), 0o644))
 
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
@@ -177,7 +177,7 @@ func TestValidateManifests_InvalidFileContent(t *testing.T) {
 
 func TestValidateManifests_InvalidFileContent_JSONOutput(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.json"), []byte("not json"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.json"), []byte("not json"), 0o644))
 
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
@@ -193,7 +193,7 @@ func TestValidateManifests_InvalidFileContent_JSONOutput(t *testing.T) {
 
 func TestValidateStarlarkWrapper_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte("x = 1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte("x = 1"), 0o644))
 
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestValidateStarlarkWrapper_NoMatches(t *testing.T) {
 
 func TestValidateStarlarkWrapper_JSONOutput(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte("x = 1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.star"), []byte("x = 1"), 0o644))
 
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestValidateStarlarkWrapper_JSONOutput(t *testing.T) {
 
 func TestValidateStarlarkWrapper_FailedFile(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.star"), []byte("def foo(\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.star"), []byte("def foo(\n"), 0o644))
 
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestValidateStarlarkWrapper_SkippedFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "skip.star"),
 		[]byte("# schema-validation: skip\nx = 1"),
-		0644,
+		0o644,
 	))
 
 	derivedSchema, err := buildDerivedSchema()
@@ -260,7 +260,7 @@ func TestValidateStarlarkWrapper_JSONOutput_SkippedFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "skip.star"),
 		[]byte("# schema-validation: skip\nx = 1"),
-		0644,
+		0o644,
 	))
 
 	derivedSchema, err := buildDerivedSchema()
