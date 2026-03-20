@@ -46,6 +46,12 @@ func collectStarlarkFiles(glob string) ([]string, error) {
 	root := filepath.Clean(strings.TrimRight(parts[0], string(filepath.Separator)))
 	suffix := strings.TrimLeft(parts[1], string(filepath.Separator))
 
+	// Determine whether the suffix contains path separators.
+	// filepath.Match does not match across path separators, so for simple
+	// suffixes like "*.star" we match the basename; for multi-segment suffixes
+	// like "payments/*.star" we match the relative path from root.
+	matchRelative := strings.Contains(suffix, string(filepath.Separator))
+
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -54,7 +60,17 @@ func collectStarlarkFiles(glob string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		matched, matchErr := filepath.Match(suffix, filepath.Base(path))
+		var target string
+		if matchRelative {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return relErr
+			}
+			target = rel
+		} else {
+			target = filepath.Base(path)
+		}
+		matched, matchErr := filepath.Match(suffix, target)
 		if matchErr != nil {
 			return matchErr
 		}
@@ -67,6 +83,17 @@ func collectStarlarkFiles(glob string) ([]string, error) {
 		return nil, fmt.Errorf("walking directory %s: %w", root, err)
 	}
 	return files, nil
+}
+
+// hasSkipDirective checks whether a Starlark script contains the skip directive
+// as an actual comment line rather than inside a string literal.
+func hasSkipDirective(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == skipDirective {
+			return true
+		}
+	}
+	return false
 }
 
 // starlarkValidationResult holds the validation outcome for a single .star file.
@@ -110,8 +137,8 @@ func validateSingleStarlarkFile(path string, schemaReg *schema.Registry) starlar
 	}
 	content := string(data)
 
-	// Honor skip directive
-	if strings.Contains(content, skipDirective) {
+	// Honor skip directive - check actual comment lines only
+	if hasSkipDirective(content) {
 		return starlarkValidationResult{File: path, Pass: true, Skipped: true}
 	}
 
