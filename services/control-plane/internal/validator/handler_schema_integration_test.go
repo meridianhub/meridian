@@ -113,11 +113,15 @@ func fullHandlerSchema() *schema.Schema {
 
 			// --- financial_accounting ---
 			"financial_accounting.post_entries": {
-				Params:     map[string]*schema.FieldDef{},
+				Params: map[string]*schema.FieldDef{
+					"entries": {Type: schema.TypeArray},
+				},
 				Compensate: "financial_accounting.reverse_entries",
 			},
 			"financial_accounting.reverse_entries": {
-				Params:               map[string]*schema.FieldDef{},
+				Params: map[string]*schema.FieldDef{
+					"entries": {Type: schema.TypeArray},
+				},
 				CompensationStrategy: schema.CompensationStrategyNone,
 			},
 
