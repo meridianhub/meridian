@@ -127,7 +127,7 @@ function findViolations(): Violation[] {
   if (fs.existsSync(featuresDir)) {
     const featureFiles = collectSourceFiles(featuresDir)
     for (const file of featureFiles) {
-      const relFile = path.relative(SRC_DIR, file)
+      const relFile = path.relative(SRC_DIR, file).split(path.sep).join('/')
       const fileFeature = extractFeatureName(relFile)
       if (!fileFeature) continue
 
@@ -154,7 +154,7 @@ function findViolations(): Violation[] {
   if (fs.existsSync(sharedDir)) {
     const sharedFiles = collectSourceFiles(sharedDir)
     for (const file of sharedFiles) {
-      const relFile = path.relative(SRC_DIR, file)
+      const relFile = path.relative(SRC_DIR, file).split(path.sep).join('/')
       const content = fs.readFileSync(file, 'utf-8')
       for (const { line, importPath } of extractImports(content)) {
         const resolved = resolveImportPath(importPath)
@@ -177,7 +177,7 @@ function findViolations(): Violation[] {
   if (fs.existsSync(apiDir)) {
     const apiFiles = collectSourceFiles(apiDir)
     for (const file of apiFiles) {
-      const relFile = path.relative(SRC_DIR, file)
+      const relFile = path.relative(SRC_DIR, file).split(path.sep).join('/')
       const content = fs.readFileSync(file, 'utf-8')
       for (const { line, importPath } of extractImports(content)) {
         const resolved = resolveImportPath(importPath)
@@ -351,7 +351,7 @@ describe('Frontend import boundaries', () => {
     ).length
     const newCount = violations.length - allowedCount
 
-    // This test always passes - it just reports the current state
+    // Reports the current state and fails if there are any new violations
     console.log(`\nImport boundary violations:`)
     console.log(`  Total:     ${violations.length}`)
     console.log(`  Allowed:   ${allowedCount} (in ratchet allowlist)`)
