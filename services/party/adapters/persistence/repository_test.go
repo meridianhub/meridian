@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"testing"
 	"time"
@@ -978,4 +979,51 @@ func TestAudit_DeleteParty_WritesAuditOutboxEntry(t *testing.T) {
 	assert.Equal(t, "party", deleteEntry.Table)
 	assert.NotEmpty(t, deleteEntry.OldValues, "Old values should contain deleted party data")
 	assert.Empty(t, deleteEntry.NewValues, "New values should be empty for DELETE")
+}
+
+// Unit tests for DecodePartyCursor
+
+func TestDecodePartyCursor_InvalidBase64(t *testing.T) {
+	_, err := DecodePartyCursor("!!!not-valid-base64!!!")
+	assert.ErrorIs(t, err, ErrInvalidCursor)
+}
+
+func TestDecodePartyCursor_InvalidFormat(t *testing.T) {
+	// Valid base64url but decoded content has no pipe separator
+	token := base64.URLEncoding.EncodeToString([]byte("nopipe"))
+	_, err := DecodePartyCursor(token)
+	assert.ErrorIs(t, err, ErrInvalidCursor)
+}
+
+func TestDecodePartyCursor_InvalidTimestamp(t *testing.T) {
+	// Valid format (has pipe) but timestamp portion is not parseable
+	token := base64.URLEncoding.EncodeToString([]byte("notadate|" + uuid.New().String()))
+	_, err := DecodePartyCursor(token)
+	assert.ErrorIs(t, err, ErrInvalidCursor)
+}
+
+func TestDecodePartyCursor_InvalidUUID(t *testing.T) {
+	// Valid timestamp but UUID portion is malformed
+	token := base64.URLEncoding.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano) + "|notauuid"))
+	_, err := DecodePartyCursor(token)
+	assert.ErrorIs(t, err, ErrInvalidCursor)
+}
+
+// Unit tests for Repository helper methods
+
+func TestIsInTransaction_NilStatement(t *testing.T) {
+	// A fresh gorm.DB with nil Statement (no query chain started) is not in a transaction.
+	repo := &Repository{db: &gorm.DB{}}
+	assert.False(t, repo.isInTransaction())
+}
+
+func TestWithTx_ReturnsNewInstance(t *testing.T) {
+	original := &gorm.DB{}
+	tx := &gorm.DB{}
+	repo := &Repository{db: original}
+
+	txRepo := repo.WithTx(tx)
+
+	assert.NotSame(t, repo, txRepo)
+	assert.Equal(t, tx, txRepo.db)
 }

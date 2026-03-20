@@ -23,8 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Generated API code (from buf generate)
-src/api/gen
 
 # Coverage reports
 coverage

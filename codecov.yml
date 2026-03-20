@@ -20,9 +20,10 @@ ignore:
   - "services/mcp-server/cmd/wire.go"
 
 comment:
-  layout: "condensed_header, condensed_files, condensed_footer"
+  layout: "condensed_header, condensed_files, components, condensed_footer"
   behavior: default
   require_changes: true
+  show_carryforward_flags: true
 
 flags:
   unittests:
@@ -39,3 +40,203 @@ flags:
     paths:
       - "frontend/src/"
     carryforward: true
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: 80%
+        threshold: 2%
+  individual_components:
+    - component_id: api-gateway
+      name: API Gateway
+      paths:
+        - services/api-gateway/**
+    - component_id: audit-worker
+      name: Audit Worker
+      paths:
+        - services/audit-worker/**
+    - component_id: control-plane
+      name: Control Plane
+      paths:
+        - services/control-plane/**
+    - component_id: current-account
+      name: Current Account
+      paths:
+        - services/current-account/**
+    - component_id: event-router
+      name: Event Router
+      paths:
+        - services/event-router/**
+    - component_id: financial-accounting
+      name: Financial Accounting
+      paths:
+        - services/financial-accounting/**
+    - component_id: financial-gateway
+      name: Financial Gateway
+      paths:
+        - services/financial-gateway/**
+    - component_id: forecasting
+      name: Forecasting
+      paths:
+        - services/forecasting/**
+    - component_id: identity
+      name: Identity
+      paths:
+        - services/identity/**
+    - component_id: internal-account
+      name: Internal Account
+      paths:
+        - services/internal-account/**
+    - component_id: market-information
+      name: Market Information
+      paths:
+        - services/market-information/**
+    - component_id: mcp-server
+      name: MCP Server
+      paths:
+        - services/mcp-server/**
+    - component_id: operational-gateway
+      name: Operational Gateway
+      paths:
+        - services/operational-gateway/**
+    - component_id: party
+      name: Party
+      paths:
+        - services/party/**
+    - component_id: payment-order
+      name: Payment Order
+      paths:
+        - services/payment-order/**
+    - component_id: position-keeping
+      name: Position Keeping
+      paths:
+        - services/position-keeping/**
+    - component_id: reconciliation
+      name: Reconciliation
+      paths:
+        - services/reconciliation/**
+    - component_id: reference-data
+      name: Reference Data
+      paths:
+        - services/reference-data/**
+    - component_id: tenant
+      name: Tenant
+      paths:
+        - services/tenant/**
+    - component_id: shared-platform
+      name: Shared Platform
+      paths:
+        - shared/platform/**
+    - component_id: shared-pkg
+      name: Shared Pkg
+      paths:
+        - shared/pkg/**
+    - component_id: shared-domain
+      name: Shared Domain
+      paths:
+        - shared/domain/**
+    - component_id: fe-accounts
+      name: Frontend - Accounts
+      paths:
+        - frontend/src/features/accounts/**
+    - component_id: fe-audit
+      name: Frontend - Audit
+      paths:
+        - frontend/src/features/audit/**
+    - component_id: fe-cookbook
+      name: Frontend - Cookbook
+      paths:
+        - frontend/src/features/cookbook/**
+    - component_id: fe-dashboard
+      name: Frontend - Dashboard
+      paths:
+        - frontend/src/features/dashboard/**
+    - component_id: fe-economy
+      name: Frontend - Economy
+      paths:
+        - frontend/src/features/economy/**
+    - component_id: fe-forecasting
+      name: Frontend - Forecasting
+      paths:
+        - frontend/src/features/forecasting/**
+    - component_id: fe-identity
+      name: Frontend - Identity
+      paths:
+        - frontend/src/features/identity/**
+    - component_id: fe-internal-accounts
+      name: Frontend - Internal Accounts
+      paths:
+        - frontend/src/features/internal-accounts/**
+    - component_id: fe-ledger
+      name: Frontend - Ledger
+      paths:
+        - frontend/src/features/ledger/**
+    - component_id: fe-manifests
+      name: Frontend - Manifests
+      paths:
+        - frontend/src/features/manifests/**
+    - component_id: fe-mappings
+      name: Frontend - Mappings
+      paths:
+        - frontend/src/features/mappings/**
+    - component_id: fe-market-data
+      name: Frontend - Market Data
+      paths:
+        - frontend/src/features/market-data/**
+    - component_id: fe-mcp-config
+      name: Frontend - MCP Config
+      paths:
+        - frontend/src/features/mcp-config/**
+    - component_id: fe-parties
+      name: Frontend - Parties
+      paths:
+        - frontend/src/features/parties/**
+    - component_id: fe-payments
+      name: Frontend - Payments
+      paths:
+        - frontend/src/features/payments/**
+    - component_id: fe-positions
+      name: Frontend - Positions
+      paths:
+        - frontend/src/features/positions/**
+    - component_id: fe-reconciliation
+      name: Frontend - Reconciliation
+      paths:
+        - frontend/src/features/reconciliation/**
+    - component_id: fe-reference-data
+      name: Frontend - Reference Data
+      paths:
+        - frontend/src/features/reference-data/**
+    - component_id: fe-sagas
+      name: Frontend - Sagas
+      paths:
+        - frontend/src/features/sagas/**
+    - component_id: fe-tenants
+      name: Frontend - Tenants
+      paths:
+        - frontend/src/features/tenants/**
+    - component_id: fe-transactions
+      name: Frontend - Transactions
+      paths:
+        - frontend/src/features/transactions/**
+    - component_id: fe-components
+      name: Frontend - Components
+      paths:
+        - frontend/src/components/**
+    - component_id: fe-contexts
+      name: Frontend - Contexts
+      paths:
+        - frontend/src/contexts/**
+    - component_id: fe-hooks
+      name: Frontend - Hooks
+      paths:
+        - frontend/src/hooks/**
+    - component_id: fe-lib
+      name: Frontend - Lib
+      paths:
+        - frontend/src/lib/**
+    - component_id: fe-shared
+      name: Frontend - Shared
+      paths:
+        - frontend/src/shared/**
