@@ -244,9 +244,11 @@ channels:
 
 ### Breadcrumb-Driven Behavior — Keywords That Light Up Patterns
 
-**Pattern**: The project's CLAUDE.md (loaded into every AI session) uses specific phrases and keywords that activate preferred agent behavior. These act as "breadcrumbs" — compact triggers that reference larger patterns.
+**Pattern**: Project-level instruction files (loaded into AI agent context at session start) use specific phrases and keywords that activate preferred behavior. These act as "breadcrumbs" — compact triggers that reference larger patterns the agent should follow.
 
-Examples from Meridian's CLAUDE.md:
+Most AI coding tools support project-level instruction files: `.cursorrules`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, and similar. The specific file varies by tool, but the technique is universal.
+
+Examples from Meridian's project instructions:
 
 | Breadcrumb | Behavior it triggers |
 |------------|---------------------|
@@ -256,13 +258,17 @@ Examples from Meridian's CLAUDE.md:
 | "CockroachDB, not PostgreSQL" | Agent avoids PG-specific features (LISTEN/NOTIFY, PL/pgSQL) |
 | "Atlas, NOT Flyway" | Agent uses correct migration tool |
 | "NEVER edit existing migration files" | Agent creates new migrations, doesn't modify history |
-| "`git branch -D` not `-d`" | Agent uses force-delete after squash merges |
 
-These aren't documentation — they're **behavioral programming**. An LLM responds to pattern and emphasis. "NEVER" in capitals with context hits differently than a buried convention in a style guide. The CLAUDE.md is effectively a prompt that shapes every action the agent takes.
+These aren't documentation — they're **behavioral programming**. LLMs respond to pattern and emphasis. "NEVER" in capitals with context hits differently than a buried convention in a style guide. The instruction file is effectively a prompt that shapes every action the agent takes.
 
-**Why this matters**: A 200-line CLAUDE.md replaces hours of onboarding. Every session starts with the same behavioral baseline. When the agent encounters a test that needs async waiting, the breadcrumb "await.Until()" is already loaded — it doesn't need to discover the package by exploring.
+**Why this matters**: A concise instruction file replaces hours of onboarding. Every session starts with the same behavioral baseline. When the agent encounters a test that needs async waiting, the breadcrumb "await.Until()" is already loaded — it doesn't need to discover the package by exploring.
 
-**Design principle**: Breadcrumbs should be **specific and actionable** ("use X instead of Y"), not vague ("follow best practices"). They should include the **why** when the reason isn't obvious ("CockroachDB doesn't support LISTEN/NOTIFY"). And they should use **strong language** for hard rules ("NEVER") vs. soft preferences ("prefer").
+**Design principles for breadcrumbs**:
+- **Specific and actionable**: "use X instead of Y", not "follow best practices"
+- **Include the why** when the reason isn't obvious: "CockroachDB doesn't support LISTEN/NOTIFY"
+- **Strong language for hard rules** ("NEVER") vs. soft preferences ("prefer")
+- **Positive framing where possible**: "Use constructor injection" rather than "Don't use singletons"
+- **Keep them current**: Stale breadcrumbs are worse than none — they train the agent on outdated patterns
 
 ### Package Documentation as Discoverability
 
