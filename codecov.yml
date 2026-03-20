@@ -15,6 +15,7 @@ ignore:
   - "**/*.pb.validate.go"
   - "**/*_grpc.pb.go"
   - "**/mocks/**"
+  - "**/testhelpers/**"
   - "utilities/**"
   - "frontend/src/api/gen/**"
   - "services/mcp-server/cmd/wire.go"
