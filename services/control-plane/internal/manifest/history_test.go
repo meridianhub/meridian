@@ -500,4 +500,3 @@ func TestUnmarshalManifest_Invalid(t *testing.T) {
 	_, err := unmarshalManifest(`not valid json`)
 	assert.Error(t, err)
 }
-
