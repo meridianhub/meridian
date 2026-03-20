@@ -342,9 +342,15 @@ func runBootstrap(baseDSN string, logger *slog.Logger) error {
 	}
 	defer platformPool.Close()
 
+	provConfig, err := DeriveProvisionerConfig(baseDSN)
+	if err != nil {
+		return fmt.Errorf("provisioner config: %w", err)
+	}
+
 	return masterbootstrap.Run(ctx, masterbootstrap.Config{
-		PlatformDB:       platformDB,
-		ControlPlanePool: platformPool,
-		Logger:           logger,
+		PlatformDB:        platformDB,
+		ControlPlanePool:  platformPool,
+		ProvisionerConfig: provConfig,
+		Logger:            logger,
 	})
 }

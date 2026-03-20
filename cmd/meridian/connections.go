@@ -15,6 +15,7 @@ import (
 	misclient "github.com/meridianhub/meridian/services/market-information/client"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
 	pkclient "github.com/meridianhub/meridian/services/position-keeping/client"
+	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
 
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -25,6 +26,27 @@ import (
 )
 
 // ─── Per-Service Database Connections ────────────────────────────────────────
+
+// DeriveProvisionerConfig returns a provisioner config with each service's DatabaseURL
+// derived from baseDSN by replacing the database component. If baseDSN is empty,
+// DefaultConfig() is returned unchanged (preserving env-var fallback behaviour).
+func DeriveProvisionerConfig(baseDSN string) (*tenantprovisioner.Config, error) {
+	config := tenantprovisioner.DefaultConfig()
+	if baseDSN == "" {
+		return config, nil
+	}
+	for i := range config.Services {
+		svc := &config.Services[i]
+		if sdb, ok := migrations.ServiceDatabases[svc.Name]; ok {
+			dsn, err := replaceDSNDatabase(baseDSN, sdb.Database)
+			if err != nil {
+				return nil, fmt.Errorf("derive DSN for %s: %w", svc.Name, err)
+			}
+			svc.DatabaseURL = dsn
+		}
+	}
+	return config, nil
+}
 
 // replaceDSNDatabase replaces the database name in a PostgreSQL/CockroachDB DSN URL.
 func replaceDSNDatabase(baseDSN, database string) (string, error) {

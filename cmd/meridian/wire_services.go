@@ -78,7 +78,6 @@ import (
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 
 	// Shared platform
-	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -327,18 +326,9 @@ func startProvisioningWorker(ctx context.Context, baseDSN string, platformDB *go
 	// DefaultConfig() falls back to cockroachdb:26257 when per-service env vars
 	// are unset. The unified binary derives all connections from a single base DSN,
 	// so we override each service's DatabaseURL to match.
-	config := tenantprovisioner.DefaultConfig()
-	if baseDSN != "" {
-		for i := range config.Services {
-			svc := &config.Services[i]
-			if sdb, ok := migrations.ServiceDatabases[svc.Name]; ok {
-				dsn, dsnErr := replaceDSNDatabase(baseDSN, sdb.Database)
-				if dsnErr != nil {
-					return nil, nil, fmt.Errorf("provisioner dsn for %s: %w", svc.Name, dsnErr)
-				}
-				svc.DatabaseURL = dsn
-			}
-		}
+	config, err := DeriveProvisionerConfig(baseDSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("provisioner config: %w", err)
 	}
 	prov, err := tenantprovisioner.NewPostgresProvisioner(platformDB, config)
 	if err != nil {
