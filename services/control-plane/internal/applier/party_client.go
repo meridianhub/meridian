@@ -61,12 +61,18 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 }
 
 // parseExternalReferenceType converts a string to the proto ExternalReferenceType enum.
+// Accepts both prefixed ("EXTERNAL_REFERENCE_TYPE_LEI") and stripped ("LEI") forms,
+// since the Starlark handler schema uses stripped names while proto uses prefixed names.
 // Returns an error for non-empty strings that do not match a known type.
 func parseExternalReferenceType(s string) (partyv1.ExternalReferenceType, error) {
 	if s == "" {
 		return partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED, nil
 	}
 	if v, ok := partyv1.ExternalReferenceType_value[s]; ok {
+		return partyv1.ExternalReferenceType(v), nil
+	}
+	// Try with prefix added (handles stripped form like "LEI").
+	if v, ok := partyv1.ExternalReferenceType_value["EXTERNAL_REFERENCE_TYPE_"+s]; ok {
 		return partyv1.ExternalReferenceType(v), nil
 	}
 	return 0, fmt.Errorf("%w: %q", ErrUnknownExternalReferenceType, s)
