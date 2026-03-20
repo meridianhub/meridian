@@ -168,7 +168,7 @@ Checks include file size limits (with `//meridian:large-file` escape hatch), `ti
 
 **Consistency mechanism**: CI freshness checks regenerate and diff, failing if committed files are stale. This is the equivalent of a database trigger ensuring denormalized copies stay in sync.
 
-**Prior art**: Google checks in all generated code (Bazel outputs, proto files) for the same reason — builds must work from a clean checkout.
+**Prior art**: Google's monorepo checks in many categories of generated code so that builds work from a clean checkout. The principle is the same — availability at read time matters more than deduplication.
 
 ### Machine-Readable Conventions
 
