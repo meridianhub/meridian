@@ -106,10 +106,10 @@ function findCrossFeatureImports(): Violation[] {
         const importedFeature = match[1]
         if (importedFeature === feature) continue
 
-        const relativePath = path.relative(
-          path.resolve(FEATURES_DIR, '../..'),
-          filePath,
-        )
+        const relativePath = path
+          .relative(path.resolve(FEATURES_DIR, '../..'), filePath)
+          .split(path.sep)
+          .join('/')
 
         const key = `${feature} -> ${importedFeature}`
         const allowedFiles = ALLOWED_CROSS_FEATURE_IMPORTS[key] ?? []
