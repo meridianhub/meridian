@@ -142,6 +142,7 @@ func TestListFinancialPositionLogs_NextPageToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, resp.Logs, 10)
 	assert.Equal(t, "10", resp.Pagination.NextPageToken)
+	mockRepo.AssertExpectations(t)
 }
 
 func TestListFinancialPositionLogs_CanceledContext(t *testing.T) {
@@ -181,6 +182,7 @@ func TestListFinancialPositionLogs_ContextCancelledDuringQuery(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.Canceled, st.Code())
+	mockRepo.AssertExpectations(t)
 }
 
 func TestListFinancialPositionLogs_DeadlineExceeded(t *testing.T) {
@@ -202,4 +204,5 @@ func TestListFinancialPositionLogs_DeadlineExceeded(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.DeadlineExceeded, st.Code())
+	mockRepo.AssertExpectations(t)
 }
