@@ -174,13 +174,16 @@ def execute_apply_manifest():
     for org in organizations:
         step(name="register_organization_" + org["code"])
         org_name = org.get("name", org["code"])
+        org_attrs = org.get("attributes", {})
+        # Use external_reference from attributes if present, otherwise fall back to org code.
+        ext_ref = org_attrs.get("external_reference", org["code"])
         party.register_organization(
             legal_name=org_name,
             display_name=org_name,
             party_type=org.get("party_type", "ORGANIZATION"),
-            external_reference=org.get("code", ""),
-            external_reference_type=org.get("external_reference_type", "COMPANIES_HOUSE"),
-            attributes=org.get("attributes", {}),
+            external_reference=ext_ref,
+            external_reference_type=org.get("external_reference_type", "NATIONAL_ID"),
+            attributes=org_attrs,
         )
         registered_organizations.append({
             "code": org["code"],
