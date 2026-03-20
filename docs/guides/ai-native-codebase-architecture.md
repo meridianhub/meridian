@@ -24,12 +24,16 @@ The same problem affects human contributors on large codebases, but AI amplifies
 
 This guide describes patterns for keeping a large codebase coherent despite contributors (human and AI) who cannot hold it all in context at once, and provides an implementation checklist for setting them up. The examples come from Meridian (a multi-service Go/TypeScript platform), but the patterns are language-agnostic.
 
-## The Core Idea: Layered Safety
+## The Core Idea: Contracts, Not Norms
 
-Errors are cheapest to fix closest to where they're introduced. Each layer catches a different class of mistake, and cost increases with distance from introduction:
+Most codebases run on norms - conventions that people are expected to follow. Norms work when everyone knows them and cares about them. They break down when contributors don't know the norms exist (every AI agent, every new hire) or are under pressure to ship (everyone, eventually).
+
+The alternative is contracts: **define what you expect, then enforce it automatically.** Types define expected shapes. Linters define expected style. Architecture tests define expected structure. CI defines expected quality. Coverage gates define expected test discipline. Each layer is a contract. A norm says "we prefer X." A contract says "the build fails if you don't do X."
+
+Errors are cheapest to fix closest to where they're introduced. Cost increases with distance:
 
 ```
-Layer 1: Type System          - catches at write time    (seconds to fix)
+Layer 1: Code Design          - catches at write time    (seconds to fix)
 Layer 2: Linters              - catches before push      (seconds)
 Layer 3: Architecture Tests   - catches structural drift (minutes)
 Layer 4: CI Pipeline          - catches on every PR      (minutes)
@@ -38,7 +42,7 @@ Layer 6: Code Review (bots)   - catches design issues    (hours)
 Layer 7: Automated Retros     - catches workflow drift   (end of cycle)
 ```
 
-No single layer is sufficient. The value is in the combination - each layer catches what the previous one missed. Layers 1-6 are automated guard rails that enforce correctness on every change. Layer 7 is the feedback loop that improves the guard rails themselves.
+No single layer is sufficient. The value is in the combination - each layer catches what the previous one missed. Layers 1-6 are automated enforcement. Layer 7 is the feedback loop that improves the contracts themselves.
 
 ## The Patterns
 
