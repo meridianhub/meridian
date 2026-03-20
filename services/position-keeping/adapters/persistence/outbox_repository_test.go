@@ -13,6 +13,10 @@ import (
 )
 
 func TestPostgresRepository_CreateWithOutbox(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
@@ -76,6 +80,10 @@ func TestPostgresRepository_CreateWithOutbox(t *testing.T) {
 }
 
 func TestPostgresRepository_UpdateWithOutbox(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)
 
