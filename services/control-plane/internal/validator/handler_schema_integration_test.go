@@ -444,6 +444,9 @@ func TestCookbookStarlarkScripts_HandlerSchemaValidation(t *testing.T) {
 					return
 				}
 
+				// Track handler calls made during this script's execution
+				callsBefore := len(callLog)
+
 				// Execute with typed service modules to validate handler calls
 				thread := &starlark.Thread{
 					Name:  baseName,
@@ -452,8 +455,11 @@ func TestCookbookStarlarkScripts_HandlerSchemaValidation(t *testing.T) {
 				sandbox.HardenThread(thread, sandbox.DefaultConfig())
 
 				_, execErr := starlark.ExecFileOptions(fileOpts, thread, baseName, script, predeclared)
+				callsMade := len(callLog) - callsBefore
+
 				if execErr == nil {
-					return // clean execution
+					assert.Greater(t, callsMade, 0, "script executed cleanly but made no handler calls")
+					return
 				}
 
 				// Check if the error is a handler validation error (schema bug)
@@ -471,9 +477,15 @@ func TestCookbookStarlarkScripts_HandlerSchemaValidation(t *testing.T) {
 					return
 				}
 
-				// Other errors (runtime: dict access, arithmetic, etc.) are expected
-				// since we don't provide full runtime mocks
-				t.Logf("runtime error (expected without full mocks): %v", execErr)
+				// Runtime error (dict access, arithmetic, etc.) is expected since
+				// we don't provide full runtime mocks. But at least one handler call
+				// should have been validated before the script hit the runtime error.
+				if callsMade == 0 {
+					t.Errorf("script failed before any handler calls were validated: %v", execErr)
+					return
+				}
+
+				t.Logf("validated %d handler call(s) before runtime error: %v", callsMade, execErr)
 			})
 		}
 	}
@@ -497,9 +509,11 @@ func buildCookbookPredeclared(serviceModules starlark.StringDict) starlark.Strin
 	predeclared["input_data"] = buildSeedInputData()
 	predeclared["party_scope"] = starlark.NewDict(0)
 
+	// Decimal stub returns a Float so arithmetic operations (*, /, +, -)
+	// work during script execution. Real Decimal is shopspring/decimal.
 	predeclared["Decimal"] = starlark.NewBuiltin("Decimal",
 		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
-			return starlark.String("0"), nil
+			return starlark.Float(1.0), nil
 		})
 
 	// saga(name=...) returns a no-op dict-like value
