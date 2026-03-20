@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # verify-service-conventions.sh - Check Meridian service conventions
 #
-# Scans the codebase for convention violations across four areas:
+# Scans the codebase for convention violations across five areas:
 #   1. File size limits (error >800 lines for non-test, non-pb Go files)
 #   2. time.Sleep in test files (should use shared/platform/await instead)
-#   3. Proto freshness (generated .pb.go files match .proto sources)
+#   3. Proto freshness (generated .pb.go and *_pb.ts files match .proto sources)
 #   4. Stale or incomplete //nolint directives
 #
 # Note: doc.go presence and service/server.go naming are enforced by
@@ -224,6 +224,49 @@ check_proto_freshness() {
 }
 
 # ---------------------------------------------------------------------------
+# Check 3b: Frontend proto freshness (generated TypeScript files match .proto)
+# ---------------------------------------------------------------------------
+
+check_frontend_proto_freshness() {
+    log_section "Frontend Proto Freshness (generated TypeScript files up to date)"
+
+    if ! command -v npx >/dev/null 2>&1; then
+        echo "       Skipped: npx not available"
+        return
+    fi
+
+    if [ ! -f "$REPO_ROOT/frontend/buf.gen.yaml" ]; then
+        echo "       Skipped: frontend/buf.gen.yaml not found"
+        return
+    fi
+
+    cd "$REPO_ROOT/frontend"
+
+    if ! npx buf generate --template buf.gen.yaml ../api/proto 2>/dev/null; then
+        log_error "frontend buf generate failed — cannot check frontend proto freshness"
+        cd "$REPO_ROOT"
+        return
+    fi
+
+    cd "$REPO_ROOT"
+
+    local stale_files
+    stale_files=$(git status --short -- frontend/src/api/gen/ 2>/dev/null | awk '{print $2}')
+
+    if [ -z "$stale_files" ]; then
+        log_ok "Frontend generated proto files are up to date"
+    else
+        log_error "Frontend generated files are stale — run 'cd frontend && npm run generate' and commit the result"
+        echo "       Fix: cd frontend && npm run generate"
+        echo "$stale_files" | while IFS= read -r f; do
+            echo "       - ${f}"
+        done
+        git checkout -- frontend/src/api/gen/ 2>/dev/null || true
+        git clean -f -- frontend/src/api/gen/ 2>/dev/null || true
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Check 4: Stale or incomplete //nolint directives
 #
 # Note: golangci-lint runs nolintlint with require-specific and require-
@@ -295,6 +338,7 @@ echo ""
 check_file_size
 check_time_sleep
 check_proto_freshness
+check_frontend_proto_freshness
 check_nolint_directives
 
 # Summary
