@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,20 @@ import (
 
 // skipDirective is the comment that opts a .star file out of schema validation.
 const skipDirective = "# schema-validation: skip"
+
+// Sentinel errors for linter compliance.
+var (
+	errNoFilesMatched    = errors.New("no files matched pattern")
+	errDecimalArgCount   = errors.New("decimal: expected exactly 1 argument")
+	errDecimalOverflow   = errors.New("decimal: integer too large to convert")
+	errDecimalParse      = errors.New("decimal: cannot parse as a number")
+	errDecimalType       = errors.New("decimal: unsupported type")
+	errUnhashableDict    = errors.New("unhashable: dict")
+	errUnhashableModule  = errors.New("unhashable: open_service_module")
+	errUnhashableHybrid  = errors.New("unhashable: hybrid_service_module")
+	errUnhashableResult  = errors.New("unhashable: result")
+	errHandlerNotAllowed = errors.New("handler not registered and not in open fallback allowlist")
+)
 
 // starlarkValidationResult holds the validation outcome for a single .star file.
 type starlarkValidationResult struct {
@@ -32,7 +47,7 @@ func validateStarlarkFiles(glob string, derivedSchema *schema.Schema) ([]starlar
 		return nil, fmt.Errorf("invalid glob pattern: %w", err)
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no files matched pattern: %s", glob)
+		return nil, fmt.Errorf("%w: %s", errNoFilesMatched, glob)
 	}
 
 	schemaReg := schema.NewRegistryFromSchema(derivedSchema)
@@ -174,9 +189,19 @@ func buildStarlarkPredeclared(schemaReg *schema.Registry) (starlark.StringDict, 
 	})
 
 	// Decimal(s) returns a Float for arithmetic compatibility
-	predeclared["Decimal"] = starlark.NewBuiltin("Decimal", func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+	predeclared["Decimal"] = decimalBuiltin()
+
+	// input_data is a permissive dict that returns sensible defaults for any key access.
+	predeclared["input_data"] = &permissiveInputDict{}
+
+	return predeclared, nil
+}
+
+// decimalBuiltin returns a Starlark builtin that converts string/int/float to Float.
+func decimalBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("Decimal", func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
 		if len(args) != 1 {
-			return nil, fmt.Errorf("Decimal: expected exactly 1 argument, got %d", len(args))
+			return nil, fmt.Errorf("%w: got %d", errDecimalArgCount, len(args))
 		}
 		switch v := args[0].(type) {
 		case starlark.Float:
@@ -184,31 +209,20 @@ func buildStarlarkPredeclared(schemaReg *schema.Registry) (starlark.StringDict, 
 		case starlark.Int:
 			i64, ok := v.Int64()
 			if !ok {
-				return nil, fmt.Errorf("Decimal: integer too large to convert")
+				return nil, errDecimalOverflow
 			}
 			return starlark.Float(float64(i64)), nil
 		case starlark.String:
 			var f float64
 			n, err := fmt.Sscanf(string(v), "%f", &f)
 			if err != nil || n != 1 {
-				return nil, fmt.Errorf("Decimal: cannot parse %q as a number", string(v))
+				return nil, fmt.Errorf("%w: %q", errDecimalParse, string(v))
 			}
 			return starlark.Float(f), nil
 		default:
-			return nil, fmt.Errorf("Decimal: unsupported type %s", args[0].Type())
+			return nil, fmt.Errorf("%w: %s", errDecimalType, args[0].Type())
 		}
 	})
-
-	// input_data is a permissive dict that returns sensible defaults for any key access.
-	predeclared["input_data"] = newPermissiveInputData()
-
-	return predeclared, nil
-}
-
-// newPermissiveInputData creates a permissive input_data mock that returns
-// sensible defaults for any key access pattern used in cookbook scripts.
-func newPermissiveInputData() *permissiveInputDict {
-	return &permissiveInputDict{}
 }
 
 // permissiveInputDict is a Starlark value that responds to both dict-style
@@ -221,7 +235,7 @@ func (d *permissiveInputDict) String() string        { return "input_data{}" }
 func (d *permissiveInputDict) Type() string          { return "dict" }
 func (d *permissiveInputDict) Freeze()               {}
 func (d *permissiveInputDict) Truth() starlark.Bool  { return starlark.True }
-func (d *permissiveInputDict) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: dict") }
+func (d *permissiveInputDict) Hash() (uint32, error) { return 0, errUnhashableDict }
 
 // Get implements starlark.Mapping for x["key"] access.
 func (d *permissiveInputDict) Get(key starlark.Value) (v starlark.Value, found bool, err error) {
@@ -247,7 +261,7 @@ func (d *permissiveInputDict) Attr(name string) (starlark.Value, error) {
 			return starlark.String(""), nil
 		}), nil
 	}
-	return nil, nil
+	return starlark.None, nil
 }
 
 // AttrNames lists the available methods.
@@ -295,7 +309,7 @@ func (m *openServiceModule) Type() string         { return "open_service_module"
 func (m *openServiceModule) Freeze()              {}
 func (m *openServiceModule) Truth() starlark.Bool { return starlark.True }
 func (m *openServiceModule) Hash() (uint32, error) {
-	return 0, fmt.Errorf("unhashable: open_service_module")
+	return 0, errUnhashableModule
 }
 
 func (m *openServiceModule) Attr(name string) (starlark.Value, error) {
@@ -321,7 +335,7 @@ func (h *hybridServiceModule) Type() string         { return "hybrid_service_mod
 func (h *hybridServiceModule) Freeze()              {}
 func (h *hybridServiceModule) Truth() starlark.Bool { return starlark.True }
 func (h *hybridServiceModule) Hash() (uint32, error) {
-	return 0, fmt.Errorf("unhashable: hybrid_service_module")
+	return 0, errUnhashableHybrid
 }
 
 func (h *hybridServiceModule) Attr(name string) (starlark.Value, error) {
@@ -334,7 +348,7 @@ func (h *hybridServiceModule) Attr(name string) (starlark.Value, error) {
 	if _, allowed := h.openHandlers[name]; allowed {
 		return h.open.Attr(name)
 	}
-	return nil, fmt.Errorf("%s.%s: handler not registered and not in open fallback allowlist (possible misspelling?)", h.name, name)
+	return nil, fmt.Errorf("%s.%s: %w (possible misspelling?)", h.name, name, errHandlerNotAllowed)
 }
 
 func (h *hybridServiceModule) AttrNames() []string {
@@ -350,11 +364,14 @@ type permissiveResultValue struct {
 	name string
 }
 
-func (r *permissiveResultValue) String() string        { return r.name + "{}" }
-func (r *permissiveResultValue) Type() string          { return r.name }
-func (r *permissiveResultValue) Freeze()               {}
-func (r *permissiveResultValue) Truth() starlark.Bool  { return starlark.True }
-func (r *permissiveResultValue) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: %s", r.name) }
+func (r *permissiveResultValue) String() string       { return r.name + "{}" }
+func (r *permissiveResultValue) Type() string         { return r.name }
+func (r *permissiveResultValue) Freeze()              {}
+func (r *permissiveResultValue) Truth() starlark.Bool { return starlark.True }
+
+func (r *permissiveResultValue) Hash() (uint32, error) {
+	return 0, errUnhashableResult
+}
 
 func (r *permissiveResultValue) Attr(name string) (starlark.Value, error) {
 	if name == "get" {
