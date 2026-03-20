@@ -65,7 +65,7 @@ Examples:
 | "Atlas, NOT Flyway" | Agent uses correct migration tool |
 | "NEVER edit existing migration files" | Agent creates new migrations, doesn't modify history |
 
-These aren't documentation - they're **behavioral programming**. LLMs respond to pattern and emphasis. "NEVER" in capitals with context hits differently than a buried convention in a style guide. The instruction file is effectively a prompt that shapes every action the agent takes.
+These aren't documentation - they're **behavioral contracts**. Where linters and CI enforce contracts on code, breadcrumbs enforce contracts on the agent itself. "NEVER" in capitals with context hits differently than a buried convention in a style guide. The instruction file is effectively a prompt that shapes every action the agent takes - the same principle as every other layer, applied to the contributor rather than the contribution.
 
 **Design principles for effective breadcrumbs**:
 - **Specific and actionable**: "use X instead of Y", not "follow best practices"
