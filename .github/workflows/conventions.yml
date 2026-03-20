@@ -11,6 +11,10 @@ on:
       - 'buf.lock'
       - 'services/**'
       - 'shared/**'
+      - 'frontend/buf.gen.yaml'
+      - 'frontend/src/api/gen/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
       - 'scripts/verify-service-conventions.sh'
       - '.github/workflows/conventions.yml'
   pull_request:
@@ -23,6 +27,10 @@ on:
       - 'buf.lock'
       - 'services/**'
       - 'shared/**'
+      - 'frontend/buf.gen.yaml'
+      - 'frontend/src/api/gen/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
       - 'scripts/verify-service-conventions.sh'
       - '.github/workflows/conventions.yml'
 
@@ -48,6 +56,17 @@ jobs:
         uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
 
       - name: Run service convention checks
         run: ./scripts/verify-service-conventions.sh
