@@ -78,7 +78,7 @@
     {
       "name": "process_compute_billing",
       "trigger": "scheduled:hourly_compute_billing",
-      "script": "def execute(ctx):\n    usage = ctx\n    hours = Decimal(str(usage.get('gpu_hours', '0')))\n    position_keeping.initiate_log(amount=hours, direction='DEBIT')\n"
+      "script": "def execute(ctx):\n    usage = ctx\n    hours = Decimal(str(usage.get('gpu_hours', '0')))\n    position_keeping.initiate_log(position_id=ctx['account_id'], amount=hours, direction='DEBIT')\n"
     }
   ]
 }
