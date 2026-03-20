@@ -29,7 +29,7 @@ import (
 
 // DeriveProvisionerConfig returns a provisioner config with each service's DatabaseURL
 // derived from baseDSN by replacing the database component. If baseDSN is empty,
-// DefaultConfig() is returned unchanged (preserving env-var fallback behaviour).
+// DefaultConfig() is returned unchanged (preserving env-var fallback behavior).
 func DeriveProvisionerConfig(baseDSN string) (*tenantprovisioner.Config, error) {
 	config := tenantprovisioner.DefaultConfig()
 	if baseDSN == "" {
