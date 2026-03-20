@@ -192,24 +192,77 @@ instructions: |
 
 18 guides in `docs/guides/`, 37 ADRs in `docs/adr/`, all with this front-matter.
 
-### Consistent Service Structure
+### Hexagonal Architecture — Predictable Boundaries
 
-**Pattern**: All standard services follow a hexagonal architecture defined in ADR-015:
+**Pattern**: All standard services follow a hexagonal (ports and adapters) architecture defined in ADR-015:
 
 ```
 services/{name}/
-├── domain/              # Business logic, interfaces, errors
+├── domain/              # Pure business logic, interfaces, errors — no imports from adapters/
 ├── adapters/
-│   └── persistence/     # GORM implementations
+│   └── persistence/     # GORM implementations of domain interfaces
 ├── service/
-│   └── server.go        # gRPC handler entry point
+│   └── server.go        # gRPC handler entry point — orchestrates domain + adapters
 ├── migrations/          # Atlas schema files
 └── README.md            # Service guide with YAML front-matter
 ```
 
+The boundaries are strict and tested:
+- **domain/** has zero dependencies on infrastructure — it defines interfaces, the adapters implement them
+- **adapters/** depends on domain (implements its interfaces) but never on service/
+- **service/** depends on both (wires them together) but is the only layer that does
+- **shared/** never imports services/ — dependency flows one direction only
+
+Architecture tests (`TestNoInternalCrossServiceImports`, `TestAdaptersNeverImportService`) enforce these boundaries. A violation is a CI failure, not a review comment.
+
 3 reference services are explicitly designated: `party/` (minimal), `current-account/` (inter-service calls), `financial-accounting/` (Kafka + observability).
 
-**Why this matters for AI**: When an agent needs to add a gRPC endpoint, it knows exactly where to look: `services/{name}/service/server.go`. When it needs the domain model: `services/{name}/domain/`. No guessing, no searching, no variation.
+**Why this matters for AI**: An agent doesn't need to understand the whole codebase to make a safe change. Hexagonal boundaries mean: "if I'm adding a repository method, I only need to read `domain/` and `adapters/persistence/`." The architecture tests guarantee that a local change stays local — no hidden cross-service coupling to discover by accident.
+
+### API Contract Specifications — Three Layers of Truth
+
+**Pattern**: Every service boundary has a machine-readable contract specification:
+
+| Layer | Format | Location | Purpose |
+|-------|--------|----------|---------|
+| **Synchronous APIs** | Protocol Buffers | `api/proto/meridian/` | gRPC service definitions, request/response types |
+| **REST APIs** | OpenAPI/Swagger | `api/openapi/meridian.swagger.json` | Auto-generated from proto, 21k+ lines |
+| **Async Events** | AsyncAPI | `api/asyncapi/{service}.yaml` | Kafka event schemas per service |
+
+All three are **generated from or defined alongside the source of truth** (proto files for sync, AsyncAPI specs for async), committed to git, and validated in CI.
+
+```yaml
+# api/asyncapi/position-keeping.yaml — machine-readable event contract
+channels:
+  position-keeping.position-log.created:
+    publish:
+      message:
+        $ref: '#/components/messages/PositionLogCreated'
+```
+
+**Why this matters for AI**: When an agent needs to integrate with a service, it can read the contract specification without reading the implementation. Proto files define what methods exist and what types they accept. AsyncAPI specs define what events are published and their schemas. The agent can generate correct client code from the contract alone — no need to trace through service internals.
+
+### Breadcrumb-Driven Behavior — Keywords That Light Up Patterns
+
+**Pattern**: The project's CLAUDE.md (loaded into every AI session) uses specific phrases and keywords that activate preferred agent behavior. These act as "breadcrumbs" — compact triggers that reference larger patterns.
+
+Examples from Meridian's CLAUDE.md:
+
+| Breadcrumb | Behavior it triggers |
+|------------|---------------------|
+| "Use `await.Until()` instead of `time.Sleep`" | Agent reaches for polling, not sleeping |
+| "NEVER use `time.Sleep` in tests" | Absolute prohibition, agent doesn't rationalize exceptions |
+| "Constructor injection for dependencies" | Agent uses DI, doesn't create singletons |
+| "CockroachDB, not PostgreSQL" | Agent avoids PG-specific features (LISTEN/NOTIFY, PL/pgSQL) |
+| "Atlas, NOT Flyway" | Agent uses correct migration tool |
+| "NEVER edit existing migration files" | Agent creates new migrations, doesn't modify history |
+| "`git branch -D` not `-d`" | Agent uses force-delete after squash merges |
+
+These aren't documentation — they're **behavioral programming**. An LLM responds to pattern and emphasis. "NEVER" in capitals with context hits differently than a buried convention in a style guide. The CLAUDE.md is effectively a prompt that shapes every action the agent takes.
+
+**Why this matters**: A 200-line CLAUDE.md replaces hours of onboarding. Every session starts with the same behavioral baseline. When the agent encounters a test that needs async waiting, the breadcrumb "await.Until()" is already loaded — it doesn't need to discover the package by exploring.
+
+**Design principle**: Breadcrumbs should be **specific and actionable** ("use X instead of Y"), not vague ("follow best practices"). They should include the **why** when the reason isn't obvious ("CockroachDB doesn't support LISTEN/NOTIFY"). And they should use **strong language** for hard rules ("NEVER") vs. soft preferences ("prefer").
 
 ### Package Documentation as Discoverability
 
