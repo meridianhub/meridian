@@ -36,6 +36,7 @@ func fullHandlerSchema() *schema.Schema {
 					"correlation_id":  {Type: schema.TypeString},
 					"attributes":      {Type: schema.TypeMap},
 					"description":     {Type: schema.TypeString},
+					"reference":       {Type: schema.TypeString},
 				},
 				Returns: map[string]*schema.FieldDef{
 					"log_id": {Type: schema.TypeString},
@@ -114,7 +115,7 @@ func fullHandlerSchema() *schema.Schema {
 			// --- financial_accounting ---
 			"financial_accounting.post_entries": {
 				Params: map[string]*schema.FieldDef{
-					"entries": {Type: schema.TypeArray},
+					"entries": {Type: schema.TypeArray, Required: true},
 				},
 				Compensate: "financial_accounting.reverse_entries",
 			},
@@ -128,11 +129,16 @@ func fullHandlerSchema() *schema.Schema {
 			// --- financial_gateway ---
 			"financial_gateway.dispatch_payment": {
 				Params: map[string]*schema.FieldDef{
-					"amount":           {Type: schema.TypeDecimal, Required: true},
-					"currency":         {Type: schema.TypeString, Required: true},
-					"payment_order_id": {Type: schema.TypeString},
-					"idempotency_key":  {Type: schema.TypeString},
-					"party_id":         {Type: schema.TypeString},
+					"amount":                   {Type: schema.TypeDecimal},
+					"amount_minor_units":       {Type: schema.TypeInt64},
+					"currency":                 {Type: schema.TypeString, Required: true},
+					"payment_order_id":         {Type: schema.TypeString},
+					"idempotency_key":          {Type: schema.TypeString},
+					"party_id":                 {Type: schema.TypeString},
+					"customer_reference":       {Type: schema.TypeString},
+					"payment_method_reference": {Type: schema.TypeString},
+					"rail":                     {Type: schema.TypeString},
+					"metadata":                 {Type: schema.TypeMap},
 				},
 				Returns: map[string]*schema.FieldDef{
 					"payment_id": {Type: schema.TypeString},
@@ -191,6 +197,7 @@ func fullHandlerSchema() *schema.Schema {
 					"amount":          {Type: schema.TypeDecimal, Required: true},
 					"from_instrument": {Type: schema.TypeString, Required: true},
 					"to_instrument":   {Type: schema.TypeString, Required: true},
+					"value_date":      {Type: schema.TypeString},
 				},
 				Returns: map[string]*schema.FieldDef{
 					"amount": {Type: schema.TypeDecimal},
@@ -212,9 +219,11 @@ func fullHandlerSchema() *schema.Schema {
 			},
 			"current_account.execute_withdrawal": {
 				Params: map[string]*schema.FieldDef{
-					"account_id":      {Type: schema.TypeString, Required: true},
+					"account_id":      {Type: schema.TypeString},
+					"position_id":     {Type: schema.TypeString},
 					"amount":          {Type: schema.TypeDecimal, Required: true},
 					"instrument_code": {Type: schema.TypeString},
+					"reference":       {Type: schema.TypeString},
 				},
 				Returns: map[string]*schema.FieldDef{
 					"transaction_id": {Type: schema.TypeString},
