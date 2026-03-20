@@ -179,7 +179,7 @@ def execute_apply_manifest():
             display_name=org_name,
             party_type=org.get("party_type", "ORGANIZATION"),
             external_reference=org.get("code", ""),
-            external_reference_type=org.get("external_reference_type", ""),
+            external_reference_type=org.get("external_reference_type", "COMPANIES_HOUSE"),
             attributes=org.get("attributes", {}),
         )
         registered_organizations.append({
