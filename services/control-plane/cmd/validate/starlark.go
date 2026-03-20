@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
@@ -30,6 +31,44 @@ var (
 	errHandlerNotAllowed = errors.New("handler not registered and not in open fallback allowlist")
 )
 
+// collectStarlarkFiles resolves a glob pattern into a list of .star file paths.
+// Unlike filepath.Glob, this supports ** for recursive directory matching by
+// using filepath.WalkDir when the pattern contains **.
+func collectStarlarkFiles(glob string) ([]string, error) {
+	if !strings.Contains(glob, "**") {
+		// Simple glob without recursion - filepath.Glob works fine
+		return filepath.Glob(glob)
+	}
+
+	// Split pattern at ** to get the root directory and the file suffix pattern.
+	// E.g., "cookbook/patterns/**/*.star" -> root="cookbook/patterns", suffix="*.star"
+	parts := strings.SplitN(glob, "**", 2)
+	root := filepath.Clean(strings.TrimRight(parts[0], string(filepath.Separator)))
+	suffix := strings.TrimLeft(parts[1], string(filepath.Separator))
+
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		matched, matchErr := filepath.Match(suffix, filepath.Base(path))
+		if matchErr != nil {
+			return matchErr
+		}
+		if matched {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking directory %s: %w", root, err)
+	}
+	return files, nil
+}
+
 // starlarkValidationResult holds the validation outcome for a single .star file.
 type starlarkValidationResult struct {
 	File    string
@@ -41,10 +80,13 @@ type starlarkValidationResult struct {
 // validateStarlarkFiles validates standalone .star files against the handler schema.
 // It builds validation modules from the derived schema and executes each script
 // to catch UNKNOWN_HANDLER, UNKNOWN_PARAM, MISSING_REQUIRED_PARAM, and WRONG_PARAM_TYPE errors.
+//
+// The glob parameter supports ** for recursive matching (e.g., "cookbook/patterns/**/*.star")
+// by using filepath.WalkDir instead of filepath.Glob, which does not support **.
 func validateStarlarkFiles(glob string, derivedSchema *schema.Schema) ([]starlarkValidationResult, error) {
-	files, err := filepath.Glob(glob)
+	files, err := collectStarlarkFiles(glob)
 	if err != nil {
-		return nil, fmt.Errorf("invalid glob pattern: %w", err)
+		return nil, err
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("%w: %s", errNoFilesMatched, glob)
@@ -213,9 +255,8 @@ func decimalBuiltin() *starlark.Builtin {
 			}
 			return starlark.Float(float64(i64)), nil
 		case starlark.String:
-			var f float64
-			n, err := fmt.Sscanf(string(v), "%f", &f)
-			if err != nil || n != 1 {
+			f, err := strconv.ParseFloat(string(v), 64)
+			if err != nil {
 				return nil, fmt.Errorf("%w: %q", errDecimalParse, string(v))
 			}
 			return starlark.Float(f), nil
@@ -440,12 +481,9 @@ func permissiveResultField(contextName, name string) starlark.Value {
 			&permissiveResultValue{name: contextName + "." + name + "[1]"},
 		})
 	}
-	intFields := map[string]bool{"count": true}
+	intFields := map[string]bool{"count": true, "max_members": true}
 	if intFields[name] {
 		return starlark.MakeInt(0)
-	}
-	if name == "max_members" {
-		return starlark.MakeInt(100)
 	}
 	numericFields := map[string]bool{
 		"amount": true, "total": true, "balance": true, "quantity": true,
