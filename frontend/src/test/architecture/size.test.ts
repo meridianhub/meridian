@@ -89,16 +89,17 @@ function collectSourceFiles(dir: string): string[] {
 function lineCount(filePath: string): number {
   const content = fs.readFileSync(filePath, 'utf-8')
   if (content.length === 0) return 0
-  // Count newline characters (matches `wc -l` behavior)
+  // Count newline characters, plus one if the file lacks a trailing newline
   let count = 0
   for (let i = 0; i < content.length; i++) {
     if (content[i] === '\n') count++
   }
+  if (!content.endsWith('\n')) count++
   return count
 }
 
 function relativePath(filePath: string): string {
-  return path.relative(FRONTEND_ROOT, filePath)
+  return path.relative(FRONTEND_ROOT, filePath).split(path.sep).join('/')
 }
 
 // ---------------------------------------------------------------------------
