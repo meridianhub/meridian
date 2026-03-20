@@ -1020,6 +1020,40 @@ audit logging using `shared/platform/audit`.
 
 ---
 
+### Codecov Component Registration
+
+**Applies when**: Any new `services/<name>/` directory or `frontend/src/features/<name>/`
+directory is created.
+
+Register a Codecov component so coverage for the new service is tracked independently.
+The `default_rules` in `codecov.yml` automatically apply an 80% target to all registered
+components — no additional target configuration is needed.
+
+Add the component definition to `codecov.yml` under
+`component_management.individual_components`:
+
+**Backend service:**
+
+```yaml
+- component_id: <service-name>
+  name: <Service Name>
+  paths:
+    - services/<service-name>/**
+```
+
+**Frontend feature:**
+
+```yaml
+- component_id: fe-<feature-name>
+  name: Frontend - <Feature Name>
+  paths:
+    - frontend/src/features/<feature-name>/**
+```
+
+**Reference PRs**: #1815 (backend components), #1820 (frontend components)
+
+---
+
 ### Idempotency Service Wiring
 
 **Applies when**: The service accepts mutation requests that must not be executed more than
