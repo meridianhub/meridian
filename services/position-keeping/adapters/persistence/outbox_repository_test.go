@@ -22,7 +22,7 @@ func TestPostgresRepository_CreateWithOutbox(t *testing.T) {
 		log := createTestLog(t, testAccountID)
 		postFnCalled := false
 
-		err := tc.repo.CreateWithOutbox(ctx, log, func(tx pgx.Tx) error {
+		err := tc.repo.CreateWithOutbox(ctx, log, func(_ pgx.Tx) error {
 			postFnCalled = true
 			return nil
 		})
@@ -63,7 +63,7 @@ func TestPostgresRepository_CreateWithOutbox(t *testing.T) {
 		log := createTestLog(t, testAccountID)
 		expectedErr := fmt.Errorf("outbox write failed")
 
-		err := tc.repo.CreateWithOutbox(ctx, log, func(tx pgx.Tx) error {
+		err := tc.repo.CreateWithOutbox(ctx, log, func(_ pgx.Tx) error {
 			return expectedErr
 		})
 		require.Error(t, err)
@@ -90,7 +90,7 @@ func TestPostgresRepository_UpdateWithOutbox(t *testing.T) {
 		require.NoError(t, err)
 
 		postFnCalled := false
-		err = tc.repo.UpdateWithOutbox(ctx, log, func(tx pgx.Tx) error {
+		err = tc.repo.UpdateWithOutbox(ctx, log, func(_ pgx.Tx) error {
 			postFnCalled = true
 			return nil
 		})
@@ -150,7 +150,7 @@ func TestPostgresRepository_UpdateWithOutbox(t *testing.T) {
 		err = log.MarkPosted("Posted", nil)
 		require.NoError(t, err)
 
-		err = tc.repo.UpdateWithOutbox(ctx, log, func(tx pgx.Tx) error {
+		err = tc.repo.UpdateWithOutbox(ctx, log, func(_ pgx.Tx) error {
 			return fmt.Errorf("outbox error")
 		})
 		require.Error(t, err)
