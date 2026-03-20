@@ -250,34 +250,53 @@ These aren't documentation - they're **behavioral programming**. LLMs respond to
 
 **Pattern**: All services follow the same internal architecture, enforced by architecture tests. The primary value isn't the architecture pattern itself - it's that every service is structurally identical, so an agent (or a human) can navigate any service without learning a new layout.
 
-Meridian uses hexagonal (ports and adapters), which is a well-established pattern for separating business logic from infrastructure:
+A hexagonal (ports and adapters) layout illustrates the principle:
 
 ```
 services/{name}/
-├── domain/              # Pure business logic, interfaces, errors - no imports from adapters/
+├── domain/              # Pure business logic, interfaces, errors - no infrastructure imports
 ├── adapters/
 │   └── persistence/     # Implementations of domain interfaces
 ├── service/
-│   └── server.go        # Entry point - orchestrates domain + adapters
+│   └── entrypoint       # Orchestrates domain + adapters
 ├── migrations/          # Schema files
-└── README.md            # Service guide with YAML front-matter
+└── README.md            # Service guide
 ```
 
-The boundaries are strict and tested:
+The boundaries that matter for enforcement:
 - **domain/** has zero dependencies on infrastructure - it defines interfaces, the adapters implement them
 - **adapters/** depends on domain (implements its interfaces) but never on service/
 - **service/** depends on both (wires them together) but is the only layer that does
 - **shared/** never imports services/ - dependency flows one direction only
 
-The architecture tests from Layer 3 enforce this uniformity across every service. If someone creates a service that puts persistence code in `domain/` or imports another service's internals, the build fails. Designate 2-3 services as **reference implementations** that agents should copy from - architecture tests guarantee all services match.
+The specific pattern - hexagonal, clean architecture, vertical slices - matters less than two things: (1) every service uses the same one, and (2) architecture tests from Layer 3 enforce it. If someone creates a service that puts persistence code in `domain/` or imports another service's internals, the build fails. Designate 2-3 services as **reference implementations** that agents should copy from.
 
-**Why this matters for AI**: An agent doesn't need to understand the whole codebase to make a safe change. Every service has the same shape, so "if I'm adding a repository method, I need `domain/` and `adapters/persistence/`" is always true, in every service. The architecture tests guarantee that a local change stays local - no hidden cross-service coupling to discover by accident.
+**Why this matters for AI**: An agent doesn't need to understand the whole codebase to make a safe change. Every service has the same shape, so navigating any service works the same way. The architecture tests guarantee that a local change stays local - no hidden cross-service coupling to discover by accident.
 
-### API Contract Specifications
+### API Contract Specifications - Multiple Layers of Truth
 
-**Pattern**: Every service boundary has a machine-readable contract specification - proto files, OpenAPI specs, AsyncAPI schemas, or whatever fits your stack. Commit these to git (denormalized availability) and validate them in CI.
+**Pattern**: Every service boundary has machine-readable contract specifications at multiple levels. A single contract format rarely covers all integration scenarios - synchronous APIs, auto-generated REST documentation, and asynchronous event schemas serve different consumers.
 
-When an agent needs to integrate with a service, it can read the contract specification without reading the implementation. The agent can generate correct client code from the contract alone - no need to trace through service internals.
+| Layer | Format | Purpose |
+|-------|--------|---------|
+| **Synchronous APIs** | Protocol Buffers, GraphQL SDL, OpenAPI | Service-to-service RPC definitions, request/response types |
+| **REST/HTTP APIs** | OpenAPI/Swagger (often auto-generated from the above) | External consumers, documentation, client generation |
+| **Async Events** | AsyncAPI | Event schemas per service, channel definitions |
+
+The key is that all three are **generated from or defined alongside the source of truth**, committed to git (denormalized availability), and validated in CI.
+
+A concrete example - an AsyncAPI spec for an event-driven service:
+
+```yaml
+# asyncapi/{service}.yaml - machine-readable event contract
+channels:
+  position-keeping.position-log.created:
+    publish:
+      message:
+        $ref: '#/components/messages/PositionLogCreated'
+```
+
+An agent integrating with this service doesn't need to read the implementation. It reads the proto file to know what RPC methods exist, the OpenAPI spec to see the REST surface, and the AsyncAPI spec to see what events are published. Correct client code can be generated from the contracts alone - no need to trace through service internals.
 
 ### Package Documentation as Discoverability
 
