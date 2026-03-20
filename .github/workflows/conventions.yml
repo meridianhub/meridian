@@ -13,6 +13,8 @@ on:
       - 'shared/**'
       - 'frontend/buf.gen.yaml'
       - 'frontend/src/api/gen/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
       - 'scripts/verify-service-conventions.sh'
       - '.github/workflows/conventions.yml'
   pull_request:
@@ -27,6 +29,8 @@ on:
       - 'shared/**'
       - 'frontend/buf.gen.yaml'
       - 'frontend/src/api/gen/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
       - 'scripts/verify-service-conventions.sh'
       - '.github/workflows/conventions.yml'
 
