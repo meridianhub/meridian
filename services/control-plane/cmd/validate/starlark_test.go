@@ -649,11 +649,15 @@ func TestValidateStarlarkFiles_SyntaxError(t *testing.T) {
 }
 
 func TestValidateStarlarkFiles_UnreadableFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping: root can read any file regardless of permissions")
+	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "unreadable.star")
 	require.NoError(t, os.WriteFile(path, []byte("x = 1"), 0o644))
 	require.NoError(t, os.Chmod(path, 0o000))
-	t.Cleanup(func() { os.Chmod(path, 0o644) })
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 
 	s := &schema.Schema{Handlers: map[string]*schema.HandlerDef{}}
 	results, err := validateStarlarkFiles(filepath.Join(dir, "*.star"), s)

@@ -18,7 +18,8 @@ func setupTestStore(t *testing.T) (*PostgresManifestVersionStore, context.Contex
 	}
 
 	pool := testdb.NewTestPool(t, testdb.WithMigrations("control-plane"))
-	ctx, _ := testdb.SetupTenantSchemaForPgx(t, pool, "test-tenant", "control-plane")
+	ctx, cleanup := testdb.SetupTenantSchemaForPgx(t, pool, "test-tenant", "control-plane")
+	t.Cleanup(cleanup)
 
 	store := NewPostgresManifestVersionStore(pool)
 	return store, ctx

@@ -137,14 +137,11 @@ func TestValidateManifests_ValidFile(t *testing.T) {
 	derivedSchema, err := buildDerivedSchema()
 	require.NoError(t, err)
 
-	// Capture stderr to suppress output
-	oldStderr := os.Stderr
-	os.Stderr, _ = os.Open(os.DevNull)
-	defer func() { os.Stderr = oldStderr }()
-
-	// The manifest may have validation errors (missing required fields),
-	// but the function should not error on file reading/parsing.
-	_ = validateManifests(filepath.Join(dir, "*.json"), derivedSchema, false)
+	// Use JSON output mode to capture the result and verify the file was processed
+	output := captureStdout(t, func() {
+		_ = validateManifests(filepath.Join(dir, "*.json"), derivedSchema, true)
+	})
+	assert.Contains(t, output, "test.json")
 }
 
 func TestValidateManifests_JSONOutput(t *testing.T) {
