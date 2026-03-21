@@ -1110,12 +1110,12 @@ func TestBuildExecutorInput_MarketDataSetAlignedFields(t *testing.T) {
 		},
 		Datasets: []*controlplanev1.MarketDataSetDefinition{
 			{
-				Code:                      "USD_EUR_FX",
-				Category:                  1, // FX_RATE
-				Unit:                      "USD/EUR",
-				SourceCode:                "ECB",
-				ValidationExpression:      "value > 0",
-				ResolutionKeyExpression:   "observed_at + ':' + source_code",
+				Code:                    "USD_EUR_FX",
+				Category:                1, // FX_RATE
+				Unit:                    "USD/EUR",
+				SourceCode:              "ECB",
+				ValidationExpression:    "value > 0",
+				ResolutionKeyExpression: "observed_at + ':' + source_code",
 			},
 		},
 	}
