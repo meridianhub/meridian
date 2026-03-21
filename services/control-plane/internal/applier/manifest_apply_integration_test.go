@@ -33,7 +33,7 @@ func (n *noopMarketInformation) ActivateDataSet(_ *saga.StarlarkContext, p map[s
 // noopParty implements PartyService with no-op handlers.
 type noopParty struct{}
 
-func (n *noopParty) RegisterOrganization(_ *saga.StarlarkContext, p map[string]any) (any, error) {
+func (n *noopParty) RegisterOrganization(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
 	return map[string]any{"party_id": "party-uuid-1", "status": "ACTIVE"}, nil
 }
 
