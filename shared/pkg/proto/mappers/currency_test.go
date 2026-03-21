@@ -11,7 +11,7 @@ import (
 func TestCurrencyCodeToProto(t *testing.T) {
 	tests := []struct {
 		code string
-		want commonpb.Currency
+		want commonpb.Currency //nolint:staticcheck // testing deprecated mapper
 	}{
 		{"GBP", commonpb.Currency_CURRENCY_GBP},
 		{"USD", commonpb.Currency_CURRENCY_USD},
@@ -35,7 +35,7 @@ func TestCurrencyCodeToProto(t *testing.T) {
 func TestDomainCurrencyToProto(t *testing.T) {
 	tests := []struct {
 		currency money.Currency
-		want     commonpb.Currency
+		want     commonpb.Currency //nolint:staticcheck // testing deprecated mapper
 	}{
 		{money.CurrencyGBP, commonpb.Currency_CURRENCY_GBP},
 		{money.CurrencyUSD, commonpb.Currency_CURRENCY_USD},
