@@ -5301,10 +5301,10 @@ func TestRetrieveWithdrawal_MissingBothIDs(t *testing.T) {
 // =============================================================================
 
 // =============================================================================
-// getAccountBalanceCents: various response shapes
+// getAccountBalanceMinorUnits: various response shapes
 // =============================================================================
 
-func TestGetAccountBalanceCents_NilAmount(t *testing.T) {
+func TestGetAccountBalanceMinorUnits_NilAmount(t *testing.T) {
 	mockPK := &stubPKClient{
 		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
 			Amount: nil,
@@ -5314,12 +5314,12 @@ func TestGetAccountBalanceCents_NilAmount(t *testing.T) {
 		posKeepingClient: mockPK,
 		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
-	cents, err := svc.getAccountBalanceCents(context.Background(), "ACC-001")
+	cents, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-001", "GBP", 2)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), cents)
 }
 
-func TestGetAccountBalanceCents_EmptyAmount(t *testing.T) {
+func TestGetAccountBalanceMinorUnits_EmptyAmount(t *testing.T) {
 	mockPK := &stubPKClient{
 		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
 			Amount: &quantityv1.InstrumentAmount{
@@ -5331,12 +5331,12 @@ func TestGetAccountBalanceCents_EmptyAmount(t *testing.T) {
 		posKeepingClient: mockPK,
 		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
-	cents, err := svc.getAccountBalanceCents(context.Background(), "ACC-001")
+	cents, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-001", "GBP", 2)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), cents)
 }
 
-func TestGetAccountBalanceCents_InstrumentCodeMismatch(t *testing.T) {
+func TestGetAccountBalanceMinorUnits_InstrumentCodeMismatch(t *testing.T) {
 	mockPK := &stubPKClient{
 		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
 			Amount: &quantityv1.InstrumentAmount{
@@ -5349,12 +5349,12 @@ func TestGetAccountBalanceCents_InstrumentCodeMismatch(t *testing.T) {
 		posKeepingClient: mockPK,
 		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
-	_, err := svc.getAccountBalanceCents(context.Background(), "ACC-001")
+	_, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-001", "GBP", 2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInstrumentCodeMismatch)
 }
 
-func TestGetAccountBalanceCents_InvalidAmountString(t *testing.T) {
+func TestGetAccountBalanceMinorUnits_InvalidAmountString(t *testing.T) {
 	mockPK := &stubPKClient{
 		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
 			Amount: &quantityv1.InstrumentAmount{
@@ -5367,12 +5367,12 @@ func TestGetAccountBalanceCents_InvalidAmountString(t *testing.T) {
 		posKeepingClient: mockPK,
 		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
-	_, err := svc.getAccountBalanceCents(context.Background(), "ACC-001")
+	_, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-001", "GBP", 2)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse balance amount")
 }
 
-func TestGetAccountBalanceCents_Success(t *testing.T) {
+func TestGetAccountBalanceMinorUnits_Success(t *testing.T) {
 	mockPK := &stubPKClient{
 		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
 			Amount: &quantityv1.InstrumentAmount{
@@ -5385,12 +5385,12 @@ func TestGetAccountBalanceCents_Success(t *testing.T) {
 		posKeepingClient: mockPK,
 		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
-	cents, err := svc.getAccountBalanceCents(context.Background(), "ACC-001")
+	cents, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-001", "GBP", 2)
 	require.NoError(t, err)
 	assert.Equal(t, int64(12345), cents)
 }
 
-func TestGetAccountBalanceCents_Error(t *testing.T) {
+func TestGetAccountBalanceMinorUnits_Error(t *testing.T) {
 	mockPK := &stubPKClient{
 		getBalanceErr: fmt.Errorf("connection refused"),
 	}
@@ -5398,9 +5398,180 @@ func TestGetAccountBalanceCents_Error(t *testing.T) {
 		posKeepingClient: mockPK,
 		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
-	_, err := svc.getAccountBalanceCents(context.Background(), "ACC-001")
+	_, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-001", "GBP", 2)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "connection refused")
+}
+
+func TestGetAccountBalanceMinorUnits_KWH_Precision0(t *testing.T) {
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "1500",
+				InstrumentCode: "KWH",
+			},
+		},
+	}
+	svc := &Service{
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+	minorUnits, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-KWH-001", "KWH", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1500), minorUnits)
+}
+
+func TestGetAccountBalanceMinorUnits_KWH_Precision3(t *testing.T) {
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "1.500",
+				InstrumentCode: "KWH",
+			},
+		},
+	}
+	svc := &Service{
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+	minorUnits, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-KWH-001", "KWH", 3)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1500), minorUnits)
+}
+
+func TestGetAccountBalanceMinorUnits_CarbonCredit(t *testing.T) {
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "CARBON_CREDIT",
+			},
+		},
+	}
+	svc := &Service{
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+	minorUnits, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-CC-001", "CARBON_CREDIT", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), minorUnits)
+}
+
+func TestGetAccountBalanceMinorUnits_InstrumentMismatch_NonFiat(t *testing.T) {
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "GBP",
+			},
+		},
+	}
+	svc := &Service{
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+	_, err := svc.getAccountBalanceMinorUnits(context.Background(), "ACC-KWH-001", "KWH", 0)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInstrumentCodeMismatch)
+}
+
+// =============================================================================
+// hydrateAccountWithBalance: non-fiat instruments
+// =============================================================================
+
+func TestHydrateAccountWithBalance_KWH_Success(t *testing.T) {
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "1500",
+				InstrumentCode: "KWH",
+			},
+		},
+	}
+	db := openSharedDB(t)
+	repo := persistence.NewRepository(db)
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+
+	account, err := domain.NewCurrentAccountWithDimension("ACC-KWH-001", "KWH-001", uuid.New().String(), "KWH", "ENERGY", 0)
+	require.NoError(t, err)
+	hydrated, err := svc.hydrateAccountWithBalance(context.Background(), account)
+	require.NoError(t, err)
+	balanceMinor, _ := hydrated.Balance().ToMinorUnits()
+	assert.Equal(t, int64(1500), balanceMinor)
+	assert.Equal(t, "KWH", hydrated.Balance().InstrumentCode())
+	assert.Equal(t, "ENERGY", hydrated.Balance().Dimension())
+}
+
+func TestHydrateAccountWithBalance_KWH_Precision3_Success(t *testing.T) {
+	// PK returns "1.500" (major units). With precision=3, minor units = 1500.
+	// Hydration must reconstruct Amount with precision=3 so 1500 minor -> 1.500 KWH.
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "1.500",
+				InstrumentCode: "KWH",
+			},
+		},
+	}
+	db := openSharedDB(t)
+	repo := persistence.NewRepository(db)
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+
+	account, err := domain.NewCurrentAccountWithDimension("ACC-KWH-P3", "KWH-P3-001", uuid.New().String(), "KWH", "ENERGY", 3)
+	require.NoError(t, err)
+	hydrated, err := svc.hydrateAccountWithBalance(context.Background(), account)
+	require.NoError(t, err)
+	balanceMinor, _ := hydrated.Balance().ToMinorUnits()
+	assert.Equal(t, int64(1500), balanceMinor)
+	assert.Equal(t, 3, hydrated.Balance().Precision())
+	// Verify major units display correctly
+	assert.Equal(t, "1.500 KWH", hydrated.Balance().String())
+}
+
+func TestHydrateAccountWithBalance_CarbonCredit_Success(t *testing.T) {
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "50",
+				InstrumentCode: "CARBON_CREDIT",
+			},
+		},
+	}
+	db := openSharedDB(t)
+	repo := persistence.NewRepository(db)
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+
+	account, err := domain.NewCurrentAccountWithDimension("ACC-CC-001", "CC-001", uuid.New().String(), "CARBON_CREDIT", "CARBON", 0)
+	require.NoError(t, err)
+	hydrated, err := svc.hydrateAccountWithBalance(context.Background(), account)
+	require.NoError(t, err)
+	balanceMinor, _ := hydrated.Balance().ToMinorUnits()
+	assert.Equal(t, int64(50), balanceMinor)
+	assert.Equal(t, "CARBON_CREDIT", hydrated.Balance().InstrumentCode())
+	assert.Equal(t, "CARBON", hydrated.Balance().Dimension())
+}
+
+func TestHydrateAccountWithPrefetchedBalance_KWH_Success(t *testing.T) {
+	svc := &Service{logger: slog.New(slog.NewJSONHandler(os.Stdout, nil))}
+	account, err := domain.NewCurrentAccountWithDimension("ACC-KWH-PREF-001", "KWH-PREF-001", uuid.New().String(), "KWH", "ENERGY", 0)
+	require.NoError(t, err)
+	hydrated, err := svc.hydrateAccountWithPrefetchedBalance(account, 5000)
+	require.NoError(t, err)
+	balanceMinor, _ := hydrated.Balance().ToMinorUnits()
+	assert.Equal(t, int64(5000), balanceMinor)
+	assert.Equal(t, "KWH", hydrated.Balance().InstrumentCode())
 }
 
 // =============================================================================

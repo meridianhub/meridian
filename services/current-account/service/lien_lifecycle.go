@@ -161,7 +161,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 	bucketID := req.BucketId
 
-	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, req.AccountId)
+	prefetchedBalanceCents, err := s.getAccountBalanceMinorUnits(ctx, req.AccountId, prefetchedAccount.InstrumentCode(), prefetchedAccount.Balance().Precision())
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
 		s.logger.Error("failed to prefetch balance from Position Keeping",
@@ -437,7 +437,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	// Note: Currently Position Keeping returns total balance regardless of bucket.
 	// The lien's bucket_id is used for bucket-scoped lien calculations within Current Account,
 	// but the balance comes from total Position Keeping balance.
-	prefetchedBalanceCents, err := s.getAccountBalanceCents(ctx, prefetchAccount.AccountID())
+	prefetchedBalanceCents, err := s.getAccountBalanceMinorUnits(ctx, prefetchAccount.AccountID(), prefetchAccount.InstrumentCode(), prefetchAccount.Balance().Precision())
 	if err != nil {
 		operationStatus = opStatusRetrieveFailed
 		s.logger.Error("failed to prefetch balance from Position Keeping",

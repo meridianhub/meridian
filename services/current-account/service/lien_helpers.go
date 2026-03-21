@@ -158,13 +158,14 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 // Position Keeping is the source of truth for account balances - this method MUST be called
 // before any operation that requires the current balance.
 func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.CurrentAccount) (domain.CurrentAccount, error) {
-	balanceCents, err := s.getAccountBalanceCents(ctx, account.AccountID())
+	precision := account.Balance().Precision()
+	balanceCents, err := s.getAccountBalanceMinorUnits(ctx, account.AccountID(), account.InstrumentCode(), precision)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
 	}
 
-	// Create balance Money object
-	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), 0, balanceCents)
+	// Create balance Amount using the account's instrument precision.
+	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), precision, balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
@@ -199,8 +200,8 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 // Use this inside transactions to avoid making external service calls while holding database locks.
 // The balanceCents parameter should be fetched from Position Keeping BEFORE entering the transaction.
 func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAccount, balanceCents int64) (domain.CurrentAccount, error) {
-	// Create balance Money object
-	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), 0, balanceCents)
+	// Create balance Amount using the account's instrument precision.
+	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), account.Balance().Precision(), balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
@@ -232,24 +233,19 @@ func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAcco
 		Build(), nil
 }
 
-// currentAccountInstrumentCode is the instrument code used for Current Account balance queries.
-// Current Account operates exclusively with GBP currency (CURRENCY dimension).
-// The Internal Account service will use different instrument codes for multi-asset support.
-const currentAccountInstrumentCode = "GBP"
-
-// getAccountBalanceCents gets the account balance in cents from Position Keeping service.
+// getAccountBalanceMinorUnits gets the account balance from Position Keeping service.
 // Position Keeping is the mandatory source of truth for all account balances.
-// Uses the multi-asset API with explicit instrument_code="GBP" for currency operations.
-// Returns balance in minor units (cents/pence).
-func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) (int64, error) {
+// Uses the multi-asset API with the account's instrument code and precision.
+// Returns balance in minor units scaled by the given precision.
+func (s *Service) getAccountBalanceMinorUnits(ctx context.Context, accountID, instrumentCode string, precision int) (int64, error) {
 	resp, err := s.posKeepingClient.GetAccountBalance(ctx, &positionkeepingv1.GetAccountBalanceRequest{
 		AccountId:      accountID,
 		BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
-		InstrumentCode: currentAccountInstrumentCode, // Explicit instrument for multi-asset API
+		InstrumentCode: instrumentCode,
 	})
 	if err != nil {
 		s.logger.Error("failed to get balance from Position Keeping",
-			"account_id", accountID, "instrument_code", currentAccountInstrumentCode, "error", err)
+			"account_id", accountID, "instrument_code", instrumentCode, "error", err)
 		return 0, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
 	}
 
@@ -259,14 +255,14 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) 
 
 	// Validate that the response instrument matches the requested instrument.
 	// This guards against configuration mismatches where Position Keeping might
-	// return a different currency than expected.
-	if resp.Amount.InstrumentCode != currentAccountInstrumentCode {
+	// return a different instrument than expected.
+	if resp.Amount.InstrumentCode != instrumentCode {
 		s.logger.Error("instrument code mismatch in balance response",
 			"account_id", accountID,
-			"expected", currentAccountInstrumentCode,
+			"expected", instrumentCode,
 			"received", resp.Amount.InstrumentCode)
 		return 0, fmt.Errorf("%w: expected %s, got %s",
-			ErrInstrumentCodeMismatch, currentAccountInstrumentCode, resp.Amount.InstrumentCode)
+			ErrInstrumentCodeMismatch, instrumentCode, resp.Amount.InstrumentCode)
 	}
 
 	// Parse InstrumentAmount as decimal
@@ -277,19 +273,19 @@ func (s *Service) getAccountBalanceCents(ctx context.Context, accountID string) 
 		return 0, fmt.Errorf("failed to parse balance amount: %w", err)
 	}
 
-	// Convert to minor units (cents/pence) - multiply by 100 for 2 decimal currencies.
-	// Uses banker's rounding (round-to-even) which differs from half-up at .5 boundaries:
-	// e.g., 0.015 -> 2 (rounds to even), 0.025 -> 2 (rounds to even), 0.035 -> 4 (rounds to even)
-	cents := amount.Mul(decimal.NewFromInt(100)).RoundBank(0)
+	// Convert to minor units using the instrument's precision (Shift by precision digits).
+	// Uses banker's rounding (round-to-even) which differs from half-up at .5 boundaries.
+	// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
+	minorUnits := amount.Shift(int32(precision)).RoundBank(0)
 
 	// Check for overflow using int64 bounds
 	maxInt64 := decimal.NewFromInt(math.MaxInt64)
 	minInt64 := decimal.NewFromInt(math.MinInt64)
-	if cents.GreaterThan(maxInt64) || cents.LessThan(minInt64) {
+	if minorUnits.GreaterThan(maxInt64) || minorUnits.LessThan(minInt64) {
 		return 0, ErrAmountOverflow
 	}
 
-	return cents.IntPart(), nil
+	return minorUnits.IntPart(), nil
 }
 
 // calculateAvailableBalance calculates available balance with active liens.
