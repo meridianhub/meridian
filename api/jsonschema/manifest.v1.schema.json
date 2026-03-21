@@ -674,6 +674,14 @@
                 "description": {
                     "type": "string",
                     "description": "description provides additional context about this data set."
+                },
+                "validationExpression": {
+                    "type": "string",
+                    "description": "validation_expression is a CEL expression evaluated against each observation before acceptance. Must return a boolean. Observations are only stored when the expression returns true. Default: \"true\" (accept all observations). Example: \"value \u003e 0 \u0026\u0026 value \u003c 1000000\""
+                },
+                "resolutionKeyExpression": {
+                    "type": "string",
+                    "description": "resolution_key_expression is a CEL expression that determines the resolution key for deduplication and conflict resolution of observations. Default: \"observed_at\" (one observation per timestamp). Example: \"observed_at + ':' + source_code\""
                 }
             },
             "additionalProperties": false,
@@ -795,7 +803,7 @@
                 },
                 "name": {
                     "type": "string",
-                    "description": "name is the legal or display name of the organization."
+                    "description": "name is the legacy display name of the organization. Deprecated: Use legal_name and display_name instead. Retained for backward compatibility."
                 },
                 "partyType": {
                     "type": "string",
@@ -807,6 +815,22 @@
                     },
                     "type": "object",
                     "description": "attributes contains additional metadata for this organization as key-value pairs. Keys and values are validated against the party type's attribute_schema if defined."
+                },
+                "legalName": {
+                    "type": "string",
+                    "description": "legal_name is the official legal name of the organization. Maps directly to the party.register_organization handler's legal_name parameter. If empty, falls back to the name field for backward compatibility."
+                },
+                "displayName": {
+                    "type": "string",
+                    "description": "display_name is the human-readable display name of the organization. Maps directly to the party.register_organization handler's display_name parameter. If empty, falls back to legal_name, then name."
+                },
+                "externalReference": {
+                    "type": "string",
+                    "description": "external_reference is a stable identifier for this organization in an external system. Maps directly to the party.register_organization handler's external_reference parameter. If empty, falls back to the organization code."
+                },
+                "externalReferenceType": {
+                    "type": "string",
+                    "description": "external_reference_type identifies the type of external reference (e.g., \"LEI\", \"NATIONAL_ID\"). Accepts stripped enum names (e.g., \"LEI\") - the handler accepts both \"LEI\" and \"EXTERNAL_REFERENCE_TYPE_LEI\" formats."
                 }
             },
             "additionalProperties": false,

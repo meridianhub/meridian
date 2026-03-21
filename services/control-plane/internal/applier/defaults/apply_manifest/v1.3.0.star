@@ -171,19 +171,19 @@ def execute_apply_manifest():
         })
 
     # Phase 55: Register organizations with Party service
+    # Fields are passed through directly from the manifest proto via buildSagaInput.
+    # Fallback resolution (legal_name from name, external_reference from code) is
+    # handled upstream in extractPartyAndAccounts, so the Starlark script receives
+    # pre-resolved values.
     for org in organizations:
         step(name="register_organization_" + org["code"])
-        org_name = org.get("name", org["code"])
-        org_attrs = org.get("attributes", {})
-        # Use external_reference from attributes if present, otherwise fall back to org code.
-        ext_ref = org_attrs.get("external_reference", org["code"])
         party.register_organization(
-            legal_name=org_name,
-            display_name=org_name,
+            legal_name=org.get("legal_name", org.get("name", org["code"])),
+            display_name=org.get("display_name", org.get("legal_name", org.get("name", org["code"]))),
             party_type=org.get("party_type", "ORGANIZATION"),
-            external_reference=ext_ref,
-            external_reference_type=org.get("external_reference_type", "NATIONAL_ID"),
-            attributes=org_attrs,
+            external_reference=org.get("external_reference", org["code"]),
+            external_reference_type=org.get("external_reference_type", ""),
+            attributes=org.get("attributes", {}),
         )
         registered_organizations.append({
             "code": org["code"],

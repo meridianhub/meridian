@@ -801,12 +801,14 @@ func extractMarketData(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
 	}
 	for _, ds := range md.GetDatasets() {
 		input.MarketDataSets = append(input.MarketDataSets, MarketDataSetInput{
-			Code:        ds.GetCode(),
-			Category:    stripEnumPrefix(ds.GetCategory().String(), "DATA_CATEGORY_"),
-			Unit:        ds.GetUnit(),
-			SourceCode:  ds.GetSourceCode(),
-			DisplayName: ds.GetDisplayName(),
-			Description: ds.GetDescription(),
+			Code:                    ds.GetCode(),
+			Category:                stripEnumPrefix(ds.GetCategory().String(), "DATA_CATEGORY_"),
+			Unit:                    ds.GetUnit(),
+			SourceCode:              ds.GetSourceCode(),
+			DisplayName:             ds.GetDisplayName(),
+			Description:             ds.GetDescription(),
+			ValidationExpression:    ds.GetValidationExpression(),
+			ResolutionKeyExpression: ds.GetResolutionKeyExpression(),
 		})
 	}
 }
@@ -814,11 +816,36 @@ func extractMarketData(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
 // extractPartyAndAccounts converts organizations and internal accounts from the manifest proto.
 func extractPartyAndAccounts(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
 	for _, org := range mf.GetOrganizations() {
+		// Resolve legal_name with fallback chain: legal_name -> name -> code
+		legalName := org.GetLegalName()
+		if legalName == "" {
+			legalName = org.GetName()
+		}
+		if legalName == "" {
+			legalName = org.GetCode()
+		}
+
+		// Resolve display_name with fallback chain: display_name -> legal_name
+		displayName := org.GetDisplayName()
+		if displayName == "" {
+			displayName = legalName
+		}
+
+		// Resolve external_reference with fallback: external_reference -> code
+		extRef := org.GetExternalReference()
+		if extRef == "" {
+			extRef = org.GetCode()
+		}
+
 		input.Organizations = append(input.Organizations, OrganizationInput{
-			Code:       org.GetCode(),
-			Name:       org.GetName(),
-			PartyType:  org.GetPartyType(),
-			Attributes: org.GetAttributes(),
+			Code:                  org.GetCode(),
+			Name:                  org.GetName(),
+			LegalName:             legalName,
+			DisplayName:           displayName,
+			ExternalReference:     extRef,
+			ExternalReferenceType: org.GetExternalReferenceType(),
+			PartyType:             org.GetPartyType(),
+			Attributes:            org.GetAttributes(),
 		})
 	}
 	for _, ia := range mf.GetInternalAccounts() {
