@@ -139,8 +139,8 @@ def execute_apply_manifest():
             source_code=dataset.get("source_code", ""),
             display_name=dataset.get("display_name", dataset["code"]),
             description=dataset.get("description", ""),
-            validation_expression=dataset.get("validation_expression", "true"),
-            resolution_key_expression=dataset.get("resolution_key_expression", "observed_at"),
+            validation_expression=dataset.get("validation_expression", "") or "true",
+            resolution_key_expression=dataset.get("resolution_key_expression", "") or "observed_at",
         )
 
         step(name="activate_data_set_" + dataset["code"])
