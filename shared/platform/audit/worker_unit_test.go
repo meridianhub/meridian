@@ -116,39 +116,39 @@ func TestWithAdaptivePolling(t *testing.T) {
 }
 
 func TestCalculateAdaptiveInterval(t *testing.T) {
-	min := defaults.DefaultRetryDelay  // 100ms
-	max := defaults.DefaultRPCTimeout  // 30s
+	minInterval := defaults.DefaultRetryDelay // 100ms
+	maxInterval := defaults.DefaultRPCTimeout // 30s
 
 	t.Run("work found resets to min interval", func(t *testing.T) {
 		w := newTestWorker()
-		w.minPollInterval = min
-		w.maxPollInterval = max
+		w.minPollInterval = minInterval
+		w.maxPollInterval = maxInterval
 		w.emptyPollCount = 5 // simulate previous idle state
 
 		interval := w.calculateAdaptiveInterval(10)
-		assert.Equal(t, min, interval)
+		assert.Equal(t, minInterval, interval)
 		assert.Equal(t, 0, w.emptyPollCount)
 	})
 
 	t.Run("no work increases interval exponentially", func(t *testing.T) {
 		w := newTestWorker()
-		w.minPollInterval = min
-		w.maxPollInterval = max
+		w.minPollInterval = minInterval
+		w.maxPollInterval = maxInterval
 
 		// First empty poll: emptyPollCount becomes 1, multiplier = 2^1 = 2
 		interval := w.calculateAdaptiveInterval(0)
 		assert.Equal(t, 1, w.emptyPollCount)
-		assert.Equal(t, 2*min, interval)
+		assert.Equal(t, 2*minInterval, interval)
 
 		// Second empty poll: emptyPollCount becomes 2, multiplier = 2^2 = 4
 		interval = w.calculateAdaptiveInterval(0)
 		assert.Equal(t, 2, w.emptyPollCount)
-		assert.Equal(t, 4*min, interval)
+		assert.Equal(t, 4*minInterval, interval)
 	})
 
 	t.Run("interval is capped at max", func(t *testing.T) {
 		w := newTestWorker()
-		w.minPollInterval = min
+		w.minPollInterval = minInterval
 		w.maxPollInterval = 200 * time.Millisecond // very small max
 		w.emptyPollCount = 20                      // large count to exceed max
 
