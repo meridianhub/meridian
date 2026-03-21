@@ -291,13 +291,12 @@ func TestCapturePostingHandler_MissingParam(t *testing.T) {
 // --- createBookingHandler error path ---
 
 func TestCreateBookingHandler_InitiateError(t *testing.T) {
-	// mock returns error from InitiateFinancialBookingLog
 	client := &Client{financialAccounting: &mockFinancialAccountingClient{}}
 	handler := createBookingHandler(client)
 
 	ctx := &saga.StarlarkContext{Context: context.Background()}
 	params := map[string]any{
-		// missing required params so InitiateFinancialBookingLog returns error
+		// missing required params causes param validation to fail before gRPC call
 	}
 
 	_, err := handler(ctx, params)
