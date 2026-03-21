@@ -408,8 +408,10 @@ message ExecuteDepositRequest {
     max_len: 100
   }];
 
-  // amount is the deposit amount
-  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+  // amount is the deposit amount (legacy, currency-only).
+  // Use this for same-currency deposits (e.g., GBP deposit to GBP account).
+  // Mutually exclusive with input - if both provided, input takes precedence.
+  meridian.common.v1.MoneyAmount amount = 2;
 
   // description is optional deposit description
   string description = 3 [(buf.validate.field).string = {max_len: 500}];

@@ -664,24 +664,24 @@ func TestExecuteDeposit_InstrumentAmountInput_KWH(t *testing.T) {
 	defer cleanup()
 
 	repo := persistence.NewRepository(db)
-	// Mock PK returns 1500 minor units (1500 KWH with precision 0)
+	// Mock PK returns 9500 minor units (9.500 KWH with precision 3)
 	svc := mustNewServiceWithPositionKeeping(t, repo, nil, map[string]int64{
-		"ACC-KWH-001": 1500,
+		"ACC-KWH-001": 9500,
 	})
 
-	// Create KWH energy account (precision 0 = whole kWh units)
+	// Create KWH energy account (precision 3 = milliwatt-hours, e.g. 9.500 KWH)
 	account, err := domain.NewCurrentAccountWithDimension(
-		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 0,
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
 	)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
 
-	// Deposit 8.5 KWH using InstrumentAmount input field
+	// Deposit 9.5 KWH using InstrumentAmount input field
 	req := &pb.ExecuteDepositRequest{
 		AccountId:   "ACC-KWH-001",
-		Description: "Meter read 2026-03-20: 8.50 kWh",
+		Description: "Meter read 2026-03-20: 9.500 kWh",
 		Input: &quantityv1.InstrumentAmount{
-			Amount:         "8.5",
+			Amount:         "9.5",
 			InstrumentCode: "KWH",
 			Version:        1,
 		},
@@ -735,7 +735,7 @@ func TestExecuteDeposit_InstrumentAmountInput_InvalidAmount(t *testing.T) {
 
 	// Create KWH account
 	account, err := domain.NewCurrentAccountWithDimension(
-		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 0,
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
 	)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
@@ -768,7 +768,7 @@ func TestExecuteDeposit_InstrumentAmountInput_MalformedAmount(t *testing.T) {
 
 	// Create KWH account
 	account, err := domain.NewCurrentAccountWithDimension(
-		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 0,
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
 	)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))
@@ -789,6 +789,65 @@ func TestExecuteDeposit_InstrumentAmountInput_MalformedAmount(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	require.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_ExceedsPrecision(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	// Create KWH account with precision 3 (3 decimal places, e.g. 9.500 KWH)
+	account, err := domain.NewCurrentAccountWithDimension(
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// 8.5001 KWH has 4 decimal places, exceeding precision 3
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-KWH-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "8.5001",
+			InstrumentCode: "KWH",
+			Version:        1,
+		},
+	}
+
+	_, err = svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+	require.Contains(t, st.Message(), "exceeds instrument precision")
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_PartialInput(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	// Input present but missing instrument_code
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:  "100",
+			Version: 1,
+			// InstrumentCode deliberately omitted
+		},
+	}
+
+	_, err := svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+	require.Contains(t, st.Message(), "input.amount and input.instrument_code are required")
 }
 
 func TestExecuteDeposit_LegacyMoneyAmount_StillWorks(t *testing.T) {
@@ -835,7 +894,7 @@ func TestExecuteDeposit_InputTakesPrecedenceOverAmount(t *testing.T) {
 
 	// Create KWH account
 	account, err := domain.NewCurrentAccountWithDimension(
-		"ACC-KWH-002", "KWH-IDENT-002", uuid.New().String(), "KWH", "ENERGY", 0,
+		"ACC-KWH-002", "KWH-IDENT-002", uuid.New().String(), "KWH", "ENERGY", 3,
 	)
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, account))

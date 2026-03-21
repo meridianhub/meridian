@@ -105,9 +105,15 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 	// Determine mode: multi-asset (input) or legacy (amount).
 	// InstrumentAmount supports any instrument (KWH, GBP, CARBON_CREDIT, etc.) without
 	// abusing google.type.Money's CurrencyCode field for non-ISO-4217 codes.
-	useInput := req.Input != nil && req.Input.Amount != "" && req.Input.InstrumentCode != ""
+	useInput := req.Input != nil
 
-	if !useInput {
+	if useInput {
+		// Validate required sub-fields when input is provided.
+		if req.Input.Amount == "" || req.Input.InstrumentCode == "" {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Error(codes.InvalidArgument, "input.amount and input.instrument_code are required when input is provided")
+		}
+	} else {
 		// Validate legacy amount is present before account fetch to fail fast on malformed requests.
 		if req.Amount == nil || req.Amount.Amount == nil {
 			operationStatus = opStatusMissingAmount
@@ -149,14 +155,24 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}
 
 		// Convert to minor units using the account's precision.
+		// Reject amounts that exceed the instrument's precision instead of silently rounding.
 		precision := account.Balance().Instrument().Precision
 		// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
-		scale := decimal.NewFromInt(1).Shift(int32(precision))
-		minorUnits := inputAmount.Mul(scale).RoundBank(0)
+		minorUnits := inputAmount.Shift(int32(precision))
+		if !minorUnits.Equal(minorUnits.Truncate(0)) {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Errorf(codes.InvalidArgument,
+				"deposit amount %q exceeds instrument precision %d",
+				req.Input.Amount, precision)
+		}
 		maxInt64 := decimal.NewFromInt(math.MaxInt64)
-		if minorUnits.GreaterThan(maxInt64) || minorUnits.LessThan(decimal.Zero) {
+		if minorUnits.GreaterThan(maxInt64) {
 			operationStatus = opStatusAmountOverflow
 			return nil, status.Error(codes.InvalidArgument, "deposit amount overflow")
+		}
+		if !minorUnits.IsPositive() {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Error(codes.InvalidArgument, "deposit amount must be positive")
 		}
 
 		var amountErr error
