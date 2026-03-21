@@ -132,6 +132,8 @@
       "code": "UKPN",
       "name": "UK Power Networks",
       "partyType": "ORGANIZATION",
+      "externalReference": "UKPNDNO001",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "dno",
         "external_reference": "UKPNDNO001"
@@ -141,6 +143,8 @@
       "code": "GSP_SEEB",
       "name": "South East England GSP",
       "partyType": "ORGANIZATION",
+      "externalReference": "GSPSEEB",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "SEEB",
@@ -151,6 +155,8 @@
       "code": "GSP_EELC",
       "name": "Eastern England GSP",
       "partyType": "ORGANIZATION",
+      "externalReference": "GSPEELC",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "EELC",
@@ -161,6 +167,8 @@
       "code": "GSP_LOND",
       "name": "London Power GSP",
       "partyType": "ORGANIZATION",
+      "externalReference": "GSPLOND",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "LOND",
@@ -171,6 +179,8 @@
       "code": "GSP_SOUT",
       "name": "Southern England GSP",
       "partyType": "ORGANIZATION",
+      "externalReference": "GSPSOUT",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "SOUT",
