@@ -14,6 +14,7 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	marketv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -370,8 +371,10 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 			return fmt.Errorf("deposit GBP for %s day %d: %w", acct.customerName, day, err)
 		}
 
-		// KWH meter read deposit — CREDIT customer kWh account, DEBIT GSP inventory account
-		if err := depositIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
+		// KWH meter read deposit — CREDIT customer kWh account, DEBIT GSP inventory account.
+		// Uses InstrumentAmount (input field) instead of MoneyAmount to avoid abusing
+		// google.type.Money's CurrencyCode for non-ISO-4217 instrument codes.
+		if err := depositInstrumentIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
 			fmt.Sprintf("Meter read %s: %.2f kWh", date.Format("2006-01-02"), dailyKWH),
 			fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
 			acct.gspKwhAccountID, // GSP inventory account is the debit (clearing) side
@@ -391,6 +394,30 @@ func depositIdempotent(ctx context.Context, client currentaccountv1.CurrentAccou
 		Description:       description,
 		Reference:         reference,
 		ClearingAccountId: clearingAccountID,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// depositInstrumentIdempotent deposits using the InstrumentAmount input field,
+// which properly represents non-monetary instruments (KWH, CARBON_CREDIT, etc.)
+// without abusing google.type.Money's CurrencyCode field.
+func depositInstrumentIdempotent(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, accountID string, amount float64, instrumentCode, description, reference, clearingAccountID string) error {
+	_, err := client.ExecuteDeposit(ctx, &currentaccountv1.ExecuteDepositRequest{
+		AccountId:         accountID,
+		Description:       description,
+		Reference:         reference,
+		ClearingAccountId: clearingAccountID,
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         fmt.Sprintf("%.6f", amount),
+			InstrumentCode: instrumentCode,
+			Version:        1,
+		},
 	})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {

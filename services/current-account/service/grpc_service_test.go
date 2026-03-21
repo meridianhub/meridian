@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/services/reference-data/cache"
@@ -656,6 +657,288 @@ func TestExecuteDepositCurrencyMismatch(t *testing.T) {
 	if !strings.Contains(st.Message(), "currency mismatch") {
 		t.Errorf("Expected 'currency mismatch' in error message, got: %s", st.Message())
 	}
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_KWH(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	// Mock PK returns 9500 minor units (9.500 KWH with precision 3)
+	svc := mustNewServiceWithPositionKeeping(t, repo, nil, map[string]int64{
+		"ACC-KWH-001": 9500,
+	})
+
+	// Create KWH energy account (precision 3 = milliwatt-hours, e.g. 9.500 KWH)
+	account, err := domain.NewCurrentAccountWithDimension(
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Deposit 9.5 KWH using InstrumentAmount input field
+	req := &pb.ExecuteDepositRequest{
+		AccountId:   "ACC-KWH-001",
+		Description: "Meter read 2026-03-20: 9.500 kWh",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "9.5",
+			InstrumentCode: "KWH",
+			Version:        1,
+		},
+	}
+
+	resp, err := svc.ExecuteDeposit(ctx, req)
+	require.NoError(t, err, "KWH deposit via InstrumentAmount should succeed")
+
+	require.Equal(t, "ACC-KWH-001", resp.AccountId)
+	require.NotEmpty(t, resp.TransactionId)
+	require.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_InstrumentMismatch(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	// Create GBP account
+	account, err := domain.NewCurrentAccount("ACC-001", "ACC-001", uuid.New().String(), "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Try to deposit KWH to a GBP account
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "100",
+			InstrumentCode: "KWH",
+			Version:        1,
+		},
+	}
+
+	_, err = svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+	require.Contains(t, st.Message(), "instrument mismatch")
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_InvalidAmount(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	// Create KWH account
+	account, err := domain.NewCurrentAccountWithDimension(
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Non-positive amount
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-KWH-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "-5",
+			InstrumentCode: "KWH",
+			Version:        1,
+		},
+	}
+
+	_, err = svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+	require.Contains(t, st.Message(), "positive")
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_MalformedAmount(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	// Create KWH account
+	account, err := domain.NewCurrentAccountWithDimension(
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Malformed amount string
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-KWH-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "not-a-number",
+			InstrumentCode: "KWH",
+			Version:        1,
+		},
+	}
+
+	_, err = svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_ExceedsPrecision(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	// Create KWH account with precision 3 (3 decimal places, e.g. 9.500 KWH)
+	account, err := domain.NewCurrentAccountWithDimension(
+		"ACC-KWH-001", "KWH-IDENT-001", uuid.New().String(), "KWH", "ENERGY", 3,
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// 8.5001 KWH has 4 decimal places, exceeding precision 3
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-KWH-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "8.5001",
+			InstrumentCode: "KWH",
+			Version:        1,
+		},
+	}
+
+	_, err = svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+	require.Contains(t, st.Message(), "exceeds instrument precision")
+}
+
+func TestExecuteDeposit_InstrumentAmountInput_PartialInput(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	// Input present but missing instrument_code
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-001",
+		Input: &quantityv1.InstrumentAmount{
+			Amount:  "100",
+			Version: 1,
+			// InstrumentCode deliberately omitted
+		},
+	}
+
+	_, err := svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
+	require.Contains(t, st.Message(), "input.amount and input.instrument_code are required")
+}
+
+func TestExecuteDeposit_LegacyMoneyAmount_StillWorks(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewServiceWithPositionKeeping(t, repo, nil, map[string]int64{
+		"ACC-GBP-001": 10050,
+	})
+
+	// Create GBP account
+	account, err := domain.NewCurrentAccount("ACC-GBP-001", "ACC-GBP-001", uuid.New().String(), "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Legacy path: use MoneyAmount (backwards compat)
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-GBP-001",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP",
+				Units:        100,
+				Nanos:        500000000,
+			},
+		},
+		Description: "Legacy GBP deposit",
+	}
+
+	resp, err := svc.ExecuteDeposit(ctx, req)
+	require.NoError(t, err, "legacy MoneyAmount deposit should still work")
+	require.Equal(t, "ACC-GBP-001", resp.AccountId)
+	require.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
+}
+
+func TestExecuteDeposit_InputTakesPrecedenceOverAmount(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewServiceWithPositionKeeping(t, repo, nil, map[string]int64{
+		"ACC-KWH-002": 500,
+	})
+
+	// Create KWH account
+	account, err := domain.NewCurrentAccountWithDimension(
+		"ACC-KWH-002", "KWH-IDENT-002", uuid.New().String(), "KWH", "ENERGY", 3,
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, account))
+
+	// Both input and amount provided - input should take precedence
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-KWH-002",
+		Amount: &commonpb.MoneyAmount{
+			Amount: &money.Money{
+				CurrencyCode: "GBP", // wrong instrument - should be ignored
+				Units:        999,
+			},
+		},
+		Input: &quantityv1.InstrumentAmount{
+			Amount:         "10",
+			InstrumentCode: "KWH",
+			Version:        1,
+		},
+	}
+
+	resp, err := svc.ExecuteDeposit(ctx, req)
+	require.NoError(t, err, "input field should take precedence over amount field")
+	require.Equal(t, "ACC-KWH-002", resp.AccountId)
+	require.Equal(t, pb.TransactionStatus_TRANSACTION_STATUS_COMPLETED, resp.Status)
+}
+
+func TestExecuteDeposit_NeitherInputNorAmount_ReturnsError(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	req := &pb.ExecuteDepositRequest{
+		AccountId: "ACC-001",
+		// Neither amount nor input provided
+	}
+
+	_, err := svc.ExecuteDeposit(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
 }
 
 func TestInitiateCurrentAccountUnsupportedCurrency(t *testing.T) {

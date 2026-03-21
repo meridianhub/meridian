@@ -408,8 +408,10 @@ message ExecuteDepositRequest {
     max_len: 100
   }];
 
-  // amount is the deposit amount
-  meridian.common.v1.MoneyAmount amount = 2 [(buf.validate.field).required = true];
+  // amount is the deposit amount (legacy, currency-only).
+  // Use this for same-currency deposits (e.g., GBP deposit to GBP account).
+  // Mutually exclusive with input - if both provided, input takes precedence.
+  meridian.common.v1.MoneyAmount amount = 2;
 
   // description is optional deposit description
   string description = 3 [(buf.validate.field).string = {max_len: 500}];
@@ -434,6 +436,14 @@ message ExecuteDepositRequest {
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]*$"
   }];
+
+  // input is the multi-asset amount to deposit (e.g., 8.5 KWH, 100 GBP).
+  // When provided, the instrument_code and amount are used directly instead of
+  // the legacy MoneyAmount field. This supports non-monetary instruments like
+  // energy (KWH), carbon credits, and compute units without abusing
+  // google.type.Money's CurrencyCode field for non-ISO-4217 codes.
+  // Mutually exclusive with amount - if both provided, input takes precedence.
+  meridian.quantity.v1.InstrumentAmount input = 8;
 }
 
 // Response for deposit execution
