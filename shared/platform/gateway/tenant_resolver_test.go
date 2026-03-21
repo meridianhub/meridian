@@ -1417,6 +1417,80 @@ func TestHandlerOptionalTenant_TenantNotFoundInDB(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+func TestHandlerOptionalTenant_LocalDevMode_ValidSlugFromHeader(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+	testSlug := "acme"
+	testTenantID := tenant.MustNewTenantID("tenant_abc")
+	logger := slog.Default()
+
+	mockCache := new(MockSlugCache)
+	mockRepo := new(MockTenantRepository)
+
+	mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+
+	middleware := &TenantResolverMiddleware{
+		slugCache:    mockCache,
+		tenantRepo:   mockRepo,
+		baseDomain:   baseDomain,
+		logger:       logger,
+		localDevMode: true,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://"+baseDomain+"/api/test", nil)
+	req.Header.Set(TenantSlugHeader, testSlug)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	var capturedTenantOk bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, capturedTenantOk = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := middleware.HandlerOptionalTenant(next)
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, capturedTenantOk, "tenant should be resolved from header slug in local dev mode")
+	mockCache.AssertExpectations(t)
+}
+
+func TestHandlerOptionalTenant_LocalDevMode_InvalidSlugFromHeader(t *testing.T) {
+	ctx := context.Background()
+	baseDomain := "api.meridian.io"
+	logger := slog.Default()
+
+	mockCache := new(MockSlugCache)
+	mockRepo := new(MockTenantRepository)
+
+	middleware := &TenantResolverMiddleware{
+		slugCache:    mockCache,
+		tenantRepo:   mockRepo,
+		baseDomain:   baseDomain,
+		logger:       logger,
+		localDevMode: true,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://"+baseDomain+"/api/test", nil)
+	req.Header.Set(TenantSlugHeader, "INVALID SLUG!!!")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	var capturedTenantOk bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, capturedTenantOk = tenant.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := middleware.HandlerOptionalTenant(next)
+	handler.ServeHTTP(rec, req)
+
+	// Invalid slug: falls through to subdomain extraction, which also returns empty, so no tenant
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, capturedTenantOk, "no tenant should be resolved with invalid slug")
+}
+
 func TestPlatformPathsDoesNotIncludeDex(t *testing.T) {
 	assert.False(t, IsPlatformPath("/dex/auth"), "/dex/auth should not be a platform path")
 	assert.False(t, IsPlatformPath("/dex/callback"), "/dex/callback should not be a platform path")

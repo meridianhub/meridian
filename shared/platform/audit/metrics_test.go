@@ -11,6 +11,11 @@ func TestRecordKafkaMetrics(t *testing.T) {
 		RecordPollInterval("test_schema", 5.0)
 	})
 
+	t.Run("RecordEmptyPolls", func(_ *testing.T) {
+		RecordEmptyPolls("test_schema", 0)
+		RecordEmptyPolls("test_schema", 5)
+	})
+
 	t.Run("RecordKafkaPublished", func(_ *testing.T) {
 		RecordKafkaPublished("test_schema", "INSERT", "success")
 		RecordKafkaPublished("test_schema", "UPDATE", "failure")

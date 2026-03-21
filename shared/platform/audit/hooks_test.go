@@ -403,3 +403,51 @@ func TestAuditOutboxTableName(t *testing.T) {
 	outbox := AuditOutbox{}
 	assert.Equal(t, "audit_outbox", outbox.TableName())
 }
+
+func TestRecordUpdateManual(t *testing.T) {
+	db := setupHooksTestDB(t)
+
+	t.Run("records UPDATE with explicit old and new values", func(t *testing.T) {
+		oldEntity := testEntity{
+			ID:     uuid.New(),
+			Name:   "Old Name",
+			Status: "pending",
+		}
+		newEntity := testEntity{
+			ID:     oldEntity.ID,
+			Name:   "New Name",
+			Status: "active",
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			return RecordUpdateManual(tx, oldEntity, newEntity)
+		})
+		require.NoError(t, err)
+
+		var outbox testAuditOutbox
+		err = db.Order("created_at DESC").First(&outbox).Error
+		require.NoError(t, err)
+
+		assert.Equal(t, "test_entity", outbox.Table)
+		assert.Equal(t, OperationUpdate, outbox.Operation)
+		assert.Equal(t, oldEntity.ID.String(), outbox.RecordID)
+		assert.NotEmpty(t, outbox.OldValues)
+		assert.NotEmpty(t, outbox.NewValues)
+
+		var oldVals map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(outbox.OldValues), &oldVals))
+		assert.Equal(t, "Old Name", oldVals["Name"])
+
+		var newVals map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(outbox.NewValues), &newVals))
+		assert.Equal(t, "New Name", newVals["Name"])
+	})
+
+	t.Run("returns error on nil transaction", func(t *testing.T) {
+		oldEntity := testEntity{ID: uuid.New(), Name: "Old"}
+		newEntity := testEntity{ID: oldEntity.ID, Name: "New"}
+
+		err := RecordUpdateManual[testEntity](nil, oldEntity, newEntity)
+		assert.ErrorIs(t, err, ErrNilTransaction)
+	})
+}
