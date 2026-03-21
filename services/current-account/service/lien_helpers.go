@@ -235,7 +235,7 @@ func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAcco
 // getAccountBalanceMinorUnits gets the account balance from Position Keeping service.
 // Position Keeping is the mandatory source of truth for all account balances.
 // Uses the multi-asset API with the account's instrument code and precision.
-// Returns balance in minor units (e.g., cents for GBP precision=2, whole units for KWH precision=0).
+// Returns balance in minor units scaled by the given precision.
 func (s *Service) getAccountBalanceMinorUnits(ctx context.Context, accountID, instrumentCode string, precision int) (int64, error) {
 	resp, err := s.posKeepingClient.GetAccountBalance(ctx, &positionkeepingv1.GetAccountBalanceRequest{
 		AccountId:      accountID,
@@ -272,10 +272,8 @@ func (s *Service) getAccountBalanceMinorUnits(ctx context.Context, accountID, in
 		return 0, fmt.Errorf("failed to parse balance amount: %w", err)
 	}
 
-	// Convert to minor units using the instrument's precision.
-	// For GBP (precision=2): multiply by 100. For KWH (precision=0): multiply by 1.
-	// Uses banker's rounding (round-to-even) which differs from half-up at .5 boundaries:
-	// e.g., 0.015 -> 2 (rounds to even), 0.025 -> 2 (rounds to even), 0.035 -> 4 (rounds to even)
+	// Convert to minor units using the instrument's precision (Shift by precision digits).
+	// Uses banker's rounding (round-to-even) which differs from half-up at .5 boundaries.
 	// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
 	minorUnits := amount.Shift(int32(precision)).RoundBank(0)
 
