@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,15 +106,14 @@ func TestGetLatestApplied_WithoutTenant(t *testing.T) {
 	pool := testdb.NewTestPool(t, testdb.WithMigrations("control-plane"))
 	store := NewPostgresManifestVersionStore(pool)
 
-	// Use plain context without tenant - should still work (no search_path set)
+	// Use plain context without tenant - should return error
 	ctx := context.Background()
 
-	// Save and retrieve without tenant context
 	err := store.Save(ctx, testManifest(), "no-tenant-user")
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 
-	result, err := store.GetLatestApplied(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Equal(t, 1, result.Version)
+	_, err = store.GetLatestApplied(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, tenant.ErrMissingTenantContext)
 }

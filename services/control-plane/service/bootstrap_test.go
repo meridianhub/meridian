@@ -230,6 +230,82 @@ func (f *fakeManifestValidator) ValidateDryRun(_ context.Context, _ string) (*ge
 }
 
 // ---------------------------------------------------------------------------
+// SeedManifestVersion tests
+// ---------------------------------------------------------------------------
+
+func TestSeedManifestVersion_NilDB(t *testing.T) {
+	_, err := SeedManifestVersion(context.Background(), nil, &controlplanev1.Manifest{}, "test")
+	require.ErrorIs(t, err, ErrDBRequired)
+}
+
+func TestSeedManifestVersion_StoresManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires testcontainer")
+	}
+
+	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tc := testdb.SetupTenantSchema(t, db, "test_tenant")
+	defer tc.Cleanup()
+	testdb.CreateTable(t, tc.DB, tc.Tenant, manifestVersionsDDL)
+
+	mf := &controlplanev1.Manifest{
+		Version:  "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{Name: "Test", Industry: "platform"},
+	}
+
+	seeded, err := SeedManifestVersion(tc.Ctx, tc.DB, mf, "system:bootstrap")
+	require.NoError(t, err)
+	assert.True(t, seeded, "expected manifest to be seeded on first call")
+}
+
+func TestSeedManifestVersion_Idempotent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires testcontainer")
+	}
+
+	db, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tc := testdb.SetupTenantSchema(t, db, "test_tenant")
+	defer tc.Cleanup()
+	testdb.CreateTable(t, tc.DB, tc.Tenant, manifestVersionsDDL)
+
+	mf := &controlplanev1.Manifest{
+		Version:  "1.0",
+		Metadata: &controlplanev1.ManifestMetadata{Name: "Test", Industry: "platform"},
+	}
+
+	seeded1, err := SeedManifestVersion(tc.Ctx, tc.DB, mf, "system:bootstrap")
+	require.NoError(t, err)
+	assert.True(t, seeded1)
+
+	seeded2, err := SeedManifestVersion(tc.Ctx, tc.DB, mf, "system:bootstrap")
+	require.NoError(t, err)
+	assert.False(t, seeded2, "expected second call to skip seeding")
+}
+
+const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_versions (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	version VARCHAR(50) NOT NULL,
+	manifest_json JSONB NOT NULL,
+	applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	applied_by VARCHAR(255) NOT NULL,
+	apply_status VARCHAR(20) NOT NULL DEFAULT 'APPLIED',
+	apply_job_id UUID,
+	diff_summary TEXT,
+	relationship_graph JSONB,
+	sequence_number BIGINT NOT NULL DEFAULT 0,
+	checksum VARCHAR(64),
+	source VARCHAR(20),
+	resource_path VARCHAR(255),
+	phase_status JSONB,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	CONSTRAINT valid_apply_status CHECK (apply_status IN ('APPLIED', 'FAILED', 'ROLLED_BACK', 'PARTIAL'))
+)`
+
+// ---------------------------------------------------------------------------
 // NewHandlerDeps test
 // ---------------------------------------------------------------------------
 

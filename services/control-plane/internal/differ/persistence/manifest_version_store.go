@@ -110,10 +110,11 @@ func (s *PostgresManifestVersionStore) Save(ctx context.Context, manifest *contr
 }
 
 // setSearchPath sets the PostgreSQL search_path for tenant isolation.
+// Returns tenant.ErrMissingTenantContext if the context has no tenant ID.
 func (s *PostgresManifestVersionStore) setSearchPath(ctx context.Context, tx pgx.Tx) error {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
-		return nil
+		return tenant.ErrMissingTenantContext
 	}
 
 	schemaName := pgx.Identifier{tenantID.SchemaName()}.Sanitize()
