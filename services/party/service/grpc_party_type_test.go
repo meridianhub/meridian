@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"log/slog"
-	"os"
 	"testing"
 	"time"
 
@@ -441,9 +439,4 @@ func TestPartyTypeDefinitionToProto(t *testing.T) {
 	assert.Equal(t, int32(3), proto.Version)
 	assert.NotNil(t, proto.CreatedAt)
 	assert.NotNil(t, proto.UpdatedAt)
-}
-
-// Verify the newTestService helper works with logger (suppress noise)
-func init() {
-	_ = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 }
