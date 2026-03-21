@@ -236,6 +236,142 @@ func TestParseManifestVersion(t *testing.T) {
 	}
 }
 
+func TestBuildSagaInput_ProviderConnectionsAndRoutes(t *testing.T) {
+	executor := &ManifestExecutor{}
+
+	input := &ApplyManifestInput{
+		ManifestVersion: "3",
+		TenantID:        "org_test",
+		ProviderConnections: []ProviderConnectionInput{
+			{
+				ConnectionID: "stripe-conn",
+				ProviderName: "Stripe",
+				ProviderType: "payment_gateway",
+				Protocol:     "HTTPS",
+				BaseURL:      "https://api.stripe.com",
+				AuthType:     "api_key",
+				AuthConfig:   map[string]any{"header_name": "Authorization"},
+				RetryPolicy:  map[string]any{"max_attempts": 3},
+				RateLimitConfig: map[string]any{"requests_per_second": 100.0},
+			},
+		},
+		InstructionRoutes: []InstructionRouteInput{
+			{
+				InstructionType:      "payment.initiate",
+				ConnectionID:         "stripe-conn",
+				FallbackConnectionID: "backup-conn",
+				OutboundMapping:      "stripe-outbound",
+				InboundMapping:       "stripe-inbound",
+				HTTPMethod:           "POST",
+				PathTemplate:         "/v1/payment_intents",
+			},
+		},
+	}
+
+	sagaInput := executor.buildSagaInput(input)
+
+	conns, ok := sagaInput["provider_connections"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, conns, 1)
+	firstConn, ok := conns[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "stripe-conn", firstConn["connection_id"])
+	assert.Equal(t, "Stripe", firstConn["provider_name"])
+	assert.Equal(t, "payment_gateway", firstConn["provider_type"])
+	assert.Equal(t, "HTTPS", firstConn["protocol"])
+	assert.Equal(t, "https://api.stripe.com", firstConn["base_url"])
+	assert.Equal(t, "api_key", firstConn["auth_type"])
+	authCfg, ok := firstConn["auth_config"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Authorization", authCfg["header_name"])
+
+	routes, ok := sagaInput["instruction_routes"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, routes, 1)
+	firstRoute, ok := routes[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "payment.initiate", firstRoute["instruction_type"])
+	assert.Equal(t, "stripe-conn", firstRoute["connection_id"])
+	assert.Equal(t, "backup-conn", firstRoute["fallback_connection_id"])
+	assert.Equal(t, "stripe-outbound", firstRoute["outbound_mapping"])
+	assert.Equal(t, "stripe-inbound", firstRoute["inbound_mapping"])
+	assert.Equal(t, "POST", firstRoute["http_method"])
+	assert.Equal(t, "/v1/payment_intents", firstRoute["path_template"])
+}
+
+func TestBuildSagaInput_AccountTypeWithValuationMethods(t *testing.T) {
+	executor := &ManifestExecutor{}
+
+	input := &ApplyManifestInput{
+		ManifestVersion: "1",
+		AccountTypes: []AccountTypeInput{
+			{
+				Code:                    "SAVINGS_GBP",
+				DisplayName:             "GBP Savings",
+				Description:             "A savings account",
+				BehaviorClass:           "SAVINGS",
+				NormalBalance:           "CREDIT",
+				InstrumentCode:          "GBP",
+				AccountType:             "SAVINGS",
+				DefaultSagaPrefix:       "savings",
+				DefaultConversionMethod: "SPOT",
+				ValidationCEL:           "amount > 0",
+				EligibilityCEL:          "true",
+				AttributeSchema:         `{"type":"object"}`,
+				ValuationMethods: []ValuationMethodInput{
+					{InputInstrument: "USD", MethodName: "SPOT_RATE"},
+					{InputInstrument: "EUR", MethodName: "WEIGHTED_AVG"},
+				},
+			},
+		},
+	}
+
+	sagaInput := executor.buildSagaInput(input)
+	ats, ok := sagaInput["account_types"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, ats, 1)
+	at, ok := ats[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "savings", at["default_saga_prefix"])
+	assert.Equal(t, "SPOT", at["default_conversion_method"])
+	assert.Equal(t, "amount > 0", at["validation_cel"])
+	assert.Equal(t, "true", at["eligibility_cel"])
+	assert.Equal(t, `{"type":"object"}`, at["attribute_schema"])
+
+	vms, ok := at["valuation_methods"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, vms, 2)
+	vm0, ok := vms[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "USD", vm0["input_instrument"])
+	assert.Equal(t, "SPOT_RATE", vm0["method_name"])
+}
+
+func TestNewManifestExecutorFromDeps_NilPool(t *testing.T) {
+	_, err := NewManifestExecutorFromDeps(ManifestExecutorDepsConfig{
+		Pool: nil,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPoolRequired)
+}
+
+func TestApplyManifest_NilInput(t *testing.T) {
+	executor := &ManifestExecutor{}
+	_, err := executor.Apply(context.Background(), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilInput)
+}
+
+func TestApplyManifest_MissingTenantID(t *testing.T) {
+	executor := &ManifestExecutor{}
+	_, err := executor.Apply(context.Background(), &ApplyManifestInput{
+		ManifestVersion: "1",
+		TenantID:        "",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingTenantID)
+}
+
 func TestNewManifestExecutor(t *testing.T) {
 	executor := NewManifestExecutor(ManifestExecutorConfig{})
 	require.NotNil(t, executor)

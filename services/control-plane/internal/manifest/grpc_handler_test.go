@@ -268,3 +268,4 @@ func TestPhaseStatusMapToProto_Empty(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Len(t, result, 0)
 }
+

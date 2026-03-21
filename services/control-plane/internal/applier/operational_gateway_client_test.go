@@ -231,3 +231,129 @@ func TestBuildRateLimit(t *testing.T) {
 	assert.Equal(t, 100.0, rl.RequestsPerSecond)
 	assert.Equal(t, int32(200), rl.BurstSize)
 }
+
+func TestBuildUpsertConnectionRequest_BasicAuth(t *testing.T) {
+	params := map[string]any{
+		"connection_id": "basic-service",
+		"provider_name": "Basic Provider",
+		"protocol":      "PROTOCOL_HTTPS",
+		"base_url":      "https://api.example.com",
+		"auth_type":     "basic",
+		"auth_config": map[string]any{
+			"username":     "admin",
+			"password_ref": "basic-secret",
+		},
+	}
+
+	req, err := buildUpsertConnectionRequest(params)
+	require.NoError(t, err)
+
+	basic, ok := req.AuthConfig.(*opgatewayv1.UpsertConnectionRequest_Basic)
+	require.True(t, ok, "expected Basic auth config")
+	assert.Equal(t, "admin", basic.Basic.Username)
+	assert.Equal(t, "basic-secret", basic.Basic.PasswordSecretRef)
+}
+
+func TestBuildUpsertConnectionRequest_WithRateLimit(t *testing.T) {
+	params := map[string]any{
+		"connection_id": "rate-limited",
+		"provider_name": "RL Provider",
+		"protocol":      "PROTOCOL_HTTPS",
+		"base_url":      "https://api.example.com",
+		"auth_type":     "api_key",
+		"auth_config":   map[string]any{"header_name": "X-Key", "secret_ref": "s"},
+		"rate_limit_config": map[string]any{
+			"requests_per_second": float64(50.0),
+			"burst_size":          int64(100),
+		},
+	}
+
+	req, err := buildUpsertConnectionRequest(params)
+	require.NoError(t, err)
+	require.NotNil(t, req.RateLimit)
+	assert.Equal(t, 50.0, req.RateLimit.RequestsPerSecond)
+	assert.Equal(t, int32(100), req.RateLimit.BurstSize)
+}
+
+func TestBuildUpsertConnectionRequest_OAuth2StringScopes(t *testing.T) {
+	params := map[string]any{
+		"connection_id": "oauth-str",
+		"provider_name": "OAuth Str",
+		"protocol":      "PROTOCOL_HTTPS",
+		"base_url":      "https://api.example.com",
+		"auth_type":     "oauth2",
+		"auth_config": map[string]any{
+			"token_url":         "https://auth.example.com/token",
+			"client_id":         "id",
+			"client_secret_ref": "ref",
+			"scopes":            []string{"read", "write"},
+		},
+	}
+
+	req, err := buildUpsertConnectionRequest(params)
+	require.NoError(t, err)
+	oauth2, ok := req.AuthConfig.(*opgatewayv1.UpsertConnectionRequest_Oauth2)
+	require.True(t, ok)
+	assert.Equal(t, []string{"read", "write"}, oauth2.Oauth2.Scopes)
+}
+
+func TestToInt32_IntType(t *testing.T) {
+	v, ok := toInt32(42)
+	assert.True(t, ok)
+	assert.Equal(t, int32(42), v)
+}
+
+func TestToInt32_Int32Type(t *testing.T) {
+	v, ok := toInt32(int32(99))
+	assert.True(t, ok)
+	assert.Equal(t, int32(99), v)
+}
+
+func TestToInt32_Float32Type(t *testing.T) {
+	v, ok := toInt32(float32(7.0))
+	assert.True(t, ok)
+	assert.Equal(t, int32(7), v)
+}
+
+func TestToInt32_NonIntegralFloat(t *testing.T) {
+	_, ok := toInt32(3.14)
+	assert.False(t, ok)
+}
+
+func TestToFloat64_IntTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+		want  float64
+	}{
+		{"int", 42, 42.0},
+		{"int32", int32(99), 99.0},
+		{"int64", int64(200), 200.0},
+		{"float32", float32(1.5), 1.5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, ok := toFloat64(tt.input)
+			assert.True(t, ok)
+			assert.InDelta(t, tt.want, v, 0.01)
+		})
+	}
+}
+
+func TestToFloat64_UnsupportedType(t *testing.T) {
+	_, ok := toFloat64("not a number")
+	assert.False(t, ok)
+}
+
+func TestStringFromMap_NilMap(t *testing.T) {
+	assert.Equal(t, "", stringFromMap(nil, "key"))
+}
+
+func TestStringFromMap_MissingKey(t *testing.T) {
+	assert.Equal(t, "", stringFromMap(map[string]any{"a": "b"}, "missing"))
+}
+
+func TestNewOperationalGatewayClient(t *testing.T) {
+	c := NewOperationalGatewayClient(nil)
+	assert.NotNil(t, c)
+}
