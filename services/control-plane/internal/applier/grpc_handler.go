@@ -821,6 +821,9 @@ func extractPartyAndAccounts(mf *controlplanev1.Manifest, input *ApplyManifestIn
 		if legalName == "" {
 			legalName = org.GetName()
 		}
+		if legalName == "" {
+			legalName = org.GetCode()
+		}
 
 		// Resolve display_name with fallback chain: display_name -> legal_name
 		displayName := org.GetDisplayName()

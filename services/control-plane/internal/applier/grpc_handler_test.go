@@ -1100,6 +1100,25 @@ func TestBuildExecutorInput_OrganizationAlignedFields(t *testing.T) {
 		assert.Equal(t, "ACME", org.ExternalReference, "external_reference should fall back to code")
 		assert.Equal(t, "", org.ExternalReferenceType, "external_reference_type should be empty when not set")
 	})
+
+	t.Run("code-only fallback when both legal_name and name are empty", func(t *testing.T) {
+		mf := newTestManifest()
+		mf.Organizations = []*controlplanev1.OrganizationDefinition{
+			{
+				Code:      "GRID_OPS",
+				PartyType: "ORGANIZATION",
+				// No name, legal_name, or display_name set
+			},
+		}
+
+		input := buildExecutorInput(mf)
+
+		require.Len(t, input.Organizations, 1)
+		org := input.Organizations[0]
+		assert.Equal(t, "GRID_OPS", org.LegalName, "legal_name should fall back to code when name is also empty")
+		assert.Equal(t, "GRID_OPS", org.DisplayName, "display_name should fall back through to code")
+		assert.Equal(t, "GRID_OPS", org.ExternalReference, "external_reference should fall back to code")
+	})
 }
 
 func TestBuildExecutorInput_MarketDataSetAlignedFields(t *testing.T) {
