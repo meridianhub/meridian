@@ -434,6 +434,14 @@ message ExecuteDepositRequest {
     max_len: 100
     pattern: "^[a-zA-Z0-9_-]*$"
   }];
+
+  // input is the multi-asset amount to deposit (e.g., 8.5 KWH, 100 GBP).
+  // When provided, the instrument_code and amount are used directly instead of
+  // the legacy MoneyAmount field. This supports non-monetary instruments like
+  // energy (KWH), carbon credits, and compute units without abusing
+  // google.type.Money's CurrencyCode field for non-ISO-4217 codes.
+  // Mutually exclusive with amount - if both provided, input takes precedence.
+  meridian.quantity.v1.InstrumentAmount input = 8;
 }
 
 // Response for deposit execution
