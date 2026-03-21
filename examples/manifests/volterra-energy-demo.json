@@ -111,7 +111,9 @@
         "unit": "GBP/kWh",
         "sourceCode": "SEED_DEMO",
         "displayName": "UK Wholesale Electricity Price",
-        "description": "Daily UK wholesale electricity spot price in GBP per kilowatt-hour"
+        "description": "Daily UK wholesale electricity spot price in GBP per kilowatt-hour",
+        "validationExpression": "true",
+        "resolutionKeyExpression": "observed_at"
       },
       {
         "code": "CARBON_MARKET",
@@ -119,7 +121,9 @@
         "unit": "GBP/TONNE_CO2E",
         "sourceCode": "SEED_DEMO",
         "displayName": "Carbon Credit Market Price",
-        "description": "Carbon credit spot price in GBP per tonne CO2 equivalent"
+        "description": "Carbon credit spot price in GBP per tonne CO2 equivalent",
+        "validationExpression": "true",
+        "resolutionKeyExpression": "observed_at"
       }
     ]
   },
