@@ -158,13 +158,14 @@ func (s *Service) checkLienIdempotency(ctx context.Context, paymentOrderRef stri
 // Position Keeping is the source of truth for account balances - this method MUST be called
 // before any operation that requires the current balance.
 func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.CurrentAccount) (domain.CurrentAccount, error) {
-	balanceCents, err := s.getAccountBalanceMinorUnits(ctx, account.AccountID(), account.InstrumentCode(), account.Balance().Precision())
+	precision := account.Balance().Precision()
+	balanceCents, err := s.getAccountBalanceMinorUnits(ctx, account.AccountID(), account.InstrumentCode(), precision)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to get balance from Position Keeping: %w", err)
 	}
 
-	// Create balance Money object
-	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), 0, balanceCents)
+	// Create balance Amount using the account's instrument precision.
+	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), precision, balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}
@@ -199,8 +200,8 @@ func (s *Service) hydrateAccountWithBalance(ctx context.Context, account domain.
 // Use this inside transactions to avoid making external service calls while holding database locks.
 // The balanceCents parameter should be fetched from Position Keeping BEFORE entering the transaction.
 func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAccount, balanceCents int64) (domain.CurrentAccount, error) {
-	// Create balance Money object
-	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), 0, balanceCents)
+	// Create balance Amount using the account's instrument precision.
+	balance, err := domain.NewAmountFromInstrument(account.InstrumentCode(), account.Dimension(), account.Balance().Precision(), balanceCents)
 	if err != nil {
 		return domain.CurrentAccount{}, fmt.Errorf("failed to create balance: %w", err)
 	}

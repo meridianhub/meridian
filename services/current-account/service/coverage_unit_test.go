@@ -5506,6 +5506,36 @@ func TestHydrateAccountWithBalance_KWH_Success(t *testing.T) {
 	assert.Equal(t, "ENERGY", hydrated.Balance().Dimension())
 }
 
+func TestHydrateAccountWithBalance_KWH_Precision3_Success(t *testing.T) {
+	// PK returns "1.500" (major units). With precision=3, minor units = 1500.
+	// Hydration must reconstruct Amount with precision=3 so 1500 minor -> 1.500 KWH.
+	mockPK := &stubPKClient{
+		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
+			Amount: &quantityv1.InstrumentAmount{
+				Amount:         "1.500",
+				InstrumentCode: "KWH",
+			},
+		},
+	}
+	db := openSharedDB(t)
+	repo := persistence.NewRepository(db)
+	svc := &Service{
+		repo:             repo,
+		posKeepingClient: mockPK,
+		logger:           slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+	}
+
+	account, err := domain.NewCurrentAccountWithDimension("ACC-KWH-P3", "KWH-P3-001", uuid.New().String(), "KWH", "ENERGY", 3)
+	require.NoError(t, err)
+	hydrated, err := svc.hydrateAccountWithBalance(context.Background(), account)
+	require.NoError(t, err)
+	balanceMinor, _ := hydrated.Balance().ToMinorUnits()
+	assert.Equal(t, int64(1500), balanceMinor)
+	assert.Equal(t, 3, hydrated.Balance().Precision())
+	// Verify major units display correctly
+	assert.Equal(t, "1.500 KWH", hydrated.Balance().String())
+}
+
 func TestHydrateAccountWithBalance_CarbonCredit_Success(t *testing.T) {
 	mockPK := &stubPKClient{
 		getBalanceResp: &positionkeepingv1.GetAccountBalanceResponse{
