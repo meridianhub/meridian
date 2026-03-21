@@ -182,8 +182,13 @@ func TestExtractHandlerName_SingleComponent(t *testing.T) {
 // --- extractParamName ---
 
 func TestExtractParamName_WithHash(t *testing.T) {
-	param := generator.ExtractHandlerName("sagas[0]:pk.initiate_log#amount")
-	assert.Equal(t, "pk.initiate_log", param)
+	param := generator.ExtractParamName("sagas[0]:pk.initiate_log#amount")
+	assert.Equal(t, "amount", param)
+}
+
+func TestExtractParamName_NoHash(t *testing.T) {
+	param := generator.ExtractParamName("sagas[0]:pk.initiate_log")
+	assert.Equal(t, "", param)
 }
 
 // --- enrichErrors with specific codes ---
