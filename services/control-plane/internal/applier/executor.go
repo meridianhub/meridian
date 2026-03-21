@@ -221,20 +221,26 @@ type MarketDataSourceInput struct {
 
 // MarketDataSetInput represents a market data set to register and activate.
 type MarketDataSetInput struct {
-	Code        string
-	Category    string
-	Unit        string
-	SourceCode  string
-	DisplayName string
-	Description string
+	Code                      string
+	Category                  string
+	Unit                      string
+	SourceCode                string
+	DisplayName               string
+	Description               string
+	ValidationExpression      string
+	ResolutionKeyExpression   string
 }
 
 // OrganizationInput represents an organization to register.
 type OrganizationInput struct {
-	Code       string
-	Name       string
-	PartyType  string
-	Attributes map[string]string
+	Code                  string
+	Name                  string
+	LegalName             string
+	DisplayName           string
+	ExternalReference     string
+	ExternalReferenceType string
+	PartyType             string
+	Attributes            map[string]string
 }
 
 // InternalAccountInput represents an internal account to initiate.
@@ -484,12 +490,14 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 	marketDataSets := make([]interface{}, len(input.MarketDataSets))
 	for i, ds := range input.MarketDataSets {
 		marketDataSets[i] = map[string]interface{}{
-			"code":         ds.Code,
-			"category":     ds.Category,
-			"unit":         ds.Unit,
-			"source_code":  ds.SourceCode,
-			"display_name": ds.DisplayName,
-			"description":  ds.Description,
+			"code":                        ds.Code,
+			"category":                    ds.Category,
+			"unit":                        ds.Unit,
+			"source_code":                 ds.SourceCode,
+			"display_name":                ds.DisplayName,
+			"description":                 ds.Description,
+			"validation_expression":       ds.ValidationExpression,
+			"resolution_key_expression":   ds.ResolutionKeyExpression,
 		}
 	}
 	sagaInput["market_data_sets"] = marketDataSets
@@ -515,10 +523,14 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			attrs[k] = v
 		}
 		organizations[i] = map[string]interface{}{
-			"code":       org.Code,
-			"name":       org.Name,
-			"party_type": org.PartyType,
-			"attributes": attrs,
+			"code":                     org.Code,
+			"name":                     org.Name,
+			"legal_name":               org.LegalName,
+			"display_name":             org.DisplayName,
+			"external_reference":       org.ExternalReference,
+			"external_reference_type":  org.ExternalReferenceType,
+			"party_type":               org.PartyType,
+			"attributes":               attrs,
 		}
 	}
 	sagaInput["organizations"] = organizations
