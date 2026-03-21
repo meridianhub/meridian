@@ -281,9 +281,9 @@ func TestUpdateLienExecutionStatus_VersionConflict_Retries(t *testing.T) {
 
 	// Create a repo that returns version conflict on the first update, then succeeds
 	repo := &versionConflictMockRepo{
-		inner:            NewMockRepository(),
-		conflictsRemain:  2,
-		mu:               sync.Mutex{},
+		inner:           NewMockRepository(),
+		conflictsRemain: 2,
+		mu:              sync.Mutex{},
 	}
 	po := testfixtures.NewPaymentOrderInStatus(t, domain.PaymentOrderStatusCompleted)
 	require.NoError(t, repo.inner.Create(context.Background(), po))

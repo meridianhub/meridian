@@ -44,7 +44,7 @@ func TestPaymentEventConsumer_Start_NotConfigured(t *testing.T) {
 // Stop — no panic on nil consumers
 // =============================================================================
 
-func TestPaymentEventConsumer_Stop_NilConsumers(t *testing.T) {
+func TestPaymentEventConsumer_Stop_NilConsumers(_ *testing.T) {
 	stub := &stubPaymentOrderUpdater{}
 	consumer := messaging.NewPaymentEventConsumer(stub)
 
