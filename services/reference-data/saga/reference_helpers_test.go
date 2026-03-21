@@ -1,6 +1,7 @@
 package saga
 
 import (
+	"context"
 	"testing"
 
 	pkgsaga "github.com/meridianhub/meridian/shared/pkg/saga"
@@ -96,12 +97,12 @@ func TestSuggestHandler_EmptyRegistry(t *testing.T) {
 
 func TestSuggestInstrument_NilChecker(t *testing.T) {
 	v := &ReferenceValidator{instrumentChecker: nil}
-	result := v.suggestInstrument(nil, "GBX")
+	result := v.suggestInstrument(context.TODO(), "GBX")
 	assert.Equal(t, "", result)
 }
 
 func TestSuggestSaga_NilChecker(t *testing.T) {
 	v := &ReferenceValidator{definitionChecker: nil}
-	result := v.suggestSaga(nil, "payment.initiate")
+	result := v.suggestSaga(context.TODO(), "payment.initiate")
 	assert.Equal(t, "", result)
 }
