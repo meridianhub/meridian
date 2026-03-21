@@ -80,3 +80,24 @@ func TestNewKafkaPublisher_EmptyTopic(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, ErrEmptyTopic)
 }
+
+func TestNewKafkaPublisher_ValidConfig(t *testing.T) {
+	pub, err := NewKafkaPublisher(KafkaPublisherConfig{
+		BootstrapServers: "localhost:9092",
+		Topic:            "payments",
+		ClientID:         "test-producer",
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, pub)
+	pub.Close()
+}
+
+func TestNewKafkaPublisher_ValidConfigNoClientID(t *testing.T) {
+	pub, err := NewKafkaPublisher(KafkaPublisherConfig{
+		BootstrapServers: "localhost:9092",
+		Topic:            "payments",
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, pub)
+	pub.Close()
+}

@@ -24,6 +24,7 @@ type mockPartyTypeDefinitionRepository struct {
 	entities  map[uuid.UUID]*persistence.PartyTypeDefinitionEntity
 	createErr error
 	getErr    error
+	listErr   error
 	updateErr error
 }
 
@@ -71,6 +72,9 @@ func (m *mockPartyTypeDefinitionRepository) GetByTenantAndType(_ context.Context
 }
 
 func (m *mockPartyTypeDefinitionRepository) ListByTenant(_ context.Context, tenantID string, partyType string) ([]*persistence.PartyTypeDefinitionEntity, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	var result []*persistence.PartyTypeDefinitionEntity
 	for _, e := range m.entities {
 		if e.TenantID == tenantID {
