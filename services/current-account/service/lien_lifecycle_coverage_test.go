@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/type/money"
@@ -734,8 +736,11 @@ func TestTerminateLien_DoubleTermination_Idempotent(t *testing.T) {
 var errTestInternal = status.Error(codes.Internal, "mock internal error")
 
 // buildTestIdempKey constructs an idempotency key matching the format used by ExecuteLien.
-func buildTestIdempKey(_ interface{ Value(any) any }, lienID, requestID string) idempotency.Key {
+// Includes TenantID from context to match the key structure built inside ExecuteLien.
+func buildTestIdempKey(ctx context.Context, lienID, requestID string) idempotency.Key {
+	tid, _ := tenant.FromContext(ctx)
 	return idempotency.Key{
+		TenantID:  string(tid),
 		Namespace: idempotencyNamespace,
 		Operation: "execute_lien",
 		EntityID:  lienID,
