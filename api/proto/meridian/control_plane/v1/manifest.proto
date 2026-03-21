@@ -863,13 +863,13 @@ message MarketDataSetDefinition {
   // Must return a boolean. Observations are only stored when the expression returns true.
   // Default: "true" (accept all observations).
   // Example: "value > 0 && value < 1000000"
-  string validation_expression = 7 [(buf.validate.field).string.max_len = 4096];
+  optional string validation_expression = 7 [(buf.validate.field).string.max_len = 4096];
 
   // resolution_key_expression is a CEL expression that determines the resolution key
   // for deduplication and conflict resolution of observations.
   // Default: "observed_at" (one observation per timestamp).
   // Example: "observed_at + ':' + source_code"
-  string resolution_key_expression = 8 [(buf.validate.field).string.max_len = 4096];
+  optional string resolution_key_expression = 8 [(buf.validate.field).string.max_len = 4096];
 }
 
 // ========================================
@@ -907,22 +907,22 @@ message OrganizationDefinition {
   // legal_name is the official legal name of the organization.
   // Maps directly to the party.register_organization handler's legal_name parameter.
   // If empty, falls back to the name field for backward compatibility.
-  string legal_name = 5 [(buf.validate.field).string.max_len = 255];
+  optional string legal_name = 5 [(buf.validate.field).string.max_len = 255];
 
   // display_name is the human-readable display name of the organization.
   // Maps directly to the party.register_organization handler's display_name parameter.
   // If empty, falls back to legal_name, then name.
-  string display_name = 6 [(buf.validate.field).string.max_len = 255];
+  optional string display_name = 6 [(buf.validate.field).string.max_len = 255];
 
   // external_reference is a stable identifier for this organization in an external system.
   // Maps directly to the party.register_organization handler's external_reference parameter.
   // If empty, falls back to the organization code.
-  string external_reference = 7 [(buf.validate.field).string.max_len = 255];
+  optional string external_reference = 7 [(buf.validate.field).string.max_len = 255];
 
   // external_reference_type identifies the type of external reference (e.g., "LEI", "NATIONAL_ID").
   // Accepts stripped enum names (e.g., "LEI") - the handler accepts both
   // "LEI" and "EXTERNAL_REFERENCE_TYPE_LEI" formats.
-  string external_reference_type = 8 [(buf.validate.field).string.max_len = 64];
+  optional string external_reference_type = 8 [(buf.validate.field).string.max_len = 64];
 }
 
 // ========================================

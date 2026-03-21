@@ -616,9 +616,7 @@
                 "unit",
                 "sourceCode",
                 "displayName",
-                "description",
-                "validationExpression",
-                "resolutionKeyExpression"
+                "description"
             ],
             "properties": {
                 "code": {
@@ -796,11 +794,7 @@
                 "code",
                 "name",
                 "partyType",
-                "attributes",
-                "legalName",
-                "displayName",
-                "externalReference",
-                "externalReferenceType"
+                "attributes"
             ],
             "properties": {
                 "code": {

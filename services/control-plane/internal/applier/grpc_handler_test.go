@@ -14,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 // newTestManifest creates a minimal valid manifest for testing.
@@ -1063,10 +1064,10 @@ func TestBuildExecutorInput_OrganizationAlignedFields(t *testing.T) {
 				Code:                  "ACME",
 				Name:                  "Legacy Name",
 				PartyType:             "ORGANIZATION",
-				LegalName:             "Acme Corp Legal",
-				DisplayName:           "Acme Corp",
-				ExternalReference:     "LEI-123456",
-				ExternalReferenceType: "LEI",
+				LegalName:             proto.String("Acme Corp Legal"),
+				DisplayName:           proto.String("Acme Corp"),
+				ExternalReference:     proto.String("LEI-123456"),
+				ExternalReferenceType: proto.String("LEI"),
 			},
 		}
 
@@ -1133,8 +1134,8 @@ func TestBuildExecutorInput_MarketDataSetAlignedFields(t *testing.T) {
 				Category:                1, // FX_RATE
 				Unit:                    "USD/EUR",
 				SourceCode:              "ECB",
-				ValidationExpression:    "value > 0",
-				ResolutionKeyExpression: "observed_at + ':' + source_code",
+				ValidationExpression:    proto.String("value > 0"),
+				ResolutionKeyExpression: proto.String("observed_at + ':' + source_code"),
 			},
 		},
 	}
