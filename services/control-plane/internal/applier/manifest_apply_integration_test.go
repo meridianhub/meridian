@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -124,7 +125,10 @@ func TestApplyManifest_ExampleManifests(t *testing.T) {
 				Input:           sagaInput,
 			}
 
-			output, err := runner.ExecuteSaga(context.Background(), "apply_manifest", string(scriptBytes), runnerInput)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			output, err := runner.ExecuteSaga(ctx, "apply_manifest", string(scriptBytes), runnerInput)
 			require.NoError(t, err, "ExecuteSaga should not return error for %s", manifestFile)
 			assert.True(t, output.Success, "saga should succeed for %s: %s", manifestFile, output.Error)
 		})
