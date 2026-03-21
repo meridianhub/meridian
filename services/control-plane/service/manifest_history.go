@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -65,4 +66,40 @@ func RegisterManifestHistoryService(server *grpc.Server, cfg ManifestHistoryServ
 
 	controlplanev1.RegisterManifestHistoryServiceServer(server, handler)
 	return nil
+}
+
+// SeedManifestVersion stores a manifest as the initial applied version in the
+// tenant's manifest_versions table. Idempotent - returns (false, nil) if a
+// manifest version already exists. The context must carry tenant identity via
+// tenant.WithTenant. Returns (true, nil) when a new version was stored.
+func SeedManifestVersion(ctx context.Context, db *gorm.DB, mf *controlplanev1.Manifest, appliedBy string) (bool, error) {
+	if db == nil {
+		return false, ErrDBRequired
+	}
+
+	repo, err := manifest.NewRepository(db)
+	if err != nil {
+		return false, fmt.Errorf("manifest repository: %w", err)
+	}
+
+	historySvc, err := manifest.NewHistoryService(repo)
+	if err != nil {
+		return false, fmt.Errorf("manifest history service: %w", err)
+	}
+
+	// Check if a manifest already exists - skip if so (idempotent)
+	_, err = historySvc.GetCurrentManifest(ctx)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, manifest.ErrVersionNotFound) {
+		return false, fmt.Errorf("check existing manifest: %w", err)
+	}
+
+	_, err = historySvc.StoreManifestVersion(ctx, mf, appliedBy, nil, manifest.ApplyStatusApplied, nil, 0)
+	if err != nil {
+		return false, fmt.Errorf("store manifest version: %w", err)
+	}
+
+	return true, nil
 }

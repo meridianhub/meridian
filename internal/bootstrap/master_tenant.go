@@ -81,6 +81,11 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("manifest validation: %w", err)
 	}
 
+	// Step 4: Seed platform manifest into master tenant schema
+	if err := seedPlatformManifest(ctx, cfg.PlatformDB, logger); err != nil {
+		return fmt.Errorf("seed platform manifest: %w", err)
+	}
+
 	logger.Info("master tenant bootstrap completed successfully")
 	return nil
 }
@@ -165,6 +170,37 @@ func validatePlatformManifest(logger *slog.Logger) error {
 		"account_types", len(mf.AccountTypes),
 		"valuation_rules", len(mf.ValuationRules),
 		"warnings", len(result.Warnings))
+	return nil
+}
+
+// seedPlatformManifest stores the platform manifest in the master tenant's
+// manifest_versions table so the Economy and Starlark Config pages display
+// content immediately after bootstrap. Idempotent - skips if a manifest
+// version already exists.
+func seedPlatformManifest(ctx context.Context, db *gorm.DB, logger *slog.Logger) error {
+	logger.Info("seeding platform manifest into master tenant schema")
+
+	tenantID := tenant.TenantID(MasterTenantID)
+	tenantCtx := tenant.WithTenant(ctx, tenantID)
+
+	mf, err := LoadPlatformManifest()
+	if err != nil {
+		return fmt.Errorf("load platform manifest: %w", err)
+	}
+
+	seeded, err := controlplaneservice.SeedManifestVersion(tenantCtx, db, mf, "system:bootstrap")
+	if err != nil {
+		return fmt.Errorf("seed manifest version: %w", err)
+	}
+
+	if !seeded {
+		logger.Info("platform manifest already seeded, skipping")
+		return nil
+	}
+
+	logger.Info("platform manifest seeded successfully",
+		"tenant_id", MasterTenantID,
+		"version", mf.Version)
 	return nil
 }
 
