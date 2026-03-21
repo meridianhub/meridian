@@ -322,3 +322,32 @@ func TestInterceptor_NilMetrics(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, codes.ResourceExhausted, status.Code(err))
 }
+
+func TestNewMetrics_AlreadyRegistered(t *testing.T) {
+	// Register metrics once
+	registry := testRegistry()
+	m1 := NewMetrics("dedupe_test", registry)
+	assert.NotNil(t, m1)
+
+	// Registering again with the same registry should not panic
+	// (AlreadyRegisteredError is handled gracefully)
+	assert.NotPanics(t, func() {
+		m2 := NewMetrics("dedupe_test", registry)
+		assert.NotNil(t, m2)
+	})
+}
+
+func TestNewMetrics_NilRegistry(t *testing.T) {
+	// nil registry falls back to prometheus.DefaultRegisterer
+	// This should not panic
+	assert.NotPanics(t, func() {
+		_ = NewMetrics("nil_reg_test", nil)
+	})
+}
+
+func TestNewMetrics_EmptyNamespace(t *testing.T) {
+	registry := testRegistry()
+	// Empty namespace falls back to "grpc"
+	m := NewMetrics("", registry)
+	assert.NotNil(t, m)
+}

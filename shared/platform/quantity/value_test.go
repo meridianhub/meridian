@@ -607,3 +607,18 @@ func TestValue_HighPrecision(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "1.123456789012345678", result.Amount.String())
 }
+
+func TestParseQuantity_InvalidNonEmptyDimension(t *testing.T) {
+	// Create an instrument with a non-empty dimension that is not in ValidDimensions.
+	// This bypasses the empty-string case and exercises the ValidDimensions check.
+	invalidInst := quantity.Instrument{
+		Code:      "BOGUS",
+		Version:   1,
+		Dimension: "NOT_A_VALID_DIMENSION",
+		Precision: 2,
+	}
+
+	_, err := quantity.ParseQuantity(decimal.NewFromInt(42), invalidInst)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, quantity.ErrUnknownDimension)
+}
