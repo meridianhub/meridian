@@ -341,15 +341,18 @@ func TestCachedRegistry_UpdateDefinition_InvalidatesCache(t *testing.T) {
 	def := makeTestDef("updatable", StatusDraft)
 	reg.definitions[def.ID] = def
 
-	// Populate cache
+	// Populate all cache paths
 	_, _ = cr.GetByID(ctx, def.ID)
+	_, _ = cr.GetDefinition(ctx, def.Name, def.Version)
 	require.NotNil(t, cache.GetByID(ctx, def.ID))
+	require.NotNil(t, cache.Get(ctx, def.Name, def.Version))
 
 	err := cr.UpdateDefinition(ctx, def.ID, &Definition{DisplayName: "Updated"})
 	require.NoError(t, err)
 
-	// Cache should be invalidated
+	// Both cache paths should be invalidated
 	assert.Nil(t, cache.GetByID(ctx, def.ID))
+	assert.Nil(t, cache.Get(ctx, def.Name, def.Version))
 }
 
 func TestCachedRegistry_UpdateDefinition_GetByIDError(t *testing.T) {
@@ -380,14 +383,18 @@ func TestCachedRegistry_ActivateSaga_InvalidatesCache(t *testing.T) {
 	def := makeTestDef("activatable", StatusDraft)
 	reg.definitions[def.ID] = def
 
-	// Populate cache
+	// Populate all cache paths
 	_, _ = cr.GetByID(ctx, def.ID)
+	_, _ = cr.GetDefinition(ctx, def.Name, def.Version)
 	require.NotNil(t, cache.GetByID(ctx, def.ID))
+	require.NotNil(t, cache.Get(ctx, def.Name, def.Version))
 
 	err := cr.ActivateSaga(ctx, def.ID)
 	require.NoError(t, err)
 
+	// All cache paths should be invalidated (InvalidateName clears def keys too)
 	assert.Nil(t, cache.GetByID(ctx, def.ID))
+	assert.Nil(t, cache.Get(ctx, def.Name, def.Version))
 }
 
 func TestCachedRegistry_ActivateSaga_GetByIDError(t *testing.T) {
@@ -418,15 +425,22 @@ func TestCachedRegistry_DeprecateSaga_InvalidatesCache(t *testing.T) {
 	def := makeTestDef("deprecatable", StatusActive)
 	reg.definitions[def.ID] = def
 
-	// Populate cache
+	// Populate all cache paths
 	_, _ = cr.GetByID(ctx, def.ID)
+	_, _ = cr.GetDefinition(ctx, def.Name, def.Version)
+	_, _ = cr.GetActive(ctx, def.Name)
 	require.NotNil(t, cache.GetByID(ctx, def.ID))
+	require.NotNil(t, cache.Get(ctx, def.Name, def.Version))
+	require.NotNil(t, cache.GetActive(ctx, def.Name))
 
 	successorID := uuid.New()
 	err := cr.DeprecateSaga(ctx, def.ID, &successorID)
 	require.NoError(t, err)
 
+	// All cache paths should be invalidated
 	assert.Nil(t, cache.GetByID(ctx, def.ID))
+	assert.Nil(t, cache.Get(ctx, def.Name, def.Version))
+	assert.Nil(t, cache.GetActive(ctx, def.Name))
 }
 
 func TestCachedRegistry_DeprecateSaga_GetByIDError(t *testing.T) {

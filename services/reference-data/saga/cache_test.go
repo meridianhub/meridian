@@ -466,9 +466,14 @@ func TestJitteredTTL_WithJitter(t *testing.T) {
 	c, err := NewCache(client, WithCacheTTL(time.Hour, 5*time.Minute))
 	require.NoError(t, err)
 
+	seenDifferent := false
 	for i := 0; i < 100; i++ {
 		ttl := c.jitteredTTL()
 		assert.GreaterOrEqual(t, ttl, 55*time.Minute)
 		assert.LessOrEqual(t, ttl, 65*time.Minute)
+		if ttl != time.Hour {
+			seenDifferent = true
+		}
 	}
+	assert.True(t, seenDifferent, "jitter should produce at least one value != base TTL over 100 samples")
 }

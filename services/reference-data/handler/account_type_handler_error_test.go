@@ -523,4 +523,5 @@ func TestFindSuggestions_ExactMatchExcluded(t *testing.T) {
 	// When there are close alternatives too, those are returned
 	result = findSuggestions("GBP", []string{"GBP", "GBQ"})
 	assert.NotContains(t, result, "GBP") // exact match excluded
+	assert.Contains(t, result, "GBQ")    // close alternative included
 }
