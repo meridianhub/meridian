@@ -820,6 +820,7 @@ func TestInstrumentTypeToDimension(t *testing.T) {
 		{"commodity with unknown unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "unknown_unit", ""},
 		{"unspecified with known unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED, "energy", "ENERGY"},
 		{"unspecified with unknown unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED, "xyz", ""},
+		{"unknown enum value", controlplanev1.InstrumentType(999), "anything", ""},
 	}
 
 	for _, tt := range tests {

@@ -26,6 +26,12 @@ func TestParseExternalReferenceType_Unknown(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnknownExternalReferenceType)
 }
 
+func TestParseExternalReferenceType_Stripped(t *testing.T) {
+	refType, err := parseExternalReferenceType("COMPANIES_HOUSE")
+	require.NoError(t, err)
+	assert.Equal(t, partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE, refType)
+}
+
 func TestNewPartyClient(t *testing.T) {
 	c := NewPartyClient(nil)
 	assert.NotNil(t, c)
