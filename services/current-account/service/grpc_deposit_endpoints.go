@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
@@ -13,6 +14,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -100,10 +102,17 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}()
 	}
 
-	// Validate amount is present before account fetch to fail fast on malformed requests.
-	if req.Amount == nil || req.Amount.Amount == nil {
-		operationStatus = opStatusMissingAmount
-		return nil, status.Error(codes.InvalidArgument, "amount is required")
+	// Determine mode: multi-asset (input) or legacy (amount).
+	// InstrumentAmount supports any instrument (KWH, GBP, CARBON_CREDIT, etc.) without
+	// abusing google.type.Money's CurrencyCode field for non-ISO-4217 codes.
+	useInput := req.Input != nil && req.Input.Amount != "" && req.Input.InstrumentCode != ""
+
+	if !useInput {
+		// Validate legacy amount is present before account fetch to fail fast on malformed requests.
+		if req.Amount == nil || req.Amount.Amount == nil {
+			operationStatus = opStatusMissingAmount
+			return nil, status.Error(codes.InvalidArgument, "amount is required (provide amount or input)")
+		}
 	}
 
 	// Retrieve account (context carries organization for multi-tenant routing)
@@ -117,34 +126,79 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	// Validate currency matches account currency
-	if req.Amount.Amount.CurrencyCode != account.Balance().InstrumentCode() {
-		operationStatus = opStatusCurrencyMismatch
-		return nil, status.Errorf(codes.InvalidArgument,
-			"currency mismatch: expected %s, got %s",
-			account.Balance().InstrumentCode(), req.Amount.Amount.CurrencyCode)
-	}
+	var amount domain.Amount
 
-	// Convert amount from proto (MoneyAmount wraps google.type.Money) using the account's instrument.
-	// The account's instrument determines dimension and precision; the proto CurrencyCode is already
-	// validated against account.Balance().InstrumentCode() above.
-	amount, err := protoMoneyToAmount(req.Amount, account)
-	if err != nil {
-		operationStatus = opStatusInvalidAmount
-		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
-	}
+	if useInput {
+		// Multi-asset mode: parse InstrumentAmount directly.
+		inputAmount, parseErr := decimal.NewFromString(req.Input.Amount)
+		if parseErr != nil {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Errorf(codes.InvalidArgument, "invalid input amount: %v", parseErr)
+		}
+		if !inputAmount.IsPositive() {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Error(codes.InvalidArgument, "deposit amount must be positive")
+		}
 
-	// Validate amount is positive
-	amountCents, err := amount.ToMinorUnits()
-	if err != nil {
-		operationStatus = opStatusAmountOverflow
-		return nil, status.Errorf(codes.InvalidArgument,
-			"deposit amount overflow: %v", err)
-	}
-	if amountCents <= 0 {
-		operationStatus = opStatusInvalidAmount
-		return nil, status.Errorf(codes.InvalidArgument,
-			"deposit amount must be positive, got %d minor units", amountCents)
+		// Validate instrument code matches the account's instrument.
+		if req.Input.InstrumentCode != account.Balance().InstrumentCode() {
+			operationStatus = opStatusCurrencyMismatch
+			return nil, status.Errorf(codes.InvalidArgument,
+				"instrument mismatch: expected %s, got %s",
+				account.Balance().InstrumentCode(), req.Input.InstrumentCode)
+		}
+
+		// Convert to minor units using the account's precision.
+		precision := account.Balance().Instrument().Precision
+		// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
+		scale := decimal.NewFromInt(1).Shift(int32(precision))
+		minorUnits := inputAmount.Mul(scale).RoundBank(0)
+		maxInt64 := decimal.NewFromInt(math.MaxInt64)
+		if minorUnits.GreaterThan(maxInt64) || minorUnits.LessThan(decimal.Zero) {
+			operationStatus = opStatusAmountOverflow
+			return nil, status.Error(codes.InvalidArgument, "deposit amount overflow")
+		}
+
+		var amountErr error
+		amount, amountErr = domain.NewAmountFromInstrument(
+			account.Balance().InstrumentCode(),
+			account.Dimension(),
+			precision,
+			minorUnits.IntPart(),
+		)
+		if amountErr != nil {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", amountErr)
+		}
+	} else {
+		// Legacy mode: validate currency matches account currency.
+		if req.Amount.Amount.CurrencyCode != account.Balance().InstrumentCode() {
+			operationStatus = opStatusCurrencyMismatch
+			return nil, status.Errorf(codes.InvalidArgument,
+				"currency mismatch: expected %s, got %s",
+				account.Balance().InstrumentCode(), req.Amount.Amount.CurrencyCode)
+		}
+
+		// Convert amount from proto (MoneyAmount wraps google.type.Money) using the account's instrument.
+		var amountErr error
+		amount, amountErr = protoMoneyToAmount(req.Amount, account)
+		if amountErr != nil {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", amountErr)
+		}
+
+		// Validate amount is positive.
+		amountCents, overflowErr := amount.ToMinorUnits()
+		if overflowErr != nil {
+			operationStatus = opStatusAmountOverflow
+			return nil, status.Errorf(codes.InvalidArgument,
+				"deposit amount overflow: %v", overflowErr)
+		}
+		if amountCents <= 0 {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Errorf(codes.InvalidArgument,
+				"deposit amount must be positive, got %d minor units", amountCents)
+		}
 	}
 
 	// Generate transaction ID (full UUID required by position-keeping service)
