@@ -31,9 +31,9 @@ func TestParseManifestVersion_Extended(t *testing.T) {
 		{"single_digit", "5", 5},
 		{"only_dots", "...", 1},
 		{"dash_version", "1-beta", 1},
-		{"v_prefix", "v2", 1},     // 'v' is not a digit, breaks immediately
-		{"zero_version", "0", 1},  // zero returns default 1
-		{"zero_dot", "0.1.0", 1},  // leading 0, returns default 1
+		{"v_prefix", "v2", 1},    // 'v' is not a digit, breaks immediately
+		{"zero_version", "0", 1}, // zero returns default 1
+		{"zero_dot", "0.1.0", 1}, // leading 0, returns default 1
 	}
 
 	for _, tt := range tests {
