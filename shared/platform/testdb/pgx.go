@@ -123,6 +123,7 @@ func applyMigrationsWithPgx(t *testing.T, pool *pgxpool.Pool, service string) {
 		filepath.Join("..", "..", "services", service, "migrations"),
 		filepath.Join("..", "..", "..", "services", service, "migrations"),
 		filepath.Join("..", "..", "..", "..", "services", service, "migrations"),
+		filepath.Join("..", "..", "..", "..", "..", "services", service, "migrations"),
 	}
 
 	for _, path := range possiblePaths {
@@ -214,6 +215,7 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 		filepath.Join("..", "..", "services", service, "migrations"),
 		filepath.Join("..", "..", "..", "services", service, "migrations"),
 		filepath.Join("..", "..", "..", "..", "services", service, "migrations"),
+		filepath.Join("..", "..", "..", "..", "..", "services", service, "migrations"),
 	}
 
 	for _, path := range possiblePaths {
