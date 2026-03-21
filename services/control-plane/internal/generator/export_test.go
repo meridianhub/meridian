@@ -80,3 +80,12 @@ var ConvertYAMLToJSONCompatible = convertYAMLToJSONCompatible
 
 // ApplyAmendImpact is the exported test hook for applyAmendImpact.
 var ApplyAmendImpactFn = applyAmendImpact
+
+// FindClosestTopicMatch is the exported test hook for findClosestTopicMatch.
+var FindClosestTopicMatch = findClosestTopicMatch
+
+// LevenshteinDist is the exported test hook for levenshteinDist.
+var LevenshteinDist = levenshteinDist
+
+// ExtractParamName is the exported test hook for extractParamName.
+var ExtractParamName = extractParamName
