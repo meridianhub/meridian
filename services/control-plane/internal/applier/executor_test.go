@@ -140,20 +140,26 @@ func TestBuildSagaInput_NewResourceTypes(t *testing.T) {
 		},
 		MarketDataSets: []MarketDataSetInput{
 			{
-				Code:        "USD_EUR_FX",
-				Category:    "DATA_CATEGORY_FX_RATE",
-				Unit:        "USD/EUR",
-				SourceCode:  "BLOOMBERG",
-				DisplayName: "USD/EUR Spot Rate",
-				Description: "Spot FX rate",
+				Code:                    "USD_EUR_FX",
+				Category:                "DATA_CATEGORY_FX_RATE",
+				Unit:                    "USD/EUR",
+				SourceCode:              "BLOOMBERG",
+				DisplayName:             "USD/EUR Spot Rate",
+				Description:             "Spot FX rate",
+				ValidationExpression:    "value > 0",
+				ResolutionKeyExpression: "observed_at",
 			},
 		},
 		Organizations: []OrganizationInput{
 			{
-				Code:       "ACME_ENERGY",
-				Name:       "Acme Energy Corp",
-				PartyType:  "ORGANIZATION",
-				Attributes: map[string]string{"industry": "energy"},
+				Code:                  "ACME_ENERGY",
+				Name:                  "Acme Energy Corp",
+				LegalName:             "Acme Energy Corporation",
+				DisplayName:           "Acme Energy",
+				ExternalReference:     "LEI-ACME-001",
+				ExternalReferenceType: "LEI",
+				PartyType:             "ORGANIZATION",
+				Attributes:            map[string]string{"industry": "energy"},
 			},
 		},
 		InternalAccounts: []InternalAccountInput{
@@ -184,6 +190,8 @@ func TestBuildSagaInput_NewResourceTypes(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "USD_EUR_FX", firstDS["code"])
 	assert.Equal(t, "BLOOMBERG", firstDS["source_code"])
+	assert.Equal(t, "value > 0", firstDS["validation_expression"])
+	assert.Equal(t, "observed_at", firstDS["resolution_key_expression"])
 
 	orgs, ok := sagaInput["organizations"].([]interface{})
 	require.True(t, ok)
@@ -191,6 +199,10 @@ func TestBuildSagaInput_NewResourceTypes(t *testing.T) {
 	firstOrg, ok := orgs[0].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "ACME_ENERGY", firstOrg["code"])
+	assert.Equal(t, "Acme Energy Corporation", firstOrg["legal_name"])
+	assert.Equal(t, "Acme Energy", firstOrg["display_name"])
+	assert.Equal(t, "LEI-ACME-001", firstOrg["external_reference"])
+	assert.Equal(t, "LEI", firstOrg["external_reference_type"])
 	attrs, ok := firstOrg["attributes"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "energy", attrs["industry"])

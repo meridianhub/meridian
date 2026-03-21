@@ -1055,6 +1055,79 @@ func TestBuildExecutorInput_NilMarketData(t *testing.T) {
 	assert.Empty(t, input.MarketDataSets)
 }
 
+func TestBuildExecutorInput_OrganizationAlignedFields(t *testing.T) {
+	t.Run("new fields pass through directly", func(t *testing.T) {
+		mf := newTestManifest()
+		mf.Organizations = []*controlplanev1.OrganizationDefinition{
+			{
+				Code:                  "ACME",
+				Name:                  "Legacy Name",
+				PartyType:             "ORGANIZATION",
+				LegalName:             "Acme Corp Legal",
+				DisplayName:           "Acme Corp",
+				ExternalReference:     "LEI-123456",
+				ExternalReferenceType: "LEI",
+			},
+		}
+
+		input := buildExecutorInput(mf)
+
+		require.Len(t, input.Organizations, 1)
+		org := input.Organizations[0]
+		assert.Equal(t, "Acme Corp Legal", org.LegalName)
+		assert.Equal(t, "Acme Corp", org.DisplayName)
+		assert.Equal(t, "LEI-123456", org.ExternalReference)
+		assert.Equal(t, "LEI", org.ExternalReferenceType)
+	})
+
+	t.Run("backward compat falls back to name", func(t *testing.T) {
+		mf := newTestManifest()
+		mf.Organizations = []*controlplanev1.OrganizationDefinition{
+			{
+				Code:      "ACME",
+				Name:      "Acme Energy Corp",
+				PartyType: "ORGANIZATION",
+				// No legal_name, display_name, external_reference set
+			},
+		}
+
+		input := buildExecutorInput(mf)
+
+		require.Len(t, input.Organizations, 1)
+		org := input.Organizations[0]
+		assert.Equal(t, "Acme Energy Corp", org.LegalName, "legal_name should fall back to name")
+		assert.Equal(t, "Acme Energy Corp", org.DisplayName, "display_name should fall back to legal_name")
+		assert.Equal(t, "ACME", org.ExternalReference, "external_reference should fall back to code")
+		assert.Equal(t, "", org.ExternalReferenceType, "external_reference_type should be empty when not set")
+	})
+}
+
+func TestBuildExecutorInput_MarketDataSetAlignedFields(t *testing.T) {
+	mf := newTestManifest()
+	mf.MarketData = &controlplanev1.MarketDataConfig{
+		Sources: []*controlplanev1.MarketDataSourceDefinition{
+			{Code: "ECB", Name: "ECB", TrustLevel: 95},
+		},
+		Datasets: []*controlplanev1.MarketDataSetDefinition{
+			{
+				Code:                      "USD_EUR_FX",
+				Category:                  1, // FX_RATE
+				Unit:                      "USD/EUR",
+				SourceCode:                "ECB",
+				ValidationExpression:      "value > 0",
+				ResolutionKeyExpression:   "observed_at + ':' + source_code",
+			},
+		},
+	}
+
+	input := buildExecutorInput(mf)
+
+	require.Len(t, input.MarketDataSets, 1)
+	ds := input.MarketDataSets[0]
+	assert.Equal(t, "value > 0", ds.ValidationExpression)
+	assert.Equal(t, "observed_at + ':' + source_code", ds.ResolutionKeyExpression)
+}
+
 func TestBuildExecutorInput_InstrumentFallbackDimension(t *testing.T) {
 	mf := newTestManifest()
 	// Unspecified type with unknown unit - dimension will be empty, fallback to CURRENCY
