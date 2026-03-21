@@ -19,6 +19,7 @@ ignore:
   - "utilities/**"
   - "frontend/src/api/gen/**"
   - "services/mcp-server/cmd/wire.go"
+  - "**/cmd/main.go"
 
 comment:
   layout: "condensed_header, condensed_files, components, condensed_footer"
