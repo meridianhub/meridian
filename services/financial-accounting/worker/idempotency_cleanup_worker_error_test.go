@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,24 +22,6 @@ var errMockScan = errors.New("redis scan failed")
 
 // errMockMark is returned by the mock marker to simulate mark failures.
 var errMockMark = errors.New("redis mark failed")
-
-// mockCleaner implements idempotency.Cleaner for unit testing error paths.
-type mockCleaner struct {
-	scanResult []idempotency.StalePendingKey
-	scanErr    error
-	markErr    error
-}
-
-func (m *mockCleaner) ScanStalePendingKeys(_ context.Context, _ string, _ time.Duration, _ int) ([]idempotency.StalePendingKey, error) {
-	if m.scanErr != nil {
-		return nil, m.scanErr
-	}
-	return m.scanResult, nil
-}
-
-func (m *mockCleaner) MarkStaleAsFailed(_ context.Context, _ idempotency.StalePendingKey, _ string) error {
-	return m.markErr
-}
 
 func errorTestLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -57,7 +40,16 @@ func defaultTestConfig() config.IdempotencyCleanupConfig {
 // TestCleanupWorker_ScanError tests that the worker handles scan failures gracefully.
 // This covers the runCleanupIteration scan error path.
 func TestCleanupWorker_ScanError(t *testing.T) {
-	cleaner := &mockCleaner{scanErr: errMockScan}
+	var callCount atomic.Int32
+	cleaner := &mockCleanerFunc{
+		scanFn: func(_ context.Context, _ string, _ time.Duration, _ int) ([]idempotency.StalePendingKey, error) {
+			callCount.Add(1)
+			return nil, errMockScan
+		},
+		markFn: func(_ context.Context, _ idempotency.StalePendingKey, _ string) error {
+			return nil
+		},
+	}
 
 	w, err := worker.NewIdempotencyCleanupWorker(cleaner, defaultTestConfig(), errorTestLogger())
 	require.NoError(t, err)
@@ -70,8 +62,14 @@ func TestCleanupWorker_ScanError(t *testing.T) {
 		errCh <- w.Start(ctx)
 	}()
 
-	// Let the worker run at least one iteration (which will hit the scan error)
-	time.Sleep(50 * time.Millisecond)
+	// Wait for at least one iteration to run and hit the scan error
+	waitErr := await.New().
+		AtMost(2 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			return callCount.Load() >= 1
+		})
+	require.NoError(t, waitErr)
 	cancel()
 
 	select {
@@ -103,11 +101,11 @@ func TestCleanupWorker_MarkStaleAsFailedError(t *testing.T) {
 	}
 
 	// First scan returns one stale key, subsequent scans return empty
-	callCount := 0
+	var callCount atomic.Int32
 	cleaner := &mockCleanerFunc{
 		scanFn: func(_ context.Context, _ string, _ time.Duration, _ int) ([]idempotency.StalePendingKey, error) {
-			callCount++
-			if callCount == 1 {
+			n := callCount.Add(1)
+			if n == 1 {
 				return []idempotency.StalePendingKey{staleKey}, nil
 			}
 			return nil, nil
@@ -132,7 +130,7 @@ func TestCleanupWorker_MarkStaleAsFailedError(t *testing.T) {
 		AtMost(2 * time.Second).
 		PollInterval(50 * time.Millisecond).
 		Until(func() bool {
-			return callCount >= 1
+			return callCount.Load() >= 1
 		})
 	require.NoError(t, err)
 
@@ -157,11 +155,11 @@ func TestCleanupWorker_GetServiceFromKey_EmptyNamespace(t *testing.T) {
 		Age: 10 * time.Minute,
 	}
 
-	callCount := 0
+	var callCount atomic.Int32
 	cleaner := &mockCleanerFunc{
 		scanFn: func(_ context.Context, _ string, _ time.Duration, _ int) ([]idempotency.StalePendingKey, error) {
-			callCount++
-			if callCount == 1 {
+			n := callCount.Add(1)
+			if n == 1 {
 				return []idempotency.StalePendingKey{staleKeyEmptyNS}, nil
 			}
 			return nil, nil
@@ -185,7 +183,7 @@ func TestCleanupWorker_GetServiceFromKey_EmptyNamespace(t *testing.T) {
 		AtMost(2 * time.Second).
 		PollInterval(50 * time.Millisecond).
 		Until(func() bool {
-			return callCount >= 1
+			return callCount.Load() >= 1
 		})
 	require.NoError(t, err)
 
@@ -208,4 +206,3 @@ func (m *mockCleanerFunc) MarkStaleAsFailed(ctx context.Context, key idempotency
 
 // Ensure mockCleanerFunc implements idempotency.Cleaner.
 var _ idempotency.Cleaner = (*mockCleanerFunc)(nil)
-
