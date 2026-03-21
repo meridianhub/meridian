@@ -792,6 +792,7 @@
         "meridian.control_plane.v1.OrganizationDefinition": {
             "required": [
                 "code",
+                "name",
                 "partyType",
                 "attributes"
             ],

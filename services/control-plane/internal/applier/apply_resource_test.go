@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 // --- ApplyResource unit tests ---
@@ -497,7 +496,7 @@ func TestPatchResource_AddOrganization(t *testing.T) {
 		Resource: &controlplanev1.ApplyResourceRequest_Organization{
 			Organization: &controlplanev1.OrganizationDefinition{
 				Code:      "ACME_ENERGY",
-				Name:      proto.String("Acme Energy Corp"),
+				Name:      "Acme Energy Corp",
 				PartyType: "ORGANIZATION",
 			},
 		},

@@ -397,7 +397,7 @@ func TestBuildExecutorInput_NewResourceTypes(t *testing.T) {
 	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
 		{
 			Code:      "ACME_ENERGY",
-			Name:      proto.String("Acme Energy Corp"),
+			Name:      "Acme Energy Corp",
 			PartyType: "ORGANIZATION",
 			Attributes: map[string]string{
 				"industry": "energy",
@@ -1062,7 +1062,7 @@ func TestBuildExecutorInput_OrganizationAlignedFields(t *testing.T) {
 		mf.Organizations = []*controlplanev1.OrganizationDefinition{
 			{
 				Code:                  "ACME",
-				Name:                  proto.String("Legacy Name"),
+				Name:                  "Legacy Name",
 				PartyType:             "ORGANIZATION",
 				LegalName:             proto.String("Acme Corp Legal"),
 				DisplayName:           proto.String("Acme Corp"),
@@ -1086,7 +1086,7 @@ func TestBuildExecutorInput_OrganizationAlignedFields(t *testing.T) {
 		mf.Organizations = []*controlplanev1.OrganizationDefinition{
 			{
 				Code:      "ACME",
-				Name:      proto.String("Acme Energy Corp"),
+				Name:      "Acme Energy Corp",
 				PartyType: "ORGANIZATION",
 				// No legal_name, display_name, external_reference set
 			},
