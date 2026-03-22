@@ -88,8 +88,8 @@ function setupMock(account = makeAccount()) {
   mockListLedgerPostings.mockResolvedValue({ ledgerPostings: [], pagination: {} })
 }
 
-function setupNotFoundMock() {
-  const { ConnectError, Code } = require('@connectrpc/connect')
+async function setupNotFoundMock() {
+  const { ConnectError, Code } = await import('@connectrpc/connect')
   vi.mocked(createServiceClients).mockReturnValue({
     currentAccount: {} as never,
     paymentOrder: {} as never,
@@ -153,7 +153,7 @@ describe('InternalAccountDetailPage - loading and error states', () => {
   })
 
   it('shows not found state when account is null', async () => {
-    setupNotFoundMock()
+    await setupNotFoundMock()
     renderPage()
 
     await waitFor(() => {
