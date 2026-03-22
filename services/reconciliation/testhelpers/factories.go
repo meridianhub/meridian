@@ -28,6 +28,22 @@ func NewSettlementRun(t *testing.T) *domain.SettlementRun {
 	return run
 }
 
+// NewSettlementRunForAccount creates a settlement run for a specific account.
+func NewSettlementRunForAccount(t *testing.T, accountID string) *domain.SettlementRun {
+	t.Helper()
+	now := time.Now().UTC()
+	run, err := domain.NewSettlementRun(
+		accountID,
+		domain.ReconciliationScopeAccount,
+		domain.SettlementTypeDaily,
+		now.Add(-24*time.Hour),
+		now,
+		"test-user",
+	)
+	require.NoError(t, err)
+	return run
+}
+
 // NewRunningSettlementRun creates a settlement run that has been started.
 func NewRunningSettlementRun(t *testing.T) *domain.SettlementRun {
 	t.Helper()

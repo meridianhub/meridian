@@ -1697,3 +1697,212 @@ func TestPostgresProvisioner_MigrationFailure_IncrementsServiceFailureMetric(t *
 	finalVal := testutil.ToFloat64(counter)
 	assert.Equal(t, initialVal+1, finalVal, "Service failure metric should be incremented on migration failure")
 }
+
+func TestPostgresProvisioner_InitializeProvisioningStatus(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("init_tenant")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "init-svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20260101000000_init.sql", "CREATE TABLE init_t (id UUID PRIMARY KEY);")
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "init-svc", MigrationPath: svcDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Initialize status
+	err = prov.InitializeProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	// Verify status is pending
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StatePending, status.State)
+	assert.Len(t, status.Services, 1)
+
+	// Idempotent: calling again should be a no-op
+	err = prov.InitializeProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	status2, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StatePending, status2.State)
+}
+
+func TestPostgresProvisioner_Close(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	svcDir := filepath.Join(tc.migDir, "close-svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20260101000000_init.sql", "CREATE TABLE close_t (id UUID PRIMARY KEY);")
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "close-svc", MigrationPath: svcDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+
+	// Close should succeed
+	err = prov.Close()
+	require.NoError(t, err)
+}
+
+func TestPostgresProvisioner_GetRequiredSchemas(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	svcDir1 := filepath.Join(tc.migDir, "svc-a")
+	svcDir2 := filepath.Join(tc.migDir, "svc-b")
+	require.NoError(t, os.MkdirAll(svcDir1, 0o755))
+	require.NoError(t, os.MkdirAll(svcDir2, 0o755))
+	createTestMigration(t, svcDir1, "20260101000000_init.sql", "CREATE TABLE a_t (id UUID PRIMARY KEY);")
+	createTestMigration(t, svcDir2, "20260101000000_init.sql", "CREATE TABLE b_t (id UUID PRIMARY KEY);")
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "svc-a", MigrationPath: svcDir1, DatabaseURL: tc.connStr},
+			{Name: "svc-b", MigrationPath: svcDir2, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	schemas := prov.GetRequiredSchemas()
+	assert.Equal(t, []string{"svc-a", "svc-b"}, schemas)
+}
+
+func TestPostgresProvisioner_PostProvisioningHooks(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("hook_tenant")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "hook-svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20260101000000_init.sql", "CREATE TABLE hook_t (id UUID PRIMARY KEY);")
+
+	var hookCalled bool
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "hook-svc", MigrationPath: svcDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+		PostProvisioningHooks: []PostProvisioningHook{
+			func(_ context.Context, tid tenant.TenantID) error {
+				hookCalled = true
+				assert.Equal(t, tenantID, tid)
+				return nil
+			},
+		},
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.True(t, hookCalled, "Post-provisioning hook should be called")
+}
+
+func TestPostgresProvisioner_PostProvisioningHooks_FailureDoesNotFailProvisioning(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("hook_fail_tenant")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "hookfail-svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20260101000000_init.sql", "CREATE TABLE hookfail_t (id UUID PRIMARY KEY);")
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "hookfail-svc", MigrationPath: svcDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+		PostProvisioningHooks: []PostProvisioningHook{
+			func(_ context.Context, _ tenant.TenantID) error {
+				return fmt.Errorf("hook failure")
+			},
+		},
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Provisioning should succeed despite hook failure
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateActive, status.State)
+}
+
+func TestPostgresProvisioner_PostProvisioningHooks_PanicRecovery(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("hook_panic_tenant")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	svcDir := filepath.Join(tc.migDir, "hookpanic-svc")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20260101000000_init.sql", "CREATE TABLE hookpanic_t (id UUID PRIMARY KEY);")
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "hookpanic-svc", MigrationPath: svcDir, DatabaseURL: tc.connStr},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+		PostProvisioningHooks: []PostProvisioningHook{
+			func(_ context.Context, _ tenant.TenantID) error {
+				panic("unexpected panic in hook")
+			},
+		},
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Provisioning should succeed despite hook panic
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateActive, status.State)
+}
+
+func TestNewPostgresProvisioner_NilPlatformDB(t *testing.T) {
+	config := &Config{
+		Services: []ServiceConfig{
+			{Name: "svc", MigrationPath: "/tmp", DatabaseURL: "postgres://localhost/test"},
+		},
+	}
+	_, err := NewPostgresProvisioner(nil, config)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilPlatformDB)
+}

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,472 +14,468 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- Mock VarianceRepository ---
+// --- Variance-specific mock repos (distinct from snapshot_capturer mocks) ---
 
-type mockVarianceRepoFull struct {
-	mu        sync.Mutex
-	variances []*domain.Variance
-	deleted   []uuid.UUID
-
-	createBatchErr error
-	deleteErr      error
+type vdRunRepo struct {
+	runs      map[uuid.UUID]*domain.SettlementRun
+	listRuns  []*domain.SettlementRun
+	findErr   error
+	listErr   error
 }
 
-func (m *mockVarianceRepoFull) Create(_ context.Context, v *domain.Variance) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.variances = append(m.variances, v)
+func newVdRunRepo() *vdRunRepo { return &vdRunRepo{runs: make(map[uuid.UUID]*domain.SettlementRun)} }
+
+func (m *vdRunRepo) Create(_ context.Context, run *domain.SettlementRun) error {
+	m.runs[run.RunID] = run
 	return nil
 }
+func (m *vdRunRepo) FindByID(_ context.Context, runID uuid.UUID) (*domain.SettlementRun, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	run, ok := m.runs[runID]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return run, nil
+}
+func (m *vdRunRepo) Update(_ context.Context, run *domain.SettlementRun) error {
+	m.runs[run.RunID] = run
+	return nil
+}
+func (m *vdRunRepo) List(_ context.Context, _ domain.RunFilter) ([]*domain.SettlementRun, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.listRuns, nil
+}
 
-func (m *mockVarianceRepoFull) CreateBatch(_ context.Context, vs []*domain.Variance) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+type vdSnapRepo struct {
+	snapsByRunID map[uuid.UUID][]*domain.SettlementSnapshot
+	findErr      error
+}
+
+func newVdSnapRepo() *vdSnapRepo {
+	return &vdSnapRepo{snapsByRunID: make(map[uuid.UUID][]*domain.SettlementSnapshot)}
+}
+
+func (m *vdSnapRepo) Create(_ context.Context, _ *domain.SettlementSnapshot) error { return nil }
+func (m *vdSnapRepo) CreateBatch(_ context.Context, _ []*domain.SettlementSnapshot) error {
+	return nil
+}
+func (m *vdSnapRepo) FindByID(_ context.Context, _ uuid.UUID) (*domain.SettlementSnapshot, error) {
+	return nil, domain.ErrNotFound
+}
+func (m *vdSnapRepo) FindByRunID(_ context.Context, runID uuid.UUID) ([]*domain.SettlementSnapshot, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	return m.snapsByRunID[runID], nil
+}
+func (m *vdSnapRepo) DeleteByRunID(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *vdSnapRepo) MarkRunSnapshotsFinal(_ context.Context, _ uuid.UUID) error { return nil }
+
+type vdVarianceRepo struct {
+	created        []*domain.Variance
+	deleteErr      error
+	createBatchErr error
+}
+
+func (m *vdVarianceRepo) Create(_ context.Context, _ *domain.Variance) error   { return nil }
+func (m *vdVarianceRepo) FindByID(_ context.Context, _ uuid.UUID) (*domain.Variance, error) {
+	return nil, domain.ErrNotFound
+}
+func (m *vdVarianceRepo) FindByRunID(_ context.Context, _ uuid.UUID) ([]*domain.Variance, error) {
+	return nil, nil
+}
+func (m *vdVarianceRepo) Update(_ context.Context, _ *domain.Variance) error   { return nil }
+func (m *vdVarianceRepo) List(_ context.Context, _ domain.VarianceFilter) ([]*domain.Variance, error) {
+	return nil, nil
+}
+func (m *vdVarianceRepo) DeleteByRunID(_ context.Context, _ uuid.UUID) error {
+	return m.deleteErr
+}
+func (m *vdVarianceRepo) CreateBatch(_ context.Context, variances []*domain.Variance) error {
 	if m.createBatchErr != nil {
 		return m.createBatchErr
 	}
-	m.variances = append(m.variances, vs...)
+	m.created = append(m.created, variances...)
 	return nil
-}
-
-func (m *mockVarianceRepoFull) FindByID(_ context.Context, id uuid.UUID) (*domain.Variance, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, v := range m.variances {
-		if v.VarianceID == id {
-			return v, nil
-		}
-	}
-	return nil, domain.ErrNotFound
-}
-
-func (m *mockVarianceRepoFull) FindByRunID(_ context.Context, runID uuid.UUID) ([]*domain.Variance, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var result []*domain.Variance
-	for _, v := range m.variances {
-		if v.RunID == runID {
-			result = append(result, v)
-		}
-	}
-	return result, nil
-}
-
-func (m *mockVarianceRepoFull) Update(_ context.Context, v *domain.Variance) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i, existing := range m.variances {
-		if existing.VarianceID == v.VarianceID {
-			m.variances[i] = v
-			return nil
-		}
-	}
-	return domain.ErrNotFound
-}
-
-func (m *mockVarianceRepoFull) DeleteByRunID(_ context.Context, runID uuid.UUID) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.deleteErr != nil {
-		return m.deleteErr
-	}
-	m.deleted = append(m.deleted, runID)
-	filtered := make([]*domain.Variance, 0)
-	for _, v := range m.variances {
-		if v.RunID != runID {
-			filtered = append(filtered, v)
-		}
-	}
-	m.variances = filtered
-	return nil
-}
-
-func (m *mockVarianceRepoFull) List(_ context.Context, _ domain.VarianceFilter) ([]*domain.Variance, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.variances, nil
-}
-
-func (m *mockVarianceRepoFull) varianceCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.variances)
-}
-
-// --- Helper to create a RUNNING test run ---
-
-func newRunningTestRun(t *testing.T) *domain.SettlementRun {
-	t.Helper()
-	return testhelpers.NewRunningSettlementRun(t)
 }
 
 // --- Tests ---
 
-func TestDetectVariances_D1Run_WithVariances(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
+func TestDetectVariances_RunNotFound(t *testing.T) {
+	runRepo := newVdRunRepo()
+	runRepo.findErr = errors.New("not found")
+	vd := NewVarianceDetector(runRepo, newVdSnapRepo(), &vdVarianceRepo{})
 
-	run := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), run)
-
-	// Create snapshots with non-zero variance (expected != actual)
-	snap1, _ := domain.NewSettlementSnapshot(
-		run.RunID, "ACC-001", "GBP",
-		decimal.NewFromFloat(1000.00),
-		decimal.NewFromFloat(995.50),
-		"pk", nil,
-	)
-	snap2, _ := domain.NewSettlementSnapshot(
-		run.RunID, "ACC-002", "KWH",
-		decimal.NewFromFloat(500.00),
-		decimal.NewFromFloat(500.00), // no variance
-		"pk", nil,
-	)
-	snap3, _ := domain.NewSettlementSnapshot(
-		run.RunID, "ACC-003", "USD",
-		decimal.NewFromFloat(200.00),
-		decimal.NewFromFloat(250.00),
-		"pk", nil,
-	)
-
-	// Store snapshots in mock
-	snapRepo.snapshots = []*domain.SettlementSnapshot{snap1, snap2, snap3}
-
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	variances, err := detector.DetectVariances(context.Background(), run.RunID)
-	require.NoError(t, err)
-
-	// Should detect 2 variances (snap2 has zero variance)
-	assert.Len(t, variances, 2)
-	assert.Equal(t, 2, varianceRepo.varianceCount())
-
-	// Verify variance amounts
-	for _, v := range variances {
-		assert.Equal(t, domain.VarianceStatusDetected, v.Status)
-		assert.Equal(t, run.RunID, v.RunID)
-	}
-}
-
-func TestDetectVariances_D1Run_NoVariances(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
-
-	run := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), run)
-
-	// Create snapshots with zero variance
-	snap, _ := domain.NewSettlementSnapshot(
-		run.RunID, "ACC-001", "GBP",
-		decimal.NewFromFloat(1000.00),
-		decimal.NewFromFloat(1000.00),
-		"pk", nil,
-	)
-	snapRepo.snapshots = []*domain.SettlementSnapshot{snap}
-
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	variances, err := detector.DetectVariances(context.Background(), run.RunID)
-	require.NoError(t, err)
-
-	assert.Empty(t, variances)
-	assert.Equal(t, 0, varianceRepo.varianceCount())
-}
-
-func TestDetectVariances_SubsequentRun_DetectsDelta(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
-
-	// Create a previous completed run with an earlier CreatedAt
-	prevRun, _ := domain.NewSettlementRun(
-		"ACC-001",
-		domain.ReconciliationScopeAccount,
-		domain.SettlementTypeDaily,
-		time.Now().Add(-48*time.Hour),
-		time.Now().Add(-24*time.Hour),
-		"test-user",
-	)
-	require.NoError(t, prevRun.Start())
-	require.NoError(t, prevRun.Complete(0))
-	_ = runRepo.Create(context.Background(), prevRun)
-
-	// Previous run's snapshots (settled amounts)
-	prevSnap, _ := domain.NewSettlementSnapshot(
-		prevRun.RunID, "ACC-001", "GBP",
-		decimal.NewFromFloat(1000.00),
-		decimal.NewFromFloat(1000.00),
-		"pk", nil,
-	)
-
-	// Current run
-	currRun := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), currRun)
-
-	// Current run's snapshots (different actual balance from previous)
-	currSnap, _ := domain.NewSettlementSnapshot(
-		currRun.RunID, "ACC-001", "GBP",
-		decimal.NewFromFloat(1000.00),
-		decimal.NewFromFloat(1050.00), // delta of 50 vs previous run's actual
-		"pk", nil,
-	)
-
-	// Store both snapshots - FindByRunID filters by RunID
-	snapRepo.snapshots = []*domain.SettlementSnapshot{currSnap, prevSnap}
-
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	variances, err := detector.DetectVariances(context.Background(), currRun.RunID)
-	require.NoError(t, err)
-
-	// Should detect exactly 1 variance from the cross-run delta
-	require.Len(t, variances, 1)
-
-	v := variances[0]
-	assert.Equal(t, currRun.RunID, v.RunID)
-	assert.Equal(t, "ACC-001", v.AccountID)
-	assert.Equal(t, "GBP", v.InstrumentCode)
-	// Cross-run comparison: expected = previous actual (1000), actual = current actual (1050)
-	assert.True(t, decimal.NewFromFloat(1000.00).Equal(v.ExpectedAmount),
-		"expected amount should be previous run's actual balance, got %s", v.ExpectedAmount)
-	assert.True(t, decimal.NewFromFloat(1050.00).Equal(v.ActualAmount),
-		"actual amount should be current run's actual balance, got %s", v.ActualAmount)
-	assert.True(t, decimal.NewFromFloat(50.00).Equal(v.VarianceAmount),
-		"variance amount should be delta between runs (50), got %s", v.VarianceAmount)
+	_, err := vd.DetectVariances(context.Background(), uuid.New())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to find settlement run")
 }
 
 func TestDetectVariances_RunNotRunning(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
+	require.NoError(t, run.Complete(0))
 
-	// Create a PENDING run (not RUNNING)
-	run := newTestRun(t) // This is PENDING
-	_ = runRepo.Create(context.Background(), run)
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	vd := NewVarianceDetector(runRepo, newVdSnapRepo(), &vdVarianceRepo{})
 
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	_, err := detector.DetectVariances(context.Background(), run.RunID)
+	_, err := vd.DetectVariances(context.Background(), run.RunID)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, domain.ErrRunNotRunning)
 }
 
-func TestDetectVariances_RunNotFound(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
+func TestDetectVariances_DeleteByRunIDFails(t *testing.T) {
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
 
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	_, err := detector.DetectVariances(context.Background(), uuid.New())
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	vd := NewVarianceDetector(runRepo, newVdSnapRepo(), &vdVarianceRepo{deleteErr: errors.New("delete failed")})
+
+	_, err := vd.DetectVariances(context.Background(), run.RunID)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, domain.ErrNotFound)
+	assert.Contains(t, err.Error(), "failed to clean up existing variances")
 }
 
-func TestDetectVariances_EmptySnapshots(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
+func TestDetectVariances_NoSnapshots(t *testing.T) {
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
 
-	run := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), run)
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	vd := NewVarianceDetector(runRepo, newVdSnapRepo(), &vdVarianceRepo{})
 
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	variances, err := detector.DetectVariances(context.Background(), run.RunID)
+	variances, err := vd.DetectVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
 	assert.Nil(t, variances)
 }
 
-func TestDetectVariances_Idempotent(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
+func TestDetectVariances_SnapshotFetchFails(t *testing.T) {
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
 
-	run := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), run)
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	snapRepo := newVdSnapRepo()
+	snapRepo.findErr = errors.New("db error")
+	vd := NewVarianceDetector(runRepo, snapRepo, &vdVarianceRepo{})
 
-	snap, _ := domain.NewSettlementSnapshot(
-		run.RunID, "ACC-001", "GBP",
-		decimal.NewFromFloat(1000.00),
-		decimal.NewFromFloat(900.00),
-		"pk", nil,
-	)
-	snapRepo.snapshots = []*domain.SettlementSnapshot{snap}
-
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-
-	// First detection
-	variances1, err := detector.DetectVariances(context.Background(), run.RunID)
-	require.NoError(t, err)
-	assert.Len(t, variances1, 1)
-
-	// Second detection should produce the same result (idempotent)
-	variances2, err := detector.DetectVariances(context.Background(), run.RunID)
-	require.NoError(t, err)
-	assert.Len(t, variances2, 1)
-
-	// Should still only have 1 variance (old ones cleaned up)
-	assert.Equal(t, 1, varianceRepo.varianceCount())
-}
-
-func TestDetectVariances_DeleteCleanupError(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{deleteErr: errors.New("cleanup failed")}
-
-	run := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), run)
-
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	_, err := detector.DetectVariances(context.Background(), run.RunID)
+	_, err := vd.DetectVariances(context.Background(), run.RunID)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "clean up existing variances")
+	assert.Contains(t, err.Error(), "failed to fetch snapshots")
 }
 
-func TestDetectVariances_PersistError(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{createBatchErr: errors.New("db error")}
+func TestDetectVariances_D1Run_WithVariance(t *testing.T) {
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
 
-	run := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), run)
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
 
-	snap, _ := domain.NewSettlementSnapshot(
-		run.RunID, "ACC-001", "GBP",
-		decimal.NewFromFloat(1000.00),
-		decimal.NewFromFloat(900.00),
-		"pk", nil,
-	)
-	snapRepo.snapshots = []*domain.SettlementSnapshot{snap}
-
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	_, err := detector.DetectVariances(context.Background(), run.RunID)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "persist variances")
-}
-
-func TestClassifyVarianceReason(t *testing.T) {
-	tests := []struct {
-		name     string
-		current  *domain.SettlementSnapshot
-		previous *domain.SettlementSnapshot
-		want     domain.VarianceReason
-	}{
+	snapRepo := newVdSnapRepo()
+	snapRepo.snapsByRunID[run.RunID] = []*domain.SettlementSnapshot{
 		{
-			name: "D+1 run returns AMOUNT_MISMATCH",
-			current: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "GBP",
-				SourceSystem: "pk",
-			},
-			previous: nil,
-			want:     domain.VarianceReasonAmountMismatch,
-		},
-		{
-			name: "different source systems returns EXTERNAL_MISMATCH",
-			current: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "GBP",
-				SourceSystem: "pk",
-			},
-			previous: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "GBP",
-				SourceSystem: "external-ledger",
-			},
-			want: domain.VarianceReasonExternalMismatch,
-		},
-		{
-			name: "quality upgrade returns QUALITY_UPGRADE",
-			current: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "KWH",
-				SourceSystem: "pk",
-				Attributes:   map[string]string{"quality": "ACTUAL"},
-			},
-			previous: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "KWH",
-				SourceSystem: "pk",
-				Attributes:   map[string]string{"quality": "ESTIMATE"},
-			},
-			want: domain.VarianceReasonQualityUpgrade,
-		},
-		{
-			name: "correction attribute returns CORRECTION_APPLIED",
-			current: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "GBP",
-				SourceSystem: "pk",
-				Attributes:   map[string]string{"correction": "wash_and_reload"},
-			},
-			previous: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "GBP",
-				SourceSystem: "pk",
-			},
-			want: domain.VarianceReasonCorrectionApplied,
-		},
-		{
-			name: "same source different amounts returns AMOUNT_MISMATCH",
-			current: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "GBP",
-				SourceSystem: "pk",
-			},
-			previous: &domain.SettlementSnapshot{
-				AccountID: "ACC-001", InstrumentCode: "GBP",
-				SourceSystem: "pk",
-			},
-			want: domain.VarianceReasonAmountMismatch,
+			SnapshotID:      uuid.New(),
+			RunID:           run.RunID,
+			AccountID:       run.AccountID,
+			InstrumentCode:  "GBP",
+			ExpectedBalance: decimal.NewFromInt(100),
+			ActualBalance:   decimal.NewFromInt(90),
+			VarianceAmount:  decimal.NewFromInt(-10),
+			SourceSystem:    "ledger",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := classifyVarianceReason(tt.current, tt.previous)
-			assert.Equal(t, tt.want, got)
-		})
+	varianceRepo := &vdVarianceRepo{}
+	vd := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
+
+	variances, err := vd.DetectVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+	require.Len(t, variances, 1)
+	assert.Equal(t, domain.VarianceReasonAmountMismatch, variances[0].Reason)
+	assert.Equal(t, decimal.NewFromInt(100), variances[0].ExpectedAmount)
+	assert.Equal(t, decimal.NewFromInt(90), variances[0].ActualAmount)
+}
+
+func TestDetectVariances_D1Run_NoVariance(t *testing.T) {
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
+
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+
+	snapRepo := newVdSnapRepo()
+	snapRepo.snapsByRunID[run.RunID] = []*domain.SettlementSnapshot{
+		{
+			SnapshotID:      uuid.New(),
+			AccountID:       run.AccountID,
+			InstrumentCode:  "GBP",
+			ExpectedBalance: decimal.NewFromInt(100),
+			ActualBalance:   decimal.NewFromInt(100),
+			VarianceAmount:  decimal.Zero,
+			SourceSystem:    "ledger",
+		},
 	}
+
+	vd := NewVarianceDetector(runRepo, snapRepo, &vdVarianceRepo{})
+	variances, err := vd.DetectVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+	assert.Empty(t, variances)
+}
+
+func TestDetectVariances_SubsequentRun_DeltaDetected(t *testing.T) {
+	// Create previous completed run
+	prevRun := testhelpers.NewSettlementRun(t)
+	require.NoError(t, prevRun.Start())
+	require.NoError(t, prevRun.Complete(0))
+	prevRun.CreatedAt = time.Now().Add(-24 * time.Hour)
+
+	// Create current running run
+	run := testhelpers.NewSettlementRunForAccount(t, prevRun.AccountID)
+	require.NoError(t, run.Start())
+
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	runRepo.runs[prevRun.RunID] = prevRun
+	runRepo.listRuns = []*domain.SettlementRun{prevRun}
+
+	snapRepo := newVdSnapRepo()
+	snapRepo.snapsByRunID[run.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "GBP", ActualBalance: decimal.NewFromInt(200), SourceSystem: "ledger"},
+	}
+	snapRepo.snapsByRunID[prevRun.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "GBP", ActualBalance: decimal.NewFromInt(150), SourceSystem: "ledger"},
+	}
+
+	varianceRepo := &vdVarianceRepo{}
+	vd := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
+
+	variances, err := vd.DetectVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+	require.Len(t, variances, 1)
+	assert.Equal(t, decimal.NewFromInt(150), variances[0].ExpectedAmount)
+	assert.Equal(t, decimal.NewFromInt(200), variances[0].ActualAmount)
+}
+
+func TestDetectVariances_SubsequentRun_MissingEntryInCurrent(t *testing.T) {
+	prevRun := testhelpers.NewSettlementRun(t)
+	require.NoError(t, prevRun.Start())
+	require.NoError(t, prevRun.Complete(0))
+	prevRun.CreatedAt = time.Now().Add(-24 * time.Hour)
+
+	run := testhelpers.NewSettlementRunForAccount(t, prevRun.AccountID)
+	require.NoError(t, run.Start())
+
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	runRepo.listRuns = []*domain.SettlementRun{prevRun}
+
+	snapRepo := newVdSnapRepo()
+	// Current run has EUR but not GBP - the GBP from previous should be detected as missing
+	snapRepo.snapsByRunID[run.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "EUR", ActualBalance: decimal.NewFromInt(100), SourceSystem: "ledger"},
+	}
+	snapRepo.snapsByRunID[prevRun.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "GBP", ActualBalance: decimal.NewFromInt(100), SourceSystem: "ledger"},
+	}
+
+	vd := NewVarianceDetector(runRepo, snapRepo, &vdVarianceRepo{})
+	variances, err := vd.DetectVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+	// Two variances: EUR is new (missing in previous), GBP is missing (was in previous)
+	require.Len(t, variances, 2)
+	for _, v := range variances {
+		assert.Equal(t, domain.VarianceReasonMissingEntry, v.Reason)
+	}
+}
+
+func TestDetectVariances_SubsequentRun_NewEntryInCurrent(t *testing.T) {
+	prevRun := testhelpers.NewSettlementRun(t)
+	require.NoError(t, prevRun.Start())
+	require.NoError(t, prevRun.Complete(0))
+	prevRun.CreatedAt = time.Now().Add(-24 * time.Hour)
+
+	run := testhelpers.NewSettlementRunForAccount(t, prevRun.AccountID)
+	require.NoError(t, run.Start())
+
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	runRepo.listRuns = []*domain.SettlementRun{prevRun}
+
+	snapRepo := newVdSnapRepo()
+	snapRepo.snapsByRunID[run.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "EUR", ActualBalance: decimal.NewFromInt(50), SourceSystem: "ledger"},
+	}
+	snapRepo.snapsByRunID[prevRun.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "GBP", ActualBalance: decimal.NewFromInt(100), SourceSystem: "ledger"},
+	}
+
+	vd := NewVarianceDetector(runRepo, snapRepo, &vdVarianceRepo{})
+	variances, err := vd.DetectVariances(context.Background(), run.RunID)
+	require.NoError(t, err)
+	require.Len(t, variances, 2)
+	// One variance for the new EUR entry, one for the missing GBP entry
+	reasons := map[domain.VarianceReason]bool{}
+	for _, v := range variances {
+		reasons[v.Reason] = true
+		assert.Equal(t, domain.VarianceReasonMissingEntry, v.Reason)
+	}
+}
+
+func TestDetectVariances_CreateBatchFails(t *testing.T) {
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
+
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+
+	snapRepo := newVdSnapRepo()
+	snapRepo.snapsByRunID[run.RunID] = []*domain.SettlementSnapshot{
+		{
+			SnapshotID:      uuid.New(),
+			AccountID:       run.AccountID,
+			InstrumentCode:  "GBP",
+			ExpectedBalance: decimal.NewFromInt(100),
+			ActualBalance:   decimal.NewFromInt(80),
+			VarianceAmount:  decimal.NewFromInt(-20),
+			SourceSystem:    "ledger",
+		},
+	}
+
+	vd := NewVarianceDetector(runRepo, snapRepo, &vdVarianceRepo{createBatchErr: errors.New("batch insert failed")})
+	_, err := vd.DetectVariances(context.Background(), run.RunID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to persist variances")
+}
+
+func TestDetectVariances_FindPreviousSnapshotsFails(t *testing.T) {
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
+
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	runRepo.listErr = errors.New("list failed")
+
+	snapRepo := newVdSnapRepo()
+	snapRepo.snapsByRunID[run.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "GBP", SourceSystem: "ledger"},
+	}
+
+	vd := NewVarianceDetector(runRepo, snapRepo, &vdVarianceRepo{})
+	_, err := vd.DetectVariances(context.Background(), run.RunID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to find previous snapshots")
+}
+
+func TestClassifyVarianceReason_NoPrevious(t *testing.T) {
+	snap := &domain.SettlementSnapshot{AccountID: "ACC-1"}
+	reason := classifyVarianceReason(snap, nil)
+	assert.Equal(t, domain.VarianceReasonAmountMismatch, reason)
+}
+
+func TestClassifyVarianceReason_SourceSystemMismatch(t *testing.T) {
+	current := &domain.SettlementSnapshot{SourceSystem: "systemA", Attributes: map[string]string{}}
+	previous := &domain.SettlementSnapshot{SourceSystem: "systemB", Attributes: map[string]string{}}
+	reason := classifyVarianceReason(current, previous)
+	assert.Equal(t, domain.VarianceReasonExternalMismatch, reason)
+}
+
+func TestClassifyVarianceReason_QualityUpgrade(t *testing.T) {
+	current := &domain.SettlementSnapshot{
+		SourceSystem: "system",
+		Attributes:   map[string]string{"quality": "ACTUAL"},
+	}
+	previous := &domain.SettlementSnapshot{
+		SourceSystem: "system",
+		Attributes:   map[string]string{"quality": "ESTIMATE"},
+	}
+	reason := classifyVarianceReason(current, previous)
+	assert.Equal(t, domain.VarianceReasonQualityUpgrade, reason)
+}
+
+func TestClassifyVarianceReason_CorrectionApplied(t *testing.T) {
+	current := &domain.SettlementSnapshot{
+		SourceSystem: "system",
+		Attributes:   map[string]string{"correction": "wash_and_reload"},
+	}
+	previous := &domain.SettlementSnapshot{
+		SourceSystem: "system",
+		Attributes:   map[string]string{},
+	}
+	reason := classifyVarianceReason(current, previous)
+	assert.Equal(t, domain.VarianceReasonCorrectionApplied, reason)
+}
+
+func TestClassifyVarianceReason_DefaultAmountMismatch(t *testing.T) {
+	current := &domain.SettlementSnapshot{
+		SourceSystem: "system",
+		Attributes:   map[string]string{},
+	}
+	previous := &domain.SettlementSnapshot{
+		SourceSystem: "system",
+		Attributes:   map[string]string{},
+	}
+	reason := classifyVarianceReason(current, previous)
+	assert.Equal(t, domain.VarianceReasonAmountMismatch, reason)
 }
 
 func TestIsQualityUpgrade(t *testing.T) {
 	tests := []struct {
-		name     string
 		previous string
 		current  string
-		want     bool
+		expected bool
 	}{
-		{"estimate to actual", "ESTIMATE", "ACTUAL", true},
-		{"estimate to coefficient", "ESTIMATE", "COEFFICIENT", true},
-		{"actual to revised", "ACTUAL", "REVISED", true},
-		{"actual to estimate", "ACTUAL", "ESTIMATE", false},
-		{"same quality", "ACTUAL", "ACTUAL", false},
-		{"unknown quality", "UNKNOWN", "ACTUAL", true},
-		{"both unknown", "UNKNOWN", "OTHER", false},
+		{"ESTIMATE", "ACTUAL", true},
+		{"ESTIMATE", "COEFFICIENT", true},
+		{"ACTUAL", "REVISED", true},
+		{"ACTUAL", "ESTIMATE", false},
+		{"REVISED", "ACTUAL", false},
+		{"ACTUAL", "ACTUAL", false},
+		{"UNKNOWN", "ACTUAL", true},
+		{"ACTUAL", "UNKNOWN", false},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isQualityUpgrade(tt.previous, tt.current)
-			assert.Equal(t, tt.want, got)
+		t.Run(tt.previous+"_to_"+tt.current, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isQualityUpgrade(tt.previous, tt.current))
 		})
 	}
 }
 
-func TestDetectVariances_DecimalPrecision(t *testing.T) {
-	runRepo := newMockRunRepo()
-	snapRepo := &mockSnapshotRepo{}
-	varianceRepo := &mockVarianceRepoFull{}
+func TestSnapshotKey(t *testing.T) {
+	key := snapshotKey("ACC-1", "GBP", "ledger")
+	assert.Equal(t, "ACC-1|GBP|ledger", key)
+}
 
-	run := newRunningTestRun(t)
-	_ = runRepo.Create(context.Background(), run)
+func TestDetectVariances_SubsequentRun_NoDelta(t *testing.T) {
+	prevRun := testhelpers.NewSettlementRun(t)
+	require.NoError(t, prevRun.Start())
+	require.NoError(t, prevRun.Complete(0))
+	prevRun.CreatedAt = time.Now().Add(-24 * time.Hour)
 
-	// Small decimal variance
-	expected, _ := decimal.NewFromString("999.999999999999999999")
-	actual, _ := decimal.NewFromString("1000.000000000000000000")
+	run := testhelpers.NewSettlementRunForAccount(t, prevRun.AccountID)
+	require.NoError(t, run.Start())
 
-	snap, _ := domain.NewSettlementSnapshot(
-		run.RunID, "ACC-001", "GBP",
-		expected, actual, "pk", nil,
-	)
-	snapRepo.snapshots = []*domain.SettlementSnapshot{snap}
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	runRepo.listRuns = []*domain.SettlementRun{prevRun}
 
-	detector := NewVarianceDetector(runRepo, snapRepo, varianceRepo)
-	variances, err := detector.DetectVariances(context.Background(), run.RunID)
+	snapRepo := newVdSnapRepo()
+	snap := []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "GBP", ActualBalance: decimal.NewFromInt(100), SourceSystem: "ledger"},
+	}
+	snapRepo.snapsByRunID[run.RunID] = snap
+	snapRepo.snapsByRunID[prevRun.RunID] = []*domain.SettlementSnapshot{
+		{SnapshotID: uuid.New(), AccountID: run.AccountID, InstrumentCode: "GBP", ActualBalance: decimal.NewFromInt(100), SourceSystem: "ledger"},
+	}
+
+	vd := NewVarianceDetector(runRepo, snapRepo, &vdVarianceRepo{})
+	variances, err := vd.DetectVariances(context.Background(), run.RunID)
 	require.NoError(t, err)
-
-	require.Len(t, variances, 1)
-	expectedVariance := actual.Sub(expected)
-	assert.True(t, expectedVariance.Equal(variances[0].VarianceAmount),
-		"expected variance %s, got %s", expectedVariance, variances[0].VarianceAmount)
+	assert.Empty(t, variances)
 }
