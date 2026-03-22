@@ -161,10 +161,10 @@ describe('ManifestDiffGraph', () => {
       expect(node).toHaveAttribute('data-diff-status', 'removed')
     })
 
-    it('renders node with unchanged diff status when present in both', async () => {
+    it('shows no-changes state (not ReactFlow) when before and after are identical', async () => {
       render(<ManifestDiffGraph before={graphWithInstrument} after={graphWithInstrument} />)
-      // identical graphs => no-diff state, no ReactFlow rendered
       expect(screen.getByTestId('manifest-diff-no-changes')).toBeInTheDocument()
+      expect(screen.queryByTestId('react-flow')).not.toBeInTheDocument()
     })
 
     it('renders multiple added nodes', async () => {
