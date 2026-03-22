@@ -3,6 +3,7 @@ package manifest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -45,10 +46,11 @@ func TestNewExportService_NilCollectors_DefaultsToEmpty(t *testing.T) {
 // TestIsNotFound_WrappedError verifies that isNotFound detects wrapped ErrVersionNotFound.
 func TestIsNotFound_WrappedError(t *testing.T) {
 	wrapped := errors.New("context: " + ErrVersionNotFound.Error())
-	// Direct wrapping via %w.
+	wrappedWithW := fmt.Errorf("wrapped: %w", ErrVersionNotFound)
 	wrapErr := errors.Join(ErrVersionNotFound, errors.New("extra context"))
 	assert.True(t, isNotFound(ErrVersionNotFound))
 	assert.False(t, isNotFound(wrapped))
+	assert.True(t, isNotFound(wrappedWithW))
 	assert.True(t, isNotFound(wrapErr))
 }
 
