@@ -186,4 +186,72 @@ describe('analyzeFilter', () => {
       expect(result.reason).toContain('Complex expression');
     });
   });
+
+  describe('double-quoted string literals', () => {
+    it('handles double-quoted equality', () => {
+      const context: EventContext = { instrumentCode: 'GBP' };
+      const result = analyzeFilter(
+        'event.instrument_code == "GBP"',
+        context,
+      );
+      expect(result.result).toBe('pass');
+    });
+
+    it('handles double-quoted inequality', () => {
+      const context: EventContext = { instrumentCode: 'USD' };
+      const result = analyzeFilter(
+        'event.instrument_code != "GBP"',
+        context,
+      );
+      expect(result.result).toBe('pass');
+    });
+  });
+
+  describe('unknown field in inequality', () => {
+    it('returns indeterminate for unknown field in != expression', () => {
+      const result = analyzeFilter(
+        "event.unknown_field != 'value'",
+        {},
+      );
+      expect(result.result).toBe('indeterminate');
+      expect(result.reason).toContain('Unknown field');
+    });
+  });
+
+  describe('missing context in inequality', () => {
+    it('returns indeterminate when context value missing for != expression', () => {
+      const result = analyzeFilter(
+        "event.instrument_code != 'GBP'",
+        {},
+      );
+      expect(result.result).toBe('indeterminate');
+      expect(result.reason).toContain('missing');
+    });
+  });
+
+  describe('nested parentheses', () => {
+    it('returns indeterminate for parenthesised subexpressions (parens not stripped)', () => {
+      // The analyzer does not strip outer parens from sub-parts, so they are treated
+      // as complex unrecognised expressions and return indeterminate.
+      const context: EventContext = { instrumentCode: 'GBP', direction: 'CREDIT' };
+      const result = analyzeFilter(
+        "(event.instrument_code == 'GBP') && (event.direction == 'CREDIT')",
+        context,
+      );
+      expect(result.result).toBe('indeterminate');
+    });
+  });
+
+  describe('has() short-circuit in or expressions', () => {
+    it('returns indeterminate when expression contains has() even with a passing branch', () => {
+      // has() is detected on the whole expression before compound splitting, so the
+      // entire filter is treated as indeterminate regardless of other branches.
+      const context: EventContext = { instrumentCode: 'GBP' };
+      const result = analyzeFilter(
+        "has(event.metadata) || event.instrument_code == 'GBP'",
+        context,
+      );
+      expect(result.result).toBe('indeterminate');
+    });
+  });
 });
