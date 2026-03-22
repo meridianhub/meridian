@@ -17,10 +17,10 @@ import (
 // --- Variance-specific mock repos (distinct from snapshot_capturer mocks) ---
 
 type vdRunRepo struct {
-	runs      map[uuid.UUID]*domain.SettlementRun
-	listRuns  []*domain.SettlementRun
-	findErr   error
-	listErr   error
+	runs     map[uuid.UUID]*domain.SettlementRun
+	listRuns []*domain.SettlementRun
+	findErr  error
+	listErr  error
 }
 
 func newVdRunRepo() *vdRunRepo { return &vdRunRepo{runs: make(map[uuid.UUID]*domain.SettlementRun)} }
@@ -29,6 +29,7 @@ func (m *vdRunRepo) Create(_ context.Context, run *domain.SettlementRun) error {
 	m.runs[run.RunID] = run
 	return nil
 }
+
 func (m *vdRunRepo) FindByID(_ context.Context, runID uuid.UUID) (*domain.SettlementRun, error) {
 	if m.findErr != nil {
 		return nil, m.findErr
@@ -39,10 +40,12 @@ func (m *vdRunRepo) FindByID(_ context.Context, runID uuid.UUID) (*domain.Settle
 	}
 	return run, nil
 }
+
 func (m *vdRunRepo) Update(_ context.Context, run *domain.SettlementRun) error {
 	m.runs[run.RunID] = run
 	return nil
 }
+
 func (m *vdRunRepo) List(_ context.Context, _ domain.RunFilter) ([]*domain.SettlementRun, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
@@ -63,16 +66,18 @@ func (m *vdSnapRepo) Create(_ context.Context, _ *domain.SettlementSnapshot) err
 func (m *vdSnapRepo) CreateBatch(_ context.Context, _ []*domain.SettlementSnapshot) error {
 	return nil
 }
+
 func (m *vdSnapRepo) FindByID(_ context.Context, _ uuid.UUID) (*domain.SettlementSnapshot, error) {
 	return nil, domain.ErrNotFound
 }
+
 func (m *vdSnapRepo) FindByRunID(_ context.Context, runID uuid.UUID) ([]*domain.SettlementSnapshot, error) {
 	if m.findErr != nil {
 		return nil, m.findErr
 	}
 	return m.snapsByRunID[runID], nil
 }
-func (m *vdSnapRepo) DeleteByRunID(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *vdSnapRepo) DeleteByRunID(_ context.Context, _ uuid.UUID) error         { return nil }
 func (m *vdSnapRepo) MarkRunSnapshotsFinal(_ context.Context, _ uuid.UUID) error { return nil }
 
 type vdVarianceRepo struct {
@@ -81,20 +86,23 @@ type vdVarianceRepo struct {
 	createBatchErr error
 }
 
-func (m *vdVarianceRepo) Create(_ context.Context, _ *domain.Variance) error   { return nil }
+func (m *vdVarianceRepo) Create(_ context.Context, _ *domain.Variance) error { return nil }
 func (m *vdVarianceRepo) FindByID(_ context.Context, _ uuid.UUID) (*domain.Variance, error) {
 	return nil, domain.ErrNotFound
 }
+
 func (m *vdVarianceRepo) FindByRunID(_ context.Context, _ uuid.UUID) ([]*domain.Variance, error) {
 	return nil, nil
 }
-func (m *vdVarianceRepo) Update(_ context.Context, _ *domain.Variance) error   { return nil }
+func (m *vdVarianceRepo) Update(_ context.Context, _ *domain.Variance) error { return nil }
 func (m *vdVarianceRepo) List(_ context.Context, _ domain.VarianceFilter) ([]*domain.Variance, error) {
 	return nil, nil
 }
+
 func (m *vdVarianceRepo) DeleteByRunID(_ context.Context, _ uuid.UUID) error {
 	return m.deleteErr
 }
+
 func (m *vdVarianceRepo) CreateBatch(_ context.Context, variances []*domain.Variance) error {
 	if m.createBatchErr != nil {
 		return m.createBatchErr
