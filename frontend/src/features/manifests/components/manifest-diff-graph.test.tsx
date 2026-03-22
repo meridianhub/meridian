@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import { ManifestDiffGraph } from './manifest-diff-graph'
 import type { ManifestGraph } from '../lib/manifest-graph-model'
@@ -12,8 +13,7 @@ vi.mock('@/components/ui/tooltip', () => ({
   ),
 }))
 
-vi.mock('@xyflow/react', async () => {
-  const React = await vi.importActual<typeof import('react')>('react')
+vi.mock('@xyflow/react', () => {
   const Position = { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' }
   const BackgroundVariant = { Dots: 'dots' }
 
@@ -58,11 +58,11 @@ vi.mock('@xyflow/react', async () => {
     Position,
     BackgroundVariant,
     useNodesState: (init: unknown[]) => {
-      const [s, setS] = React.useState(init)
+      const [s, setS] = useState(init)
       return [s, setS, vi.fn()]
     },
     useEdgesState: (init: unknown[]) => {
-      const [s, setS] = React.useState(init)
+      const [s, setS] = useState(init)
       return [s, setS, vi.fn()]
     },
   }
