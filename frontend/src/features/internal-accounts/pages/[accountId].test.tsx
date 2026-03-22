@@ -148,8 +148,7 @@ describe('InternalAccountDetailPage - loading and error states', () => {
       marketInformation: {} as never,
     })
     renderPage()
-    // Should show loading state (DetailSkeleton)
-    expect(document.body).toBeTruthy()
+    expect(screen.getByTestId('detail-skeleton')).toBeInTheDocument()
   })
 
   it('shows not found state when account is null', async () => {
