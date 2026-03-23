@@ -612,8 +612,11 @@ type ListPostingsParams struct {
 	// BookingLogID filters by parent booking log (empty for no filter)
 	BookingLogID *uuid.UUID
 
-	// AccountID filters by account identifier (empty for no filter)
+	// AccountID filters by account identifier (empty for no filter). Ignored when AccountIDs is non-empty.
 	AccountID string
+
+	// AccountIDs filters by multiple account identifiers (empty for no filter). Takes precedence over AccountID.
+	AccountIDs []string
 
 	// PostingDirection filters by DEBIT or CREDIT (empty for no filter)
 	PostingDirection string
@@ -670,8 +673,10 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 			query = query.Where("financial_booking_log_id = ?", *params.BookingLogID)
 		}
 
-		// Apply account ID filter if provided
-		if params.AccountID != "" {
+		// Apply account ID filter - AccountIDs takes precedence over AccountID
+		if len(params.AccountIDs) > 0 {
+			query = query.Where("account_id IN ?", params.AccountIDs)
+		} else if params.AccountID != "" {
 			query = query.Where("account_id = ?", params.AccountID)
 		}
 

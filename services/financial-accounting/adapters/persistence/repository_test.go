@@ -798,3 +798,64 @@ func TestAuditChangedByDefaultsToSystem(t *testing.T) {
 	require.NotNil(t, outbox.ChangedBy)
 	assert.Equal(t, "system", *outbox.ChangedBy)
 }
+
+func TestListPostings_FilterByAccountIDs(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewLedgerRepository(db)
+
+	bookingLogID := uuid.New()
+	bookingLog := &FinancialBookingLogEntity{
+		ID:                      bookingLogID,
+		FinancialAccountType:    "DEBIT",
+		ProductServiceReference: "PROD-001",
+		BusinessUnitReference:   "BU-001",
+		ChartOfAccountsRules:    "{}",
+		BaseCurrency:            "GBP",
+		Status:                  "ACTIVE",
+		IdempotencyKey:          "test-key-" + uuid.New().String(),
+		CreatedAt:               time.Now(),
+		UpdatedAt:               time.Now(),
+		Version:                 1,
+	}
+	require.NoError(t, db.Create(bookingLog).Error)
+
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromFloat(100.00), gbpInstrument)
+
+	for _, accID := range []string{"ACC-X1", "ACC-X2", "ACC-OTHER"} {
+		p := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                money,
+			AccountID:             accID,
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, repo.SavePosting(ctx, p))
+	}
+
+	// Filter by two accounts
+	result, err := repo.ListPostings(ctx, ListPostingsParams{
+		PageSize:   10,
+		AccountIDs: []string{"ACC-X1", "ACC-X2"},
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Postings, 2)
+	for _, p := range result.Postings {
+		assert.Contains(t, []string{"ACC-X1", "ACC-X2"}, p.AccountID)
+	}
+
+	// AccountIDs takes precedence over AccountID
+	result, err = repo.ListPostings(ctx, ListPostingsParams{
+		PageSize:   10,
+		AccountID:  "ACC-OTHER",
+		AccountIDs: []string{"ACC-X1"},
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Postings, 1)
+	assert.Equal(t, "ACC-X1", result.Postings[0].AccountID)
+}
