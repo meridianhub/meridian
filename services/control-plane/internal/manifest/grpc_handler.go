@@ -15,9 +15,9 @@ import (
 // ErrHistoryServiceRequired is returned when history service is nil.
 var ErrHistoryServiceRequired = errors.New("history service is required")
 
-// ManifestApplier is the interface for applying manifests via the standard pipeline.
+// Applier is the interface for applying manifests via the standard pipeline.
 // This decouples the history handler from the applier package to avoid import cycles.
-type ManifestApplier interface {
+type Applier interface {
 	ApplyManifest(ctx context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error)
 }
 
@@ -28,7 +28,7 @@ type HistoryHandler struct {
 	history    *HistoryService
 	exporter   *ExportService
 	reconciler *ReconcileService
-	applier    ManifestApplier
+	applier    Applier
 	logger     *slog.Logger
 }
 
@@ -68,9 +68,9 @@ func NewHistoryHandlerWithReconcile(history *HistoryService, exporter *ExportSer
 	return h, nil
 }
 
-// SetApplier configures the ManifestApplier for rollback support.
+// SetApplier configures the Applier for rollback support.
 // When nil, the RollbackManifest RPC returns Unimplemented.
-func (h *HistoryHandler) SetApplier(applier ManifestApplier) {
+func (h *HistoryHandler) SetApplier(applier Applier) {
 	h.applier = applier
 }
 

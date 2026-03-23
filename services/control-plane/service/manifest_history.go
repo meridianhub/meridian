@@ -26,7 +26,7 @@ type ManifestHistoryServiceConfig struct {
 
 	// Applier enables the RollbackManifest RPC by providing the manifest
 	// application pipeline. When nil, RollbackManifest returns Unimplemented.
-	Applier manifest.ManifestApplier
+	Applier manifest.Applier
 }
 
 // ErrDBRequired is returned when DB is nil during service registration.

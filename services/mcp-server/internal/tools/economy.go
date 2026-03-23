@@ -943,10 +943,10 @@ func handleManifestRollback(ctx context.Context, client ManifestHistorian, param
 
 	if resp.Diff != nil && resp.Diff.Summary != nil {
 		result["diff_summary"] = map[string]interface{}{
-			"creates":             resp.Diff.Summary.Creates,
-			"updates":             resp.Diff.Summary.Updates,
-			"deletes":             resp.Diff.Summary.Deletes,
-			"no_changes":          resp.Diff.Summary.NoChanges,
+			"creates":              resp.Diff.Summary.Creates,
+			"updates":              resp.Diff.Summary.Updates,
+			"deletes":              resp.Diff.Summary.Deletes,
+			"no_changes":           resp.Diff.Summary.NoChanges,
 			"has_breaking_changes": resp.Diff.Summary.HasBreakingChanges,
 		}
 	}

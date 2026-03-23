@@ -152,7 +152,7 @@ func TestSetApplier(t *testing.T) {
 	assert.NotNil(t, handler.applier)
 }
 
-// mockApplier is a no-op implementation of ManifestApplier for unit tests.
+// mockApplier is a no-op implementation of Applier for unit tests.
 type mockApplier struct{}
 
 func (m *mockApplier) ApplyManifest(_ context.Context, _ *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
