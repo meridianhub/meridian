@@ -69,9 +69,12 @@ test.describe('Party detail — Accounts tab structure', () => {
 test.describe('Account detail page — structure', () => {
   test('not-found state renders breadcrumb back to Accounts', async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/accounts/00000000-0000-0000-0000-000000000000')
+    // AccountNotFound renders both the breadcrumb link AND the not-found div simultaneously.
+    // Use .first() to avoid strict-mode violation when both match.
     await expect(
       page.getByLabel('Breadcrumb').getByRole('link', { name: 'Accounts' })
         .or(page.getByTestId('account-not-found'))
+        .first()
     ).toBeVisible({ timeout: 10_000 })
   })
 
