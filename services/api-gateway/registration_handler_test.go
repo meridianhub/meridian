@@ -21,16 +21,11 @@ import (
 // --- Stub implementations ---
 
 type stubTenantCreator struct {
-	createFn      func(ctx context.Context, tenantID, slug, displayName string) (string, error)
-	slugAvailable func(ctx context.Context, slug string) (bool, error)
+	createFn func(ctx context.Context, tenantID, slug, displayName string) (string, error)
 }
 
 func (s *stubTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error) {
 	return s.createFn(ctx, tenantID, slug, displayName)
-}
-
-func (s *stubTenantCreator) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
-	return s.slugAvailable(ctx, slug)
 }
 
 type stubIdentityRepo struct {
@@ -90,9 +85,6 @@ func defaultStubs() (*stubTenantCreator, *stubIdentityRepo) {
 	tc := &stubTenantCreator{
 		createFn: func(_ context.Context, tenantID, _, _ string) (string, error) {
 			return tenantID, nil
-		},
-		slugAvailable: func(_ context.Context, _ string) (bool, error) {
-			return true, nil
 		},
 	}
 	ir := &stubIdentityRepo{}
@@ -261,16 +253,10 @@ func TestRegistrationHandler_WeakPassword(t *testing.T) {
 	assert.Contains(t, resp["error"], "password")
 }
 
-func TestRegistrationHandler_TenantCreationAlreadyExistsIsIdempotent(t *testing.T) {
+func TestRegistrationHandler_SlugTaken(t *testing.T) {
 	tc, ir := defaultStubs()
 	tc.createFn = func(_ context.Context, _, _, _ string) (string, error) {
 		return "", errors.New("tenant acme_corp already exists (AlreadyExists)")
-	}
-
-	var identitySaved bool
-	ir.saveIdentityWithRolesFn = func(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
-		identitySaved = true
-		return nil
 	}
 
 	h := newRegistrationHandler(t, tc, ir)
@@ -280,9 +266,11 @@ func TestRegistrationHandler_TenantCreationAlreadyExistsIsIdempotent(t *testing.
 		"password": "SecurePass123!",
 	})
 
-	// Idempotent: proceeds to create identity even when tenant already exists.
-	assert.Equal(t, http.StatusCreated, w.Code)
-	assert.True(t, identitySaved, "identity should be saved even when tenant already exists")
+	assert.Equal(t, http.StatusConflict, w.Code)
+	resp := parseResponse(t, w)
+	assert.Contains(t, resp["error"], "taken")
+
+	_ = ir // identity repo should not be called
 }
 
 func TestRegistrationHandler_TenantCreationFails(t *testing.T) {
@@ -301,11 +289,8 @@ func TestRegistrationHandler_TenantCreationFails(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestRegistrationHandler_TenantAlreadyExistsEmailConflict(t *testing.T) {
+func TestRegistrationHandler_EmailAlreadyRegistered(t *testing.T) {
 	tc, ir := defaultStubs()
-	tc.createFn = func(_ context.Context, _, _, _ string) (string, error) {
-		return "", errors.New("tenant acme_corp already exists (AlreadyExists)")
-	}
 	ir.saveIdentityWithRolesFn = func(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
 		return identitydomain.ErrEmailAlreadyExists
 	}
@@ -317,7 +302,6 @@ func TestRegistrationHandler_TenantAlreadyExistsEmailConflict(t *testing.T) {
 		"password": "SecurePass123!",
 	})
 
-	// Tenant exists AND email already registered → 409 Conflict.
 	assert.Equal(t, http.StatusConflict, w.Code)
 	resp := parseResponse(t, w)
 	assert.Contains(t, resp["error"], "already registered")
