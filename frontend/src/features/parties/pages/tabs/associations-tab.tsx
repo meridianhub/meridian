@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -42,12 +41,13 @@ const ASSOCIATION_STATUS_LABELS: Record<number, string> = {
   [AssociationStatus.TERMINATED]: 'TERMINATED',
 }
 
-function relationshipTypeLabel(type: number): string {
+function relationshipTypeLabel(type: number | string): string {
+  if (typeof type === 'string') return type
   return RELATIONSHIP_TYPE_LABELS[type] ?? String(type)
 }
 
-function associationStatusLabel(status: number): string {
-  if (typeof status === 'string') return status as string
+function associationStatusLabel(status: number | string): string {
+  if (typeof status === 'string') return status
   return ASSOCIATION_STATUS_LABELS[status] ?? String(status)
 }
 
@@ -64,10 +64,9 @@ function metadataSummary(metadata: Record<string, unknown> | undefined): string 
 
 interface AssociationTableProps {
   associations: Association[]
-  onRowClick?: (association: Association) => void
 }
 
-function AssociationTable({ associations, onRowClick }: AssociationTableProps) {
+function AssociationTable({ associations }: AssociationTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -81,11 +80,7 @@ function AssociationTable({ associations, onRowClick }: AssociationTableProps) {
         </thead>
         <tbody>
           {associations.map((assoc) => (
-            <tr
-              key={assoc.associationId}
-              className={onRowClick ? 'cursor-pointer hover:bg-muted/50' : undefined}
-              onClick={onRowClick ? () => onRowClick(assoc) : undefined}
-            >
+            <tr key={assoc.associationId} className="hover:bg-muted/50">
               <td className="py-2 pr-4">
                 <EntityLink type="party" id={assoc.relatedPartyId} />
               </td>
@@ -109,7 +104,6 @@ function AssociationTable({ associations, onRowClick }: AssociationTableProps) {
 export function AssociationsTab({ partyId, partyType }: AssociationsTabProps) {
   const clients = useApiClients()
   const tenantSlug = useTenantSlug()
-  const navigate = useNavigate()
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
   const isOrganization =
@@ -117,8 +111,11 @@ export function AssociationsTab({ partyId, partyType }: AssociationsTabProps) {
     partyType === 'PARTY_TYPE_ORGANIZATION' ||
     partyType === 'ORGANIZATION'
 
-  // For PERSON parties: retrieve forward associations (relationships registered by this party)
-  const { data: associationsData, isLoading: isLoadingAssociations } = usePartyAssociations(partyId)
+  // For PERSON parties: retrieve forward associations (relationships registered by this party).
+  // Disabled for org parties — orgs use listParticipants instead.
+  const { data: associationsData, isLoading: isLoadingAssociations } = usePartyAssociations(
+    isOrganization ? undefined : partyId,
+  )
 
   // For ORGANIZATION parties: list participants (members of this org/syndicate)
   const { data: participantsData, isLoading: isLoadingParticipants } = useQuery({
@@ -155,10 +152,7 @@ export function AssociationsTab({ partyId, partyType }: AssociationsTabProps) {
       {associations.length === 0 ? (
         <EmptyState title={tableTitle} description={emptyDescription} />
       ) : (
-        <AssociationTable
-          associations={associations}
-          onRowClick={(assoc) => navigate(`/parties/${assoc.relatedPartyId}`)}
-        />
+        <AssociationTable associations={associations} />
       )}
       <RegisterAssociationsDialog
         open={dialogOpen}
