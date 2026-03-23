@@ -465,6 +465,32 @@ func TestPostgresRepository_List(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(logs))
 
+	// Test filter by multiple account IDs (account_ids)
+	anotherAccountID := "GB33BUKB20201555555556"
+	log3 := createTestLog(t, anotherAccountID)
+	err = tc.repo.Create(ctx, log3)
+	require.NoError(t, err)
+
+	filter = domain.PositionLogFilter{
+		AccountIDs: []string{testAccountID, anotherAccountID},
+		Limit:      10,
+		Offset:     0,
+	}
+	logs, err = tc.repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Equal(t, 3, len(logs))
+
+	// AccountIDs with only one account
+	filter = domain.PositionLogFilter{
+		AccountIDs: []string{anotherAccountID},
+		Limit:      10,
+		Offset:     0,
+	}
+	logs, err = tc.repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(logs))
+	assert.Equal(t, anotherAccountID, logs[0].AccountID)
+
 	// Test invalid limit
 	filter = domain.PositionLogFilter{
 		Limit: 0,
