@@ -10,6 +10,7 @@ import { usePageTitle } from '@/hooks/use-page-title'
 import { StatCard } from './stat-card'
 import { ActivityFeed, type ActivityItem } from './activity-feed'
 import { QuickActions, type QuickAction } from './quick-actions'
+import { McpConnectionCard } from './mcp-connection-card'
 
 // Cache dashboard stats for 60s to reduce unnecessary refetches on navigation
 const DASHBOARD_STALE_TIME = 60_000
@@ -226,15 +227,18 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Quick Actions - takes 1/3 width */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <QuickActions actions={quickActions} />
-          </CardContent>
-        </Card>
+        {/* Right column: Quick Actions + MCP Connection */}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <QuickActions actions={quickActions} />
+            </CardContent>
+          </Card>
+          <McpConnectionCard />
+        </div>
       </div>
     </div>
   )
