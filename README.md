@@ -22,21 +22,10 @@ Meridian handles the bookkeeping, audit trails, reconciliation, and payment coll
 
 ## Why Meridian
 
-Billing starts as a Stripe checkout and a cron job. Then you need usage metering.
-Then revenue splits. Then your auditor asks for a transaction trail.
+Billing starts as a Stripe checkout and a cron job. Then you need usage
+metering. Then revenue splits. Then your auditor asks for a transaction trail.
 Then estimates need to reconcile with actuals.
 Now you're maintaining a financial system - and you're not a financial company.
-
-Existing solutions force a tradeoff:
-
-| Platform | Limitation |
-|----------|------------|
-| Murex | $10M+/year, 3-year implementation, built for trading floors |
-| 10x / Thought Machine | Fiat currency only - cannot natively track kWh, carbon credits, or compute |
-| Stripe / Modern Treasury | Great APIs, but you still build the ledger logic yourself |
-| Custom internal systems | Years of maintenance, no audit trail, no multi-asset support |
-
-Meridian gives you bank-grade infrastructure without the enterprise price tag or the build-it-yourself burden.
 
 ## What Makes It Different
 
