@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { formatBalance } from './use-accounts'
 
 describe('formatBalance', () => {
@@ -8,21 +8,25 @@ describe('formatBalance', () => {
   })
 
   it('formats ISO currency codes using Intl.NumberFormat', () => {
-    const result = formatBalance({ units: 100, nanos: 500_000_000, currencyCode: 'GBP' })
-    expect(result).toBeDefined()
-    // Intl formatting includes the value; exact format is locale-dependent
-    expect(result).toContain('100.50')
+    const input = { units: 100, nanos: 500_000_000, currencyCode: 'GBP' }
+    const expected = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'GBP',
+    }).format(100.5)
+    expect(formatBalance(input)).toBe(expected)
+  })
+
+  it('falls back to "<value> <code>" when Intl.NumberFormat throws', () => {
+    const spy = vi.spyOn(Intl, 'NumberFormat').mockImplementation((() => {
+      throw new RangeError('forced failure')
+    }) as unknown as typeof Intl.NumberFormat)
+    expect(formatBalance({ units: 245, nanos: 500_000_000, currencyCode: 'KWH' })).toBe(
+      '245.50 KWH',
+    )
+    spy.mockRestore()
   })
 
   it('formats non-ISO currency codes with code and value', () => {
-    const result = formatBalance({ units: 245, nanos: 500_000_000, currencyCode: 'KWH' })
-    expect(result).toBeDefined()
-    // Intl may format as "KWH 245.50" or catch block returns "245.50 KWH"
-    expect(result).toContain('245.50')
-    expect(result).toContain('KWH')
-  })
-
-  it('formats non-ISO currency codes for zero values', () => {
     const result = formatBalance({ units: 0, nanos: 0, currencyCode: 'KWH' })
     expect(result).toBeDefined()
     expect(result).toContain('0.00')
