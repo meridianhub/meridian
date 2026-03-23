@@ -471,6 +471,7 @@ message ListFinancialPositionLogsRequest {
     max_items: 100
     items: {
       string: {
+        min_len: 1
         max_len: 255
       }
     }

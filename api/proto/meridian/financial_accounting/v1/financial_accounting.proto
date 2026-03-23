@@ -447,8 +447,9 @@ message ListLedgerPostingsRequest {
     max_items: 100
     items: {
       string: {
+        min_len: 1
         max_len: 255
-        pattern: "^[a-zA-Z0-9_-]*$"
+        pattern: "^[a-zA-Z0-9_-]+$"
       }
     }
   }];
