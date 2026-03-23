@@ -76,7 +76,7 @@ export function PartyDetailPage() {
                 </TabsContent>
 
                 <TabsContent value="associations" className="mt-0">
-                  <AssociationsTab partyId={partyId} />
+                  <AssociationsTab partyId={partyId} partyType={party?.partyType} />
                 </TabsContent>
 
                 <TabsContent value="bank-relations" className="mt-0">
