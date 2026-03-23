@@ -467,10 +467,16 @@ func TestPostgresRepository_List(t *testing.T) {
 
 	// Test filter by multiple account IDs (account_ids)
 	anotherAccountID := "GB33BUKB20201555555556"
+	excludedAccountID := "GB33BUKB20201555555557"
 	log3 := createTestLog(t, anotherAccountID)
+	log4 := createTestLog(t, excludedAccountID)
 	err = tc.repo.Create(ctx, log3)
 	require.NoError(t, err)
+	err = tc.repo.Create(ctx, log4)
+	require.NoError(t, err)
 
+	// 4 logs exist: 2 for testAccountID, 1 for anotherAccountID, 1 for excludedAccountID.
+	// Filter to testAccountID + anotherAccountID should return 3, excluding the 4th.
 	filter = domain.PositionLogFilter{
 		AccountIDs: []string{testAccountID, anotherAccountID},
 		Limit:      10,
@@ -479,6 +485,9 @@ func TestPostgresRepository_List(t *testing.T) {
 	logs, err = tc.repo.List(ctx, filter)
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(logs))
+	for _, l := range logs {
+		assert.NotEqual(t, excludedAccountID, l.AccountID)
+	}
 
 	// AccountIDs with only one account
 	filter = domain.PositionLogFilter{
