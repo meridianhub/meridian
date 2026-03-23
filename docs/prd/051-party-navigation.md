@@ -246,13 +246,13 @@ perspective.
 
 Add a tab showing ledger postings across all the party's
 accounts. The frontend resolves the complete set of account
-IDs for the party via a dedicated API call
+IDs for the party via dedicated API calls
 (`ListCurrentAccounts(party_id=X)` and, for orgs,
-`ListInternalAccounts(org_party_id=X)` with no pagination
-limit) - independent of whatever the Accounts tab has loaded.
-Then queries `ListLedgerPostings(account_ids=[...])`. No
-cross-service coupling - the frontend is the boundary that
-joins the data.
+`ListInternalAccounts(org_party_id=X)`) using cursor-based
+pagination to iterate all pages - independent of whatever
+the Accounts tab UI has loaded. Then queries
+`ListLedgerPostings(account_ids=[...])`. No cross-service
+coupling - the frontend is the boundary that joins the data.
 
 ### 14. Org drill-down navigation
 
@@ -364,5 +364,6 @@ Dependency graph:
   in parallel
 - Frontend work (8) depends on API filters being complete
 - Service boundary cleanup is independent of frontend work
-- Critical path: max(API filters, boundary cleanup) ->
-  Frontend = max(5, 8) -> 8 = 16 points
+- Critical path: API filters (5) + Frontend (8) = 13 points
+  sequential. Boundary cleanup (8) runs in parallel with
+  both, so wall-clock critical path is 13 points.
