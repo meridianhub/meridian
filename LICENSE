@@ -8,9 +8,10 @@ Licensor:             Meridian Hub Ltd
 Licensed Work:        Meridian
                       The Licensed Work is (c) 2025-2026 Meridian Hub Ltd.
 Additional Use Grant: You may make production use of the Licensed Work, provided
-                      Your use does not include offering the Licensed Work to third
-                      parties as a commercial billing, ledger, treasury, or financial
-                      accounting service that competes with Meridian Hub products.
+                      that the total number of active accounts (accounts not in a
+                      closed or archived state) across all tenants does not exceed
+                      5,000. Production use exceeding this limit requires a commercial
+                      license from the Licensor.
 Change Date:          February 12, 2030
 Change License:       Apache License, Version 2.0
 
