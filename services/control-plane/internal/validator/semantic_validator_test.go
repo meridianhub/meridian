@@ -419,29 +419,43 @@ func TestValidateOrphanedInstruments_Orphaned(t *testing.T) {
 }
 
 func TestValidateOrphanedInstruments_ReferencedByInternalAccount(t *testing.T) {
+	// This test verifies the internal_account reference path specifically by adding
+	// an instrument that is ONLY referenced via an internal account (not via any
+	// account_type.allowed_instruments or valuation_rule).
 	v, err := New(WithOpenAPIPaths(nil), WithAsyncAPISchemas(nil))
 	require.NoError(t, err)
 
 	m := validManifest()
-	// Add account type with no allowed_instruments and internal account using KWH
-	// KWH is also in valuation rule so it's not orphaned
-	m.AccountTypes = append(m.AccountTypes, &controlplanev1.AccountTypeDefinition{
-		Code:          "ENERGY",
-		Name:          "Energy Account",
-		NormalBalance: controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT,
+	// Add TONNE_CO2E instrument and an account type with no allowed_instruments restriction
+	m.Instruments = append(m.Instruments, &controlplanev1.InstrumentDefinition{
+		Code: "TONNE_CO2E",
+		Name: "Tonne CO2 Equivalent",
+		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
+		Dimensions: &controlplanev1.InstrumentDimensions{
+			Unit:      "tCO2e",
+			Precision: 3,
+		},
 	})
+	m.AccountTypes = append(m.AccountTypes, &controlplanev1.AccountTypeDefinition{
+		Code:          "CARBON",
+		Name:          "Carbon Account",
+		NormalBalance: controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT,
+		// No AllowedInstruments restriction
+	})
+	// TONNE_CO2E is only referenced by this internal account, not by any
+	// account_type.allowed_instruments or valuation_rule.
 	m.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
 		{
-			Code:        "ENERGY_KWH",
-			AccountType: "ENERGY",
-			Instrument:  "KWH",
+			Code:        "CARBON_RESERVE",
+			AccountType: "CARBON",
+			Instrument:  "TONNE_CO2E",
 		},
 	}
 
 	result := v.Validate(m, nil)
 	for _, w := range result.Warnings {
-		if w.Code == "ORPHANED_INSTRUMENT" && w.ResourceID == "KWH" {
-			t.Error("KWH referenced by internal account should not be orphaned")
+		if w.Code == "ORPHANED_INSTRUMENT" && w.ResourceID == "TONNE_CO2E" {
+			t.Error("TONNE_CO2E referenced only by internal account should not be orphaned")
 		}
 	}
 }
