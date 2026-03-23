@@ -326,12 +326,19 @@ func (v *ManifestValidator) Validate(
 	// 13. Operational gateway orphan detection
 	v.validateOperationalGatewayOrphans(manifest, result)
 
-	// 14. Immutability checks (skipped when validating for a new tenant)
+	// 14. Semantic validations
+	v.validateSettlementCompleteness(manifest, result)
+	v.validateSagaHandlerCompleteness(manifest, result)
+	v.validateValuationRuleCycles(manifest, result)
+	v.validateInstrumentAccountTypeConsistency(manifest, result)
+	v.validateOrphanedInstruments(manifest, result)
+
+	// 15. Immutability checks (skipped when validating for a new tenant)
 	if previousManifest != nil && !cfg.skipImmutabilityChecks {
 		v.validateImmutability(manifest, previousManifest, result)
 	}
 
-	// 15. Destructive change detection (skipped when validating for a new tenant)
+	// 16. Destructive change detection (skipped when validating for a new tenant)
 	// Use the previous manifest's call logs for graph construction so that
 	// dependencies that existed in the previous version are correctly detected,
 	// even if a saga was modified or removed in the current manifest.
