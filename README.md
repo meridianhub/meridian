@@ -29,54 +29,58 @@ Now you're maintaining a financial system - and you're not a financial company.
 
 ## What Makes It Different
 
-### Multi-asset ledger with dimensional type safety
+### Every movement of value is traceable
 
-Track currency, energy (kWh), carbon credits (tCO2e), compute hours, vouchers,
-or any custom instrument - all in a single ledger. Compile-time type safety
-prevents mixing incompatible asset types. Whether you're moving money or
-megawatts, every movement of value is traceable, reconcilable, and compliant
-with double-entry principles.
+Whether you're moving money, megawatts, or carbon credits - every transaction
+is recorded in a double-entry ledger with an immutable audit trail. Meridian
+natively handles multiple asset types (currency, energy, carbon, compute hours,
+vouchers) in a single ledger, with type safety that prevents accidentally
+mixing incompatible units.
 
-### Saga orchestration with guaranteed termination
+### Multi-step operations that recover from failure
 
-Every operation runs as a distributed saga - a multi-step workflow that either
-completes fully or compensates automatically. No partial state, no manual
-intervention. Sagas are written in
-[Starlark](https://github.com/bazelbuild/starlark) (the language behind Bazel),
-which mathematically guarantees termination. No infinite loops, no runaway
-computation, no tenant can starve another's resources.
+Real-world transactions span multiple services - reserving funds, posting to
+the ledger, triggering settlement. If any step fails partway through, Meridian
+automatically reverses the completed steps to keep the system consistent. No
+partial state, no manual cleanup.
 
-### Declarative economy - define it, then run it
+Business logic is written in
+[Starlark](https://github.com/bazelbuild/starlark), a deterministic subset of
+Python used by Google's Bazel. It guarantees every workflow terminates - no
+infinite loops, no runaway computation, no tenant can starve another's
+resources.
+
+### Define your economy, then run it
 
 Define instruments, account types, settlement rules, and pricing logic in a
-YAML + Starlark manifest. Meridian doesn't just provision the configuration -
-it continuously operates it. Scheduled billing fires monthly. Settlement
-triggers when market data arrives. Compensation reverses failed steps
-automatically. The manifest *is* the running system.
+declarative manifest. Meridian doesn't just provision the configuration - it
+continuously operates it. Scheduled billing fires monthly. Settlement triggers
+when market data arrives. Failed steps reverse automatically. The manifest
+*is* the running system.
 
 A complete tote betting platform - instruments, accounts, double-entry
 settlement, Stripe integration, event-driven payouts - can be expressed in
 under 400 lines of manifest. No code deployment. No PRs to Meridian core.
 No migrations.
 
-### Bi-temporal data with quality tracking
+### Data that knows its own quality
 
-Every measurement carries what was known, how it was known, and when it was
-known. The quality ladder (Estimate -> Coefficient -> Actual -> Revised)
-handles late-arriving data, out-of-order meter reads, and T+2 settlement
-without locking the database.
+Measurements carry what was known, how it was known, and when it was known.
+The quality ladder (Estimate -> Coefficient -> Actual -> Revised) handles
+late-arriving data, out-of-order meter reads, and delayed settlement without
+locking the database.
 
-### AI-configurable infrastructure
+### AI-configurable
 
-Schema-driven service modules auto-generate type-safe Starlark clients. AI can
-generate saga code that compiles on the first attempt because the schema
-constrains it to only call real handlers with real types. Configuration by
-conversation instead of 6-month implementations.
+Schema-driven service modules auto-generate type-safe clients. AI can generate
+business logic that works on the first attempt because the schema constrains
+it to only call real handlers with real types. Configuration by conversation
+instead of 6-month implementations.
 
 ## What You Get
 
-- **Double-entry ledger** with immutable, bi-temporal audit trail
-- **Saga orchestration** with automatic compensation - settlement completes or reverts
+- **Double-entry ledger** with immutable audit trail
+- **Automatic failure recovery** - multi-step operations complete or revert cleanly
 - **Multi-asset support** - currency, kWh, carbon credits, compute hours, vouchers, custom instruments
 - **Stripe Connect** integration for multi-tenant payment collection
 - **Reconciliation** - variance detection, dispute management, imbalance tracking
