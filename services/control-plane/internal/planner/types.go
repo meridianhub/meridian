@@ -141,6 +141,7 @@ const (
 
 	// Party Service (Organizations)
 	MethodRegisterOrganization GRPCMethod = "meridian.party.v1.PartyService/RegisterParty"
+	MethodControlOrganization  GRPCMethod = "meridian.party.v1.PartyService/ControlParty"
 )
 
 // PlannedCall represents a single gRPC call in the execution plan.
