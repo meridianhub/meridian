@@ -76,7 +76,9 @@ export function McpConnectionCard() {
   const claudeCodeConfig = buildClaudeCodeConfig(serverUrl)
 
   const tokenPreview = accessToken
-    ? `${accessToken.slice(0, 12)}...${accessToken.slice(-6)}`
+    ? accessToken.length > 18
+      ? `${accessToken.slice(0, 12)}...${accessToken.slice(-6)}`
+      : `${accessToken.slice(0, 4)}...`
     : null
 
   return (
