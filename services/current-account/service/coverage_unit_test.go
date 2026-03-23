@@ -199,29 +199,10 @@ func TestNewDepositOrchestrator_NilDependencies(t *testing.T) {
 			wantErr: ErrOrchestratorRepositoryNil,
 		},
 		{
-			name: "nil pos keeping client",
+			name: "nil saga runner",
 			cfg: DepositOrchestratorConfig{
 				Logger: logger,
 				Repo:   validRepo,
-			},
-			wantErr: ErrOrchestratorPosKeepingClientNil,
-		},
-		{
-			name: "nil fin acct client",
-			cfg: DepositOrchestratorConfig{
-				Logger:           logger,
-				Repo:             validRepo,
-				PosKeepingClient: &mockPositionKeepingClient{},
-			},
-			wantErr: ErrOrchestratorFinAcctClientNil,
-		},
-		{
-			name: "nil saga runner",
-			cfg: DepositOrchestratorConfig{
-				Logger:           logger,
-				Repo:             validRepo,
-				PosKeepingClient: &mockPositionKeepingClient{},
-				FinAcctClient:    &mockFinancialAccountingClient{},
 			},
 			wantErr: ErrOrchestratorSagaRunnerNil,
 		},
@@ -862,29 +843,10 @@ func TestNewWithdrawalOrchestrator_NilDependencies(t *testing.T) {
 			wantErr: ErrOrchestratorRepositoryNil,
 		},
 		{
-			name: "nil pos keeping client",
+			name: "nil saga runner",
 			cfg: WithdrawalOrchestratorConfig{
 				Logger: logger,
 				Repo:   validRepo,
-			},
-			wantErr: ErrOrchestratorPosKeepingClientNil,
-		},
-		{
-			name: "nil fin acct client",
-			cfg: WithdrawalOrchestratorConfig{
-				Logger:           logger,
-				Repo:             validRepo,
-				PosKeepingClient: &mockPositionKeepingClient{},
-			},
-			wantErr: ErrOrchestratorFinAcctClientNil,
-		},
-		{
-			name: "nil saga runner",
-			cfg: WithdrawalOrchestratorConfig{
-				Logger:           logger,
-				Repo:             validRepo,
-				PosKeepingClient: &mockPositionKeepingClient{},
-				FinAcctClient:    &mockFinancialAccountingClient{},
 			},
 			wantErr: ErrOrchestratorSagaRunnerNil,
 		},
