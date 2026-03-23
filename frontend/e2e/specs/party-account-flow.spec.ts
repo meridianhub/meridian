@@ -26,6 +26,7 @@ import { switchToTab } from '../helpers/parties'
 test.describe('Party detail — Accounts tab structure', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/parties')
+    await page.waitForLoadState('networkidle')
     const rowCount = await page.locator('table tbody tr').count()
     if (rowCount === 0) {
       await navigateTo(page, '/parties/00000000-0000-0000-0000-000000000000')
@@ -161,6 +162,7 @@ test.describe('Party to account navigation flow (requires backend)', () => {
   }) => {
     // Start from parties list
     await navigateTo(page, '/parties')
+    await page.waitForLoadState('networkidle')
     const rowCount = await page.locator('table tbody tr').count()
     if (rowCount === 0) {
       test.skip()
@@ -196,6 +198,7 @@ test.describe('Party to account navigation flow (requires backend)', () => {
 
   test('account detail shows balance field', async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/accounts')
+    await page.waitForLoadState('networkidle')
     const rowCount = await page.locator('table tbody tr').count()
     if (rowCount === 0) {
       test.skip()
