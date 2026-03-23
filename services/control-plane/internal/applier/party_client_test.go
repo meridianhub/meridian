@@ -114,8 +114,8 @@ func TestRegisterOrganization_AlreadyExists_TreatedAsSuccess(t *testing.T) {
 
 	ctx := &saga.StarlarkContext{Context: context.Background()}
 	result, err := client.RegisterOrganization(ctx, map[string]any{
-		"legal_name":             "Acme Corp",
-		"external_reference":     "123456",
+		"legal_name":              "Acme Corp",
+		"external_reference":      "123456",
 		"external_reference_type": "LEI",
 	})
 
