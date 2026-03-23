@@ -264,8 +264,13 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 		Offset: offset,
 	}
 
-	// Add account ID filter
-	if req.AccountId != "" {
+	// Add account ID filter - account_ids takes precedence over account_id
+	if len(req.AccountIds) > 0 {
+		if len(req.AccountIds) > 100 {
+			return nil, status.Error(codes.InvalidArgument, "account_ids must not exceed 100 items")
+		}
+		filter.AccountIDs = req.AccountIds
+	} else if req.AccountId != "" {
 		filter.AccountID = &req.AccountId
 	}
 

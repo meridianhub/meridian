@@ -440,6 +440,18 @@ message ListLedgerPostingsRequest {
   meridian.common.v1.TransactionStatus status = 8 [(buf.validate.field).enum = {
     defined_only: true
   }];
+
+  // account_ids filters by multiple account identifiers (optional, max 100).
+  // When provided, takes precedence over account_id.
+  repeated string account_ids = 9 [(buf.validate.field).repeated = {
+    max_items: 100
+    items: {
+      string: {
+        max_len: 255
+        pattern: "^[a-zA-Z0-9_-]*$"
+      }
+    }
+  }];
 }
 
 // ListLedgerPostingsResponse returns a page of ledger postings.

@@ -1484,6 +1484,114 @@ func TestUpdateFinancialBookingLog_Integration_NonPostedTransition_SkipsValidati
 	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED, resp.FinancialBookingLog.Status)
 }
 
+// TestListLedgerPostings_Integration_FilterByAccountIDs tests filtering by multiple account IDs.
+func TestListLedgerPostings_Integration_FilterByAccountIDs(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
+
+	// Create postings for three different accounts
+	for _, accID := range []string{"ACC-A1", "ACC-A2", "ACC-OTHER"} {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                amount,
+			AccountID:             accID,
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+	}
+
+	// Filter for two accounts only
+	resp, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		AccountIds: []string{"ACC-A1", "ACC-A2"},
+		Pagination: &commonv1.Pagination{PageSize: 10},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.LedgerPostings, 2)
+	for _, p := range resp.LedgerPostings {
+		assert.Contains(t, []string{"ACC-A1", "ACC-A2"}, p.AccountId)
+	}
+}
+
+// TestListLedgerPostings_Integration_AccountIDs_TakesPrecedence verifies account_ids takes
+// precedence over account_id when both are provided.
+func TestListLedgerPostings_Integration_AccountIDs_TakesPrecedence(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	bookingLogID := createTestBookingLog(t, ts.db, ts.ctx)
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	amount := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
+
+	for _, accID := range []string{"ACC-B1", "ACC-B2", "ACC-IGNORED"} {
+		posting := &domain.LedgerPosting{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                amount,
+			AccountID:             accID,
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPending,
+			CreatedAt:             time.Now(),
+		}
+		require.NoError(t, ts.repo.SavePosting(ctx, posting))
+	}
+
+	// account_ids should take precedence over account_id
+	resp, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		AccountId:  "ACC-IGNORED",
+		AccountIds: []string{"ACC-B1", "ACC-B2"},
+		Pagination: &commonv1.Pagination{PageSize: 10},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.LedgerPostings, 2)
+	for _, p := range resp.LedgerPostings {
+		assert.Contains(t, []string{"ACC-B1", "ACC-B2"}, p.AccountId)
+	}
+}
+
+// TestListLedgerPostings_Integration_AccountIDs_MaxLimitRejected tests that >100 account_ids
+// is rejected with InvalidArgument.
+func TestListLedgerPostings_Integration_AccountIDs_MaxLimitRejected(t *testing.T) {
+	ts, _ := setupIntegrationTest(t)
+	defer ts.cleanup()
+
+	ctx, cancel := context.WithTimeout(ts.ctx, 10*time.Second)
+	defer cancel()
+
+	tooMany := make([]string, 101)
+	for i := range tooMany {
+		tooMany[i] = "ACC-001"
+	}
+
+	_, err := ts.grpcClient.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
+		AccountIds: tooMany,
+		Pagination: &commonv1.Pagination{PageSize: 10},
+	})
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
 // TestUpdateFinancialBookingLog_Integration_CancelledTransition_SkipsValidation tests that
 // transitions to CANCELLED skip balance validation.
 func TestUpdateFinancialBookingLog_Integration_CancelledTransition_SkipsValidation(t *testing.T) {

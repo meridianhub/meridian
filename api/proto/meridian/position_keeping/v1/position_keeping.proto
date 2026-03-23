@@ -453,6 +453,7 @@ message BulkImportTransactionsResponse {
 // ListFinancialPositionLogsRequest lists financial position logs with filtering.
 message ListFinancialPositionLogsRequest {
   // account_id filters logs by account (optional).
+  // Deprecated in favour of account_ids. When account_ids is provided, account_id is ignored.
   string account_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // status filters logs by current status (optional).
@@ -463,6 +464,17 @@ message ListFinancialPositionLogsRequest {
 
   // pagination controls the page size and offset.
   meridian.common.v1.Pagination pagination = 4;
+
+  // account_ids filters logs by multiple accounts (optional, max 100).
+  // When provided, takes precedence over account_id.
+  repeated string account_ids = 5 [(buf.validate.field).repeated = {
+    max_items: 100
+    items: {
+      string: {
+        max_len: 255
+      }
+    }
+  }];
 }
 
 // ListFinancialPositionLogsResponse returns a list of logs.
