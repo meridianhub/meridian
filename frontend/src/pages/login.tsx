@@ -1,5 +1,5 @@
 import { useState, useCallback, type FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
 import { useAuthProviders, type AuthProvider as AuthProviderType } from '@/hooks/use-auth-providers'
 import { useOAuthFlow } from '@/hooks/use-oauth-flow'
@@ -14,6 +14,8 @@ function isBareDomain(): boolean {
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const justRegistered = searchParams.get('registered') === '1'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -107,6 +109,12 @@ export function LoginPage() {
           <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
           <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
         </div>
+
+        {justRegistered && (
+          <p role="status" className="rounded-md bg-green-50 px-4 py-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+            Account created. Sign in to get started.
+          </p>
+        )}
 
         {/* Password login form - shown in production builds only */}
         {!import.meta.env.DEV && (
