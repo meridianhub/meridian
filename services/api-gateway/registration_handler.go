@@ -156,11 +156,11 @@ func (h *RegistrationHandler) parseAndValidateRequest(r *http.Request) (*registr
 	}
 
 	if err := tenantdomain.ValidateSlug(req.Slug); err != nil {
-		return nil, fmt.Errorf("%w: %v", errInvalidSlug, err)
+		return nil, fmt.Errorf("%w: %w", errInvalidSlug, err)
 	}
 
 	if err := credentials.ValidatePasswordPolicy(req.Password); err != nil {
-		return nil, fmt.Errorf("%w: %v", errPasswordPolicyViolation, err)
+		return nil, fmt.Errorf("%w: %w", errPasswordPolicyViolation, err)
 	}
 
 	return &req, nil
