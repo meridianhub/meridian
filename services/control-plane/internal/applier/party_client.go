@@ -75,17 +75,17 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 // downstream saga steps receive the party_id. Falls back to a best-effort
 // result without party_id if the lookup fails.
 func (c *PartyClient) handleAlreadyExists(ctx context.Context, req *partyv1.RegisterPartyRequest) (any, error) {
-	existing, lookupErr := c.findPartyByExternalRef(ctx, req.GetExternalReference(), req.GetExternalReferenceType())
-	if lookupErr != nil {
+	existing, _ := c.findPartyByExternalRef(ctx, req.GetExternalReference(), req.GetExternalReferenceType())
+	if existing != nil {
 		return map[string]any{
-			"legal_name": req.GetLegalName(),
-			"status":     partyv1.PartyStatus_PARTY_STATUS_ACTIVE.String(),
+			"party_id":   existing.GetPartyId(),
+			"legal_name": existing.GetLegalName(),
+			"status":     existing.GetStatus().String(),
 		}, nil
 	}
 	return map[string]any{
-		"party_id":   existing.GetPartyId(),
-		"legal_name": existing.GetLegalName(),
-		"status":     existing.GetStatus().String(),
+		"legal_name": req.GetLegalName(),
+		"status":     partyv1.PartyStatus_PARTY_STATUS_ACTIVE.String(),
 	}, nil
 }
 
