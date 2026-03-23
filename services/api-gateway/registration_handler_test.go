@@ -22,10 +22,18 @@ import (
 
 type stubTenantCreator struct {
 	createFn func(ctx context.Context, tenantID, slug, displayName string) (string, error)
+	deleteFn func(ctx context.Context, tenantID string) error
 }
 
 func (s *stubTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error) {
 	return s.createFn(ctx, tenantID, slug, displayName)
+}
+
+func (s *stubTenantCreator) DeleteTenant(ctx context.Context, tenantID string) error {
+	if s.deleteFn != nil {
+		return s.deleteFn(ctx, tenantID)
+	}
+	return nil
 }
 
 type stubIdentityRepo struct {
@@ -307,10 +315,16 @@ func TestRegistrationHandler_EmailAlreadyRegistered(t *testing.T) {
 	assert.Contains(t, resp["error"], "already registered")
 }
 
-func TestRegistrationHandler_IdentitySaveFails(t *testing.T) {
+func TestRegistrationHandler_IdentitySaveFailsCompensatesTenant(t *testing.T) {
 	tc, ir := defaultStubs()
 	ir.saveIdentityWithRolesFn = func(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
 		return errors.New("DB write error")
+	}
+
+	var deletedTenantID string
+	tc.deleteFn = func(_ context.Context, tenantID string) error {
+		deletedTenantID = tenantID
+		return nil
 	}
 
 	h := newRegistrationHandler(t, tc, ir)
@@ -321,6 +335,7 @@ func TestRegistrationHandler_IdentitySaveFails(t *testing.T) {
 	})
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "acme_corp", deletedTenantID, "tenant should be deleted as compensation")
 }
 
 func TestRegistrationHandler_RateLimiting(t *testing.T) {

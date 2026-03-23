@@ -39,6 +39,9 @@ type TenantCreator interface {
 	// CreateTenant creates a new tenant with the given ID, slug, and display name.
 	// Returns the tenant ID on success.
 	CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error)
+	// DeleteTenant removes a tenant. Used as compensation when identity provisioning
+	// fails after tenant creation, preventing orphaned tenants.
+	DeleteTenant(ctx context.Context, tenantID string) error
 }
 
 // RegistrationHandler handles self-service tenant registration.
@@ -182,6 +185,11 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 	}
 
 	if err := h.provisionAdminIdentity(ctx, createdTenantID, req.Email, req.Password); err != nil {
+		// Compensate: delete orphaned tenant to allow the user to retry.
+		if delErr := h.tenantCreator.DeleteTenant(ctx, createdTenantID); delErr != nil {
+			h.logger.ErrorContext(ctx, "registration: failed to compensate (delete tenant)",
+				"tenant_id", createdTenantID, "error", delErr)
+		}
 		return err.status, nil, err
 	}
 
