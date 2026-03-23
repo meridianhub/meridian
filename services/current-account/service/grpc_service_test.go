@@ -1616,4 +1616,148 @@ func TestListCurrentAccounts(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 	})
+
+	t.Run("filters by party_id", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		partyA := uuid.New().String()
+		partyB := uuid.New().String()
+
+		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", partyA, "GBP")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc1))
+
+		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", partyB, "EUR")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc2))
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			PartyId: partyA,
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 1)
+		require.Equal(t, partyA, resp.Accounts[0].PartyId)
+	})
+
+	t.Run("filters by org_party_id", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		org := uuid.New()
+
+		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP",
+			domain.WithOrgPartyID(org))
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc1))
+
+		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc2))
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			OrgPartyId: org.String(),
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 1)
+		require.Equal(t, org.String(), resp.Accounts[0].OrgPartyId)
+	})
+
+	t.Run("filters by both party_id and org_party_id", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		org := uuid.New()
+		partyA := uuid.New().String()
+
+		// partyA in org
+		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", partyA, "GBP",
+			domain.WithOrgPartyID(org))
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc1))
+
+		// partyA NOT in org
+		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", partyA, "EUR")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc2))
+
+		// different party in org
+		acc3, err := domain.NewCurrentAccount("ACC-003", "FR7630006000011234567890189", uuid.New().String(), "EUR",
+			domain.WithOrgPartyID(org))
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc3))
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			PartyId:    partyA,
+			OrgPartyId: org.String(),
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 1)
+		require.Equal(t, partyA, resp.Accounts[0].PartyId)
+		require.Equal(t, org.String(), resp.Accounts[0].OrgPartyId)
+	})
+
+	t.Run("returns InvalidArgument for invalid party_id UUID", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			PartyId: "not-a-uuid",
+		})
+		require.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("returns InvalidArgument for invalid org_party_id UUID", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			OrgPartyId: "not-a-uuid",
+		})
+		require.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("returns all accounts when no filters provided", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		acc1, err := domain.NewCurrentAccount("ACC-001", "GB82WEST12345698765432", uuid.New().String(), "GBP")
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc1))
+
+		acc2, err := domain.NewCurrentAccount("ACC-002", "DE89370400440532013000", uuid.New().String(), "EUR",
+			domain.WithOrgPartyID(uuid.New()))
+		require.NoError(t, err)
+		require.NoError(t, repo.Save(ctx, acc2))
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{})
+		require.NoError(t, err)
+		require.Len(t, resp.Accounts, 2)
+	})
 }

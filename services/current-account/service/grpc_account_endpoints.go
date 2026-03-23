@@ -358,6 +358,22 @@ func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAc
 		params.Status = statusStr
 	}
 
+	if req.PartyId != "" {
+		partyUUID, err := uuid.Parse(req.PartyId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid party_id: must be a valid UUID")
+		}
+		params.PartyID = partyUUID
+	}
+
+	if req.OrgPartyId != "" {
+		orgPartyUUID, err := uuid.Parse(req.OrgPartyId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: must be a valid UUID")
+		}
+		params.OrgPartyID = orgPartyUUID
+	}
+
 	// Execute query
 	result, err := s.repo.ListAccounts(ctx, params)
 	if err != nil {
