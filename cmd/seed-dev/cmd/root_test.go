@@ -2,14 +2,17 @@
 package cmd
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestCheckHealth_Healthy(t *testing.T) {
@@ -110,6 +113,96 @@ func TestRootCmd_DefaultFlagValues(t *testing.T) {
 	skip, err := f.GetBool("skip-manifest")
 	require.NoError(t, err)
 	assert.False(t, skip)
+}
+
+func TestEnergyManifest_ContainsFixtureDependencies(t *testing.T) {
+	// Verify energy.json contains all sections that fixtures.go depends on:
+	// organizations (DNO party), internalAccounts (GSP KWH accounts), marketData (wholesale prices).
+	manifestPath := "../../../examples/manifests/energy.json"
+	data, err := os.ReadFile(manifestPath)
+	require.NoError(t, err)
+
+	var manifest controlplanev1.Manifest
+	require.NoError(t, protojson.Unmarshal(data, &manifest))
+
+	// Organizations: fixtures resolve DNO party by external reference "UKPNDNO001".
+	require.NotEmpty(t, manifest.GetOrganizations(), "manifest must define organizations for fixture DNO resolution")
+	var foundDNO bool
+	for _, org := range manifest.GetOrganizations() {
+		if org.GetExternalReference() == "UKPNDNO001" {
+			foundDNO = true
+			break
+		}
+	}
+	assert.True(t, foundDNO, "manifest must include UKPN organization with external_reference=UKPNDNO001")
+
+	// Internal accounts: fixtures resolve GSP KWH accounts by code.
+	require.NotEmpty(t, manifest.GetInternalAccounts(), "manifest must define internal accounts for GSP KWH resolution")
+	manifestAccountCodes := make(map[string]bool)
+	for _, ia := range manifest.GetInternalAccounts() {
+		manifestAccountCodes[ia.GetCode()] = true
+	}
+	for _, gsp := range gspAccountCodes {
+		assert.True(t, manifestAccountCodes[gsp.accountCode],
+			"manifest missing internal account code %q required by fixtures (region %s)", gsp.accountCode, gsp.region)
+	}
+
+	// Market data: fixtures record observations to WHOLESALE_ENERGY_GBP_KWH dataset.
+	require.NotNil(t, manifest.GetMarketData(), "manifest must define marketData for wholesale price seeding")
+	var foundDataset bool
+	for _, ds := range manifest.GetMarketData().GetDatasets() {
+		if ds.GetCode() == "WHOLESALE_ENERGY_GBP_KWH" {
+			foundDataset = true
+			break
+		}
+	}
+	assert.True(t, foundDataset, "manifest must include WHOLESALE_ENERGY_GBP_KWH dataset")
+}
+
+func TestEnergyManifest_ValidJSON(t *testing.T) {
+	// Verify energy.json is valid JSON (catches syntax errors that protojson might tolerate).
+	manifestPath := "../../../examples/manifests/energy.json"
+	data, err := os.ReadFile(manifestPath)
+	require.NoError(t, err)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &raw), "energy.json must be valid JSON")
+
+	// Verify expected top-level keys exist.
+	for _, key := range []string{"version", "metadata", "instruments", "accountTypes", "organizations", "internalAccounts", "marketData"} {
+		assert.Contains(t, raw, key, "energy.json missing top-level key %q", key)
+	}
+}
+
+func TestToMoney(t *testing.T) {
+	m := toMoney(12.34, "GBP")
+	require.NotNil(t, m)
+	require.NotNil(t, m.GetAmount())
+	assert.Equal(t, "GBP", m.GetAmount().GetCurrencyCode())
+	assert.Equal(t, int64(12), m.GetAmount().GetUnits())
+	assert.Equal(t, int32(340000000), m.GetAmount().GetNanos())
+}
+
+func TestToMoney_ZeroAmount(t *testing.T) {
+	m := toMoney(0, "USD")
+	require.NotNil(t, m)
+	assert.Equal(t, int64(0), m.GetAmount().GetUnits())
+	assert.Equal(t, int32(0), m.GetAmount().GetNanos())
+}
+
+func TestGSPAccountCodes_AllUnique(t *testing.T) {
+	seen := make(map[string]bool)
+	for _, gsp := range gspAccountCodes {
+		assert.False(t, seen[gsp.accountCode], "duplicate GSP account code: %s", gsp.accountCode)
+		seen[gsp.accountCode] = true
+	}
+}
+
+func TestCustomerDefinitions_GSPIndexBounds(t *testing.T) {
+	for _, cust := range customerDefinitions {
+		assert.Less(t, cust.gspIndex, len(gspAccountCodes),
+			"customer %s has gspIndex %d but only %d GSP codes defined", cust.legalName, cust.gspIndex, len(gspAccountCodes))
+	}
 }
 
 func TestSkipManifestDoesNotBlockFixtures(t *testing.T) {
