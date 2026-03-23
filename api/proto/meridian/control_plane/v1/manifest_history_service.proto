@@ -70,6 +70,18 @@ service ManifestHistoryService {
       get: "/v1/manifests/reconcile"
     };
   }
+
+  // RollbackManifest reverts the tenant's manifest to a previous version identified
+  // by sequence number. This creates a NEW version record with the old content
+  // (forward-only audit trail). The manifest is re-applied through the standard
+  // applier pipeline to ensure downstream services are updated.
+  // Use dry_run=true to preview the diff without applying changes.
+  rpc RollbackManifest(RollbackManifestRequest) returns (RollbackManifestResponse) {
+    option (google.api.http) = {
+      post: "/v1/manifests/rollback"
+      body: "*"
+    };
+  }
 }
 
 // ========================================
@@ -419,4 +431,57 @@ message ReconcileSummary {
 
   // extra is the number of resources live but absent from the manifest.
   int32 extra = 5;
+}
+
+// ========================================
+// Rollback Manifest
+// ========================================
+
+// RollbackManifestRequest specifies the target version to rollback to.
+message RollbackManifestRequest {
+  // target_sequence_number is the sequence number of the manifest version to
+  // rollback to (required, must be > 0).
+  int64 target_sequence_number = 1 [(buf.validate.field).int64.gt = 0];
+
+  // dry_run when true returns the diff preview without applying changes.
+  bool dry_run = 2;
+
+  // applied_by identifies who is performing the rollback (e.g., user email).
+  string applied_by = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// RollbackManifestResponse contains the result of the rollback operation.
+message RollbackManifestResponse {
+  // version is the newly created manifest version record (only set when dry_run=false).
+  ManifestVersion version = 1;
+
+  // diff contains the structured diff between the current and target versions.
+  DiffManifestVersionsResponse diff = 2;
+
+  // status is the outcome of the rollback operation.
+  RollbackStatus status = 3;
+
+  // message is a human-readable description of the rollback result.
+  string message = 4;
+}
+
+// RollbackStatus represents the outcome of a rollback operation.
+enum RollbackStatus {
+  // ROLLBACK_STATUS_UNSPECIFIED is the default zero value.
+  ROLLBACK_STATUS_UNSPECIFIED = 0;
+
+  // ROLLBACK_STATUS_COMPLETED indicates the rollback was successfully applied.
+  ROLLBACK_STATUS_COMPLETED = 1;
+
+  // ROLLBACK_STATUS_DRY_RUN indicates the rollback was previewed but not applied.
+  ROLLBACK_STATUS_DRY_RUN = 2;
+
+  // ROLLBACK_STATUS_FAILED indicates the rollback failed during application.
+  ROLLBACK_STATUS_FAILED = 3;
+
+  // ROLLBACK_STATUS_NO_CHANGE indicates the target version is identical to current.
+  ROLLBACK_STATUS_NO_CHANGE = 4;
 }

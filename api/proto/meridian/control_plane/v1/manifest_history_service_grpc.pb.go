@@ -25,6 +25,7 @@ const (
 	ManifestHistoryService_DiffManifestVersions_FullMethodName = "/meridian.control_plane.v1.ManifestHistoryService/DiffManifestVersions"
 	ManifestHistoryService_ExportManifest_FullMethodName       = "/meridian.control_plane.v1.ManifestHistoryService/ExportManifest"
 	ManifestHistoryService_ReconcileManifest_FullMethodName    = "/meridian.control_plane.v1.ManifestHistoryService/ReconcileManifest"
+	ManifestHistoryService_RollbackManifest_FullMethodName     = "/meridian.control_plane.v1.ManifestHistoryService/RollbackManifest"
 )
 
 // ManifestHistoryServiceClient is the client API for ManifestHistoryService service.
@@ -59,6 +60,12 @@ type ManifestHistoryServiceClient interface {
 	// no auto-repair is performed. With structural APIs removed from the public
 	// surface, drift should be impossible; reconciliation validates that invariant.
 	ReconcileManifest(ctx context.Context, in *ReconcileManifestRequest, opts ...grpc.CallOption) (*ReconcileManifestResponse, error)
+	// RollbackManifest reverts the tenant's manifest to a previous version identified
+	// by sequence number. This creates a NEW version record with the old content
+	// (forward-only audit trail). The manifest is re-applied through the standard
+	// applier pipeline to ensure downstream services are updated.
+	// Use dry_run=true to preview the diff without applying changes.
+	RollbackManifest(ctx context.Context, in *RollbackManifestRequest, opts ...grpc.CallOption) (*RollbackManifestResponse, error)
 }
 
 type manifestHistoryServiceClient struct {
@@ -129,6 +136,16 @@ func (c *manifestHistoryServiceClient) ReconcileManifest(ctx context.Context, in
 	return out, nil
 }
 
+func (c *manifestHistoryServiceClient) RollbackManifest(ctx context.Context, in *RollbackManifestRequest, opts ...grpc.CallOption) (*RollbackManifestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RollbackManifestResponse)
+	err := c.cc.Invoke(ctx, ManifestHistoryService_RollbackManifest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManifestHistoryServiceServer is the server API for ManifestHistoryService service.
 // All implementations must embed UnimplementedManifestHistoryServiceServer
 // for forward compatibility.
@@ -161,6 +178,12 @@ type ManifestHistoryServiceServer interface {
 	// no auto-repair is performed. With structural APIs removed from the public
 	// surface, drift should be impossible; reconciliation validates that invariant.
 	ReconcileManifest(context.Context, *ReconcileManifestRequest) (*ReconcileManifestResponse, error)
+	// RollbackManifest reverts the tenant's manifest to a previous version identified
+	// by sequence number. This creates a NEW version record with the old content
+	// (forward-only audit trail). The manifest is re-applied through the standard
+	// applier pipeline to ensure downstream services are updated.
+	// Use dry_run=true to preview the diff without applying changes.
+	RollbackManifest(context.Context, *RollbackManifestRequest) (*RollbackManifestResponse, error)
 	mustEmbedUnimplementedManifestHistoryServiceServer()
 }
 
@@ -188,6 +211,9 @@ func (UnimplementedManifestHistoryServiceServer) ExportManifest(context.Context,
 }
 func (UnimplementedManifestHistoryServiceServer) ReconcileManifest(context.Context, *ReconcileManifestRequest) (*ReconcileManifestResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReconcileManifest not implemented")
+}
+func (UnimplementedManifestHistoryServiceServer) RollbackManifest(context.Context, *RollbackManifestRequest) (*RollbackManifestResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RollbackManifest not implemented")
 }
 func (UnimplementedManifestHistoryServiceServer) mustEmbedUnimplementedManifestHistoryServiceServer() {
 }
@@ -319,6 +345,24 @@ func _ManifestHistoryService_ReconcileManifest_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManifestHistoryService_RollbackManifest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RollbackManifestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManifestHistoryServiceServer).RollbackManifest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManifestHistoryService_RollbackManifest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManifestHistoryServiceServer).RollbackManifest(ctx, req.(*RollbackManifestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManifestHistoryService_ServiceDesc is the grpc.ServiceDesc for ManifestHistoryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -349,6 +393,10 @@ var ManifestHistoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReconcileManifest",
 			Handler:    _ManifestHistoryService_ReconcileManifest_Handler,
+		},
+		{
+			MethodName: "RollbackManifest",
+			Handler:    _ManifestHistoryService_RollbackManifest_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
