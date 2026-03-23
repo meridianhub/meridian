@@ -7,6 +7,8 @@ import (
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ErrUnknownExternalReferenceType is returned when an unrecognized external_reference_type is provided.
@@ -49,6 +51,14 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 	callCtx := prepareCallContext(ctx)
 	resp, err := c.client.RegisterParty(callCtx, req)
 	if err != nil {
+		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios
+		// where the underlying party was already created by a previous apply.
+		if status.Code(err) == codes.AlreadyExists {
+			return map[string]any{
+				"legal_name": req.GetLegalName(),
+				"status":     partyv1.PartyStatus_PARTY_STATUS_ACTIVE.String(),
+			}, nil
+		}
 		return nil, fmt.Errorf("register organization: %w", err)
 	}
 
