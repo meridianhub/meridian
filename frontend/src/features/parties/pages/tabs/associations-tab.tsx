@@ -15,11 +15,13 @@ import {
   PartyType,
 } from '@/api/gen/meridian/party/v1/party_pb'
 import type { Association } from '@/api/gen/meridian/party/v1/party_pb'
-import { usePartyDetail, usePartyAssociations } from '../../hooks'
+import { usePartyAssociations } from '../../hooks'
 import { RegisterAssociationsDialog } from '../dialogs/register-associations-dialog'
 
 interface AssociationsTabProps {
   partyId: string
+  /** Party type passed from the parent page to avoid a duplicate fetch */
+  partyType?: number | string
 }
 
 const RELATIONSHIP_TYPE_LABELS: Record<number, string> = {
@@ -104,18 +106,16 @@ function AssociationTable({ associations, onRowClick }: AssociationTableProps) {
   )
 }
 
-export function AssociationsTab({ partyId }: AssociationsTabProps) {
+export function AssociationsTab({ partyId, partyType }: AssociationsTabProps) {
   const clients = useApiClients()
   const tenantSlug = useTenantSlug()
   const navigate = useNavigate()
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
-  const { data: party, isLoading: isLoadingParty } = usePartyDetail(partyId)
-
   const isOrganization =
-    party?.partyType === PartyType.ORGANIZATION ||
-    (party?.partyType as unknown) === 'PARTY_TYPE_ORGANIZATION' ||
-    (party?.partyType as unknown) === 'ORGANIZATION'
+    partyType === PartyType.ORGANIZATION ||
+    partyType === 'PARTY_TYPE_ORGANIZATION' ||
+    partyType === 'ORGANIZATION'
 
   // For PERSON parties: retrieve forward associations (relationships registered by this party)
   const { data: associationsData, isLoading: isLoadingAssociations } = usePartyAssociations(partyId)
@@ -127,7 +127,7 @@ export function AssociationsTab({ partyId }: AssociationsTabProps) {
     enabled: Boolean(tenantSlug && partyId && isOrganization),
   })
 
-  const isLoading = isLoadingParty || (isOrganization ? isLoadingParticipants : isLoadingAssociations)
+  const isLoading = isOrganization ? isLoadingParticipants : isLoadingAssociations
 
   const associations: Association[] = isOrganization
     ? (participantsData?.participants ?? [])

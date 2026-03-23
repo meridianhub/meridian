@@ -6,14 +6,12 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 const mockRetrieveAssociations = vi.fn().mockResolvedValue({ associations: [] })
 const mockListParticipants = vi.fn().mockResolvedValue({ participants: [] })
-const mockRetrieveParty = vi.fn().mockResolvedValue({ party: undefined })
 
 vi.mock('@/api/context', () => ({
   useClients: vi.fn(() => ({
     party: {
       retrieveAssociations: mockRetrieveAssociations,
       listParticipants: mockListParticipants,
-      retrieveParty: mockRetrieveParty,
       listParties: vi.fn().mockResolvedValue({ parties: [] }),
       registerAssociations: vi.fn(),
     },
@@ -22,7 +20,6 @@ vi.mock('@/api/context', () => ({
     party: {
       retrieveAssociations: mockRetrieveAssociations,
       listParticipants: mockListParticipants,
-      retrieveParty: mockRetrieveParty,
       listParties: vi.fn().mockResolvedValue({ parties: [] }),
       registerAssociations: vi.fn(),
     },
@@ -40,26 +37,15 @@ vi.mock('@/hooks/use-tenant-context', () => ({
 import { useApiClients } from '@/api/context'
 import { AssociationsTab } from './associations-tab'
 
+const PARTY_TYPE_PERSON = 1
+const PARTY_TYPE_ORGANIZATION = 2
+
 function makeQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0, staleTime: 0 },
     },
   })
-}
-
-const mockPersonParty = {
-  partyId: 'party-person-001',
-  legalName: 'Jane Doe',
-  partyType: 1, // PARTY_TYPE_PERSON
-  status: 1,
-}
-
-const mockOrgParty = {
-  partyId: 'party-org-001',
-  legalName: 'Acme Syndicate',
-  partyType: 2, // PARTY_TYPE_ORGANIZATION
-  status: 1,
 }
 
 const mockAssociation = {
@@ -88,12 +74,12 @@ const mockParticipant = {
   effectiveTo: undefined,
 }
 
-function renderTab(partyId = 'party-001') {
+function renderTab(partyId = 'party-001', partyType?: number) {
   return render(
     <MemoryRouter>
       <QueryClientProvider client={makeQueryClient()}>
         <TooltipProvider>
-          <AssociationsTab partyId={partyId} />
+          <AssociationsTab partyId={partyId} partyType={partyType} />
         </TooltipProvider>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -107,7 +93,6 @@ describe('AssociationsTab', () => {
       party: {
         retrieveAssociations: vi.fn().mockResolvedValue({ associations: [] }),
         listParticipants: vi.fn().mockResolvedValue({ participants: [] }),
-        retrieveParty: vi.fn().mockResolvedValue({ party: mockPersonParty }),
         listParties: vi.fn().mockResolvedValue({ parties: [] }),
         registerAssociations: vi.fn(),
       },
@@ -120,7 +105,6 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations: vi.fn(() => new Promise(() => {})),
           listParticipants: vi.fn(() => new Promise(() => {})),
-          retrieveParty: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useApiClients>)
 
@@ -135,7 +119,6 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations: vi.fn(() => new Promise(() => {})),
           listParticipants: vi.fn(() => new Promise(() => {})),
-          retrieveParty: vi.fn(() => new Promise(() => {})),
         },
       } as ReturnType<typeof useApiClients>)
 
@@ -151,7 +134,6 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({ associations: [] }),
           listParticipants: vi.fn().mockResolvedValue({ participants: [] }),
-          retrieveParty: vi.fn().mockResolvedValue({ party: mockPersonParty }),
           listParties: vi.fn().mockResolvedValue({ parties: [] }),
           registerAssociations: vi.fn(),
         },
@@ -159,7 +141,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders empty state for person with no associations', async () => {
-      renderTab('party-person-001')
+      renderTab('party-person-001', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /organizations/i })).toBeInTheDocument()
@@ -167,7 +149,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders descriptive message for person empty state', async () => {
-      renderTab('party-person-001')
+      renderTab('party-person-001', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(screen.getByText(/no associations information available/i)).toBeInTheDocument()
@@ -175,7 +157,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders add association button', async () => {
-      renderTab('party-person-001')
+      renderTab('party-person-001', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /add association/i })).toBeInTheDocument()
@@ -189,7 +171,6 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({ associations: [] }),
           listParticipants: vi.fn().mockResolvedValue({ participants: [] }),
-          retrieveParty: vi.fn().mockResolvedValue({ party: mockOrgParty }),
           listParties: vi.fn().mockResolvedValue({ parties: [] }),
           registerAssociations: vi.fn(),
         },
@@ -197,7 +178,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders empty state for org with no participants', async () => {
-      renderTab('party-org-001')
+      renderTab('party-org-001', PARTY_TYPE_ORGANIZATION)
 
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /members/i })).toBeInTheDocument()
@@ -205,7 +186,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders descriptive message for org empty state', async () => {
-      renderTab('party-org-001')
+      renderTab('party-org-001', PARTY_TYPE_ORGANIZATION)
 
       await waitFor(() => {
         expect(screen.getByText(/no members registered/i)).toBeInTheDocument()
@@ -219,7 +200,6 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({ associations: [mockAssociation] }),
           listParticipants: vi.fn().mockResolvedValue({ participants: [] }),
-          retrieveParty: vi.fn().mockResolvedValue({ party: mockPersonParty }),
           listParties: vi.fn().mockResolvedValue({ parties: [] }),
           registerAssociations: vi.fn(),
         },
@@ -227,7 +207,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders table with association rows', async () => {
-      renderTab('party-person-001')
+      renderTab('party-person-001', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(screen.getByRole('table')).toBeInTheDocument()
@@ -235,7 +215,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders related party as a link', async () => {
-      renderTab('party-person-001')
+      renderTab('party-person-001', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(screen.getByRole('link', { name: 'party-org-001' })).toBeInTheDocument()
@@ -243,7 +223,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders relationship type label', async () => {
-      renderTab('party-person-001')
+      renderTab('party-person-001', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(screen.getByText('Syndicate Participant')).toBeInTheDocument()
@@ -251,7 +231,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders status badge', async () => {
-      renderTab('party-person-001')
+      renderTab('party-person-001', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(screen.getByText('ACTIVE')).toBeInTheDocument()
@@ -265,7 +245,6 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({ associations: [] }),
           listParticipants: vi.fn().mockResolvedValue({ participants: [mockParticipant] }),
-          retrieveParty: vi.fn().mockResolvedValue({ party: mockOrgParty }),
           listParties: vi.fn().mockResolvedValue({ parties: [] }),
           registerAssociations: vi.fn(),
         },
@@ -273,7 +252,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders table with participant rows', async () => {
-      renderTab('party-org-001')
+      renderTab('party-org-001', PARTY_TYPE_ORGANIZATION)
 
       await waitFor(() => {
         expect(screen.getByRole('table')).toBeInTheDocument()
@@ -281,7 +260,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders member party as a link', async () => {
-      renderTab('party-org-001')
+      renderTab('party-org-001', PARTY_TYPE_ORGANIZATION)
 
       await waitFor(() => {
         expect(screen.getByRole('link', { name: 'party-member-001' })).toBeInTheDocument()
@@ -289,7 +268,7 @@ describe('AssociationsTab', () => {
     })
 
     it('renders metadata summary for participant', async () => {
-      renderTab('party-org-001')
+      renderTab('party-org-001', PARTY_TYPE_ORGANIZATION)
 
       await waitFor(() => {
         expect(screen.getByText(/allocation_share/i)).toBeInTheDocument()
@@ -302,13 +281,12 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations: vi.fn().mockResolvedValue({ associations: [] }),
           listParticipants,
-          retrieveParty: vi.fn().mockResolvedValue({ party: mockOrgParty }),
           listParties: vi.fn().mockResolvedValue({ parties: [] }),
           registerAssociations: vi.fn(),
         },
       } as ReturnType<typeof useApiClients>)
 
-      renderTab('party-org-001')
+      renderTab('party-org-001', PARTY_TYPE_ORGANIZATION)
 
       await waitFor(() => {
         expect(listParticipants).toHaveBeenCalledWith({ partyId: 'party-org-001' })
@@ -323,13 +301,12 @@ describe('AssociationsTab', () => {
         party: {
           retrieveAssociations,
           listParticipants: vi.fn().mockResolvedValue({ participants: [] }),
-          retrieveParty: vi.fn().mockResolvedValue({ party: mockPersonParty }),
           listParties: vi.fn().mockResolvedValue({ parties: [] }),
           registerAssociations: vi.fn(),
         },
       } as ReturnType<typeof useApiClients>)
 
-      renderTab('party-abc')
+      renderTab('party-abc', PARTY_TYPE_PERSON)
 
       await waitFor(() => {
         expect(retrieveAssociations).toHaveBeenCalledWith({ partyId: 'party-abc' })
