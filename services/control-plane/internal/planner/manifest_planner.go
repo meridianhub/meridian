@@ -19,7 +19,6 @@ var ErrNoMethodMapping = errors.New("no gRPC method mapping")
 // Party types are managed through schema updates; deletion via manifest apply is not supported.
 var ErrDeleteNotSupportedForPartyType = errors.New("delete not supported for party types: update the schema instead")
 
-
 // ManifestPlanner transforms a DiffPlan into a dependency-ordered
 // ExecutionPlan of gRPC calls. It assigns each action to a phase
 // based on resource type dependencies and maps actions to the
