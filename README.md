@@ -46,9 +46,12 @@ partial state, no manual cleanup.
 
 Business logic is written in
 [Starlark](https://github.com/bazelbuild/starlark), a deterministic subset of
-Python used by Google's Bazel. It guarantees every workflow terminates - no
-infinite loops, no runaway computation, no tenant can starve another's
-resources.
+Python used by Google's Bazel. It reads like simple Python, so your team
+reviews sagas the same way they review any other code - no new DSL to learn.
+Starlark is secure by construction: the language can't express dangerous
+operations, errors are caught at compile time, and every workflow is guaranteed
+to terminate. AI can generate reliable saga code because the schema constrains
+it to only call real handlers with real types.
 
 ### Define your economy, then run it
 
@@ -72,10 +75,11 @@ locking the database.
 
 ### AI-configurable
 
-Schema-driven service modules auto-generate type-safe clients. AI can generate
-business logic that works on the first attempt because the schema constrains
-it to only call real handlers with real types. Configuration by conversation
-instead of 6-month implementations.
+Because the economy is declarative and the scripting language is constrained,
+the entire economic model can be configured by conversation. AI generates
+working saga code, the schema catches mistakes at compile time, and the UI
+lets you visualize your instruments, accounts, and settlement flows before
+anything runs.
 
 ## What You Get
 
