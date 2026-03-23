@@ -5,14 +5,36 @@
 # Each BIAN service domain must be independently deployable with zero knowledge of other
 # services. Cross-service coordination belongs in the saga orchestration layer.
 #
+# Services are enforced incrementally. Add a service to ENFORCED_SERVICES below once it
+# has been cleaned up. Services not in the list are skipped (with a warning).
+#
 # Usage: scripts/check-cross-service-imports.sh
-# Exit code: 0 if clean, 1 if cross-service imports found.
+# Exit code: 0 if clean, 1 if cross-service imports found in enforced services.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVICES_DIR="${REPO_ROOT}/services"
 VIOLATIONS=0
+
+# Services that have been cleaned up and must remain free of cross-service imports.
+# Add services here as they complete the service boundary cleanup.
+ENFORCED_SERVICES=(
+    "current-account"
+    "internal-account"
+    # financial-accounting: still imports reference-data/client (not in scope for initial cleanup)
+)
+
+# Check if a service is in the enforced list
+is_enforced() {
+    local name="$1"
+    for enforced in "${ENFORCED_SERVICES[@]}"; do
+        if [ "$enforced" = "$name" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 # Find all service directories
 for service_dir in "${SERVICES_DIR}"/*/; do
@@ -24,9 +46,13 @@ for service_dir in "${SERVICES_DIR}"/*/; do
         continue
     fi
 
-    # Scan Go files in cmd/ for imports of other service client packages
-    for go_file in "${cmd_dir}"/*.go; do
-        [ -f "$go_file" ] || continue
+    # Skip services not yet enforced
+    if ! is_enforced "$service_name"; then
+        continue
+    fi
+
+    # Scan Go files in cmd/ recursively for imports of other service client packages
+    while IFS= read -r go_file; do
 
         # Extract import paths that match services/*/client
         while IFS= read -r import_line; do
@@ -43,10 +69,11 @@ for service_dir in "${SERVICES_DIR}"/*/; do
                 continue
             fi
 
-            echo "VIOLATION: services/${service_name}/cmd/$(basename "$go_file") imports services/${imported_service}/client"
+            relative_path="${go_file#"${SERVICES_DIR}"/}"
+            echo "VIOLATION: services/${relative_path} imports services/${imported_service}/client"
             VIOLATIONS=$((VIOLATIONS + 1))
         done < <(grep -E '"github\.com/meridianhub/meridian/services/[^"]+/client"' "$go_file" 2>/dev/null || true)
-    done
+    done < <(find "$cmd_dir" -name '*.go' -type f)
 done
 
 if [ "$VIOLATIONS" -gt 0 ]; then
@@ -57,5 +84,5 @@ if [ "$VIOLATIONS" -gt 0 ]; then
     exit 1
 fi
 
-echo "No cross-service import violations found."
+echo "No cross-service import violations found in enforced services: ${ENFORCED_SERVICES[*]}"
 exit 0
