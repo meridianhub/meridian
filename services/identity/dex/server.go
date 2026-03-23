@@ -32,7 +32,7 @@ type EmbeddedDex struct {
 // New creates an EmbeddedDex instance with in-memory storage, registers the
 // Meridian connector adapter, and creates OIDC clients. The returned instance
 // exposes the storage and adapter for integration with the Dex server.
-func New(ctx context.Context, cfg Config) (*EmbeddedDex, error) {
+func New(_ context.Context, cfg Config) (*EmbeddedDex, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
