@@ -183,13 +183,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development setup, Kubernete
 
 Business Source License 1.1 - See [LICENSE](LICENSE).
 
-You can use, modify, and deploy Meridian in production to run your own
-business - a bank running its own ledger, an energy company managing its own
-settlement, a startup billing its own customers. The only restriction: you
-cannot offer Meridian itself to third parties as a competing commercial
-billing, ledger, treasury, or financial accounting service.
+Free for development, testing, and evaluation. Production use is free for up
+to 5,000 active accounts across all tenants. Beyond that, a commercial license
+is required.
 
-Converts to Apache 2.0 on February 12, 2030.
-
-For alternative licensing arrangements, contact
-[ben@meridianhub.org](mailto:ben@meridianhub.org).
+Converts to Apache 2.0 on February 12, 2030. For commercial licensing,
+contact [ben@meridianhub.org](mailto:ben@meridianhub.org).
