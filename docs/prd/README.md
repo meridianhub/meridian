@@ -93,6 +93,7 @@ stateDiagram-v2
 | [MCP Manifest Tenant Isolation](043-mcp-manifest-tenant-isolation.md) | Fix tenant leakage in MCP manifest validation |
 | [Auth Flow Architecture](044-auth-flow-architecture.md) | Authentication entry points and tenant context flow |
 | [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) | Control plane owns all economy declarations |
+| [Demo Sandbox](050-demo-sandbox.md) | Self-service AI economy creation on ephemeral demo environment |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -275,6 +276,8 @@ material.
   Fix tenant leakage and create-vs-amend mode in MCP manifest validation
 - [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) -
   Control plane owns all structural economy declarations, versioned in DB
+- [Demo Sandbox](050-demo-sandbox.md) -
+  Self-service AI economy creation with nightly reset and tenant registration
 
 ### Identity & Access Control
 
