@@ -72,12 +72,6 @@ func NewDepositOrchestrator(cfg DepositOrchestratorConfig) (*DepositOrchestrator
 	if cfg.Repo == nil {
 		return nil, ErrOrchestratorRepositoryNil
 	}
-	if cfg.PosKeepingClient == nil {
-		return nil, ErrOrchestratorPosKeepingClientNil
-	}
-	if cfg.FinAcctClient == nil {
-		return nil, ErrOrchestratorFinAcctClientNil
-	}
 	if cfg.SagaRunner == nil {
 		return nil, ErrOrchestratorSagaRunnerNil
 	}
