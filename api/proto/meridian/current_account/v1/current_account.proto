@@ -1179,6 +1179,15 @@ message ListCurrentAccountsRequest {
 
   // iban filters results by external reference prefix match (optional).
   string iban = 4 [(buf.validate.field).string = {max_len: 34}];
+
+  // party_id filters results to accounts owned by a specific party (optional).
+  // Must be a valid UUID when provided.
+  string party_id = 5 [(buf.validate.field).string = {max_len: 36}];
+
+  // org_party_id filters results to accounts belonging to a specific organization (optional).
+  // Must be a valid UUID when provided.
+  // When both party_id and org_party_id are provided, they are ANDed together.
+  string org_party_id = 6 [(buf.validate.field).string = {max_len: 36}];
 }
 
 // ListCurrentAccountsResponse is the paginated response containing current accounts.

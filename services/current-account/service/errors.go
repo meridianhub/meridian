@@ -9,6 +9,7 @@ import (
 // Service-level sentinel errors for validation and state checks
 var (
 	ErrRepositoryNil                       = errors.New("repository cannot be nil")
+	ErrPositionKeepingClientNil            = errors.New("position keeping client not available")
 	ErrPositionKeepingServiceNameEmpty     = errors.New("position keeping service name cannot be empty")
 	ErrFinancialAccountingServiceNameEmpty = errors.New("financial accounting service name cannot be empty")
 	// ErrHealthCheckerRepositoryNil is returned when attempting to create a health checker with a nil repository

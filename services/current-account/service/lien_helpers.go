@@ -238,6 +238,9 @@ func (s *Service) hydrateAccountWithPrefetchedBalance(account domain.CurrentAcco
 // Uses the multi-asset API with the account's instrument code and precision.
 // Returns balance in minor units scaled by the given precision.
 func (s *Service) getAccountBalanceMinorUnits(ctx context.Context, accountID, instrumentCode string, precision int) (int64, error) {
+	if s.posKeepingClient == nil {
+		return 0, ErrPositionKeepingClientNil
+	}
 	resp, err := s.posKeepingClient.GetAccountBalance(ctx, &positionkeepingv1.GetAccountBalanceRequest{
 		AccountId:      accountID,
 		BalanceType:    positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,

@@ -73,6 +73,10 @@ type ListAccountsParams struct {
 	Status string
 	// IBAN filters by IBAN prefix match (empty = no filter).
 	IBAN string
+	// PartyID filters by the account owner's party ID (zero value = no filter).
+	PartyID uuid.UUID
+	// OrgPartyID filters by the organization party ID (zero value = no filter).
+	OrgPartyID uuid.UUID
 	// Limit is the maximum number of results to return.
 	Limit int
 	// Cursor is the pagination cursor (zero value = first page).
@@ -514,6 +518,12 @@ func (r *Repository) ListAccounts(ctx context.Context, params ListAccountsParams
 		}
 		if params.IBAN != "" {
 			baseQuery = baseQuery.Where("account_identification LIKE ?", params.IBAN+"%")
+		}
+		if params.PartyID != uuid.Nil {
+			baseQuery = baseQuery.Where("party_id = ?", params.PartyID)
+		}
+		if params.OrgPartyID != uuid.Nil {
+			baseQuery = baseQuery.Where("org_party_id = ?", params.OrgPartyID)
 		}
 
 		// Get total count matching filters
