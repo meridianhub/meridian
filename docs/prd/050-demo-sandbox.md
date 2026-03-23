@@ -1,3 +1,18 @@
+---
+name: prd-demo-sandbox
+description: Self-service AI economy creation on ephemeral demo environment
+triggers:
+  - Setting up or configuring the demo environment
+  - Implementing self-service tenant registration
+  - Adding MCP connection UI for demo users
+  - Nightly database reset or demo lifecycle management
+  - Manifest semantic validation or economy guardrails
+instructions: |
+  22 story points. Fix seed-dev and manifest apply first (tasks 11-13),
+  then nightly reset, then registration flow, then MCP card, then
+  semantic validation. Tasks 11-13 are in manifest-integrity tag.
+---
+
 # Demo Sandbox: Self-Service AI Economy Creation
 
 ## Problem Statement
@@ -75,6 +90,12 @@ steps:
 - Clean slate means reproducible demos
 - Reduces support burden (broken state self-heals)
 
+**Operational notes:**
+
+- SSH key stored as GitHub Actions secret (not in repo)
+- Action posts to Slack on failure (or opens GitHub issue)
+- Health check verifies HTTP 200 on /healthz before marking success
+
 ### Self-Service Tenant Creation
 
 The tenant creation API exists (`TenantService.CreateTenant`).
@@ -83,12 +104,14 @@ What's needed:
 1. **Public registration endpoint** in the API gateway:
    - POST /api/v1/register with `{slug, email, password}`
    - Creates tenant via gRPC
-   - Provisions admin user in Dex
+   - Creates admin identity via embedded Dex connector adapter
+     (see PRD 044 for auth flow architecture)
    - Returns login URL
 
 2. **Registration UI page** (unauthenticated):
    - Slug input with availability check
    - Email + password
+   - Rate limiting (max 5 tenants per IP per day)
    - Submit -> redirect to login
 
 3. **MCP connection card** on dashboard:
@@ -138,7 +161,8 @@ evaluated at apply time, before the saga executes.
 1. A new user can go from demo.meridianhub.cloud to a running
    economy in under 10 minutes
 2. The AI conversation (via MCP) can generate and apply a valid
-   manifest for any industry described in natural language
+   manifest for industries covered by the cookbook library
+   (see PRD 035) and reasonable extensions thereof
 3. After manifest apply, the Economy page shows all defined
    instruments, account types, and organizations
 4. The nightly reset runs without manual intervention and the
