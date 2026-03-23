@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
@@ -282,13 +283,14 @@ func (h *HistoryHandler) RollbackManifest(
 	if req.GetTargetSequenceNumber() <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "target_sequence_number must be greater than 0")
 	}
-	if req.GetAppliedBy() == "" {
+	appliedBy := strings.TrimSpace(req.GetAppliedBy())
+	if appliedBy == "" {
 		return nil, status.Error(codes.InvalidArgument, "applied_by is required")
 	}
 
 	logger := h.logger.With(
 		"target_sequence", req.GetTargetSequenceNumber(),
-		"applied_by", req.GetAppliedBy(),
+		"applied_by", appliedBy,
 		"dry_run", req.GetDryRun(),
 	)
 
@@ -318,7 +320,7 @@ func (h *HistoryHandler) RollbackManifest(
 
 	var diffResp *controlplanev1.DiffManifestVersionsResponse
 	if currentSeq > 0 && currentSeq != req.GetTargetSequenceNumber() {
-		plan, baseSeq, targetSeq, diffErr := h.history.DiffVersionsBySequence(ctx, req.GetTargetSequenceNumber(), currentSeq)
+		plan, baseSeq, targetSeq, diffErr := h.history.DiffVersionsBySequence(ctx, currentSeq, req.GetTargetSequenceNumber())
 		if diffErr != nil {
 			logger.Warn("failed to generate rollback diff", "error", diffErr)
 		} else {
@@ -354,7 +356,7 @@ func (h *HistoryHandler) RollbackManifest(
 	logger.Info("applying rollback manifest")
 	applyResp, err := h.applier.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
 		Manifest:  targetManifest,
-		AppliedBy: fmt.Sprintf("rollback:%s", req.GetAppliedBy()),
+		AppliedBy: fmt.Sprintf("rollback:%s", appliedBy),
 		Force:     true, // Rollbacks may involve deletions from the current state
 	})
 	if err != nil {

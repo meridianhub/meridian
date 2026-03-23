@@ -776,8 +776,7 @@ func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Po
 		logger.Warn("failed to seed platform saga (non-fatal, --bootstrap will retry)", "error", err)
 	}
 
-	// Register ManifestHistoryService for manifest version history queries.
-	// Wire the loopback ApplyManifestService client to enable RollbackManifest RPC.
+	// Register ManifestHistoryService with loopback applier for rollback support.
 	applyClient := controlplanev1.NewApplyManifestServiceClient(loopback.rawConn)
 	if err := controlplaneservice.RegisterManifestHistoryService(server, controlplaneservice.ManifestHistoryServiceConfig{
 		DB:      db,
@@ -791,8 +790,7 @@ func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Po
 	return nil
 }
 
-// loopbackApplyManifestAdapter adapts the gRPC ApplyManifestServiceClient to
-// the manifest.Applier interface for rollback support.
+// loopbackApplyManifestAdapter adapts gRPC ApplyManifestServiceClient to manifest.Applier.
 type loopbackApplyManifestAdapter struct {
 	c controlplanev1.ApplyManifestServiceClient
 }
