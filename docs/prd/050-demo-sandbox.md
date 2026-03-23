@@ -21,7 +21,6 @@ Meridian's core value proposition - "define an economy by conversation, run it c
 
 ### Infrastructure
 
-- DigitalOcean Droplet (68.183.40.239)
 - Docker Compose: meridian (unified binary), postgres, caddy (reverse proxy), dex (OIDC)
 - CI: GitHub Actions builds `ghcr.io/meridianhub/meridian:demo` on push to `demo` branch
 - Domain: demo.meridianhub.cloud (Cloudflare origin cert via Caddy)
