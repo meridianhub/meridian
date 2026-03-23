@@ -98,6 +98,11 @@ export function RegisterPage() {
         return
       }
 
+      if (!email.trim() || !email.includes('@')) {
+        setFormError('Please enter a valid email address')
+        return
+      }
+
       if (password.length < 8) {
         setFormError('Password must be at least 8 characters')
         return
