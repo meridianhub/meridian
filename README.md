@@ -161,7 +161,7 @@ and [docs/adr/](docs/adr/) for architectural decisions.
 **Prerequisites**: Docker and Docker Compose
 
 ```bash
-git clone git@github.com:meridianhub/meridian.git
+git clone https://github.com/meridianhub/meridian.git
 cd meridian
 make dev-up
 ```
