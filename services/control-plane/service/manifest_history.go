@@ -23,6 +23,10 @@ type ManifestHistoryServiceConfig struct {
 	// ExportCollectors provides live service collectors for ExportManifest.
 	// When nil, the ExportManifest RPC returns Unimplemented.
 	ExportCollectors *manifest.ExportCollectors
+
+	// Applier enables the RollbackManifest RPC by providing the manifest
+	// application pipeline. When nil, RollbackManifest returns Unimplemented.
+	Applier manifest.Applier
 }
 
 // ErrDBRequired is returned when DB is nil during service registration.
@@ -62,6 +66,10 @@ func RegisterManifestHistoryService(server *grpc.Server, cfg ManifestHistoryServ
 	}
 	if err != nil {
 		return fmt.Errorf("manifest history handler: %w", err)
+	}
+
+	if cfg.Applier != nil {
+		handler.SetApplier(cfg.Applier)
 	}
 
 	controlplanev1.RegisterManifestHistoryServiceServer(server, handler)

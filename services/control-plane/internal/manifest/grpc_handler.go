@@ -3,7 +3,9 @@ package manifest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
@@ -14,6 +16,12 @@ import (
 // ErrHistoryServiceRequired is returned when history service is nil.
 var ErrHistoryServiceRequired = errors.New("history service is required")
 
+// Applier is the interface for applying manifests via the standard pipeline.
+// This decouples the history handler from the applier package to avoid import cycles.
+type Applier interface {
+	ApplyManifest(ctx context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error)
+}
+
 // HistoryHandler implements the ManifestHistoryService gRPC interface.
 type HistoryHandler struct {
 	controlplanev1.UnimplementedManifestHistoryServiceServer
@@ -21,6 +29,7 @@ type HistoryHandler struct {
 	history    *HistoryService
 	exporter   *ExportService
 	reconciler *ReconcileService
+	applier    Applier
 	logger     *slog.Logger
 }
 
@@ -58,6 +67,12 @@ func NewHistoryHandlerWithReconcile(history *HistoryService, exporter *ExportSer
 	}
 	h.reconciler = reconciler
 	return h, nil
+}
+
+// SetApplier configures the Applier for rollback support.
+// When nil, the RollbackManifest RPC returns Unimplemented.
+func (h *HistoryHandler) SetApplier(applier Applier) {
+	h.applier = applier
 }
 
 // GetCurrentManifest retrieves the most recently applied manifest for the tenant.
@@ -253,4 +268,121 @@ func (h *HistoryHandler) ReconcileManifest(
 	}
 
 	return result.ToProtoResponse(), nil
+}
+
+// RollbackManifest reverts the tenant's manifest to a previous version by
+// re-applying the target version's content through the standard applier pipeline.
+// A new version record is created (forward-only audit trail).
+func (h *HistoryHandler) RollbackManifest(
+	ctx context.Context,
+	req *controlplanev1.RollbackManifestRequest,
+) (*controlplanev1.RollbackManifestResponse, error) {
+	if h.applier == nil {
+		return nil, status.Error(codes.Unimplemented, "rollback not configured: applier not available")
+	}
+	if req.GetTargetSequenceNumber() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "target_sequence_number must be greater than 0")
+	}
+	appliedBy := strings.TrimSpace(req.GetAppliedBy())
+	if appliedBy == "" {
+		return nil, status.Error(codes.InvalidArgument, "applied_by is required")
+	}
+
+	logger := h.logger.With(
+		"target_sequence", req.GetTargetSequenceNumber(),
+		"applied_by", appliedBy,
+		"dry_run", req.GetDryRun(),
+	)
+
+	// Look up the target version by sequence number.
+	targetEntity, err := h.history.repo.GetBySequenceNumber(ctx, req.GetTargetSequenceNumber())
+	if err != nil {
+		if errors.Is(err, ErrVersionNotFound) {
+			return nil, status.Errorf(codes.NotFound, "manifest version with sequence number %d not found", req.GetTargetSequenceNumber())
+		}
+		logger.Error("failed to get target version", "error", err)
+		return nil, status.Error(codes.Internal, "failed to get target version")
+	}
+
+	// Unmarshal the target manifest.
+	targetManifest, err := unmarshalManifest(targetEntity.ManifestJSON)
+	if err != nil {
+		logger.Error("failed to unmarshal target manifest", "error", err)
+		return nil, status.Error(codes.Internal, "failed to unmarshal target manifest")
+	}
+
+	// Generate diff between current and target for preview.
+	currentSeq, err := h.history.repo.GetCurrentSequenceNumber(ctx)
+	if err != nil {
+		logger.Error("failed to get current sequence number", "error", err)
+		return nil, status.Error(codes.Internal, "failed to get current sequence number")
+	}
+
+	var diffResp *controlplanev1.DiffManifestVersionsResponse
+	if currentSeq > 0 && currentSeq != req.GetTargetSequenceNumber() {
+		plan, baseSeq, targetSeq, diffErr := h.history.DiffVersionsBySequence(ctx, currentSeq, req.GetTargetSequenceNumber())
+		if diffErr != nil {
+			logger.Warn("failed to generate rollback diff", "error", diffErr)
+		} else {
+			diffResp = &controlplanev1.DiffManifestVersionsResponse{
+				BaseSequenceNumber:   baseSeq,
+				TargetSequenceNumber: targetSeq,
+				Actions:              diffPlanToProtoActions(plan),
+				Summary:              diffPlanToProtoSummary(plan),
+			}
+		}
+	}
+
+	// If no changes, report NO_CHANGE.
+	if currentSeq == req.GetTargetSequenceNumber() {
+		return &controlplanev1.RollbackManifestResponse{
+			Diff:    diffResp,
+			Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_NO_CHANGE,
+			Message: "target version is already the current version",
+		}, nil
+	}
+
+	// Dry run: return diff without applying.
+	if req.GetDryRun() {
+		logger.Info("dry run rollback preview")
+		return &controlplanev1.RollbackManifestResponse{
+			Diff:    diffResp,
+			Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_DRY_RUN,
+			Message: fmt.Sprintf("dry run: would rollback to sequence %d (version %s)", req.GetTargetSequenceNumber(), targetEntity.Version),
+		}, nil
+	}
+
+	// Apply the target manifest through the standard pipeline.
+	logger.Info("applying rollback manifest")
+	applyResp, err := h.applier.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
+		Manifest:  targetManifest,
+		AppliedBy: fmt.Sprintf("rollback:%s", appliedBy),
+		Force:     true, // Rollbacks may involve deletions from the current state
+	})
+	if err != nil {
+		logger.Error("rollback apply failed", "error", err)
+		return &controlplanev1.RollbackManifestResponse{
+			Diff:    diffResp,
+			Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_FAILED,
+			Message: "rollback failed: apply pipeline returned an error",
+		}, nil
+	}
+
+	if applyResp.Status != controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED {
+		logger.Warn("rollback apply did not succeed", "apply_status", applyResp.Status.String())
+		return &controlplanev1.RollbackManifestResponse{
+			Diff:    diffResp,
+			Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_FAILED,
+			Message: fmt.Sprintf("rollback apply returned status %s", applyResp.Status.String()),
+		}, nil
+	}
+
+	// Return the snapshot from the apply response as the new version.
+	logger.Info("rollback completed successfully", "new_sequence", applyResp.GetSequenceNumber())
+	return &controlplanev1.RollbackManifestResponse{
+		Version: applyResp.Snapshot,
+		Diff:    diffResp,
+		Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_COMPLETED,
+		Message: fmt.Sprintf("rolled back to sequence %d (version %s)", req.GetTargetSequenceNumber(), targetEntity.Version),
+	}, nil
 }

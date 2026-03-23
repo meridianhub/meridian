@@ -165,6 +165,10 @@ func (a manifestHistoryAdapter) ListManifestVersions(ctx context.Context, req *c
 	return a.c.ListManifestVersions(ctx, req)
 }
 
+func (a manifestHistoryAdapter) RollbackManifest(ctx context.Context, req *controlplanev1.RollbackManifestRequest) (*controlplanev1.RollbackManifestResponse, error) {
+	return a.c.RollbackManifest(ctx, req)
+}
+
 // referenceDataAdapter satisfies tools.ReferenceDataClient.
 type referenceDataAdapter struct {
 	c referencedatav1.ReferenceDataServiceClient

@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
-import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/shared/data-table'
 import { useApiClients } from '@/api/context'
-import { StatusBadge } from '@/shared/status-badge'
-import { TimeDisplay } from '@/shared/time-display'
+import { useUserClaims } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -22,87 +20,22 @@ import { ChevronDown } from 'lucide-react'
 import yaml from 'js-yaml'
 import { manifestKeys } from '@/lib/query-keys'
 import type { ManifestVersion } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
-import { ApplyStatus } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import { buildManifestGraph } from '../lib/manifest-graph-model'
 import { ManifestDiffGraph } from '../components/manifest-diff-graph'
-
-const APPLY_STATUS_LABEL: Record<number, string> = {
-  [ApplyStatus.APPLIED]: 'APPLIED',
-  [ApplyStatus.FAILED]: 'FAILED',
-  [ApplyStatus.ROLLED_BACK]: 'ROLLED_BACK',
-  [ApplyStatus.PARTIAL]: 'PARTIAL',
-}
-
-function buildColumns(
-  compareSet: Set<string>,
-  onToggleCompare: (version: ManifestVersion) => void,
-): ColumnDef<ManifestVersion>[] {
-  return [
-    {
-      id: 'compare',
-      header: 'Compare',
-      cell: ({ row }) => {
-        const v = row.original
-        const versionId = v.id ?? v.version
-        const isSelected = compareSet.has(versionId)
-        const disabled = !isSelected && compareSet.size >= 2
-        return (
-          <input
-            type="checkbox"
-            checked={isSelected}
-            disabled={disabled}
-            onChange={() => onToggleCompare(v)}
-            onClick={(e) => e.stopPropagation()}
-            aria-label={`Select version ${v.version} for comparison`}
-            className="rounded"
-            data-testid={`compare-checkbox-${v.version}`}
-          />
-        )
-      },
-      enableSorting: false,
-    },
-    {
-      accessorKey: 'version',
-      header: 'Version',
-    },
-    {
-      accessorKey: 'appliedAt',
-      header: 'Applied At',
-      cell: ({ row }) => <TimeDisplay timestamp={row.original.appliedAt} />,
-    },
-    {
-      accessorKey: 'appliedBy',
-      header: 'Applied By',
-    },
-    {
-      accessorKey: 'applyStatus',
-      header: 'Status',
-      cell: ({ row }) => {
-        const label = APPLY_STATUS_LABEL[row.original.applyStatus] ?? 'UNKNOWN'
-        return <StatusBadge status={label} />
-      },
-    },
-    {
-      accessorKey: 'diffSummary',
-      header: 'Changes',
-      cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground">
-          {row.original.diffSummary ?? '\u2014'}
-        </span>
-      ),
-    },
-  ]
-}
+import { RollbackConfirmationDialog } from '../components/rollback-confirmation-dialog'
+import { buildColumns } from './manifest-history-columns'
 
 type ExportFormat = 'yaml' | 'json'
 
 export function ManifestHistoryTable() {
   const { manifestHistory } = useApiClients()
+  const claims = useUserClaims()
   const [selectedVersion, setSelectedVersion] = useState<ManifestVersion | null>(null)
   const [compareVersions, setCompareVersions] = useState<ManifestVersion[]>([])
   const [showDiff, setShowDiff] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [rollbackVersion, setRollbackVersion] = useState<ManifestVersion | null>(null)
 
   const compareSet = useMemo(
     () => new Set(compareVersions.map((v) => v.id ?? v.version)),
@@ -120,7 +53,7 @@ export function ManifestHistoryTable() {
   }
 
   const columns = useMemo(
-    () => buildColumns(compareSet, toggleCompare),
+    () => buildColumns(compareSet, toggleCompare, setRollbackVersion),
     [compareSet],
   )
 
@@ -286,6 +219,13 @@ export function ManifestHistoryTable() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <RollbackConfirmationDialog
+        version={rollbackVersion}
+        open={rollbackVersion != null}
+        onOpenChange={(open) => { if (!open) setRollbackVersion(null) }}
+        appliedBy={claims?.userId ?? 'unknown'}
+      />
     </>
   )
 }

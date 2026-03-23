@@ -86,6 +86,81 @@ func TestNewHistoryHandlerWithReconcile_ValidConstruction(t *testing.T) {
 	assert.NotNil(t, handler.logger)
 }
 
+// --- RollbackManifest handler tests ---
+
+func TestRollbackManifest_NilApplier_ReturnsUnimplemented(t *testing.T) {
+	repo := &Repository{}
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
+	handler, err := NewHistoryHandler(svc, nil)
+	require.NoError(t, err)
+
+	_, err = handler.RollbackManifest(context.Background(), &controlplanev1.RollbackManifestRequest{
+		TargetSequenceNumber: 1,
+		AppliedBy:            "admin",
+	})
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unimplemented, st.Code())
+	assert.Contains(t, st.Message(), "rollback not configured")
+}
+
+func TestRollbackManifest_InvalidSequenceNumber(t *testing.T) {
+	repo := &Repository{}
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
+	handler, err := NewHistoryHandler(svc, nil)
+	require.NoError(t, err)
+	handler.SetApplier(&mockApplier{})
+
+	_, err = handler.RollbackManifest(context.Background(), &controlplanev1.RollbackManifestRequest{
+		TargetSequenceNumber: 0,
+		AppliedBy:            "admin",
+	})
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+}
+
+func TestRollbackManifest_EmptyAppliedBy(t *testing.T) {
+	repo := &Repository{}
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
+	handler, err := NewHistoryHandler(svc, nil)
+	require.NoError(t, err)
+	handler.SetApplier(&mockApplier{})
+
+	_, err = handler.RollbackManifest(context.Background(), &controlplanev1.RollbackManifestRequest{
+		TargetSequenceNumber: 1,
+		AppliedBy:            "",
+	})
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	assert.Contains(t, st.Message(), "applied_by")
+}
+
+func TestSetApplier(t *testing.T) {
+	repo := &Repository{}
+	svc, err := NewHistoryService(repo)
+	require.NoError(t, err)
+	handler, err := NewHistoryHandler(svc, nil)
+	require.NoError(t, err)
+
+	assert.Nil(t, handler.applier)
+	handler.SetApplier(&mockApplier{})
+	assert.NotNil(t, handler.applier)
+}
+
+// mockApplier is a no-op implementation of Applier for unit tests.
+type mockApplier struct{}
+
+func (m *mockApplier) ApplyManifest(_ context.Context, _ *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+	return &controlplanev1.ApplyManifestResponse{
+		Status: controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
+	}, nil
+}
+
 // --- diffPlanToProtoActions empty ---
 
 func TestDiffPlanToProtoActions_Empty(t *testing.T) {

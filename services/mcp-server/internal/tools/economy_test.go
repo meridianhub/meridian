@@ -52,6 +52,10 @@ func (m *mockManifestHistorian) GetCurrentManifest(ctx context.Context, req *con
 	return &controlplanev1.GetCurrentManifestResponse{Version: resp.Versions[0]}, nil
 }
 
+func (m *mockManifestHistorian) RollbackManifest(_ context.Context, _ *controlplanev1.RollbackManifestRequest) (*controlplanev1.RollbackManifestResponse, error) {
+	return &controlplanev1.RollbackManifestResponse{}, nil
+}
+
 // validManifestJSON returns a minimal valid manifest JSON for testing.
 func validManifestJSON() json.RawMessage {
 	return json.RawMessage(`{
@@ -932,8 +936,8 @@ func TestEconomyTools_PartialClients_RegistersAvailable(t *testing.T) {
 	tools.RegisterEconomyTools(r.Server(), sess, tools.EconomyDeps{Historian: historian})
 
 	listed := r.List(context.Background())
-	if len(listed) != 2 {
-		t.Fatalf("expected 2 registered tools (history + graph), got %d", len(listed))
+	if len(listed) != 3 {
+		t.Fatalf("expected 3 registered tools (history + graph + rollback), got %d", len(listed))
 	}
 	names := make(map[string]bool)
 	for _, tool := range listed {
@@ -944,6 +948,9 @@ func TestEconomyTools_PartialClients_RegistersAvailable(t *testing.T) {
 	}
 	if !names["meridian_economy_graph"] {
 		t.Error("expected meridian_economy_graph to be registered")
+	}
+	if !names["meridian_manifest_rollback"] {
+		t.Error("expected meridian_manifest_rollback to be registered")
 	}
 }
 

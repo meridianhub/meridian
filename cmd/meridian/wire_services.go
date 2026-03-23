@@ -11,6 +11,7 @@ import (
 
 	// Proto registrations
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
@@ -775,14 +776,25 @@ func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Po
 		logger.Warn("failed to seed platform saga (non-fatal, --bootstrap will retry)", "error", err)
 	}
 
-	// Register ManifestHistoryService for manifest version history queries.
+	// Register ManifestHistoryService with loopback applier for rollback support.
+	applyClient := controlplanev1.NewApplyManifestServiceClient(loopback.rawConn)
 	if err := controlplaneservice.RegisterManifestHistoryService(server, controlplaneservice.ManifestHistoryServiceConfig{
-		DB:     db,
-		Logger: logger,
+		DB:      db,
+		Logger:  logger,
+		Applier: loopbackApplyManifestAdapter{c: applyClient},
 	}); err != nil {
 		return err
 	}
 	logger.Info("registered control-plane service (ManifestHistoryService)")
 
 	return nil
+}
+
+// loopbackApplyManifestAdapter adapts gRPC ApplyManifestServiceClient to manifest.Applier.
+type loopbackApplyManifestAdapter struct {
+	c controlplanev1.ApplyManifestServiceClient
+}
+
+func (a loopbackApplyManifestAdapter) ApplyManifest(ctx context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+	return a.c.ApplyManifest(ctx, req)
 }
