@@ -1,5 +1,5 @@
 import { type ReactNode, lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { queryClient } from '@/lib/query-client'
@@ -17,6 +17,7 @@ import { AppShell } from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from 'sonner'
 import { CallbackPage } from '@/pages/callback'
+import { RegisterPage } from '@/features/registration/pages/register-page'
 import { ProviderButton } from '@/components/auth/provider-button'
 import { AuthDivider } from '@/components/auth/auth-divider'
 import { DashboardPage } from '@/features/dashboard'
@@ -313,6 +314,16 @@ function LoginPage() {
           </>
         )}
 
+        {/* Registration link - shown in production builds only */}
+        {!import.meta.env.DEV && (
+          <p className="text-center text-sm text-muted-foreground">
+            Don&apos;t have an account?{' '}
+            <Link to="/register" className="text-primary underline-offset-4 hover:underline">
+              Create one
+            </Link>
+          </p>
+        )}
+
         {/* Dev-only fake JWT buttons (also shown in E2E mode) */}
         {(import.meta.env.DEV || import.meta.env.VITE_E2E_MODE === 'true') && (
           <div className="space-y-2">
@@ -536,6 +547,7 @@ function AuthenticatedApp() {
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
               <Route path="/callback" element={<CallbackPage />} />
               <Route
                 path="/*"
