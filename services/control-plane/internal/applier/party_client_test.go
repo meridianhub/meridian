@@ -50,6 +50,7 @@ func TestNewPartyClient(t *testing.T) {
 type fakePartyServer struct {
 	partyv1.UnimplementedPartyServiceServer
 	registerFn func(context.Context, *partyv1.RegisterPartyRequest) (*partyv1.RegisterPartyResponse, error)
+	listFn     func(context.Context, *partyv1.ListPartiesRequest) (*partyv1.ListPartiesResponse, error)
 }
 
 func (f *fakePartyServer) RegisterParty(ctx context.Context, req *partyv1.RegisterPartyRequest) (*partyv1.RegisterPartyResponse, error) {
@@ -63,6 +64,13 @@ func (f *fakePartyServer) RegisterParty(ctx context.Context, req *partyv1.Regist
 			Status:    partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
 		},
 	}, nil
+}
+
+func (f *fakePartyServer) ListParties(ctx context.Context, req *partyv1.ListPartiesRequest) (*partyv1.ListPartiesResponse, error) {
+	if f.listFn != nil {
+		return f.listFn(ctx, req)
+	}
+	return &partyv1.ListPartiesResponse{}, nil
 }
 
 func newPartyTestServer(t *testing.T, srv *fakePartyServer) *grpc.ClientConn {
@@ -108,6 +116,19 @@ func TestRegisterOrganization_AlreadyExists_TreatedAsSuccess(t *testing.T) {
 		registerFn: func(_ context.Context, _ *partyv1.RegisterPartyRequest) (*partyv1.RegisterPartyResponse, error) {
 			return nil, status.Error(codes.AlreadyExists, "party with external reference of type LEI already exists")
 		},
+		listFn: func(_ context.Context, _ *partyv1.ListPartiesRequest) (*partyv1.ListPartiesResponse, error) {
+			return &partyv1.ListPartiesResponse{
+				Parties: []*partyv1.Party{
+					{
+						PartyId:               "existing-party-uuid",
+						LegalName:             "Acme Corp",
+						Status:                partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
+						ExternalReference:     "123456",
+						ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI,
+					},
+				},
+			}, nil
+		},
 	}
 	conn := newPartyTestServer(t, srv)
 	client := NewPartyClient(conn)
@@ -121,6 +142,7 @@ func TestRegisterOrganization_AlreadyExists_TreatedAsSuccess(t *testing.T) {
 
 	require.NoError(t, err, "AlreadyExists should be treated as idempotent success")
 	m := result.(map[string]any)
+	assert.Equal(t, "existing-party-uuid", m["party_id"])
 	assert.Equal(t, "Acme Corp", m["legal_name"])
 	assert.Equal(t, "PARTY_STATUS_ACTIVE", m["status"])
 }

@@ -1,6 +1,7 @@
 package applier
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -54,9 +55,17 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios
 		// where the underlying party was already created by a previous apply.
 		if status.Code(err) == codes.AlreadyExists {
+			existing, lookupErr := c.findPartyByExternalRef(callCtx, req.GetExternalReference(), req.GetExternalReferenceType())
+			if lookupErr != nil || existing == nil {
+				return map[string]any{
+					"legal_name": req.GetLegalName(),
+					"status":     partyv1.PartyStatus_PARTY_STATUS_ACTIVE.String(),
+				}, nil
+			}
 			return map[string]any{
-				"legal_name": req.GetLegalName(),
-				"status":     partyv1.PartyStatus_PARTY_STATUS_ACTIVE.String(),
+				"party_id":   existing.GetPartyId(),
+				"legal_name": existing.GetLegalName(),
+				"status":     existing.GetStatus().String(),
 			}, nil
 		}
 		return nil, fmt.Errorf("register organization: %w", err)
@@ -68,6 +77,31 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 		"legal_name": party.GetLegalName(),
 		"status":     party.GetStatus().String(),
 	}, nil
+}
+
+// findPartyByExternalRef pages through ListParties to locate an existing party
+// that matches the given external reference and type. Returns nil if not found.
+func (c *PartyClient) findPartyByExternalRef(ctx context.Context, extRef string, extRefType partyv1.ExternalReferenceType) (*partyv1.Party, error) {
+	pageToken := ""
+	for {
+		resp, err := c.client.ListParties(ctx, &partyv1.ListPartiesRequest{
+			PartyType: partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
+			PageSize:  100,
+			PageToken: pageToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list parties for lookup: %w", err)
+		}
+		for _, p := range resp.GetParties() {
+			if p.GetExternalReference() == extRef && p.GetExternalReferenceType() == extRefType {
+				return p, nil
+			}
+		}
+		pageToken = resp.GetNextPageToken()
+		if pageToken == "" {
+			return nil, nil
+		}
+	}
 }
 
 // parseExternalReferenceType converts a string to the proto ExternalReferenceType enum.
