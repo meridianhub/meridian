@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -914,6 +915,7 @@ func handleManifestRollback(ctx context.Context, client ManifestHistorian, param
 			"message": "Use meridian_manifest_history to find available sequence numbers.",
 		}, nil
 	}
+	p.AppliedBy = strings.TrimSpace(p.AppliedBy)
 	if p.AppliedBy == "" {
 		return map[string]interface{}{
 			"error":   "applied_by is required",

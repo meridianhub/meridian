@@ -34,6 +34,7 @@ export function RollbackConfirmationDialog({
     if (!version) return
     setPreviewLoading(true)
     setPreviewMessage(null)
+    rollback.reset()
     try {
       const result = await rollback.mutateAsync({
         targetSequenceNumber: BigInt(version.sequenceNumber),
@@ -50,6 +51,7 @@ export function RollbackConfirmationDialog({
 
   async function handleRollback() {
     if (!version) return
+    rollback.reset()
     try {
       const result = await rollback.mutateAsync({
         targetSequenceNumber: BigInt(version.sequenceNumber),
