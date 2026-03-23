@@ -1,6 +1,7 @@
-h1:u6ZwkR3/+Sqvc0w1D6l412Wr1dLxdTDhn7wYu1QI2ok=
+h1:oHxvlm6dS+QkpwxnUWrKMIJbnADml2NelZEMZb8pP4U=
 20251216000001_initial.sql h1:fDcJR00ykXOFp9882/ieCQyoMbvkdJN3jF7y+fH+4DQ=
 20251223000001_add_status_updated_at_index.sql h1:+gm99ghOO5+QMv5uYxTbOIl52cCpzlu599SHFUzThIk=
 20260223000001_fix_audit_outbox_column_types.sql h1:3CSTxMS9bEv1S0rLhXYWPmFEFvV57CULZYRHp+p/WHE=
 20260223000002_fix_audit_outbox_column_types_data.sql h1:xSkSJVnbYPb0CXhJf4iqW0m/L7Vko0ssUec6nE04TK8=
 20260226000001_seed_master_tenant.sql h1:OEAOiO8E6Xu/3X6FXEewH3VoBvHby0YcNOsoZs5qDl4=
+20260323000001_align_audit_schema.sql h1:L8bw+cioHOFkzJFMuAcSaY7vHOLztUMnMCgy5JJceAA=
