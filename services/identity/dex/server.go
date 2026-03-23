@@ -59,7 +59,7 @@ func New(ctx context.Context, cfg Config) (*EmbeddedDex, error) {
 	}
 
 	// Register OIDC clients.
-	if err := registerClients(ctx, memStorage, cfg.Clients, logger); err != nil {
+	if err := registerClients(memStorage, cfg.Clients, logger); err != nil {
 		return nil, err
 	}
 
