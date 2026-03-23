@@ -10,9 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	dexconnector "github.com/dexidp/dex/connector"
 	dexserver "github.com/dexidp/dex/server"
-	"github.com/dexidp/dex/server/signer"
 	"github.com/dexidp/dex/storage"
 	"github.com/dexidp/dex/storage/memory"
 )
@@ -44,11 +45,12 @@ func New(ctx context.Context, cfg Config) (*EmbeddedDex, error) {
 	// Create the adapter that bridges Meridian's connector to Dex's interface.
 	adapter := NewConnectorAdapter(cfg.Connector)
 
-	// Create in-memory storage.
-	memStorage := memory.New(logger)
+	// Create in-memory storage. dex v2.13.0 uses logrus internally.
+	memStorage := memory.New(newDexLogger())
 
 	// Register the connector definition in storage.
-	if err := memStorage.CreateConnector(ctx, storage.Connector{
+	// dex v2.13.0 storage methods do not take a context argument.
+	if err := memStorage.CreateConnector(storage.Connector{
 		ID:   ConnectorID,
 		Type: ConnectorType,
 		Name: "Meridian",
@@ -123,20 +125,13 @@ func (d *EmbeddedDex) StartServer(ctx context.Context, issuer string, skipApprov
 		}
 	})
 
-	// Create a local signer backed by Dex storage for token signing and key rotation.
-	localSignerCfg := &signer.LocalConfig{KeysRotationPeriod: "6h"}
-	s, err := localSignerCfg.Open(ctx, d.storage, 24*time.Hour, time.Now, d.logger)
-	if err != nil {
-		return fmt.Errorf("dex: creating signer: %w", err)
-	}
-	s.Start(ctx)
-
+	// dex v2.13.0 handles key rotation internally via RotateKeysAfter/IDTokensValidFor.
 	srv, err := dexserver.NewServer(ctx, dexserver.Config{
 		Issuer:             issuer,
 		Storage:            d.storage,
-		Logger:             d.logger,
-		Signer:             s,
-		PasswordConnector:  ConnectorID,
+		Logger:             newDexLogger(),
+		RotateKeysAfter:    6 * time.Hour,
+		IDTokensValidFor:   24 * time.Hour,
 		SkipApprovalScreen: skipApproval,
 	})
 	if err != nil {
@@ -154,6 +149,14 @@ type connectorConfigAdapter struct {
 	adapter *ConnectorAdapter
 }
 
-func (c *connectorConfigAdapter) Open(_ string, _ *slog.Logger) (dexconnector.Connector, error) {
+func (c *connectorConfigAdapter) Open(_ string, _ logrus.FieldLogger) (dexconnector.Connector, error) {
 	return c.adapter, nil
+}
+
+// newDexLogger returns a logrus logger for use with the embedded dex library.
+// dex v2.13.0 uses logrus internally; this isolates the logrus dependency to this package.
+func newDexLogger() logrus.FieldLogger {
+	l := logrus.New()
+	l.SetLevel(logrus.InfoLevel)
+	return l
 }

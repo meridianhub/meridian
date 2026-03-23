@@ -2,7 +2,6 @@ package dex
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 
 	"github.com/dexidp/dex/storage"
@@ -77,7 +76,7 @@ func TestClientConfig_Validate(t *testing.T) {
 }
 
 func TestRegisterClients_Success(t *testing.T) {
-	store := memory.New(slog.Default())
+	store := memory.New(newDexLogger())
 	ctx := context.Background()
 
 	clients := []ClientConfig{
@@ -90,10 +89,10 @@ func TestRegisterClients_Success(t *testing.T) {
 		},
 	}
 
-	err := registerClients(ctx, store, clients, slog.Default())
+	err := registerClients(ctx, store, clients, nil)
 	require.NoError(t, err)
 
-	stored, err := store.GetClient(ctx, "test-client")
+	stored, err := store.GetClient("test-client")
 	require.NoError(t, err)
 	assert.Equal(t, "test-client", stored.ID)
 	assert.Equal(t, "test-secret", stored.Secret)
@@ -102,32 +101,32 @@ func TestRegisterClients_Success(t *testing.T) {
 }
 
 func TestRegisterClients_UpdatesExisting(t *testing.T) {
-	store := memory.New(slog.Default())
+	store := memory.New(newDexLogger())
 	ctx := context.Background()
 
 	// Register initial client.
 	initial := []ClientConfig{
 		{ID: "upsert-client", Name: "Old Name", Public: true, RedirectURIs: []string{"http://old/cb"}},
 	}
-	err := registerClients(ctx, store, initial, slog.Default())
+	err := registerClients(ctx, store, initial, nil)
 	require.NoError(t, err)
 
 	// Re-register with different config.
 	updated := []ClientConfig{
 		{ID: "upsert-client", Name: "New Name", Public: true, RedirectURIs: []string{"http://new/cb"}},
 	}
-	err = registerClients(ctx, store, updated, slog.Default())
+	err = registerClients(ctx, store, updated, nil)
 	require.NoError(t, err)
 
 	// Verify the client was updated.
-	stored, err := store.GetClient(ctx, "upsert-client")
+	stored, err := store.GetClient("upsert-client")
 	require.NoError(t, err)
 	assert.Equal(t, "New Name", stored.Name)
 	assert.Equal(t, []string{"http://new/cb"}, stored.RedirectURIs)
 }
 
 func TestRegisterClients_MultipleClients(t *testing.T) {
-	store := memory.New(slog.Default())
+	store := memory.New(newDexLogger())
 	ctx := context.Background()
 
 	clients := []ClientConfig{
@@ -135,27 +134,27 @@ func TestRegisterClients_MultipleClients(t *testing.T) {
 		{ID: "client-b", Name: "B", Public: true, RedirectURIs: []string{"http://b/cb"}},
 	}
 
-	err := registerClients(ctx, store, clients, slog.Default())
+	err := registerClients(ctx, store, clients, nil)
 	require.NoError(t, err)
 
-	a, err := store.GetClient(ctx, "client-a")
+	a, err := store.GetClient("client-a")
 	require.NoError(t, err)
 	assert.Equal(t, "A", a.Name)
 
-	b, err := store.GetClient(ctx, "client-b")
+	b, err := store.GetClient("client-b")
 	require.NoError(t, err)
 	assert.Equal(t, "B", b.Name)
 }
 
 func TestRegisterClients_InvalidClient(t *testing.T) {
-	store := memory.New(slog.Default())
+	store := memory.New(newDexLogger())
 	ctx := context.Background()
 
 	clients := []ClientConfig{
 		{ID: "", RedirectURIs: []string{"http://bad/cb"}}, // empty ID
 	}
 
-	err := registerClients(ctx, store, clients, slog.Default())
+	err := registerClients(ctx, store, clients, nil)
 	assert.ErrorIs(t, err, ErrClientIDRequired)
 }
 

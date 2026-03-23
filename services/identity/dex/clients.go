@@ -99,7 +99,7 @@ func registerClients(ctx context.Context, s storage.Storage, clients []ClientCon
 			Name:         c.Name,
 		}
 
-		err := s.CreateClient(ctx, client)
+		err := s.CreateClient(client)
 		if err == nil {
 			logger.Info("dex: registered OIDC client",
 				"client_id", c.ID,
@@ -110,7 +110,7 @@ func registerClients(ctx context.Context, s storage.Storage, clients []ClientCon
 
 		if errors.Is(err, storage.ErrAlreadyExists) {
 			// Update the existing client to ensure config consistency.
-			if updateErr := s.UpdateClient(ctx, c.ID, func(_ storage.Client) (storage.Client, error) {
+			if updateErr := s.UpdateClient(c.ID, func(_ storage.Client) (storage.Client, error) {
 				return client, nil
 			}); updateErr != nil {
 				return fmt.Errorf("dex: updating existing client %q: %w", c.ID, updateErr)
