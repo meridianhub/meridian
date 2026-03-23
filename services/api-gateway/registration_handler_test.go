@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	identitydomain "github.com/meridianhub/meridian/services/identity/domain"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	"github.com/stretchr/testify/assert"
@@ -264,7 +266,7 @@ func TestRegistrationHandler_WeakPassword(t *testing.T) {
 func TestRegistrationHandler_SlugTaken(t *testing.T) {
 	tc, ir := defaultStubs()
 	tc.createFn = func(_ context.Context, _, _, _ string) (string, error) {
-		return "", errors.New("tenant acme_corp already exists (AlreadyExists)")
+		return "", status.Error(codes.AlreadyExists, "tenant acme_corp already exists")
 	}
 
 	h := newRegistrationHandler(t, tc, ir)

@@ -15,6 +15,8 @@ import (
 	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // RegistrationHandler errors.
@@ -250,6 +252,9 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 	}
 
 	now := time.Now()
+	// ReconstructRoleAssignment is used instead of NewRoleAssignment because
+	// this is a system-level bootstrap operation (no granting identity exists yet).
+	// This follows the same pattern as identity/bootstrap/bootstrap.go.
 	ra := identitydomain.ReconstructRoleAssignment(
 		uuid.New(),
 		identity.ID(),
@@ -278,8 +283,11 @@ func WithRegistrationHandler(handler *RegistrationHandler) ServerOption {
 	}
 }
 
-// isAlreadyExistsError checks if an error indicates a resource already exists.
+// isAlreadyExistsError checks if an error indicates a resource already exists
+// using the gRPC status code rather than brittle string matching.
 func isAlreadyExistsError(err error) bool {
-	return strings.Contains(err.Error(), "already exists") ||
-		strings.Contains(err.Error(), "AlreadyExists")
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.AlreadyExists
+	}
+	return false
 }

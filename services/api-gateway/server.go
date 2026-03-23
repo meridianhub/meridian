@@ -514,6 +514,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.authMiddleware.Close()
 	}
 
+	// Stop registration rate limiter background goroutine.
+	if s.registrationHandler != nil && s.registrationHandler.rateLimiter != nil {
+		s.registrationHandler.rateLimiter.Stop()
+	}
+
 	s.logger.Info("HTTP server stopped")
 	return nil
 }
