@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/empty-state'
+import { ErrorState } from '@/shared/error-state'
 import { Button } from '@/components/ui/button'
 import { EntityLink } from '@/shared/entity-link'
 import { StatusBadge } from '@/shared/status-badge'
@@ -113,18 +114,28 @@ export function AssociationsTab({ partyId, partyType }: AssociationsTabProps) {
 
   // For PERSON parties: retrieve forward associations (relationships registered by this party).
   // Disabled for org parties — orgs use listParticipants instead.
-  const { data: associationsData, isLoading: isLoadingAssociations } = usePartyAssociations(
-    isOrganization ? undefined : partyId,
-  )
+  const {
+    data: associationsData,
+    isLoading: isLoadingAssociations,
+    isError: isErrorAssociations,
+    refetch: refetchAssociations,
+  } = usePartyAssociations(isOrganization ? undefined : partyId)
 
   // For ORGANIZATION parties: list participants (members of this org/syndicate)
-  const { data: participantsData, isLoading: isLoadingParticipants } = useQuery({
+  const {
+    data: participantsData,
+    isLoading: isLoadingParticipants,
+    isError: isErrorParticipants,
+    refetch: refetchParticipants,
+  } = useQuery({
     queryKey: [...tenantKeys.party(tenantSlug ?? '', partyId), 'participants'],
     queryFn: () => clients.party.listParticipants({ partyId }),
     enabled: Boolean(tenantSlug && partyId && isOrganization),
   })
 
   const isLoading = isOrganization ? isLoadingParticipants : isLoadingAssociations
+  const isError = isOrganization ? isErrorParticipants : isErrorAssociations
+  const refetch = isOrganization ? refetchParticipants : refetchAssociations
 
   const associations: Association[] = isOrganization
     ? (participantsData?.participants ?? [])
@@ -142,6 +153,10 @@ export function AssociationsTab({ partyId, partyType }: AssociationsTabProps) {
         <Skeleton className="h-4 w-1/3" />
       </div>
     )
+  }
+
+  if (isError) {
+    return <ErrorState onRetry={() => void refetch()} />
   }
 
   return (
