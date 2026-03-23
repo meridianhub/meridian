@@ -473,6 +473,7 @@ message ListFinancialPositionLogsRequest {
       string: {
         min_len: 1
         max_len: 255
+        pattern: "^[a-zA-Z0-9_-]+$"
       }
     }
   }];
