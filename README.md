@@ -45,13 +45,13 @@ automatically reverses the completed steps to keep the system consistent. No
 partial state, no manual cleanup.
 
 Business logic is written in
-[Starlark](https://github.com/bazelbuild/starlark), a deterministic subset of
-Python used by Google's Bazel. It reads like simple Python, so your team
-reviews sagas the same way they review any other code - no new DSL to learn.
-Starlark is secure by construction: the language can't express dangerous
-operations, errors are caught at compile time, and every workflow is guaranteed
-to terminate. AI can generate reliable saga code because the schema constrains
-it to only call real handlers with real types.
+[Starlark](https://github.com/bazelbuild/starlark), a subset of Python used
+by Google's Bazel. It reads like simple Python, so your team reviews sagas
+the same way they review any other code - no new DSL to learn. Meridian's
+runtime enforces execution step limits, so every workflow is guaranteed to
+terminate - no runaway scripts can exhaust compute resources. Errors are
+caught at compile time, and AI can generate reliable saga code because the
+schema constrains it to only call real handlers with real types.
 
 ### Define your economy, then run it
 
@@ -183,6 +183,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development setup, Kubernete
 
 Business Source License 1.1 - See [LICENSE](LICENSE).
 
-- Use, modify, and deploy for any internal purpose
-- Cannot offer a competing Billing/Treasury-as-a-Service
-- Converts to Apache 2.0 on February 12, 2030
+You can use, modify, and deploy Meridian in production to run your own
+business - a bank running its own ledger, an energy company managing its own
+settlement, a startup billing its own customers. The only restriction: you
+cannot offer Meridian itself to third parties as a competing commercial
+billing, ledger, treasury, or financial accounting service.
+
+Converts to Apache 2.0 on February 12, 2030.
+
+For alternative licensing arrangements, contact
+[ben@meridianhub.org](mailto:ben@meridianhub.org).
