@@ -22,7 +22,10 @@ Meridian handles the bookkeeping, audit trails, reconciliation, and payment coll
 
 ## Why Meridian
 
-Billing starts as a Stripe checkout and a cron job. Then you need usage metering. Then revenue splits. Then your auditor asks for a transaction trail. Then estimates need to reconcile with actuals. Now you're maintaining a financial system - and you're not a financial company.
+Billing starts as a Stripe checkout and a cron job. Then you need usage metering.
+Then revenue splits. Then your auditor asks for a transaction trail.
+Then estimates need to reconcile with actuals.
+Now you're maintaining a financial system - and you're not a financial company.
 
 Existing solutions force a tradeoff:
 
@@ -39,25 +42,47 @@ Meridian gives you bank-grade infrastructure without the enterprise price tag or
 
 ### Multi-asset ledger with dimensional type safety
 
-Track currency, energy (kWh), carbon credits (tCO2e), compute hours, vouchers, or any custom instrument - all in a single ledger. Compile-time type safety prevents mixing incompatible asset types. Whether you're moving money or megawatts, every movement of value is traceable, reconcilable, and compliant with double-entry principles.
+Track currency, energy (kWh), carbon credits (tCO2e), compute hours, vouchers,
+or any custom instrument - all in a single ledger. Compile-time type safety
+prevents mixing incompatible asset types. Whether you're moving money or
+megawatts, every movement of value is traceable, reconcilable, and compliant
+with double-entry principles.
 
 ### Saga orchestration with guaranteed termination
 
-Every operation runs as a distributed saga - a multi-step workflow that either completes fully or compensates automatically. No partial state, no manual intervention. Sagas are written in [Starlark](https://github.com/bazelbuild/starlark) (the language behind Bazel), which mathematically guarantees termination. No infinite loops, no runaway computation, no tenant can starve another's resources.
+Every operation runs as a distributed saga - a multi-step workflow that either
+completes fully or compensates automatically. No partial state, no manual
+intervention. Sagas are written in
+[Starlark](https://github.com/bazelbuild/starlark) (the language behind Bazel),
+which mathematically guarantees termination. No infinite loops, no runaway
+computation, no tenant can starve another's resources.
 
 ### Declarative economy - define it, then run it
 
-Define instruments, account types, settlement rules, and pricing logic in a YAML + Starlark manifest. Meridian doesn't just provision the configuration - it continuously operates it. Scheduled billing fires monthly. Settlement triggers when market data arrives. Compensation reverses failed steps automatically. The manifest *is* the running system.
+Define instruments, account types, settlement rules, and pricing logic in a
+YAML + Starlark manifest. Meridian doesn't just provision the configuration -
+it continuously operates it. Scheduled billing fires monthly. Settlement
+triggers when market data arrives. Compensation reverses failed steps
+automatically. The manifest *is* the running system.
 
-A complete tote betting platform - instruments, accounts, double-entry settlement, Stripe integration, event-driven payouts - can be expressed in under 400 lines of manifest. No code deployment. No PRs to Meridian core. No migrations.
+A complete tote betting platform - instruments, accounts, double-entry
+settlement, Stripe integration, event-driven payouts - can be expressed in
+under 400 lines of manifest. No code deployment. No PRs to Meridian core.
+No migrations.
 
 ### Bi-temporal data with quality tracking
 
-Every measurement carries what was known, how it was known, and when it was known. The quality ladder (Estimate -> Coefficient -> Actual -> Revised) handles late-arriving data, out-of-order meter reads, and T+2 settlement without locking the database.
+Every measurement carries what was known, how it was known, and when it was
+known. The quality ladder (Estimate -> Coefficient -> Actual -> Revised)
+handles late-arriving data, out-of-order meter reads, and T+2 settlement
+without locking the database.
 
 ### AI-configurable infrastructure
 
-Schema-driven service modules auto-generate type-safe Starlark clients. AI can generate saga code that compiles on the first attempt because the schema constrains it to only call real handlers with real types. Configuration by conversation instead of 6-month implementations.
+Schema-driven service modules auto-generate type-safe Starlark clients. AI can
+generate saga code that compiles on the first attempt because the schema
+constrains it to only call real handlers with real types. Configuration by
+conversation instead of 6-month implementations.
 
 ## What You Get
 
@@ -148,7 +173,10 @@ cd meridian
 make dev-up
 ```
 
-Open [localhost:5173](http://localhost:5173) to explore the web UI - register customers, open accounts, make deposits, and see the ledger in action. Every operation runs as a saga across multiple services with automatic compensation on failure.
+Open [localhost:5173](http://localhost:5173) to explore the web UI - register
+customers, open accounts, make deposits, and see the ledger in action. Every
+operation runs as a saga across multiple services with automatic compensation
+on failure.
 
 REST API is also available at `localhost:8090` and gRPC at `localhost:50051`.
 
