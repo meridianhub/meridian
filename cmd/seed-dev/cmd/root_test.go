@@ -116,6 +116,11 @@ func TestSkipManifestDoesNotBlockFixtures(t *testing.T) {
 	// Verify that --skip-manifest and --with-fixtures can be set independently.
 	// The bug: runSeed() returned early when skipManifest was true,
 	// preventing withFixtures code from executing.
+	origSkip, origFixtures := skipManifest, withFixtures
+	t.Cleanup(func() {
+		skipManifest = origSkip
+		withFixtures = origFixtures
+	})
 
 	cmd := rootCmd
 
@@ -126,8 +131,4 @@ func TestSkipManifestDoesNotBlockFixtures(t *testing.T) {
 	// After parsing, both package-level vars should be set.
 	assert.True(t, skipManifest, "skipManifest flag should be true")
 	assert.True(t, withFixtures, "withFixtures flag should be true")
-
-	// Reset for other tests.
-	skipManifest = false
-	withFixtures = false
 }
