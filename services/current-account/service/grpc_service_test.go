@@ -1740,6 +1740,40 @@ func TestListCurrentAccounts(t *testing.T) {
 		require.Equal(t, codes.InvalidArgument, st.Code())
 	})
 
+	t.Run("returns InvalidArgument for zero UUID party_id", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			PartyId: "00000000-0000-0000-0000-000000000000",
+		})
+		require.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
+	t.Run("returns InvalidArgument for zero UUID org_party_id", func(t *testing.T) {
+		db, ctx, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		repo := persistence.NewRepository(db)
+		svc := mustNewService(t, repo, nil)
+
+		resp, err := svc.ListCurrentAccounts(ctx, &pb.ListCurrentAccountsRequest{
+			OrgPartyId: "00000000-0000-0000-0000-000000000000",
+		})
+		require.Nil(t, resp)
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+	})
+
 	t.Run("returns all accounts when no filters provided", func(t *testing.T) {
 		db, ctx, cleanup := setupTestDB(t)
 		defer cleanup()

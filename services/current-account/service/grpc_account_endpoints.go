@@ -363,6 +363,9 @@ func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAc
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid party_id: must be a valid UUID")
 		}
+		if partyUUID == uuid.Nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid party_id: zero UUID is not allowed")
+		}
 		params.PartyID = partyUUID
 	}
 
@@ -370,6 +373,9 @@ func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAc
 		orgPartyUUID, err := uuid.Parse(req.OrgPartyId)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: must be a valid UUID")
+		}
+		if orgPartyUUID == uuid.Nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: zero UUID is not allowed")
 		}
 		params.OrgPartyID = orgPartyUUID
 	}
