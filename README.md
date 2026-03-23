@@ -11,7 +11,7 @@
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/meridianhub/meridian)
 
-**The open-source transaction integrity engine for the real-world economy.**
+**A source-available transaction integrity engine for the real-world economy.**
 
 Define your pricing, settlement, and multi-party revenue-sharing logic in code.
 Meridian handles the bookkeeping, audit trails, reconciliation, and payment collection.
