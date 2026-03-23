@@ -1,7 +1,6 @@
 package dex
 
 import (
-	"context"
 	"testing"
 
 	"github.com/dexidp/dex/storage"
@@ -77,7 +76,6 @@ func TestClientConfig_Validate(t *testing.T) {
 
 func TestRegisterClients_Success(t *testing.T) {
 	store := memory.New(newDexLogger())
-	ctx := context.Background()
 
 	clients := []ClientConfig{
 		{
@@ -89,7 +87,7 @@ func TestRegisterClients_Success(t *testing.T) {
 		},
 	}
 
-	err := registerClients(ctx, store, clients, nil)
+	err := registerClients(store, clients, nil)
 	require.NoError(t, err)
 
 	stored, err := store.GetClient("test-client")
@@ -102,20 +100,19 @@ func TestRegisterClients_Success(t *testing.T) {
 
 func TestRegisterClients_UpdatesExisting(t *testing.T) {
 	store := memory.New(newDexLogger())
-	ctx := context.Background()
 
 	// Register initial client.
 	initial := []ClientConfig{
 		{ID: "upsert-client", Name: "Old Name", Public: true, RedirectURIs: []string{"http://old/cb"}},
 	}
-	err := registerClients(ctx, store, initial, nil)
+	err := registerClients(store, initial, nil)
 	require.NoError(t, err)
 
 	// Re-register with different config.
 	updated := []ClientConfig{
 		{ID: "upsert-client", Name: "New Name", Public: true, RedirectURIs: []string{"http://new/cb"}},
 	}
-	err = registerClients(ctx, store, updated, nil)
+	err = registerClients(store, updated, nil)
 	require.NoError(t, err)
 
 	// Verify the client was updated.
@@ -127,14 +124,13 @@ func TestRegisterClients_UpdatesExisting(t *testing.T) {
 
 func TestRegisterClients_MultipleClients(t *testing.T) {
 	store := memory.New(newDexLogger())
-	ctx := context.Background()
 
 	clients := []ClientConfig{
 		{ID: "client-a", Name: "A", Public: true, RedirectURIs: []string{"http://a/cb"}},
 		{ID: "client-b", Name: "B", Public: true, RedirectURIs: []string{"http://b/cb"}},
 	}
 
-	err := registerClients(ctx, store, clients, nil)
+	err := registerClients(store, clients, nil)
 	require.NoError(t, err)
 
 	a, err := store.GetClient("client-a")
@@ -148,13 +144,12 @@ func TestRegisterClients_MultipleClients(t *testing.T) {
 
 func TestRegisterClients_InvalidClient(t *testing.T) {
 	store := memory.New(newDexLogger())
-	ctx := context.Background()
 
 	clients := []ClientConfig{
 		{ID: "", RedirectURIs: []string{"http://bad/cb"}}, // empty ID
 	}
 
-	err := registerClients(ctx, store, clients, nil)
+	err := registerClients(store, clients, nil)
 	assert.ErrorIs(t, err, ErrClientIDRequired)
 }
 

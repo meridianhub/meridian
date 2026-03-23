@@ -1,7 +1,6 @@
 package dex
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -82,7 +81,7 @@ func DefaultDemoClient(baseDomain string) ClientConfig {
 
 // registerClients writes clients to Dex storage idempotently. If a client
 // already exists with the same ID, it is updated to match the provided config.
-func registerClients(ctx context.Context, s storage.Storage, clients []ClientConfig, logger *slog.Logger) error {
+func registerClients(s storage.Storage, clients []ClientConfig, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
