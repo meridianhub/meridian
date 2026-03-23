@@ -138,27 +138,25 @@ func runSeed(_ *cobra.Command, _ []string) error {
 
 	if skipManifest {
 		fmt.Println("Skipping manifest application (--skip-manifest set).")
-		fmt.Println("Seed complete.")
-		return nil
-	}
-
-	// Use separate connection for control-plane if address differs from tenant service
-	cpAddr := controlPlaneAddr
-	if cpAddr == "" {
-		cpAddr = grpcAddr
-	}
-	manifestConn := conn
-	if cpAddr != grpcAddr {
-		manifestConn, err = grpc.NewClient(cpAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			return fmt.Errorf("connect to control-plane gRPC server %s: %w", cpAddr, err)
+	} else {
+		// Use separate connection for control-plane if address differs from tenant service
+		cpAddr := controlPlaneAddr
+		if cpAddr == "" {
+			cpAddr = grpcAddr
 		}
-		defer func() { _ = manifestConn.Close() }()
-	}
+		manifestConn := conn
+		if cpAddr != grpcAddr {
+			manifestConn, err = grpc.NewClient(cpAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				return fmt.Errorf("connect to control-plane gRPC server %s: %w", cpAddr, err)
+			}
+			defer func() { _ = manifestConn.Close() }()
+		}
 
-	fmt.Printf("Applying manifest from %s ...\n", manifestPath)
-	if err := applyManifest(ctx, manifestConn, tenantID, manifestPath); err != nil {
-		return fmt.Errorf("apply manifest: %w", err)
+		fmt.Printf("Applying manifest from %s ...\n", manifestPath)
+		if err := applyManifest(ctx, manifestConn, tenantID, manifestPath); err != nil {
+			return fmt.Errorf("apply manifest: %w", err)
+		}
 	}
 
 	if withFixtures {

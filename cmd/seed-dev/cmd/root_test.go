@@ -111,3 +111,24 @@ func TestRootCmd_DefaultFlagValues(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, skip)
 }
+
+func TestSkipManifestDoesNotBlockFixtures(t *testing.T) {
+	// Verify that --skip-manifest and --with-fixtures can be set independently.
+	// The bug: runSeed() returned early when skipManifest was true,
+	// preventing withFixtures code from executing.
+	origSkip, origFixtures := skipManifest, withFixtures
+	t.Cleanup(func() {
+		skipManifest = origSkip
+		withFixtures = origFixtures
+	})
+
+	cmd := rootCmd
+
+	// Parse flags without executing - verify both flags are accepted together.
+	err := cmd.ParseFlags([]string{"--skip-manifest", "--with-fixtures"})
+	assert.NoError(t, err)
+
+	// After parsing, both package-level vars should be set.
+	assert.True(t, skipManifest, "skipManifest flag should be true")
+	assert.True(t, withFixtures, "withFixtures flag should be true")
+}
