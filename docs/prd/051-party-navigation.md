@@ -154,19 +154,20 @@ directly.
 ### 3. Add account_ids to ListLedgerPostings
 
 Financial-accounting already filters by single `account_id`.
-Add a new repeated `account_ids` field. Backward
-compatibility: when `account_ids` is provided it takes
-precedence; when only `account_id` is set the existing
-behavior is preserved. The caller resolves party -> accounts,
-then passes the IDs. Financial-accounting has no knowledge of
-parties.
+Add a new repeated `account_ids` field with a maximum of 100
+IDs per request. Callers with larger account sets must batch
+requests. Backward compatibility: when `account_ids` is
+provided it takes precedence; when only `account_id` is set
+the existing behavior is preserved. The caller resolves
+party -> accounts, then passes the IDs.
+Financial-accounting has no knowledge of parties.
 
 ### 4. Add account_ids to ListFinancialPositionLogs
 
-Same pattern and backward compatibility rules as
-financial-accounting. Position-keeping already understands
-account_id. The new repeated `account_ids` field takes
-precedence when provided; existing single `account_id`
+Same pattern, backward compatibility rules, and 100-ID batch
+limit as financial-accounting. Position-keeping already
+understands account_id. The new repeated `account_ids` field
+takes precedence when provided; existing single `account_id`
 behavior is preserved. Multiple IDs in one call avoids N+1
 queries from the frontend.
 
