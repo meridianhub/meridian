@@ -18,7 +18,7 @@ function toAccountStatus(status: number | undefined): AccountStatusType {
 }
 
 /** Extract a display string from google.type.Money (units + nanos/1e9). */
-function formatBalance(
+export function formatBalance(
   money:
     | { units?: bigint | number; nanos?: number; currencyCode?: string }
     | undefined
@@ -45,7 +45,7 @@ function formatBalance(
         currency: money.currencyCode,
       }).format(value)
     } catch {
-      /* fall through for non-ISO codes */
+      return `${value.toFixed(2)} ${money.currencyCode}`
     }
   }
   return value.toFixed(2)
