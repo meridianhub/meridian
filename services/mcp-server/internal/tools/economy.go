@@ -46,6 +46,7 @@ type ManifestApplier interface {
 type ManifestHistorian interface {
 	ListManifestVersions(ctx context.Context, req *controlplanev1.ListManifestVersionsRequest) (*controlplanev1.ListManifestVersionsResponse, error)
 	GetCurrentManifest(ctx context.Context, req *controlplanev1.GetCurrentManifestRequest) (*controlplanev1.GetCurrentManifestResponse, error)
+	RollbackManifest(ctx context.Context, req *controlplanev1.RollbackManifestRequest) (*controlplanev1.RollbackManifestResponse, error)
 }
 
 // EconomyDeps holds all service clients used by economy design tools.
@@ -69,6 +70,7 @@ func RegisterEconomyTools(srv *mcp.Server, sess PlanStore, deps EconomyDeps) {
 	if deps.Historian != nil {
 		candidates = append(candidates, buildManifestHistoryTool(deps.Historian))
 		candidates = append(candidates, buildEconomyGraphTool(deps.Historian))
+		candidates = append(candidates, buildManifestRollbackTool(deps.Historian))
 	}
 
 	for _, t := range candidates {
@@ -856,4 +858,96 @@ func extractManifestGraph(m *controlplanev1.Manifest) ([]graphNode, []graphEdge)
 	}
 
 	return nodes, edges
+}
+
+// buildManifestRollbackTool returns the meridian_manifest_rollback tool.
+func buildManifestRollbackTool(client ManifestHistorian) Tool {
+	return Tool{
+		Name:     "meridian_manifest_rollback",
+		Category: CategoryWrite,
+		Description: "Rollback the tenant's manifest to a previous version by sequence number. " +
+			"Creates a new version record (forward-only audit trail) and re-applies the " +
+			"target manifest through the standard pipeline. Use dry_run=true to preview " +
+			"changes without applying. Use meridian_manifest_history to find sequence numbers.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"target_sequence_number": map[string]interface{}{
+					"type":        "integer",
+					"description": "The sequence number of the manifest version to rollback to. Use meridian_manifest_history to find available versions.",
+					"minimum":     1,
+				},
+				"dry_run": map[string]interface{}{
+					"type":        "boolean",
+					"description": "When true, returns a diff preview without applying changes (default false).",
+				},
+				"applied_by": map[string]interface{}{
+					"type":        "string",
+					"description": "Identifier of who is performing the rollback (e.g., user email).",
+				},
+			},
+			"required": []interface{}{"target_sequence_number", "applied_by"},
+		},
+		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+			return handleManifestRollback(ctx, client, params)
+		},
+	}
+}
+
+// manifestRollbackParams holds parsed parameters for meridian_manifest_rollback.
+type manifestRollbackParams struct {
+	TargetSequenceNumber int64  `json:"target_sequence_number"`
+	DryRun               bool   `json:"dry_run"`
+	AppliedBy            string `json:"applied_by"`
+}
+
+// handleManifestRollback implements the meridian_manifest_rollback handler logic.
+func handleManifestRollback(ctx context.Context, client ManifestHistorian, params json.RawMessage) (interface{}, error) {
+	var p manifestRollbackParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+
+	if p.TargetSequenceNumber <= 0 {
+		return map[string]interface{}{
+			"error":   "target_sequence_number must be greater than 0",
+			"message": "Use meridian_manifest_history to find available sequence numbers.",
+		}, nil
+	}
+	if p.AppliedBy == "" {
+		return map[string]interface{}{
+			"error":   "applied_by is required",
+			"message": "Provide an identifier for who is performing the rollback.",
+		}, nil
+	}
+
+	resp, err := client.RollbackManifest(ctx, &controlplanev1.RollbackManifestRequest{
+		TargetSequenceNumber: p.TargetSequenceNumber,
+		DryRun:               p.DryRun,
+		AppliedBy:            p.AppliedBy,
+	})
+	if err != nil {
+		return mcperrors.FormatGRPCError(err), nil
+	}
+
+	result := map[string]interface{}{
+		"status":  resp.Status.String(),
+		"message": resp.Message,
+	}
+
+	if resp.Version != nil {
+		result["version"] = formatManifestVersion(resp.Version)
+	}
+
+	if resp.Diff != nil && resp.Diff.Summary != nil {
+		result["diff_summary"] = map[string]interface{}{
+			"creates":             resp.Diff.Summary.Creates,
+			"updates":             resp.Diff.Summary.Updates,
+			"deletes":             resp.Diff.Summary.Deletes,
+			"no_changes":          resp.Diff.Summary.NoChanges,
+			"has_breaking_changes": resp.Diff.Summary.HasBreakingChanges,
+		}
+	}
+
+	return result, nil
 }
