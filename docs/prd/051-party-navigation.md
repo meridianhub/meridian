@@ -154,15 +154,20 @@ directly.
 ### 3. Add account_ids to ListLedgerPostings
 
 Financial-accounting already filters by single `account_id`.
-Extend to accept multiple account IDs in one query. This is a
-performance convenience - the caller resolves party ->
-accounts, then passes the IDs. Financial-accounting has no
-knowledge of parties.
+Add a new repeated `account_ids` field. Backward
+compatibility: when `account_ids` is provided it takes
+precedence; when only `account_id` is set the existing
+behavior is preserved. The caller resolves party -> accounts,
+then passes the IDs. Financial-accounting has no knowledge of
+parties.
 
 ### 4. Add account_ids to ListFinancialPositionLogs
 
-Same pattern as financial-accounting. Position-keeping already
-understands account_id. Multiple IDs in one call avoids N+1
+Same pattern and backward compatibility rules as
+financial-accounting. Position-keeping already understands
+account_id. The new repeated `account_ids` field takes
+precedence when provided; existing single `account_id`
+behavior is preserved. Multiple IDs in one call avoids N+1
 queries from the frontend.
 
 ---
@@ -239,11 +244,15 @@ perspective.
 
 ### 13. Party detail Transactions tab (new)
 
-Add a tab showing ledger postings across all of the party's
-accounts. The frontend resolves party -> account IDs via the
-Accounts tab data, then queries
-`ListLedgerPostings(account_ids=[...])`. No cross-service
-coupling - the frontend is the boundary that joins the data.
+Add a tab showing ledger postings across all the party's
+accounts. The frontend resolves the complete set of account
+IDs for the party via a dedicated API call
+(`ListCurrentAccounts(party_id=X)` and, for orgs,
+`ListInternalAccounts(org_party_id=X)` with no pagination
+limit) - independent of whatever the Accounts tab has loaded.
+Then queries `ListLedgerPostings(account_ids=[...])`. No
+cross-service coupling - the frontend is the boundary that
+joins the data.
 
 ### 14. Org drill-down navigation
 
