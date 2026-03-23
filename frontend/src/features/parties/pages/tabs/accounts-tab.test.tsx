@@ -38,6 +38,7 @@ function renderTab(partyId: string, partyType?: number | string) {
 
 describe('AccountsTab - server-side filtering', () => {
   beforeEach(() => {
+    mockListCurrentAccounts.mockReset()
     mockListCurrentAccounts.mockResolvedValue({ accounts: [], nextPageToken: '' })
   })
 
