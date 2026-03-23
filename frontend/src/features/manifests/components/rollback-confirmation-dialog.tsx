@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -29,9 +29,11 @@ export function RollbackConfirmationDialog({
   const rollback = useRollbackManifest()
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewMessage, setPreviewMessage] = useState<string | null>(null)
+  const closedRef = useRef(false)
 
   async function handlePreview() {
     if (!version) return
+    closedRef.current = false
     setPreviewLoading(true)
     setPreviewMessage(null)
     rollback.reset()
@@ -41,16 +43,23 @@ export function RollbackConfirmationDialog({
         dryRun: true,
         appliedBy,
       })
-      setPreviewMessage(result.message || 'Preview complete')
+      if (!closedRef.current) {
+        setPreviewMessage(result.message || 'Preview complete')
+      }
     } catch (err) {
-      setPreviewMessage(`Preview failed: ${err instanceof Error ? err.message : String(err)}`)
+      if (!closedRef.current) {
+        setPreviewMessage(`Preview failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
     } finally {
-      setPreviewLoading(false)
+      if (!closedRef.current) {
+        setPreviewLoading(false)
+      }
     }
   }
 
   async function handleRollback() {
     if (!version) return
+    closedRef.current = false
     rollback.reset()
     try {
       const result = await rollback.mutateAsync({
@@ -58,7 +67,7 @@ export function RollbackConfirmationDialog({
         dryRun: false,
         appliedBy,
       })
-      if (result.status === RollbackStatus.COMPLETED) {
+      if (!closedRef.current && result.status === RollbackStatus.COMPLETED) {
         onOpenChange(false)
         setPreviewMessage(null)
       }
@@ -67,12 +76,14 @@ export function RollbackConfirmationDialog({
     }
   }
 
-  function handleClose(open: boolean) {
-    if (!open) {
+  function handleClose(nextOpen: boolean) {
+    if (!nextOpen) {
+      closedRef.current = true
+      setPreviewLoading(false)
       setPreviewMessage(null)
       rollback.reset()
     }
-    onOpenChange(open)
+    onOpenChange(nextOpen)
   }
 
   return (

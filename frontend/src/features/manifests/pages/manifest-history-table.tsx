@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { DataTable, type DataTableQueryParams, type DataTableResult } from '@/shared/data-table'
 import { useApiClients } from '@/api/context'
+import { useUserClaims } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -29,6 +30,7 @@ type ExportFormat = 'yaml' | 'json'
 
 export function ManifestHistoryTable() {
   const { manifestHistory } = useApiClients()
+  const claims = useUserClaims()
   const [selectedVersion, setSelectedVersion] = useState<ManifestVersion | null>(null)
   const [compareVersions, setCompareVersions] = useState<ManifestVersion[]>([])
   const [showDiff, setShowDiff] = useState(false)
@@ -222,7 +224,7 @@ export function ManifestHistoryTable() {
         version={rollbackVersion}
         open={rollbackVersion != null}
         onOpenChange={(open) => { if (!open) setRollbackVersion(null) }}
-        appliedBy="ui-user"
+        appliedBy={claims?.userId ?? 'unknown'}
       />
     </>
   )

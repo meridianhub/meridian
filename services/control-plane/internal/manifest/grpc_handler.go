@@ -362,7 +362,7 @@ func (h *HistoryHandler) RollbackManifest(
 		return &controlplanev1.RollbackManifestResponse{
 			Diff:    diffResp,
 			Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_FAILED,
-			Message: fmt.Sprintf("rollback failed: %v", err),
+			Message: "rollback failed: apply pipeline returned an error",
 		}, nil
 	}
 
