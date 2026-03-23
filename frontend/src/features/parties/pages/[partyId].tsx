@@ -82,7 +82,7 @@ export function PartyDetailPage() {
                 </TabsContent>
 
                 <TabsContent value="accounts" className="mt-0">
-                  <AccountsTab partyId={partyId} />
+                  <AccountsTab partyId={partyId} partyType={party?.partyType} />
                 </TabsContent>
 
                 <TabsContent value="audit-trail" className="mt-0">
