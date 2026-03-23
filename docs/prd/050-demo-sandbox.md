@@ -58,7 +58,8 @@ steps:
   - Drop and recreate database
   - docker compose up -d
   - Run --migrate
-  - Run --bootstrap (seeds platform manifest)
+  - Run --bootstrap (seeds platform manifest, provisions master tenant schemas)
+  - Run seed-dev (creates demo tenant with admin user, applies energy manifest, seeds fixture data - parties, accounts, 30 days of transactions)
   - Health check
 ```
 
