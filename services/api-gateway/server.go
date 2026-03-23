@@ -38,6 +38,7 @@ type Server struct {
 	providersConfig       ProvidersConfig
 	authHandler           *AuthHandler
 	ssoHandler            *SSOHandler
+	registrationHandler   *RegistrationHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -202,6 +203,11 @@ func (s *Server) registerRoutes() {
 		// state parameter stored during initiation. The callback URL is a single global
 		// endpoint (no tenant subdomain required).
 		s.mux.Handle("GET /api/auth/callback", http.HandlerFunc(s.ssoHandler.HandleCallback))
+	}
+
+	// Self-service registration endpoint - NO middleware (public, unauthenticated).
+	if s.registrationHandler != nil {
+		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
 	}
 
 	// API routes - with auth and tenant middleware chain.
