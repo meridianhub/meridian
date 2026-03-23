@@ -22,6 +22,18 @@ var (
 	ErrRegistrationLoggerRequired   = errors.New("registration handler: logger is required")
 	ErrRegistrationTenantRequired   = errors.New("registration handler: tenant creator is required")
 	ErrRegistrationIdentityRequired = errors.New("registration handler: identity repository is required")
+
+	errInvalidRequestBody       = errors.New("invalid request body")
+	errMissingRequiredFields    = errors.New("slug, email, and password are required")
+	errInvalidSlug              = errors.New("invalid slug")
+	errPasswordPolicyViolation  = errors.New("password policy violation")
+	errSlugCheckFailed          = errors.New("failed to check slug availability")
+	errSlugTaken                = errors.New("slug is already taken")
+	errTenantAlreadyExists      = errors.New("tenant already exists")
+	errTenantCreationFailed     = errors.New("failed to create tenant")
+	errIdentityCreationFailed   = errors.New("failed to create identity")
+	errInitTenantIdentityFailed = errors.New("failed to initialize tenant identity")
+	errEmailAlreadyRegistered   = errors.New("email already registered in this tenant")
 )
 
 // TenantCreator abstracts tenant creation for the registration handler.
@@ -136,19 +148,19 @@ func (h *RegistrationHandler) HandleRegister(w http.ResponseWriter, r *http.Requ
 func (h *RegistrationHandler) parseAndValidateRequest(r *http.Request) (*registrationRequest, error) {
 	var req registrationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, errors.New("invalid request body")
+		return nil, errInvalidRequestBody
 	}
 
 	if req.Slug == "" || req.Email == "" || req.Password == "" {
-		return nil, errors.New("slug, email, and password are required")
+		return nil, errMissingRequiredFields
 	}
 
 	if err := tenantdomain.ValidateSlug(req.Slug); err != nil {
-		return nil, fmt.Errorf("invalid slug: %v", err)
+		return nil, fmt.Errorf("%w: %v", errInvalidSlug, err)
 	}
 
 	if err := credentials.ValidatePasswordPolicy(req.Password); err != nil {
-		return nil, fmt.Errorf("password policy violation: %v", err)
+		return nil, fmt.Errorf("%w: %v", errPasswordPolicyViolation, err)
 	}
 
 	return &req, nil
@@ -161,10 +173,10 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 	if err != nil {
 		h.logger.ErrorContext(ctx, "registration: failed to check slug availability",
 			"slug", req.Slug, "error", err)
-		return http.StatusInternalServerError, nil, errors.New("failed to check slug availability")
+		return http.StatusInternalServerError, nil, errSlugCheckFailed
 	}
 	if !available {
-		return http.StatusConflict, nil, errors.New("slug is already taken")
+		return http.StatusConflict, nil, errSlugTaken
 	}
 
 	tenantID := strings.ReplaceAll(req.Slug, "-", "_")
@@ -176,11 +188,11 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 	createdTenantID, err := h.tenantCreator.CreateTenant(ctx, tenantID, req.Slug, displayName)
 	if err != nil {
 		if isAlreadyExistsError(err) {
-			return http.StatusConflict, nil, errors.New("tenant already exists")
+			return http.StatusConflict, nil, errTenantAlreadyExists
 		}
 		h.logger.ErrorContext(ctx, "registration: failed to create tenant",
 			"tenant_id", tenantID, "error", err)
-		return http.StatusInternalServerError, nil, errors.New("failed to create tenant")
+		return http.StatusInternalServerError, nil, errTenantCreationFailed
 	}
 
 	if err := h.provisionAdminIdentity(ctx, createdTenantID, req.Email, req.Password); err != nil {
@@ -201,13 +213,14 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 // registrationError is an error with an associated HTTP status code.
 type registrationError struct {
 	status int
-	msg    string
+	inner  error
 }
 
-func (e *registrationError) Error() string { return e.msg }
+func (e *registrationError) Error() string { return e.inner.Error() }
+func (e *registrationError) Unwrap() error { return e.inner }
 
-func newRegistrationError(status int, msg string) *registrationError {
-	return &registrationError{status: status, msg: msg}
+func newRegistrationError(status int, inner error) *registrationError {
+	return &registrationError{status: status, inner: inner}
 }
 
 // provisionAdminIdentity creates the initial admin identity within the new tenant's scope.
@@ -216,30 +229,30 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 	if err != nil {
 		h.logger.ErrorContext(ctx, "registration: invalid tenant ID from creation",
 			"tenant_id", tenantIDStr, "error", err)
-		return newRegistrationError(http.StatusInternalServerError, "failed to initialize tenant identity")
+		return newRegistrationError(http.StatusInternalServerError, errInitTenantIdentityFailed)
 	}
 
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
 	identity, err := identitydomain.NewIdentity(email)
 	if err != nil {
-		return newRegistrationError(http.StatusBadRequest, fmt.Sprintf("invalid email: %v", err))
+		return newRegistrationError(http.StatusBadRequest, fmt.Errorf("%w: %w", errIdentityCreationFailed, err))
 	}
 
 	hash, err := credentials.HashPassword(password)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "registration: failed to hash password", "error", err)
-		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
+		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
 
 	if err := identity.SetPassword(hash); err != nil {
 		h.logger.ErrorContext(ctx, "registration: failed to set password", "error", err)
-		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
+		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
 
 	if err := identity.Activate(); err != nil {
 		h.logger.ErrorContext(ctx, "registration: failed to activate identity", "error", err)
-		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
+		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
 
 	now := time.Now()
@@ -254,11 +267,11 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 
 	if err := h.identityRepo.SaveIdentityWithRoles(tenantCtx, identity, []*identitydomain.RoleAssignment{ra}); err != nil {
 		if errors.Is(err, identitydomain.ErrEmailAlreadyExists) {
-			return newRegistrationError(http.StatusConflict, "email already registered in this tenant")
+			return newRegistrationError(http.StatusConflict, errEmailAlreadyRegistered)
 		}
 		h.logger.ErrorContext(ctx, "registration: failed to save identity",
 			"tenant_id", tenantIDStr, "error", err)
-		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
+		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
 
 	return nil
