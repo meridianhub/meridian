@@ -213,6 +213,19 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
+		// Party - Organization lifecycle control (deactivation via TERMINATE)
+		"party.control_organization": {
+			handler: controlOrganizationHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Apply a lifecycle control action to an organization (e.g., TERMINATE)",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*partyv1.ControlPartyRequest)(nil),
+				ProtoResponseType:    (*partyv1.ControlPartyResponse)(nil),
+				Version:              1,
+			},
+		},
 	}
 
 	for name, h := range handlers {
@@ -296,6 +309,8 @@ type MarketInformationService interface {
 type PartyService interface {
 	// RegisterOrganization registers a new organization party in the party directory.
 	RegisterOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error)
+	// ControlOrganization applies a lifecycle control action (e.g., TERMINATE) to an organization.
+	ControlOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error)
 }
 
 // registerInstrumentHandler creates a handler that registers an instrument via Reference Data.
@@ -446,6 +461,18 @@ func registerOrganizationHandler(deps *HandlerDependencies) saga.Handler {
 			return nil, ErrPartyNotConfigured
 		}
 		return deps.Party.RegisterOrganization(ctx, params)
+	}
+}
+
+// controlOrganizationHandler creates a handler that applies a lifecycle control action
+// to an organization (e.g., TERMINATE for deactivation).
+// Returns an error if Party is nil to prevent silent skipping.
+func controlOrganizationHandler(deps *HandlerDependencies) saga.Handler {
+	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+		if deps.Party == nil {
+			return nil, ErrPartyNotConfigured
+		}
+		return deps.Party.ControlOrganization(ctx, params)
 	}
 }
 

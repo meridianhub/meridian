@@ -38,6 +38,10 @@ func (n *noopParty) RegisterOrganization(_ *saga.StarlarkContext, _ map[string]a
 	return map[string]any{"party_id": "party-uuid-1", "status": "ACTIVE"}, nil
 }
 
+func (n *noopParty) ControlOrganization(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+	return map[string]any{"party_id": "party-uuid-1", "status": "TERMINATED"}, nil
+}
+
 // noopOperationalGateway implements OperationalGatewayService with no-op handlers.
 type noopOperationalGateway struct{}
 

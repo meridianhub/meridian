@@ -78,5 +78,31 @@ func parseExternalReferenceType(s string) (partyv1.ExternalReferenceType, error)
 	return 0, fmt.Errorf("%w: %q", ErrUnknownExternalReferenceType, s)
 }
 
+// ControlOrganization implements PartyService.
+// Converts Starlark params to a ControlPartyRequest with CONTROL_ACTION_TERMINATE
+// and calls the gRPC service. This is used when a manifest DELETE removes an organization.
+func (c *PartyClient) ControlOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	req := &partyv1.ControlPartyRequest{
+		ControlAction: partyv1.ControlAction_CONTROL_ACTION_TERMINATE,
+	}
+	req.PartyId, _ = params["party_id"].(string)
+	req.Reason, _ = params["reason"].(string)
+	if req.Reason == "" {
+		req.Reason = "Organization removed from manifest"
+	}
+
+	callCtx := prepareCallContext(ctx)
+	resp, err := c.client.ControlParty(callCtx, req)
+	if err != nil {
+		return nil, fmt.Errorf("control organization: %w", err)
+	}
+
+	party := resp.GetParty()
+	return map[string]any{
+		"party_id": party.GetPartyId(),
+		"status":   party.GetStatus().String(),
+	}, nil
+}
+
 // Ensure PartyClient implements PartyService at compile time.
 var _ PartyService = (*PartyClient)(nil)

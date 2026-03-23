@@ -19,10 +19,6 @@ var ErrNoMethodMapping = errors.New("no gRPC method mapping")
 // Party types are managed through schema updates; deletion via manifest apply is not supported.
 var ErrDeleteNotSupportedForPartyType = errors.New("delete not supported for party types: update the schema instead")
 
-// ErrDeleteNotSupportedForOrganization is returned when a DELETE action is attempted on an organization.
-// Organizations are deactivated through the Party Service; deletion via manifest apply is not supported.
-var ErrDeleteNotSupportedForOrganization = errors.New("delete not supported for organizations: deactivate the party instead")
-
 // ManifestPlanner transforms a DiffPlan into a dependency-ordered
 // ExecutionPlan of gRPC calls. It assigns each action to a phase
 // based on resource type dependencies and maps actions to the
@@ -133,9 +129,6 @@ func grpcMethodFor(rt differ.ResourceType, action differ.ActionType) (GRPCMethod
 	if rt == differ.ResourcePartyType && action == differ.ActionDelete {
 		return "", ErrDeleteNotSupportedForPartyType
 	}
-	if rt == differ.ResourceOrganization && action == differ.ActionDelete {
-		return "", ErrDeleteNotSupportedForOrganization
-	}
 	key := methodKey{rt, action}
 	method, ok := grpcMethodMap[key]
 	if !ok {
@@ -209,7 +202,7 @@ var grpcMethodMap = map[methodKey]GRPCMethod{
 	// Organizations
 	{differ.ResourceOrganization, differ.ActionCreate}: MethodRegisterOrganization,
 	{differ.ResourceOrganization, differ.ActionUpdate}: MethodRegisterOrganization,
-	// No delete method: organizations are deactivated, not deleted.
+	{differ.ResourceOrganization, differ.ActionDelete}: MethodControlOrganization,
 
 	// Internal Accounts
 	{differ.ResourceInternalAccount, differ.ActionCreate}: MethodInitiateAccount,
