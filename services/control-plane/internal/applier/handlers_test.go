@@ -719,6 +719,7 @@ func (m *mockMarketInformation) ActivateDataSet(ctx *saga.StarlarkContext, param
 // mockParty implements PartyService for testing.
 type mockParty struct {
 	registerOrganizationFn func(*saga.StarlarkContext, map[string]any) (any, error)
+	controlOrganizationFn  func(*saga.StarlarkContext, map[string]any) (any, error)
 }
 
 func (m *mockParty) RegisterOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
@@ -726,6 +727,13 @@ func (m *mockParty) RegisterOrganization(ctx *saga.StarlarkContext, params map[s
 		return m.registerOrganizationFn(ctx, params)
 	}
 	return map[string]any{"party_id": params["party_id"], "status": "ACTIVE"}, nil
+}
+
+func (m *mockParty) ControlOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	if m.controlOrganizationFn != nil {
+		return m.controlOrganizationFn(ctx, params)
+	}
+	return map[string]any{"party_id": params["party_id"], "status": "TERMINATED"}, nil
 }
 
 // TestRegisterDataSourceHandler verifies the handler delegates to MarketInformationService.
@@ -942,6 +950,57 @@ func TestRegisterOrganizationHandler_NilService(t *testing.T) {
 	require.NoError(t, err)
 
 	handler, err := registry.Get("party.register_organization")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	_, err = handler(ctx, map[string]any{"party_id": "acme-corp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "party service not configured")
+}
+
+// TestControlOrganizationHandler verifies the handler delegates to PartyService.
+func TestControlOrganizationHandler(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+		Party:           &mockParty{},
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.control_organization")
+	require.NoError(t, err)
+
+	ctx := newTestStarlarkContext()
+	params := map[string]any{
+		"party_id": "acme-corp",
+		"reason":   "Removed from manifest",
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "acme-corp", resultMap["party_id"])
+	assert.Equal(t, "TERMINATED", resultMap["status"])
+}
+
+// TestControlOrganizationHandler_NilService verifies error when Party service is nil.
+func TestControlOrganizationHandler_NilService(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	deps := &HandlerDependencies{
+		ReferenceData:   &mockReferenceData{},
+		InternalAccount: &mockInternalAccount{},
+		Party:           nil,
+	}
+
+	err := RegisterManifestHandlers(registry, deps)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("party.control_organization")
 	require.NoError(t, err)
 
 	ctx := newTestStarlarkContext()
