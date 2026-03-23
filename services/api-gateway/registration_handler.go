@@ -19,8 +19,8 @@ import (
 
 // RegistrationHandler errors.
 var (
-	ErrRegistrationLoggerRequired  = errors.New("registration handler: logger is required")
-	ErrRegistrationTenantRequired  = errors.New("registration handler: tenant creator is required")
+	ErrRegistrationLoggerRequired   = errors.New("registration handler: logger is required")
+	ErrRegistrationTenantRequired   = errors.New("registration handler: tenant creator is required")
 	ErrRegistrationIdentityRequired = errors.New("registration handler: identity repository is required")
 )
 
@@ -98,7 +98,6 @@ func (h *RegistrationHandler) HandleRegister(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Rate limit by client IP.
 	clientIP := ClientIP(r)
 	if !h.rateLimiter.Allow(clientIP) {
 		h.logger.WarnContext(r.Context(), "registration rate limited",
@@ -109,144 +108,145 @@ func (h *RegistrationHandler) HandleRegister(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Limit request body to 4KB.
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 
-	var req registrationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "invalid request body",
-		})
-		return
-	}
-
-	// Validate required fields.
-	if req.Slug == "" || req.Email == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "slug, email, and password are required",
-		})
-		return
-	}
-
-	// Validate slug format.
-	if err := tenantdomain.ValidateSlug(req.Slug); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("invalid slug: %v", err),
-		})
-		return
-	}
-
-	// Validate password policy.
-	if err := credentials.ValidatePasswordPolicy(req.Password); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("password policy violation: %v", err),
-		})
+	req, err := h.parseAndValidateRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	ctx := r.Context()
 
-	// Check slug availability.
+	status, resp, err := h.executeRegistration(ctx, req)
+	if err != nil {
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+
+	h.logger.InfoContext(ctx, "registration: tenant and admin identity created",
+		"tenant_id", resp.TenantID,
+		"slug", req.Slug,
+		"client_ip", clientIP)
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// parseAndValidateRequest decodes and validates the registration request body.
+func (h *RegistrationHandler) parseAndValidateRequest(r *http.Request) (*registrationRequest, error) {
+	var req registrationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, errors.New("invalid request body")
+	}
+
+	if req.Slug == "" || req.Email == "" || req.Password == "" {
+		return nil, errors.New("slug, email, and password are required")
+	}
+
+	if err := tenantdomain.ValidateSlug(req.Slug); err != nil {
+		return nil, fmt.Errorf("invalid slug: %v", err)
+	}
+
+	if err := credentials.ValidatePasswordPolicy(req.Password); err != nil {
+		return nil, fmt.Errorf("password policy violation: %v", err)
+	}
+
+	return &req, nil
+}
+
+// executeRegistration performs tenant creation and identity provisioning.
+// Returns (httpStatus, response, error). On success error is nil.
+func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *registrationRequest) (int, *registrationResponse, error) {
 	available, err := h.tenantCreator.IsSlugAvailable(ctx, req.Slug)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "registration: failed to check slug availability",
-			"slug", req.Slug,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to check slug availability",
-		})
-		return
+			"slug", req.Slug, "error", err)
+		return http.StatusInternalServerError, nil, errors.New("failed to check slug availability")
 	}
 	if !available {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "slug is already taken",
-		})
-		return
+		return http.StatusConflict, nil, errors.New("slug is already taken")
 	}
 
-	// Derive tenant ID from slug (replace hyphens with underscores for DB schema naming).
 	tenantID := strings.ReplaceAll(req.Slug, "-", "_")
-
-	// Default display name to slug if not provided.
 	displayName := req.DisplayName
 	if displayName == "" {
 		displayName = req.Slug
 	}
 
-	// Create tenant.
 	createdTenantID, err := h.tenantCreator.CreateTenant(ctx, tenantID, req.Slug, displayName)
 	if err != nil {
 		if isAlreadyExistsError(err) {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "tenant already exists",
-			})
-			return
+			return http.StatusConflict, nil, errors.New("tenant already exists")
 		}
 		h.logger.ErrorContext(ctx, "registration: failed to create tenant",
-			"tenant_id", tenantID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to create tenant",
-		})
-		return
+			"tenant_id", tenantID, "error", err)
+		return http.StatusInternalServerError, nil, errors.New("failed to create tenant")
 	}
 
-	// Create admin identity within the new tenant's scope.
-	tid, err := tenant.NewTenantID(createdTenantID)
+	if err := h.provisionAdminIdentity(ctx, createdTenantID, req.Email, req.Password); err != nil {
+		return err.status, nil, err
+	}
+
+	loginURL := fmt.Sprintf("https://%s.%s/login", req.Slug, h.baseDomain)
+	if h.baseDomain == "" {
+		loginURL = fmt.Sprintf("/login?tenant=%s", req.Slug)
+	}
+
+	return http.StatusCreated, &registrationResponse{
+		TenantID: createdTenantID,
+		LoginURL: loginURL,
+	}, nil
+}
+
+// registrationError is an error with an associated HTTP status code.
+type registrationError struct {
+	status int
+	msg    string
+}
+
+func (e *registrationError) Error() string { return e.msg }
+
+func newRegistrationError(status int, msg string) *registrationError {
+	return &registrationError{status: status, msg: msg}
+}
+
+// provisionAdminIdentity creates the initial admin identity within the new tenant's scope.
+func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenantIDStr, email, password string) *registrationError {
+	tid, err := tenant.NewTenantID(tenantIDStr)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "registration: invalid tenant ID from creation",
-			"tenant_id", createdTenantID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to initialize tenant identity",
-		})
-		return
+			"tenant_id", tenantIDStr, "error", err)
+		return newRegistrationError(http.StatusInternalServerError, "failed to initialize tenant identity")
 	}
 
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
-	identity, err := identitydomain.NewIdentity(req.Email)
+	identity, err := identitydomain.NewIdentity(email)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("invalid email: %v", err),
-		})
-		return
+		return newRegistrationError(http.StatusBadRequest, fmt.Sprintf("invalid email: %v", err))
 	}
 
-	hash, err := credentials.HashPassword(req.Password)
+	hash, err := credentials.HashPassword(password)
 	if err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to hash password",
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to create identity",
-		})
-		return
+		h.logger.ErrorContext(ctx, "registration: failed to hash password", "error", err)
+		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
 	}
 
 	if err := identity.SetPassword(hash); err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to set password",
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to create identity",
-		})
-		return
+		h.logger.ErrorContext(ctx, "registration: failed to set password", "error", err)
+		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
 	}
 
 	if err := identity.Activate(); err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to activate identity",
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to create identity",
-		})
-		return
+		h.logger.ErrorContext(ctx, "registration: failed to activate identity", "error", err)
+		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
 	}
 
-	// Assign TENANT_OWNER role to the admin identity.
 	now := time.Now()
 	ra := identitydomain.ReconstructRoleAssignment(
 		uuid.New(),
 		identity.ID(),
-		identity.ID(), // self-granted (system bootstrap)
+		identity.ID(),
 		identitydomain.RoleTenantOwner,
 		nil, nil, nil,
 		now, now,
@@ -254,35 +254,14 @@ func (h *RegistrationHandler) HandleRegister(w http.ResponseWriter, r *http.Requ
 
 	if err := h.identityRepo.SaveIdentityWithRoles(tenantCtx, identity, []*identitydomain.RoleAssignment{ra}); err != nil {
 		if errors.Is(err, identitydomain.ErrEmailAlreadyExists) {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "email already registered in this tenant",
-			})
-			return
+			return newRegistrationError(http.StatusConflict, "email already registered in this tenant")
 		}
 		h.logger.ErrorContext(ctx, "registration: failed to save identity",
-			"tenant_id", createdTenantID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to create identity",
-		})
-		return
+			"tenant_id", tenantIDStr, "error", err)
+		return newRegistrationError(http.StatusInternalServerError, "failed to create identity")
 	}
 
-	h.logger.InfoContext(ctx, "registration: tenant and admin identity created",
-		"tenant_id", createdTenantID,
-		"slug", req.Slug,
-		"identity_id", identity.ID(),
-		"client_ip", clientIP)
-
-	loginURL := fmt.Sprintf("https://%s.%s/login", req.Slug, h.baseDomain)
-	if h.baseDomain == "" {
-		loginURL = fmt.Sprintf("/login?tenant=%s", req.Slug)
-	}
-
-	writeJSON(w, http.StatusCreated, registrationResponse{
-		TenantID: createdTenantID,
-		LoginURL: loginURL,
-	})
+	return nil
 }
 
 // WithRegistrationHandler sets the self-service registration handler for the server.

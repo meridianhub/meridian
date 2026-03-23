@@ -40,36 +40,46 @@ type stubIdentityRepo struct {
 func (s *stubIdentityRepo) Save(_ context.Context, _ *identitydomain.Identity) error {
 	return nil
 }
+
 func (s *stubIdentityRepo) FindByID(_ context.Context, _ uuid.UUID) (*identitydomain.Identity, error) {
 	return nil, identitydomain.ErrIdentityNotFound
 }
+
 func (s *stubIdentityRepo) FindByEmail(_ context.Context, _ string) (*identitydomain.Identity, error) {
 	return nil, identitydomain.ErrIdentityNotFound
 }
+
 func (s *stubIdentityRepo) ListByTenant(_ context.Context) ([]*identitydomain.Identity, error) {
 	return nil, nil
 }
+
 func (s *stubIdentityRepo) SaveRoleAssignment(_ context.Context, _ *identitydomain.RoleAssignment) error {
 	return nil
 }
+
 func (s *stubIdentityRepo) FindRoleAssignments(_ context.Context, _ uuid.UUID) ([]*identitydomain.RoleAssignment, error) {
 	return nil, nil
 }
+
 func (s *stubIdentityRepo) SaveIdentityWithInvitation(_ context.Context, _ *identitydomain.Identity, _ *identitydomain.Invitation) error {
 	return nil
 }
+
 func (s *stubIdentityRepo) SaveIdentityWithRoles(ctx context.Context, identity *identitydomain.Identity, roles []*identitydomain.RoleAssignment) error {
 	if s.saveIdentityWithRolesFn != nil {
 		return s.saveIdentityWithRolesFn(ctx, identity, roles)
 	}
 	return nil
 }
+
 func (s *stubIdentityRepo) SaveRoleAssignments(_ context.Context, _ []*identitydomain.RoleAssignment) error {
 	return nil
 }
+
 func (s *stubIdentityRepo) SaveInvitation(_ context.Context, _ *identitydomain.Invitation) error {
 	return nil
 }
+
 func (s *stubIdentityRepo) FindInvitationByTokenHash(_ context.Context, _ string) (*identitydomain.Invitation, error) {
 	return nil, identitydomain.ErrInvitationNotFound
 }
