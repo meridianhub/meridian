@@ -242,9 +242,9 @@ func run(logger *slog.Logger) error {
 	// Cross-service health checks (position-keeping, financial-accounting) are not
 	// wired here - each service is independently deployable.
 	healthChecker, err := service.NewHealthChecker(service.HealthCheckerConfig{
-		Repository:  repo,
-		Logger:      logger,
-		ServiceName: "current-account",
+		Repository:   repo,
+		Logger:       logger,
+		ServiceName:  "current-account",
 		CheckTimeout: defaults.DefaultHealthCheckTimeout,
 	})
 	if err != nil {
@@ -443,4 +443,3 @@ func createServiceWithClients(
 
 	return svc, svcClients, nil
 }
-

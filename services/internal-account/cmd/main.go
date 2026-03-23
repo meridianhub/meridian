@@ -336,4 +336,3 @@ func createServiceWithClients(
 
 	return svc, svcClients, nil
 }
-
