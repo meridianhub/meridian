@@ -18,7 +18,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, RotateCcw } from 'lucide-react'
 import yaml from 'js-yaml'
 import { manifestKeys } from '@/lib/query-keys'
 import type { ManifestVersion } from '@/api/gen/meridian/control_plane/v1/manifest_history_service_pb'
@@ -26,6 +26,7 @@ import { ApplyStatus } from '@/api/gen/meridian/control_plane/v1/manifest_histor
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import { buildManifestGraph } from '../lib/manifest-graph-model'
 import { ManifestDiffGraph } from '../components/manifest-diff-graph'
+import { RollbackConfirmationDialog } from '../components/rollback-confirmation-dialog'
 
 const APPLY_STATUS_LABEL: Record<number, string> = {
   [ApplyStatus.APPLIED]: 'APPLIED',
@@ -37,6 +38,7 @@ const APPLY_STATUS_LABEL: Record<number, string> = {
 function buildColumns(
   compareSet: Set<string>,
   onToggleCompare: (version: ManifestVersion) => void,
+  onRollback: (version: ManifestVersion) => void,
 ): ColumnDef<ManifestVersion>[] {
   return [
     {
@@ -92,6 +94,25 @@ function buildColumns(
         </span>
       ),
     },
+    {
+      id: 'actions',
+      header: '',
+      cell: ({ row }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation()
+            onRollback(row.original)
+          }}
+          title={`Rollback to version ${row.original.version}`}
+          data-testid={`rollback-button-${row.original.version}`}
+        >
+          <RotateCcw className="h-4 w-4" />
+        </Button>
+      ),
+      enableSorting: false,
+    },
   ]
 }
 
@@ -103,6 +124,7 @@ export function ManifestHistoryTable() {
   const [compareVersions, setCompareVersions] = useState<ManifestVersion[]>([])
   const [showDiff, setShowDiff] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [rollbackVersion, setRollbackVersion] = useState<ManifestVersion | null>(null)
 
   const compareSet = useMemo(
     () => new Set(compareVersions.map((v) => v.id ?? v.version)),
@@ -120,7 +142,7 @@ export function ManifestHistoryTable() {
   }
 
   const columns = useMemo(
-    () => buildColumns(compareSet, toggleCompare),
+    () => buildColumns(compareSet, toggleCompare, setRollbackVersion),
     [compareSet],
   )
 
@@ -286,6 +308,13 @@ export function ManifestHistoryTable() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <RollbackConfirmationDialog
+        version={rollbackVersion}
+        open={rollbackVersion != null}
+        onOpenChange={(open) => { if (!open) setRollbackVersion(null) }}
+        appliedBy="ui-user"
+      />
     </>
   )
 }
