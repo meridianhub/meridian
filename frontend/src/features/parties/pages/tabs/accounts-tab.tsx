@@ -10,9 +10,12 @@ import { useClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { AccountStatus } from '@/api/gen/meridian/current_account/v1/current_account_pb'
+import { PartyType } from '@/api/gen/meridian/party/v1/party_pb'
 
 interface AccountsTabProps {
   partyId: string
+  /** Party type passed from the parent page to avoid a duplicate fetch */
+  partyType?: number | string
 }
 
 interface AccountRow {
@@ -57,10 +60,15 @@ const columns: ColumnDef<AccountRow>[] = [
   },
 ]
 
-export function AccountsTab({ partyId }: AccountsTabProps) {
+export function AccountsTab({ partyId, partyType }: AccountsTabProps) {
   const clients = useClients()
   const tenantSlug = useTenantSlug()
   const navigate = useNavigate()
+
+  const isOrganization =
+    partyType === PartyType.ORGANIZATION ||
+    partyType === 'PARTY_TYPE_ORGANIZATION' ||
+    partyType === 'ORGANIZATION'
 
   const queryKey = React.useMemo(
     () => [...tenantKeys.party(tenantSlug ?? '', partyId), 'accounts'],
@@ -71,54 +79,24 @@ export function AccountsTab({ partyId }: AccountsTabProps) {
     async (params: DataTableQueryParams): Promise<DataTableResult<AccountRow>> => {
       if (!tenantSlug) return { items: [] }
 
-      // The API does not support filtering by partyId, so we fetch pages and filter
-      // client-side. We continue fetching until we have enough matching rows to fill
-      // pageSize, or the API is exhausted. MAX_PAGES caps sequential API calls to
-      // prevent unbounded fetching when the party owns few accounts in a large dataset.
-      const MAX_PAGES = 10
-      const collected: AccountRow[] = []
-      let cursor = params.pageToken ?? ''
-      let nextPageToken: string | undefined
-      let pagesScanned = 0
-
-      while (collected.length < params.pageSize && pagesScanned < MAX_PAGES) {
-        pagesScanned++
-        // Use remaining slots as batch size to avoid dropping same-page overflow:
-        // if the batch were larger than remaining slots, we might get more matches
-        // than pageSize in one batch but nextPageToken would advance past them.
-        const remaining = Math.max(params.pageSize - collected.length, 1)
-        const response = await clients.currentAccount.listCurrentAccounts({
-          pageSize: remaining,
-          pageToken: cursor,
-        })
-
-        for (const a of response.accounts ?? []) {
-          if (a.orgPartyId === partyId || a.partyId === partyId) {
-            collected.push({
-              accountId: a.accountId,
-              externalReference: a.externalIdentifier ?? '',
-              status: ACCOUNT_STATUS_NAMES[a.accountStatus] ?? String(a.accountStatus),
-              instrumentCode: a.instrumentCode || '',
-              createdAt: a.createdAt ?? undefined,
-            })
-          }
-        }
-
-        if (!response.nextPageToken) {
-          nextPageToken = undefined
-          break
-        }
-
-        cursor = response.nextPageToken
-        nextPageToken = response.nextPageToken
-      }
+      const response = await clients.currentAccount.listCurrentAccounts({
+        pageSize: params.pageSize,
+        pageToken: params.pageToken ?? '',
+        ...(isOrganization ? { orgPartyId: partyId } : { partyId }),
+      })
 
       return {
-        items: collected.slice(0, params.pageSize),
-        nextPageToken,
+        items: (response.accounts ?? []).map((a) => ({
+          accountId: a.accountId,
+          externalReference: a.externalIdentifier ?? '',
+          status: ACCOUNT_STATUS_NAMES[a.accountStatus] ?? String(a.accountStatus),
+          instrumentCode: a.instrumentCode || '',
+          createdAt: a.createdAt ?? undefined,
+        })),
+        nextPageToken: response.nextPageToken || undefined,
       }
     },
-    [tenantSlug, partyId, clients],
+    [tenantSlug, partyId, isOrganization, clients],
   )
 
   return (
