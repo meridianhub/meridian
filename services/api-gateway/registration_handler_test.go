@@ -261,10 +261,16 @@ func TestRegistrationHandler_WeakPassword(t *testing.T) {
 	assert.Contains(t, resp["error"], "password")
 }
 
-func TestRegistrationHandler_SlugTaken(t *testing.T) {
+func TestRegistrationHandler_TenantCreationAlreadyExistsIsIdempotent(t *testing.T) {
 	tc, ir := defaultStubs()
-	tc.slugAvailable = func(_ context.Context, _ string) (bool, error) {
-		return false, nil
+	tc.createFn = func(_ context.Context, _, _, _ string) (string, error) {
+		return "", errors.New("tenant acme_corp already exists (AlreadyExists)")
+	}
+
+	var identitySaved bool
+	ir.saveIdentityWithRolesFn = func(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
+		identitySaved = true
+		return nil
 	}
 
 	h := newRegistrationHandler(t, tc, ir)
@@ -274,9 +280,9 @@ func TestRegistrationHandler_SlugTaken(t *testing.T) {
 		"password": "SecurePass123!",
 	})
 
-	assert.Equal(t, http.StatusConflict, w.Code)
-	resp := parseResponse(t, w)
-	assert.Contains(t, resp["error"], "taken")
+	// Idempotent: proceeds to create identity even when tenant already exists.
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.True(t, identitySaved, "identity should be saved even when tenant already exists")
 }
 
 func TestRegistrationHandler_TenantCreationFails(t *testing.T) {
@@ -295,10 +301,13 @@ func TestRegistrationHandler_TenantCreationFails(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestRegistrationHandler_TenantAlreadyExists(t *testing.T) {
+func TestRegistrationHandler_TenantAlreadyExistsEmailConflict(t *testing.T) {
 	tc, ir := defaultStubs()
 	tc.createFn = func(_ context.Context, _, _, _ string) (string, error) {
 		return "", errors.New("tenant acme_corp already exists (AlreadyExists)")
+	}
+	ir.saveIdentityWithRolesFn = func(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
+		return identitydomain.ErrEmailAlreadyExists
 	}
 
 	h := newRegistrationHandler(t, tc, ir)
@@ -308,7 +317,10 @@ func TestRegistrationHandler_TenantAlreadyExists(t *testing.T) {
 		"password": "SecurePass123!",
 	})
 
+	// Tenant exists AND email already registered → 409 Conflict.
 	assert.Equal(t, http.StatusConflict, w.Code)
+	resp := parseResponse(t, w)
+	assert.Contains(t, resp["error"], "already registered")
 }
 
 func TestRegistrationHandler_IdentitySaveFails(t *testing.T) {

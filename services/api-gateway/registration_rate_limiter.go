@@ -1,8 +1,6 @@
 package gateway
 
 import (
-	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -11,11 +9,16 @@ import (
 
 // RegistrationRateLimiter provides per-IP rate limiting for the registration endpoint.
 // It uses an in-memory map of token-bucket limiters keyed by client IP.
+//
+// Limitation: state is per-process. With multiple replicas, each has an independent
+// limiter, so the effective limit is multiplied by replica count. For stronger
+// guarantees, replace with a Redis-backed limiter (e.g., go-redis/redis_rate).
 type RegistrationRateLimiter struct {
 	mu       sync.Mutex
 	limiters map[string]*ipLimiter
 	rate     rate.Limit
 	burst    int
+	stop     chan struct{}
 }
 
 type ipLimiter struct {
@@ -24,13 +27,17 @@ type ipLimiter struct {
 }
 
 // NewRegistrationRateLimiter creates a rate limiter that allows the given number of
-// registrations per 24-hour window per IP address.
+// registrations per 24-hour window per IP address. A background goroutine runs
+// every hour to evict stale entries.
 func NewRegistrationRateLimiter(perDay int) *RegistrationRateLimiter {
-	return &RegistrationRateLimiter{
+	rl := &RegistrationRateLimiter{
 		limiters: make(map[string]*ipLimiter),
 		rate:     rate.Limit(float64(perDay) / (24 * 60 * 60)),
 		burst:    perDay,
+		stop:     make(chan struct{}),
 	}
+	go rl.cleanupLoop()
+	return rl
 }
 
 // Allow returns true if the given IP is permitted to make a registration request.
@@ -50,7 +57,6 @@ func (rl *RegistrationRateLimiter) Allow(ip string) bool {
 }
 
 // Cleanup removes entries that have not been seen for the given duration.
-// Callers should invoke this periodically (e.g., every hour) to bound memory.
 func (rl *RegistrationRateLimiter) Cleanup(maxAge time.Duration) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -63,20 +69,21 @@ func (rl *RegistrationRateLimiter) Cleanup(maxAge time.Duration) {
 	}
 }
 
-// ClientIP extracts the client IP from the request, preferring X-Forwarded-For
-// when present (common behind reverse proxies), falling back to RemoteAddr.
-func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For: client, proxy1, proxy2 - take the leftmost (client).
-		if idx := strings.IndexByte(xff, ','); idx > 0 {
-			return strings.TrimSpace(xff[:idx])
+// Stop halts the background cleanup goroutine.
+func (rl *RegistrationRateLimiter) Stop() {
+	close(rl.stop)
+}
+
+// cleanupLoop evicts stale limiter entries every hour.
+func (rl *RegistrationRateLimiter) cleanupLoop() {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			rl.Cleanup(24 * time.Hour)
+		case <-rl.stop:
+			return
 		}
-		return strings.TrimSpace(xff)
 	}
-	// RemoteAddr is "host:port"; strip the port.
-	addr := r.RemoteAddr
-	if idx := strings.LastIndexByte(addr, ':'); idx > 0 {
-		return addr[:idx]
-	}
-	return addr
 }

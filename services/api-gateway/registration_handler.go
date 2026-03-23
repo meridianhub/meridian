@@ -27,9 +27,6 @@ var (
 	errMissingRequiredFields    = errors.New("slug, email, and password are required")
 	errInvalidSlug              = errors.New("invalid slug")
 	errPasswordPolicyViolation  = errors.New("password policy violation")
-	errSlugCheckFailed          = errors.New("failed to check slug availability")
-	errSlugTaken                = errors.New("slug is already taken")
-	errTenantAlreadyExists      = errors.New("tenant already exists")
 	errTenantCreationFailed     = errors.New("failed to create tenant")
 	errIdentityCreationFailed   = errors.New("failed to create identity")
 	errInitTenantIdentityFailed = errors.New("failed to initialize tenant identity")
@@ -39,7 +36,7 @@ var (
 // TenantCreator abstracts tenant creation for the registration handler.
 type TenantCreator interface {
 	// CreateTenant creates a new tenant with the given ID, slug, and display name.
-	// Returns the tenant ID on success.
+	// Returns the tenant ID on success, or the existing tenant ID if it already exists.
 	CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error)
 	// IsSlugAvailable checks whether a slug is available for use.
 	IsSlugAvailable(ctx context.Context, slug string) (bool, error)
@@ -110,7 +107,7 @@ func (h *RegistrationHandler) HandleRegister(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	clientIP := ClientIP(r)
+	clientIP := getClientIP(r)
 	if !h.rateLimiter.Allow(clientIP) {
 		h.logger.WarnContext(r.Context(), "registration rate limited",
 			"client_ip", clientIP)
@@ -168,17 +165,11 @@ func (h *RegistrationHandler) parseAndValidateRequest(r *http.Request) (*registr
 
 // executeRegistration performs tenant creation and identity provisioning.
 // Returns (httpStatus, response, error). On success error is nil.
+//
+// The flow is idempotent: if the tenant already exists (e.g., from a prior
+// attempt where identity creation failed), the handler proceeds to create
+// the identity in the existing tenant rather than returning a conflict error.
 func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *registrationRequest) (int, *registrationResponse, error) {
-	available, err := h.tenantCreator.IsSlugAvailable(ctx, req.Slug)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to check slug availability",
-			"slug", req.Slug, "error", err)
-		return http.StatusInternalServerError, nil, errSlugCheckFailed
-	}
-	if !available {
-		return http.StatusConflict, nil, errSlugTaken
-	}
-
 	tenantID := strings.ReplaceAll(req.Slug, "-", "_")
 	displayName := req.DisplayName
 	if displayName == "" {
@@ -186,13 +177,14 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 	}
 
 	createdTenantID, err := h.tenantCreator.CreateTenant(ctx, tenantID, req.Slug, displayName)
-	if err != nil {
-		if isAlreadyExistsError(err) {
-			return http.StatusConflict, nil, errTenantAlreadyExists
-		}
+	if err != nil && !isAlreadyExistsError(err) {
 		h.logger.ErrorContext(ctx, "registration: failed to create tenant",
 			"tenant_id", tenantID, "error", err)
 		return http.StatusInternalServerError, nil, errTenantCreationFailed
+	}
+	// On AlreadyExists, proceed with identity creation (idempotent retry).
+	if createdTenantID == "" {
+		createdTenantID = tenantID
 	}
 
 	if err := h.provisionAdminIdentity(ctx, createdTenantID, req.Email, req.Password); err != nil {

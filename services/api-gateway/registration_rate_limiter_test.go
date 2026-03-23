@@ -1,8 +1,6 @@
 package gateway_test
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -44,51 +42,6 @@ func TestRegistrationRateLimiter_Cleanup(t *testing.T) {
 	// After cleanup, IPs get fresh limiters (burst resets).
 	for i := 0; i < 5; i++ {
 		assert.True(t, rl.Allow("10.0.0.1"), "request %d should be allowed after cleanup", i+1)
-	}
-}
-
-func TestClientIP_XForwardedFor(t *testing.T) {
-	tests := []struct {
-		name     string
-		xff      string
-		remote   string
-		expected string
-	}{
-		{
-			name:     "single IP in XFF",
-			xff:      "203.0.113.50",
-			remote:   "10.0.0.1:1234",
-			expected: "203.0.113.50",
-		},
-		{
-			name:     "multiple IPs in XFF, takes first",
-			xff:      "203.0.113.50, 70.41.3.18, 150.172.238.178",
-			remote:   "10.0.0.1:1234",
-			expected: "203.0.113.50",
-		},
-		{
-			name:     "no XFF, falls back to RemoteAddr",
-			xff:      "",
-			remote:   "192.168.1.100:5678",
-			expected: "192.168.1.100",
-		},
-		{
-			name:     "no XFF, RemoteAddr without port",
-			xff:      "",
-			remote:   "192.168.1.100",
-			expected: "192.168.1.100",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodPost, "/register", nil)
-			r.RemoteAddr = tt.remote
-			if tt.xff != "" {
-				r.Header.Set("X-Forwarded-For", tt.xff)
-			}
-			assert.Equal(t, tt.expected, gateway.ClientIP(r))
-		})
 	}
 }
 
