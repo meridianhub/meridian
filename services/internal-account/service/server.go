@@ -745,6 +745,7 @@ func (s *Service) ListInternalAccounts(ctx context.Context, req *pb.ListInternal
 	if req.OrgPartyIdFilter != "" {
 		orgPartyID, err := uuid.Parse(req.OrgPartyIdFilter)
 		if err != nil {
+			operationStatus = operationStatusFailed
 			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id_filter: %v", err)
 		}
 		filter.OrgPartyID = &orgPartyID
