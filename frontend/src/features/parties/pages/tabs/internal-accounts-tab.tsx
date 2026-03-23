@@ -7,6 +7,7 @@ import { StatusBadge } from '@/shared/status-badge'
 import { useClients } from '@/api/context'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
+import { InternalAccountStatus } from '@/api/gen/meridian/internal_account/v1/internal_account_pb'
 
 interface InternalAccountsTabProps {
   partyId: string
@@ -17,17 +18,17 @@ interface InternalAccountRow {
   accountCode: string
   name: string
   behaviorClass: string
-  accountStatus: number
+  accountStatus: InternalAccountStatus
   instrumentCode: string
 }
 
-function accountStatusLabel(status: number): string {
+function accountStatusLabel(status: InternalAccountStatus): string {
   switch (status) {
-    case 1:
+    case InternalAccountStatus.ACTIVE:
       return 'ACTIVE'
-    case 2:
+    case InternalAccountStatus.SUSPENDED:
       return 'SUSPENDED'
-    case 3:
+    case InternalAccountStatus.CLOSED:
       return 'CLOSED'
     default:
       return 'UNKNOWN'
