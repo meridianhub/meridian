@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	// Proto registrations
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	auditv1 "github.com/meridianhub/meridian/api/proto/meridian/audit/v1"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
@@ -776,13 +777,26 @@ func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Po
 	}
 
 	// Register ManifestHistoryService for manifest version history queries.
+	// Wire the loopback ApplyManifestService client to enable RollbackManifest RPC.
+	applyClient := controlplanev1.NewApplyManifestServiceClient(loopback.rawConn)
 	if err := controlplaneservice.RegisterManifestHistoryService(server, controlplaneservice.ManifestHistoryServiceConfig{
-		DB:     db,
-		Logger: logger,
+		DB:      db,
+		Logger:  logger,
+		Applier: loopbackApplyManifestAdapter{c: applyClient},
 	}); err != nil {
 		return err
 	}
 	logger.Info("registered control-plane service (ManifestHistoryService)")
 
 	return nil
+}
+
+// loopbackApplyManifestAdapter adapts the gRPC ApplyManifestServiceClient to
+// the manifest.ManifestApplier interface for rollback support.
+type loopbackApplyManifestAdapter struct {
+	c controlplanev1.ApplyManifestServiceClient
+}
+
+func (a loopbackApplyManifestAdapter) ApplyManifest(ctx context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
+	return a.c.ApplyManifest(ctx, req)
 }
