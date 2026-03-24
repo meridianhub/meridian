@@ -117,7 +117,7 @@ type Client struct {
 //	    return err
 //	}
 //	defer cleanup()
-func New(cfg Config) (*Client, func(), error) {
+func New(ctx context.Context, cfg Config) (*Client, func(), error) {
 	// Apply defaults
 	if cfg.Timeout == 0 {
 		cfg.Timeout = DefaultTimeout
@@ -147,7 +147,7 @@ func New(cfg Config) (*Client, func(), error) {
 		}
 
 		// Use platform factory for DNS-based load balancing
-		conn, err = platformgrpc.NewClient(context.Background(), platformgrpc.ClientConfig{
+		conn, err = platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
 			ServiceName: cfg.ServiceName,
 			Namespace:   cfg.Namespace,
 			Port:        cfg.Port,

@@ -78,7 +78,7 @@ func createCurrentAccountClient(namespace string, logger *slog.Logger, tracer *o
 // createFinancialAccountingClient creates the FinancialAccounting gRPC client with resilience patterns.
 // Uses the service-owned client package from services/financial-accounting/client for standardized
 // client creation with built-in tracing and resilience patterns.
-func createFinancialAccountingClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.FinancialAccountingClient, func(), error) {
+func createFinancialAccountingClient(ctx context.Context, namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.FinancialAccountingClient, func(), error) {
 	logger.Info("connecting to financial-accounting service",
 		"service", financialaccountingclient.ServiceName,
 		"namespace", namespace,
@@ -110,7 +110,7 @@ func createFinancialAccountingClient(namespace string, logger *slog.Logger, trac
 	)
 
 	// Use the service-owned client package with DNS-based load balancing
-	client, cleanup, err := financialaccountingclient.New(financialaccountingclient.Config{
+	client, cleanup, err := financialaccountingclient.New(ctx, financialaccountingclient.Config{
 		ServiceName: financialaccountingclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.FinancialAccounting,

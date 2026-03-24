@@ -18,7 +18,7 @@ import (
 )
 
 func TestNew_WithTarget(t *testing.T) {
-	client, cleanup, err := New(Config{
+	client, cleanup, err := New(context.Background(), Config{
 		Target:  "localhost:50055",
 		Timeout: 10 * time.Second,
 	})
@@ -35,7 +35,7 @@ func TestNew_WithTarget(t *testing.T) {
 }
 
 func TestNew_WithServiceName(t *testing.T) {
-	client, cleanup, err := New(Config{
+	client, cleanup, err := New(context.Background(), Config{
 		ServiceName: "party",
 		Namespace:   "default",
 		Port:        50055,
@@ -52,7 +52,7 @@ func TestNew_WithServiceName(t *testing.T) {
 }
 
 func TestNew_Defaults(t *testing.T) {
-	client, cleanup, err := New(Config{
+	client, cleanup, err := New(context.Background(), Config{
 		Target: "localhost:50055",
 	})
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestNew_Defaults(t *testing.T) {
 }
 
 func TestNew_RequiresTargetOrServiceName(t *testing.T) {
-	_, _, err := New(Config{})
+	_, _, err := New(context.Background(), Config{})
 	assert.ErrorIs(t, err, ErrTargetRequired)
 }
 
@@ -88,7 +88,7 @@ func TestNew_DefaultsApplied(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, cleanup, err := New(tt.cfg)
+			client, cleanup, err := New(context.Background(), tt.cfg)
 			require.NoError(t, err)
 			defer cleanup()
 			require.NotNil(t, client)
@@ -97,7 +97,7 @@ func TestNew_DefaultsApplied(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	client, cleanup, err := New(Config{
+	client, cleanup, err := New(context.Background(), Config{
 		Target: "localhost:50055",
 	})
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestConstants(t *testing.T) {
 
 func TestNew_WithResilience(t *testing.T) {
 	resilienceConfig := clients.DefaultResilientClientConfig("party-client")
-	client, cleanup, err := New(Config{
+	client, cleanup, err := New(context.Background(), Config{
 		Target:     "localhost:50055",
 		Resilience: &resilienceConfig,
 	})
@@ -136,7 +136,7 @@ func TestNew_WithResilience(t *testing.T) {
 }
 
 func TestNew_WithoutResilience(t *testing.T) {
-	client, cleanup, err := New(Config{
+	client, cleanup, err := New(context.Background(), Config{
 		Target: "localhost:50055",
 	})
 	require.NoError(t, err)

@@ -232,9 +232,10 @@ func TestLeaseRenewer_StopIsIdempotent(t *testing.T) {
 	renewer := NewLeaseRenewer(sagaID, claimService, logger, WithRenewalInterval(50*time.Millisecond))
 
 	ctx := context.Background()
+	// Capture baseline before Start so the goroutine is not yet counted
+	initialGoroutinesIdempotent := runtime.NumGoroutine()
 	renewer.Start(ctx)
 
-	initialGoroutinesIdempotent := runtime.NumGoroutine()
 	awaitIdempotentErr := await.New().
 		AtMost(1 * time.Second).
 		PollInterval(10 * time.Millisecond).
