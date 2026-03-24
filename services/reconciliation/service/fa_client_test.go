@@ -15,7 +15,10 @@ type stubFAClient struct {
 	err    error
 }
 
-func (s *stubFAClient) GetDiagnosticDetail(_ context.Context, _, _ string) (*DiagnosticDetail, error) {
+func (s *stubFAClient) GetDiagnosticDetail(ctx context.Context, _, _ string) (*DiagnosticDetail, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -113,10 +116,7 @@ func TestFinancialAccountingClient_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	// The stub propagates the context error when the context is canceled.
-	var client FinancialAccountingClient = &stubFAClient{
-		err: ctx.Err(),
-	}
+	var client FinancialAccountingClient = &stubFAClient{}
 
 	result, err := client.GetDiagnosticDetail(ctx, "ACC-001", "GBP")
 

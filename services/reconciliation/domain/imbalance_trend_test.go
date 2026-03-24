@@ -261,10 +261,14 @@ func TestImbalanceTrend_SameUTCDay(t *testing.T) {
 		assert.False(t, sameUTCDay(a, b))
 	})
 
-	t.Run("same UTC day early and late hours", func(t *testing.T) {
-		// 2024-01-15 23:00 UTC and 2024-01-15 00:01 UTC are same UTC calendar day
-		a := time.Date(2024, 1, 15, 23, 0, 0, 0, time.UTC)
-		b := time.Date(2024, 1, 15, 0, 1, 0, 0, time.UTC)
+	t.Run("same UTC day despite different local timezones", func(t *testing.T) {
+		// 2024-01-15 23:00 UTC = 2024-01-16 07:00 in UTC+8 (next local day)
+		// 2024-01-15 01:00 UTC = 2024-01-14 17:00 in UTC-8 (previous local day)
+		// Both are 2024-01-15 UTC, so sameUTCDay must return true.
+		eastZone := time.FixedZone("UTC+8", 8*60*60)
+		westZone := time.FixedZone("UTC-8", -8*60*60)
+		a := time.Date(2024, 1, 15, 23, 0, 0, 0, time.UTC).In(eastZone)
+		b := time.Date(2024, 1, 15, 1, 0, 0, 0, time.UTC).In(westZone)
 		assert.True(t, sameUTCDay(a, b))
 	})
 
