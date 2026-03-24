@@ -108,7 +108,7 @@ func setupFullTestServer(t *testing.T, mock *fullMockServer) (client.Config, fun
 }
 
 func TestNew_ErrTargetRequired(t *testing.T) {
-	c, cleanup, err := client.New(client.Config{})
+	c, cleanup, err := client.New(context.Background(), client.Config{})
 	assert.ErrorIs(t, err, client.ErrTargetRequired)
 	assert.Nil(t, c)
 	assert.Nil(t, cleanup)
@@ -124,7 +124,7 @@ func TestNew_Defaults(t *testing.T) {
 	cfg.Port = 0       // Should default to 50053
 	cfg.Namespace = "" // Should default to "default"
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	defer cleanup()
@@ -137,7 +137,7 @@ func TestInitiateFinancialPositionLog_Error(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -162,7 +162,7 @@ func TestInitiateFinancialPositionLogBatch_Success(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -178,7 +178,7 @@ func TestInitiateFinancialPositionLogBatch_Error(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -195,7 +195,7 @@ func TestUpdateFinancialPositionLog_Error(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -219,7 +219,7 @@ func TestRetrieveFinancialPositionLog_Success(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -237,7 +237,7 @@ func TestRetrieveFinancialPositionLog_Error(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -256,7 +256,7 @@ func TestBulkImportTransactions_Success(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -274,7 +274,7 @@ func TestBulkImportTransactions_Error(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -296,7 +296,7 @@ func TestListFinancialPositionLogs_Success(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -312,7 +312,7 @@ func TestListFinancialPositionLogs_Error(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -329,7 +329,7 @@ func TestReleaseReservation_Success(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -347,7 +347,7 @@ func TestReleaseReservation_Error(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -364,7 +364,7 @@ func TestClient_Close(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, _, err := client.New(cfg)
+	c, _, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 
 	err = c.Close()
@@ -376,7 +376,7 @@ func TestClient_Conn(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -396,7 +396,7 @@ func TestInitiateFinancialPositionLog_Success(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -419,7 +419,7 @@ func TestUpdateFinancialPositionLog_Success(t *testing.T) {
 	cfg, serverCleanup := setupFullTestServer(t, mock)
 	defer serverCleanup()
 
-	c, cleanup, err := client.New(cfg)
+	c, cleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer cleanup()
 

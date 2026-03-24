@@ -105,7 +105,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
@@ -133,7 +133,7 @@ func TestGetAccountBalance_NotFound(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
@@ -163,7 +163,7 @@ func TestGetAccountBalance_ServerError(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
@@ -210,7 +210,7 @@ func TestGetAccountBalances_Success(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
@@ -242,7 +242,7 @@ func TestGetAccountBalances_NotFound(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
@@ -271,7 +271,7 @@ func TestGetAccountBalances_EmptyResponse(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
@@ -297,7 +297,7 @@ func TestGetAccountBalance_ContextCanceled(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
@@ -339,7 +339,7 @@ func TestGetAccountBalances_WithInstrumentFilter(t *testing.T) {
 	cfg, cleanup := setupTestServer(t, mock)
 	defer cleanup()
 
-	c, clientCleanup, err := client.New(cfg)
+	c, clientCleanup, err := client.New(context.Background(), cfg)
 	require.NoError(t, err)
 	defer clientCleanup()
 
