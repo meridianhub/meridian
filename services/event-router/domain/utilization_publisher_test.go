@@ -13,10 +13,10 @@ import (
 
 // fakeUtilizationPublisher is a test double implementing domain.UtilizationPublisher.
 type fakeUtilizationPublisher struct {
-	mu           sync.Mutex
-	published    []*domain.UtilizationMeasurement
-	stopped      bool
-	publishFunc  func(*domain.UtilizationMeasurement)
+	mu          sync.Mutex
+	published   []*domain.UtilizationMeasurement
+	stopped     bool
+	publishFunc func(*domain.UtilizationMeasurement)
 }
 
 func newFakeUtilizationPublisher() *fakeUtilizationPublisher {

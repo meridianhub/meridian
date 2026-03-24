@@ -141,8 +141,8 @@ func TestAuditEventTransformer_Transform_MultipleServices(t *testing.T) {
 	tenantID := "00000000-0000-0000-0000-000000000000"
 
 	services := []struct {
-		schemaName      string
-		wantAssetCode   string
+		schemaName    string
+		wantAssetCode string
 	}{
 		{"current_account", "MERIDIAN-CURRENT-ACCOUNT-OPS"},
 		{"payment_order", "MERIDIAN-PAYMENT-ORDER-OPS"},
