@@ -96,9 +96,8 @@ func TestNewBillingExecutor_ShadowMode(t *testing.T) {
 
 // TestBillingExecutor_Execute_SkipsIfDuplicateInRedis verifies that a billing run is
 // skipped when the idempotency key already exists in Redis (from a previous execution).
+// Not parallel: mutates the package-level NowFunc global.
 func TestBillingExecutor_Execute_SkipsIfDuplicateInRedis(t *testing.T) {
-	t.Parallel()
-
 	repo := newMockBillingRepo()
 	redisClient := setupMiniredis(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
