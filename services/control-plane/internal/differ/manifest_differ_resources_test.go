@@ -321,6 +321,9 @@ func TestDiffWithSkipSafetyChecks_AllowsDeletion(t *testing.T) {
 	plan, err := d.Diff(context.Background(), last, next, WithSkipSafetyChecks())
 	require.NoError(t, err)
 	assert.Empty(t, plan.BlockedDeletions)
+	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceInstrument)
+	require.Len(t, deletes, 1)
+	assert.Equal(t, "OLD", deletes[0].ResourceCode)
 }
 
 // ─── DiffPlan.HasBreakingChanges ─────────────────────────────────────────────
@@ -339,4 +342,5 @@ func TestDiffPlan_BreakingChangesFlaggedOnDelete(t *testing.T) {
 
 	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceInstrument)
 	assert.Len(t, deletes, 1)
+	assert.True(t, plan.HasBreakingChanges)
 }
