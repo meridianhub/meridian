@@ -10,9 +10,9 @@ import (
 
 func TestExtractRef(t *testing.T) {
 	tests := []struct {
-		name  string
-		ref   string
-		want  string
+		name string
+		ref  string
+		want string
 	}{
 		{"empty", "", ""},
 		{"simple", "#/components/schemas/Foo", "Foo"},

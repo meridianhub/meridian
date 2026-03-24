@@ -36,7 +36,7 @@ func TestManifestVersion_ZeroValue(t *testing.T) {
 }
 
 // TestManifestVersionStore_InterfaceCompliance verifies compile-time interface satisfaction.
-func TestManifestVersionStore_InterfaceCompliance(t *testing.T) {
+func TestManifestVersionStore_InterfaceCompliance(_ *testing.T) {
 	var _ ManifestVersionStore = (*inMemoryManifestVersionStore)(nil)
 }
 

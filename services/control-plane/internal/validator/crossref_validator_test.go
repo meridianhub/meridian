@@ -200,8 +200,11 @@ func TestValidateScheduledTriggers_Duplicate(t *testing.T) {
 // ─── API trigger validation ──────────────────────────────────────────────────
 
 func TestValidateAPITriggers_ValidPath_Direct(t *testing.T) {
+	// Use a validator without an apiPathRegistry so path existence is not checked.
+	// This tests only the format validation logic.
 	v, err := New()
 	require.NoError(t, err)
+	v.apiPathRegistry = nil // disable spec-based path checking
 
 	manifest := &controlplanev1.Manifest{
 		Sagas: []*controlplanev1.SagaDefinition{
@@ -227,13 +230,15 @@ func TestValidateAPITriggers_InvalidPathFormat_Direct(t *testing.T) {
 	result := &ValidationResult{Valid: true}
 	v.validateAPITriggers(manifest, result)
 
-	require.Len(t, result.Errors, 1)
-	assert.Equal(t, "INVALID_API_PATH_FORMAT", result.Errors[0].Code)
+	formatErrors := filterValidationErrors(result.Errors, "INVALID_API_PATH_FORMAT")
+	require.Len(t, formatErrors, 1)
+	assert.Equal(t, "sagas[0].trigger", formatErrors[0].Path)
 }
 
 func TestValidateAPITriggers_DuplicatePath_Direct(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
+	v.apiPathRegistry = nil // disable spec-based path checking
 
 	manifest := &controlplanev1.Manifest{
 		Sagas: []*controlplanev1.SagaDefinition{
@@ -245,8 +250,9 @@ func TestValidateAPITriggers_DuplicatePath_Direct(t *testing.T) {
 	result := &ValidationResult{Valid: true}
 	v.validateAPITriggers(manifest, result)
 
-	require.Len(t, result.Errors, 1)
-	assert.Equal(t, "DUPLICATE_API_TRIGGER", result.Errors[0].Code)
+	dupeErrors := filterValidationErrors(result.Errors, "DUPLICATE_API_TRIGGER")
+	require.Len(t, dupeErrors, 1)
+	assert.Equal(t, "sagas[1].trigger", dupeErrors[0].Path)
 }
 
 func TestValidateAPITriggers_NonAPITriggerSkipped(t *testing.T) {
