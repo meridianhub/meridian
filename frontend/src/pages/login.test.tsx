@@ -9,18 +9,18 @@ import { LoginPage } from './login'
 const mockLogin = vi.fn()
 const mockNavigate = vi.fn()
 const mockStartFlow = vi.fn()
-vi.mock('@/contexts/auth-context', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/contexts/auth-context')>()
+vi.mock('@/contexts/auth-context', async () => {
+  const actual = await vi.importActual('@/contexts/auth-context')
   return {
-    ...actual,
+    ...(actual as Record<string, unknown>),
     useAuth: () => ({ accessToken: null, claims: null, login: mockLogin, logout: vi.fn() }),
   }
 })
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom')
   return {
-    ...actual,
+    ...(actual as Record<string, unknown>),
     useNavigate: () => mockNavigate,
   }
 })
