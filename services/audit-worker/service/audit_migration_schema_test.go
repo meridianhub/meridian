@@ -90,7 +90,7 @@ func TestListAuditEntries_AgainstMigrationSchema(t *testing.T) {
 	// Insert a row using the migration's actual column names
 	require.NoError(t, db.Exec(fmt.Sprintf(`
 		INSERT INTO %q.audit_log (table_name, operation, record_id, changed_by, changed_at)
-		VALUES ('parties', 'INSERT', gen_random_uuid(), 'test_user', now())
+		VALUES ('parties', 'INSERT', 'IBA-test-string-id', 'test_user', now())
 	`, schema)).Error)
 
 	svc, err := NewAuditService(db, slog.Default())
