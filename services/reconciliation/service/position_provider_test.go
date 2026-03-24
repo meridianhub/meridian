@@ -136,6 +136,12 @@ func TestPositionDataProvider_MultiPageAggregation(t *testing.T) {
 	require.Len(t, page2.Records, 1)
 	assert.Equal(t, "EUR", page2.Records[0].InstrumentCode)
 	assert.Empty(t, page2.NextPageToken)
+
+	// Aggregated result across all pages
+	aggregated := append(page1.Records, page2.Records...)
+	require.Len(t, aggregated, 2)
+	assert.Equal(t, "GBP", aggregated[0].InstrumentCode)
+	assert.Equal(t, "EUR", aggregated[1].InstrumentCode)
 }
 
 func TestPositionDataProvider_Error(t *testing.T) {
