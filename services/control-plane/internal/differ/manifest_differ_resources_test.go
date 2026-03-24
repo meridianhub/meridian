@@ -341,6 +341,7 @@ func TestDiffPlan_BreakingChangesFlaggedOnDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	deletes := filterActionsByResource(plan.Actions, ActionDelete, ResourceInstrument)
-	assert.Len(t, deletes, 1)
+	require.Len(t, deletes, 1)
+	assert.True(t, deletes[0].Breaking)
 	assert.True(t, plan.HasBreakingChanges)
 }
