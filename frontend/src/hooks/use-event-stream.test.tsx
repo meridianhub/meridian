@@ -22,7 +22,10 @@ class MockWebSocket {
   onmessage: ((ev: MessageEvent) => void) | null = null
   onerror: ((ev: Event) => void) | null = null
   send = vi.fn()
-  close = vi.fn()
+  close = vi.fn(() => {
+    // Mimic real WebSocket: closing fires onclose
+    this.onclose?.(new CloseEvent('close'))
+  })
 
   constructor(url: string) {
     this.url = url
@@ -381,18 +384,32 @@ describe('useEventStream', () => {
     }
   })
 
-  it('closes WebSocket on error then triggers reconnect via onclose', () => {
-    renderHook(() => useEventStream(), { wrapper: createWrapper() })
+  it('closes WebSocket on error then triggers reconnect via onclose', async () => {
+    vi.useFakeTimers()
 
-    act(() => {
-      mockWsInstances[0].simulateOpen()
-    })
+    try {
+      renderHook(() => useEventStream(), { wrapper: createWrapper() })
 
-    act(() => {
-      mockWsInstances[0].simulateError()
-    })
+      act(() => {
+        mockWsInstances[0].simulateOpen()
+      })
+      expect(mockWsInstances).toHaveLength(1)
 
-    expect(mockWsInstances[0].close).toHaveBeenCalled()
+      act(() => {
+        mockWsInstances[0].simulateError()
+      })
+
+      expect(mockWsInstances[0].close).toHaveBeenCalled()
+
+      // close fires onclose, which triggers reconnect with backoff
+      await act(async () => {
+        vi.advanceTimersByTime(3000)
+      })
+
+      expect(mockWsInstances.length).toBeGreaterThanOrEqual(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('constructs correct WebSocket URL based on protocol', () => {
