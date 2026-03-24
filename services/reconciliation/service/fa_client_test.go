@@ -110,11 +110,15 @@ func TestFinancialAccountingClient_MultipleInstruments(t *testing.T) {
 }
 
 func TestFinancialAccountingClient_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	// The stub propagates the context error when the context is canceled.
 	var client FinancialAccountingClient = &stubFAClient{
-		err: context.Canceled,
+		err: ctx.Err(),
 	}
 
-	result, err := client.GetDiagnosticDetail(context.Background(), "ACC-001", "GBP")
+	result, err := client.GetDiagnosticDetail(ctx, "ACC-001", "GBP")
 
 	require.Error(t, err)
 	assert.Nil(t, result)
