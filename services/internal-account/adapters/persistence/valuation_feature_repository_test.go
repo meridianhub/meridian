@@ -39,8 +39,8 @@ func TestNewValuationFeatureRepository_IsSharedRepository(t *testing.T) {
 	repo := NewValuationFeatureRepository(gormDB)
 
 	// ValuationFeatureRepository is a type alias for vf.Repository.
-	// Verify the returned repo is a *vf.Repository by calling a shared method.
-	_ = (*vf.Repository)(repo)
+	// Verify the returned repo exposes the shared package's DB() method.
+	assert.NotNil(t, repo.DB())
 }
 
 func TestNewValuationFeatureRepository_Create_FindByID(t *testing.T) {
