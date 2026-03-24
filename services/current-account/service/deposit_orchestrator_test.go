@@ -137,8 +137,8 @@ func TestDepositOrchestrator_Orchestrate_FungibilityValidationFailure(t *testing
 
 func TestDepositOrchestrator_ResolveClearingAccountID_NilAll(t *testing.T) {
 	orch := &DepositOrchestrator{
-		logger:        slog.Default(),
-		accountConfig: nil,
+		logger:          slog.Default(),
+		accountConfig:   nil,
 		accountResolver: nil,
 	}
 
