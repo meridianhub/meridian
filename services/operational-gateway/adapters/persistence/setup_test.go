@@ -154,8 +154,11 @@ func createSchema(db *gorm.DB) error {
             path_template VARCHAR(1024) NOT NULL DEFAULT '',
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (tenant_id, instruction_type)
+            PRIMARY KEY (tenant_id, instruction_type),
+            FOREIGN KEY (tenant_id, connection_id) REFERENCES provider_connections (tenant_id, connection_id) ON DELETE RESTRICT,
+            FOREIGN KEY (tenant_id, fallback_connection_id) REFERENCES provider_connections (tenant_id, connection_id) ON DELETE RESTRICT
         )`,
+		`CREATE INDEX IF NOT EXISTS idx_instruction_routes_connection_id ON instruction_routes (tenant_id, connection_id)`,
 	}
 
 	for _, stmt := range ddl {
