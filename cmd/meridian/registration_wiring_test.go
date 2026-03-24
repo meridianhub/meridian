@@ -16,6 +16,7 @@ import (
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	identitydomain "github.com/meridianhub/meridian/services/identity/domain"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -135,14 +136,15 @@ func TestRegistrationEndpoint_Reachable(t *testing.T) {
 
 	// Wait for server to bind.
 	addr := fmt.Sprintf("localhost:%d", httpPort)
-	for range 40 {
+	err = await.UntilNoError(func() error {
 		conn, dialErr := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
-		if dialErr == nil {
-			conn.Close()
-			break
+		if dialErr != nil {
+			return dialErr
 		}
-		time.Sleep(50 * time.Millisecond) //nolint:forbidigo
-	}
+		conn.Close()
+		return nil
+	})
+	require.NoError(t, err, "gateway server did not start")
 
 	body, _ := json.Marshal(map[string]string{
 		"slug":     "test-org",
