@@ -917,7 +917,8 @@ var unitToDimension = map[string]string{
 	"CPU_HOUR":   "COMPUTE",
 	"GB":         "DATA",
 	"TB":         "DATA",
-	"LITRE":      "VOLUME",
+	"LITER":      "VOLUME",
+	"LITRE":      "VOLUME", //nolint:misspell // British English variant is a valid unit name
 	"GALLON":     "VOLUME",
 	"KG":         "MASS",
 	"TONNE":      "MASS",
