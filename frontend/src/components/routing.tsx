@@ -41,7 +41,7 @@ interface AdminOnlyRouteProps {
   children: ReactNode
 }
 
-const ADMIN_ROLES = ['admin', 'tenant-admin', 'super-admin', 'platform-admin', 'tenant-owner']
+const ADMIN_ROLES = ['admin', 'tenant-admin', 'super-admin', 'platform-admin', 'tenant-owner', 'operator', 'auditor']
 
 /**
  * Redirects users without admin-level roles to /.
