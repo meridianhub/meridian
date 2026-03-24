@@ -610,3 +610,66 @@ func TestInitiateCurrentAccount_TableDriven(t *testing.T) {
 		})
 	}
 }
+
+// Test Suite: OrgPartyID Validation During Account Creation
+
+func TestInitiateCurrentAccount_OrgPartyID_InvalidFormat(t *testing.T) {
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
+	defer cleanup()
+
+	svc := &Service{
+		repo:             persistence.NewRepository(db),
+		instrumentGetter: defaultMockInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	req := createInitiateAccountRequest(newTestPartyID(), "GB82WEST12345698765432")
+	req.OrgPartyId = "not-a-uuid"
+
+	_, err := svc.InitiateCurrentAccount(ctx, req)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid org_party_id")
+}
+
+func TestInitiateCurrentAccount_OrgPartyID_ZeroUUID(t *testing.T) {
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
+	defer cleanup()
+
+	svc := &Service{
+		repo:             persistence.NewRepository(db),
+		instrumentGetter: defaultMockInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	req := createInitiateAccountRequest(newTestPartyID(), "GB82WEST12345698765432")
+	req.OrgPartyId = uuid.Nil.String()
+
+	_, err := svc.InitiateCurrentAccount(ctx, req)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "zero UUID is not allowed")
+}
+
+func TestInitiateCurrentAccount_OrgPartyID_ValidPersisted(t *testing.T) {
+	db, ctx, cleanup := setupPartyIntegrationTestDB(t)
+	defer cleanup()
+
+	svc := &Service{
+		repo:             persistence.NewRepository(db),
+		instrumentGetter: defaultMockInstrumentGetter(),
+		logger:           slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+
+	orgPartyID := uuid.New().String()
+	req := createInitiateAccountRequest(newTestPartyID(), "GB82WEST-ORG-TEST-001")
+	req.OrgPartyId = orgPartyID
+
+	resp, err := svc.InitiateCurrentAccount(ctx, req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.AccountId)
+
+	// Verify org_party_id was persisted by reading back
+	account, err := persistence.NewRepository(db).FindByID(ctx, resp.AccountId)
+	require.NoError(t, err)
+	require.NotNil(t, account.OrgPartyID())
+	assert.Equal(t, orgPartyID, account.OrgPartyID().String())
+}
