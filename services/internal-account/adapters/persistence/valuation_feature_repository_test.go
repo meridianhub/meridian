@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -80,7 +79,7 @@ func TestNewValuationFeatureRepository_FindByID_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrValuationFeatureNotFound)
 }
 
-func TestNewValuationFeatureRepository_WithNilContext(t *testing.T) {
+func TestNewValuationFeatureRepository_WithTx_ReturnsNewRepo(t *testing.T) {
 	gormDB, _, cleanup := testdb.SetupTestDB(t,
 		testdb.WithModels(&vf.Entity{}),
 		testdb.WithTenant(testTenantID),
@@ -90,10 +89,10 @@ func TestNewValuationFeatureRepository_WithNilContext(t *testing.T) {
 	repo := NewValuationFeatureRepository(gormDB)
 	assert.NotNil(t, repo)
 
-	// WithTx should return a new repository instance.
+	// WithTx should return a new repository instance scoped to the transaction.
 	tx := gormDB.Begin()
 	defer tx.Rollback()
 	txRepo := repo.WithTx(tx)
 	assert.NotNil(t, txRepo)
-	_ = context.Background()
+	assert.NotSame(t, repo, txRepo)
 }

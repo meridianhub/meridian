@@ -85,15 +85,15 @@ func TestReleaseBuffer_ReturnedBufferIsReset(t *testing.T) {
 	assert.Equal(t, 0, b2.Len())
 }
 
-func TestReleaseBuffer_LargeBuffer_NotReturnedToPool(t *testing.T) {
+func TestReleaseBuffer_LargeBuffer_DoesNotPanic(t *testing.T) {
 	// Create a buffer larger than 64KB threshold.
+	// releaseBuffer drops oversized buffers instead of returning them to the pool.
 	large := make([]byte, 65*1024)
 	b := &bytes.Buffer{}
 	_, err := b.Write(large)
 	require.NoError(t, err)
 	assert.Greater(t, b.Cap(), 64*1024)
 
-	// Should not panic, even though it won't be returned to the pool.
 	assert.NotPanics(t, func() {
 		releaseBuffer(b)
 	})
