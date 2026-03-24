@@ -22,7 +22,7 @@ func TestDatasetChecker_CodeMismatch(t *testing.T) {
 	t.Run("returns ErrDatasetCodeMismatch when codes differ", func(t *testing.T) {
 		checker := NewDatasetChecker(nil, "USD_EUR_FX")
 
-		err := checker.Check(nil, "OTHER_DATASET") //nolint:staticcheck
+		err := checker.Check(nil, "OTHER_DATASET") //nolint:staticcheck // nil context is intentional for unit testing the mismatch path
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrDatasetCodeMismatch))
 	})
@@ -30,7 +30,7 @@ func TestDatasetChecker_CodeMismatch(t *testing.T) {
 	t.Run("includes expected and actual codes in error message", func(t *testing.T) {
 		checker := NewDatasetChecker(nil, "USD_EUR_FX")
 
-		err := checker.Check(nil, "WRONG_CODE") //nolint:staticcheck
+		err := checker.Check(nil, "WRONG_CODE") //nolint:staticcheck // nil context is intentional for unit testing the mismatch path
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "USD_EUR_FX")
 		assert.Contains(t, err.Error(), "WRONG_CODE")

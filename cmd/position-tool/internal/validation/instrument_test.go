@@ -76,7 +76,7 @@ func TestCreateInstrumentConnection_WithTarget(t *testing.T) {
 	// grpc.NewClient does not immediately connect, so no error expected
 	require.NoError(t, err)
 	require.NotNil(t, conn)
-	conn.Close() //nolint:errcheck
+	conn.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
 }
 
 func TestCacheKey(t *testing.T) {
