@@ -396,8 +396,11 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 			fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
 			acct.gspKwhAccountID, // GSP inventory account is the debit (clearing) side
 		); err != nil {
-			if st, ok := status.FromError(err); ok && (st.Code() == codes.InvalidArgument || st.Code() == codes.Internal) {
-				// Expected: financial-accounting rejects non-monetary instruments.
+			// The saga wraps the financial-accounting rejection as Internal, and the
+			// inner error is InvalidArgument with "invalid currency". Match on the
+			// error message to avoid masking unrelated Internal errors.
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "invalid currency") || strings.Contains(errMsg, "invalid posting_amount") {
 				if day == 30 {
 					fmt.Printf("  [WARN] KWH deposits skipped for %s (financial-accounting does not yet support non-monetary instruments)\n", acct.customerName)
 				}
