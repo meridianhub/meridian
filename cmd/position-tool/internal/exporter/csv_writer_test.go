@@ -21,7 +21,7 @@ func TestNewCSVWriter(t *testing.T) {
 		w, err := NewCSVWriter(path, nil)
 		require.NoError(t, err)
 		require.NotNil(t, w)
-		defer w.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+		defer w.Close()
 	})
 
 	t.Run("returns error for invalid path", func(t *testing.T) {
@@ -33,7 +33,7 @@ func TestNewCSVWriter(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "out.csv")
 		w, err := NewCSVWriter(path, []string{"zzz", "aaa", "mmm"})
 		require.NoError(t, err)
-		defer w.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+		defer w.Close()
 
 		keys := w.AttributeKeys()
 		assert.Equal(t, []string{"aaa", "mmm", "zzz"}, keys)
@@ -45,7 +45,7 @@ func TestCSVWriter_HeaderCount(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "out.csv")
 		w, err := NewCSVWriter(path, nil)
 		require.NoError(t, err)
-		defer w.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+		defer w.Close()
 
 		assert.Equal(t, 6, w.HeaderCount())
 	})
@@ -54,7 +54,7 @@ func TestCSVWriter_HeaderCount(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "out.csv")
 		w, err := NewCSVWriter(path, []string{"tenor", "currency"})
 		require.NoError(t, err)
-		defer w.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+		defer w.Close()
 
 		assert.Equal(t, 8, w.HeaderCount())
 	})
@@ -85,7 +85,7 @@ func TestCSVWriter_WriteRow(t *testing.T) {
 		// Read back and verify
 		f, err := os.Open(path)
 		require.NoError(t, err)
-		defer f.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+		defer f.Close()
 
 		records, err := csv.NewReader(f).ReadAll()
 		require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestCSVWriter_WriteRow(t *testing.T) {
 
 		f, err := os.Open(path)
 		require.NoError(t, err)
-		defer f.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+		defer f.Close()
 
 		records, err := csv.NewReader(f).ReadAll()
 		require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestCSVWriter_WriteRow(t *testing.T) {
 
 		f, err := os.Open(path)
 		require.NoError(t, err)
-		defer f.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+		defer f.Close()
 
 		records, err := csv.NewReader(f).ReadAll()
 		require.NoError(t, err)
@@ -245,7 +245,7 @@ func TestCSVWriter_MultipleRows(t *testing.T) {
 
 	f, err := os.Open(path)
 	require.NoError(t, err)
-	defer f.Close() //nolint:errcheck // test cleanup, error not relevant to test outcome
+	defer f.Close()
 
 	records, err := csv.NewReader(f).ReadAll()
 	require.NoError(t, err)

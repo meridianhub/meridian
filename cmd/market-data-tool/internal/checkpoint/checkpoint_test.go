@@ -86,8 +86,8 @@ func TestCheckpoint_Progress(t *testing.T) {
 
 func TestCheckpoint_IsResumable(t *testing.T) {
 	tests := []struct {
-		status     Status
-		resumable  bool
+		status    Status
+		resumable bool
 	}{
 		{StatusRunning, true},
 		{StatusCancelled, true},
