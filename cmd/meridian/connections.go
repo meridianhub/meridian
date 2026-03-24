@@ -221,20 +221,20 @@ func newLoopbackClients(ctx context.Context, grpcPort int, svcCreds *platformaut
 		return nil, fmt.Errorf("mds loopback: %w", err)
 	}
 
-	pk, pkClose, err := pkclient.New(pkclient.Config{Target: target, DialOptions: opts})
+	pk, pkClose, err := pkclient.New(ctx, pkclient.Config{Target: target, DialOptions: opts})
 	if err != nil {
 		_ = mdsClose()
 		return nil, fmt.Errorf("pk loopback: %w", err)
 	}
 
-	fa, faClose, err := faclient.New(faclient.Config{Target: target, DialOptions: opts})
+	fa, faClose, err := faclient.New(ctx, faclient.Config{Target: target, DialOptions: opts})
 	if err != nil {
 		_ = mdsClose()
 		pkClose()
 		return nil, fmt.Errorf("fa loopback: %w", err)
 	}
 
-	party, partyClose, err := partyclient.New(partyclient.Config{Target: target, DialOptions: opts})
+	party, partyClose, err := partyclient.New(ctx, partyclient.Config{Target: target, DialOptions: opts})
 	if err != nil {
 		_ = mdsClose()
 		pkClose()

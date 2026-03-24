@@ -182,7 +182,7 @@ func (m *retrieveFinancialBookingLogMock) RetrieveFinancialBookingLog(ctx contex
 }
 
 func TestConn_ReturnsConnection(t *testing.T) {
-	c, cleanup, err := New(Config{Target: "localhost:50052"})
+	c, cleanup, err := New(context.Background(), Config{Target: "localhost:50052"})
 	require.NoError(t, err)
 	defer cleanup()
 

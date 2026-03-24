@@ -132,7 +132,7 @@ func run(logger *slog.Logger) error {
 	}
 	defer caCleanup()
 
-	financialAccountingClient, faCleanup, err := createFinancialAccountingClient(namespace, logger, tracer)
+	financialAccountingClient, faCleanup, err := createFinancialAccountingClient(ctx, namespace, logger, tracer)
 	if err != nil {
 		return fmt.Errorf("failed to create financial accounting client: %w", err)
 	}
@@ -244,7 +244,7 @@ func run(logger *slog.Logger) error {
 	// Create position-keeping client for Starlark handlers.
 	// Note: payment-order needs position-keeping for payment execution sagas.
 	// This is optional during migration - service can start without it until Starlark is active.
-	posKeepingClient, posKeepingCleanup, err := positionkeepingclient.New(positionkeepingclient.Config{
+	posKeepingClient, posKeepingCleanup, err := positionkeepingclient.New(ctx, positionkeepingclient.Config{
 		ServiceName: positionkeepingclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.PositionKeeping,
@@ -293,7 +293,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Create Party client for Starlark handlers (party.get_default_payment_method).
-	partyClient, partyCleanup, err := partyclient.New(partyclient.Config{
+	partyClient, partyCleanup, err := partyclient.New(ctx, partyclient.Config{
 		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.Party,

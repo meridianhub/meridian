@@ -171,7 +171,7 @@ func run(logger *slog.Logger) error {
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 	partyEnabled := env.GetEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
 	if partyEnabled {
-		pc, cleanup, err := createPartyClient(namespace, logger, tracer)
+		pc, cleanup, err := createPartyClient(ctx, namespace, logger, tracer)
 		if err != nil {
 			return fmt.Errorf("failed to create party client: %w", err)
 		}
@@ -395,7 +395,7 @@ func getConfigSource(key string) string {
 // Uses the service-owned client package from services/party/client for standardized
 // client creation with built-in tracing and resilience patterns.
 // Returns a PartyClient interface adapter wrapping the underlying party client.
-func createPartyClient(namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.PartyClient, func(), error) {
+func createPartyClient(ctx context.Context, namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.PartyClient, func(), error) {
 	logger.Info("connecting to party service",
 		"service", partyclient.ServiceName,
 		"namespace", namespace,
@@ -427,7 +427,7 @@ func createPartyClient(namespace string, logger *slog.Logger, tracer *observabil
 	)
 
 	// Use the service-owned client package with DNS-based load balancing
-	pc, cleanup, err := partyclient.New(partyclient.Config{
+	pc, cleanup, err := partyclient.New(ctx, partyclient.Config{
 		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.Party,
