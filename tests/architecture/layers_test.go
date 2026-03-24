@@ -35,7 +35,6 @@ var knownCrossServiceDomainImports = map[string]bool{
 	"services/api-gateway/auth_handler.go":                                  true,
 	"services/api-gateway/auth_sso_handler.go":                              true,
 	"services/api-gateway/cmd/main.go":                                      true,
-	"services/api-gateway/registration_handler.go":                          true,
 	"services/current-account/service/deposit_orchestrator.go":              true,
 	"services/current-account/service/fungibility_validator.go":             true,
 	"services/current-account/service/grpc_account_endpoints.go":            true,

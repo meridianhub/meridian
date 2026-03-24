@@ -37,12 +37,12 @@ test.describe('Party detail — Accounts tab structure', () => {
   })
 
   test('Accounts tab trigger is present in the 8-tab list', async ({ authenticatedPage: page }) => {
-    await expect(page.getByRole('tab', { name: 'Accounts' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toBeVisible()
   })
 
   test('Accounts tab activates on click', async ({ authenticatedPage: page }) => {
     await switchToTab(page, 'Accounts')
-    await expect(page.getByRole('tab', { name: 'Accounts', selected: true })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Accounts', exact: true, selected: true })).toBeVisible()
   })
 
   test('Accounts tab renders a table', async ({ authenticatedPage: page }) => {
@@ -175,7 +175,7 @@ test.describe('Party to account navigation flow (requires backend)', () => {
 
     // Open the Accounts tab
     await switchToTab(page, 'Accounts')
-    await expect(page.getByRole('tab', { name: 'Accounts', selected: true })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Accounts', exact: true, selected: true })).toBeVisible()
 
     // If this party has accounts, clicking a row navigates to the account detail page
     const accountRowCount = await page.locator('table tbody tr').count()
