@@ -193,33 +193,43 @@ type noopIdentityRepo struct{}
 func (n *noopIdentityRepo) Save(_ context.Context, _ *identitydomain.Identity) error {
 	return fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) FindByID(_ context.Context, _ uuid.UUID) (*identitydomain.Identity, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) FindByEmail(_ context.Context, _ string) (*identitydomain.Identity, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) ListByTenant(_ context.Context) ([]*identitydomain.Identity, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) SaveRoleAssignment(_ context.Context, _ *identitydomain.RoleAssignment) error {
 	return fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) FindRoleAssignments(_ context.Context, _ uuid.UUID) ([]*identitydomain.RoleAssignment, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) SaveIdentityWithInvitation(_ context.Context, _ *identitydomain.Identity, _ *identitydomain.Invitation) error {
 	return fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) SaveIdentityWithRoles(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
 	return nil // success - allows registration to complete
 }
+
 func (n *noopIdentityRepo) SaveRoleAssignments(_ context.Context, _ []*identitydomain.RoleAssignment) error {
 	return fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) SaveInvitation(_ context.Context, _ *identitydomain.Invitation) error {
 	return fmt.Errorf("not implemented")
 }
+
 func (n *noopIdentityRepo) FindInvitationByTokenHash(_ context.Context, _ string) (*identitydomain.Invitation, error) {
 	return nil, fmt.Errorf("not implemented")
 }

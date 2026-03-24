@@ -189,6 +189,9 @@ func buildUnifiedEventStreamComponents(db *gorm.DB, logger *slog.Logger) (*event
 
 // ─── Registration Wiring ────────────────────────────────────────────────────
 
+// errNilTenantResponse is returned when InitiateTenant succeeds but returns a nil tenant.
+var errNilTenantResponse = fmt.Errorf("InitiateTenant returned nil tenant")
+
 // loopbackTenantCreator adapts the tenant gRPC service client to the
 // gateway.TenantCreator interface used by RegistrationHandler.
 type loopbackTenantCreator struct {
@@ -208,7 +211,7 @@ func (a *loopbackTenantCreator) CreateTenant(ctx context.Context, tenantID, slug
 		return "", err
 	}
 	if resp.Tenant == nil {
-		return "", fmt.Errorf("InitiateTenant returned nil tenant")
+		return "", errNilTenantResponse
 	}
 	return resp.Tenant.TenantId, nil
 }
