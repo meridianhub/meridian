@@ -4,42 +4,37 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
+const mockClients = {
+  party: {
+    retrieveParty: vi.fn().mockResolvedValue({
+      party: {
+        partyId: 'test-party-1',
+        legalName: 'Test Party',
+        partyType: 'PARTY_TYPE_ORGANIZATION',
+        status: 'PARTY_STATUS_ACTIVE',
+      },
+    }),
+    listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
+    retrieveReference: vi.fn().mockResolvedValue({}),
+    retrieveAssociations: vi.fn().mockResolvedValue({}),
+    retrieveBankRelations: vi.fn().mockResolvedValue({}),
+    retrieveDemographics: vi.fn().mockResolvedValue(null),
+  },
+  currentAccount: {
+    listCurrentAccounts: vi.fn().mockResolvedValue({ accounts: [], nextPageToken: '' }),
+  },
+  financialAccounting: {
+    listLedgerPostings: vi.fn().mockResolvedValue({ ledgerPostings: [] }),
+  },
+  internalAccount: {
+    listInternalAccounts: vi.fn().mockResolvedValue({ facilities: [], pagination: {} }),
+  },
+}
+
 // Mock the API context to avoid loading ungenerated proto files
 vi.mock('@/api/context', () => ({
-  useClients: vi.fn(() => ({
-    party: {
-      retrieveParty: vi.fn().mockResolvedValue({
-        party: {
-          partyId: 'test-party-1',
-          legalName: 'Test Party',
-          partyType: 'PARTY_TYPE_ORGANIZATION',
-          status: 'PARTY_STATUS_ACTIVE',
-        },
-      }),
-      listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
-      retrieveReference: vi.fn().mockResolvedValue({}),
-      retrieveAssociations: vi.fn().mockResolvedValue({}),
-      retrieveBankRelations: vi.fn().mockResolvedValue({}),
-      retrieveDemographics: vi.fn().mockResolvedValue(null),
-    },
-  })),
-  useApiClients: vi.fn(() => ({
-    party: {
-      retrieveParty: vi.fn().mockResolvedValue({
-        party: {
-          partyId: 'test-party-1',
-          legalName: 'Test Party',
-          partyType: 'PARTY_TYPE_ORGANIZATION',
-          status: 'PARTY_STATUS_ACTIVE',
-        },
-      }),
-      listPaymentMethods: vi.fn().mockResolvedValue({ paymentMethods: [] }),
-      retrieveReference: vi.fn().mockResolvedValue({}),
-      retrieveAssociations: vi.fn().mockResolvedValue({}),
-      retrieveBankRelations: vi.fn().mockResolvedValue({}),
-      retrieveDemographics: vi.fn().mockResolvedValue(null),
-    },
-  })),
+  useClients: vi.fn(() => mockClients),
+  useApiClients: vi.fn(() => mockClients),
 }))
 
 // Mock useAuth to avoid requiring AuthProvider in tests
@@ -101,7 +96,7 @@ describe('PartyDetailPage', () => {
     })
   })
 
-  it('renders all seven tabs', async () => {
+  it('renders all eight tabs', async () => {
     const { container } = renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
     // Check that tabs container is rendered (wait for data to load)
@@ -145,6 +140,29 @@ describe('PartyDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'Payment Methods' })).toHaveAttribute('data-state', 'active')
+    })
+  })
+
+  it('renders Transactions tab trigger', async () => {
+    renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Transactions' })).toBeInTheDocument()
+    })
+  })
+
+  it('switches to transactions tab on click', async () => {
+    const user = userEvent.setup()
+    renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Transactions' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: 'Transactions' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Transactions' })).toHaveAttribute('data-state', 'active')
     })
   })
 
