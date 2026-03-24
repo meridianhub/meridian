@@ -17,8 +17,8 @@ func TestRegisterCurrentAccountHandlers_AllHandlersPresent(t *testing.T) {
 	err := RegisterCurrentAccountHandlers(registry)
 	require.NoError(t, err)
 
-	// Verify all expected handlers are registered
-	expectedHandlers := []string{
+	// Verify core current-account handlers are registered
+	coreHandlers := []string{
 		"position_keeping.initiate_log",
 		"position_keeping.update_log",
 		"position_keeping.cancel_log",
@@ -36,10 +36,30 @@ func TestRegisterCurrentAccountHandlers_AllHandlersPresent(t *testing.T) {
 		"current_account.terminate_lien",
 	}
 
-	for _, name := range expectedHandlers {
+	for _, name := range coreHandlers {
 		handler, err := registry.Get(name)
 		require.NoError(t, err, "handler %q should be registered", name)
 		assert.NotNil(t, handler, "handler %q should not be nil", name)
+	}
+
+	// Verify platform-wide stub handlers are also registered
+	platformStubs := []string{
+		"notification.send",
+		"payment_order.create_lien",
+		"reconciliation.initiate_run",
+		"party.get_default_payment_method",
+		"operational_gateway.dispatch_instruction",
+		"financial_gateway.dispatch_payment",
+		"forecasting.compute_forward_curve",
+		"market_information.publish_observation",
+		"reference_data.register_instrument",
+		"internal_account.initiate",
+	}
+
+	for _, name := range platformStubs {
+		handler, err := registry.Get(name)
+		require.NoError(t, err, "platform stub handler %q should be registered", name)
+		assert.NotNil(t, handler, "platform stub handler %q should not be nil", name)
 	}
 }
 
@@ -48,7 +68,7 @@ func TestRegisterCurrentAccountHandlers_StubHandlersReturnNotImplemented(t *test
 	err := RegisterCurrentAccountHandlers(registry)
 	require.NoError(t, err)
 
-	// Stub handlers should return "not implemented" error
+	// Stub handlers (not yet implemented) should return errHandlerNotImplemented
 	stubHandlers := []string{
 		"position_keeping.update_log",
 		"financial_accounting.post_entries",
@@ -58,6 +78,10 @@ func TestRegisterCurrentAccountHandlers_StubHandlersReturnNotImplemented(t *test
 		"current_account.create_lien",
 		"current_account.execute_lien",
 		"current_account.terminate_lien",
+		// Platform-wide stubs
+		"notification.send",
+		"payment_order.create_lien",
+		"reconciliation.initiate_run",
 	}
 
 	for _, name := range stubHandlers {
@@ -72,37 +96,21 @@ func TestRegisterCurrentAccountHandlers_StubHandlersReturnNotImplemented(t *test
 }
 
 func TestRegisterCurrentAccountHandlers_HandlerCount(t *testing.T) {
-	// Ensure registration does not silently skip any handler
+	// Ensure registration does not silently skip any handler.
+	// Uses registry.List() to get the actual count rather than iterating a
+	// hardcoded list, so this test catches both missing and extra handlers.
+	//
+	// The full set includes 15 core handlers plus platform-wide stubs for
+	// cross-service handlers defined in the saga schema (payment_order,
+	// reconciliation, party, operational_gateway, financial_gateway,
+	// forecasting, market_information, reference_data, internal_account, etc.).
 	registry := saga.NewHandlerRegistry()
 	err := RegisterCurrentAccountHandlers(registry)
 	require.NoError(t, err)
 
-	// The registry should have all 15 handlers registered
-	const expectedCount = 15
-	count := 0
-	for _, name := range []string{
-		"position_keeping.initiate_log",
-		"position_keeping.update_log",
-		"position_keeping.cancel_log",
-		"financial_accounting.post_entries",
-		"financial_accounting.reverse_entries",
-		"financial_accounting.create_booking",
-		"financial_accounting.initiate_booking_log",
-		"financial_accounting.capture_posting",
-		"financial_accounting.update_booking_log",
-		"financial_accounting.compensate_posting",
-		"current_account.save",
-		"current_account.control",
-		"current_account.create_lien",
-		"current_account.execute_lien",
-		"current_account.terminate_lien",
-	} {
-		_, err := registry.Get(name)
-		if err == nil {
-			count++
-		}
-	}
-	assert.Equal(t, expectedCount, count, "expected %d handlers to be registered", expectedCount)
+	const expectedCount = 47
+	registered := registry.List()
+	assert.Equal(t, expectedCount, len(registered), "expected %d handlers to be registered, got %d: %v", expectedCount, len(registered), registered)
 }
 
 func TestRegisterCurrentAccountHandlers_CompensationMetadata(t *testing.T) {
