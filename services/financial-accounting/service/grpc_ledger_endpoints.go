@@ -157,8 +157,13 @@ func (s *FinancialAccountingService) ListLedgerPostings(
 		params.BookingLogID = &bookingLogID
 	}
 
-	// Apply account ID filter if provided
-	if req.AccountId != "" {
+	// Apply account ID filter - account_ids takes precedence over account_id
+	if len(req.AccountIds) > 0 {
+		if len(req.AccountIds) > 100 {
+			return nil, status.Error(codes.InvalidArgument, "account_ids must not exceed 100 items")
+		}
+		params.AccountIDs = req.AccountIds
+	} else if req.AccountId != "" {
 		params.AccountID = req.AccountId
 	}
 
