@@ -10,10 +10,10 @@ import (
 
 func TestNewMoneyFromInstrumentCode_Currency(t *testing.T) {
 	tests := []struct {
-		name     string
-		amount   decimal.Decimal
-		code     string
-		wantErr  bool
+		name    string
+		amount  decimal.Decimal
+		code    string
+		wantErr bool
 	}{
 		{
 			name:   "valid GBP",
@@ -79,11 +79,11 @@ func TestMoneyCurrency(t *testing.T) {
 
 func TestMoneyToMinorUnits(t *testing.T) {
 	tests := []struct {
-		name       string
-		amount     decimal.Decimal
-		currency   Currency
-		wantMinor  int64
-		wantErr    bool
+		name      string
+		amount    decimal.Decimal
+		currency  Currency
+		wantMinor int64
+		wantErr   bool
 	}{
 		{
 			name:      "GBP 100.50",
@@ -137,11 +137,11 @@ func TestMoneyToMinorUnitsUnchecked(t *testing.T) {
 
 func TestNewMoneyFromMinorUnits(t *testing.T) {
 	tests := []struct {
-		name        string
-		code        string
-		minorUnits  int64
-		wantAmount  decimal.Decimal
-		wantErr     bool
+		name       string
+		code       string
+		minorUnits int64
+		wantAmount decimal.Decimal
+		wantErr    bool
 	}{
 		{
 			name:       "GBP 10000 minor = 100.00",
