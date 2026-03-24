@@ -358,25 +358,27 @@ describe('useEventStream', () => {
   it('attempts reconnect on unexpected close', async () => {
     vi.useFakeTimers()
 
-    renderHook(() => useEventStream(), { wrapper: createWrapper() })
+    try {
+      renderHook(() => useEventStream(), { wrapper: createWrapper() })
 
-    act(() => {
-      mockWsInstances[0].simulateOpen()
-    })
-    expect(mockWsInstances).toHaveLength(1)
+      act(() => {
+        mockWsInstances[0].simulateOpen()
+      })
+      expect(mockWsInstances).toHaveLength(1)
 
-    act(() => {
-      mockWsInstances[0].simulateClose()
-    })
+      act(() => {
+        mockWsInstances[0].simulateClose()
+      })
 
-    // Advance past reconnect delay (base 1000ms + jitter, max ~2000ms)
-    await act(async () => {
-      vi.advanceTimersByTime(3000)
-    })
+      // Advance past reconnect delay (base 1000ms + jitter, max ~2000ms)
+      await act(async () => {
+        vi.advanceTimersByTime(3000)
+      })
 
-    expect(mockWsInstances.length).toBeGreaterThanOrEqual(2)
-
-    vi.useRealTimers()
+      expect(mockWsInstances.length).toBeGreaterThanOrEqual(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('closes WebSocket on error then triggers reconnect via onclose', () => {

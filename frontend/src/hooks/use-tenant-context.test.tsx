@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
@@ -31,6 +31,10 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe('use-tenant-context hooks', () => {
+  beforeEach(() => {
+    vi.mocked(useTenantContext).mockReturnValue(mockContextValue)
+  })
+
   it('useCurrentTenant returns currentTenant from context', () => {
     const { result } = renderHook(() => useCurrentTenant(), { wrapper })
     expect(result.current).toEqual({ id: 'tenant-1', slug: 'acme', name: 'Acme Corp' })
@@ -55,8 +59,7 @@ describe('use-tenant-context hooks', () => {
     const { result } = renderHook(() => useIsPlatformAdmin(), { wrapper })
     expect(result.current).toBe(true)
 
-    // Restore default
-    vi.mocked(useTenantContext).mockReturnValue(mockContextValue)
+
   })
 
   it('useSwitchTenant returns switchTenant function from context', () => {
