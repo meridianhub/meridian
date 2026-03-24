@@ -25,11 +25,13 @@ func (stubStarlarkRuntime) Execute(_ context.Context, _ string, _ *valuation.Req
 
 type stubValuationCache struct{}
 
-func (stubValuationCache) GetMethod(_ string, _ *int) (*valuation.Method, error)         { return nil, nil }
-func (stubValuationCache) SetMethod(_ *valuation.Method) error                           { return nil }
-func (stubValuationCache) GetPolicy(_ string, _ *int) (valuation.CompiledPolicy, error)  { return nil, nil }
-func (stubValuationCache) SetPolicy(_ string, _ int, _ valuation.CompiledPolicy) error   { return nil }
-func (stubValuationCache) Clear()                                                        {}
+func (stubValuationCache) GetMethod(_ string, _ *int) (*valuation.Method, error) { return nil, nil }
+func (stubValuationCache) SetMethod(_ *valuation.Method) error                   { return nil }
+func (stubValuationCache) GetPolicy(_ string, _ *int) (valuation.CompiledPolicy, error) {
+	return nil, nil
+}
+func (stubValuationCache) SetPolicy(_ string, _ int, _ valuation.CompiledPolicy) error { return nil }
+func (stubValuationCache) Clear()                                                      {}
 
 func TestWithPolicyRuntime(t *testing.T) {
 	rt := stubPolicyRuntime{}
