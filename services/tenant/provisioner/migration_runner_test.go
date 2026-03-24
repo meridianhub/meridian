@@ -12,7 +12,7 @@ import (
 // writeMigrationFile creates a migration SQL file in the given directory.
 func writeMigrationFile(t *testing.T, dir, filename, content string) {
 	t.Helper()
-	err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0600)
+	err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0o600)
 	require.NoError(t, err)
 }
 
@@ -121,9 +121,9 @@ func TestReadMigrationFiles_IgnoresNonSQLFiles(t *testing.T) {
 	writeMigrationFile(t, dir, "001_init.sql", "CREATE TABLE foo (id INT);")
 
 	// Non-SQL files should be ignored
-	err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Migrations"), 0600)
+	err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Migrations"), 0o600)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("notes"), 0600)
+	err = os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("notes"), 0o600)
 	require.NoError(t, err)
 
 	migrations, err := p.readMigrationFiles(dir)
@@ -140,7 +140,7 @@ func TestReadMigrationFiles_IgnoresSubdirectories(t *testing.T) {
 
 	// Create a subdirectory (should be ignored)
 	subdir := filepath.Join(dir, "subdir")
-	require.NoError(t, os.Mkdir(subdir, 0700))
+	require.NoError(t, os.Mkdir(subdir, 0o700))
 	writeMigrationFile(t, subdir, "002_sub.sql", "CREATE TABLE bar (id INT);")
 
 	migrations, err := p.readMigrationFiles(dir)
@@ -427,9 +427,9 @@ func TestReadMigrationFiles_MultipleFilesContent(t *testing.T) {
 	p := newMinimalProvisioner(nil)
 
 	files := map[string]string{
-		"001_create_tables.sql":  "CREATE TABLE foo (id INT);",
-		"002_add_indexes.sql":    "CREATE INDEX idx_foo ON foo(id);",
-		"003_seed_data.sql":      "INSERT INTO foo VALUES (1);",
+		"001_create_tables.sql": "CREATE TABLE foo (id INT);",
+		"002_add_indexes.sql":   "CREATE INDEX idx_foo ON foo(id);",
+		"003_seed_data.sql":     "INSERT INTO foo VALUES (1);",
 	}
 
 	for name, content := range files {
@@ -494,4 +494,3 @@ func TestReadMigrationFiles_SortingConsistency(t *testing.T) {
 	assert.Equal(t, "20251204000001_e.sql", migrations[3].Filename)
 	assert.Equal(t, "20251205000001_b.sql", migrations[4].Filename)
 }
-
