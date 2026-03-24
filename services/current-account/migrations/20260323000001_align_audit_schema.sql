@@ -1,4 +1,4 @@
--- Align audit_log and audit_outbox with shared audit infrastructure
+-- Align audit_log and audit_outbox with shared audit infrastructure (DDL)
 --
 -- Fixes three schema mismatches between migration-created tables and application code:
 --   1. GORM AuditLog model and AuditService query use "created_at", migrations have "changed_at"
@@ -8,21 +8,15 @@
 -- CockroachDB constraints:
 --   - ALTER COLUMN TYPE cannot run inside a transaction
 --   - Column must be "public" before it can be indexed or used in DML
+--   - Newly-added columns cannot be referenced in DML in the same migration
 --
--- This migration uses atlas:txn false to handle ALTER COLUMN TYPE.
+-- This migration adds columns and alters types. DML (backfill) is in the next migration.
 -- atlas:txn false
 
 -- ============================================================
 -- audit_log: add created_at alongside changed_at
 -- ============================================================
--- Add created_at (the column the code writes to)
 ALTER TABLE IF EXISTS audit_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
-
--- Backfill from changed_at for any existing rows (guarded for services where audit_log may not exist)
-UPDATE audit_log SET created_at = changed_at WHERE created_at IS NULL AND changed_at IS NOT NULL;
-
--- Set default for new rows
-ALTER TABLE IF EXISTS audit_log ALTER COLUMN created_at SET DEFAULT now();
 
 -- Add event_id for idempotent writes from tenant_audit_writer (Kafka consumer path)
 ALTER TABLE IF EXISTS audit_log ADD COLUMN IF NOT EXISTS event_id VARCHAR(100);
@@ -33,12 +27,6 @@ ALTER TABLE IF EXISTS audit_log ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(
 ALTER TABLE IF EXISTS audit_log ADD COLUMN IF NOT EXISTS causation_id VARCHAR(255);
 ALTER TABLE IF EXISTS audit_log ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
 
--- Create unique index on event_id (supports ON CONFLICT for idempotency)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_log_event_id ON audit_log(event_id);
-
--- Index created_at for query ordering
-CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
-
 -- ============================================================
 -- Drop change_summary view before ALTER COLUMN TYPE
 -- (view depends on record_id and changed_at columns)
@@ -48,15 +36,11 @@ DROP VIEW IF EXISTS change_summary;
 -- ============================================================
 -- audit_log: fix record_id type (UUID -> VARCHAR)
 -- ============================================================
--- Change record_id from UUID to VARCHAR(100) to support string IDs like "IBA-xxx"
--- This is a no-op if already VARCHAR from a prior compatibility migration.
 ALTER TABLE IF EXISTS audit_log ALTER COLUMN record_id TYPE VARCHAR(100);
 
 -- ============================================================
 -- audit_log: fix client_ip type (INET -> VARCHAR)
 -- ============================================================
--- GORM model uses VARCHAR(45), some migrations created INET.
--- This is a no-op if already VARCHAR.
 ALTER TABLE IF EXISTS audit_log ALTER COLUMN client_ip TYPE VARCHAR(45);
 
 -- ============================================================
