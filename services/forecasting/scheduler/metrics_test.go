@@ -238,4 +238,3 @@ func TestMetrics_RecordError_MultipleTypes(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 3, len(f.GetMetric()))
 }
-

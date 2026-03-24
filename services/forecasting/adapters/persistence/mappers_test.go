@@ -12,7 +12,7 @@ import (
 	"github.com/meridianhub/meridian/services/forecasting/domain"
 )
 
-func makeTestStrategy(t *testing.T, opts ...func(*domain.ForecastingStrategy)) domain.ForecastingStrategy {
+func makeTestStrategy(t *testing.T) domain.ForecastingStrategy {
 	t.Helper()
 	s, err := domain.NewForecastingStrategy(
 		"tenant-1",
