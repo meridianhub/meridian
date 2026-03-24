@@ -85,21 +85,10 @@ DO $do$ BEGIN
           changed_at,
           changed_by,
           CASE
-              WHEN operation = 'UPDATE'
-                   AND new_values IS NOT NULL
-                   AND new_values != ''
-                   AND new_values ~ '^{.*}$' THEN
-                  COALESCE(
-                      (SELECT json_object_agg(key, value)
-                       FROM jsonb_each(new_values::jsonb)
-                       WHERE (old_values IS NULL
-                              OR old_values = ''
-                              OR NOT (old_values ~ '^{.*}$')
-                              OR (old_values ~ '^{.*}$'
-                                  AND new_values::jsonb->key IS DISTINCT FROM old_values::jsonb->key
-                              ))),
-                      '{}'::json
-                  )
+              WHEN operation = 'UPDATE' THEN
+                  (SELECT json_object_agg(key, value)
+                   FROM jsonb_each(new_values)
+                   WHERE new_values->key IS DISTINCT FROM old_values->key)
               ELSE NULL
           END AS changed_fields,
           transaction_id
