@@ -71,22 +71,29 @@ ALTER TABLE IF EXISTS audit_outbox ALTER COLUMN client_ip TYPE VARCHAR(45);
 
 -- ============================================================
 -- Recreate change_summary view with updated column types
+-- (only if audit_log exists - handles partial migration scenarios)
 -- ============================================================
-CREATE OR REPLACE VIEW change_summary AS
-SELECT
-    id,
-    table_name AS table_full_name,
-    operation,
-    record_id,
-    changed_at,
-    changed_by,
-    CASE
-        WHEN operation = 'UPDATE' AND new_values IS NOT NULL AND old_values IS NOT NULL THEN
-            (SELECT json_object_agg(key, value)
-             FROM jsonb_each(new_values::jsonb)
-             WHERE (new_values::jsonb)->key IS DISTINCT FROM (old_values::jsonb)->key)
-        ELSE NULL
-    END AS changed_fields,
-    transaction_id
-FROM audit_log
-ORDER BY changed_at DESC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'audit_log' AND table_schema = current_schema()) THEN
+    EXECUTE '
+      CREATE OR REPLACE VIEW change_summary AS
+      SELECT
+          id,
+          table_name AS table_full_name,
+          operation,
+          record_id,
+          changed_at,
+          changed_by,
+          CASE
+              WHEN operation = ''UPDATE'' AND new_values IS NOT NULL AND old_values IS NOT NULL THEN
+                  (SELECT json_object_agg(key, value)
+                   FROM jsonb_each(new_values::jsonb)
+                   WHERE (new_values::jsonb)->key IS DISTINCT FROM (old_values::jsonb)->key)
+              ELSE NULL
+          END AS changed_fields,
+          transaction_id
+      FROM audit_log
+      ORDER BY changed_at DESC
+    ';
+  END IF;
+END $$;
