@@ -73,8 +73,11 @@ type FinancialPositionLogRepository interface {
 
 // PositionLogFilter defines filtering and pagination options for listing financial position logs.
 type PositionLogFilter struct {
-	// AccountID filters by account (optional)
+	// AccountID filters by account (optional). Ignored when AccountIDs is non-empty.
 	AccountID *string
+
+	// AccountIDs filters by multiple accounts (optional). Takes precedence over AccountID.
+	AccountIDs []string
 
 	// Status filters by current status (optional)
 	Status *TransactionStatus

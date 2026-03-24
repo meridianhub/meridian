@@ -451,3 +451,139 @@ func TestListFinancialPositionLogs_RepositoryError(t *testing.T) {
 	assert.Equal(t, codes.Internal, st.Code())
 	mockRepo.AssertExpectations(t)
 }
+
+// TestListFinancialPositionLogs_ByAccountIDs tests filtering by multiple account IDs
+func TestListFinancialPositionLogs_ByAccountIDs(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
+
+	accountIDs := []string{"ACC-001", "ACC-002"}
+	now := time.Now().UTC()
+
+	expectedLogs := []*domain.FinancialPositionLog{
+		{
+			LogID:                 uuid.New(),
+			AccountID:             "ACC-001",
+			TransactionLogEntries: []*domain.TransactionLogEntry{},
+			AuditTrail:            []*domain.AuditTrailEntry{},
+			StatusTracking:        domain.NewStatusTracking(),
+			CreatedAt:             now,
+			UpdatedAt:             now,
+			Version:               1,
+		},
+		{
+			LogID:                 uuid.New(),
+			AccountID:             "ACC-002",
+			TransactionLogEntries: []*domain.TransactionLogEntry{},
+			AuditTrail:            []*domain.AuditTrailEntry{},
+			StatusTracking:        domain.NewStatusTracking(),
+			CreatedAt:             now,
+			UpdatedAt:             now,
+			Version:               1,
+		},
+	}
+
+	mockRepo.On("List", ctx, domain.PositionLogFilter{
+		AccountIDs: accountIDs,
+		Limit:      50,
+		Offset:     0,
+	}).Return(expectedLogs, nil)
+
+	req := &positionkeepingv1.ListFinancialPositionLogsRequest{
+		AccountIds: accountIDs,
+		Pagination: &commonv1.Pagination{
+			PageSize: 50,
+		},
+	}
+
+	resp, err := svc.ListFinancialPositionLogs(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Len(t, resp.Logs, 2)
+	mockRepo.AssertExpectations(t)
+}
+
+// TestListFinancialPositionLogs_AccountIDs_TakesPrecedenceOverAccountID verifies account_ids
+// takes precedence when both account_id and account_ids are set.
+func TestListFinancialPositionLogs_AccountIDs_TakesPrecedenceOverAccountID(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
+
+	accountIDs := []string{"ACC-001", "ACC-002"}
+	now := time.Now().UTC()
+
+	expectedLogs := []*domain.FinancialPositionLog{
+		{
+			LogID:                 uuid.New(),
+			AccountID:             "ACC-001",
+			TransactionLogEntries: []*domain.TransactionLogEntry{},
+			AuditTrail:            []*domain.AuditTrailEntry{},
+			StatusTracking:        domain.NewStatusTracking(),
+			CreatedAt:             now,
+			UpdatedAt:             now,
+			Version:               1,
+		},
+	}
+
+	// Mock expects AccountIDs set, not AccountID
+	mockRepo.On("List", ctx, domain.PositionLogFilter{
+		AccountIDs: accountIDs,
+		Limit:      50,
+		Offset:     0,
+	}).Return(expectedLogs, nil)
+
+	req := &positionkeepingv1.ListFinancialPositionLogsRequest{
+		AccountId:  "IGNORED",
+		AccountIds: accountIDs,
+		Pagination: &commonv1.Pagination{
+			PageSize: 50,
+		},
+	}
+
+	resp, err := svc.ListFinancialPositionLogs(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	mockRepo.AssertExpectations(t)
+}
+
+// TestListFinancialPositionLogs_AccountIDs_MaxLimitValidation verifies the 100-item limit is enforced.
+func TestListFinancialPositionLogs_AccountIDs_MaxLimitValidation(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+
+	svc := mustNewPositionKeepingService(t, mockRepo, mockEventPublisher, mockIdempotency)
+
+	// Build 101 account IDs
+	tooMany := make([]string, 101)
+	for i := range tooMany {
+		tooMany[i] = "ACC-001"
+	}
+
+	req := &positionkeepingv1.ListFinancialPositionLogsRequest{
+		AccountIds: tooMany,
+		Pagination: &commonv1.Pagination{
+			PageSize: 50,
+		},
+	}
+
+	resp, err := svc.ListFinancialPositionLogs(ctx, req)
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
+	mockRepo.AssertNotCalled(t, "List")
+}

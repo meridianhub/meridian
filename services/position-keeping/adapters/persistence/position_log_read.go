@@ -150,7 +150,11 @@ func (r *PostgresRepository) List(ctx context.Context, filter domain.PositionLog
 		argPos := 1
 
 		// Build WHERE clauses dynamically
-		if filter.AccountID != nil {
+		if len(filter.AccountIDs) > 0 {
+			query += fmt.Sprintf(" AND account_id = ANY($%d)", argPos)
+			args = append(args, filter.AccountIDs)
+			argPos++
+		} else if filter.AccountID != nil {
 			query += fmt.Sprintf(" AND account_id = $%d", argPos)
 			args = append(args, *filter.AccountID)
 			argPos++

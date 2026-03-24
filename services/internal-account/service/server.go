@@ -741,6 +741,16 @@ func (s *Service) ListInternalAccounts(ctx context.Context, req *pb.ListInternal
 		}
 	}
 
+	// Apply org party ID filter
+	if req.OrgPartyIdFilter != "" {
+		orgPartyID, err := uuid.Parse(req.OrgPartyIdFilter)
+		if err != nil {
+			operationStatus = operationStatusFailed
+			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id_filter: %v", err)
+		}
+		filter.OrgPartyID = &orgPartyID
+	}
+
 	// Apply pagination
 	if req.Pagination != nil {
 		if req.Pagination.PageSize > 0 {

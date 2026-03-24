@@ -21,6 +21,6 @@ export async function navigateToFirstPartyDetail(page: Page): Promise<string> {
  * Click a tab by name and wait for network idle.
  */
 export async function switchToTab(page: Page, tabName: string): Promise<void> {
-  await page.getByRole('tab', { name: tabName }).click()
+  await page.getByRole('tab', { name: tabName, exact: true }).click()
   await page.waitForLoadState('networkidle')
 }

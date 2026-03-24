@@ -21,6 +21,6 @@
   "author": "",
   "license": "Apache-2.0",
   "devDependencies": {
-    "markdownlint-cli2": "^0.22.0"
+    "markdownlint-cli2": "^0.21.0"
   }
 }
