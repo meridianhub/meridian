@@ -132,12 +132,17 @@ func TestReferenceExtractor_AttributeAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should produce instrument ref AND attribute ref.
-	var attrRefs []Reference
+	var instrRefs, attrRefs []Reference
 	for _, r := range refs {
-		if r.Type == ReferenceTypeAttribute {
+		switch r.Type {
+		case ReferenceTypeInstrument:
+			instrRefs = append(instrRefs, r)
+		case ReferenceTypeAttribute:
 			attrRefs = append(attrRefs, r)
 		}
 	}
+	require.Len(t, instrRefs, 1)
+	assert.Equal(t, "GBP", instrRefs[0].Key)
 	require.Len(t, attrRefs, 1)
 	assert.Equal(t, "precision", attrRefs[0].AttributeKey)
 	assert.Equal(t, "GBP", attrRefs[0].InstrumentCode)
