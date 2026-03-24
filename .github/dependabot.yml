@@ -7,6 +7,11 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    ignore:
+      # dex uses a pseudo-version (v0.0.0-...) pinned to their main branch.
+      # Dependabot sees the old tagged release v2.13.0+incompatible as "newer"
+      # but that pre-modules version lacks server/signer and breaks the build.
+      - dependency-name: "github.com/dexidp/dex"
     groups:
       go-dependencies:
         patterns:
