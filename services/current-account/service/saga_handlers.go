@@ -44,6 +44,8 @@ var (
 	errMissingParameter      = errors.New("missing required parameter")
 	errInvalidParameterType  = errors.New("invalid parameter type")
 	errHandlerNotImplemented = errors.New("handler not implemented")
+	errPosKeepingClientNil   = errors.New("position keeping client not available - delegated to saga layer")
+	errFinAcctClientNil      = errors.New("financial accounting client not available - delegated to saga layer")
 )
 
 // CurrentAccountHandlerDeps contains dependencies needed by Current Account saga handlers.
@@ -361,6 +363,9 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 	}
 
 	// Call Position Keeping service
+	if deps.PosKeepingClient == nil {
+		return nil, wrapHandlerError(handlerName, errPosKeepingClientNil)
+	}
 	resp, err := deps.PosKeepingClient.InitiateFinancialPositionLog(ctx,
 		&positionkeepingv1.InitiateFinancialPositionLogRequest{
 			AccountId:    accountID,
@@ -437,6 +442,10 @@ func currentAccountPositionKeepingCancelLog(ctx *saga.StarlarkContext, params ma
 	if direction == directionDebit {
 		idempKeyPrefix = sagaTypeWithdrawal
 		sagaType = sagaTypeWithdrawal
+	}
+
+	if deps.PosKeepingClient == nil {
+		return nil, wrapHandlerError(handlerName, errPosKeepingClientNil)
 	}
 
 	deps.Logger.Info("compensating position_keeping.cancel_log",
@@ -519,6 +528,10 @@ func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params m
 	transactionType, err := requireString(params, "transaction_type")
 	if err != nil {
 		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	if deps.FinAcctClient == nil {
+		return nil, wrapHandlerError(handlerName, errFinAcctClientNil)
 	}
 
 	deps.Logger.Info("executing financial_accounting.initiate_booking_log",
@@ -625,6 +638,10 @@ func currentAccountFinAcctCapturePosting(ctx *saga.StarlarkContext, params map[s
 		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s", errInvalidDirection, direction))
 	}
 
+	if deps.FinAcctClient == nil {
+		return nil, wrapHandlerError(handlerName, errFinAcctClientNil)
+	}
+
 	deps.Logger.Info("executing financial_accounting.capture_posting",
 		"booking_log_id", bookingLogID,
 		"account_id", accountID,
@@ -696,6 +713,10 @@ func currentAccountFinAcctUpdateBookingLog(ctx *saga.StarlarkContext, params map
 		pbStatus = commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED
 	default:
 		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s", errInvalidStatus, statusStr))
+	}
+
+	if deps.FinAcctClient == nil {
+		return nil, wrapHandlerError(handlerName, errFinAcctClientNil)
 	}
 
 	deps.Logger.Info("executing financial_accounting.update_booking_log",
@@ -792,6 +813,10 @@ func currentAccountFinAcctCompensatePosting(ctx *saga.StarlarkContext, params ma
 		pbDirection = commonpb.PostingDirection_POSTING_DIRECTION_CREDIT
 	default:
 		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s", errInvalidDirection, direction))
+	}
+
+	if deps.FinAcctClient == nil {
+		return nil, wrapHandlerError(handlerName, errFinAcctClientNil)
 	}
 
 	deps.Logger.Info("executing financial_accounting.compensate_posting",

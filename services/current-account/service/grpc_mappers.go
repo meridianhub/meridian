@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 
+	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/current-account/domain"
@@ -33,6 +34,7 @@ func toProtoFacility(account domain.CurrentAccount) *pb.CurrentAccountFacility {
 		ProductTypeVersion: int32(account.ProductTypeVersion()),
 		BehaviorClass:      account.BehaviorClass(),
 		PartyId:            account.PartyID(),
+		OrgPartyId:         orgPartyIDToString(account.OrgPartyID()),
 	}
 }
 
@@ -185,6 +187,15 @@ func protoMoneyToAmount(amount *commonpb.MoneyAmount, account domain.CurrentAcco
 		precision,
 		totalMinor,
 	)
+}
+
+// orgPartyIDToString converts an optional UUID pointer to a string.
+// Returns empty string for nil (personal accounts).
+func orgPartyIDToString(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
 }
 
 func mapStatusToProto(status domain.AccountStatus) pb.AccountStatus {

@@ -484,6 +484,13 @@ message ListInternalAccountsRequest {
   // Note: If behavior_class_filter is not "CLEARING", this filter has no effect
   // since only CLEARING accounts have non-UNSPECIFIED clearing_purpose values.
   ClearingPurpose clearing_purpose_filter = 5;
+
+  // org_party_id_filter returns only accounts associated with this organization party (optional).
+  // Empty string means no filtering by org_party_id.
+  string org_party_id_filter = 6 [(buf.validate.field).string = {
+    pattern: "^[a-zA-Z0-9_-]*$"
+    max_len: 100
+  }];
 }
 
 // ListInternalAccountsResponse returns a paginated list of accounts.

@@ -829,6 +829,128 @@ func TestListAccounts_FilterByIBAN(t *testing.T) {
 	assert.Empty(t, result.Accounts)
 }
 
+func TestListAccounts_FilterByPartyID(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	partyA := uuid.New().String()
+	partyB := uuid.New().String()
+
+	accA, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST52345698765432", partyA, "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, accA))
+
+	accB, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST62345698765432", partyB, "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, accB))
+
+	// Filter by partyA
+	partyAUUID, err := uuid.Parse(partyA)
+	require.NoError(t, err)
+	result, err := repo.ListAccounts(ctx, ListAccountsParams{
+		PartyID: partyAUUID,
+		Limit:   10,
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.Accounts, 1)
+	assert.Equal(t, partyA, result.Accounts[0].PartyID())
+
+	// Filter by non-existent party
+	result, err = repo.ListAccounts(ctx, ListAccountsParams{
+		PartyID: uuid.New(),
+		Limit:   10,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, result.Accounts)
+	assert.Equal(t, int64(0), result.TotalCount)
+}
+
+func TestListAccounts_FilterByOrgPartyID(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	orgA := uuid.New()
+	orgB := uuid.New()
+
+	acc1, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST72345698765432", uuid.New().String(), "GBP",
+		domain.WithOrgPartyID(orgA))
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, acc1))
+
+	acc2, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST82345698765432", uuid.New().String(), "GBP",
+		domain.WithOrgPartyID(orgB))
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, acc2))
+
+	// Personal account (no org) - should not appear when filtering by org
+	acc3, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WEST92345698765432", uuid.New().String(), "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, acc3))
+
+	// Filter by orgA
+	result, err := repo.ListAccounts(ctx, ListAccountsParams{
+		OrgPartyID: orgA,
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.Accounts, 1)
+	assert.Equal(t, int64(1), result.TotalCount)
+
+	// Filter by non-existent org
+	result, err = repo.ListAccounts(ctx, ListAccountsParams{
+		OrgPartyID: uuid.New(),
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, result.Accounts)
+}
+
+func TestListAccounts_FilterByPartyIDAndOrgPartyID(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db)
+
+	org := uuid.New()
+	partyA := uuid.New().String()
+	partyB := uuid.New().String()
+
+	// partyA in org
+	acc1, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WESTA2345698765432", partyA, "GBP",
+		domain.WithOrgPartyID(org))
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, acc1))
+
+	// partyB in org
+	acc2, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WESTB2345698765432", partyB, "GBP",
+		domain.WithOrgPartyID(org))
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, acc2))
+
+	// partyA NOT in org
+	acc3, err := domain.NewCurrentAccount("ACC-"+uuid.New().String()[:8], "GB82WESTC2345698765432", partyA, "GBP")
+	require.NoError(t, err)
+	require.NoError(t, repo.Save(ctx, acc3))
+
+	partyAUUID, err := uuid.Parse(partyA)
+	require.NoError(t, err)
+
+	// Filter by both partyA AND org - should return only acc1
+	result, err := repo.ListAccounts(ctx, ListAccountsParams{
+		PartyID:    partyAUUID,
+		OrgPartyID: org,
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.Accounts, 1)
+	assert.Equal(t, int64(1), result.TotalCount)
+	assert.Equal(t, partyA, result.Accounts[0].PartyID())
+}
+
 // isDuplicateKeyError test
 
 func TestIsDuplicateKeyError(t *testing.T) {

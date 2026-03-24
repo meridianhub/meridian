@@ -50,4 +50,22 @@ describe('AdminOnlyRoute', () => {
     renderWithRoute(superAdminToken)
     expect(screen.getByTestId('admin-content')).toBeInTheDocument()
   })
+
+  it('renders children for operator', () => {
+    const operatorToken = createTestToken({
+      roles: ['operator'],
+      tenantId: 'test-tenant',
+    })
+    renderWithRoute(operatorToken)
+    expect(screen.getByTestId('admin-content')).toBeInTheDocument()
+  })
+
+  it('renders children for auditor', () => {
+    const auditorToken = createTestToken({
+      roles: ['auditor'],
+      tenantId: 'test-tenant',
+    })
+    renderWithRoute(auditorToken)
+    expect(screen.getByTestId('admin-content')).toBeInTheDocument()
+  })
 })
