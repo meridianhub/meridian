@@ -408,3 +408,91 @@ func TestUpdateFinancialBookingLog_UpdatesChartOfAccountsRules(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.Equal(t, newRules, resp.FinancialBookingLog.ChartOfAccountsRules)
 }
+
+// TestUpdateFinancialBookingLog_PendingToPosted_BalancedPostings verifies that a
+// PENDING booking log with balanced double-entry postings can be transitioned to POSTED.
+// This tests the most domain-critical state change which enforces double-entry accounting.
+func TestUpdateFinancialBookingLog_PendingToPosted_BalancedPostings(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	bookingLogID := insertTestBookingLog(t, db, "PENDING")
+
+	// Insert balanced DEBIT and CREDIT postings with equal amounts
+	insertTestPosting(t, db, bookingLogID, "DEBIT")
+	insertTestPosting(t, db, bookingLogID, "CREDIT")
+
+	repo := persistence.NewLedgerRepository(db)
+	svc := mustNewFinancialAccountingService(t, repo, &mockEventPublisher{}, &mockIdempotencyService{})
+
+	req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id: bookingLogID.String(),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	}
+
+	resp, err := svc.UpdateFinancialBookingLog(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, resp.FinancialBookingLog.Status)
+}
+
+// TestUpdateFinancialBookingLog_PendingToPosted_UnbalancedPostings verifies that
+// a booking log with unbalanced postings cannot be transitioned to POSTED.
+// This enforces the double-entry bookkeeping invariant.
+func TestUpdateFinancialBookingLog_PendingToPosted_UnbalancedPostings(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	bookingLogID := insertTestBookingLog(t, db, "PENDING")
+
+	// Insert only a DEBIT posting (no matching CREDIT) - this creates an imbalance
+	insertTestPosting(t, db, bookingLogID, "DEBIT")
+
+	repo := persistence.NewLedgerRepository(db)
+	svc := mustNewFinancialAccountingService(t, repo, &mockEventPublisher{}, &mockIdempotencyService{})
+
+	req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id: bookingLogID.String(),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	}
+
+	resp, err := svc.UpdateFinancialBookingLog(ctx, req)
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+}
+
+// TestUpdateFinancialBookingLog_PendingToPosted_NoPostings verifies that
+// a booking log with no postings cannot be transitioned to POSTED.
+func TestUpdateFinancialBookingLog_PendingToPosted_NoPostings(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	bookingLogID := insertTestBookingLog(t, db, "PENDING")
+
+	repo := persistence.NewLedgerRepository(db)
+	svc := mustNewFinancialAccountingService(t, repo, &mockEventPublisher{}, &mockIdempotencyService{})
+
+	req := &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id: bookingLogID.String(),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: uuid.New().String(),
+		},
+		Status: commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	}
+
+	resp, err := svc.UpdateFinancialBookingLog(ctx, req)
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+}

@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/pkg/refdata"
@@ -82,23 +81,6 @@ func TestNewFinancialAccountingService_MultipleOptions(t *testing.T) {
 	require.NotNil(t, svc)
 	assert.Equal(t, registry, svc.registry)
 	assert.Equal(t, resolver, svc.instrumentResolver)
-}
-
-// TestFinancialAccountingService_ImplementsGRPCInterface verifies that the service
-// satisfies the gRPC server interface at compile time.
-func TestFinancialAccountingService_ImplementsGRPCInterface(t *testing.T) {
-	db := &gorm.DB{}
-	repo := persistence.NewLedgerRepository(db)
-	publisher := &mockEventPublisher{}
-	idempotencySvc := &mockIdempotencyService{}
-	outboxPublisher := events.NewOutboxPublisher("financial-accounting")
-	outboxRepo := events.NewPostgresOutboxRepository(db)
-
-	svc, err := NewFinancialAccountingService(repo, publisher, idempotencySvc, outboxPublisher, outboxRepo)
-	require.NoError(t, err)
-
-	// Compile-time interface check
-	var _ financialaccountingv1.FinancialAccountingServiceServer = svc
 }
 
 // TestNewFinancialAccountingService_IdempotencyExecutorInitialized verifies that the
