@@ -297,4 +297,3 @@ func TestUpdateLedgerPosting_UnspecifiedStatus(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 }
-
