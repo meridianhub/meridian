@@ -94,7 +94,7 @@ export function TransactionsTab({ partyId, partyType }: TransactionsTabProps) {
           ...(isOrganization ? { orgPartyId: partyId } : { partyId }),
         })
         for (const acct of resp.accounts ?? []) {
-          ids.push(acct.accountId)
+          if (acct.accountId) ids.push(acct.accountId)
         }
         pageToken = resp.nextPageToken || ''
       } while (pageToken)
@@ -195,8 +195,8 @@ export function TransactionsTab({ partyId, partyType }: TransactionsTabProps) {
               </tr>
             </thead>
             <tbody>
-              {displayedPostings.map((p) => (
-                <tr key={p.id} className="border-b last:border-0">
+              {displayedPostings.map((p, idx) => (
+                <tr key={p.id || idx} className="border-b last:border-0">
                   <td className="py-2 pr-4">
                     <StatusBadge status={getDirectionName(p.postingDirection)} />
                   </td>
