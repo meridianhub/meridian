@@ -32,7 +32,7 @@ func gatherMetrics(t *testing.T, reg *prometheus.Registry) map[string]*dto.Metri
 func counterValue(t *testing.T, f *dto.MetricFamily) float64 {
 	t.Helper()
 	require.NotNil(t, f)
-	require.NotEmpty(t, f.GetMetric())
+	require.Len(t, f.GetMetric(), 1, "expected exactly one label set")
 	return f.GetMetric()[0].GetCounter().GetValue()
 }
 
@@ -72,11 +72,16 @@ func TestMetrics_RecordExecution_MultipleStatuses(t *testing.T) {
 	require.True(t, ok)
 
 	// Should have two distinct label sets: status=success (2) and status=error (1)
-	var total float64
+	counts := map[string]float64{}
 	for _, metric := range f.GetMetric() {
-		total += metric.GetCounter().GetValue()
+		for _, label := range metric.GetLabel() {
+			if label.GetName() == "status" {
+				counts[label.GetValue()] = metric.GetCounter().GetValue()
+			}
+		}
 	}
-	assert.Equal(t, float64(3), total)
+	assert.Equal(t, float64(2), counts["success"], "success count")
+	assert.Equal(t, float64(1), counts["error"], "error count")
 }
 
 func TestMetrics_RecordExecution_MultipleStrategies(t *testing.T) {

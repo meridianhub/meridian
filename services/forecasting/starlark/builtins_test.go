@@ -117,6 +117,7 @@ func TestPercentileBuiltin_P25(t *testing.T) {
 	thread := &starlarklib.Thread{Name: "test"}
 	b := starlarklib.NewBuiltin("percentile", percentileBuiltin)
 
+	// Sorted: [10, 20, 30, 40]. rank = 0.25 * 3 = 0.75. result = 10 + 0.75 * 10 = 17.5
 	list := starlarklib.NewList([]starlarklib.Value{
 		starlarklib.Float(10.0),
 		starlarklib.Float(20.0),
@@ -125,8 +126,9 @@ func TestPercentileBuiltin_P25(t *testing.T) {
 	})
 	val, err := starlarklib.Call(thread, b, starlarklib.Tuple{list, starlarklib.MakeInt(25)}, nil)
 	require.NoError(t, err)
-	_, ok := val.(*saga.DecimalValue)
+	result, ok := val.(*saga.DecimalValue)
 	require.True(t, ok)
+	assert.Equal(t, "17.5", result.GetDecimal().String())
 }
 
 // --- filterByHourBuiltin edge cases ---
@@ -145,7 +147,15 @@ func TestFilterByHourBuiltin_MidnightHour(t *testing.T) {
 	require.NoError(t, err)
 	result, ok := val.(*starlarklib.List)
 	require.True(t, ok)
-	assert.Equal(t, 1, result.Len(), "expected only midnight observation")
+	require.Equal(t, 1, result.Len(), "expected only midnight observation")
+
+	// Verify it's the midnight item (d1), not the 01:00 item (d2)
+	kept, ok := result.Index(0).(*starlarklib.Dict)
+	require.True(t, ok)
+	tsVal, found, err := kept.Get(starlarklib.String("timestamp"))
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, starlarklib.String("2026-01-15T00:00:00Z"), tsVal)
 }
 
 func TestFilterByHourBuiltin_Hour23(t *testing.T) {
@@ -162,7 +172,15 @@ func TestFilterByHourBuiltin_Hour23(t *testing.T) {
 	require.NoError(t, err)
 	result, ok := val.(*starlarklib.List)
 	require.True(t, ok)
-	assert.Equal(t, 1, result.Len())
+	require.Equal(t, 1, result.Len())
+
+	// Verify it's the 23:00 item (d1), not the 22:59 item (d2)
+	kept, ok := result.Index(0).(*starlarklib.Dict)
+	require.True(t, ok)
+	tsVal, found, err := kept.Get(starlarklib.String("timestamp"))
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, starlarklib.String("2026-01-15T23:00:00Z"), tsVal)
 }
 
 // --- groupByHourBuiltin edge cases ---
