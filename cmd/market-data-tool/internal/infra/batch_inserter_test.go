@@ -108,9 +108,11 @@ func TestBatchInserter_AddPreservesExistingCodes(t *testing.T) {
 		QualityLevel: "ACTUAL",
 	}
 
-	_ = bi.Add(context.Background(), entry)
+	err := bi.Add(context.Background(), entry)
+	require.ErrorIs(t, err, ErrNilClient)
 
-	// Custom codes should be preserved
+	// Custom codes should be preserved (field assignment happens after nil client check)
+	// Since client is nil, Add returns before field assignment - codes remain as-is
 	assert.Equal(t, "CUSTOM_DATASET", entry.DatasetCode)
 	assert.Equal(t, "CUSTOM_SOURCE", entry.SourceCode)
 }

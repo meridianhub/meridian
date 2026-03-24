@@ -70,6 +70,10 @@ func TestDatasetChecker_Reset(t *testing.T) {
 		checker.Reset()
 
 		assert.False(t, checker.IsChecked())
+		// Verify the error was also cleared
+		checker.mu.RLock()
+		assert.Nil(t, checker.err)
+		checker.mu.RUnlock()
 	})
 }
 

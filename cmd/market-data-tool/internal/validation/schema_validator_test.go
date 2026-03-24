@@ -126,7 +126,7 @@ func TestSchemaValidator_ValidateWithContext(t *testing.T) {
 		assert.Nil(t, result.FieldErrors)
 	})
 
-	t.Run("returns invalid result with field errors", func(t *testing.T) {
+	t.Run("returns invalid result with field errors map initialized", func(t *testing.T) {
 		v := NewSchemaValidatorFromJSON(`{
 			"type": "object",
 			"properties": {
@@ -139,6 +139,8 @@ func TestSchemaValidator_ValidateWithContext(t *testing.T) {
 		result := v.ValidateWithContext(map[string]string{"other": "value"})
 		assert.False(t, result.Valid)
 		require.NotNil(t, result.Error)
+		// FieldErrors is always initialized (non-nil) when validation fails via jsonschema
+		assert.NotNil(t, result.FieldErrors)
 	})
 }
 
