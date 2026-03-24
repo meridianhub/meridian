@@ -9,6 +9,37 @@ import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { PartyType } from '@/api/gen/meridian/party/v1/party_pb'
 
+// Currencies with non-standard decimal places (ISO 4217)
+const CURRENCY_PRECISION: Record<string, number> = {
+  JPY: 0, KRW: 0, VND: 0, BHD: 3, KWD: 3, OMR: 3,
+}
+
+function toMinorUnits(money: unknown, currency: string): bigint | null {
+  if (money === undefined || money === null) return null
+  try {
+    if (typeof money === 'bigint') return money
+    if (typeof money === 'string') return BigInt(money)
+    if (typeof money === 'object' && 'units' in money) {
+      const m = money as { units?: bigint | number | string; nanos?: number }
+      const units = typeof m.units === 'bigint' ? m.units : BigInt(m.units ?? 0)
+      const nanos = m.nanos ?? 0
+      const precision = CURRENCY_PRECISION[currency] ?? 2
+      const factor = BigInt(10 ** precision)
+      const nanosDivisor = BigInt(10 ** (9 - precision))
+      const nanosBig = BigInt(nanos)
+      const half = nanosDivisor / 2n
+      const roundedNanos =
+        nanosBig >= 0n
+          ? (nanosBig + half) / nanosDivisor
+          : (nanosBig - half) / nanosDivisor
+      return units * factor + roundedNanos
+    }
+  } catch {
+    // Invalid BigInt conversion
+  }
+  return null
+}
+
 interface TransactionsTabProps {
   partyId: string
   /** Party type passed from the parent page to avoid a duplicate fetch */
@@ -170,10 +201,12 @@ export function TransactionsTab({ partyId, partyType }: TransactionsTabProps) {
                     <StatusBadge status={getDirectionName(p.postingDirection)} />
                   </td>
                   <td className="py-2 pr-4 tabular-nums">
-                    <MoneyDisplay
-                      amount={p.postingAmount?.units}
-                      currency={p.postingAmount?.currencyCode ?? ''}
-                    />
+                    {(() => {
+                      const currency = p.postingAmount?.currencyCode ?? ''
+                      const minor = toMinorUnits(p.postingAmount, currency)
+                      if (minor === null) return '-'
+                      return <MoneyDisplay amount={minor} currency={currency} />
+                    })()}
                   </td>
                   <td className="py-2 pr-4">
                     <EntityLink type="account" id={p.accountId} />
