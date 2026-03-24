@@ -113,7 +113,7 @@ func TestPositionLogWrite_Update_Success(t *testing.T) {
 	retrieved, err := tc.repo.FindByID(ctx, log.LogID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.TransactionStatusPosted, retrieved.StatusTracking.CurrentStatus)
-	assert.Equal(t, uint64(2), retrieved.Version)
+	assert.Equal(t, int64(2), retrieved.Version)
 }
 
 func TestPositionLogWrite_CreateWithOutbox_Success(t *testing.T) {
