@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.starlark.net/syntax" //nolint:depguard // required for direct AST walking in internal extractor tests
+	"go.starlark.net/syntax"
 )
 
 // parseAndExtractFull parses a full Starlark file and returns extracted references.
