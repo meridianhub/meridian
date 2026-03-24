@@ -52,7 +52,7 @@ export function TransactionsTab({ partyId, partyType }: TransactionsTabProps) {
 
   // Step 1: Resolve all account IDs for this party (paginate all pages)
   const accountIdsQuery = useQuery({
-    queryKey: [...tenantKeys.party(tenantSlug ?? '', partyId), 'transaction-account-ids'],
+    queryKey: [...tenantKeys.party(tenantSlug ?? '', partyId), 'transaction-account-ids', isOrganization],
     queryFn: async (): Promise<string[]> => {
       const ids: string[] = []
       let pageToken = ''

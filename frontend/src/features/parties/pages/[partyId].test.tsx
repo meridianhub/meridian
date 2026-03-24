@@ -96,12 +96,15 @@ describe('PartyDetailPage', () => {
     })
   })
 
-  it('renders all eight tabs', async () => {
-    const { container } = renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
+  it('renders all tabs', async () => {
+    renderAtRoute(<PartyDetailPage />, '/parties/test-party-1')
 
-    // Check that tabs container is rendered (wait for data to load)
     await waitFor(() => {
-      expect(container.querySelector('[role="tablist"]')).toBeInTheDocument()
+      const tabs = screen.getAllByRole('tab')
+      // 9 base tabs (Overview, Demographics, References, Associations,
+      // Bank Relations, Payment Methods, Accounts, Transactions, Audit Trail)
+      // Internal Accounts is org-only and requires numeric PartyType enum match
+      expect(tabs.length).toBe(9)
     })
   })
 

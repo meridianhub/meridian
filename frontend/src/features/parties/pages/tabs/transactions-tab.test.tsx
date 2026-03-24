@@ -132,6 +132,26 @@ describe('TransactionsTab', () => {
         expect(screen.getByText(/failed to load transactions/i)).toBeInTheDocument()
       })
     })
+
+    it('renders error message when postings fetch fails', async () => {
+      vi.mocked(useClients).mockReturnValue({
+        currentAccount: {
+          listCurrentAccounts: vi.fn().mockResolvedValue({
+            accounts: [{ accountId: 'acct-001' }],
+            nextPageToken: '',
+          }),
+        },
+        financialAccounting: {
+          listLedgerPostings: vi.fn().mockRejectedValue(new Error('postings error')),
+        },
+      } as ReturnType<typeof useClients>)
+
+      renderTab()
+
+      await waitFor(() => {
+        expect(screen.getByText(/failed to load transactions/i)).toBeInTheDocument()
+      })
+    })
   })
 
   describe('data display', () => {
