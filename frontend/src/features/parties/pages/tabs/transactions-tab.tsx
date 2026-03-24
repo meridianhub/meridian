@@ -72,9 +72,9 @@ export function TransactionsTab({ partyId, partyType }: TransactionsTabProps) {
     enabled: Boolean(tenantSlug && partyId),
   })
 
-  // Step 2: Fetch ledger postings for all resolved account IDs (batch by 100)
+  // Step 2: Fetch ledger postings for all resolved account IDs (batch by 100, paginate each batch)
   const postingsQuery = useQuery({
-    queryKey: [...tenantKeys.party(tenantSlug ?? '', partyId), 'transactions'],
+    queryKey: [...tenantKeys.party(tenantSlug ?? '', partyId), 'transactions', accountIdsQuery.data],
     queryFn: async () => {
       const accountIds = accountIdsQuery.data ?? []
       if (accountIds.length === 0) return []
@@ -83,15 +83,19 @@ export function TransactionsTab({ partyId, partyType }: TransactionsTabProps) {
         []
       for (let i = 0; i < accountIds.length; i += 100) {
         const batch = accountIds.slice(i, i + 100)
-        const resp = await clients.financialAccounting.listLedgerPostings({
-          pagination: { pageSize: 100, pageToken: '' },
-          accountIds: batch,
-        })
-        allPostings.push(...(resp.ledgerPostings ?? []))
+        let pageToken = ''
+        do {
+          const resp = await clients.financialAccounting.listLedgerPostings({
+            pagination: { pageSize: 100, pageToken },
+            accountIds: batch,
+          })
+          allPostings.push(...(resp.ledgerPostings ?? []))
+          pageToken = resp.pagination?.nextPageToken || ''
+        } while (pageToken)
       }
       return allPostings
     },
-    enabled: Boolean(tenantSlug && accountIdsQuery.data !== undefined),
+    enabled: Boolean(tenantSlug && accountIdsQuery.data && accountIdsQuery.data.length > 0),
   })
 
   const isLoading = accountIdsQuery.isLoading || postingsQuery.isLoading

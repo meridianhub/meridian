@@ -354,7 +354,7 @@ describe('TransactionsTab', () => {
 
   describe('batch account IDs', () => {
     it('calls listLedgerPostings with accountIds batch filter', async () => {
-      const listLedgerPostings = vi.fn().mockResolvedValue({ ledgerPostings: [] })
+      const listLedgerPostings = vi.fn().mockResolvedValue({ ledgerPostings: [], pagination: {} })
 
       vi.mocked(useClients).mockReturnValue({
         currentAccount: {
@@ -372,6 +372,46 @@ describe('TransactionsTab', () => {
         expect(listLedgerPostings).toHaveBeenCalledWith(
           expect.objectContaining({ accountIds: ['acct-001', 'acct-002'] }),
         )
+      })
+    })
+
+    it('paginates through all pages of postings', async () => {
+      const listLedgerPostings = vi.fn()
+        .mockResolvedValueOnce({
+          ledgerPostings: [mockPostings[0]],
+          pagination: { nextPageToken: 'postings-page2' },
+        })
+        .mockResolvedValueOnce({
+          ledgerPostings: [mockPostings[1]],
+          pagination: {},
+        })
+
+      vi.mocked(useClients).mockReturnValue({
+        currentAccount: {
+          listCurrentAccounts: vi.fn().mockResolvedValue({
+            accounts: [{ accountId: 'acct-001' }],
+            nextPageToken: '',
+          }),
+        },
+        financialAccounting: { listLedgerPostings },
+      } as ReturnType<typeof useClients>)
+
+      renderTab()
+
+      await waitFor(() => {
+        expect(listLedgerPostings).toHaveBeenCalledTimes(2)
+        expect(listLedgerPostings).toHaveBeenNthCalledWith(1,
+          expect.objectContaining({ pagination: { pageSize: 100, pageToken: '' } }),
+        )
+        expect(listLedgerPostings).toHaveBeenNthCalledWith(2,
+          expect.objectContaining({ pagination: { pageSize: 100, pageToken: 'postings-page2' } }),
+        )
+      })
+
+      // Both pages of postings should be displayed
+      await waitFor(() => {
+        expect(screen.getByText('CREDIT')).toBeInTheDocument()
+        expect(screen.getByText('DEBIT')).toBeInTheDocument()
       })
     })
   })
