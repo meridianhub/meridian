@@ -59,6 +59,7 @@ func TestNewCompactionWorker_Success(t *testing.T) {
 	}
 	if worker == nil {
 		t.Fatal("NewCompactionWorker() returned nil worker")
+		return // unreachable but satisfies staticcheck SA5011
 	}
 
 	if worker.pool != pool {
