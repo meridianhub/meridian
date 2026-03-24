@@ -207,6 +207,9 @@ func (a *loopbackTenantCreator) CreateTenant(ctx context.Context, tenantID, slug
 	if err != nil {
 		return "", err
 	}
+	if resp.Tenant == nil {
+		return "", fmt.Errorf("InitiateTenant returned nil tenant")
+	}
 	return resp.Tenant.TenantId, nil
 }
 

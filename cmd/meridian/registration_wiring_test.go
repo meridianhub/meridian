@@ -77,6 +77,20 @@ func TestLoopbackTenantCreator_CreateTenant(t *testing.T) {
 	assert.NotEmpty(t, stub.initiateReq.SettlementAsset, "settlement_asset must be set (proto requires it)")
 }
 
+func TestLoopbackTenantCreator_CreateTenant_NilTenantInResponse(t *testing.T) {
+	stub := &stubTenantServiceClient{
+		initiateResp: &tenantv1.InitiateTenantResponse{Tenant: nil},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	creator := &loopbackTenantCreator{client: stub, logger: logger}
+
+	_, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil tenant")
+}
+
 func TestLoopbackTenantCreator_DeleteTenant(t *testing.T) {
 	stub := &stubTenantServiceClient{
 		updateStatusResp: &tenantv1.UpdateTenantStatusResponse{},
