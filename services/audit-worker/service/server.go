@@ -55,7 +55,6 @@ const maxPageSize = 100
 // auditLogRow maps to a row in the audit_log table.
 type auditLogRow struct {
 	ID            string    `gorm:"column:id"`
-	EventID       string    `gorm:"column:event_id"`
 	TableName     string    `gorm:"column:table_name"`
 	Operation     string    `gorm:"column:operation"`
 	RecordID      string    `gorm:"column:record_id"`
@@ -92,7 +91,7 @@ func (s *AuditService) ListAuditEntries(
 	// Execute query within tenant-scoped transaction (sets search_path)
 	err := db.WithGormTenantTransaction(ctx, s.db, func(tx *gorm.DB) error {
 		query := tx.Table("audit_log").
-			Select("id, event_id, table_name, operation, record_id, old_values, new_values, created_at, changed_by").
+			Select("id, table_name, operation, record_id, old_values, new_values, created_at, changed_by").
 			Order("created_at DESC")
 
 		// Apply filters
