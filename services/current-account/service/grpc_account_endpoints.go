@@ -137,6 +137,10 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 			operationStatus = "invalid_org_party_id"
 			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: must be a valid UUID")
 		}
+		if orgPartyUUID == uuid.Nil {
+			operationStatus = "invalid_org_party_id"
+			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: zero UUID is not allowed")
+		}
 		opts = append(opts, domain.WithOrgPartyID(orgPartyUUID))
 	}
 

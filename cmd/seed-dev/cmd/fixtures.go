@@ -389,14 +389,20 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 		// KWH meter read deposit - CREDIT customer kWh account, DEBIT GSP inventory account.
 		// Uses InstrumentAmount (input field) for non-monetary instruments.
 		// NOTE: financial-accounting currently only supports ISO-4217 currencies,
-		// so KWH deposits may fail at the posting layer. Skip gracefully.
+		// so KWH deposits fail at the posting layer with InvalidArgument. Skip
+		// that specific error gracefully; propagate unexpected errors (network, auth).
 		if err := depositInstrumentIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
 			fmt.Sprintf("Meter read %s: %.2f kWh", date.Format("2006-01-02"), dailyKWH),
 			fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
 			acct.gspKwhAccountID, // GSP inventory account is the debit (clearing) side
 		); err != nil {
-			if day == 30 {
-				fmt.Printf("  [WARN] KWH deposits skipped for %s (financial-accounting does not yet support non-monetary instruments)\n", acct.customerName)
+			if st, ok := status.FromError(err); ok && (st.Code() == codes.InvalidArgument || st.Code() == codes.Internal) {
+				// Expected: financial-accounting rejects non-monetary instruments.
+				if day == 30 {
+					fmt.Printf("  [WARN] KWH deposits skipped for %s (financial-accounting does not yet support non-monetary instruments)\n", acct.customerName)
+				}
+			} else {
+				return fmt.Errorf("deposit KWH for %s day %d: %w", acct.customerName, day, err)
 			}
 		}
 	}
