@@ -122,7 +122,7 @@ func TestValidateStarlarkScripts_WhileLoopRejected(t *testing.T) {
 	result := &ValidationResult{Valid: true}
 	v.validateStarlarkScripts(manifest, result)
 	require.NotEmpty(t, result.Errors)
-	assert.Equal(t, CodeStarlarkSyntaxError, result.Errors[0].Code)
+	assert.Equal(t, CodeStarlarkCompilationError, result.Errors[0].Code)
 }
 
 func TestValidateStarlarkScripts_ValidForLoop(t *testing.T) {
