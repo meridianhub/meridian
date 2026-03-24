@@ -18,7 +18,7 @@
 -- Add created_at (the column the code writes to)
 ALTER TABLE IF EXISTS audit_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
 
--- Backfill from changed_at for any existing rows
+-- Backfill from changed_at for any existing rows (guarded for services where audit_log may not exist)
 UPDATE audit_log SET created_at = changed_at WHERE created_at IS NULL AND changed_at IS NOT NULL;
 
 -- Set default for new rows
@@ -38,6 +38,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_log_event_id ON audit_log(event_id);
 
 -- Index created_at for query ordering
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
+
+-- ============================================================
+-- Drop change_summary view before ALTER COLUMN TYPE
+-- (view depends on record_id and changed_at columns)
+-- ============================================================
+DROP VIEW IF EXISTS change_summary;
 
 -- ============================================================
 -- audit_log: fix record_id type (UUID -> VARCHAR)
@@ -62,3 +68,25 @@ ALTER TABLE IF EXISTS audit_outbox ALTER COLUMN record_id TYPE VARCHAR(100);
 -- audit_outbox: fix client_ip type (INET -> VARCHAR)
 -- ============================================================
 ALTER TABLE IF EXISTS audit_outbox ALTER COLUMN client_ip TYPE VARCHAR(45);
+
+-- ============================================================
+-- Recreate change_summary view with updated column types
+-- ============================================================
+CREATE OR REPLACE VIEW change_summary AS
+SELECT
+    id,
+    table_name AS table_full_name,
+    operation,
+    record_id,
+    changed_at,
+    changed_by,
+    CASE
+        WHEN operation = 'UPDATE' AND new_values IS NOT NULL AND old_values IS NOT NULL THEN
+            (SELECT json_object_agg(key, value)
+             FROM jsonb_each(new_values::jsonb)
+             WHERE (new_values::jsonb)->key IS DISTINCT FROM (old_values::jsonb)->key)
+        ELSE NULL
+    END AS changed_fields,
+    transaction_id
+FROM audit_log
+ORDER BY changed_at DESC;

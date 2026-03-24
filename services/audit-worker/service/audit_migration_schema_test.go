@@ -22,13 +22,13 @@ const migrationDDL = `
 CREATE TABLE IF NOT EXISTS %q.audit_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     table_name VARCHAR(100) NOT NULL,
-    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+    operation VARCHAR(20) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE', 'INITIAL_IMPORT')),
     record_id VARCHAR(100) NOT NULL,
     changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ DEFAULT now(),
     changed_by VARCHAR(100),
-    old_values TEXT,
-    new_values TEXT,
+    old_values JSONB,
+    new_values JSONB,
     transaction_id VARCHAR(100),
     client_ip VARCHAR(45),
     user_agent TEXT,
@@ -43,10 +43,10 @@ CREATE TABLE IF NOT EXISTS %q.audit_log (
 CREATE TABLE IF NOT EXISTS %[1]q.audit_outbox (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     table_name VARCHAR(100) NOT NULL,
-    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+    operation VARCHAR(20) NOT NULL CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE', 'INITIAL_IMPORT')),
     record_id VARCHAR(100) NOT NULL,
-    old_values TEXT,
-    new_values TEXT,
+    old_values JSONB,
+    new_values JSONB,
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     retry_count INT NOT NULL DEFAULT 0,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS %[1]q.audit_outbox (
 `
 
 // setupMigrationSchema creates audit tables using the exact DDL from the actual migrations,
-// NOT the idealised schema that other tests use. This catches drift between migrations and code.
+// NOT the idealized schema that other tests use. This catches drift between migrations and code.
 func setupMigrationSchema(t *testing.T) (context.Context, *gorm.DB, string) {
 	t.Helper()
 

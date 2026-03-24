@@ -1,4 +1,4 @@
-h1:Uh2DJqMm7uefsUsTB6sCvXdZcMYJq+U/3jO5G9Lhyww=
+h1:rMV6sVSsj2vArL+mDEP5XfxV0PoXum9kFuNilMx/Wbc=
 20251216000001_initial.sql h1:e2vtJfpgkEvioqxJ1piy7QAbmihqftHOSlkPDLs8jac=
 20251217000001_audit_system.sql h1:qB+oshTdK74dZ1qX/6Ux9Hz/Ij5yayGpjjSMrgoPIcg=
 20251223000001_business_qualifiers.sql h1:1wSGqT3zHTHS0AYHMjj/zd2JyMnM01AJtL89BmkieLU=
@@ -11,4 +11,4 @@ h1:Uh2DJqMm7uefsUsTB6sCvXdZcMYJq+U/3jO5G9Lhyww=
 20260221000002_add_party_attributes_index.sql h1:kr9wxy6WLP9un4IQ/napA03VxqUbpbqa+psaZu3E0C4=
 20260221000003_party_type_definition.sql h1:xHhyjWCcI8t/L+r4TRHDKKMySdgQ/DqrJVRJT/duur4=
 20260221000004_party_type_definition_index.sql h1:QcyC+PBTXv4+duHqUt6HQJDd2+CnGnV98PlUKASHp5g=
-20260323000001_align_audit_schema.sql h1:G4ibHNBF+Ciy445gQC8sh3N2pFk+EB8xLEsrmlGwQ5o=
+20260323000001_align_audit_schema.sql h1:PRbKQqV9RqAj04BI04Vwnkwon/VHf5IgT3x+eTp8DiQ=
