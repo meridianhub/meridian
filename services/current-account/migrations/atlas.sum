@@ -1,4 +1,4 @@
-h1:wI3BImezE1rjBNHa8lbByR2k7jIcAxS9LbAQ/cEgwec=
+h1:7DXS0pAi7aGYkGx3Kb26lHBaH/m/I97SypGX3uU2txk=
 20251216000001_initial.sql h1:nyRf35O3eYNJqShAvOEhvliXKLIR6e/V8B9JhOHde9w=
 20251216000002_audit_system.sql h1:X/0ZHt9cGTYmFbUUvKAkBgEiGw9fYEqfnbMB8I4SCR8=
 20251217000001_fix_audit_status_constraint.sql h1:yQxsHxbUp5g+ehkKFjOhZs59SbfaQIPw4/sA2xE2rwU=
@@ -26,4 +26,4 @@ h1:wI3BImezE1rjBNHa8lbByR2k7jIcAxS9LbAQ/cEgwec=
 20260306000001_drop_legacy_currency_columns.sql h1:xIrSNV5+exN1xI7/giwpbkmt40Nr1cGSF7Hyuye5PNo=
 20260316000001_add_event_outbox_tenant_id.sql h1:0DnheIwfkLkf+SS8+Pv5KetB6gPK1/zUKCLZacnJeP0=
 20260316000002_add_event_outbox_tenant_id_index.sql h1:hrEPnXoHQ1bnaMtvFFwZ9UzJVtryQrIe6zDSDqfoLbM=
-20260323000001_align_audit_schema.sql h1:EmFjXuhmkfzpgn/aha2TPMgJGsiUSoPKFp3nduBNHFc=
+20260323000001_align_audit_schema.sql h1:opPuTrFLNT+/9wArEau5PYBt1iK+hMaZSXvTpreyNak=
