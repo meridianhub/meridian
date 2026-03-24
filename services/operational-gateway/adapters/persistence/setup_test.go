@@ -143,6 +143,19 @@ func createSchema(db *gorm.DB) error {
             PRIMARY KEY (id)
         )`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_instruction_attempts_instruction ON instruction_attempts (instruction_id, attempt_number)`,
+		`CREATE TABLE IF NOT EXISTS instruction_routes (
+            tenant_id UUID NOT NULL,
+            instruction_type VARCHAR(255) NOT NULL,
+            connection_id UUID NOT NULL,
+            fallback_connection_id UUID NULL,
+            outbound_mapping VARCHAR(255) NOT NULL DEFAULT '',
+            inbound_mapping VARCHAR(255) NOT NULL DEFAULT '',
+            http_method VARCHAR(10) NOT NULL DEFAULT '',
+            path_template VARCHAR(1024) NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (tenant_id, instruction_type)
+        )`,
 	}
 
 	for _, stmt := range ddl {
@@ -168,7 +181,7 @@ func getSharedDB(t *testing.T) *gorm.DB {
 // cleanTables truncates all data between tests (FK order: children first).
 func cleanTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	tables := []string{"instruction_attempts", "instructions", "provider_connections"}
+	tables := []string{"instruction_attempts", "instructions", "instruction_routes", "provider_connections"}
 	for _, tbl := range tables {
 		if err := db.Exec("DELETE FROM " + tbl).Error; err != nil {
 			t.Fatalf("failed to clean table %s: %v", tbl, err)
