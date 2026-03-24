@@ -24,6 +24,7 @@ func TestFromContext_missing(t *testing.T) {
 }
 
 func TestFromContext_nil_context(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
 	got, ok := FromContext(nil)
 	assert.False(t, ok)
 	assert.Equal(t, TenantID(""), got)
@@ -44,6 +45,7 @@ func TestSlugFromContext_missing(t *testing.T) {
 }
 
 func TestSlugFromContext_nil_context(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
 	slug, ok := SlugFromContext(nil)
 	assert.False(t, ok)
 	assert.Equal(t, "", slug)

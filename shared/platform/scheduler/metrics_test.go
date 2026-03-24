@@ -40,8 +40,10 @@ func TestRecordWorkerStop(t *testing.T) {
 }
 
 func TestRecordShutdownDuration(t *testing.T) {
-	// Should not panic
-	RecordShutdownDuration("test-worker-shutdown", 1.5)
+	// Histogram observation should not panic and should register
+	assert.NotPanics(t, func() {
+		RecordShutdownDuration("test-worker-shutdown", 1.5)
+	})
 }
 
 func TestRecordShutdownTimeout(t *testing.T) {
