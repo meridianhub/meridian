@@ -135,7 +135,7 @@ func TestAuditEventTransformer_Transform_EventTypes(t *testing.T) {
 }
 
 // TestAuditEventTransformer_Transform_MultipleServices verifies different schema names
-// produce correctly labelled measurements.
+// produce correctly labeled measurements.
 func TestAuditEventTransformer_Transform_MultipleServices(t *testing.T) {
 	transformer := newEventRouterTransformer()
 	tenantID := "00000000-0000-0000-0000-000000000000"
