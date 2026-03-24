@@ -14,6 +14,7 @@ import { PaymentMethodsTab } from './tabs/payment-methods-tab'
 import { AuditTrailTab } from './tabs/audit-trail-tab'
 import { AccountsTab } from './tabs/accounts-tab'
 import { InternalAccountsTab } from './tabs/internal-accounts-tab'
+import { TransactionsTab } from './tabs/transactions-tab'
 
 export function PartyDetailPage() {
   const { partyId } = useParams<{ partyId: string }>()
@@ -59,6 +60,7 @@ export function PartyDetailPage() {
                 {isOrganization && (
                   <TabsTrigger value="internal-accounts">Internal Accounts</TabsTrigger>
                 )}
+                <TabsTrigger value="transactions">Transactions</TabsTrigger>
                 <TabsTrigger value="audit-trail">Audit Trail</TabsTrigger>
               </TabsList>
 
@@ -96,6 +98,10 @@ export function PartyDetailPage() {
                     <InternalAccountsTab partyId={partyId} />
                   </TabsContent>
                 )}
+
+                <TabsContent value="transactions" className="mt-0">
+                  <TransactionsTab partyId={partyId} partyType={party?.partyType} />
+                </TabsContent>
 
                 <TabsContent value="audit-trail" className="mt-0">
                   <AuditTrailTab partyId={partyId} />
