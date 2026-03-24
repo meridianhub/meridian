@@ -139,6 +139,8 @@ func TestReferenceExtractor_AttributeAccess(t *testing.T) {
 			instrRefs = append(instrRefs, r)
 		case ReferenceTypeAttribute:
 			attrRefs = append(attrRefs, r)
+		case ReferenceTypeStepHandler, ReferenceTypeAccount, ReferenceTypeSaga:
+			// Not expected in this test scenario
 		}
 	}
 	require.Len(t, instrRefs, 1)
