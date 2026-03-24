@@ -281,8 +281,10 @@ func TestPostgresProvisioner_StatusToEntity_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.ErrorMessage, restored.ErrorMessage)
 	require.Len(t, restored.Services, 1)
 	assert.Equal(t, original.Services[0].ServiceName, restored.Services[0].ServiceName)
+	assert.Equal(t, original.Services[0].SchemaName, restored.Services[0].SchemaName)
 	assert.Equal(t, original.Services[0].State, restored.Services[0].State)
 	assert.Equal(t, original.Services[0].MigrationVersion, restored.Services[0].MigrationVersion)
+	assert.Equal(t, original.Services[0].ErrorMessage, restored.Services[0].ErrorMessage)
 }
 
 func TestPostgresProvisioner_CreateInitialServiceStatuses(t *testing.T) {

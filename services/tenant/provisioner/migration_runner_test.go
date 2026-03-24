@@ -3,6 +3,7 @@ package provisioner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -416,7 +417,8 @@ func TestProcessMigrationSQL_CaseInsensitiveCreateSchema(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := p.processMigrationSQL(tt.sql, "org_tenant")
-			assert.NotContains(t, result, tt.sql)
+			assert.False(t, strings.Contains(strings.ToUpper(result), "CREATE SCHEMA"),
+				"CREATE SCHEMA should be stripped from result, got: %q", result)
 		})
 	}
 }
