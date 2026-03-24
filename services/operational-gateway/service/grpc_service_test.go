@@ -124,6 +124,7 @@ type mockConnectionRepo struct {
 	connections map[string]*domain.ProviderConnection
 	upsertErr   error
 	findErr     error
+	listErr     error
 }
 
 func newMockConnectionRepo() *mockConnectionRepo {
@@ -160,6 +161,9 @@ func (m *mockConnectionRepo) FindByID(_ context.Context, tenantID string, connec
 func (m *mockConnectionRepo) ListByTenant(_ context.Context, tenantID string) ([]*domain.ProviderConnection, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	var result []*domain.ProviderConnection
 	for _, conn := range m.connections {
 		if conn.TenantID == tenantID {
