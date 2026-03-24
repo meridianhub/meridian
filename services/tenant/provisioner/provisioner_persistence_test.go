@@ -1,6 +1,7 @@
 package provisioner
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -243,8 +244,13 @@ func TestPostgresProvisioner_StatusToEntity_WithServices(t *testing.T) {
 	entity, err := p.statusToEntity(status)
 	require.NoError(t, err)
 
-	assert.Contains(t, entity.ServiceSchemas, "party")
-	assert.Contains(t, entity.ServiceSchemas, "org_test_tenant")
+	var decoded []ServiceSchemaStatus
+	require.NoError(t, json.Unmarshal([]byte(entity.ServiceSchemas), &decoded))
+	require.Len(t, decoded, 1)
+	assert.Equal(t, "party", decoded[0].ServiceName)
+	assert.Equal(t, "org_test_tenant", decoded[0].SchemaName)
+	assert.Equal(t, ServiceStateMigrated, decoded[0].State)
+	assert.Equal(t, "20251208", decoded[0].MigrationVersion)
 }
 
 func TestPostgresProvisioner_StatusToEntity_RoundTrip(t *testing.T) {
