@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
 	dexconnector "github.com/dexidp/dex/connector"
@@ -130,6 +131,7 @@ func (d *EmbeddedDex) StartServer(ctx context.Context, issuer string, skipApprov
 		Issuer:             issuer,
 		Storage:            d.storage,
 		Logger:             newDexLogger(),
+		PrometheusRegistry: prometheus.NewRegistry(),
 		RotateKeysAfter:    6 * time.Hour,
 		IDTokensValidFor:   24 * time.Hour,
 		SkipApprovalScreen: skipApproval,

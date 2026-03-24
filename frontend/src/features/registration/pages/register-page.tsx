@@ -98,7 +98,9 @@ export function RegisterPage() {
         return
       }
 
-      if (!email.trim() || !email.includes('@')) {
+      const normalizedEmail = email.trim().toLowerCase()
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      if (!emailPattern.test(normalizedEmail)) {
         setFormError('Please enter a valid email address')
         return
       }
@@ -109,13 +111,16 @@ export function RegisterPage() {
       }
 
       setLoading(true)
+      const controller = new AbortController()
+      const timeoutId = window.setTimeout(() => controller.abort(), 15_000)
       try {
         const response = await fetch('/api/v1/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             slug,
-            email,
+            email: normalizedEmail,
             password,
             display_name: displayName || undefined,
           }),
@@ -138,9 +143,14 @@ export function RegisterPage() {
         }
 
         void navigate('/login?registered=1')
-      } catch {
-        setFormError('Unable to reach the server. Please check your connection and try again.')
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          setFormError('Registration timed out. Please try again.')
+        } else {
+          setFormError('Unable to reach the server. Please check your connection and try again.')
+        }
       } finally {
+        window.clearTimeout(timeoutId)
         setLoading(false)
       }
     },
