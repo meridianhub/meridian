@@ -5,16 +5,15 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
-"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 	"gorm.io/gorm"
-
-	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 )
 
 // ========== Constructor nil-logger fallback tests ==========
@@ -48,21 +47,27 @@ type mockEventPublisher struct{}
 func (m *mockEventPublisher) PublishCreated(_ context.Context, _ *gorm.DB, _ *domain.Instruction) error {
 	return nil
 }
+
 func (m *mockEventPublisher) PublishDispatched(_ context.Context, _ *gorm.DB, _ *domain.Instruction) error {
 	return nil
 }
+
 func (m *mockEventPublisher) PublishDelivered(_ context.Context, _ *gorm.DB, _ *domain.Instruction) error {
 	return nil
 }
+
 func (m *mockEventPublisher) PublishAcknowledged(_ context.Context, _ *gorm.DB, _ *domain.Instruction) error {
 	return nil
 }
+
 func (m *mockEventPublisher) PublishFailed(_ context.Context, _ *gorm.DB, _ *domain.Instruction) error {
 	return nil
 }
+
 func (m *mockEventPublisher) PublishExpired(_ context.Context, _ *gorm.DB, _ *domain.Instruction) error {
 	return nil
 }
+
 func (m *mockEventPublisher) PublishCancelled(_ context.Context, _ *gorm.DB, _ *domain.Instruction) error {
 	return nil
 }
@@ -128,4 +133,3 @@ func TestDispatchInstruction_WithMetadata(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp.Instruction.Id)
 }
-
