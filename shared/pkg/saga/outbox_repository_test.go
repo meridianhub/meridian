@@ -17,4 +17,3 @@ func TestNewGormTransactionalRepositoryWithOutbox(t *testing.T) {
 	assert.NotNil(t, repo)
 	assert.Equal(t, "test-service", repo.serviceName)
 }
-
