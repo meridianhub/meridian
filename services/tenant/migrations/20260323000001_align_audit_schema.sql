@@ -73,9 +73,9 @@ ALTER TABLE IF EXISTS audit_outbox ALTER COLUMN client_ip TYPE VARCHAR(45);
 -- Recreate change_summary view with updated column types
 -- (only if audit_log exists - handles partial migration scenarios)
 -- ============================================================
-DO $$ BEGIN
+DO $do$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'audit_log' AND table_schema = current_schema()) THEN
-    EXECUTE '
+    EXECUTE $view$
       CREATE OR REPLACE VIEW change_summary AS
       SELECT
           id,
@@ -85,18 +85,18 @@ DO $$ BEGIN
           changed_at,
           changed_by,
           CASE
-              WHEN operation = ''UPDATE'' AND new_values IS NOT NULL THEN
+              WHEN operation = 'UPDATE' AND new_values IS NOT NULL THEN
                   COALESCE(
                       (SELECT json_object_agg(key, value)
                        FROM jsonb_each(new_values::JSONB)
                        WHERE new_values::JSONB->key IS DISTINCT FROM old_values::JSONB->key),
-                      ''{}''::json
+                      '{}'::json
                   )
               ELSE NULL
           END AS changed_fields,
           transaction_id
       FROM audit_log
       ORDER BY changed_at DESC
-    ';
+    $view$;
   END IF;
-END $$;
+END $do$;
