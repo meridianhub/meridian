@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Breadcrumbs, DetailSkeleton, ErrorState, PageShell } from '@/shared'
+import { PartyType } from '@/api/gen/meridian/party/v1/party_pb'
 import { usePartyDetail } from '../hooks'
 import { PartyHeader } from './components/party-header'
 import { OverviewTab } from './tabs/overview-tab'
@@ -12,6 +13,7 @@ import { BankRelationsTab } from './tabs/bank-relations-tab'
 import { PaymentMethodsTab } from './tabs/payment-methods-tab'
 import { AuditTrailTab } from './tabs/audit-trail-tab'
 import { AccountsTab } from './tabs/accounts-tab'
+import { InternalAccountsTab } from './tabs/internal-accounts-tab'
 
 export function PartyDetailPage() {
   const { partyId } = useParams<{ partyId: string }>()
@@ -23,6 +25,7 @@ export function PartyDetailPage() {
   }
 
   const partyLabel = party?.legalName ?? partyId
+  const isOrganization = party?.partyType === PartyType.ORGANIZATION
 
   return (
     <PageShell>
@@ -53,6 +56,9 @@ export function PartyDetailPage() {
                 <TabsTrigger value="bank-relations">Bank Relations</TabsTrigger>
                 <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
                 <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                {isOrganization && (
+                  <TabsTrigger value="internal-accounts">Internal Accounts</TabsTrigger>
+                )}
                 <TabsTrigger value="audit-trail">Audit Trail</TabsTrigger>
               </TabsList>
 
@@ -70,7 +76,7 @@ export function PartyDetailPage() {
                 </TabsContent>
 
                 <TabsContent value="associations" className="mt-0">
-                  <AssociationsTab partyId={partyId} partyType={party?.partyType} />
+                  <AssociationsTab partyId={partyId} />
                 </TabsContent>
 
                 <TabsContent value="bank-relations" className="mt-0">
@@ -84,6 +90,12 @@ export function PartyDetailPage() {
                 <TabsContent value="accounts" className="mt-0">
                   <AccountsTab partyId={partyId} partyType={party?.partyType} />
                 </TabsContent>
+
+                {isOrganization && (
+                  <TabsContent value="internal-accounts" className="mt-0">
+                    <InternalAccountsTab partyId={partyId} />
+                  </TabsContent>
+                )}
 
                 <TabsContent value="audit-trail" className="mt-0">
                   <AuditTrailTab partyId={partyId} />
