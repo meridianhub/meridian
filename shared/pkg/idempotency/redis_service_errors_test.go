@@ -2,7 +2,6 @@ package idempotency
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -442,38 +441,36 @@ func TestRedisService_Check_FailedStatus(t *testing.T) {
 
 // ---- Acquire: context cancelled during retry delay ----
 
+// TestRedisService_Acquire_ContextCancelledDuringRetry verifies that a pre-cancelled
+// context is respected inside the retry-delay select: the lock is already held by
+// another token, the first attempt returns redis.Nil, and ctx.Done() fires immediately
+// instead of waiting for RetryDelay.
 func TestRedisService_Acquire_ContextCancelledDuringRetry(t *testing.T) {
 	svc, _, cleanup := setupRedisService(t)
 	defer cleanup()
 
-	ctx := context.Background()
 	key := testKey()
 
-	// Acquire lock with first token to block second acquire
+	// Hold the lock so the second acquire can't succeed on the first attempt.
 	opts1 := LockOptions{
 		TTL:   30 * time.Second,
 		Token: uuid.NewString(),
 	}
-	require.NoError(t, svc.Acquire(ctx, key, opts1))
+	require.NoError(t, svc.Acquire(context.Background(), key, opts1))
 
-	// Second acquire with a context that gets cancelled quickly
-	ctxWithCancel, cancel := context.WithCancel(ctx)
-	go func() {
-		// Cancel after a short delay to trigger the context cancellation path
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
+	// Pre-cancel the context so the retry-delay select fires ctx.Done() immediately.
+	ctxCancelled, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	opts2 := LockOptions{
 		TTL:        30 * time.Second,
 		Token:      uuid.NewString(),
-		MaxRetries: 10,
-		RetryDelay: 50 * time.Millisecond,
+		MaxRetries: 5,
+		RetryDelay: time.Hour, // long delay so ctx.Done() wins the select
 	}
-	err := svc.Acquire(ctxWithCancel, key, opts2)
+	err := svc.Acquire(ctxCancelled, key, opts2)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, context.Canceled) || errors.Is(err, ErrLockAcquisitionFailed),
-		"expected context.Canceled or ErrLockAcquisitionFailed, got: %v", err)
+	assert.Contains(t, err.Error(), "cancel")
 }
 
 // ---- Key with TenantID ----
