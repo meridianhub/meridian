@@ -21,6 +21,29 @@ export function passwordStrength(password: string): number {
 
 export type SlugAvailability = 'idle' | 'checking' | 'available' | 'taken' | 'error'
 
+/** Validates all registration form fields. Returns a map of field name to error message. */
+export function validateRegistrationFields(slug: string, email: string, password: string): Record<string, string> {
+  const errors: Record<string, string> = {}
+  if (!slug) {
+    errors.slug = 'Organization slug is required'
+  } else {
+    const slugValidation = validateSlug(slug)
+    if (slugValidation) errors.slug = slugValidation
+  }
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail) {
+    errors.email = 'Email is required'
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    errors.email = 'Please enter a valid email address'
+  }
+  if (!password) {
+    errors.password = 'Password is required'
+  } else if (password.length < 8) {
+    errors.password = 'Password must be at least 8 characters'
+  }
+  return errors
+}
+
 /** Returns true if the URL is HTTPS and shares the current hostname suffix. */
 export function isSafeRedirectUrl(url: string): boolean {
   try {

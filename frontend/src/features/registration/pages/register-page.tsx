@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { validateSlug, isSafeRedirectUrl, type SlugAvailability } from './registration-utils'
-import { PasswordStrengthBar, SlugStatus, RedirectSuccess } from './registration-helpers'
+import { validateSlug, validateRegistrationFields, isSafeRedirectUrl, type SlugAvailability } from './registration-utils'
+import { PasswordInput, SlugStatus, RedirectSuccess } from './registration-helpers'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -12,8 +12,10 @@ export function RegisterPage() {
   const [slugError, setSlugError] = useState<string | null>(null)
   const [slugAvailability, setSlugAvailability] = useState<SlugAvailability>('idle')
   const [formError, setFormError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
   const slugCheckController = useRef<AbortController | null>(null)
   const redirectTimerRef = useRef<number | null>(null)
 
@@ -46,7 +48,6 @@ export function RegisterPage() {
     setSlugAvailability('checking')
 
     const timer = setTimeout(() => {
-      // Abort any in-flight request
       slugCheckController.current?.abort()
       const controller = new AbortController()
       slugCheckController.current = controller
@@ -77,35 +78,32 @@ export function RegisterPage() {
     }
   }, [slug])
 
+  const clearFieldError = useCallback((field: string) => {
+    setFieldErrors((prev) => { const next = { ...prev }; delete next[field]; return next })
+  }, [])
+
   const handleSlugChange = useCallback((value: string) => {
     setSlug(value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
-  }, [])
+    clearFieldError('slug')
+    setFormError('')
+  }, [clearFieldError])
+
+  const validateFields = useCallback((): boolean => {
+    const errors = validateRegistrationFields(slug, email, password)
+    setFieldErrors(errors)
+    return Object.keys(errors).length === 0
+  }, [slug, email, password])
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault()
       setFormError('')
+      setSubmitted(true)
 
-      const slugValidation = validateSlug(slug)
-      if (slugValidation) {
-        setSlugError(slugValidation)
-        return
-      }
+      if (!validateFields()) return
 
       if (slugAvailability === 'taken') {
         setFormError('That slug is already taken. Please choose a different one.')
-        return
-      }
-
-      const normalizedEmail = email.trim().toLowerCase()
-      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (!emailPattern.test(normalizedEmail)) {
-        setFormError('Please enter a valid email address')
-        return
-      }
-
-      if (password.length < 8) {
-        setFormError('Password must be at least 8 characters')
         return
       }
 
@@ -119,7 +117,7 @@ export function RegisterPage() {
           signal: controller.signal,
           body: JSON.stringify({
             slug,
-            email: normalizedEmail,
+            email: email.trim().toLowerCase(),
             password,
             display_name: displayName || undefined,
           }),
@@ -131,7 +129,7 @@ export function RegisterPage() {
         }
 
         if (response.status === 429) {
-          setFormError('Too many registration attempts. Please wait a moment and try again.')
+          setFormError('Too many registration attempts. Please try again later.')
           return
         }
 
@@ -148,14 +146,11 @@ export function RegisterPage() {
         const loginUrl = typeof data?.login_url === 'string' ? data.login_url : undefined
 
         if (loginUrl && isSafeRedirectUrl(loginUrl)) {
-          // Safe tenant subdomain URL - show success then redirect
           setRedirecting(true)
           redirectTimerRef.current = window.setTimeout(() => {
             window.location.href = loginUrl
           }, 1500)
         } else {
-          // Relative path, missing, or untrusted URL - use client-side navigation
-          // Reject absolute URLs that failed validation to avoid broken SPA routes
           const fallbackPath = (loginUrl && !loginUrl.startsWith('http')) ? loginUrl : '/login?registered=1'
           void navigate(fallbackPath)
         }
@@ -170,11 +165,12 @@ export function RegisterPage() {
         setLoading(false)
       }
     },
-    [slug, slugAvailability, email, password, displayName, navigate],
+    [slug, slugAvailability, email, password, displayName, navigate, validateFields],
   )
 
   const inputClass =
     'w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+  const inputErrorClass = inputClass + ' border-destructive'
 
   if (redirecting) {
     return <RedirectSuccess />
@@ -193,7 +189,8 @@ export function RegisterPage() {
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4" noValidate>
           <div>
             <label htmlFor="slug" className="block text-sm font-medium mb-1">
-              Organization slug <span className="text-destructive" aria-hidden>*</span>
+              Organization slug <span className="text-destructive" aria-hidden="true">*</span>
+              <span className="sr-only">(required)</span>
             </label>
             <input
               id="slug"
@@ -203,7 +200,8 @@ export function RegisterPage() {
               required
               autoComplete="organization"
               aria-describedby="slug-hint slug-status"
-              className={inputClass}
+              aria-invalid={!!slugError || (submitted && !!fieldErrors.slug) ? true : undefined}
+              className={!!slugError || (submitted && !!fieldErrors.slug) ? inputErrorClass : inputClass}
               placeholder="my-org"
               minLength={3}
               maxLength={63}
@@ -211,14 +209,18 @@ export function RegisterPage() {
             <p id="slug-hint" className="mt-1 text-xs text-muted-foreground">
               Lowercase letters, numbers, and hyphens. 3-63 characters.
             </p>
-            <div id="slug-status" aria-live="polite">
-              <SlugStatus slug={slug} error={slugError} availability={slugAvailability} />
+            <div id="slug-status" role="status" aria-live="polite">
+              {submitted && fieldErrors.slug ? (
+                <p className="mt-1 text-xs text-destructive">{fieldErrors.slug}</p>
+              ) : (
+                <SlugStatus slug={slug} error={slugError} availability={slugAvailability} />
+              )}
             </div>
           </div>
 
           <div>
             <label htmlFor="display-name" className="block text-sm font-medium mb-1">
-              Display name
+              Display name <span className="text-xs text-muted-foreground font-normal">(optional)</span>
             </label>
             <input
               id="display-name"
@@ -234,39 +236,38 @@ export function RegisterPage() {
 
           <div>
             <label htmlFor="email" className="block text-sm font-medium mb-1">
-              Email <span className="text-destructive" aria-hidden>*</span>
+              Email <span className="text-destructive" aria-hidden="true">*</span>
+              <span className="sr-only">(required)</span>
             </label>
             <input
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                clearFieldError('email')
+              }}
               required
               autoComplete="email"
-              className={inputClass}
+              aria-invalid={submitted && !!fieldErrors.email ? true : undefined}
+              className={submitted && fieldErrors.email ? inputErrorClass : inputClass}
               placeholder="admin@example.com"
             />
+            {submitted && fieldErrors.email && (
+              <p className="mt-1 text-xs text-destructive" role="alert">{fieldErrors.email}</p>
+            )}
           </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium mb-1">
-              Password <span className="text-destructive" aria-hidden>*</span>
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="new-password"
-              aria-describedby="password-strength"
-              className={inputClass}
-              minLength={8}
-            />
-            <div id="password-strength" aria-live="polite">
-              <PasswordStrengthBar password={password} />
-            </div>
-          </div>
+          <PasswordInput
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              clearFieldError('password')
+            }}
+            inputClass={inputClass}
+            error={fieldErrors.password}
+            submitted={submitted}
+          />
 
           {formError && (
             <p role="alert" className="text-sm text-destructive">
