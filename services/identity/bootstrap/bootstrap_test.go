@@ -40,6 +40,7 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) {
 
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.identity (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		tenant_id VARCHAR(50) NOT NULL DEFAULT '',
 		email VARCHAR(255) NOT NULL,
 		status VARCHAR(30) NOT NULL DEFAULT 'PENDING_INVITE',
 		password_hash VARCHAR(255) NOT NULL DEFAULT '',
@@ -50,12 +51,13 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) {
 		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 		deleted_at TIMESTAMP WITH TIME ZONE,
-		UNIQUE (email) WHERE deleted_at IS NULL
+		UNIQUE (tenant_id, email) WHERE deleted_at IS NULL
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q.role_assignment (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		tenant_id VARCHAR(50) NOT NULL DEFAULT '',
 		identity_id UUID NOT NULL,
 		granted_by UUID NOT NULL,
 		role VARCHAR(50) NOT NULL,

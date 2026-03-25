@@ -17,10 +17,10 @@ type IdentityEntity struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 
 	// Tenant isolation
-	TenantID string `gorm:"column:tenant_id;type:varchar(50);not null;default:''"`
+	TenantID string `gorm:"column:tenant_id;type:varchar(50);not null;default:'';uniqueIndex:idx_identity_tenant_email"`
 
 	// Business fields
-	Email          string `gorm:"column:email;type:varchar(255);not null"`
+	Email          string `gorm:"column:email;type:varchar(255);not null;uniqueIndex:idx_identity_tenant_email"`
 	Status         string `gorm:"column:status;type:varchar(30);not null;default:'PENDING_INVITE'"`
 	PasswordHash   string `gorm:"column:password_hash;type:varchar(255);not null;default:''"`
 	ExternalIDP    string `gorm:"column:external_idp;type:varchar(100);not null;default:''"`
