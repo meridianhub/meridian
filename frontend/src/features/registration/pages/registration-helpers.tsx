@@ -110,7 +110,7 @@ export function PasswordInput({ value, onChange, inputClass, error, submitted }:
           onChange={onChange}
           required
           autoComplete="new-password"
-          aria-describedby="password-strength password-hint"
+          aria-describedby={hasError ? 'password-hint' : 'password-strength password-hint'}
           aria-invalid={hasError ? true : undefined}
           className={`${errorClass} pr-10`}
           minLength={8}

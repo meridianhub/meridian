@@ -128,7 +128,7 @@ export function RegisterPage() {
         }
 
         if (response.status === 429) {
-          setFormError('Too many registration attempts. Please try again in a few minutes.')
+          setFormError('Too many registration attempts. Please try again later.')
           return
         }
 
@@ -200,7 +200,7 @@ export function RegisterPage() {
               autoComplete="organization"
               aria-describedby="slug-hint slug-status"
               aria-invalid={submitted && (!!slugError || !!fieldErrors.slug) ? true : undefined}
-              className={submitted && fieldErrors.slug ? inputErrorClass : inputClass}
+              className={slugError || (submitted && fieldErrors.slug) ? inputErrorClass : inputClass}
               placeholder="my-org"
               minLength={3}
               maxLength={63}
