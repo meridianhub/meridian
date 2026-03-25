@@ -32,7 +32,8 @@ set -euo pipefail
 
 DEVELOP_HOST="${DEVELOP_HOST:-meridian-develop-host}"
 DEVELOP_DIR="/opt/meridian-develop"
-PG_USER="meridian"
+PG_USER="${PG_USER:-meridian}"
+PG_DB="${PG_DB:-meridian}"
 PG_CONTAINER="postgres-develop"
 APP_CONTAINER="meridian-develop"
 COMPOSE_CMD="docker compose -f docker-compose.develop.yml"
@@ -72,23 +73,23 @@ echo "=== Step 3: Drop and recreate databases ==="
 
 # Terminate active connections to meridian_* databases
 # (develop has its own postgres, so all meridian_* databases belong to us)
-ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -c \"
+ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_DB} -c \"
   SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-  WHERE datname LIKE 'meridian_%' AND pid <> pg_backend_pid();
+  WHERE datname LIKE 'meridian\\_%' ESCAPE '\\' AND pid <> pg_backend_pid();
 \" 2>/dev/null || true"
 
 # Drop all meridian_* per-service databases
-ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -tc \"
-  SELECT datname FROM pg_database WHERE datname LIKE 'meridian_%' AND datname != 'meridian';
+ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_DB} -tc \"
+  SELECT datname FROM pg_database WHERE datname LIKE 'meridian\\_%' ESCAPE '\\' AND datname != 'meridian';
 \" | while read -r db; do
   db=\$(echo \"\$db\" | xargs)
   [ -z \"\$db\" ] && continue
   echo \"  Dropping: \$db\"
-  docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -c \"DROP DATABASE IF EXISTS \\\"\$db\\\";\"
+  docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_DB} -c \"DROP DATABASE IF EXISTS \\\"\$db\\\";\"
 done"
 
 # Re-run init-databases to recreate empty per-service databases
-ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -f /docker-entrypoint-initdb.d/init-databases.sql"
+ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_DB} -f /docker-entrypoint-initdb.d/init-databases.sql"
 
 echo ""
 echo "=== Step 4: Run pre-migration scripts ==="
