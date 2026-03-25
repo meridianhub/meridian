@@ -186,6 +186,7 @@ volumes:
 
 networks:
   develop-internal:
+    internal: true
   meridian:
     external: true
     name: meridian_default
