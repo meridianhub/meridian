@@ -1,0 +1,32 @@
+-- Database initialization for the Meridian develop environment.
+--
+-- IMPORTANT: The application's ServiceDatabases map (internal/migrations/runner.go)
+-- hardcodes database names (meridian_platform, meridian_current_account, etc.).
+-- The newServiceConns function replaces only the database component of DATABASE_URL,
+-- ignoring any prefix in the base DSN. This means the develop environment uses the
+-- SAME databases as demo when sharing a postgres instance.
+--
+-- For true database isolation, either:
+--   1. Run a separate postgres container for the develop stack, OR
+--   2. Add a DB_NAME_PREFIX env var to the application (requires code change)
+--
+-- When sharing the demo stack's postgres (current approach), this script is NOT
+-- needed - the databases are already created by the demo stack's init-databases.sql.
+-- This file is retained as documentation of the database requirements.
+--
+-- If running a SEPARATE postgres for develop, uncomment the statements below:
+
+-- CREATE DATABASE meridian_platform;
+-- CREATE DATABASE meridian_current_account;
+-- CREATE DATABASE meridian_financial_accounting;
+-- CREATE DATABASE meridian_position_keeping;
+-- CREATE DATABASE meridian_payment_order;
+-- CREATE DATABASE meridian_party;
+-- CREATE DATABASE meridian_internal_bank_account;
+-- CREATE DATABASE meridian_market_information;
+-- CREATE DATABASE meridian_reconciliation;
+-- CREATE DATABASE meridian_forecasting;
+-- CREATE DATABASE meridian_reference_data;
+-- CREATE DATABASE meridian_identity;
+-- CREATE DATABASE meridian_operational_gateway;
+-- CREATE DATABASE meridian_financial_gateway;
