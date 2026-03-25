@@ -196,9 +196,9 @@ type InstrumentRegistry interface {
 	ListByStatus(ctx context.Context, status Status) ([]*InstrumentDefinition, error)
 
 	// CreateDraft creates a new instrument definition in DRAFT status.
+	// Idempotent: returns nil if an instrument with the same code+version exists.
 	// Returns ErrSystemInstrumentReadOnly if is_system=true is attempted.
 	// Returns ErrInvalidCEL if any CEL expression fails compilation.
-	// Returns ErrAlreadyExists if an instrument with the same code+version exists.
 	// CEL expressions are compiled at creation time (fail-fast validation).
 	CreateDraft(ctx context.Context, def *InstrumentDefinition) error
 
@@ -210,8 +210,9 @@ type InstrumentRegistry interface {
 	UpdateDefinition(ctx context.Context, code string, version int, updates *InstrumentDefinition) error
 
 	// ActivateInstrument transitions an instrument from DRAFT to ACTIVE.
+	// Idempotent: returns nil if already ACTIVE.
 	// Returns ErrSystemInstrumentReadOnly if the instrument has is_system=true.
-	// Returns ErrNotDraft if not currently in DRAFT status.
+	// Returns ErrNotDraft if in DEPRECATED status.
 	// Once activated, validation rules become immutable.
 	ActivateInstrument(ctx context.Context, code string, version int) error
 
