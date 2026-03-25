@@ -6,15 +6,18 @@ import (
 	"log/slog"
 	"time"
 
+	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream"
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream/adapters"
+	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 
+	"google.golang.org/grpc"
 	"gorm.io/gorm"
 )
 
@@ -182,4 +185,64 @@ func buildUnifiedEventStreamComponents(db *gorm.DB, logger *slog.Logger) (*event
 	handler := eventstream.NewHandler(router, logger)
 
 	return router, handler
+}
+
+// ─── Registration Wiring ────────────────────────────────────────────────────
+
+// errNilTenantResponse is returned when InitiateTenant succeeds but returns a nil tenant.
+var errNilTenantResponse = fmt.Errorf("InitiateTenant returned nil tenant")
+
+// loopbackTenantCreator adapts the tenant gRPC service client to the
+// gateway.TenantCreator interface used by RegistrationHandler.
+type loopbackTenantCreator struct {
+	client tenantv1.TenantServiceClient
+	logger *slog.Logger
+}
+
+func (a *loopbackTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error) {
+	resp, err := a.client.InitiateTenant(ctx, &tenantv1.InitiateTenantRequest{
+		TenantId:        tenantID,
+		DisplayName:     displayName,
+		Slug:            slug,
+		Subdomain:       slug,
+		SettlementAsset: "USD",
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Tenant == nil {
+		return "", errNilTenantResponse
+	}
+	return resp.Tenant.TenantId, nil
+}
+
+func (a *loopbackTenantCreator) DeleteTenant(ctx context.Context, tenantID string) error {
+	_, err := a.client.UpdateTenantStatus(ctx, &tenantv1.UpdateTenantStatusRequest{
+		TenantId: tenantID,
+		Status:   tenantv1.TenantStatus_TENANT_STATUS_DEPROVISIONED,
+	})
+	return err
+}
+
+// wireRegistration creates the self-service registration handler and returns
+// a ServerOption to install it. Returns nil on error (graceful degradation).
+func wireRegistration(identityDB *gorm.DB, rawConn *grpc.ClientConn, baseDomain string, logger *slog.Logger) gateway.ServerOption {
+	identityRepo := identitypersistence.NewRepository(identityDB)
+	tenantClient := tenantv1.NewTenantServiceClient(rawConn)
+
+	creator := &loopbackTenantCreator{client: tenantClient, logger: logger}
+
+	handler, err := gateway.NewRegistrationHandler(gateway.RegistrationHandlerConfig{
+		TenantCreator: creator,
+		IdentityRepo:  identityRepo,
+		BaseDomain:    baseDomain,
+		Logger:        logger,
+	})
+	if err != nil {
+		logger.Warn("self-service registration disabled", "error", err)
+		return nil
+	}
+
+	logger.Info("self-service registration handler initialized", "base_domain", baseDomain)
+	return gateway.WithRegistrationHandler(handler)
 }

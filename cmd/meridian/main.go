@@ -259,6 +259,12 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	bffSigner, bffAuthOpts := wireBFFAuth(conns.gormDB("identity"), logger)
 	extraGWOpts = append(extraGWOpts, bffAuthOpts...)
 
+	// Wire self-service registration handler (public endpoint, no auth required).
+	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
+	if regOpt := wireRegistration(conns.gormDB("identity"), loopback.rawConn, baseDomain, logger); regOpt != nil {
+		extraGWOpts = append(extraGWOpts, regOpt)
+	}
+
 	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)

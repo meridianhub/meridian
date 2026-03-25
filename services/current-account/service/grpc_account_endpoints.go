@@ -130,6 +130,20 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	var opts []domain.AccountOption
 	var cachedType *CachedAccountType
 
+	// Set org_party_id if provided (for org-scoped accounts)
+	if req.OrgPartyId != "" {
+		orgPartyUUID, err := uuid.Parse(req.OrgPartyId)
+		if err != nil {
+			operationStatus = "invalid_org_party_id"
+			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: must be a valid UUID")
+		}
+		if orgPartyUUID == uuid.Nil {
+			operationStatus = "invalid_org_party_id"
+			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: zero UUID is not allowed")
+		}
+		opts = append(opts, domain.WithOrgPartyID(orgPartyUUID))
+	}
+
 	if req.ProductTypeCode != "" && s.accountTypeCache != nil {
 		tenantID, ok := tenant.FromContext(ctx)
 		if !ok {

@@ -816,9 +816,14 @@ func TestInstrumentTypeToDimension(t *testing.T) {
 	}{
 		{"fiat", controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT, "GBP", "CURRENCY"},
 		{"voucher", controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER, "POINTS", "COUNT"},
-		{"commodity with known unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "energy", "ENERGY"},
+		{"commodity with dimension name", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "energy", "ENERGY"},
+		{"commodity kWh maps to ENERGY", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "kWh", "ENERGY"},
+		{"commodity KWH maps to ENERGY", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "KWH", "ENERGY"},
+		{"commodity MWH maps to ENERGY", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "MWH", "ENERGY"},
+		{"commodity TONNE_CO2E maps to CARBON", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "TONNE_CO2E", "CARBON"},
+		{"commodity GPU_HOUR maps to COMPUTE", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "GPU_HOUR", "COMPUTE"},
 		{"commodity with unknown unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY, "unknown_unit", ""},
-		{"unspecified with known unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED, "energy", "ENERGY"},
+		{"unspecified with dimension name", controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED, "energy", "ENERGY"},
 		{"unspecified with unknown unit", controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED, "xyz", ""},
 		{"unknown enum value", controlplanev1.InstrumentType(999), "anything", ""},
 	}

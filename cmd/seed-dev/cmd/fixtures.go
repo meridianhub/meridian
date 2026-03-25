@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"time"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -106,13 +107,23 @@ func runFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) error {
 		return fmt.Errorf("create accounts: %w", err)
 	}
 
-	// 5. Deposit meter reads and billing amounts.
+	// 5. Register party associations (customer->DNO, customer->GSP, DNO->GSP).
+	fmt.Println("\n--- Register Party Associations ---")
+	gspPartyIDs, err := resolveGSPPartyIDs(tCtx, conn)
+	if err != nil {
+		return fmt.Errorf("resolve GSP party IDs: %w", err)
+	}
+	if err := registerPartyAssociations(tCtx, conn, dnoPartyID, customerPartyIDs, gspPartyIDs); err != nil {
+		return fmt.Errorf("register party associations: %w", err)
+	}
+
+	// 6. Deposit meter reads and billing amounts.
 	fmt.Println("\n--- Seed Account Balances ---")
 	if err := seedBalances(tCtx, conn, customerAccounts); err != nil {
 		return fmt.Errorf("seed balances: %w", err)
 	}
 
-	// 6. Record wholesale energy price observations.
+	// 7. Record wholesale energy price observations.
 	fmt.Println("\n--- Record Wholesale Energy Prices ---")
 	if err := recordWholesalePrices(tCtx, conn); err != nil {
 		return fmt.Errorf("record wholesale prices: %w", err)
@@ -121,6 +132,8 @@ func runFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) error {
 	fmt.Println("\n=== Fixture Seed Complete ===")
 	fmt.Printf("  GSPs:         %d grid supply points with KWH inventory accounts\n", len(gspKwhAccountIDs))
 	fmt.Printf("  Customers:    %d customers with GBP billing + KWH consumption accounts\n", len(customerPartyIDs))
+	fmt.Printf("  Associations: %d party associations (customer->DNO, customer->GSP, DNO->GSP)\n",
+		len(customerPartyIDs)*2+len(gspPartyIDs))
 	fmt.Printf("  Double-entry: each KWH meter read DEBITs GSP inventory, CREDITs customer account\n")
 	fmt.Printf("  Market:       30 days of wholesale energy prices\n")
 	return nil
@@ -147,8 +160,10 @@ func resolveGSPInternalAccountIDs(ctx context.Context, conn *grpc.ClientConn) ([
 		if err != nil {
 			return nil, fmt.Errorf("resolve GSP KWH account %s (%s): %w", gsp.accountCode, gsp.region, err)
 		}
-		accountIDs[i] = accountID
-		fmt.Printf("  GSP-KWH-%s: %s (account_code=%s)\n", gsp.region, accountID, gsp.accountCode)
+		// Strip "IBA-" prefix to get raw UUID for use as clearing_account_id.
+		// The deposit orchestrator validates clearing_account_id as UUID.
+		accountIDs[i] = strings.TrimPrefix(accountID, "IBA-")
+		fmt.Printf("  GSP-KWH-%s: %s (account_code=%s)\n", gsp.region, accountIDs[i], gsp.accountCode)
 	}
 
 	return accountIDs, nil
@@ -371,15 +386,27 @@ func seedCustomerBalances(ctx context.Context, client currentaccountv1.CurrentAc
 			return fmt.Errorf("deposit GBP for %s day %d: %w", acct.customerName, day, err)
 		}
 
-		// KWH meter read deposit — CREDIT customer kWh account, DEBIT GSP inventory account.
-		// Uses InstrumentAmount (input field) instead of MoneyAmount to avoid abusing
-		// google.type.Money's CurrencyCode for non-ISO-4217 instrument codes.
+		// KWH meter read deposit - CREDIT customer kWh account, DEBIT GSP inventory account.
+		// Uses InstrumentAmount (input field) for non-monetary instruments.
+		// NOTE: financial-accounting currently only supports ISO-4217 currencies,
+		// so KWH deposits fail at the posting layer with InvalidArgument. Skip
+		// that specific error gracefully; propagate unexpected errors (network, auth).
 		if err := depositInstrumentIdempotent(ctx, client, acct.kwhAccountID, dailyKWH, "KWH",
 			fmt.Sprintf("Meter read %s: %.2f kWh", date.Format("2006-01-02"), dailyKWH),
 			fmt.Sprintf("METER-%s-%s", acct.partyID, date.Format("20060102")),
 			acct.gspKwhAccountID, // GSP inventory account is the debit (clearing) side
 		); err != nil {
-			return fmt.Errorf("deposit KWH for %s day %d: %w", acct.customerName, day, err)
+			// The saga wraps the financial-accounting rejection as Internal, and the
+			// inner error is InvalidArgument with "invalid currency". Match on the
+			// error message to avoid masking unrelated Internal errors.
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "invalid currency") || strings.Contains(errMsg, "invalid posting_amount") {
+				if day == 30 {
+					fmt.Printf("  [WARN] KWH deposits skipped for %s (financial-accounting does not yet support non-monetary instruments)\n", acct.customerName)
+				}
+			} else {
+				return fmt.Errorf("deposit KWH for %s day %d: %w", acct.customerName, day, err)
+			}
 		}
 	}
 
@@ -414,7 +441,7 @@ func depositInstrumentIdempotent(ctx context.Context, client currentaccountv1.Cu
 		Reference:         reference,
 		ClearingAccountId: clearingAccountID,
 		Input: &quantityv1.InstrumentAmount{
-			Amount:         fmt.Sprintf("%.6f", amount),
+			Amount:         fmt.Sprintf("%.3f", amount),
 			InstrumentCode: instrumentCode,
 			Version:        1,
 		},
@@ -473,6 +500,77 @@ func recordWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 	fmt.Printf("  Fixed retail tariff: 24.5p/kWh\n")
 	fmt.Printf("  Wholesale range: ~15-27p/kWh (margin visible in account data)\n")
 
+	return nil
+}
+
+// ─── Party Associations ──────────────────────────────────────────────────────
+
+// gspExternalRefs maps GSP region codes to their manifest-defined external references.
+var gspExternalRefs = []string{"GSPSEEB", "GSPEELC", "GSPLOND", "GSPSOUT"}
+
+// resolveGSPPartyIDs finds the party IDs for all GSP organizations.
+func resolveGSPPartyIDs(ctx context.Context, conn *grpc.ClientConn) ([]string, error) {
+	gspPartyIDs := make([]string, len(gspExternalRefs))
+	for i, extRef := range gspExternalRefs {
+		partyID, err := resolveOrganizationPartyID(ctx, conn, extRef)
+		if err != nil {
+			return nil, fmt.Errorf("resolve GSP party %s: %w", extRef, err)
+		}
+		gspPartyIDs[i] = partyID
+	}
+	return gspPartyIDs, nil
+}
+
+// registerPartyAssociations creates associations between customers, the DNO, and GSPs.
+// - Each customer -> DNO (BUSINESS_PARTNER: electricity customer)
+// - Each customer -> their GSP (BUSINESS_PARTNER: grid supply point customer)
+// - DNO -> each GSP (BUSINESS_PARTNER: operates grid supply point)
+func registerPartyAssociations(ctx context.Context, conn *grpc.ClientConn, dnoPartyID string, customerPartyIDs, gspPartyIDs []string) error {
+	client := partyv1.NewPartyServiceClient(conn)
+
+	for i, custPartyID := range customerPartyIDs {
+		cust := customerDefinitions[i]
+		gspPartyID := gspPartyIDs[cust.gspIndex]
+		gspRegion := gspAccountCodes[cust.gspIndex].region
+
+		// Customer -> DNO association
+		if err := registerAssociationIdempotent(ctx, client, custPartyID, dnoPartyID,
+			partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER); err != nil {
+			return fmt.Errorf("associate customer %s with DNO: %w", cust.legalName, err)
+		}
+
+		// Customer -> GSP association
+		if err := registerAssociationIdempotent(ctx, client, custPartyID, gspPartyID,
+			partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER); err != nil {
+			return fmt.Errorf("associate customer %s with GSP %s: %w", cust.legalName, gspRegion, err)
+		}
+	}
+
+	// DNO -> each GSP association
+	for i, gspPartyID := range gspPartyIDs {
+		if err := registerAssociationIdempotent(ctx, client, dnoPartyID, gspPartyID,
+			partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER); err != nil {
+			return fmt.Errorf("associate DNO with GSP %s: %w", gspExternalRefs[i], err)
+		}
+	}
+
+	fmt.Printf("  Registered %d associations (customer->DNO, customer->GSP, DNO->GSP)\n",
+		len(customerPartyIDs)*2+len(gspPartyIDs))
+	return nil
+}
+
+func registerAssociationIdempotent(ctx context.Context, client partyv1.PartyServiceClient, partyID, relatedPartyID string, relType partyv1.RelationshipType) error {
+	_, err := client.RegisterAssociations(ctx, &partyv1.RegisterAssociationsRequest{
+		PartyId:          partyID,
+		RelatedPartyId:   relatedPartyID,
+		RelationshipType: relType,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+			return nil
+		}
+		return err
+	}
 	return nil
 }
 
