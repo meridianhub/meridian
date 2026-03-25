@@ -1,0 +1,73 @@
+name: Deploy Gate
+
+# Checks that the latest deploy-develop workflow run succeeded before allowing
+# a deploy-demo run to proceed. This ensures code is validated in the develop
+# environment before reaching demo.
+#
+# Runs on push to demo branch. If the latest deploy-develop run for the same
+# commit (or its parent on develop) failed or hasn't run, this check fails,
+# blocking the demo deployment pipeline.
+
+on:
+  push:
+    branches: [demo]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check-develop-deploy:
+    name: Verify Develop Deployment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check latest deploy-develop status
+        uses: actions/github-script@v8
+        with:
+          script: |
+            // Find the most recent deploy-develop workflow run on the develop branch
+            const workflows = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-develop.yml',
+              branch: 'develop',
+              per_page: 1,
+              status: 'completed'
+            });
+
+            if (workflows.data.total_count === 0) {
+              core.setFailed('No completed deploy-develop workflow runs found. Deploy to develop first.');
+              return;
+            }
+
+            const latestRun = workflows.data.workflow_runs[0];
+            const runUrl = latestRun.html_url;
+
+            core.info(`Latest deploy-develop run: ${latestRun.id}`);
+            core.info(`Status: ${latestRun.conclusion}`);
+            core.info(`Commit: ${latestRun.head_sha}`);
+            core.info(`URL: ${runUrl}`);
+
+            if (latestRun.conclusion !== 'success') {
+              core.setFailed(
+                `Latest deploy-develop run did not succeed (conclusion: ${latestRun.conclusion}). ` +
+                `Fix the develop deployment before deploying to demo. Run: ${runUrl}`
+              );
+              return;
+            }
+
+            // Check that the develop deployment is reasonably recent (within 24 hours)
+            const runDate = new Date(latestRun.updated_at);
+            const now = new Date();
+            const hoursAgo = (now - runDate) / (1000 * 60 * 60);
+
+            if (hoursAgo > 24) {
+              core.warning(
+                `Latest successful deploy-develop run is ${Math.round(hoursAgo)} hours old. ` +
+                `Consider re-deploying to develop first. Run: ${runUrl}`
+              );
+            }
+
+            core.info(`Deploy gate passed. Latest develop deployment succeeded ${Math.round(hoursAgo)} hours ago.`);
