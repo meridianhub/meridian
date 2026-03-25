@@ -44,7 +44,7 @@ func TestDataSetRepository_Save_NewDataSet(t *testing.T) {
 	assert.Equal(t, 1, retrieved.Version())
 }
 
-func TestDataSetRepository_Save_DuplicateCode(t *testing.T) {
+func TestDataSetRepository_Save_DuplicateCode_IsIdempotent(t *testing.T) {
 	tc := testhelpers.SetupTestContainer(t)
 	defer tc.Cleanup(t)
 
@@ -65,7 +65,7 @@ func TestDataSetRepository_Save_DuplicateCode(t *testing.T) {
 	err = tc.Repos.DataSet.Save(ctx, dataset1)
 	require.NoError(t, err)
 
-	// Create second dataset with same code (should fail due to code+version unique constraint)
+	// Create second dataset with same code - should be idempotent (ON CONFLICT DO NOTHING)
 	dataset2, err := domain.NewDataSetDefinition(
 		"DUPLICATE_CODE",
 		"Second Dataset",
@@ -78,7 +78,7 @@ func TestDataSetRepository_Save_DuplicateCode(t *testing.T) {
 	require.NoError(t, err)
 
 	err = tc.Repos.DataSet.Save(ctx, dataset2)
-	assert.ErrorIs(t, err, domain.ErrDuplicateDataSetCode)
+	require.NoError(t, err, "duplicate dataset save should be idempotent")
 }
 
 func TestDataSetRepository_Save_UpdateWithOptimisticLocking(t *testing.T) {
