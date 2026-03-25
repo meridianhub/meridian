@@ -15,6 +15,17 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
   const slugCheckController = useRef<AbortController | null>(null)
+  const redirectTimerRef = useRef<number | null>(null)
+
+  // Clean up redirect timer on unmount
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current !== null) {
+        window.clearTimeout(redirectTimerRef.current)
+        redirectTimerRef.current = null
+      }
+    }
+  }, [])
 
   // Debounced slug validation + availability check
   useEffect(() => {
@@ -134,16 +145,29 @@ export function RegisterPage() {
           tenant_id?: string
           login_url?: string
         } | null
-        const loginUrl = data?.login_url
+        const loginUrl = typeof data?.login_url === 'string' ? data.login_url : undefined
 
-        if (loginUrl && (loginUrl.startsWith('https://') || loginUrl.startsWith('http://'))) {
-          // Absolute URL - redirect to tenant subdomain
+        // Validate absolute URLs: must be HTTPS and share the current domain suffix
+        // (e.g., my-org.demo.meridianhub.cloud when on demo.meridianhub.cloud)
+        const isSafeAbsoluteUrl = (url: string): boolean => {
+          try {
+            const parsed = new URL(url)
+            if (parsed.protocol !== 'https:') return false
+            const currentHost = window.location.hostname
+            return parsed.hostname.endsWith(`.${currentHost}`) || parsed.hostname === currentHost
+          } catch {
+            return false
+          }
+        }
+
+        if (loginUrl && isSafeAbsoluteUrl(loginUrl)) {
+          // Safe tenant subdomain URL - show success then redirect
           setRedirecting(true)
-          window.setTimeout(() => {
+          redirectTimerRef.current = window.setTimeout(() => {
             window.location.href = loginUrl
           }, 1500)
         } else {
-          // Relative path or missing - use client-side navigation
+          // Relative path, missing, or untrusted URL - use client-side navigation
           void navigate(loginUrl ?? '/login?registered=1')
         }
       } catch (error) {
