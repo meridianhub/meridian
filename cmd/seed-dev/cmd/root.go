@@ -31,6 +31,9 @@ var ErrManifestApplyFailed = errors.New("manifest apply failed")
 // ErrTenantNotActive is returned when the tenant provisioning status is not ACTIVE.
 var ErrTenantNotActive = errors.New("tenant not active")
 
+// ErrProvisioningFailed is returned when tenant provisioning reaches a terminal failure state.
+var ErrProvisioningFailed = errors.New("tenant provisioning failed")
+
 var (
 	gatewayURL       string
 	grpcAddr         string
@@ -318,23 +321,34 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 func waitForTenantReady(ctx context.Context, conn *grpc.ClientConn, id string) error {
 	client := tenantv1.NewTenantServiceClient(conn)
 
-	return await.New().
+	var terminalErr error
+	err := await.New().
 		AtMost(60 * time.Second).
 		PollInterval(2 * time.Second).
 		WithContext(ctx).
-		UntilNoError(func() error {
+		Until(func() bool {
 			resp, err := client.GetTenantProvisioningStatus(ctx, &tenantv1.GetTenantProvisioningStatusRequest{
 				TenantId: id,
 			})
 			if err != nil {
-				return fmt.Errorf("get provisioning status: %w", err)
+				fmt.Printf("  provisioning check failed: %v\n", err)
+				return false
 			}
-			if resp.GetOverallStatus() == tenantv1.TenantStatus_TENANT_STATUS_ACTIVE {
+			switch resp.GetOverallStatus() {
+			case tenantv1.TenantStatus_TENANT_STATUS_ACTIVE:
 				fmt.Println("Tenant provisioned and active.")
-				return nil
+				return true
+			case tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
+				terminalErr = fmt.Errorf("%w: %s", ErrProvisioningFailed, resp.GetOverallStatus().String())
+				return true // stop polling
+			default:
+				return false
 			}
-			return fmt.Errorf("%w: %s (waiting for ACTIVE)", ErrTenantNotActive, resp.GetOverallStatus().String())
 		})
+	if terminalErr != nil {
+		return terminalErr
+	}
+	return err
 }
 
 // getEnvOrDefault returns the environment variable value or a default.
