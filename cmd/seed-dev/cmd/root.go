@@ -136,6 +136,14 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("create tenant: %w", err)
 	}
 
+	// Wait for tenant provisioning to complete before applying manifests.
+	// The provisioner runs asynchronously - the schema must exist before
+	// any tenant-scoped operations (WithGormTenantScope validates this).
+	fmt.Println("Waiting for tenant provisioning ...")
+	if err := waitForTenantReady(ctx, conn, tenantID); err != nil {
+		return fmt.Errorf("wait for tenant provisioning: %w", err)
+	}
+
 	if skipManifest {
 		fmt.Println("Skipping manifest application (--skip-manifest set).")
 	} else {
@@ -300,6 +308,30 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 
 	fmt.Println("Manifest applied successfully.")
 	return nil
+}
+
+// waitForTenantReady polls GetTenantProvisioningStatus until the tenant schema
+// is provisioned (status ACTIVE) or the context is cancelled.
+func waitForTenantReady(ctx context.Context, conn *grpc.ClientConn, id string) error {
+	client := tenantv1.NewTenantServiceClient(conn)
+
+	return await.New().
+		AtMost(60 * time.Second).
+		PollInterval(2 * time.Second).
+		WithContext(ctx).
+		UntilNoError(func() error {
+			resp, err := client.GetTenantProvisioningStatus(ctx, &tenantv1.GetTenantProvisioningStatusRequest{
+				TenantId: id,
+			})
+			if err != nil {
+				return fmt.Errorf("get provisioning status: %w", err)
+			}
+			if resp.GetOverallStatus() == tenantv1.TenantStatus_TENANT_STATUS_ACTIVE {
+				fmt.Println("Tenant provisioned and active.")
+				return nil
+			}
+			return fmt.Errorf("tenant status: %s (waiting for ACTIVE)", resp.GetOverallStatus().String())
+		})
 }
 
 // getEnvOrDefault returns the environment variable value or a default.
