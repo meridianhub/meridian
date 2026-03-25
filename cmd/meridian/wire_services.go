@@ -105,6 +105,7 @@ func registerServices(
 	outboxPublisher *events.OutboxPublisher,
 	outboxRepo *events.PostgresOutboxRepository,
 	loopback *loopbackClients,
+	schemaProvisioner tenantprovisioner.SchemaProvisioner,
 	tracer *observability.Tracer,
 	logger *slog.Logger,
 ) error {
@@ -123,7 +124,7 @@ func registerServices(
 			return err
 		}},
 		{"market-information", func() error { return wireMarketInformation(grpcServer, conns.pgxPool("market-information"), logger) }},
-		{"tenant", func() error { return wireTenant(grpcServer, conns.gormDB("tenant"), logger) }},
+		{"tenant", func() error { return wireTenant(grpcServer, conns.gormDB("tenant"), schemaProvisioner, logger) }},
 		{"internal-account", func() error {
 			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), refDataComps, logger)
 		}},
@@ -304,43 +305,44 @@ func wireMarketInformation(server *grpc.Server, pool *pgxpool.Pool, logger *slog
 	return nil
 }
 
-func wireTenant(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+func wireTenant(server *grpc.Server, db *gorm.DB, prov tenantprovisioner.SchemaProvisioner, logger *slog.Logger) error {
 	repo := tenantpersistence.NewRepository(db)
-	svc := tenantservice.NewService(repo, nil, nil, nil, logger)
+	svc := tenantservice.NewService(repo, prov, nil, nil, logger)
 	tenantv1.RegisterTenantServiceServer(server, svc)
-	logger.Info("registered tenant service")
+	logger.Info("registered tenant service", "provisioner_enabled", prov != nil)
 	return nil
 }
 
-// startProvisioningWorker initializes the tenant schema provisioning worker when
-// SCHEMA_PROVISIONING_ENABLED=true. It returns the worker (for graceful Stop)
-// and a cleanup function that closes provisioner database connections.
-// When provisioning is disabled both return values are nil.
-func startProvisioningWorker(ctx context.Context, baseDSN string, platformDB *gorm.DB, identityDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
+// createSchemaProvisioner creates the provisioner when SCHEMA_PROVISIONING_ENABLED=true.
+// Returns nil when provisioning is disabled.
+func createSchemaProvisioner(baseDSN string, platformDB *gorm.DB, logger *slog.Logger) (*tenantprovisioner.PostgresProvisioner, error) {
 	if env.GetEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false") != "true" {
-		logger.Info("provisioning worker disabled",
-			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
-		return nil, nil, nil
+		logger.Info("schema provisioning disabled",
+			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable tenant schema isolation")
+		return nil, nil //nolint:nilnil // nil provisioner is the expected "disabled" signal
 	}
 
-	// Create provisioner config and derive service DSNs from the resolved baseDSN.
-	// DefaultConfig() falls back to cockroachdb:26257 when per-service env vars
-	// are unset. The unified binary derives all connections from a single base DSN,
-	// so we override each service's DatabaseURL to match.
 	config, err := DeriveProvisionerConfig(baseDSN)
 	if err != nil {
-		return nil, nil, fmt.Errorf("provisioner config: %w", err)
+		return nil, fmt.Errorf("provisioner config: %w", err)
 	}
 	prov, err := tenantprovisioner.NewPostgresProvisioner(platformDB, config)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create schema provisioner: %w", err)
+		return nil, fmt.Errorf("create schema provisioner: %w", err)
 	}
-
 	logger.Info("schema provisioner initialized",
 		"services", len(config.Services),
 		"provisioning_timeout", config.ProvisioningTimeout)
+	return prov, nil
+}
 
-	// Build worker config from environment (mirrors standalone tenant service).
+// startProvisioningWorker starts the background worker using an initialized provisioner.
+// When prov is nil (provisioning disabled) both return values are nil.
+func startProvisioningWorker(ctx context.Context, prov *tenantprovisioner.PostgresProvisioner, platformDB *gorm.DB, identityDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
+	if prov == nil {
+		return nil, nil, nil
+	}
+
 	repo := tenantpersistence.NewRepository(platformDB)
 	w, err := tenantworker.NewProvisioningWorker(
 		repo,
@@ -355,12 +357,10 @@ func startProvisioningWorker(ctx context.Context, baseDSN string, platformDB *go
 		logger,
 	)
 	if err != nil {
-		// Close provisioner connections on worker creation failure.
 		_ = prov.Close()
 		return nil, nil, fmt.Errorf("create provisioning worker: %w", err)
 	}
 
-	// Register post-provisioning hooks before starting the worker.
 	identityRepo := identitypersistence.NewRepository(identityDB)
 	w.RegisterPostProvisioningHook("admin-identity", identitybootstrap.AsPostProvisioningHook(identityRepo))
 
