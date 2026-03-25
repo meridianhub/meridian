@@ -159,9 +159,24 @@ jobs:
           DATABASE_URL="postgres://root@localhost:26257/defaultdb?sslmode=disable" \
           LOCAL_DEV_MODE=true \
           AUTH_ENABLED=false \
-          SCHEMA_PROVISIONING_ENABLED=true \
           SAGA_ASSET_DIR="$(pwd)" \
             ./dist/meridian >/tmp/meridian.log 2>&1 &
+
+      - name: Provision tenant schemas
+        run: |
+          # The schema provisioner is not wired into the tenant service yet,
+          # so tenants are created as immediately ACTIVE without schemas.
+          # WithGormTenantScope validates schema existence (fail-fast), so
+          # we must create org schemas in each service database before use.
+          COCKROACH="docker exec cockroachdb cockroach sql --insecure"
+          SERVICE_DBS="meridian_party meridian_current_account meridian_position_keeping meridian_financial_accounting meridian_payment_order meridian_market_information meridian_reference_data"
+          for TENANT in dev_tenant acme_corp energy_co; do
+            SCHEMA="org_${TENANT}"
+            for DB in $SERVICE_DBS; do
+              $COCKROACH -d "$DB" -e "CREATE SCHEMA IF NOT EXISTS \"${SCHEMA}\"" 2>/dev/null || true
+            done
+            echo "Created schema ${SCHEMA} in all service databases"
+          done
 
       - name: Seed dev tenant and apply manifest
         run: |
