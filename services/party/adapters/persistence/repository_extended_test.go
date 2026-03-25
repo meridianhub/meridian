@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -113,7 +114,7 @@ func TestDecodePartyCursor_EmptyString(t *testing.T) {
 	assert.Equal(t, uuid.Nil, cursor.ID)
 }
 
-func TestDecodePartyCursor_ValidTokenMultiplePipes(t *testing.T) {
+func TestDecodePartyCursor_RejectsTokenWithExtraPipes(t *testing.T) {
 	// SplitN with N=2 means extra pipes end up in the UUID part, which should fail UUID parse
 	ts := time.Now().Format(time.RFC3339Nano)
 	data := ts + "|" + uuid.New().String() + "|extra"
@@ -146,6 +147,15 @@ func TestIsDuplicateKeyError_UniqueConstraint(t *testing.T) {
 func TestIsDuplicateKeyError_UnrelatedError(t *testing.T) {
 	err := &mockError{msg: "connection refused"}
 	assert.False(t, isDuplicateKeyError(err))
+}
+
+func TestIsDuplicateKeyError_GormDuplicatedKey(t *testing.T) {
+	assert.True(t, isDuplicateKeyError(gorm.ErrDuplicatedKey))
+}
+
+func TestIsDuplicateKeyError_WrappedGormDuplicatedKey(t *testing.T) {
+	err := fmt.Errorf("save failed: %w", gorm.ErrDuplicatedKey)
+	assert.True(t, isDuplicateKeyError(err))
 }
 
 type mockError struct {

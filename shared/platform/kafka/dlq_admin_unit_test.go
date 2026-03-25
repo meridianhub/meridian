@@ -39,7 +39,7 @@ func TestNewDLQInspector_NilTopics(t *testing.T) {
 
 func TestNewDLQReplay_EmptyBootstrapServers(t *testing.T) {
 	_, err := NewDLQReplay(DLQReplayConfig{})
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrEmptyBootstrapServers)
 }
 
 // --- Unit tests for ReplayMessage header filtering ---
@@ -284,41 +284,6 @@ func TestCombineFilters_AllFail(t *testing.T) {
 		FilterByConsumerGroup("group-2"),
 	)
 	assert.False(t, combined(msg))
-}
-
-// --- Unit tests for InspectOptions defaults ---
-
-func TestInspectOptions_Defaults(t *testing.T) {
-	opts := InspectOptions{}
-	assert.Nil(t, opts.Filter)
-	assert.Equal(t, 0, opts.MaxMessages)
-	assert.Equal(t, time.Duration(0), opts.Timeout)
-}
-
-// --- Unit tests for DLQInspectorConfig ---
-
-func TestDLQInspectorConfig_Fields(t *testing.T) {
-	config := DLQInspectorConfig{
-		BootstrapServers: "broker1:9092,broker2:9092",
-		ClientID:         "test-inspector",
-		DLQTopics:        []string{"topic-dlq-1", "topic-dlq-2"},
-	}
-
-	assert.Equal(t, "broker1:9092,broker2:9092", config.BootstrapServers)
-	assert.Equal(t, "test-inspector", config.ClientID)
-	assert.Len(t, config.DLQTopics, 2)
-}
-
-// --- Unit tests for DLQReplayConfig ---
-
-func TestDLQReplayConfig_Fields(t *testing.T) {
-	config := DLQReplayConfig{
-		BootstrapServers: "broker:9092",
-		ClientID:         "replay-client",
-	}
-
-	assert.Equal(t, "broker:9092", config.BootstrapServers)
-	assert.Equal(t, "replay-client", config.ClientID)
 }
 
 // --- Unit tests for DLQMessage struct ---
