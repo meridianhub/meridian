@@ -14,7 +14,6 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
@@ -273,6 +272,7 @@ func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*
 }
 
 // CreateDraft creates a new instrument definition in DRAFT status.
+// Idempotent: if the instrument (code, version) already exists, this is a no-op.
 func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *InstrumentDefinition) error {
 	// Reject system instrument creation
 	if def.IsSystem {
@@ -296,7 +296,8 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *InstrumentDefin
 				$8, $9, $10,
 				$11, $12, $13,
 				$14, $15
-			)`
+			)
+			ON CONFLICT (code, version) DO NOTHING`
 
 		// Generate ID if not set
 		if def.ID == uuid.Nil {
@@ -321,10 +322,6 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *InstrumentDefin
 			def.CreatedAt, def.UpdatedAt,
 		)
 		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
-				return ErrAlreadyExists
-			}
 			return fmt.Errorf("failed to insert instrument definition: %w", err)
 		}
 
@@ -425,6 +422,11 @@ func (r *PostgresRegistry) ActivateInstrument(ctx context.Context, code string, 
 
 		if isSystem {
 			return ErrSystemInstrumentReadOnly
+		}
+
+		// Idempotent: already active is a no-op.
+		if Status(currentStatus) == StatusActive {
+			return nil
 		}
 
 		if err := ValidateStatusTransition(Status(currentStatus), StatusActive); err != nil {

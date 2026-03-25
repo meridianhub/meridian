@@ -111,7 +111,7 @@ func TestPostgresRegistry_CreateDraft(t *testing.T) {
 		require.ErrorIs(t, err, registry.ErrInvalidCEL)
 	})
 
-	t.Run("rejects duplicate code+version", func(t *testing.T) {
+	t.Run("duplicate code+version is idempotent no-op", func(t *testing.T) {
 		def := &registry.InstrumentDefinition{
 			Code:      "DUPE",
 			Version:   1,
@@ -122,7 +122,7 @@ func TestPostgresRegistry_CreateDraft(t *testing.T) {
 		err := reg.CreateDraft(ctx, def)
 		require.NoError(t, err)
 
-		// Try to create again
+		// Create again - should be idempotent (ON CONFLICT DO NOTHING)
 		def2 := &registry.InstrumentDefinition{
 			Code:      "DUPE",
 			Version:   1,
@@ -131,7 +131,7 @@ func TestPostgresRegistry_CreateDraft(t *testing.T) {
 		}
 
 		err = reg.CreateDraft(ctx, def2)
-		require.ErrorIs(t, err, registry.ErrAlreadyExists)
+		require.NoError(t, err, "duplicate CreateDraft should be idempotent")
 	})
 }
 
@@ -435,7 +435,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		assert.NotNil(t, result.DeprecatedAt)
 	})
 
-	t.Run("ACTIVE to ACTIVE fails", func(t *testing.T) {
+	t.Run("ACTIVE to ACTIVE is idempotent no-op", func(t *testing.T) {
 		def := &registry.InstrumentDefinition{
 			Code:      "LIFECYCLE3",
 			Version:   1,
@@ -446,7 +446,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		require.NoError(t, reg.ActivateInstrument(ctx, "LIFECYCLE3", 1))
 
 		err := reg.ActivateInstrument(ctx, "LIFECYCLE3", 1)
-		require.ErrorIs(t, err, registry.ErrNotDraft)
+		require.NoError(t, err, "activating already-active instrument should be idempotent")
 	})
 
 	t.Run("DRAFT to DEPRECATED fails", func(t *testing.T) {
