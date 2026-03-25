@@ -155,7 +155,9 @@ export function RegisterPage() {
           }, 1500)
         } else {
           // Relative path, missing, or untrusted URL - use client-side navigation
-          void navigate(loginUrl ?? '/login?registered=1')
+          // Reject absolute URLs that failed validation to avoid broken SPA routes
+          const fallbackPath = (loginUrl && !loginUrl.startsWith('http')) ? loginUrl : '/login?registered=1'
+          void navigate(fallbackPath)
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {

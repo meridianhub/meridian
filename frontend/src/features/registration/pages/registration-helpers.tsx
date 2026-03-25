@@ -30,7 +30,12 @@ interface SlugStatusProps {
 export function RedirectSuccess() {
   return (
     <div className="flex min-h-screen items-center justify-center">
-      <div className="w-full max-w-sm space-y-4 px-4 text-center">
+      <div
+        className="w-full max-w-sm space-y-4 px-4 text-center"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         <h1 className="text-2xl font-semibold">Account created!</h1>
         <p className="text-muted-foreground">
           Redirecting to your organization...
