@@ -1,10 +1,11 @@
 # Meridian develop environment stack
 #
-# Runs meridian-develop and mcp-server-develop alongside the existing demo stack
-# on the same DigitalOcean droplet (68.183.40.239). Shares the demo stack's
-# postgres and caddy containers via the external meridian_default network.
+# Runs a fully isolated develop environment alongside the existing demo stack
+# on the same DigitalOcean droplet (68.183.40.239). Has its own postgres for
+# data isolation; shares caddy via the external meridian_default network.
 #
 # Services:
+#   postgres-develop    - PostgreSQL 16 (isolated from demo, not exposed to host)
 #   meridian-develop    - Unified binary (develop branch build)
 #   mcp-server-develop  - MCP server for AI integration (develop branch build)
 #
@@ -21,15 +22,45 @@
 #     jwt-signing-key.pem                               - RSA private key (SEPARATE from demo key)
 #
 # Prerequisites:
-#   - Demo stack must be running (provides postgres and caddy)
-#   - (Optional) If using a separate postgres, uncomment and run init-databases-develop.sql
+#   - Demo stack must be running (provides caddy)
 #   - Generate a SEPARATE JWT signing key for the develop environment
 
 services:
+  postgres-develop:
+    image: postgres:16-alpine
+    container_name: postgres-develop
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-meridian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}
+      POSTGRES_DB: ${POSTGRES_DB:-meridian}
+    volumes:
+      - postgres_develop_data:/var/lib/postgresql/data
+      - /opt/meridian-develop/init-databases-develop.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meridian} -d ${POSTGRES_DB:-meridian}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - develop-internal
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
   meridian-develop:
     image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:develop}
     container_name: meridian-develop
     restart: unless-stopped
+    depends_on:
+      postgres-develop:
+        condition: service_healthy
     environment:
       # --- Application ---
       ENVIRONMENT: ${ENVIRONMENT:-develop}
@@ -39,11 +70,8 @@ services:
       DB_DRIVER: postgres
 
       # --- Database ---
-      # Connects to the demo stack's postgres container via the shared network.
-      # NOTE: The app hardcodes per-service database names (meridian_platform, etc.)
-      # in ServiceDatabases, so develop and demo share the same databases when on
-      # the same postgres. For true isolation, use a separate postgres container.
-      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
+      # Connects to the dedicated develop postgres container for full data isolation.
+      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres-develop:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
       # --- JWT Signing (SEPARATE key from demo for environment isolation) ---
       JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}
@@ -86,6 +114,7 @@ services:
     volumes:
       - /opt/meridian-develop/secrets:/run/secrets:ro
     networks:
+      - develop-internal
       - meridian
     deploy:
       resources:
@@ -152,7 +181,11 @@ services:
           cpus: '0.25'
           memory: 128M
 
+volumes:
+  postgres_develop_data:
+
 networks:
+  develop-internal:
   meridian:
     external: true
     name: meridian_default

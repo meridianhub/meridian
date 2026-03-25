@@ -26,14 +26,14 @@
 #   - The develop stack must already be deployed (docker-compose.develop.yml in /opt/meridian-develop)
 #
 # Container names use custom container_name values defined in docker-compose.develop.yml.
-# The postgres user is "meridian" (shared with demo stack).
+# The develop stack has its own postgres container (postgres-develop).
 
 set -euo pipefail
 
 DEVELOP_HOST="${DEVELOP_HOST:-meridian-develop-host}"
 DEVELOP_DIR="/opt/meridian-develop"
 PG_USER="meridian"
-PG_CONTAINER="meridian-postgres-1"
+PG_CONTAINER="postgres-develop"
 APP_CONTAINER="meridian-develop"
 COMPOSE_CMD="docker compose -f docker-compose.develop.yml"
 
@@ -70,15 +70,16 @@ ssh "${DEVELOP_HOST}" "cd ${DEVELOP_DIR} && ${COMPOSE_CMD} stop meridian-develop
 echo ""
 echo "=== Step 3: Drop and recreate databases ==="
 
-# Terminate active connections to dev_* databases
+# Terminate active connections to meridian_* databases
+# (develop has its own postgres, so all meridian_* databases belong to us)
 ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -c \"
   SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-  WHERE datname LIKE 'dev\_%' ESCAPE '\' AND pid <> pg_backend_pid();
+  WHERE datname LIKE 'meridian_%' AND pid <> pg_backend_pid();
 \" 2>/dev/null || true"
 
-# Drop all dev_* per-service databases
+# Drop all meridian_* per-service databases
 ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -tc \"
-  SELECT datname FROM pg_database WHERE datname LIKE 'dev\_%' ESCAPE '\';
+  SELECT datname FROM pg_database WHERE datname LIKE 'meridian_%' AND datname != 'meridian';
 \" | while read -r db; do
   db=\$(echo \"\$db\" | xargs)
   [ -z \"\$db\" ] && continue
@@ -86,15 +87,15 @@ ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_US
   docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -c \"DROP DATABASE IF EXISTS \\\"\$db\\\";\"
 done"
 
-# Re-run init-databases-develop.sql to recreate empty per-service databases
-ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -f /docker-entrypoint-initdb.d/init-databases-develop.sql"
+# Re-run init-databases to recreate empty per-service databases
+ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -f /docker-entrypoint-initdb.d/init-databases.sql"
 
 echo ""
 echo "=== Step 4: Run pre-migration scripts ==="
 # PostgreSQL requires ALTER TABLE DROP CONSTRAINT for constraint-backed unique indexes.
 # CockroachDB uses DROP INDEX CASCADE instead. This pre-migration resolves the divergence.
 # See deploy/demo/pg-pre-migration.sql for details.
-ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d dev_reference_data -c \"ALTER TABLE IF EXISTS public.platform_saga_definition DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;\""
+ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d meridian_reference_data -c \"ALTER TABLE IF EXISTS public.platform_saga_definition DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;\""
 
 echo ""
 echo "=== Step 5: Start meridian-develop and run migrations ==="
