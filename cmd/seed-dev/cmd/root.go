@@ -28,6 +28,9 @@ var ErrManifestValidation = errors.New("manifest validation failed")
 // ErrManifestApplyFailed is returned when the manifest apply returns a non-success status.
 var ErrManifestApplyFailed = errors.New("manifest apply failed")
 
+// ErrTenantNotActive is returned when the tenant provisioning status is not ACTIVE.
+var ErrTenantNotActive = errors.New("tenant not active")
+
 var (
 	gatewayURL       string
 	grpcAddr         string
@@ -330,7 +333,7 @@ func waitForTenantReady(ctx context.Context, conn *grpc.ClientConn, id string) e
 				fmt.Println("Tenant provisioned and active.")
 				return nil
 			}
-			return fmt.Errorf("tenant status: %s (waiting for ACTIVE)", resp.GetOverallStatus().String())
+			return fmt.Errorf("%w: %s (waiting for ACTIVE)", ErrTenantNotActive, resp.GetOverallStatus().String())
 		})
 }
 
