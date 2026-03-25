@@ -321,7 +321,7 @@ func createSchemaProvisioner(baseDSN string, platformDB *gorm.DB, logger *slog.L
 	if env.GetEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false") != "true" {
 		logger.Info("schema provisioning disabled",
 			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable tenant schema isolation")
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil provisioner is the expected "disabled" signal
 	}
 
 	// Derive service DSNs from the resolved baseDSN.
