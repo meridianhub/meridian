@@ -205,9 +205,10 @@ func (s *Server) registerRoutes() {
 		s.mux.Handle("GET /api/auth/callback", http.HandlerFunc(s.ssoHandler.HandleCallback))
 	}
 
-	// Self-service registration endpoint - NO middleware (public, unauthenticated).
+	// Self-service registration endpoints - NO middleware (public, unauthenticated).
 	if s.registrationHandler != nil {
 		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
+		s.mux.Handle("GET /api/v1/slugs/{slug}/available", http.HandlerFunc(s.registrationHandler.HandleSlugAvailable))
 	}
 
 	// API routes - with auth and tenant middleware chain.

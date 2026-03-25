@@ -1,64 +1,7 @@
-import { useState, useCallback, useEffect, type FormEvent } from 'react'
+import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-
-/** Validates a tenant slug: lowercase alphanumeric + hyphens, 3-63 chars. */
-function validateSlug(slug: string): string | null {
-  if (slug.length < 3) return 'Slug must be at least 3 characters'
-  if (slug.length > 63) return 'Slug must be at most 63 characters'
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug))
-    return 'Slug may only contain lowercase letters, numbers, and hyphens, and must start and end with a letter or number'
-  return null
-}
-
-/** Returns 0-4 strength score for a password. */
-function passwordStrength(password: string): number {
-  if (password.length === 0) return 0
-  let score = 0
-  if (password.length >= 8) score++
-  if (password.length >= 12) score++
-  if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++
-  if (/[0-9]/.test(password)) score++
-  if (/[^A-Za-z0-9]/.test(password)) score++
-  return Math.min(score, 4)
-}
-
-const STRENGTH_LABEL = ['', 'Weak', 'Fair', 'Good', 'Strong']
-const STRENGTH_COLOR = ['', 'bg-destructive', 'bg-yellow-500', 'bg-blue-500', 'bg-green-500']
-
-interface PasswordStrengthBarProps {
-  password: string
-}
-
-function PasswordStrengthBar({ password }: PasswordStrengthBarProps) {
-  const score = passwordStrength(password)
-  if (!password) return null
-  return (
-    <div className="mt-1 space-y-1">
-      <div className="flex gap-1">
-        {[1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className={`h-1 flex-1 rounded-full transition-colors ${i <= score ? STRENGTH_COLOR[score] : 'bg-muted'}`}
-          />
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground">{STRENGTH_LABEL[score]}</p>
-    </div>
-  )
-}
-
-interface SlugStatusProps {
-  slug: string
-  error: string | null
-}
-
-function SlugStatus({ slug, error }: SlugStatusProps) {
-  if (!slug) return null
-  if (error) {
-    return <p className="mt-1 text-xs text-destructive">{error}</p>
-  }
-  return <p className="mt-1 text-xs text-green-600">Slug format looks good</p>
-}
+import { validateSlug, type SlugAvailability } from './registration-utils'
+import { PasswordStrengthBar, SlugStatus } from './registration-helpers'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -67,23 +10,62 @@ export function RegisterPage() {
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [slugError, setSlugError] = useState<string | null>(null)
+  const [slugAvailability, setSlugAvailability] = useState<SlugAvailability>('idle')
   const [formError, setFormError] = useState('')
   const [loading, setLoading] = useState(false)
+  const slugCheckController = useRef<AbortController | null>(null)
 
-  // Debounced slug validation
+  // Debounced slug validation + availability check
   useEffect(() => {
     if (!slug) {
       setSlugError(null)
+      setSlugAvailability('idle')
       return
     }
+
+    const formatError = validateSlug(slug)
+    if (formatError) {
+      setSlugError(formatError)
+      setSlugAvailability('idle')
+      return
+    }
+
+    setSlugError(null)
+    setSlugAvailability('checking')
+
     const timer = setTimeout(() => {
-      setSlugError(validateSlug(slug))
-    }, 300)
-    return () => clearTimeout(timer)
+      // Abort any in-flight request
+      slugCheckController.current?.abort()
+      const controller = new AbortController()
+      slugCheckController.current = controller
+
+      fetch(`/api/v1/slugs/${encodeURIComponent(slug)}/available`, {
+        signal: controller.signal,
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`status ${res.status}`)
+          return res.json() as Promise<{ available: boolean; reason?: string }>
+        })
+        .then((data) => {
+          if (!controller.signal.aborted) {
+            setSlugAvailability(data.available ? 'available' : 'taken')
+          }
+        })
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          if (!controller.signal.aborted) {
+            setSlugAvailability('error')
+          }
+        })
+    }, 400)
+
+    return () => {
+      clearTimeout(timer)
+      slugCheckController.current?.abort()
+    }
   }, [slug])
 
   const handleSlugChange = useCallback((value: string) => {
-    // Normalize to lowercase as user types
     setSlug(value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
   }, [])
 
@@ -95,6 +77,11 @@ export function RegisterPage() {
       const slugValidation = validateSlug(slug)
       if (slugValidation) {
         setSlugError(slugValidation)
+        return
+      }
+
+      if (slugAvailability === 'taken') {
+        setFormError('That slug is already taken. Please choose a different one.')
         return
       }
 
@@ -154,7 +141,7 @@ export function RegisterPage() {
         setLoading(false)
       }
     },
-    [slug, email, password, displayName, navigate],
+    [slug, slugAvailability, email, password, displayName, navigate],
   )
 
   const inputClass =
@@ -192,7 +179,7 @@ export function RegisterPage() {
               Lowercase letters, numbers, and hyphens. 3-63 characters.
             </p>
             <div id="slug-status" aria-live="polite">
-              <SlugStatus slug={slug} error={slugError} />
+              <SlugStatus slug={slug} error={slugError} availability={slugAvailability} />
             </div>
           </div>
 
@@ -256,7 +243,7 @@ export function RegisterPage() {
 
           <button
             type="submit"
-            disabled={loading || !!slugError}
+            disabled={loading || !!slugError || slugAvailability === 'taken'}
             className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Creating account...' : 'Create account'}
