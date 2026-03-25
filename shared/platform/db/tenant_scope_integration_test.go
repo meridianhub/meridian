@@ -290,20 +290,15 @@ func TestWithTenantScope_Integration_NonExistentSchema(t *testing.T) {
 	orgID := tenant.MustNewTenantID("nonexistent")
 	orgCtx := tenant.WithTenant(ctx, orgID)
 
-	// SET LOCAL should succeed (PostgreSQL allows setting search_path to non-existent schemas)
-	// But querying tables should fail
+	// WithTenantScope must fail-fast with ErrTenantSchemaNotProvisioned
+	// rather than silently falling through to the public schema.
 	err := WithTransaction(orgCtx, pool, func(tx DB) error {
-		if _, err := WithTenantScope(orgCtx, tx); err != nil {
-			return err
-		}
-
-		// This query should fail because the schema doesn't exist
-		var count int
-		return tx.QueryRowContext(orgCtx, "SELECT COUNT(*) FROM accounts").Scan(&count)
+		_, err := WithTenantScope(orgCtx, tx)
+		return err
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "accounts") // Table not found in search_path
+	assert.ErrorIs(t, err, ErrTenantSchemaNotProvisioned)
 }
 
 func TestWithTenantScope_Integration_SQLInjectionPrevention(t *testing.T) {
