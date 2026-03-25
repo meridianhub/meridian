@@ -7,16 +7,19 @@ import (
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
 	"github.com/meridianhub/meridian/services/identity/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var mapperTestTID = tenant.MustNewTenantID("test_tenant")
 
 // --- identityToProto: cases not covered by grpc_service_test.go ---
 
 func TestIdentityToProto_WithoutExternalIDP(t *testing.T) {
 	// Verifies that when ExternalIDP is empty, the external_idp/external_idp_sub fields
 	// are not populated (the mapper guard: if identity.ExternalIDP() != "")
-	identity, err := domain.NewIdentity("local@example.com")
+	identity, err := domain.NewIdentity(mapperTestTID,"local@example.com")
 	require.NoError(t, err)
 
 	proto := identityToProto(identity)
@@ -27,7 +30,7 @@ func TestIdentityToProto_WithoutExternalIDP(t *testing.T) {
 }
 
 func TestIdentityToProto_PendingInviteStatus(t *testing.T) {
-	identity, err := domain.NewIdentity("new@example.com")
+	identity, err := domain.NewIdentity(mapperTestTID,"new@example.com")
 	require.NoError(t, err)
 
 	proto := identityToProto(identity)
@@ -38,7 +41,7 @@ func TestIdentityToProto_PendingInviteStatus(t *testing.T) {
 
 func TestIdentityToProto_TimestampsPopulated(t *testing.T) {
 	before := time.Now().Truncate(time.Second)
-	identity, err := domain.NewIdentity("ts@example.com")
+	identity, err := domain.NewIdentity(mapperTestTID,"ts@example.com")
 	require.NoError(t, err)
 
 	proto := identityToProto(identity)
@@ -56,7 +59,7 @@ func TestRoleAssignmentToProto_GrantedAtPopulated(t *testing.T) {
 	identityID := uuid.New()
 	granterID := uuid.New()
 
-	ra, err := domain.NewRoleAssignment(identityID, granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
+	ra, err := domain.NewRoleAssignment(mapperTestTID, identityID, granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
 	require.NoError(t, err)
 
 	proto := roleAssignmentToProto(ra)
@@ -70,7 +73,7 @@ func TestRoleAssignmentToProto_GrantedAtPopulated(t *testing.T) {
 func TestRoleAssignmentToProto_RevocationWithoutRevokedBy(t *testing.T) {
 	revokedAt := time.Now()
 	ra := domain.ReconstructRoleAssignment(
-		uuid.New(), uuid.New(), uuid.New(),
+		uuid.New(), mapperTestTID, uuid.New(), uuid.New(),
 		domain.RoleAdmin, nil, &revokedAt, nil, // revokedBy is nil
 		time.Now(), time.Now(),
 	)

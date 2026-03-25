@@ -51,7 +51,12 @@ func NewService(repo domain.Repository, logger *slog.Logger) (*Service, error) {
 
 // CreateIdentity creates a new identity in PENDING_INVITE status.
 func (s *Service) CreateIdentity(ctx context.Context, req *pb.CreateIdentityRequest) (*pb.CreateIdentityResponse, error) {
-	identity, err := domain.NewIdentity(req.GetEmail())
+	tenantID, err := tenant.RequireFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "missing tenant context")
+	}
+
+	identity, err := domain.NewIdentity(tenantID, req.GetEmail())
 	if err != nil {
 		s.logger.ErrorContext(ctx, "invalid email for identity creation",
 			"error", err)
@@ -450,10 +455,15 @@ func (s *Service) GrantRole(ctx context.Context, req *pb.GrantRoleRequest) (*pb.
 		return nil, mapDomainError(err, "identity")
 	}
 
+	tenantID, err := tenant.RequireFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "missing tenant context")
+	}
+
 	granterRole := s.getCallerHighestRole(ctx)
 	targetRole := protoRoleToDomain(req.GetRole())
 
-	assignment, err := domain.NewRoleAssignment(identityID, granterID, granterRole, targetRole)
+	assignment, err := domain.NewRoleAssignment(tenantID, identityID, granterID, granterRole, targetRole)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidRole) {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid role: %v", err)
@@ -586,7 +596,12 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 		return nil, status.Errorf(codes.Internal, "invalid caller identity ID")
 	}
 
-	identity, err := domain.NewIdentity(req.GetEmail())
+	tenantID, err := tenant.RequireFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "missing tenant context")
+	}
+
+	identity, err := domain.NewIdentity(tenantID, req.GetEmail())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid email: %v", err)
 	}
@@ -614,7 +629,7 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 	if req.GetRole() != pb.Role_ROLE_UNSPECIFIED {
 		granterRole := s.getCallerHighestRole(ctx)
 		targetRole := protoRoleToDomain(req.GetRole())
-		assignment, roleErr := domain.NewRoleAssignment(identity.ID(), inviterID, granterRole, targetRole)
+		assignment, roleErr := domain.NewRoleAssignment(tenantID, identity.ID(), inviterID, granterRole, targetRole)
 		if roleErr != nil {
 			s.logger.WarnContext(ctx, "failed to grant initial role during invitation",
 				"identity_id", identity.ID(),
