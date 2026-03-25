@@ -18,6 +18,12 @@ import (
 // so allowing this would silently skip tenant isolation.
 var ErrTenantScopeRequiresTransaction = errors.New("tenant scope requires an active transaction: SET LOCAL has no effect outside a transaction")
 
+// ErrTenantSchemaNotProvisioned is returned when SET LOCAL search_path targets a schema
+// that does not exist in the database. PostgreSQL silently accepts non-existent schemas
+// in search_path, which would cause queries to fall through to the public schema and
+// expose cross-tenant data.
+var ErrTenantSchemaNotProvisioned = errors.New("tenant schema not provisioned: schema does not exist in database")
+
 // hashTenantID creates a short, privacy-preserving hash of the tenant ID for logging.
 // This allows correlation in logs without exposing the actual tenant ID.
 func hashTenantID(tenantID tenant.TenantID) string {
@@ -99,6 +105,23 @@ func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog
 			"tenant_hash", hashTenantID(tenantID),
 			"error", err)
 		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
+	}
+
+	// Verify the tenant schema actually exists - PostgreSQL allows SET LOCAL to non-existent schemas,
+	// which would silently fall through to public schema and leak cross-tenant data.
+	var schemaExists bool
+	if err := tx.WithContext(bypassCtx).Raw("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = ?)", schema).Scan(&schemaExists).Error; err != nil {
+		logger.ErrorContext(ctx, "tenant scope: failed to verify schema existence",
+			"tenant_hash", hashTenantID(tenantID),
+			"schema", schema,
+			"error", err)
+		return nil, fmt.Errorf("failed to verify tenant schema existence: %w", err)
+	}
+	if !schemaExists {
+		logger.ErrorContext(ctx, "tenant scope: schema not provisioned",
+			"tenant_hash", hashTenantID(tenantID),
+			"schema", schema)
+		return nil, fmt.Errorf("%w: %s", ErrTenantSchemaNotProvisioned, schema)
 	}
 
 	// Audit log: emitted on every successful schema access for forensic traceability.

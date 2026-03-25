@@ -76,6 +76,9 @@ func TestTenantAudit_LogsSchemaAccess(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_acme_bank").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectRollback()
 
 	tx := gormDB.WithContext(ctx).Begin()
@@ -110,6 +113,9 @@ func TestTenantAudit_LogsSchemaAccessWithService(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_beta_corp", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_beta_corp").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectRollback()
 
 	tx := gormDB.WithContext(ctx).Begin()

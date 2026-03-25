@@ -32,6 +32,23 @@ func WithLogLevel(level logger.LogLevel) PostgresOption {
 	}
 }
 
+// CreateTenantSchema creates the database schema for a tenant ID in a test database.
+// This must be called before any tenant-scoped database operation that targets this tenant,
+// since WithGormTenantScope validates schema existence.
+//
+// Example:
+//
+//	db, cleanup := testdb.SetupCockroachDB(t, models)
+//	defer cleanup()
+//	testdb.CreateTenantSchema(t, db, tenant.MustNewTenantID("test_tenant"))
+func CreateTenantSchema(t *testing.T, db *gorm.DB, tenantID interface{ SchemaName() string }) {
+	t.Helper()
+	schema := tenantID.SchemaName()
+	if err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schema)).Error; err != nil {
+		t.Fatalf("Failed to create tenant schema %s: %v", schema, err)
+	}
+}
+
 // extractSchemasFromModels extracts unique schema names from models with TableName() methods.
 // It parses "schema.table" format and returns a set of schema names.
 func extractSchemasFromModels(models []interface{}) map[string]bool {
