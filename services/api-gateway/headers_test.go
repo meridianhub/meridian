@@ -322,8 +322,8 @@ func TestGetClientIP(t *testing.T) {
 			expected:   "2001:db8::1",
 		},
 		{
-			name:    "IPv6 X-Real-IP",
-			xRealIP: "2001:db8::1",
+			name:     "IPv6 X-Real-IP",
+			xRealIP:  "2001:db8::1",
 			expected: "2001:db8::1",
 		},
 	}
