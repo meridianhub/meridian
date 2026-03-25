@@ -7,8 +7,10 @@
 #   3. Drops and recreates all dev_ per-service databases
 #   4. Runs pre-migration scripts for PostgreSQL compatibility
 #   5. Starts meridian-develop and runs migrations
-#   6. Seeds the develop tenant with fixture data via gRPC
-#   7. Verifies the environment is healthy
+#   6. Restarts meridian-develop post-migration
+#   7. Seeds the develop tenant with fixture data via gRPC
+#   8. Starts mcp-server-develop
+#   9. Verifies the environment is healthy
 #
 # Usage:
 #   ./scripts/reset-develop.sh
@@ -71,12 +73,12 @@ echo "=== Step 3: Drop and recreate databases ==="
 # Terminate active connections to dev_* databases
 ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -c \"
   SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-  WHERE datname LIKE 'dev_%' AND pid <> pg_backend_pid();
+  WHERE datname LIKE 'dev\_%' ESCAPE '\' AND pid <> pg_backend_pid();
 \" 2>/dev/null || true"
 
 # Drop all dev_* per-service databases
 ssh "${DEVELOP_HOST}" "docker exec ${PG_CONTAINER} psql -U ${PG_USER} -d ${PG_USER} -tc \"
-  SELECT datname FROM pg_database WHERE datname LIKE 'dev_%';
+  SELECT datname FROM pg_database WHERE datname LIKE 'dev\_%' ESCAPE '\';
 \" | while read -r db; do
   db=\$(echo \"\$db\" | xargs)
   [ -z \"\$db\" ] && continue
@@ -143,7 +145,7 @@ echo "=== Step 9: Health check ==="
 attempt=0
 until [ $attempt -ge 24 ]; do
   attempt=$((attempt + 1))
-  if ssh "${DEVELOP_HOST}" "curl -sf http://localhost:80/healthz -H 'Host: develop.meridianhub.cloud'" > /dev/null 2>&1; then
+  if ssh "${DEVELOP_HOST}" "curl -sf --connect-timeout 2 --max-time 5 http://localhost:80/healthz -H 'Host: develop.meridianhub.cloud'" > /dev/null 2>&1; then
     echo "  Health check passed after ${attempt} attempts"
     break
   fi
