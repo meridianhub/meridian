@@ -5,8 +5,12 @@ name: Deploy Gate
 # environment before reaching demo.
 #
 # Runs on push to demo branch. If the latest deploy-develop run for the same
-# commit (or its parent on develop) failed or hasn't run, this check fails,
-# blocking the demo deployment pipeline.
+# commit (or its parent on develop) failed or hasn't run, this check fails.
+#
+# IMPORTANT: This workflow runs in parallel with deploy-demo.yml - it does not
+# inherently block the demo deployment. To enforce the gate, add
+# "check-develop-deploy" as a required status check in the branch protection
+# rules for the demo branch.
 
 on:
   push:
