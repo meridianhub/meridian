@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 )
 
 // setupConsumerTestDB creates an in-memory SQLite database for consumer unit tests.
+// MaxOpenConns is set to 1 so that the entire connection pool shares the same
+// in-memory database. Without this limit, database/sql may open additional
+// connections that each receive their own, empty in-memory database — making
+// data written on one connection invisible to others.
 // Tables are created with raw SQL to avoid PostgreSQL-specific syntax in GORM struct tags
 // (e.g. gen_random_uuid(), jsonb).
 func setupConsumerTestDB(t *testing.T) *gorm.DB {
@@ -28,6 +33,10 @@ func setupConsumerTestDB(t *testing.T) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 
 	err = db.Exec(`CREATE TABLE audit_log (
 		id TEXT PRIMARY KEY,
@@ -467,10 +476,19 @@ func TestProcessOutboxFallback_DefaultBatchSize(t *testing.T) {
 	c := newTestConsumer(db)
 	defer c.cancel()
 
-	// With batchSize = 0 it should use the default (100) and not error
+	// Seed 150 pending entries so the default batch size of 100 is exercised.
+	for i := 0; i < 150; i++ {
+		err := db.Exec(`INSERT INTO audit_outbox (id, table_name, operation, record_id, status, created_at, retry_count)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			uuid.New().String(), "orders", "INSERT", fmt.Sprintf("r-%d", i), "pending", time.Now(), 0,
+		).Error
+		require.NoError(t, err)
+	}
+
+	// batchSize = 0 should apply the default of 100, so exactly 100 rows are processed.
 	processed, err := c.ProcessOutboxFallback(context.Background(), "", 0)
 	require.NoError(t, err)
-	assert.Equal(t, 0, processed) // No pending entries
+	assert.Equal(t, 100, processed)
 }
 
 func TestProcessOutboxFallback_NegativeBatchSize_UsesDefault(t *testing.T) {
@@ -478,9 +496,19 @@ func TestProcessOutboxFallback_NegativeBatchSize_UsesDefault(t *testing.T) {
 	c := newTestConsumer(db)
 	defer c.cancel()
 
+	// Seed 150 pending entries so the default of 100 is exercised.
+	for i := 0; i < 150; i++ {
+		err := db.Exec(`INSERT INTO audit_outbox (id, table_name, operation, record_id, status, created_at, retry_count)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			uuid.New().String(), "accounts", "UPDATE", fmt.Sprintf("a-%d", i), "pending", time.Now(), 0,
+		).Error
+		require.NoError(t, err)
+	}
+
+	// Negative batch size should also fall back to 100.
 	processed, err := c.ProcessOutboxFallback(context.Background(), "", -5)
 	require.NoError(t, err)
-	assert.Equal(t, 0, processed)
+	assert.Equal(t, 100, processed)
 }
 
 func TestProcessOutboxFallback_NoPendingEntries(t *testing.T) {
@@ -589,37 +617,40 @@ func TestProcessOutboxFallback_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	// Insert a pending entry so processing would be attempted
+	entryID := uuid.New().String()
 	err := db.Exec(`INSERT INTO audit_outbox (id, table_name, operation, record_id, status, created_at, retry_count)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		uuid.New().String(), "orders", "INSERT", "order-1", "pending", time.Now(), 0,
+		entryID, "orders", "INSERT", "order-ctx-cancel", "pending", time.Now(), 0,
 	).Error
 	require.NoError(t, err)
 
-	// The cancelled context should cause the processing to fail early
-	// Either returns 0 (context cancelled before processing) or fails partway
-	_, _ = c.ProcessOutboxFallback(ctx, "", 10)
-	// We don't assert a specific error here since SQLite may still proceed
-	// with the cancelled context - the main thing is it doesn't panic.
+	// A pre-cancelled context should prevent processing; the entry must remain pending.
+	c.ProcessOutboxFallback(ctx, "", 10) //nolint:errcheck // outcome verified via DB state below
+
+	var status string
+	db.Raw("SELECT status FROM audit_outbox WHERE id = ?", entryID).Scan(&status)
+	// The entry should not have been moved to 'completed'; it stays 'pending' (or 'failed').
+	assert.NotEqual(t, "completed", status, "cancelled context should prevent audit log write")
 }
 
 // --- Error types ---
 
 func TestConsumerErrorTypes(t *testing.T) {
-	t.Run("ErrEmptyBootstrapServers is distinct", func(t *testing.T) {
+	t.Run("sentinel errors are distinct", func(t *testing.T) {
 		assert.NotEqual(t, ErrEmptyBootstrapServers, ErrNilDatabase)
 		assert.NotEqual(t, ErrEmptyBootstrapServers, ErrUnexpectedMessageType)
 		assert.NotEqual(t, ErrEmptyBootstrapServers, ErrInvalidOperation)
 		assert.NotEqual(t, ErrEmptyBootstrapServers, ErrInvalidSchemaName)
 	})
 
-	t.Run("errors can be wrapped and unwrapped", func(t *testing.T) {
-		wrapped := func(base error) error {
-			return errors.New("wrapped: " + base.Error())
-		}
-		_ = wrapped(ErrNilDatabase)
-		// sentinel errors are distinct and usable as Is targets
-		assert.True(t, errors.Is(ErrInvalidSchemaName, ErrInvalidSchemaName))
-		assert.True(t, errors.Is(ErrInvalidOperation, ErrInvalidOperation))
+	t.Run("sentinel errors survive fmt.Errorf wrapping", func(t *testing.T) {
+		wrappedSchema := fmt.Errorf("outer: %w", ErrInvalidSchemaName)
+		assert.ErrorIs(t, wrappedSchema, ErrInvalidSchemaName)
+
+		wrappedOp := fmt.Errorf("outer: %w", ErrInvalidOperation)
+		assert.ErrorIs(t, wrappedOp, ErrInvalidOperation)
+
+		wrappedDB := fmt.Errorf("outer: %w", ErrNilDatabase)
+		assert.ErrorIs(t, wrappedDB, ErrNilDatabase)
 	})
 }
