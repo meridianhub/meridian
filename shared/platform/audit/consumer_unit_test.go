@@ -625,7 +625,8 @@ func TestProcessOutboxFallback_ContextCancelled(t *testing.T) {
 	require.NoError(t, err)
 
 	// A pre-cancelled context should prevent processing; the entry must remain pending.
-	c.ProcessOutboxFallback(ctx, "", 10) //nolint:errcheck // outcome verified via DB state below
+	// Intentionally ignore the return value — the outcome is verified via DB state below.
+	_, _ = c.ProcessOutboxFallback(ctx, "", 10)
 
 	var status string
 	db.Raw("SELECT status FROM audit_outbox WHERE id = ?", entryID).Scan(&status)
