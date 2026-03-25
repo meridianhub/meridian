@@ -629,7 +629,9 @@ func TestProcessOutboxFallback_ContextCancelled(t *testing.T) {
 	_, _ = c.ProcessOutboxFallback(ctx, "", 10)
 
 	var status string
-	db.Raw("SELECT status FROM audit_outbox WHERE id = ?", entryID).Scan(&status)
+	err = db.Raw("SELECT status FROM audit_outbox WHERE id = ?", entryID).Scan(&status).Error
+	require.NoError(t, err)
+	require.NotEmpty(t, status)
 	// The entry should not have been moved to 'completed'; it stays 'pending' (or 'failed').
 	assert.NotEqual(t, "completed", status, "cancelled context should prevent audit log write")
 }
