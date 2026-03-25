@@ -240,7 +240,7 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
-	identity, err := identitydomain.NewIdentity(email)
+	identity, err := identitydomain.NewIdentity(tid, email)
 	if err != nil {
 		return newRegistrationError(http.StatusBadRequest, fmt.Errorf("%w: %w", errIdentityCreationFailed, err))
 	}
@@ -267,6 +267,7 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 	// This follows the same pattern as identity/bootstrap/bootstrap.go.
 	ra := identitydomain.ReconstructRoleAssignment(
 		uuid.New(),
+		tid,
 		identity.ID(),
 		identity.ID(),
 		identitydomain.RoleTenantOwner,

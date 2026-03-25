@@ -78,6 +78,7 @@ func setupIdentitySchema(t *testing.T, db *gorm.DB, tenantID string) context.Con
 		`CREATE SCHEMA IF NOT EXISTS %q`,
 		`CREATE TABLE IF NOT EXISTS %q.identity (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id VARCHAR(50) NOT NULL DEFAULT '',
 			email VARCHAR(255) NOT NULL,
 			status VARCHAR(30) NOT NULL DEFAULT 'PENDING_INVITE',
 			password_hash VARCHAR(255) NOT NULL DEFAULT '',
@@ -88,10 +89,11 @@ func setupIdentitySchema(t *testing.T, db *gorm.DB, tenantID string) context.Con
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 			deleted_at TIMESTAMP WITH TIME ZONE,
-			UNIQUE (email) WHERE deleted_at IS NULL
+			UNIQUE (tenant_id, email) WHERE deleted_at IS NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS %q.role_assignment (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id VARCHAR(50) NOT NULL DEFAULT '',
 			identity_id UUID NOT NULL,
 			granted_by UUID NOT NULL,
 			role VARCHAR(50) NOT NULL,
@@ -125,7 +127,9 @@ func setupIdentitySchema(t *testing.T, db *gorm.DB, tenantID string) context.Con
 func (infra *multiTenantInfra) createActiveIdentity(t *testing.T, ctx context.Context, email, password string) *domain.Identity {
 	t.Helper()
 
-	id, err := domain.NewIdentity(email)
+	tid, ok := tenant.FromContext(ctx)
+	require.True(t, ok, "tenant context required")
+	id, err := domain.NewIdentity(tid, email)
 	require.NoError(t, err)
 
 	hash, err := credentials.HashPassword(password)
@@ -235,7 +239,8 @@ func TestMultiTenant_RoleIsolation(t *testing.T) {
 
 	// Grant ADMIN role to the identity in tenant A.
 	granterID := uuid.New()
-	assignment, err := domain.NewRoleAssignment(idA.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
+	tidA := tenant.MustNewTenantID(tenantAlpha)
+	assignment, err := domain.NewRoleAssignment(tidA, idA.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
 	require.NoError(t, err)
 	err = infra.repo.SaveRoleAssignment(infra.ctxA, assignment)
 	require.NoError(t, err)

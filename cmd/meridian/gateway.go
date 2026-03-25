@@ -195,16 +195,22 @@ var errNilTenantResponse = fmt.Errorf("InitiateTenant returned nil tenant")
 // loopbackTenantCreator adapts the tenant gRPC service client to the
 // gateway.TenantCreator interface used by RegistrationHandler.
 type loopbackTenantCreator struct {
-	client tenantv1.TenantServiceClient
-	logger *slog.Logger
+	client     tenantv1.TenantServiceClient
+	baseDomain string
+	logger     *slog.Logger
 }
 
 func (a *loopbackTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error) {
+	subdomain := slug
+	if a.baseDomain != "" {
+		subdomain = slug + "." + a.baseDomain
+	}
+
 	resp, err := a.client.InitiateTenant(ctx, &tenantv1.InitiateTenantRequest{
 		TenantId:        tenantID,
 		DisplayName:     displayName,
 		Slug:            slug,
-		Subdomain:       slug,
+		Subdomain:       subdomain,
 		SettlementAsset: "USD",
 	})
 	if err != nil {
@@ -240,7 +246,7 @@ func wireRegistration(identityDB, tenantDB *gorm.DB, rawConn *grpc.ClientConn, b
 	identityRepo := identitypersistence.NewRepository(identityDB)
 	tenantClient := tenantv1.NewTenantServiceClient(rawConn)
 
-	creator := &loopbackTenantCreator{client: tenantClient, logger: logger}
+	creator := &loopbackTenantCreator{client: tenantClient, baseDomain: baseDomain, logger: logger}
 	slugChecker := &loopbackSlugChecker{repo: tenantpersistence.NewRepository(tenantDB)}
 
 	handler, err := gateway.NewRegistrationHandler(gateway.RegistrationHandlerConfig{

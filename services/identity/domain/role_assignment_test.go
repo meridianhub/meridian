@@ -5,9 +5,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var testRATenantID = tenant.MustNewTenantID("test_tenant")
+
+func TestNewRoleAssignment_EmptyTenantID_ReturnsError(t *testing.T) {
+	_, err := NewRoleAssignment("", uuid.New(), uuid.New(), string(RolePlatform), string(RoleAdmin))
+	assert.ErrorIs(t, err, ErrTenantIDRequired)
+}
 
 func TestNewRoleAssignment_ValidRole(t *testing.T) {
 	tests := []struct {
@@ -26,7 +34,7 @@ func TestNewRoleAssignment_ValidRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.granter+"->"+tt.target, func(t *testing.T) {
-			ra, err := NewRoleAssignment(identityID, grantedBy, tt.granter, tt.target)
+			ra, err := NewRoleAssignment(testRATenantID, identityID, grantedBy, tt.granter, tt.target)
 			require.NoError(t, err)
 			assert.NotEqual(t, uuid.Nil, ra.ID())
 			assert.Equal(t, identityID, ra.IdentityID())
@@ -41,7 +49,7 @@ func TestNewRoleAssignment_ValidRole(t *testing.T) {
 }
 
 func TestNewRoleAssignment_InvalidRole(t *testing.T) {
-	_, err := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), "SUPERUSER")
+	_, err := NewRoleAssignment(testRATenantID, uuid.New(), uuid.New(), string(RolePlatform), "SUPERUSER")
 	assert.ErrorIs(t, err, ErrInvalidRole)
 }
 
@@ -62,14 +70,14 @@ func TestNewRoleAssignment_InsufficientPermissions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.granter+"->"+tt.target, func(t *testing.T) {
-			_, err := NewRoleAssignment(uuid.New(), uuid.New(), tt.granter, tt.target)
+			_, err := NewRoleAssignment(testRATenantID, uuid.New(), uuid.New(), tt.granter, tt.target)
 			assert.ErrorIs(t, err, ErrInsufficientRolePermissions)
 		})
 	}
 }
 
 func TestRoleAssignment_Revoke(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RoleAdmin), string(RoleViewer))
+	ra, _ := NewRoleAssignment(testRATenantID, uuid.New(), uuid.New(), string(RoleAdmin), string(RoleViewer))
 	assert.True(t, ra.IsActive())
 
 	revokedBy := uuid.New()
@@ -82,7 +90,7 @@ func TestRoleAssignment_Revoke(t *testing.T) {
 }
 
 func TestRoleAssignment_RevokeAlreadyRevoked(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), string(RoleAdmin))
+	ra, _ := NewRoleAssignment(testRATenantID, uuid.New(), uuid.New(), string(RolePlatform), string(RoleAdmin))
 	_ = ra.Revoke(uuid.New())
 
 	err := ra.Revoke(uuid.New())
@@ -90,21 +98,21 @@ func TestRoleAssignment_RevokeAlreadyRevoked(t *testing.T) {
 }
 
 func TestRoleAssignment_IsActive_Expired(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), string(RoleOperator))
+	ra, _ := NewRoleAssignment(testRATenantID, uuid.New(), uuid.New(), string(RolePlatform), string(RoleOperator))
 	// Set expiry in the past via reconstruction
 	past := time.Now().Add(-time.Hour)
 	ra2 := ReconstructRoleAssignment(
-		ra.ID(), ra.IdentityID(), ra.GrantedBy(), ra.Role(),
+		ra.ID(), testRATenantID, ra.IdentityID(), ra.GrantedBy(), ra.Role(),
 		&past, nil, nil, ra.CreatedAt(), ra.UpdatedAt(),
 	)
 	assert.False(t, ra2.IsActive())
 }
 
 func TestRoleAssignment_IsActive_NotExpired(t *testing.T) {
-	ra, _ := NewRoleAssignment(uuid.New(), uuid.New(), string(RolePlatform), string(RoleOperator))
+	ra, _ := NewRoleAssignment(testRATenantID, uuid.New(), uuid.New(), string(RolePlatform), string(RoleOperator))
 	future := time.Now().Add(time.Hour)
 	ra2 := ReconstructRoleAssignment(
-		ra.ID(), ra.IdentityID(), ra.GrantedBy(), ra.Role(),
+		ra.ID(), testRATenantID, ra.IdentityID(), ra.GrantedBy(), ra.Role(),
 		&future, nil, nil, ra.CreatedAt(), ra.UpdatedAt(),
 	)
 	assert.True(t, ra2.IsActive())
