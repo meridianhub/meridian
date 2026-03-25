@@ -1,7 +1,6 @@
 package kafka
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -42,192 +41,10 @@ func TestNewDLQReplay_EmptyBootstrapServers(t *testing.T) {
 	assert.ErrorIs(t, err, ErrEmptyBootstrapServers)
 }
 
-// --- Unit tests for ReplayMessage header filtering ---
-
-func TestReplayMessage_StripsPrefix(t *testing.T) {
-	// Test the header-stripping logic that ReplayMessage uses
-	dlqMsg := DLQMessage{
-		Record: &kgo.Record{
-			Key:   []byte("test-key"),
-			Value: []byte("test-value"),
-			Headers: []kgo.RecordHeader{
-				{Key: "dlq.original_topic", Value: []byte("orders")},
-				{Key: "dlq.error_message", Value: []byte("timeout")},
-				{Key: "correlation_id", Value: []byte("corr-123")},
-				{Key: "content-type", Value: []byte("application/protobuf")},
-			},
-		},
-		Metadata: DLQMetadata{
-			OriginalTopic: "orders",
-		},
-	}
-
-	// Simulate the header filtering from ReplayMessage
-	var replayHeaders []kgo.RecordHeader
-	for _, header := range dlqMsg.Record.Headers {
-		if !strings.HasPrefix(header.Key, "dlq.") {
-			replayHeaders = append(replayHeaders, header)
-		}
-	}
-
-	assert.Len(t, replayHeaders, 2)
-	assert.Equal(t, "correlation_id", replayHeaders[0].Key)
-	assert.Equal(t, "content-type", replayHeaders[1].Key)
-}
-
-func TestReplayMessage_PreservesNonDLQHeaders(t *testing.T) {
-	headers := []kgo.RecordHeader{
-		{Key: "x-custom", Value: []byte("value1")},
-		{Key: "x-trace-id", Value: []byte("trace-abc")},
-	}
-
-	var replayHeaders []kgo.RecordHeader
-	for _, header := range headers {
-		if !strings.HasPrefix(header.Key, "dlq.") {
-			replayHeaders = append(replayHeaders, header)
-		}
-	}
-
-	assert.Len(t, replayHeaders, 2)
-}
-
-func TestReplayMessage_AllDLQHeaders(t *testing.T) {
-	headers := []kgo.RecordHeader{
-		{Key: "dlq.original_topic", Value: []byte("orders")},
-		{Key: "dlq.error_message", Value: []byte("fail")},
-		{Key: "dlq.retry_count", Value: []byte("3")},
-	}
-
-	var replayHeaders []kgo.RecordHeader
-	for _, header := range headers {
-		if !strings.HasPrefix(header.Key, "dlq.") {
-			replayHeaders = append(replayHeaders, header)
-		}
-	}
-
-	assert.Empty(t, replayHeaders)
-}
-
-// --- Unit tests for DLQStatistics aggregation ---
-
-func TestDLQStatistics_EmptyMessages(t *testing.T) {
-	stats := DLQStatistics{
-		TotalMessages:           0,
-		MessagesByTopic:         make(map[string]int),
-		MessagesByErrorType:     make(map[string]int),
-		MessagesByConsumerGroup: make(map[string]int),
-	}
-
-	assert.Equal(t, 0, stats.TotalMessages)
-	assert.Empty(t, stats.MessagesByTopic)
-	assert.True(t, stats.OldestFailure.IsZero())
-	assert.True(t, stats.NewestFailure.IsZero())
-}
-
-func TestDLQStatistics_AggregationLogic(t *testing.T) {
-	now := time.Now()
-
-	messages := []DLQMessage{
-		{
-			Metadata: DLQMetadata{
-				OriginalTopic:    "orders",
-				ErrorMessage:     "timeout\ndetails",
-				ConsumerGroupID:  "group-a",
-				FirstFailureTime: now.Add(-3 * time.Hour),
-				LastFailureTime:  now.Add(-2 * time.Hour),
-			},
-		},
-		{
-			Metadata: DLQMetadata{
-				OriginalTopic:    "orders",
-				ErrorMessage:     "serialization error",
-				ConsumerGroupID:  "group-a",
-				FirstFailureTime: now.Add(-1 * time.Hour),
-				LastFailureTime:  now,
-			},
-		},
-		{
-			Metadata: DLQMetadata{
-				OriginalTopic:    "payments",
-				ErrorMessage:     "timeout\nmore details",
-				ConsumerGroupID:  "group-b",
-				FirstFailureTime: now.Add(-4 * time.Hour),
-				LastFailureTime:  now.Add(-30 * time.Minute),
-			},
-		},
-	}
-
-	// Replicate the aggregation logic from GetStatistics
-	stats := DLQStatistics{
-		TotalMessages:           len(messages),
-		MessagesByTopic:         make(map[string]int),
-		MessagesByErrorType:     make(map[string]int),
-		MessagesByConsumerGroup: make(map[string]int),
-	}
-
-	for _, msg := range messages {
-		stats.MessagesByTopic[msg.Metadata.OriginalTopic]++
-
-		errorType := strings.Split(msg.Metadata.ErrorMessage, "\n")[0]
-		if len(errorType) > 100 {
-			errorType = errorType[:100] + "..."
-		}
-		stats.MessagesByErrorType[errorType]++
-
-		stats.MessagesByConsumerGroup[msg.Metadata.ConsumerGroupID]++
-
-		if stats.OldestFailure.IsZero() || msg.Metadata.FirstFailureTime.Before(stats.OldestFailure) {
-			stats.OldestFailure = msg.Metadata.FirstFailureTime
-		}
-		if msg.Metadata.LastFailureTime.After(stats.NewestFailure) {
-			stats.NewestFailure = msg.Metadata.LastFailureTime
-		}
-	}
-
-	assert.Equal(t, 3, stats.TotalMessages)
-	assert.Equal(t, 2, stats.MessagesByTopic["orders"])
-	assert.Equal(t, 1, stats.MessagesByTopic["payments"])
-	assert.Equal(t, 2, stats.MessagesByConsumerGroup["group-a"])
-	assert.Equal(t, 1, stats.MessagesByConsumerGroup["group-b"])
-	// Error types extracted from first line
-	assert.Equal(t, 2, stats.MessagesByErrorType["timeout"])
-	assert.Equal(t, 1, stats.MessagesByErrorType["serialization error"])
-	assert.True(t, stats.OldestFailure.Equal(now.Add(-4*time.Hour)))
-	assert.True(t, stats.NewestFailure.Equal(now))
-}
-
-func TestDLQStatistics_LongErrorTypeTruncation(t *testing.T) {
-	longError := strings.Repeat("x", 150)
-	messages := []DLQMessage{
-		{
-			Metadata: DLQMetadata{
-				OriginalTopic:    "test",
-				ErrorMessage:     longError,
-				ConsumerGroupID:  "group",
-				FirstFailureTime: time.Now(),
-				LastFailureTime:  time.Now(),
-			},
-		},
-	}
-
-	stats := DLQStatistics{
-		MessagesByErrorType: make(map[string]int),
-	}
-
-	for _, msg := range messages {
-		errorType := strings.Split(msg.Metadata.ErrorMessage, "\n")[0]
-		if len(errorType) > 100 {
-			errorType = errorType[:100] + "..."
-		}
-		stats.MessagesByErrorType[errorType]++
-	}
-
-	// Should have the truncated key
-	for key := range stats.MessagesByErrorType {
-		assert.LessOrEqual(t, len(key), 103) // 100 + "..."
-		assert.True(t, strings.HasSuffix(key, "..."))
-	}
-}
+// Note: ReplayMessage, ReplayMessages, and GetStatistics require a live Kafka
+// broker and are covered by integration tests. Unit tests here focus on the
+// pure functions (parseDLQMetadata, filter combinators, config validation)
+// that can be tested without external dependencies.
 
 // --- Unit tests for filter functions (additional coverage) ---
 
@@ -286,41 +103,40 @@ func TestCombineFilters_AllFail(t *testing.T) {
 	assert.False(t, combined(msg))
 }
 
-// --- Unit tests for DLQMessage struct ---
+// --- Round-trip test: ToRecordHeaders -> parseDLQMetadata ---
 
-func TestDLQMessage_RecordAndMetadata(t *testing.T) {
-	now := time.Now()
-	record := &kgo.Record{
-		Key:   []byte("key-1"),
-		Value: []byte("value-1"),
-		Topic: "test-topic",
+func TestDLQMetadata_RoundTrip(t *testing.T) {
+	now := time.Now().Truncate(time.Second) // RFC3339 truncates to seconds
+	original := DLQMetadata{
+		OriginalTopic:     "orders.events.v1",
+		OriginalPartition: 7,
+		OriginalOffset:    12345,
+		ErrorMessage:      "processing failed: timeout",
+		ErrorStackTrace:   "goroutine 1 [running]:\nmain.go:42",
+		RetryCount:        3,
+		FirstFailureTime:  now.Add(-10 * time.Minute),
+		LastFailureTime:   now,
+		ConsumerGroupID:   "order-processor",
+		CorrelationID:     "corr-abc-123",
+		CausationID:       "cause-xyz-456",
 	}
 
-	msg := DLQMessage{
-		Record: record,
-		Metadata: DLQMetadata{
-			OriginalTopic:    "original-topic",
-			OriginalPartition: 3,
-			OriginalOffset:    42,
-			ErrorMessage:      "processing failed",
-			RetryCount:        5,
-			FirstFailureTime:  now.Add(-10 * time.Minute),
-			LastFailureTime:   now,
-			ConsumerGroupID:   "cg-1",
-			CorrelationID:     "corr-abc",
-			CausationID:       "cause-xyz",
-		},
-	}
+	// Serialize to headers, then parse back
+	headers := original.ToRecordHeaders()
+	record := &kgo.Record{Headers: headers}
+	parsed := parseDLQMetadata(record)
 
-	assert.Equal(t, record, msg.Record)
-	assert.Equal(t, "original-topic", msg.Metadata.OriginalTopic)
-	assert.Equal(t, int32(3), msg.Metadata.OriginalPartition)
-	assert.Equal(t, int64(42), msg.Metadata.OriginalOffset)
-	assert.Equal(t, "processing failed", msg.Metadata.ErrorMessage)
-	assert.Equal(t, int32(5), msg.Metadata.RetryCount)
-	assert.Equal(t, "cg-1", msg.Metadata.ConsumerGroupID)
-	assert.Equal(t, "corr-abc", msg.Metadata.CorrelationID)
-	assert.Equal(t, "cause-xyz", msg.Metadata.CausationID)
+	assert.Equal(t, original.OriginalTopic, parsed.OriginalTopic)
+	assert.Equal(t, original.OriginalPartition, parsed.OriginalPartition)
+	assert.Equal(t, original.OriginalOffset, parsed.OriginalOffset)
+	assert.Equal(t, original.ErrorMessage, parsed.ErrorMessage)
+	assert.Equal(t, original.ErrorStackTrace, parsed.ErrorStackTrace)
+	assert.Equal(t, original.RetryCount, parsed.RetryCount)
+	assert.True(t, original.FirstFailureTime.Equal(parsed.FirstFailureTime))
+	assert.True(t, original.LastFailureTime.Equal(parsed.LastFailureTime))
+	assert.Equal(t, original.ConsumerGroupID, parsed.ConsumerGroupID)
+	assert.Equal(t, original.CorrelationID, parsed.CorrelationID)
+	assert.Equal(t, original.CausationID, parsed.CausationID)
 }
 
 // --- parseDLQMetadata edge cases ---

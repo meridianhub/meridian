@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -234,12 +235,21 @@ func TestListParties_FilterByStatus(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, p2))
 
+	// Create a suspended party to ensure the filter actually excludes it
+	p3, err := domain.NewParty(domain.PartyTypePerson, "Suspended Person")
+	require.NoError(t, err)
+	require.NoError(t, p3.Suspend())
+	require.NoError(t, repo.Save(ctx, p3))
+
 	result, err := repo.ListParties(ctx, ListPartiesParams{
 		Status: string(domain.PartyStatusActive),
 		Limit:  10,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), result.TotalCount)
+	for _, party := range result.Parties {
+		assert.Equal(t, domain.PartyStatusActive, party.Status())
+	}
 }
 
 func TestListParties_SearchQuery(t *testing.T) {
@@ -741,14 +751,18 @@ func TestSaveInTx_UsesProvidedTransaction(t *testing.T) {
 	party, err := domain.NewParty(domain.PartyTypePerson, "TxTest Person")
 	require.NoError(t, err)
 
+	// Force a rollback after SaveInTx to prove the write used the provided tx.
+	// If SaveInTx ignored tx and wrote via repo.db, the row would persist despite rollback.
+	rollbackErr := errors.New("rollback to verify tx wiring")
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return repo.SaveInTx(ctx, party, tx)
+		require.NoError(t, repo.SaveInTx(ctx, party, tx))
+		return rollbackErr
 	})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, rollbackErr)
 
-	found, err := repo.FindByID(ctx, party.ID())
-	require.NoError(t, err)
-	assert.Equal(t, "TxTest Person", found.LegalName())
+	// The row must NOT exist because the transaction was rolled back
+	_, err = repo.FindByID(ctx, party.ID())
+	assert.ErrorIs(t, err, ErrPartyNotFound)
 }
 
 // --- Encoding edge case ---
