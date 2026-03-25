@@ -288,10 +288,19 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 
 // HandleSlugAvailable handles GET /api/v1/slugs/{slug}/available.
 // Returns {"available": true/false} with optional validation errors.
+// Rate limited per IP to prevent slug enumeration.
 func (h *RegistrationHandler) HandleSlugAvailable(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	clientIP := getClientIP(r)
+	if !h.rateLimiter.Allow(clientIP) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many requests, please try again later",
+		})
 		return
 	}
 

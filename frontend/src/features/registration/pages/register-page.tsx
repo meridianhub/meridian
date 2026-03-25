@@ -42,7 +42,10 @@ export function RegisterPage() {
       fetch(`/api/v1/slugs/${encodeURIComponent(slug)}/available`, {
         signal: controller.signal,
       })
-        .then((res) => res.json() as Promise<{ available: boolean; reason?: string }>)
+        .then((res) => {
+          if (!res.ok) throw new Error(`status ${res.status}`)
+          return res.json() as Promise<{ available: boolean; reason?: string }>
+        })
         .then((data) => {
           if (!controller.signal.aborted) {
             setSlugAvailability(data.available ? 'available' : 'taken')
