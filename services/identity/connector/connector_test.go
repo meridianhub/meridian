@@ -94,7 +94,7 @@ const testPassword = "ValidPassword1!"
 
 func makeActiveIdentity(t *testing.T, email string) *domain.Identity {
 	t.Helper()
-	id, err := domain.NewIdentity(connTestTID,email)
+	id, err := domain.NewIdentity(connTestTID, email)
 	require.NoError(t, err)
 
 	hash, err := credentials.HashPassword(testPassword)
@@ -227,7 +227,7 @@ func TestLogin_WrongPassword_ReturnsFalse(t *testing.T) {
 // --- Login: account states ---
 
 func TestLogin_LockedAccount_ReturnsFalse(t *testing.T) {
-	id, err := domain.NewIdentity(connTestTID,"locked@example.com")
+	id, err := domain.NewIdentity(connTestTID, "locked@example.com")
 	require.NoError(t, err)
 	hash, err := credentials.HashPassword(testPassword)
 	require.NoError(t, err)
@@ -250,7 +250,7 @@ func TestLogin_LockedAccount_ReturnsFalse(t *testing.T) {
 }
 
 func TestLogin_SuspendedAccount_ReturnsFalse(t *testing.T) {
-	id, err := domain.NewIdentity(connTestTID,"suspended@example.com")
+	id, err := domain.NewIdentity(connTestTID, "suspended@example.com")
 	require.NoError(t, err)
 	hash, err := credentials.HashPassword(testPassword)
 	require.NoError(t, err)
@@ -270,7 +270,7 @@ func TestLogin_SuspendedAccount_ReturnsFalse(t *testing.T) {
 
 func TestLogin_PendingInviteAccount_ReturnsFalse(t *testing.T) {
 	// NewIdentity starts in PENDING_INVITE — no need to transition.
-	id, err := domain.NewIdentity(connTestTID,"pending@example.com")
+	id, err := domain.NewIdentity(connTestTID, "pending@example.com")
 	require.NoError(t, err)
 
 	repo := &mockRepo{identity: id}
@@ -425,7 +425,7 @@ func TestResolve_RepositoryError_ReturnsError(t *testing.T) {
 
 func TestResolve_NonActiveAccount_ReturnsFalse(t *testing.T) {
 	// NewIdentity starts in PENDING_INVITE — not active
-	id, err := domain.NewIdentity(connTestTID,"pending-resolve@example.com")
+	id, err := domain.NewIdentity(connTestTID, "pending-resolve@example.com")
 	require.NoError(t, err)
 
 	repo := &mockRepo{identity: id}

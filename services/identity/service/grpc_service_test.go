@@ -192,7 +192,7 @@ func contextWithAuth(callerID uuid.UUID, roles []string) context.Context {
 
 func makeActiveIdentity(t *testing.T, email, password string) *domain.Identity {
 	t.Helper()
-	identity, err := domain.NewIdentity(svcTestTID,email)
+	identity, err := domain.NewIdentity(svcTestTID, email)
 	require.NoError(t, err)
 
 	hash, err := credentials.HashPassword(password)
@@ -264,7 +264,7 @@ func TestRetrieveIdentity_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"test@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "test@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -307,7 +307,7 @@ func TestUpdateIdentity_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"test@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "test@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -324,7 +324,7 @@ func TestUpdateIdentity_VersionConflict(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"test@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "test@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -343,9 +343,9 @@ func TestListIdentities_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity1, err := domain.NewIdentity(svcTestTID,"user1@example.com")
+	identity1, err := domain.NewIdentity(svcTestTID, "user1@example.com")
 	require.NoError(t, err)
-	identity2, err := domain.NewIdentity(svcTestTID,"user2@example.com")
+	identity2, err := domain.NewIdentity(svcTestTID, "user2@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity1)
 	repo.addIdentity(identity2)
@@ -483,7 +483,7 @@ func TestSetPassword_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"test@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "test@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -681,7 +681,7 @@ func TestGrantRole_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	granterID := uuid.New()
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
@@ -703,7 +703,7 @@ func TestGrantRole_InsufficientPermissions(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	granterID := uuid.New()
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
@@ -752,11 +752,11 @@ func TestRevokeRole_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	granterID := uuid.New()
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
-	assignment, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), granterID, "ADMIN", "OPERATOR")
+	assignment, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), granterID, "ADMIN", "OPERATOR")
 	require.NoError(t, err)
 	repo.roles[targetIdentity.ID()] = []*domain.RoleAssignment{assignment}
 
@@ -776,7 +776,7 @@ func TestRevokeRole_Success(t *testing.T) {
 func TestRevokeRole_AssignmentNotFound(t *testing.T) {
 	svc, repo := newTestService(t)
 
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
@@ -795,12 +795,12 @@ func TestRevokeRole_InsufficientPermissions(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	granterID := uuid.New()
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
 	// Assignment grants OPERATOR role
-	assignment, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), granterID, "ADMIN", "OPERATOR")
+	assignment, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), granterID, "ADMIN", "OPERATOR")
 	require.NoError(t, err)
 	repo.roles[targetIdentity.ID()] = []*domain.RoleAssignment{assignment}
 
@@ -821,11 +821,11 @@ func TestRevokeRole_AlreadyRevoked(t *testing.T) {
 	svc, repo := newTestService(t)
 
 	granterID := uuid.New()
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
-	assignment, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), granterID, "ADMIN", "OPERATOR")
+	assignment, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), granterID, "ADMIN", "OPERATOR")
 	require.NoError(t, err)
 	require.NoError(t, assignment.Revoke(granterID)) // already revoked
 	repo.roles[targetIdentity.ID()] = []*domain.RoleAssignment{assignment}
@@ -847,13 +847,13 @@ func TestListRoleAssignments_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
-	assignment1, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), uuid.New(), "ADMIN", "OPERATOR")
+	assignment1, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), uuid.New(), "ADMIN", "OPERATOR")
 	require.NoError(t, err)
-	assignment2, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), uuid.New(), "ADMIN", "VIEWER")
+	assignment2, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), uuid.New(), "ADMIN", "VIEWER")
 	require.NoError(t, err)
 	repo.roles[targetIdentity.ID()] = []*domain.RoleAssignment{assignment1, assignment2}
 
@@ -869,13 +869,13 @@ func TestListRoleAssignments_ExcludeRevoked(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
-	active, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), uuid.New(), "ADMIN", "OPERATOR")
+	active, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), uuid.New(), "ADMIN", "OPERATOR")
 	require.NoError(t, err)
-	revoked, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), uuid.New(), "ADMIN", "VIEWER")
+	revoked, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), uuid.New(), "ADMIN", "VIEWER")
 	require.NoError(t, err)
 	require.NoError(t, revoked.Revoke(uuid.New()))
 	repo.roles[targetIdentity.ID()] = []*domain.RoleAssignment{active, revoked}
@@ -893,13 +893,13 @@ func TestListRoleAssignments_IncludeRevoked(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"target@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 
-	active, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), uuid.New(), "ADMIN", "OPERATOR")
+	active, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), uuid.New(), "ADMIN", "OPERATOR")
 	require.NoError(t, err)
-	revoked, err := domain.NewRoleAssignment(svcTestTID,targetIdentity.ID(), uuid.New(), "ADMIN", "VIEWER")
+	revoked, err := domain.NewRoleAssignment(svcTestTID, targetIdentity.ID(), uuid.New(), "ADMIN", "VIEWER")
 	require.NoError(t, err)
 	require.NoError(t, revoked.Revoke(uuid.New()))
 	repo.roles[targetIdentity.ID()] = []*domain.RoleAssignment{active, revoked}
@@ -969,7 +969,7 @@ func TestAcceptInvitation_Success(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"invited@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "invited@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -1017,7 +1017,7 @@ func TestAcceptInvitation_ExpiredInvitation(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"invited@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "invited@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -1093,7 +1093,7 @@ func TestSuspendIdentity_NotActive(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
-	identity, err := domain.NewIdentity(svcTestTID,"test@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "test@example.com")
 	require.NoError(t, err)
 	// identity is in PENDING_INVITE status, cannot be suspended
 	repo.addIdentity(identity)
@@ -1329,7 +1329,7 @@ func TestIdentityToProto_Nil(t *testing.T) {
 }
 
 func TestRoleAssignmentToProto(t *testing.T) {
-	assignment, err := domain.NewRoleAssignment(svcTestTID,uuid.New(), uuid.New(), "ADMIN", "OPERATOR")
+	assignment, err := domain.NewRoleAssignment(svcTestTID, uuid.New(), uuid.New(), "ADMIN", "OPERATOR")
 	require.NoError(t, err)
 
 	pb := roleAssignmentToProto(assignment)
@@ -1348,7 +1348,7 @@ func TestInvitationToProto_Nil(t *testing.T) {
 }
 
 func TestInvitationToProto_AcceptedInvitation(t *testing.T) {
-	identity, err := domain.NewIdentity(svcTestTID,"inv-proto@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "inv-proto@example.com")
 	require.NoError(t, err)
 	inv, _, err := domain.NewInvitation(identity.ID(), uuid.New())
 	require.NoError(t, err)
@@ -1362,7 +1362,7 @@ func TestInvitationToProto_AcceptedInvitation(t *testing.T) {
 }
 
 func TestInvitationToProto_PendingInvitation(t *testing.T) {
-	identity, err := domain.NewIdentity(svcTestTID,"inv-pending-proto@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "inv-pending-proto@example.com")
 	require.NoError(t, err)
 	inv, _, err := domain.NewInvitation(identity.ID(), uuid.New())
 	require.NoError(t, err)
@@ -1416,7 +1416,7 @@ func TestUpdateIdentity_EmailChangeRejected(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"immutable@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "immutable@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -1472,7 +1472,7 @@ func TestAuthenticate_PendingInviteAccount(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"pending@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "pending@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -1490,7 +1490,7 @@ func TestSetPassword_ExpiredInvitation(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"expired-setpw@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "expired-setpw@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -1519,7 +1519,7 @@ func TestSetPassword_AlreadyAcceptedInvitation(t *testing.T) {
 	svc, repo := newTestService(t)
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
 
-	identity, err := domain.NewIdentity(svcTestTID,"already-accepted@example.com")
+	identity, err := domain.NewIdentity(svcTestTID, "already-accepted@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(identity)
 
@@ -1648,7 +1648,7 @@ func TestGrantRole_InvalidIdentityID(t *testing.T) {
 func TestGrantRole_SaveError(t *testing.T) {
 	svc, repo := newTestService(t)
 
-	targetIdentity, err := domain.NewIdentity(svcTestTID,"saveerr@example.com")
+	targetIdentity, err := domain.NewIdentity(svcTestTID, "saveerr@example.com")
 	require.NoError(t, err)
 	repo.addIdentity(targetIdentity)
 	repo.saveRoleErr = errors.New("db write error")
