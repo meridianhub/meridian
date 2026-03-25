@@ -140,7 +140,7 @@ func TestReferenceExtractor_AttributeAccess(t *testing.T) {
 		case ReferenceTypeAttribute:
 			attrRefs = append(attrRefs, r)
 		case ReferenceTypeAccount, ReferenceTypeSaga, ReferenceTypeStepHandler:
-			// not relevant to this test
+			t.Fatalf("unexpected reference type %s for key %s", r.Type, r.Key)
 		}
 	}
 	require.Len(t, instrRefs, 1)
