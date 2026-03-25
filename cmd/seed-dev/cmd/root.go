@@ -334,7 +334,7 @@ func waitForTenantReady(ctx context.Context, conn *grpc.ClientConn, id string) e
 				fmt.Printf("  provisioning check failed: %v\n", err)
 				return false
 			}
-			switch resp.GetOverallStatus() {
+			switch resp.GetOverallStatus() { //nolint:exhaustive // default handles remaining transitional states
 			case tenantv1.TenantStatus_TENANT_STATUS_ACTIVE:
 				fmt.Println("Tenant provisioned and active.")
 				return true
