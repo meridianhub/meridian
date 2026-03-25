@@ -49,14 +49,14 @@ func (m *mockDB) ExecContext(_ context.Context, query string, _ ...interface{}) 
 	return nil, m.execErr
 }
 
-func (m *mockDB) QueryRowContext(_ context.Context, _ string, _ ...interface{}) *sql.Row {
+func (m *mockDB) QueryRowContext(ctx context.Context, _ string, _ ...interface{}) *sql.Row {
 	if m.queryRowErr != nil {
 		m.sqlMock.ExpectQuery("SELECT").WillReturnError(m.queryRowErr)
 	} else {
 		m.sqlMock.ExpectQuery("SELECT").
 			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(m.schemaExists))
 	}
-	return m.sqlDB.QueryRowContext(context.Background(), "SELECT 1")
+	return m.sqlDB.QueryRowContext(ctx, "SELECT 1")
 }
 
 func (m *mockDB) BeginTx(_ context.Context, _ *sql.TxOptions) (*sql.Tx, error) {
