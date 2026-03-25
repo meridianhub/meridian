@@ -33,6 +33,7 @@ import (
 	masterbootstrap "github.com/meridianhub/meridian/internal/bootstrap"
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
+	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -213,9 +214,18 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		return fmt.Errorf("schema provisioner: %w", err)
 	}
 
+	// Guard against Go nil interface gotcha: a nil *PostgresProvisioner assigned
+	// to a SchemaProvisioner interface becomes non-nil (type set, value nil).
+	// Downstream code checks `provisioner != nil` to decide behavior, so we must
+	// keep the interface itself nil when provisioning is disabled.
+	var provIface tenantprovisioner.SchemaProvisioner
+	if schemaProvisioner != nil {
+		provIface = schemaProvisioner
+	}
+
 	// ─── Register All Services ──────────────────────────────────────────
 
-	if err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, schemaProvisioner, tracer, logger); err != nil {
+	if err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, provIface, tracer, logger); err != nil {
 		return err
 	}
 
