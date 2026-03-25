@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { validateSlug, type SlugAvailability } from './registration-utils'
-import { PasswordStrengthBar, SlugStatus } from './registration-helpers'
+import { validateSlug, isSafeRedirectUrl, type SlugAvailability } from './registration-utils'
+import { PasswordStrengthBar, SlugStatus, RedirectSuccess } from './registration-helpers'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -13,7 +13,19 @@ export function RegisterPage() {
   const [slugAvailability, setSlugAvailability] = useState<SlugAvailability>('idle')
   const [formError, setFormError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [redirecting, setRedirecting] = useState(false)
   const slugCheckController = useRef<AbortController | null>(null)
+  const redirectTimerRef = useRef<number | null>(null)
+
+  // Clean up redirect timer on unmount
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current !== null) {
+        window.clearTimeout(redirectTimerRef.current)
+        redirectTimerRef.current = null
+      }
+    }
+  }, [])
 
   // Debounced slug validation + availability check
   useEffect(() => {
@@ -129,7 +141,24 @@ export function RegisterPage() {
           return
         }
 
-        void navigate('/login?registered=1')
+        const data = (await response.json().catch(() => null)) as {
+          tenant_id?: string
+          login_url?: string
+        } | null
+        const loginUrl = typeof data?.login_url === 'string' ? data.login_url : undefined
+
+        if (loginUrl && isSafeRedirectUrl(loginUrl)) {
+          // Safe tenant subdomain URL - show success then redirect
+          setRedirecting(true)
+          redirectTimerRef.current = window.setTimeout(() => {
+            window.location.href = loginUrl
+          }, 1500)
+        } else {
+          // Relative path, missing, or untrusted URL - use client-side navigation
+          // Reject absolute URLs that failed validation to avoid broken SPA routes
+          const fallbackPath = (loginUrl && !loginUrl.startsWith('http')) ? loginUrl : '/login?registered=1'
+          void navigate(fallbackPath)
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           setFormError('Registration timed out. Please try again.')
@@ -146,6 +175,10 @@ export function RegisterPage() {
 
   const inputClass =
     'w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+  if (redirecting) {
+    return <RedirectSuccess />
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center">

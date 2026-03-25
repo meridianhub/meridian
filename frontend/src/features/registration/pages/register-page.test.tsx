@@ -114,7 +114,7 @@ describe('RegisterPage', () => {
     expect(screen.getByText(/weak|fair|good|strong/i)).toBeInTheDocument()
   })
 
-  it('submits the form and redirects to login on success', async () => {
+  it('submits the form and navigates to login on success with relative login_url', async () => {
     const { user } = setup()
 
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
@@ -130,6 +130,73 @@ describe('RegisterPage', () => {
       '/api/v1/register',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('shows redirect message on success with absolute login_url', async () => {
+    vi.restoreAllMocks()
+    // jsdom hostname is "localhost", so use a subdomain of localhost
+    mockFetchForRegistration({
+      registerBody: {
+        tenant_id: 'my-org',
+        login_url: 'https://my-org.localhost/login',
+      },
+    })
+
+    const { user } = setup()
+
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/account created/i)).toBeInTheDocument()
+      expect(screen.getByText(/redirecting to your organization/i)).toBeInTheDocument()
+    })
+  })
+
+  it('falls back to client navigation when login_url is http (not https)', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({
+      registerBody: {
+        tenant_id: 'my-org',
+        login_url: 'http://my-org.localhost/login',
+      },
+    })
+
+    const { user } = setup()
+
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    // Should NOT show redirect message - falls back to navigate()
+    await waitFor(() => {
+      expect(screen.queryByText(/account created/i)).not.toBeInTheDocument()
+    })
+  })
+
+  it('falls back to client navigation when login_url domain is untrusted', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({
+      registerBody: {
+        tenant_id: 'my-org',
+        login_url: 'https://evil.example.com/login',
+      },
+    })
+
+    const { user } = setup()
+
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    // Should NOT show redirect message - untrusted domain
+    await waitFor(() => {
+      expect(screen.queryByText(/account created/i)).not.toBeInTheDocument()
+    })
   })
 
   it('shows error on 409 slug conflict', async () => {
