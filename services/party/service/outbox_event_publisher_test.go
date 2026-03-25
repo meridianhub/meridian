@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -211,6 +210,3 @@ func TestPublishVerificationCompleted_InvalidEventFailsValidation(t *testing.T) 
 	db.Model(&events.EventOutbox{}).Count(&count)
 	assert.Equal(t, int64(0), count)
 }
-
-// errIntentionalRollback is used to force a transaction rollback in tests.
-var errIntentionalRollback = errors.New("intentional rollback")
