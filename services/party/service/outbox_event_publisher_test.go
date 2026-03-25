@@ -1,14 +1,41 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func setupOutboxTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	err = db.AutoMigrate(&events.EventOutbox{})
+	require.NoError(t, err)
+
+	return db
+}
+
+func validVerificationCompletedEvent() VerificationCompletedEvent {
+	return VerificationCompletedEvent{
+		EventID:        uuid.New().String(),
+		PartyID:        uuid.New().String(),
+		VerificationID: "verif-abc-123",
+		Provider:       "jumio",
+		Status:         "APPROVED",
+		CompletedAt:    time.Now().UTC(),
+		Metadata:       map[string]string{"source": "webhook"},
+	}
+}
 
 // --- NewOutboxVerificationEventPublisher ---
 
@@ -75,4 +102,111 @@ func TestVerificationCompletedEvent_OptionalFieldsNil(t *testing.T) {
 
 	assert.Nil(t, e.RiskScore)
 	assert.Nil(t, e.Reason)
+}
+
+// --- PublishVerificationCompleted ---
+
+func TestPublishVerificationCompleted_WritesOutboxEntry(t *testing.T) {
+	db := setupOutboxTestDB(t)
+	publisher := events.NewOutboxPublisher("party")
+	p := NewOutboxVerificationEventPublisher(publisher, db)
+
+	e := validVerificationCompletedEvent()
+
+	err := p.PublishVerificationCompleted(context.Background(), e)
+	require.NoError(t, err)
+
+	var entries []events.EventOutbox
+	db.Find(&entries)
+	require.Len(t, entries, 1)
+
+	entry := entries[0]
+	assert.Equal(t, "party.verification-completed.v1", entry.Topic)
+	assert.Equal(t, "party.verification-completed.v1", entry.EventType)
+	assert.Equal(t, e.PartyID, entry.AggregateID)
+	assert.Equal(t, "Party", entry.AggregateType)
+	assert.Equal(t, "party", entry.ServiceName)
+	assert.Equal(t, events.StatusPending, entry.Status)
+	assert.NotEmpty(t, entry.EventPayload)
+}
+
+func TestPublishVerificationCompleted_WithAllOptionalFields(t *testing.T) {
+	db := setupOutboxTestDB(t)
+	publisher := events.NewOutboxPublisher("party")
+	p := NewOutboxVerificationEventPublisher(publisher, db)
+
+	riskScore := 0.75
+	reason := "high risk score"
+	e := validVerificationCompletedEvent()
+	e.Status = "REJECTED"
+	e.RiskScore = &riskScore
+	e.Reason = &reason
+
+	err := p.PublishVerificationCompleted(context.Background(), e)
+	require.NoError(t, err)
+
+	var count int64
+	db.Model(&events.EventOutbox{}).Count(&count)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestPublishVerificationCompleted_WithNilOptionalFields(t *testing.T) {
+	db := setupOutboxTestDB(t)
+	publisher := events.NewOutboxPublisher("party")
+	p := NewOutboxVerificationEventPublisher(publisher, db)
+
+	e := validVerificationCompletedEvent()
+	e.RiskScore = nil
+	e.Reason = nil
+	e.Metadata = nil
+
+	err := p.PublishVerificationCompleted(context.Background(), e)
+	require.NoError(t, err)
+
+	var count int64
+	db.Model(&events.EventOutbox{}).Count(&count)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestPublishVerificationCompleted_ManualReviewStatus(t *testing.T) {
+	db := setupOutboxTestDB(t)
+	publisher := events.NewOutboxPublisher("party")
+	p := NewOutboxVerificationEventPublisher(publisher, db)
+
+	e := validVerificationCompletedEvent()
+	e.Status = "MANUAL_REVIEW"
+
+	err := p.PublishVerificationCompleted(context.Background(), e)
+	require.NoError(t, err)
+}
+
+func TestPublishVerificationCompleted_RollbackOnDBError(t *testing.T) {
+	db := setupOutboxTestDB(t)
+	publisher := events.NewOutboxPublisher("party")
+	p := NewOutboxVerificationEventPublisher(publisher, db)
+
+	// Drop the table to force a DB error inside the transaction
+	db.Exec("DROP TABLE event_outbox")
+
+	e := validVerificationCompletedEvent()
+	err := p.PublishVerificationCompleted(context.Background(), e)
+	require.Error(t, err)
+}
+
+func TestPublishVerificationCompleted_InvalidEventFailsValidation(t *testing.T) {
+	db := setupOutboxTestDB(t)
+	publisher := events.NewOutboxPublisher("party")
+	p := NewOutboxVerificationEventPublisher(publisher, db)
+
+	e := validVerificationCompletedEvent()
+	e.EventID = "not-a-uuid" // violates buf.validate uuid constraint
+
+	err := p.PublishVerificationCompleted(context.Background(), e)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "event payload validation failed")
+
+	// Nothing should be in the outbox
+	var count int64
+	db.Model(&events.EventOutbox{}).Count(&count)
+	assert.Equal(t, int64(0), count)
 }
