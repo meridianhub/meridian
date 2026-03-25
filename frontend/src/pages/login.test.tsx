@@ -25,7 +25,10 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-const mockState = { providers: [] as { id: string; type: string; displayName: string }[] }
+const mockState = {
+  providers: [] as { id: string; type: string; displayName: string }[],
+  isBareDomain: false,
+}
 
 vi.mock('@/hooks/use-auth-providers', () => ({
   useAuthProviders: () => ({ data: mockState.providers }),
@@ -36,7 +39,7 @@ vi.mock('@/hooks/use-oauth-flow', () => ({
 }))
 
 vi.mock('@/lib/tenant-utils', () => ({
-  isBaseDomain: () => false,
+  isBaseDomain: () => mockState.isBareDomain,
   getTenantSlugFromSubdomain: () => null,
 }))
 
@@ -57,6 +60,7 @@ function setup(initialEntries: string[] = ['/login']) {
 describe('LoginPage', () => {
   beforeEach(() => {
     mockState.providers = []
+    mockState.isBareDomain = false
     vi.stubGlobal('fetch', vi.fn())
   })
 
@@ -145,6 +149,7 @@ describe('LoginPage', () => {
 describe('LoginPage - production mode', () => {
   beforeEach(() => {
     mockState.providers = []
+    mockState.isBareDomain = false
     vi.stubGlobal('fetch', vi.fn())
     // Override import.meta.env.DEV to false for production mode tests
     vi.stubEnv('DEV', false as unknown as string)
@@ -271,6 +276,24 @@ describe('LoginPage - production mode', () => {
   })
 })
 
-// Note: bare domain + production mode branch is difficult to test in vitest because
-// import.meta.env.DEV is baked in at module level and vi.mock for tenant-utils is
-// hoisted. The branch is exercised in E2E tests instead.
+describe('LoginPage - bare domain production mode', () => {
+  beforeEach(() => {
+    mockState.providers = []
+    mockState.isBareDomain = true
+    vi.stubGlobal('fetch', vi.fn())
+    vi.stubEnv('DEV', false as unknown as string)
+  })
+
+  afterEach(() => {
+    mockState.isBareDomain = false
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('shows create account link on bare domain', () => {
+    setup()
+    const link = screen.getByRole('link', { name: /create an account/i })
+    expect(link).toBeInTheDocument()
+    expect(link).toHaveAttribute('href', '/register')
+  })
+})
