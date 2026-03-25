@@ -13,6 +13,7 @@ export function RegisterPage() {
   const [slugAvailability, setSlugAvailability] = useState<SlugAvailability>('idle')
   const [formError, setFormError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [redirecting, setRedirecting] = useState(false)
   const slugCheckController = useRef<AbortController | null>(null)
 
   // Debounced slug validation + availability check
@@ -129,7 +130,22 @@ export function RegisterPage() {
           return
         }
 
-        void navigate('/login?registered=1')
+        const data = (await response.json().catch(() => null)) as {
+          tenant_id?: string
+          login_url?: string
+        } | null
+        const loginUrl = data?.login_url
+
+        if (loginUrl && (loginUrl.startsWith('https://') || loginUrl.startsWith('http://'))) {
+          // Absolute URL - redirect to tenant subdomain
+          setRedirecting(true)
+          window.setTimeout(() => {
+            window.location.href = loginUrl
+          }, 1500)
+        } else {
+          // Relative path or missing - use client-side navigation
+          void navigate(loginUrl ?? '/login?registered=1')
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           setFormError('Registration timed out. Please try again.')
@@ -146,6 +162,19 @@ export function RegisterPage() {
 
   const inputClass =
     'w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+  if (redirecting) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="w-full max-w-sm space-y-4 px-4 text-center">
+          <h1 className="text-2xl font-semibold">Account created!</h1>
+          <p className="text-muted-foreground">
+            Redirecting to your organization...
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center">
