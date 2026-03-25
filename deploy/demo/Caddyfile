@@ -52,7 +52,10 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	}
 }
 
-develop.meridianhub.cloud, *.develop.meridianhub.cloud {
+# Tenant subdomains (*.develop.meridianhub.cloud) require the Cloudflare origin
+# cert to include a sub-subdomain wildcard SAN. Add that to the cert before
+# uncommenting the wildcard below.
+develop.meridianhub.cloud {
 	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
 
 	# Health/readiness probes

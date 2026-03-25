@@ -20,3 +20,4 @@ CREATE DATABASE dev_meridian_forecasting;
 CREATE DATABASE dev_meridian_reference_data;
 CREATE DATABASE dev_meridian_identity;
 CREATE DATABASE dev_meridian_operational_gateway;
+CREATE DATABASE dev_meridian_financial_gateway;
