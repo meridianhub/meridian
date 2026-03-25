@@ -129,7 +129,6 @@ func TestHealthChecker_Watch_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	callCount := 0
-	stream := &mockHealthWatchStream{ctx: ctx}
 
 	aggregator := health.NewAggregator([]health.Checker{})
 	hc := &HealthChecker{
@@ -138,10 +137,6 @@ func TestHealthChecker_Watch_ContextCancellation(t *testing.T) {
 		serviceName:  "party",
 		checkTimeout: 100 * time.Millisecond,
 	}
-
-	// Replace Send to cancel context after initial response
-	origSend := stream
-	_ = origSend
 
 	// Use a custom stream that cancels context after first send
 	cancellingStream := &cancelAfterFirstSendStream{
@@ -164,7 +159,7 @@ type cancelAfterFirstSendStream struct {
 
 func (c *cancelAfterFirstSendStream) Send(resp *grpc_health_v1.HealthCheckResponse) error {
 	*c.sendCount++
-	c.mockHealthWatchStream.sends = append(c.mockHealthWatchStream.sends, resp)
+	c.sends = append(c.sends, resp)
 	if *c.sendCount == 1 {
 		c.cancel()
 	}
