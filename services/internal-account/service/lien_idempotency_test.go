@@ -20,12 +20,13 @@ import (
 
 // mockIdempotencyService implements idempotency.Service for unit testing.
 type mockIdempotencyService struct {
-	mu        sync.Mutex
-	results   map[string]*idempotency.Result
-	pending   map[string]bool
-	checkErr  error
-	storeErr  error
-	deleteErr error
+	mu             sync.Mutex
+	results        map[string]*idempotency.Result
+	pending        map[string]bool
+	checkErr       error
+	storeErr       error
+	deleteErr      error
+	markPendingErr error
 }
 
 func newMockIdempotencyService() *mockIdempotencyService {
@@ -56,6 +57,10 @@ func (m *mockIdempotencyService) Check(_ context.Context, key idempotency.Key) (
 func (m *mockIdempotencyService) MarkPending(_ context.Context, key idempotency.Key, _ time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.markPendingErr != nil {
+		return m.markPendingErr
+	}
 
 	keyStr := key.String()
 	if m.pending[keyStr] {
