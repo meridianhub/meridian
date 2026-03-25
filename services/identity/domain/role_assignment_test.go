@@ -12,6 +12,11 @@ import (
 
 var testRATenantID = tenant.MustNewTenantID("test_tenant")
 
+func TestNewRoleAssignment_EmptyTenantID_ReturnsError(t *testing.T) {
+	_, err := NewRoleAssignment("", uuid.New(), uuid.New(), string(RolePlatform), string(RoleAdmin))
+	assert.ErrorIs(t, err, ErrTenantIDRequired)
+}
+
 func TestNewRoleAssignment_ValidRole(t *testing.T) {
 	tests := []struct {
 		granter string

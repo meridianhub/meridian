@@ -184,7 +184,6 @@ func newTestService(t *testing.T) (*Service, *mockRepository) {
 
 func contextWithAuth(callerID uuid.UUID, roles []string) context.Context {
 	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-	ctx = tenant.WithTenant(ctx, svcTestTID)
 	ctx = context.WithValue(ctx, auth.UserIDContextKey, callerID.String())
 	ctx = context.WithValue(ctx, auth.RolesContextKey, roles)
 	return ctx
