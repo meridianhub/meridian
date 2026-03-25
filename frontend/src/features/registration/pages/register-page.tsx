@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { validateSlug, type SlugAvailability } from './registration-utils'
-import { PasswordStrengthBar, SlugStatus } from './registration-helpers'
+import { validateSlug, isSafeRedirectUrl, type SlugAvailability } from './registration-utils'
+import { PasswordStrengthBar, SlugStatus, RedirectSuccess } from './registration-helpers'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -147,20 +147,7 @@ export function RegisterPage() {
         } | null
         const loginUrl = typeof data?.login_url === 'string' ? data.login_url : undefined
 
-        // Validate absolute URLs: must be HTTPS and share the current domain suffix
-        // (e.g., my-org.demo.meridianhub.cloud when on demo.meridianhub.cloud)
-        const isSafeAbsoluteUrl = (url: string): boolean => {
-          try {
-            const parsed = new URL(url)
-            if (parsed.protocol !== 'https:') return false
-            const currentHost = window.location.hostname
-            return parsed.hostname.endsWith(`.${currentHost}`) || parsed.hostname === currentHost
-          } catch {
-            return false
-          }
-        }
-
-        if (loginUrl && isSafeAbsoluteUrl(loginUrl)) {
+        if (loginUrl && isSafeRedirectUrl(loginUrl)) {
           // Safe tenant subdomain URL - show success then redirect
           setRedirecting(true)
           redirectTimerRef.current = window.setTimeout(() => {
@@ -188,16 +175,7 @@ export function RegisterPage() {
     'w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
   if (redirecting) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="w-full max-w-sm space-y-4 px-4 text-center">
-          <h1 className="text-2xl font-semibold">Account created!</h1>
-          <p className="text-muted-foreground">
-            Redirecting to your organization...
-          </p>
-        </div>
-      </div>
-    )
+    return <RedirectSuccess />
   }
 
   return (

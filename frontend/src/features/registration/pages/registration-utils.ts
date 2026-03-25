@@ -20,3 +20,15 @@ export function passwordStrength(password: string): number {
 }
 
 export type SlugAvailability = 'idle' | 'checking' | 'available' | 'taken' | 'error'
+
+/** Returns true if the URL is HTTPS and shares the current hostname suffix. */
+export function isSafeRedirectUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:') return false
+    const currentHost = window.location.hostname
+    return parsed.hostname.endsWith(`.${currentHost}`) || parsed.hostname === currentHost
+  } catch {
+    return false
+  }
+}
