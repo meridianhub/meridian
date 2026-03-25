@@ -5,6 +5,33 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { renderWithProviders } from '@/test/test-utils'
 import { RegisterPage } from './register-page'
 
+/** Mock fetch to handle both registration and slug availability endpoints. */
+function mockFetchForRegistration(overrides?: {
+  registerStatus?: number
+  registerBody?: object
+  slugAvailable?: boolean
+}) {
+  const {
+    registerStatus = 201,
+    registerBody = { tenant_id: 'my-org', login_url: '/login?tenant=my-org' },
+    slugAvailable = true,
+  } = overrides ?? {}
+
+  return vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+    if (url.includes('/api/v1/slugs/')) {
+      return new Response(JSON.stringify({ available: slugAvailable }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify(registerBody), {
+      status: registerStatus,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  })
+}
+
 function setup() {
   const user = userEvent.setup({ delay: null })
   renderWithProviders(
@@ -20,12 +47,7 @@ function setup() {
 
 describe('RegisterPage', () => {
   beforeEach(() => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ tenant_id: 'my-org', login_url: '/login?tenant=my-org' }), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
+    mockFetchForRegistration()
   })
 
   afterEach(() => {
@@ -62,18 +84,27 @@ describe('RegisterPage', () => {
   it('shows slug validation error for too-short slug after debounce', async () => {
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'ab')
-    await new Promise((resolve) => setTimeout(resolve, 400))
     await waitFor(() => {
       expect(screen.getByText(/at least 3 characters/i)).toBeInTheDocument()
     })
   }, 8000)
 
-  it('shows slug format ok message for valid slug after debounce', async () => {
+  it('shows slug available message after checking backend', async () => {
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
-    await new Promise((resolve) => setTimeout(resolve, 400))
     await waitFor(() => {
-      expect(screen.getByText(/slug format looks good/i)).toBeInTheDocument()
+      expect(screen.getByText(/slug is available/i)).toBeInTheDocument()
+    })
+  }, 8000)
+
+  it('shows slug taken message when backend reports unavailable', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({ slugAvailable: false })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'taken-org')
+    await waitFor(() => {
+      expect(screen.getByText(/slug is already taken/i)).toBeInTheDocument()
     })
   }, 8000)
 
@@ -102,12 +133,11 @@ describe('RegisterPage', () => {
   })
 
   it('shows error on 409 slug conflict', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: 'slug is already taken' }), {
-        status: 409,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
+    vi.restoreAllMocks()
+    mockFetchForRegistration({
+      registerStatus: 409,
+      registerBody: { error: 'slug is already taken' },
+    })
 
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'taken-slug')
@@ -121,12 +151,8 @@ describe('RegisterPage', () => {
   })
 
   it('shows error on 429 rate limit', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: 'too many requests' }), {
-        status: 429,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
+    vi.restoreAllMocks()
+    mockFetchForRegistration({ registerStatus: 429, registerBody: { error: 'too many requests' } })
 
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
@@ -152,7 +178,17 @@ describe('RegisterPage', () => {
   })
 
   it('shows error on network failure', async () => {
-    vi.spyOn(global, 'fetch').mockRejectedValue(new Error('Network error'))
+    vi.restoreAllMocks()
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.includes('/api/v1/slugs/')) {
+        return new Response(JSON.stringify({ available: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error('Network error')
+    })
 
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
@@ -166,10 +202,18 @@ describe('RegisterPage', () => {
   })
 
   it('shows loading state while submitting', async () => {
+    vi.restoreAllMocks()
     let resolveFetch!: (value: Response) => void
-    vi.spyOn(global, 'fetch').mockImplementation(
-      () => new Promise<Response>((resolve) => { resolveFetch = resolve }),
-    )
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.includes('/api/v1/slugs/')) {
+        return new Response(JSON.stringify({ available: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Promise<Response>((resolve) => { resolveFetch = resolve })
+    })
 
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
@@ -202,4 +246,18 @@ describe('RegisterPage', () => {
     await user.tab()
     expect(document.activeElement).toBe(screen.getByLabelText(/password/i))
   })
+
+  it('disables submit button when slug is taken', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({ slugAvailable: false })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'taken-org')
+
+    await waitFor(() => {
+      expect(screen.getByText(/slug is already taken/i)).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /create account/i })).toBeDisabled()
+  }, 8000)
 })

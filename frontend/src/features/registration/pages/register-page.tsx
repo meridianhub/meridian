@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, type FormEvent } from 'react'
+import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 
 /** Validates a tenant slug: lowercase alphanumeric + hyphens, 3-63 chars. */
@@ -47,17 +47,31 @@ function PasswordStrengthBar({ password }: PasswordStrengthBarProps) {
   )
 }
 
+type SlugAvailability = 'idle' | 'checking' | 'available' | 'taken' | 'error'
+
 interface SlugStatusProps {
   slug: string
   error: string | null
+  availability: SlugAvailability
 }
 
-function SlugStatus({ slug, error }: SlugStatusProps) {
+function SlugStatus({ slug, error, availability }: SlugStatusProps) {
   if (!slug) return null
   if (error) {
     return <p className="mt-1 text-xs text-destructive">{error}</p>
   }
-  return <p className="mt-1 text-xs text-green-600">Slug format looks good</p>
+  switch (availability) {
+    case 'checking':
+      return <p className="mt-1 text-xs text-muted-foreground">Checking availability...</p>
+    case 'available':
+      return <p className="mt-1 text-xs text-green-600">Slug is available</p>
+    case 'taken':
+      return <p className="mt-1 text-xs text-destructive">Slug is already taken</p>
+    case 'error':
+      return <p className="mt-1 text-xs text-muted-foreground">Could not check availability</p>
+    default:
+      return <p className="mt-1 text-xs text-green-600">Slug format looks good</p>
+  }
 }
 
 export function RegisterPage() {
@@ -67,19 +81,56 @@ export function RegisterPage() {
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [slugError, setSlugError] = useState<string | null>(null)
+  const [slugAvailability, setSlugAvailability] = useState<SlugAvailability>('idle')
   const [formError, setFormError] = useState('')
   const [loading, setLoading] = useState(false)
+  const slugCheckController = useRef<AbortController | null>(null)
 
-  // Debounced slug validation
+  // Debounced slug validation + availability check
   useEffect(() => {
     if (!slug) {
       setSlugError(null)
+      setSlugAvailability('idle')
       return
     }
+
+    const formatError = validateSlug(slug)
+    if (formatError) {
+      setSlugError(formatError)
+      setSlugAvailability('idle')
+      return
+    }
+
+    setSlugError(null)
+    setSlugAvailability('checking')
+
     const timer = setTimeout(() => {
-      setSlugError(validateSlug(slug))
-    }, 300)
-    return () => clearTimeout(timer)
+      // Abort any in-flight request
+      slugCheckController.current?.abort()
+      const controller = new AbortController()
+      slugCheckController.current = controller
+
+      fetch(`/api/v1/slugs/${encodeURIComponent(slug)}/available`, {
+        signal: controller.signal,
+      })
+        .then((res) => res.json() as Promise<{ available: boolean; reason?: string }>)
+        .then((data) => {
+          if (!controller.signal.aborted) {
+            setSlugAvailability(data.available ? 'available' : 'taken')
+          }
+        })
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          if (!controller.signal.aborted) {
+            setSlugAvailability('error')
+          }
+        })
+    }, 400)
+
+    return () => {
+      clearTimeout(timer)
+      slugCheckController.current?.abort()
+    }
   }, [slug])
 
   const handleSlugChange = useCallback((value: string) => {
@@ -95,6 +146,11 @@ export function RegisterPage() {
       const slugValidation = validateSlug(slug)
       if (slugValidation) {
         setSlugError(slugValidation)
+        return
+      }
+
+      if (slugAvailability === 'taken') {
+        setFormError('That slug is already taken. Please choose a different one.')
         return
       }
 
@@ -154,7 +210,7 @@ export function RegisterPage() {
         setLoading(false)
       }
     },
-    [slug, email, password, displayName, navigate],
+    [slug, slugAvailability, email, password, displayName, navigate],
   )
 
   const inputClass =
@@ -192,7 +248,7 @@ export function RegisterPage() {
               Lowercase letters, numbers, and hyphens. 3-63 characters.
             </p>
             <div id="slug-status" aria-live="polite">
-              <SlugStatus slug={slug} error={slugError} />
+              <SlugStatus slug={slug} error={slugError} availability={slugAvailability} />
             </div>
           </div>
 
@@ -256,7 +312,7 @@ export function RegisterPage() {
 
           <button
             type="submit"
-            disabled={loading || !!slugError}
+            disabled={loading || !!slugError || slugAvailability === 'taken'}
             className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Creating account...' : 'Create account'}
