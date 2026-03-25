@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meridianhub/meridian/services/market-information/domain"
 )
@@ -25,7 +24,7 @@ func NewDataSetRepository(pool *pgxpool.Pool) *DataSetRepository {
 }
 
 // Save persists a new or updated dataset definition.
-// For new datasets, returns ErrDuplicateDataSetCode if the code already exists.
+// Idempotent for new datasets: returns nil if the code+version already exists.
 // For updates, returns ErrVersionMismatch on optimistic lock failure.
 func (r *DataSetRepository) Save(ctx context.Context, dataset domain.DataSetDefinition) error {
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
@@ -61,7 +60,8 @@ func (r *DataSetRepository) insertDataSet(ctx context.Context, tx pgx.Tx, entity
 			$7, $8, $9,
 			$10, $11, $12, $13, $14, $15, $16,
 			$17, $18
-		)`
+		)
+		ON CONFLICT (code, version) DO NOTHING`
 
 	_, err := tx.Exec(ctx, query,
 		entity.ID,
@@ -84,10 +84,6 @@ func (r *DataSetRepository) insertDataSet(ctx context.Context, tx pgx.Tx, entity
 		nullTimePtr(entity.DeprecatedAt),
 	)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return domain.ErrDuplicateDataSetCode
-		}
 		return fmt.Errorf("failed to insert dataset definition: %w", err)
 	}
 
