@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // IdentityEntity represents the database persistence model for identities.
@@ -15,8 +16,11 @@ type IdentityEntity struct {
 	// Primary key
 	ID uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 
+	// Tenant isolation
+	TenantID string `gorm:"column:tenant_id;type:varchar(50);not null;default:''"`
+
 	// Business fields
-	Email          string `gorm:"column:email;type:varchar(255);not null;uniqueIndex:idx_identity_email,where:deleted_at IS NULL"`
+	Email          string `gorm:"column:email;type:varchar(255);not null"`
 	Status         string `gorm:"column:status;type:varchar(30);not null;default:'PENDING_INVITE'"`
 	PasswordHash   string `gorm:"column:password_hash;type:varchar(255);not null;default:''"`
 	ExternalIDP    string `gorm:"column:external_idp;type:varchar(100);not null;default:''"`
@@ -42,6 +46,7 @@ func (IdentityEntity) TableName() string {
 func ToEntity(identity *domain.Identity) *IdentityEntity {
 	return &IdentityEntity{
 		ID:             identity.ID(),
+		TenantID:       string(identity.TenantID()),
 		Email:          identity.Email(),
 		Status:         string(identity.Status()),
 		PasswordHash:   identity.PasswordHash(),
@@ -58,6 +63,7 @@ func ToEntity(identity *domain.Identity) *IdentityEntity {
 func ToDomain(entity *IdentityEntity) *domain.Identity {
 	return domain.ReconstructIdentity(
 		entity.ID,
+		tenant.TenantID(entity.TenantID),
 		entity.Email,
 		domain.IdentityStatus(entity.Status),
 		entity.PasswordHash,
