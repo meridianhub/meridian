@@ -87,7 +87,7 @@ func NewRegistrationHandler(cfg RegistrationHandlerConfig) (*RegistrationHandler
 	}
 	rl := cfg.RateLimiter
 	if rl == nil {
-		rl = NewRegistrationRateLimiter(5)
+		rl = NewRegistrationRateLimiter(20)
 	}
 	return &RegistrationHandler{
 		tenantCreator: cfg.TenantCreator,
@@ -288,19 +288,12 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 
 // HandleSlugAvailable handles GET /api/v1/slugs/{slug}/available.
 // Returns {"available": true/false} with optional validation errors.
-// Rate limited per IP to prevent slug enumeration.
+// Not rate-limited: this is a read-only check that the frontend fires on keystroke.
+// Format validation prevents brute-force enumeration (slugs must be 3+ chars, lowercase).
 func (h *RegistrationHandler) HandleSlugAvailable(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	clientIP := getClientIP(r)
-	if !h.rateLimiter.Allow(clientIP) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": "too many requests, please try again later",
-		})
 		return
 	}
 

@@ -60,7 +60,7 @@ describe('RegisterPage', () => {
     expect(screen.getByLabelText(/organization slug/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^password/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument()
   })
 
@@ -110,7 +110,7 @@ describe('RegisterPage', () => {
 
   it('shows password strength indicator as user types', async () => {
     const { user } = setup()
-    await user.type(screen.getByLabelText(/password/i), 'weakpass')
+    await user.type(screen.getByLabelText(/^password/i), 'weakpass')
     expect(screen.getByText(/weak|fair|good|strong/i)).toBeInTheDocument()
   })
 
@@ -119,7 +119,7 @@ describe('RegisterPage', () => {
 
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
@@ -146,7 +146,7 @@ describe('RegisterPage', () => {
 
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
@@ -168,7 +168,7 @@ describe('RegisterPage', () => {
 
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     // Should NOT show redirect message - falls back to navigate()
@@ -190,7 +190,7 @@ describe('RegisterPage', () => {
 
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     // Should NOT show redirect message - untrusted domain
@@ -209,7 +209,7 @@ describe('RegisterPage', () => {
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'taken-slug')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
@@ -224,7 +224,7 @@ describe('RegisterPage', () => {
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
@@ -236,7 +236,7 @@ describe('RegisterPage', () => {
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'short')
+    await user.type(screen.getByLabelText(/^password/i), 'short')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
@@ -260,7 +260,7 @@ describe('RegisterPage', () => {
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
@@ -285,7 +285,7 @@ describe('RegisterPage', () => {
     const { user } = setup()
     await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
     await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
-    await user.type(screen.getByLabelText(/password/i), 'SecurePass123!')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
@@ -311,7 +311,35 @@ describe('RegisterPage', () => {
     expect(document.activeElement).toBe(screen.getByLabelText(/email/i))
 
     await user.tab()
-    expect(document.activeElement).toBe(screen.getByLabelText(/password/i))
+    expect(document.activeElement).toBe(screen.getByLabelText(/^password/i))
+
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /show password/i }))
+  })
+
+  it('toggles password visibility', async () => {
+    const { user } = setup()
+    const passwordInput = screen.getByLabelText(/^password/i)
+    await user.type(passwordInput, 'SecurePass123!')
+
+    expect(passwordInput).toHaveAttribute('type', 'password')
+
+    await user.click(screen.getByRole('button', { name: /show password/i }))
+    expect(passwordInput).toHaveAttribute('type', 'text')
+
+    await user.click(screen.getByRole('button', { name: /hide password/i }))
+    expect(passwordInput).toHaveAttribute('type', 'password')
+  })
+
+  it('shows field-level errors on empty submission', async () => {
+    const { user } = setup()
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/organization slug is required/i)).toBeInTheDocument()
+      expect(screen.getByText(/email is required/i)).toBeInTheDocument()
+      expect(screen.getByText(/password is required/i)).toBeInTheDocument()
+    })
   })
 
   it('disables submit button when slug is taken', async () => {

@@ -207,9 +207,11 @@ func TestHeaderPropagationMiddleware_TenantIDPassthrough(t *testing.T) {
 		"x-tenant-id should be passed through unchanged")
 }
 
-// TestHeaderPropagationMiddleware_XRealIPPriority verifies that X-Real-IP
-// is used in preference to RemoteAddr for x-forwarded-for.
-func TestHeaderPropagationMiddleware_XRealIPPriority(t *testing.T) {
+// TestHeaderPropagationMiddleware_XForwardedForUsesRemoteAddr verifies that
+// x-forwarded-for always uses RemoteAddr (the direct connection), not proxy
+// headers like X-Real-IP. The XFF chain tracks connection hops, while X-Real-IP
+// is used separately by getClientIP for rate limiting.
+func TestHeaderPropagationMiddleware_XForwardedForUsesRemoteAddr(t *testing.T) {
 	var capturedHeaders http.Header
 
 	handler := HeaderPropagationMiddleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -223,9 +225,9 @@ func TestHeaderPropagationMiddleware_XRealIPPriority(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	// Verify X-Real-IP was used over RemoteAddr
-	assert.Equal(t, "203.0.113.50", capturedHeaders.Get("x-forwarded-for"),
-		"x-forwarded-for should use X-Real-IP when available")
+	// XFF chain should use RemoteAddr (direct connection), not X-Real-IP
+	assert.Equal(t, "10.0.0.1", capturedHeaders.Get("x-forwarded-for"),
+		"x-forwarded-for should use RemoteAddr for the connection chain")
 }
 
 // TestHeaderPropagationMiddleware_AllHeadersSet verifies that all expected
@@ -257,42 +259,72 @@ func TestHeaderPropagationMiddleware_AllHeadersSet(t *testing.T) {
 }
 
 // TestGetClientIP verifies the client IP extraction logic.
+// Priority: X-Real-IP > CF-Connecting-IP > X-Forwarded-For > RemoteAddr.
 func TestGetClientIP(t *testing.T) {
 	tests := []struct {
-		name       string
-		xRealIP    string
-		remoteAddr string
-		expected   string
+		name           string
+		xRealIP        string
+		cfConnectingIP string
+		xForwardedFor  string
+		remoteAddr     string
+		expected       string
 	}{
 		{
-			name:       "X-Real-IP present",
+			name:       "X-Real-IP present (highest priority)",
 			xRealIP:    "203.0.113.50",
 			remoteAddr: "10.0.0.1:12345",
 			expected:   "203.0.113.50",
 		},
 		{
-			name:       "X-Real-IP empty, use RemoteAddr with port",
-			xRealIP:    "",
+			name:           "X-Real-IP takes precedence over CF-Connecting-IP",
+			xRealIP:        "203.0.113.50",
+			cfConnectingIP: "198.51.100.1",
+			remoteAddr:     "10.0.0.1:12345",
+			expected:       "203.0.113.50",
+		},
+		{
+			name:           "CF-Connecting-IP used when no X-Real-IP",
+			cfConnectingIP: "198.51.100.1",
+			remoteAddr:     "10.0.0.1:12345",
+			expected:       "198.51.100.1",
+		},
+		{
+			name:          "X-Forwarded-For single IP",
+			xForwardedFor: "203.0.113.50",
+			remoteAddr:    "10.0.0.1:12345",
+			expected:      "203.0.113.50",
+		},
+		{
+			name:          "X-Forwarded-For multiple IPs uses first",
+			xForwardedFor: "203.0.113.50, 198.51.100.1, 10.0.0.1",
+			remoteAddr:    "172.18.0.5:12345",
+			expected:      "203.0.113.50",
+		},
+		{
+			name:          "X-Forwarded-For with whitespace",
+			xForwardedFor: " 203.0.113.50 , 198.51.100.1",
+			remoteAddr:    "10.0.0.1:12345",
+			expected:      "203.0.113.50",
+		},
+		{
+			name:       "RemoteAddr with port (fallback)",
 			remoteAddr: "192.168.1.100:54321",
 			expected:   "192.168.1.100",
 		},
 		{
-			name:       "X-Real-IP empty, RemoteAddr without port",
-			xRealIP:    "",
+			name:       "RemoteAddr without port",
 			remoteAddr: "192.168.1.100",
 			expected:   "192.168.1.100",
 		},
 		{
 			name:       "IPv6 RemoteAddr with port",
-			xRealIP:    "",
 			remoteAddr: "[2001:db8::1]:8080",
 			expected:   "2001:db8::1",
 		},
 		{
-			name:       "IPv6 X-Real-IP",
-			xRealIP:    "2001:db8::1",
-			remoteAddr: "[::1]:8080",
-			expected:   "2001:db8::1",
+			name:    "IPv6 X-Real-IP",
+			xRealIP: "2001:db8::1",
+			expected: "2001:db8::1",
 		},
 	}
 
@@ -301,6 +333,12 @@ func TestGetClientIP(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
 			if tt.xRealIP != "" {
 				req.Header.Set("X-Real-IP", tt.xRealIP)
+			}
+			if tt.cfConnectingIP != "" {
+				req.Header.Set("CF-Connecting-IP", tt.cfConnectingIP)
+			}
+			if tt.xForwardedFor != "" {
+				req.Header.Set("X-Forwarded-For", tt.xForwardedFor)
 			}
 			req.RemoteAddr = tt.remoteAddr
 

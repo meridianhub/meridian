@@ -3,6 +3,7 @@ package gateway
 import (
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -24,14 +25,15 @@ func HeaderPropagationMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 3. x-forwarded-for - APPEND to existing (don't overwrite)
-		// CRITICAL: Appending maintains the client IP chain for proper request tracing
-		// and prevents IP spoofing by preserving the original chain
-		if clientIP := getClientIP(r); clientIP != "" {
+		// CRITICAL: Appending maintains the client IP chain for proper request tracing.
+		// Always use RemoteAddr here (the direct connection IP), not getClientIP,
+		// because getClientIP reads proxy headers which would create circular references.
+		if connectIP := remoteAddrIP(r); connectIP != "" {
 			existing := r.Header.Get("x-forwarded-for")
 			if existing != "" {
-				r.Header.Set("x-forwarded-for", existing+", "+clientIP)
+				r.Header.Set("x-forwarded-for", existing+", "+connectIP)
 			} else {
-				r.Header.Set("x-forwarded-for", clientIP)
+				r.Header.Set("x-forwarded-for", connectIP)
 			}
 		}
 
@@ -44,26 +46,45 @@ func HeaderPropagationMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// remoteAddrIP extracts the IP from RemoteAddr only (direct connection).
+// Used by HeaderPropagationMiddleware to build the X-Forwarded-For chain.
+func remoteAddrIP(r *http.Request) string {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
+}
+
 // getClientIP extracts the client IP address from the request.
-// It prioritizes X-Real-IP (typically set by ingress/load balancer) over RemoteAddr.
+// Priority: X-Real-IP > CF-Connecting-IP > X-Forwarded-For (first entry) > RemoteAddr.
 //
-// SECURITY: This function trusts X-Real-IP unconditionally. This is safe because:
-//   - The gateway MUST run behind a trusted ingress controller (nginx-ingress, Envoy)
-//   - The ingress MUST set X-Real-IP from the actual client connection
+// SECURITY: This function trusts proxy headers unconditionally. This is safe because:
+//   - The gateway MUST run behind a trusted reverse proxy (Caddy, nginx-ingress, Envoy)
+//   - The proxy MUST set X-Real-IP or forward CF-Connecting-IP from upstream (Cloudflare)
 //   - The gateway MUST NOT be directly exposed to untrusted clients
-//   - Kubernetes NetworkPolicy should restrict direct access to the gateway pod
 //
-// If these conditions are not met, attackers could spoof X-Real-IP to bypass
+// If these conditions are not met, attackers could spoof headers to bypass
 // IP-based rate limiting or access controls in downstream services.
 func getClientIP(r *http.Request) string {
-	// Trust X-Real-IP from ingress (nginx-ingress, Envoy set this from the actual client)
+	// Trust X-Real-IP from reverse proxy (set by Caddy/nginx from upstream headers)
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return ip
+	}
+	// Cloudflare sets CF-Connecting-IP to the actual client IP
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+	// Standard proxy header: first entry is the original client
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if ip, _, ok := strings.Cut(xff, ","); ok {
+			return strings.TrimSpace(ip)
+		}
+		return strings.TrimSpace(xff)
 	}
 	// Fallback to RemoteAddr (direct connection IP)
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		// RemoteAddr might not have a port (e.g., Unix sockets)
 		return r.RemoteAddr
 	}
 	return ip
