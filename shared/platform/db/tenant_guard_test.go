@@ -109,6 +109,9 @@ func TestTenantGuard_AllowsQueryWithTenantScope(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_acme_bank").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(`SELECT \* FROM "test_entities"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 	mock.ExpectCommit()
@@ -141,6 +144,9 @@ func TestTenantGuard_AllowsCreateWithTenantScope(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_acme_bank").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(`INSERT INTO "test_entities"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 	mock.ExpectCommit()
@@ -172,6 +178,9 @@ func TestTenantGuard_AllowsWithinTenantTransaction(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_acme_bank").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery(`SELECT \* FROM "test_entities"`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 	mock.ExpectCommit()
