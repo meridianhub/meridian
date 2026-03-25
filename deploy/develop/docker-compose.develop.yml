@@ -1,0 +1,156 @@
+# Meridian develop environment stack
+#
+# Runs meridian-develop and mcp-server-develop alongside the existing demo stack
+# on the same DigitalOcean droplet (68.183.40.239). Shares the demo stack's
+# postgres and caddy containers via the external meridian_default network.
+#
+# Services:
+#   meridian-develop    - Unified binary (develop branch build)
+#   mcp-server-develop  - MCP server for AI integration (develop branch build)
+#
+# Usage:
+#   cp deploy/develop/.env.develop.template /opt/meridian-develop/.env
+#   # Edit /opt/meridian-develop/.env with actual values
+#   docker compose --env-file /opt/meridian-develop/.env \
+#     -f /opt/meridian-develop/docker-compose.develop.yml up -d
+#
+# Directory layout expected on the host:
+#   /opt/meridian-develop/.env                          - Filled-in environment file
+#   /opt/meridian-develop/frontend/                     - Built frontend static files (deployed by CI)
+#   /opt/meridian-develop/secrets/                      - Runtime secrets (mode 700)
+#     jwt-signing-key.pem                               - RSA private key (SEPARATE from demo key)
+#
+# Prerequisites:
+#   - Demo stack must be running (provides postgres and caddy)
+#   - Run init-databases-develop.sql against postgres to create dev_ databases
+#   - Generate a SEPARATE JWT signing key for the develop environment
+
+services:
+  meridian-develop:
+    image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:develop}
+    container_name: meridian-develop
+    restart: unless-stopped
+    environment:
+      # --- Application ---
+      ENVIRONMENT: ${ENVIRONMENT:-develop}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+
+      # --- Database driver ---
+      DB_DRIVER: postgres
+
+      # --- Database ---
+      # Connects to the demo stack's postgres container via the shared network.
+      # Uses dev_ prefixed databases created by init-databases-develop.sql.
+      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-dev_meridian}?sslmode=disable
+
+      # --- JWT Signing (SEPARATE key from demo for environment isolation) ---
+      JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
+      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-develop-1}
+      JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian-develop}
+
+      # --- Authentication (embedded Dex OIDC server) ---
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      DEX_ISSUER: ${DEX_ISSUER:-https://${BASE_DOMAIN:-develop.meridianhub.cloud}/dex}
+      DEX_BASE_DOMAIN: ${BASE_DOMAIN:-develop.meridianhub.cloud}
+      API_KEYS: ${API_KEYS:-}
+      BASE_DOMAIN: ${BASE_DOMAIN:-develop.meridianhub.cloud}
+      LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}
+
+      # --- Demo users (identity bootstrap) ---
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
+      DEMO_OPERATOR_EMAIL: ${DEMO_OPERATOR_EMAIL:-}
+      DEMO_OPERATOR_PASSWORD: ${DEMO_OPERATOR_PASSWORD:-}
+      DEMO_OPERATOR_TENANT: ${DEMO_OPERATOR_TENANT:-}
+
+      # --- Feature flags ---
+      BILLING_ENABLED: ${BILLING_ENABLED:-false}
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      KAFKA_ENABLED: ${KAFKA_ENABLED:-false}
+      SCHEMA_PROVISIONING_ENABLED: ${SCHEMA_PROVISIONING_ENABLED:-true}
+
+      # --- Multi-tenancy ---
+      MASTER_TENANT_ID: ${MASTER_TENANT_ID:-meridian_master}
+
+      # --- Clearing accounts ---
+      DEPOSIT_CLEARING_ACCOUNT_ID: ${DEPOSIT_CLEARING_ACCOUNT_ID:-}
+
+      # --- Connection pool ---
+      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-25}
+      DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
+      DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
+      DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
+    volumes:
+      - /opt/meridian-develop/secrets:/run/secrets:ro
+    networks:
+      - meridian
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  mcp-server-develop:
+    image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:develop}
+    container_name: mcp-server-develop
+    entrypoint: ["/mcp-server"]
+    restart: unless-stopped
+    depends_on:
+      meridian-develop:
+        condition: service_started
+    environment:
+      # --- MCP Transport ---
+      MCP_TRANSPORT: http
+      MCP_PORT: "8090"
+      MCP_SERVER_NAME: ${MCP_SERVER_NAME:-meridian-mcp-develop}
+      MCP_BASE_URL: ${MCP_BASE_URL:?MCP_BASE_URL must be set in the env file (e.g. https://develop.meridianhub.cloud)}
+
+      # --- Meridian API ---
+      MERIDIAN_API_URL: meridian-develop:50051
+      MERIDIAN_API_KEY: ${MERIDIAN_API_KEY:?MERIDIAN_API_KEY must be set in the env file}
+
+      # --- Application ---
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+
+      # --- OAuth 2.1 + OIDC (optional) ---
+      MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
+      MCP_BASE_DOMAIN: ${BASE_DOMAIN:-}
+
+      # --- Tenant defaults (single-tenant demo mode) ---
+      MCP_DEFAULT_TENANT_SLUG: ${MCP_DEFAULT_TENANT_SLUG:-}
+
+      # --- Dex OIDC ---
+      MCP_DEX_ISSUER_URL: ${MCP_DEX_ISSUER_URL:-}
+      MCP_DEX_CLIENT_ID: ${MCP_DEX_CLIENT_ID:-meridian-service}
+      MCP_DEX_CALLBACK_URL: ${MCP_DEX_CALLBACK_URL:-}
+
+      # --- JWT signing (SEPARATE from demo) ---
+      JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
+      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-develop-1}
+      JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian-develop}
+
+      # --- Bearer token validation ---
+      MCP_JWKS_URL: ${MCP_JWKS_URL:-}
+    volumes:
+      - /opt/meridian-develop/secrets:/run/secrets:ro
+    networks:
+      - meridian
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+networks:
+  meridian:
+    external: true
+    name: meridian_default
