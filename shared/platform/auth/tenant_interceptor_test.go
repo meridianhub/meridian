@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -9,6 +12,32 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
+
+// resetTenantExtractionWarning resets the sync.Once and overridable functions
+// for testing the AUTH_ENABLED warning. Returns a cleanup function.
+func resetTenantExtractionWarning(t *testing.T, authEnabled bool) *bytes.Buffer {
+	t.Helper()
+
+	// Save originals (do NOT copy sync.Once - it must not be copied after first use)
+	origCheck := checkAuthEnabled
+	origLogger := warnLogger
+
+	// Reset to fresh zero-value Once
+	warnOnceAuthEnabled = sync.Once{}
+	checkAuthEnabled = func() bool { return authEnabled }
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	warnLogger = func() *slog.Logger { return logger }
+
+	t.Cleanup(func() {
+		warnOnceAuthEnabled = sync.Once{}
+		checkAuthEnabled = origCheck
+		warnLogger = origLogger
+	})
+
+	return &buf
+}
 
 func TestTenantExtractionInterceptor(t *testing.T) {
 	t.Run("extracts tenant from metadata when not in context", func(t *testing.T) {
@@ -283,5 +312,39 @@ func TestTenantExtractionStreamInterceptor(t *testing.T) {
 		// Tenant should NOT be in context due to validation failure
 		_, ok := tenant.FromContext(capturedCtx)
 		assert.False(t, ok)
+	})
+}
+
+func TestTenantExtractionInterceptor_AuthEnabledWarning(t *testing.T) {
+	t.Run("logs warning when AUTH_ENABLED is true", func(t *testing.T) {
+		buf := resetTenantExtractionWarning(t, true)
+
+		_ = TenantExtractionInterceptor()
+
+		output := buf.String()
+		assert.Contains(t, output, "TenantExtractionInterceptor is active with AUTH_ENABLED=true")
+		assert.Contains(t, output, "development/testing")
+	})
+
+	t.Run("no warning when AUTH_ENABLED is false", func(t *testing.T) {
+		buf := resetTenantExtractionWarning(t, false)
+
+		_ = TenantExtractionInterceptor()
+
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("warning fires only once across unary and stream", func(t *testing.T) {
+		buf := resetTenantExtractionWarning(t, true)
+
+		_ = TenantExtractionInterceptor()
+		_ = TenantExtractionStreamInterceptor()
+
+		// Count warning occurrences - should be exactly one
+		output := buf.String()
+		assert.Contains(t, output, "AUTH_ENABLED=true")
+		// The sync.Once ensures only one warning line
+		lines := bytes.Count(buf.Bytes(), []byte("AUTH_ENABLED=true"))
+		assert.Equal(t, 1, lines, "warning should fire exactly once")
 	})
 }

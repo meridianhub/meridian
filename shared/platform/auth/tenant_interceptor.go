@@ -2,13 +2,33 @@ package auth
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
+// warnOnceAuthEnabled emits a one-time warning when TenantExtractionInterceptor is
+// used with AUTH_ENABLED=true. This interceptor trusts headers without JWT validation,
+// so using it in production (where AUTH_ENABLED defaults to true) is a security risk.
+var warnOnceAuthEnabled sync.Once
+
+// checkAuthEnabled is the function used to check AUTH_ENABLED. Overridable in tests.
+var checkAuthEnabled = func() bool {
+	return env.GetEnvAsBool("AUTH_ENABLED", true)
+}
+
+// warnLogger is the logger used for tenant extraction warnings. Overridable in tests.
+var warnLogger = slog.Default
+
 // TenantExtractionInterceptor extracts tenant ID from gRPC metadata (x-tenant-id header).
+//
+// WARNING: This interceptor is for DEVELOPMENT/TESTING ONLY. It trusts the x-tenant-id
+// header without JWT validation. In production, use auth.Interceptor.UnaryInterceptor()
+// which validates the header against the JWT tenant_id claim.
 //
 // IMPORTANT: This interceptor is MUTUALLY EXCLUSIVE with auth.Interceptor.UnaryInterceptor().
 // Do NOT use both in the same interceptor chain.
@@ -30,6 +50,19 @@ import (
 // However, this interceptor does NOT validate tenant ownership - use auth.Interceptor
 // in production to ensure the JWT tenant matches the header.
 func TenantExtractionInterceptor() grpc.UnaryServerInterceptor {
+	// Emit a one-time warning if AUTH_ENABLED=true, since this interceptor
+	// should only be used in development/testing when auth is disabled.
+	warnOnceAuthEnabled.Do(func() {
+		if checkAuthEnabled() {
+			warnLogger().Warn("TenantExtractionInterceptor is active with AUTH_ENABLED=true; "+
+				"this interceptor trusts x-tenant-id headers without JWT validation "+
+				"and should only be used for development/testing",
+				"interceptor", "TenantExtractionInterceptor",
+				"recommendation", "use auth.Interceptor.UnaryInterceptor() for production",
+			)
+		}
+	})
+
 	return func(
 		ctx context.Context,
 		req interface{},
@@ -72,6 +105,18 @@ func TenantExtractionInterceptor() grpc.UnaryServerInterceptor {
 // However, this interceptor does NOT validate tenant ownership - use auth.Interceptor
 // in production to ensure the JWT tenant matches the header.
 func TenantExtractionStreamInterceptor() grpc.StreamServerInterceptor {
+	// Reuse the same sync.Once - warning only needs to fire once per process
+	warnOnceAuthEnabled.Do(func() {
+		if checkAuthEnabled() {
+			warnLogger().Warn("TenantExtractionStreamInterceptor is active with AUTH_ENABLED=true; "+
+				"this interceptor trusts x-tenant-id headers without JWT validation "+
+				"and should only be used for development/testing",
+				"interceptor", "TenantExtractionStreamInterceptor",
+				"recommendation", "use auth.Interceptor.StreamInterceptor() for production",
+			)
+		}
+	})
+
 	return func(
 		srv interface{},
 		ss grpc.ServerStream,
