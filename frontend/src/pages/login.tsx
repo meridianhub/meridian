@@ -97,6 +97,12 @@ export function LoginPage() {
           <p className="font-mono text-sm text-muted-foreground">
             https://your-org.{baseDomain}
           </p>
+          <p className="text-sm text-muted-foreground">
+            Don&apos;t have an organization?{' '}
+            <Link to="/register" className="text-primary underline-offset-4 hover:underline">
+              Create an account
+            </Link>
+          </p>
         </div>
       </div>
     )
