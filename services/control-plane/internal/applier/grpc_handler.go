@@ -904,10 +904,34 @@ func extractOperationalGateway(mf *controlplanev1.Manifest, input *ApplyManifest
 	}
 }
 
+// unitToDimension maps common instrument unit names to their Dimension enum values.
+// Unit names in manifests (e.g., "kWh", "TONNE_CO2E") don't match Dimension enum
+// names (ENERGY, CARBON), so we need an explicit mapping table.
+var unitToDimension = map[string]string{
+	"KWH":        "ENERGY",
+	"MWH":        "ENERGY",
+	"WH":         "ENERGY",
+	"TONNE_CO2E": "CARBON",
+	"KG_CO2E":    "CARBON",
+	"GPU_HOUR":   "COMPUTE",
+	"CPU_HOUR":   "COMPUTE",
+	"GB":         "DATA",
+	"TB":         "DATA",
+	"LITER":      "VOLUME",
+	"LITRE":      "VOLUME", //nolint:misspell // British English variant is a valid unit name
+	"GALLON":     "VOLUME",
+	"KG":         "MASS",
+	"TONNE":      "MASS",
+	"SECOND":     "TIME",
+	"MINUTE":     "TIME",
+	"HOUR":       "TIME",
+	"POINTS":     "COUNT",
+}
+
 // instrumentTypeToDimension derives the Dimension enum name from the manifest
-// InstrumentType and unit. FIAT→CURRENCY, VOUCHER→COUNT. For COMMODITY and
-// other types, checks if the uppercased unit is a valid Dimension enum name;
-// otherwise returns empty string so the Starlark script uses its default.
+// InstrumentType and unit. FIAT->CURRENCY, VOUCHER->COUNT. For COMMODITY and
+// other types, uses a unit-to-dimension mapping table since unit names (kWh)
+// don't match dimension enum names (ENERGY).
 func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit string) string {
 	switch instType {
 	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:
@@ -916,12 +940,15 @@ func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit stri
 		return "COUNT"
 	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
 		controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED:
-		// Check if the uppercased unit matches a known Dimension enum name.
 		upper := strings.ToUpper(unit)
+		// First check the unit-to-dimension mapping table.
+		if dim, ok := unitToDimension[upper]; ok {
+			return dim
+		}
+		// Fall back to checking if the uppercased unit IS a valid Dimension name.
 		if _, ok := referencedatav1.Dimension_value["DIMENSION_"+upper]; ok {
 			return upper
 		}
-		// Not a known dimension — return empty so the Starlark default applies.
 		return ""
 	}
 	return ""
