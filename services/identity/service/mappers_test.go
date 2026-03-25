@@ -19,7 +19,7 @@ var mapperTestTID = tenant.MustNewTenantID("test_tenant")
 func TestIdentityToProto_WithoutExternalIDP(t *testing.T) {
 	// Verifies that when ExternalIDP is empty, the external_idp/external_idp_sub fields
 	// are not populated (the mapper guard: if identity.ExternalIDP() != "")
-	identity, err := domain.NewIdentity(mapperTestTID,"local@example.com")
+	identity, err := domain.NewIdentity(mapperTestTID, "local@example.com")
 	require.NoError(t, err)
 
 	proto := identityToProto(identity)
@@ -30,7 +30,7 @@ func TestIdentityToProto_WithoutExternalIDP(t *testing.T) {
 }
 
 func TestIdentityToProto_PendingInviteStatus(t *testing.T) {
-	identity, err := domain.NewIdentity(mapperTestTID,"new@example.com")
+	identity, err := domain.NewIdentity(mapperTestTID, "new@example.com")
 	require.NoError(t, err)
 
 	proto := identityToProto(identity)
@@ -41,7 +41,7 @@ func TestIdentityToProto_PendingInviteStatus(t *testing.T) {
 
 func TestIdentityToProto_TimestampsPopulated(t *testing.T) {
 	before := time.Now().Truncate(time.Second)
-	identity, err := domain.NewIdentity(mapperTestTID,"ts@example.com")
+	identity, err := domain.NewIdentity(mapperTestTID, "ts@example.com")
 	require.NoError(t, err)
 
 	proto := identityToProto(identity)
