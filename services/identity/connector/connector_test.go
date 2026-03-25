@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var connTestTID = tenant.MustNewTenantID("test_tenant")
+
 func now() time.Time { return time.Now() }
 
 // --- Mock repository ---
@@ -92,7 +94,7 @@ const testPassword = "ValidPassword1!"
 
 func makeActiveIdentity(t *testing.T, email string) *domain.Identity {
 	t.Helper()
-	id, err := domain.NewIdentity(email)
+	id, err := domain.NewIdentity(connTestTID,email)
 	require.NoError(t, err)
 
 	hash, err := credentials.HashPassword(testPassword)
@@ -152,12 +154,12 @@ func TestLogin_Success_PopulatesGroups(t *testing.T) {
 
 	// Build two active assignments.
 	adminAssign := domain.ReconstructRoleAssignment(
-		uuid.New(), identity.ID(), uuid.New(),
+		uuid.New(), connTestTID, identity.ID(), uuid.New(),
 		domain.RoleAdmin, nil, nil, nil,
 		now(), now(),
 	)
 	operatorAssign := domain.ReconstructRoleAssignment(
-		uuid.New(), identity.ID(), uuid.New(),
+		uuid.New(), connTestTID, identity.ID(), uuid.New(),
 		domain.RoleOperator, nil, nil, nil,
 		now(), now(),
 	)
@@ -180,7 +182,7 @@ func TestLogin_Success_SkipsRevokedAssignments(t *testing.T) {
 	identity := makeActiveIdentity(t, "carol@example.com")
 
 	active := domain.ReconstructRoleAssignment(
-		uuid.New(), identity.ID(), uuid.New(),
+		uuid.New(), connTestTID, identity.ID(), uuid.New(),
 		domain.RoleAdmin, nil, nil, nil,
 		now(), now(),
 	)
@@ -188,7 +190,7 @@ func TestLogin_Success_SkipsRevokedAssignments(t *testing.T) {
 	revokedBy := uuid.New()
 	revokedAt := now()
 	revoked := domain.ReconstructRoleAssignment(
-		uuid.New(), identity.ID(), uuid.New(),
+		uuid.New(), connTestTID, identity.ID(), uuid.New(),
 		domain.RoleOperator, nil, &revokedAt, &revokedBy,
 		now(), now(),
 	)
@@ -225,7 +227,7 @@ func TestLogin_WrongPassword_ReturnsFalse(t *testing.T) {
 // --- Login: account states ---
 
 func TestLogin_LockedAccount_ReturnsFalse(t *testing.T) {
-	id, err := domain.NewIdentity("locked@example.com")
+	id, err := domain.NewIdentity(connTestTID,"locked@example.com")
 	require.NoError(t, err)
 	hash, err := credentials.HashPassword(testPassword)
 	require.NoError(t, err)
@@ -248,7 +250,7 @@ func TestLogin_LockedAccount_ReturnsFalse(t *testing.T) {
 }
 
 func TestLogin_SuspendedAccount_ReturnsFalse(t *testing.T) {
-	id, err := domain.NewIdentity("suspended@example.com")
+	id, err := domain.NewIdentity(connTestTID,"suspended@example.com")
 	require.NoError(t, err)
 	hash, err := credentials.HashPassword(testPassword)
 	require.NoError(t, err)
@@ -268,7 +270,7 @@ func TestLogin_SuspendedAccount_ReturnsFalse(t *testing.T) {
 
 func TestLogin_PendingInviteAccount_ReturnsFalse(t *testing.T) {
 	// NewIdentity starts in PENDING_INVITE — no need to transition.
-	id, err := domain.NewIdentity("pending@example.com")
+	id, err := domain.NewIdentity(connTestTID,"pending@example.com")
 	require.NoError(t, err)
 
 	repo := &mockRepo{identity: id}
@@ -377,7 +379,7 @@ func TestResolve_Success(t *testing.T) {
 	identity := makeActiveIdentity(t, "resolve@example.com")
 
 	adminAssign := domain.ReconstructRoleAssignment(
-		uuid.New(), identity.ID(), uuid.New(),
+		uuid.New(), connTestTID, identity.ID(), uuid.New(),
 		domain.RoleAdmin, nil, nil, nil,
 		now(), now(),
 	)
@@ -423,7 +425,7 @@ func TestResolve_RepositoryError_ReturnsError(t *testing.T) {
 
 func TestResolve_NonActiveAccount_ReturnsFalse(t *testing.T) {
 	// NewIdentity starts in PENDING_INVITE — not active
-	id, err := domain.NewIdentity("pending-resolve@example.com")
+	id, err := domain.NewIdentity(connTestTID,"pending-resolve@example.com")
 	require.NoError(t, err)
 
 	repo := &mockRepo{identity: id}

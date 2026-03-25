@@ -125,7 +125,9 @@ func setupIdentitySchema(t *testing.T, db *gorm.DB, tenantID string) context.Con
 func (infra *multiTenantInfra) createActiveIdentity(t *testing.T, ctx context.Context, email, password string) *domain.Identity {
 	t.Helper()
 
-	id, err := domain.NewIdentity(email)
+	tid, ok := tenant.FromContext(ctx)
+	require.True(t, ok, "tenant context required")
+	id, err := domain.NewIdentity(tid, email)
 	require.NoError(t, err)
 
 	hash, err := credentials.HashPassword(password)
@@ -235,7 +237,8 @@ func TestMultiTenant_RoleIsolation(t *testing.T) {
 
 	// Grant ADMIN role to the identity in tenant A.
 	granterID := uuid.New()
-	assignment, err := domain.NewRoleAssignment(idA.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
+	tidA := tenant.MustNewTenantID(tenantAlpha)
+	assignment, err := domain.NewRoleAssignment(tidA, idA.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
 	require.NoError(t, err)
 	err = infra.repo.SaveRoleAssignment(infra.ctxA, assignment)
 	require.NoError(t, err)

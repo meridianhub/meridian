@@ -81,7 +81,8 @@ func Run(ctx context.Context, repo domain.Repository) error {
 	}
 
 	// Build domain objects before the transaction.
-	identity, err := domain.NewIdentity(email)
+	masterTenant := tenant.MustNewTenantID(MasterTenantID)
+	identity, err := domain.NewIdentity(masterTenant, email)
 	if err != nil {
 		return fmt.Errorf("creating platform admin identity: %w", err)
 	}
@@ -92,7 +93,7 @@ func Run(ctx context.Context, repo domain.Repository) error {
 		return fmt.Errorf("activating platform admin identity: %w", err)
 	}
 
-	roleAssignments := buildRoleAssignments(identity.ID(), platformAdminRoles)
+	roleAssignments := buildRoleAssignments(masterTenant, identity.ID(), platformAdminRoles)
 
 	// Persist identity and all role assignments in a single transaction.
 	if err := repo.SaveIdentityWithRoles(masterCtx, identity, roleAssignments); err != nil {
@@ -139,7 +140,7 @@ func reconcileRoles(ctx context.Context, repo domain.Repository, identity *domai
 		"email", identity.Email(),
 		"missing_roles", len(missing))
 
-	roleAssignments := buildRoleAssignments(identity.ID(), missing)
+	roleAssignments := buildRoleAssignments(identity.TenantID(), identity.ID(), missing)
 
 	// Persist all missing role assignments in a single transaction.
 	if err := repo.SaveRoleAssignments(ctx, roleAssignments); err != nil {
@@ -230,7 +231,7 @@ func seedDemoUser(ctx context.Context, repo domain.Repository, u DemoUser) error
 	}
 
 	// Build identity.
-	identity, err := domain.NewIdentity(u.Email)
+	identity, err := domain.NewIdentity(tid, u.Email)
 	if err != nil {
 		return fmt.Errorf("creating demo user identity: %w", err)
 	}
@@ -244,6 +245,7 @@ func seedDemoUser(ctx context.Context, repo domain.Repository, u DemoUser) error
 	now := time.Now()
 	ra := domain.ReconstructRoleAssignment(
 		uuid.New(),
+		tid,
 		identity.ID(),
 		identity.ID(),
 		domain.Role(u.Role),
@@ -285,6 +287,7 @@ func reconcileDemoRole(ctx context.Context, repo domain.Repository, identity *do
 	now := time.Now()
 	ra := domain.ReconstructRoleAssignment(
 		uuid.New(),
+		identity.TenantID(),
 		identity.ID(),
 		identity.ID(),
 		domain.Role(role),
@@ -338,7 +341,7 @@ func ProvisionAdminForTenant(ctx context.Context, repo domain.Repository, tenant
 	}
 
 	// Build domain objects.
-	identity, err := domain.NewIdentity(email)
+	identity, err := domain.NewIdentity(tenantID, email)
 	if err != nil {
 		return fmt.Errorf("creating platform admin identity for tenant %s: %w", tenantID, err)
 	}
@@ -349,7 +352,7 @@ func ProvisionAdminForTenant(ctx context.Context, repo domain.Repository, tenant
 		return fmt.Errorf("activating platform admin identity: %w", err)
 	}
 
-	roleAssignments := buildRoleAssignments(identity.ID(), platformAdminRoles)
+	roleAssignments := buildRoleAssignments(tenantID, identity.ID(), platformAdminRoles)
 
 	if err := repo.SaveIdentityWithRoles(tenantCtx, identity, roleAssignments); err != nil {
 		return fmt.Errorf("provisioning platform admin in tenant %s: %w", tenantID, err)
@@ -378,12 +381,13 @@ func AsPostProvisioningHook(repo domain.Repository) func(ctx context.Context, te
 // buildRoleAssignments constructs RoleAssignment domain objects for each role.
 // Bootstrap is a trusted system operation; ReconstructRoleAssignment is used to
 // bypass the privilege hierarchy check that would otherwise require a granting identity.
-func buildRoleAssignments(identityID uuid.UUID, roles []auth.Role) []*domain.RoleAssignment {
+func buildRoleAssignments(tid tenant.TenantID, identityID uuid.UUID, roles []auth.Role) []*domain.RoleAssignment {
 	now := time.Now()
 	assignments := make([]*domain.RoleAssignment, 0, len(roles))
 	for _, role := range roles {
 		ra := domain.ReconstructRoleAssignment(
 			uuid.New(),
+			tid,
 			identityID,
 			identityID, // self-granted by the system identity
 			domain.Role(role.String()),

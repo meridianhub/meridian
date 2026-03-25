@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -194,7 +195,7 @@ func TestSeedDemoUsers_ReconcilesRole_ExistingUserMissingRole(t *testing.T) {
 	repo := newFakeRepo()
 
 	// Pre-seed an identity with no role assignments.
-	identity, err := domain.NewIdentity("operator@volterra.energy")
+	identity, err := domain.NewIdentity(tenant.MustNewTenantID("volterra"), "operator@volterra.energy")
 	require.NoError(t, err)
 	require.NoError(t, identity.Activate())
 	repo.identities["operator@volterra.energy"] = identity
