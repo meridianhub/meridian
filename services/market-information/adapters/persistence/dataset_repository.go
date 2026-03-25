@@ -24,7 +24,7 @@ func NewDataSetRepository(pool *pgxpool.Pool) *DataSetRepository {
 }
 
 // Save persists a new or updated dataset definition.
-// For new datasets, returns ErrDuplicateDataSetCode if the code already exists.
+// Idempotent for new datasets: returns nil if the code+version already exists.
 // For updates, returns ErrVersionMismatch on optimistic lock failure.
 func (r *DataSetRepository) Save(ctx context.Context, dataset domain.DataSetDefinition) error {
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
