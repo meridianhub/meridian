@@ -206,15 +206,22 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	}
 	defer loopback.closeAll()
 
+	// ─── Schema Provisioner (optional, shared by tenant service + worker) ─
+
+	schemaProvisioner, err := createSchemaProvisioner(baseDSN, conns.gormDB("tenant"), logger)
+	if err != nil {
+		return fmt.Errorf("schema provisioner: %w", err)
+	}
+
 	// ─── Register All Services ──────────────────────────────────────────
 
-	if err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, tracer, logger); err != nil {
+	if err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, schemaProvisioner, tracer, logger); err != nil {
 		return err
 	}
 
 	// ─── Provisioning Worker (optional) ─────────────────────────────────
 
-	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, baseDSN, conns.gormDB("tenant"), conns.gormDB("identity"), logger)
+	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, schemaProvisioner, conns.gormDB("tenant"), conns.gormDB("identity"), logger)
 	if err != nil {
 		return fmt.Errorf("provisioning worker: %w", err)
 	}
