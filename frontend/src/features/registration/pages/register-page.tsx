@@ -1,11 +1,7 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import {
-  validateSlug,
-  PasswordStrengthBar,
-  SlugStatus,
-  type SlugAvailability,
-} from './registration-helpers'
+import { validateSlug, type SlugAvailability } from './registration-utils'
+import { PasswordStrengthBar, SlugStatus } from './registration-helpers'
 
 export function RegisterPage() {
   const navigate = useNavigate()
