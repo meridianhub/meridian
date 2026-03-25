@@ -358,31 +358,6 @@ func TestDLQMessage_RecordAndMetadata(t *testing.T) {
 	assert.Equal(t, "cause-xyz", msg.Metadata.CausationID)
 }
 
-// --- Test ReplayMessages sequencing logic ---
-
-func TestReplayMessages_CountTracking(t *testing.T) {
-	// Test that ReplayMessages returns correct count tracking by validating the message
-	// indexing and error formatting logic
-	messages := []DLQMessage{
-		{
-			Record:   &kgo.Record{Key: []byte("k1"), Value: []byte("v1")},
-			Metadata: DLQMetadata{OriginalTopic: "topic-1"},
-		},
-		{
-			Record:   &kgo.Record{Key: []byte("k2"), Value: []byte("v2")},
-			Metadata: DLQMetadata{OriginalTopic: "topic-2"},
-		},
-	}
-
-	assert.Len(t, messages, 2)
-	// Verify message count tracking logic
-	successCount := 0
-	for range messages {
-		successCount++
-	}
-	assert.Equal(t, 2, successCount)
-}
-
 // --- parseDLQMetadata edge cases ---
 
 func TestParseDLQMetadata_PartialHeaders(t *testing.T) {
