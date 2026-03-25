@@ -85,6 +85,7 @@ export function RegisterPage() {
   const handleSlugChange = useCallback((value: string) => {
     setSlug(value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
     clearFieldError('slug')
+    setFormError('')
   }, [clearFieldError])
 
   const validateFields = useCallback((): boolean => {
@@ -199,8 +200,8 @@ export function RegisterPage() {
               required
               autoComplete="organization"
               aria-describedby="slug-hint slug-status"
-              aria-invalid={submitted && (!!slugError || !!fieldErrors.slug) ? true : undefined}
-              className={slugError || (submitted && fieldErrors.slug) ? inputErrorClass : inputClass}
+              aria-invalid={!!slugError || (submitted && !!fieldErrors.slug) ? true : undefined}
+              className={!!slugError || (submitted && !!fieldErrors.slug) ? inputErrorClass : inputClass}
               placeholder="my-org"
               minLength={3}
               maxLength={63}

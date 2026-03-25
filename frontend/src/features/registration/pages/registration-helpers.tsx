@@ -110,7 +110,7 @@ export function PasswordInput({ value, onChange, inputClass, error, submitted }:
           onChange={onChange}
           required
           autoComplete="new-password"
-          aria-describedby={hasError ? 'password-hint' : 'password-strength password-hint'}
+          aria-describedby={hasError ? 'password-error password-hint' : 'password-strength password-hint'}
           aria-invalid={hasError ? true : undefined}
           className={`${errorClass} pr-10`}
           minLength={8}
@@ -128,7 +128,7 @@ export function PasswordInput({ value, onChange, inputClass, error, submitted }:
         Minimum 8 characters.
       </p>
       {hasError ? (
-        <p className="mt-1 text-xs text-destructive" role="alert">{error}</p>
+        <p id="password-error" className="mt-1 text-xs text-destructive" role="alert">{error}</p>
       ) : (
         <div id="password-strength" aria-live="polite">
           <PasswordStrengthBar password={value} />
