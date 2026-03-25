@@ -5,9 +5,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var testTenantID = tenant.MustNewTenantID("test_tenant")
 
 func TestNewIdentity_ValidEmail(t *testing.T) {
 	emails := []string{
@@ -17,7 +20,7 @@ func TestNewIdentity_ValidEmail(t *testing.T) {
 	}
 	for _, email := range emails {
 		t.Run(email, func(t *testing.T) {
-			id, err := NewIdentity(email)
+			id, err := NewIdentity(testTenantID, email)
 			require.NoError(t, err)
 			assert.NotEqual(t, uuid.Nil, id.ID())
 			assert.Equal(t, email, id.Email())
@@ -37,7 +40,7 @@ func TestNewIdentity_InvalidEmail(t *testing.T) {
 	cases := []string{"", "not-an-email", "@nodomain", "no@", "spaces in@email.com"}
 	for _, email := range cases {
 		t.Run(email, func(t *testing.T) {
-			_, err := NewIdentity(email)
+			_, err := NewIdentity(testTenantID, email)
 			assert.ErrorIs(t, err, ErrInvalidEmail)
 		})
 	}
@@ -137,7 +140,7 @@ func TestIdentity_StatusTransitions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			identity, err := NewIdentity("test@example.com")
+			identity, err := NewIdentity(testTenantID, "test@example.com")
 			require.NoError(t, err)
 
 			tt.setup(identity)
@@ -160,7 +163,7 @@ func TestIdentity_StatusTransitions(t *testing.T) {
 }
 
 func TestIdentity_IsLocked(t *testing.T) {
-	identity, _ := NewIdentity("user@example.com")
+	identity, _ := NewIdentity(testTenantID, "user@example.com")
 	assert.False(t, identity.IsLocked())
 
 	_ = identity.Activate()
@@ -172,7 +175,7 @@ func TestIdentity_IsLocked(t *testing.T) {
 }
 
 func TestIdentity_RecordLoginAttempt_SuccessResetsCounter(t *testing.T) {
-	identity, _ := NewIdentity("user@example.com")
+	identity, _ := NewIdentity(testTenantID, "user@example.com")
 	_ = identity.Activate()
 
 	// Record some failures first
@@ -187,7 +190,7 @@ func TestIdentity_RecordLoginAttempt_SuccessResetsCounter(t *testing.T) {
 }
 
 func TestIdentity_RecordLoginAttempt_LockAfterFiveFailures(t *testing.T) {
-	identity, _ := NewIdentity("user@example.com")
+	identity, _ := NewIdentity(testTenantID, "user@example.com")
 	_ = identity.Activate()
 
 	for i := 0; i < maxFailedAttempts-1; i++ {
@@ -202,7 +205,7 @@ func TestIdentity_RecordLoginAttempt_LockAfterFiveFailures(t *testing.T) {
 }
 
 func TestIdentity_UnlockResetFailedAttempts(t *testing.T) {
-	identity, _ := NewIdentity("user@example.com")
+	identity, _ := NewIdentity(testTenantID, "user@example.com")
 	_ = identity.Activate()
 	for i := 0; i < maxFailedAttempts; i++ {
 		_ = identity.RecordLoginAttempt(false)
@@ -245,7 +248,7 @@ func TestIdentity_RecordLoginAttempt_GuardsNonActiveStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			identity, _ := NewIdentity("user@example.com")
+			identity, _ := NewIdentity(testTenantID, "user@example.com")
 			tt.setup(identity)
 			err := identity.RecordLoginAttempt(false)
 			assert.ErrorIs(t, err, tt.expectedErr)
@@ -254,7 +257,7 @@ func TestIdentity_RecordLoginAttempt_GuardsNonActiveStatus(t *testing.T) {
 }
 
 func TestIdentity_SetPassword(t *testing.T) {
-	identity, _ := NewIdentity("user@example.com")
+	identity, _ := NewIdentity(testTenantID, "user@example.com")
 
 	err := identity.SetPassword("")
 	assert.ErrorIs(t, err, ErrPasswordHashEmpty)
@@ -265,7 +268,7 @@ func TestIdentity_SetPassword(t *testing.T) {
 }
 
 func TestIdentity_SetExternalIDP(t *testing.T) {
-	identity, _ := NewIdentity("user@example.com")
+	identity, _ := NewIdentity(testTenantID, "user@example.com")
 
 	err := identity.SetExternalIDP("", "some-sub")
 	assert.ErrorIs(t, err, ErrExternalIDPEmpty)
@@ -285,7 +288,7 @@ func TestReconstructIdentity(t *testing.T) {
 	revokedAt := now.Add(time.Hour)
 
 	identity := ReconstructIdentity(
-		id, "user@example.com", IdentityStatusLocked,
+		id, testTenantID, "user@example.com", IdentityStatusLocked,
 		"$2a$12$hash", "github", "gh-sub",
 		3, now, revokedAt, 5,
 	)
@@ -298,4 +301,11 @@ func TestReconstructIdentity(t *testing.T) {
 	assert.Equal(t, "gh-sub", identity.ExternalSub())
 	assert.Equal(t, 3, identity.FailedAttempts())
 	assert.Equal(t, int64(5), identity.Version())
+	assert.Equal(t, testTenantID, identity.TenantID())
+}
+
+func TestNewIdentity_EmptyTenantID_ReturnsError(t *testing.T) {
+	identity, err := NewIdentity("", "user@example.com")
+	assert.Nil(t, identity)
+	assert.ErrorIs(t, err, ErrTenantIDRequired)
 }

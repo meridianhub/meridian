@@ -19,4 +19,5 @@ var (
 	ErrInvalidRole                 = errors.New("invalid role")
 	ErrInsufficientRolePermissions = errors.New("insufficient permissions to grant this role")
 	ErrVersionConflict             = errors.New("version conflict: resource was modified by another transaction")
+	ErrTenantIDRequired            = errors.New("tenant ID is required")
 )

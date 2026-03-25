@@ -16,9 +16,11 @@ import (
 )
 
 const (
-	testTenantID   = "test_tenant"
-	secondTenantID = "test_tenant_b"
+	testTenantIDStr   = "test_tenant"
+	secondTenantIDStr = "test_tenant_b"
 )
+
+var testTID = tenant.MustNewTenantID(testTenantIDStr)
 
 var identityModels = []interface{}{
 	&IdentityEntity{},
@@ -30,7 +32,7 @@ func setupTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	t.Helper()
 	return testdb.SetupTestDB(t,
 		testdb.WithModels(identityModels...),
-		testdb.WithTenant(testTenantID),
+		testdb.WithTenant(testTenantIDStr),
 	)
 }
 
@@ -53,7 +55,7 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.C
 			return err
 		}
 		// Restore search_path to the primary tenant schema
-		primarySchema := tenant.TenantID(testTenantID).SchemaName()
+		primarySchema := tenant.TenantID(testTenantIDStr).SchemaName()
 		return tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
 	})
 	require.NoError(t, err)
@@ -68,7 +70,7 @@ func TestSaveNewIdentity(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("alice@example.com")
+	identity, err := domain.NewIdentity(testTID, "alice@example.com")
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, identity)
@@ -90,7 +92,7 @@ func TestSaveIdentity_UpdateWithOptimisticLocking(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("bob@example.com")
+	identity, err := domain.NewIdentity(testTID, "bob@example.com")
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, identity)
@@ -116,7 +118,7 @@ func TestSaveIdentity_VersionConflict(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("carol@example.com")
+	identity, err := domain.NewIdentity(testTID, "carol@example.com")
 	require.NoError(t, err)
 
 	err = repo.Save(ctx, identity)
@@ -146,11 +148,11 @@ func TestSaveIdentity_DuplicateEmail(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	first, err := domain.NewIdentity("dave@example.com")
+	first, err := domain.NewIdentity(testTID, "dave@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, first))
 
-	second, err := domain.NewIdentity("dave@example.com")
+	second, err := domain.NewIdentity(testTID, "dave@example.com")
 	require.NoError(t, err)
 	err = repo.Save(ctx, second)
 	assert.ErrorIs(t, err, domain.ErrEmailAlreadyExists)
@@ -174,7 +176,7 @@ func TestFindByEmail(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("eve@example.com")
+	identity, err := domain.NewIdentity(testTID, "eve@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
@@ -202,7 +204,7 @@ func TestListByTenant(t *testing.T) {
 	repo := NewRepository(db)
 
 	for _, email := range []string{"a@example.com", "b@example.com", "c@example.com"} {
-		identity, err := domain.NewIdentity(email)
+		identity, err := domain.NewIdentity(testTID, email)
 		require.NoError(t, err)
 		require.NoError(t, repo.Save(ctx, identity))
 	}
@@ -217,8 +219,8 @@ func TestCrossTenantIsolation(t *testing.T) {
 	db, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	tidA := tenant.TenantID(testTenantID)
-	tidB := tenant.TenantID(secondTenantID)
+	tidA := tenant.TenantID(testTenantIDStr)
+	tidB := tenant.TenantID(secondTenantIDStr)
 
 	ctxA := tenant.WithTenant(context.Background(), tidA)
 	ctxB := setupTenantSchema(t, db, tidB)
@@ -227,7 +229,7 @@ func TestCrossTenantIsolation(t *testing.T) {
 	repoB := NewRepository(db)
 
 	// Save identity in tenant A
-	identityA, err := domain.NewIdentity("tenant-a@example.com")
+	identityA, err := domain.NewIdentity(testTID, "tenant-a@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repoA.Save(ctxA, identityA))
 
@@ -248,12 +250,12 @@ func TestSaveRoleAssignment_CreateAndRetrieve(t *testing.T) {
 	repo := NewRepository(db)
 
 	// Create an identity first
-	identity, err := domain.NewIdentity("frank@example.com")
+	identity, err := domain.NewIdentity(testTID, "frank@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
 	granterID := uuid.New()
-	assignment, err := domain.NewRoleAssignment(identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
+	assignment, err := domain.NewRoleAssignment(testTID, identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
 	require.NoError(t, err)
 
 	err = repo.SaveRoleAssignment(ctx, assignment)
@@ -274,12 +276,12 @@ func TestSaveRoleAssignment_Revoke(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("grace@example.com")
+	identity, err := domain.NewIdentity(testTID, "grace@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
 	granterID := uuid.New()
-	assignment, err := domain.NewRoleAssignment(identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleViewer))
+	assignment, err := domain.NewRoleAssignment(testTID, identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleViewer))
 	require.NoError(t, err)
 	require.NoError(t, repo.SaveRoleAssignment(ctx, assignment))
 
@@ -302,7 +304,7 @@ func TestSaveInvitation_CreateAndRetrieveByTokenHash(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("henry@example.com")
+	identity, err := domain.NewIdentity(testTID, "henry@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
@@ -337,7 +339,7 @@ func TestSaveInvitation_Accept(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("iris@example.com")
+	identity, err := domain.NewIdentity(testTID, "iris@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
@@ -364,7 +366,7 @@ func TestSaveIdentityWithInvitation_NewIdentityAndInvitation(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("invite-new@example.com")
+	identity, err := domain.NewIdentity(testTID, "invite-new@example.com")
 	require.NoError(t, err)
 
 	inviterID := uuid.New()
@@ -394,7 +396,7 @@ func TestSaveIdentityWithInvitation_ExistingIdentityUpdated(t *testing.T) {
 	repo := NewRepository(db)
 
 	// Create identity first
-	identity, err := domain.NewIdentity("invite-update@example.com")
+	identity, err := domain.NewIdentity(testTID, "invite-update@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
@@ -424,12 +426,12 @@ func TestSaveIdentityWithInvitation_DuplicateEmail(t *testing.T) {
 	repo := NewRepository(db)
 
 	// Create first identity
-	first, err := domain.NewIdentity("invite-dup@example.com")
+	first, err := domain.NewIdentity(testTID, "invite-dup@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, first))
 
 	// Try to create another identity with the same email
-	second, err := domain.NewIdentity("invite-dup@example.com")
+	second, err := domain.NewIdentity(testTID, "invite-dup@example.com")
 	require.NoError(t, err)
 
 	inviterID := uuid.New()
@@ -448,7 +450,7 @@ func TestSaveIdentityWithInvitation_ExistingInvitationUpdated(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("invite-existinginv@example.com")
+	identity, err := domain.NewIdentity(testTID, "invite-existinginv@example.com")
 	require.NoError(t, err)
 
 	inviterID := uuid.New()
@@ -483,7 +485,7 @@ func TestSaveIdentityWithInvitation_VersionConflict(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("invite-conflict@example.com")
+	identity, err := domain.NewIdentity(testTID, "invite-conflict@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
@@ -517,13 +519,13 @@ func TestSaveIdentityWithRoles_Success(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("withroles@example.com")
+	identity, err := domain.NewIdentity(testTID, "withroles@example.com")
 	require.NoError(t, err)
 
 	granterID := uuid.New()
-	role1, err := domain.NewRoleAssignment(identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
+	role1, err := domain.NewRoleAssignment(testTID, identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
 	require.NoError(t, err)
-	role2, err := domain.NewRoleAssignment(identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleOperator))
+	role2, err := domain.NewRoleAssignment(testTID, identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleOperator))
 	require.NoError(t, err)
 
 	err = repo.SaveIdentityWithRoles(ctx, identity, []*domain.RoleAssignment{role1, role2})
@@ -547,11 +549,11 @@ func TestSaveIdentityWithRoles_DuplicateEmail(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	first, err := domain.NewIdentity("withroles-dup@example.com")
+	first, err := domain.NewIdentity(testTID, "withroles-dup@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, first))
 
-	second, err := domain.NewIdentity("withroles-dup@example.com")
+	second, err := domain.NewIdentity(testTID, "withroles-dup@example.com")
 	require.NoError(t, err)
 
 	err = repo.SaveIdentityWithRoles(ctx, second, nil)
@@ -565,7 +567,7 @@ func TestSaveIdentityWithRoles_EmptyRoles(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("withroles-empty@example.com")
+	identity, err := domain.NewIdentity(testTID, "withroles-empty@example.com")
 	require.NoError(t, err)
 
 	err = repo.SaveIdentityWithRoles(ctx, identity, []*domain.RoleAssignment{})
@@ -585,16 +587,16 @@ func TestSaveRoleAssignments_Success(t *testing.T) {
 
 	repo := NewRepository(db)
 
-	identity, err := domain.NewIdentity("batchroles@example.com")
+	identity, err := domain.NewIdentity(testTID, "batchroles@example.com")
 	require.NoError(t, err)
 	require.NoError(t, repo.Save(ctx, identity))
 
 	granterID := uuid.New()
-	role1, err := domain.NewRoleAssignment(identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
+	role1, err := domain.NewRoleAssignment(testTID, identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleAdmin))
 	require.NoError(t, err)
-	role2, err := domain.NewRoleAssignment(identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleOperator))
+	role2, err := domain.NewRoleAssignment(testTID, identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleOperator))
 	require.NoError(t, err)
-	role3, err := domain.NewRoleAssignment(identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleViewer))
+	role3, err := domain.NewRoleAssignment(testTID, identity.ID(), granterID, string(domain.RolePlatform), string(domain.RoleViewer))
 	require.NoError(t, err)
 
 	err = repo.SaveRoleAssignments(ctx, []*domain.RoleAssignment{role1, role2, role3})

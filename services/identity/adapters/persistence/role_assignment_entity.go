@@ -5,11 +5,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/domain"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // RoleAssignmentEntity represents the database persistence model for role assignments.
 type RoleAssignmentEntity struct {
 	ID         uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	TenantID   string     `gorm:"column:tenant_id;type:varchar(50);not null;default:''"`
 	IdentityID uuid.UUID  `gorm:"column:identity_id;type:uuid;not null;index:idx_role_assignment_identity"`
 	GrantedBy  uuid.UUID  `gorm:"column:granted_by;type:uuid;not null"`
 	Role       string     `gorm:"column:role;type:varchar(50);not null"`
@@ -30,6 +32,7 @@ func (RoleAssignmentEntity) TableName() string {
 func toRoleAssignmentEntity(ra *domain.RoleAssignment) *RoleAssignmentEntity {
 	return &RoleAssignmentEntity{
 		ID:         ra.ID(),
+		TenantID:   string(ra.TenantID()),
 		IdentityID: ra.IdentityID(),
 		GrantedBy:  ra.GrantedBy(),
 		Role:       string(ra.Role()),
@@ -45,6 +48,7 @@ func toRoleAssignmentEntity(ra *domain.RoleAssignment) *RoleAssignmentEntity {
 func toRoleAssignmentDomain(entity *RoleAssignmentEntity) *domain.RoleAssignment {
 	return domain.ReconstructRoleAssignment(
 		entity.ID,
+		tenant.TenantID(entity.TenantID),
 		entity.IdentityID,
 		entity.GrantedBy,
 		domain.Role(entity.Role),
