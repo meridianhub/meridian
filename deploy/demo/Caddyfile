@@ -51,3 +51,50 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 		file_server
 	}
 }
+
+develop.meridianhub.cloud, *.develop.meridianhub.cloud {
+	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
+
+	# Health/readiness probes
+	handle /healthz {
+		reverse_proxy meridian-develop:8090
+	}
+	handle /readyz {
+		reverse_proxy meridian-develop:8090
+	}
+
+	# MCP Server: streamable HTTP transport + OAuth 2.1 endpoints
+	@mcp_transport {
+		path /mcp /mcp/* /oauth/* /.well-known/oauth-authorization-server
+	}
+	handle @mcp_transport {
+		reverse_proxy mcp-server-develop:8090
+	}
+
+	# Dex OIDC endpoints (embedded in meridian binary)
+	handle /dex/* {
+		reverse_proxy meridian-develop:8090
+	}
+
+	# BFF auth endpoints (login, JWKS)
+	handle /api/* {
+		reverse_proxy meridian-develop:8090
+	}
+
+	# API: REST transcoding + ConnectRPC + version
+	@api {
+		path /v1/* /meridian.* /grpc.* /version
+	}
+	handle @api {
+		reverse_proxy meridian-develop:8090
+	}
+
+	# Frontend: static files with SPA fallback (catch-all, must be last)
+	handle {
+		root * /var/www/html-develop
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		try_files {path} /index.html
+		file_server
+	}
+}
