@@ -18,12 +18,11 @@ import (
 func resetTenantExtractionWarning(t *testing.T, authEnabled bool) *bytes.Buffer {
 	t.Helper()
 
-	// Save originals
-	origOnce := warnOnceAuthEnabled
+	// Save originals (do NOT copy sync.Once - it must not be copied after first use)
 	origCheck := checkAuthEnabled
 	origLogger := warnLogger
 
-	// Reset
+	// Reset to fresh zero-value Once
 	warnOnceAuthEnabled = sync.Once{}
 	checkAuthEnabled = func() bool { return authEnabled }
 
@@ -32,7 +31,7 @@ func resetTenantExtractionWarning(t *testing.T, authEnabled bool) *bytes.Buffer 
 	warnLogger = func() *slog.Logger { return logger }
 
 	t.Cleanup(func() {
-		warnOnceAuthEnabled = origOnce
+		warnOnceAuthEnabled = sync.Once{}
 		checkAuthEnabled = origCheck
 		warnLogger = origLogger
 	})
