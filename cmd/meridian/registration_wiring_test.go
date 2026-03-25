@@ -63,7 +63,11 @@ func TestLoopbackTenantCreator_CreateTenant(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	creator := &loopbackTenantCreator{client: stub, logger: logger}
+	creator := &loopbackTenantCreator{
+		client:     stub,
+		baseDomain: "demo.meridianhub.cloud",
+		logger:     logger,
+	}
 
 	tenantID, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp")
 
@@ -73,8 +77,30 @@ func TestLoopbackTenantCreator_CreateTenant(t *testing.T) {
 	assert.Equal(t, "acme_corp", stub.initiateReq.TenantId)
 	assert.Equal(t, "Acme Corp", stub.initiateReq.DisplayName)
 	assert.Equal(t, "acme-corp", stub.initiateReq.Slug)
-	assert.Equal(t, "acme-corp", stub.initiateReq.Subdomain)
+	assert.Equal(t, "acme-corp.demo.meridianhub.cloud", stub.initiateReq.Subdomain,
+		"subdomain should include BASE_DOMAIN suffix")
 	assert.NotEmpty(t, stub.initiateReq.SettlementAsset, "settlement_asset must be set (proto requires it)")
+}
+
+func TestLoopbackTenantCreator_CreateTenant_EmptyBaseDomain(t *testing.T) {
+	stub := &stubTenantServiceClient{
+		initiateResp: &tenantv1.InitiateTenantResponse{
+			Tenant: &tenantv1.Tenant{TenantId: "acme_corp"},
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	creator := &loopbackTenantCreator{
+		client:     stub,
+		baseDomain: "",
+		logger:     logger,
+	}
+
+	_, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp")
+
+	require.NoError(t, err)
+	assert.Equal(t, "acme-corp", stub.initiateReq.Subdomain,
+		"when baseDomain is empty, subdomain should be just the slug")
 }
 
 func TestLoopbackTenantCreator_CreateTenant_NilTenantInResponse(t *testing.T) {
