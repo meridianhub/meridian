@@ -58,7 +58,9 @@ var (
 	// Valid transitions: DRAFT→ACTIVE, ACTIVE→DEPRECATED.
 	ErrInvalidStateTransition = errors.New("invalid state transition")
 
-	// ErrNotDraft is returned when attempting to modify an instrument that is not in DRAFT status.
+	// ErrNotDraft is returned when attempting to modify or activate an instrument
+	// that is not in DRAFT status (e.g., DEPRECATED). Note: ACTIVE->ACTIVE is
+	// idempotent and does NOT return this error.
 	ErrNotDraft = errors.New("instrument must be in DRAFT status")
 
 	// ErrNotActive is returned when attempting operations that require ACTIVE status.
@@ -196,7 +198,9 @@ type InstrumentRegistry interface {
 	ListByStatus(ctx context.Context, status Status) ([]*InstrumentDefinition, error)
 
 	// CreateDraft creates a new instrument definition in DRAFT status.
-	// Idempotent: returns nil if an instrument with the same code+version exists.
+	// Idempotent: returns nil if an instrument with the same code+version already
+	// exists (uses ON CONFLICT DO NOTHING). The existing definition is preserved
+	// unchanged - callers needing to update should use UpdateDefinition separately.
 	// Returns ErrSystemInstrumentReadOnly if is_system=true is attempted.
 	// Returns ErrInvalidCEL if any CEL expression fails compilation.
 	// CEL expressions are compiled at creation time (fail-fast validation).
