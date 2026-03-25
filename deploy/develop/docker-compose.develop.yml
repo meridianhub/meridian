@@ -40,8 +40,10 @@ services:
 
       # --- Database ---
       # Connects to the demo stack's postgres container via the shared network.
-      # Uses dev_ prefixed databases created by init-databases-develop.sql.
-      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-dev_meridian}?sslmode=disable
+      # NOTE: The app hardcodes per-service database names (meridian_platform, etc.)
+      # in ServiceDatabases, so develop and demo share the same databases when on
+      # the same postgres. For true isolation, use a separate postgres container.
+      DATABASE_URL: postgres://${POSTGRES_USER:-meridian}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}@postgres:5432/${POSTGRES_DB:-meridian}?sslmode=disable
 
       # --- JWT Signing (SEPARATE key from demo for environment isolation) ---
       JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}

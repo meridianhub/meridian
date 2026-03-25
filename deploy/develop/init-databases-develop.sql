@@ -1,23 +1,32 @@
--- Create per-service databases for the Meridian develop environment.
--- Uses dev_ prefix to isolate from the demo environment's databases.
+-- Database initialization for the Meridian develop environment.
 --
--- Run manually against the demo stack's postgres container:
---   docker exec -i meridian-postgres-1 psql -U meridian < /opt/meridian-develop/init-databases-develop.sql
+-- IMPORTANT: The application's ServiceDatabases map (internal/migrations/runner.go)
+-- hardcodes database names (meridian_platform, meridian_current_account, etc.).
+-- The newServiceConns function replaces only the database component of DATABASE_URL,
+-- ignoring any prefix in the base DSN. This means the develop environment uses the
+-- SAME databases as demo when sharing a postgres instance.
 --
--- The list must match internal/migrations/runner.go ServiceDatabases.
+-- For true database isolation, either:
+--   1. Run a separate postgres container for the develop stack, OR
+--   2. Add a DB_NAME_PREFIX env var to the application (requires code change)
+--
+-- When sharing the demo stack's postgres (current approach), this script is NOT
+-- needed - the databases are already created by the demo stack's init-databases.sql.
+-- This file is retained as documentation of the database requirements.
+--
+-- If running a SEPARATE postgres for develop, uncomment the statements below:
 
-CREATE DATABASE dev_meridian;
-CREATE DATABASE dev_meridian_platform;
-CREATE DATABASE dev_meridian_current_account;
-CREATE DATABASE dev_meridian_financial_accounting;
-CREATE DATABASE dev_meridian_position_keeping;
-CREATE DATABASE dev_meridian_payment_order;
-CREATE DATABASE dev_meridian_party;
-CREATE DATABASE dev_meridian_internal_bank_account;
-CREATE DATABASE dev_meridian_market_information;
-CREATE DATABASE dev_meridian_reconciliation;
-CREATE DATABASE dev_meridian_forecasting;
-CREATE DATABASE dev_meridian_reference_data;
-CREATE DATABASE dev_meridian_identity;
-CREATE DATABASE dev_meridian_operational_gateway;
-CREATE DATABASE dev_meridian_financial_gateway;
+-- CREATE DATABASE meridian_platform;
+-- CREATE DATABASE meridian_current_account;
+-- CREATE DATABASE meridian_financial_accounting;
+-- CREATE DATABASE meridian_position_keeping;
+-- CREATE DATABASE meridian_payment_order;
+-- CREATE DATABASE meridian_party;
+-- CREATE DATABASE meridian_internal_bank_account;
+-- CREATE DATABASE meridian_market_information;
+-- CREATE DATABASE meridian_reconciliation;
+-- CREATE DATABASE meridian_forecasting;
+-- CREATE DATABASE meridian_reference_data;
+-- CREATE DATABASE meridian_identity;
+-- CREATE DATABASE meridian_operational_gateway;
+-- CREATE DATABASE meridian_financial_gateway;
