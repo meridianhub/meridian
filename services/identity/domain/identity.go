@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // IdentityStatus represents the lifecycle state of an identity
@@ -32,6 +33,7 @@ var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-
 // occur between a load and a save while still detecting concurrent modifications.
 type Identity struct {
 	id             uuid.UUID
+	tenantID       tenant.TenantID
 	email          string
 	status         IdentityStatus
 	passwordHash   string
@@ -46,7 +48,10 @@ type Identity struct {
 }
 
 // NewIdentity creates a new identity in PENDING_INVITE status.
-func NewIdentity(email string) (*Identity, error) {
+func NewIdentity(tenantID tenant.TenantID, email string) (*Identity, error) {
+	if tenantID.IsEmpty() {
+		return nil, ErrTenantIDRequired
+	}
 	if !emailRegex.MatchString(email) {
 		return nil, ErrInvalidEmail
 	}
@@ -54,6 +59,7 @@ func NewIdentity(email string) (*Identity, error) {
 	now := time.Now()
 	return &Identity{
 		id:        uuid.New(),
+		tenantID:  tenantID,
 		email:     email,
 		status:    IdentityStatusPendingInvite,
 		createdAt: now,
@@ -67,6 +73,7 @@ func NewIdentity(email string) (*Identity, error) {
 // baseVersion is set to version so the repository can detect concurrent modifications.
 func ReconstructIdentity(
 	id uuid.UUID,
+	tenantID tenant.TenantID,
 	email string,
 	status IdentityStatus,
 	passwordHash string,
@@ -79,6 +86,7 @@ func ReconstructIdentity(
 ) *Identity {
 	return &Identity{
 		id:             id,
+		tenantID:       tenantID,
 		email:          email,
 		status:         status,
 		passwordHash:   passwordHash,
@@ -95,6 +103,11 @@ func ReconstructIdentity(
 // ID returns the identity's unique identifier.
 func (i *Identity) ID() uuid.UUID {
 	return i.id
+}
+
+// TenantID returns the tenant this identity belongs to.
+func (i *Identity) TenantID() tenant.TenantID {
+	return i.tenantID
 }
 
 // Email returns the identity's email address.

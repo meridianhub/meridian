@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // Role represents a named permission level within the platform.
@@ -37,6 +38,7 @@ func IsValidRole(r string) bool {
 // RoleAssignment represents a granted role for an identity.
 type RoleAssignment struct {
 	id         uuid.UUID
+	tenantID   tenant.TenantID
 	identityID uuid.UUID
 	grantedBy  uuid.UUID
 	role       Role
@@ -53,7 +55,10 @@ type RoleAssignment struct {
 // cannot be assigned without proper authorization.
 // Returns ErrInvalidRole if targetRole is not recognized, and
 // ErrInsufficientRolePermissions if the granter lacks authority to assign targetRole.
-func NewRoleAssignment(identityID, grantedBy uuid.UUID, granterRole, targetRole string) (*RoleAssignment, error) {
+func NewRoleAssignment(tenantID tenant.TenantID, identityID, grantedBy uuid.UUID, granterRole, targetRole string) (*RoleAssignment, error) {
+	if tenantID.IsEmpty() {
+		return nil, ErrTenantIDRequired
+	}
 	if !IsValidRole(targetRole) {
 		return nil, ErrInvalidRole
 	}
@@ -63,6 +68,7 @@ func NewRoleAssignment(identityID, grantedBy uuid.UUID, granterRole, targetRole 
 	now := time.Now()
 	return &RoleAssignment{
 		id:         uuid.New(),
+		tenantID:   tenantID,
 		identityID: identityID,
 		grantedBy:  grantedBy,
 		role:       Role(targetRole),
@@ -74,6 +80,7 @@ func NewRoleAssignment(identityID, grantedBy uuid.UUID, granterRole, targetRole 
 // ReconstructRoleAssignment recreates a RoleAssignment from persistence layer data.
 func ReconstructRoleAssignment(
 	id uuid.UUID,
+	tenantID tenant.TenantID,
 	identityID uuid.UUID,
 	grantedBy uuid.UUID,
 	role Role,
@@ -85,6 +92,7 @@ func ReconstructRoleAssignment(
 ) *RoleAssignment {
 	return &RoleAssignment{
 		id:         id,
+		tenantID:   tenantID,
 		identityID: identityID,
 		grantedBy:  grantedBy,
 		role:       role,
@@ -99,6 +107,11 @@ func ReconstructRoleAssignment(
 // ID returns the role assignment's unique identifier.
 func (r *RoleAssignment) ID() uuid.UUID {
 	return r.id
+}
+
+// TenantID returns the tenant this role assignment belongs to.
+func (r *RoleAssignment) TenantID() tenant.TenantID {
+	return r.tenantID
 }
 
 // IdentityID returns the identity this assignment belongs to.
