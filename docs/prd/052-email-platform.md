@@ -66,7 +66,7 @@ never delivered. This gap affects every customer-facing workflow.
 
 ### Architecture Overview
 
-```
+```text
 Starlark Sagas / Go Services
         |
         v
@@ -117,7 +117,10 @@ type TemplateRenderer interface {
 
 **Provider implementation**: `shared/pkg/email/resend/` wraps the Resend Go SDK.
 
-**Outbox pattern**: Emails are written to an `email_outbox` table within the same transaction as the business operation (e.g., invoice creation). A background worker polls the outbox and sends via Resend. This guarantees exactly-once delivery semantics even if the service crashes mid-operation.
+**Outbox pattern**: Emails are written to an `email_outbox` table within the same
+transaction as the business operation (e.g., invoice creation). A background worker
+polls the outbox and sends via Resend. This guarantees exactly-once delivery
+semantics even if the service crashes mid-operation.
 
 ### Email Templates
 
@@ -276,7 +279,8 @@ Background worker that:
 
 **Task 7: Invoice email template** (2 points)
 
-- Professional invoice template with: tenant logo placeholder, invoice number, date, due date, line items table, subtotal/total, payment instructions
+- Professional invoice template with: tenant logo placeholder, invoice number,
+  date, due date, line items table, subtotal/total, payment instructions
 - Plain text fallback with formatted table
 - PDF attachment support (stretch goal - initially just HTML email)
 
