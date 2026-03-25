@@ -224,16 +224,28 @@ func (a *loopbackTenantCreator) DeleteTenant(ctx context.Context, tenantID strin
 	return err
 }
 
+// loopbackSlugChecker adapts the tenant persistence repository to the
+// gateway.SlugChecker interface used by RegistrationHandler.
+type loopbackSlugChecker struct {
+	repo *tenantpersistence.Repository
+}
+
+func (c *loopbackSlugChecker) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
+	return c.repo.IsSlugAvailable(ctx, slug)
+}
+
 // wireRegistration creates the self-service registration handler and returns
 // a ServerOption to install it. Returns nil on error (graceful degradation).
-func wireRegistration(identityDB *gorm.DB, rawConn *grpc.ClientConn, baseDomain string, logger *slog.Logger) gateway.ServerOption {
+func wireRegistration(identityDB, tenantDB *gorm.DB, rawConn *grpc.ClientConn, baseDomain string, logger *slog.Logger) gateway.ServerOption {
 	identityRepo := identitypersistence.NewRepository(identityDB)
 	tenantClient := tenantv1.NewTenantServiceClient(rawConn)
 
 	creator := &loopbackTenantCreator{client: tenantClient, logger: logger}
+	slugChecker := &loopbackSlugChecker{repo: tenantpersistence.NewRepository(tenantDB)}
 
 	handler, err := gateway.NewRegistrationHandler(gateway.RegistrationHandlerConfig{
 		TenantCreator: creator,
+		SlugChecker:   slugChecker,
 		IdentityRepo:  identityRepo,
 		BaseDomain:    baseDomain,
 		Logger:        logger,

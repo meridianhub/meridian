@@ -89,6 +89,14 @@ func (s *stubIdentityRepo) FindInvitationByTokenHash(_ context.Context, _ string
 	return nil, identitydomain.ErrInvitationNotFound
 }
 
+type stubSlugChecker struct {
+	isAvailableFn func(ctx context.Context, slug string) (bool, error)
+}
+
+func (s *stubSlugChecker) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
+	return s.isAvailableFn(ctx, slug)
+}
+
 // --- Helper ---
 
 func defaultStubs() (*stubTenantCreator, *stubIdentityRepo) {
@@ -107,6 +115,20 @@ func newRegistrationHandler(t *testing.T, tc gateway.TenantCreator, ir identityd
 		TenantCreator: tc,
 		IdentityRepo:  ir,
 		RateLimiter:   gateway.NewRegistrationRateLimiter(100), // high limit for tests
+		BaseDomain:    "meridian.app",
+		Logger:        slog.Default(),
+	})
+	require.NoError(t, err)
+	return h
+}
+
+func newRegistrationHandlerWithSlugChecker(t *testing.T, tc gateway.TenantCreator, ir identitydomain.Repository, sc gateway.SlugChecker) *gateway.RegistrationHandler {
+	t.Helper()
+	h, err := gateway.NewRegistrationHandler(gateway.RegistrationHandlerConfig{
+		TenantCreator: tc,
+		IdentityRepo:  ir,
+		SlugChecker:   sc,
+		RateLimiter:   gateway.NewRegistrationRateLimiter(100),
 		BaseDomain:    "meridian.app",
 		Logger:        slog.Default(),
 	})
@@ -434,4 +456,121 @@ func TestNewRegistrationHandler_Validation(t *testing.T) {
 		IdentityRepo:  ir,
 	})
 	assert.ErrorIs(t, err, gateway.ErrRegistrationLoggerRequired)
+}
+
+// --- Slug Availability Tests ---
+
+func slugAvailableRequest(handler *gateway.RegistrationHandler, slug string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/slugs/"+slug+"/available", nil)
+	r.SetPathValue("slug", slug)
+	w := httptest.NewRecorder()
+	handler.HandleSlugAvailable(w, r)
+	return w
+}
+
+func TestSlugAvailable_Available(t *testing.T) {
+	tc, ir := defaultStubs()
+	sc := &stubSlugChecker{
+		isAvailableFn: func(_ context.Context, _ string) (bool, error) {
+			return true, nil
+		},
+	}
+	h := newRegistrationHandlerWithSlugChecker(t, tc, ir, sc)
+	w := slugAvailableRequest(h, "my-org")
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := parseResponse(t, w)
+	assert.Equal(t, true, resp["available"])
+	assert.Nil(t, resp["reason"])
+}
+
+func TestSlugAvailable_Taken(t *testing.T) {
+	tc, ir := defaultStubs()
+	sc := &stubSlugChecker{
+		isAvailableFn: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	h := newRegistrationHandlerWithSlugChecker(t, tc, ir, sc)
+	w := slugAvailableRequest(h, "taken-org")
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := parseResponse(t, w)
+	assert.Equal(t, false, resp["available"])
+	assert.Equal(t, "slug is already taken", resp["reason"])
+}
+
+func TestSlugAvailable_InvalidSlug(t *testing.T) {
+	tc, ir := defaultStubs()
+	sc := &stubSlugChecker{
+		isAvailableFn: func(_ context.Context, _ string) (bool, error) {
+			return true, nil
+		},
+	}
+	h := newRegistrationHandlerWithSlugChecker(t, tc, ir, sc)
+
+	tests := []struct {
+		name string
+		slug string
+	}{
+		{"too short", "ab"},
+		{"uppercase", "Acme"},
+		{"leading hyphen", "-org"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := slugAvailableRequest(h, tt.slug)
+			assert.Equal(t, http.StatusOK, w.Code)
+			resp := parseResponse(t, w)
+			assert.Equal(t, false, resp["available"])
+			assert.Contains(t, resp["reason"], "invalid slug")
+		})
+	}
+}
+
+func TestSlugAvailable_EmptySlug(t *testing.T) {
+	tc, ir := defaultStubs()
+	h := newRegistrationHandler(t, tc, ir)
+	w := slugAvailableRequest(h, "")
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSlugAvailable_NoSlugChecker(t *testing.T) {
+	tc, ir := defaultStubs()
+	h := newRegistrationHandler(t, tc, ir) // no slug checker configured
+	w := slugAvailableRequest(h, "my-org")
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestSlugAvailable_CheckerError(t *testing.T) {
+	tc, ir := defaultStubs()
+	sc := &stubSlugChecker{
+		isAvailableFn: func(_ context.Context, _ string) (bool, error) {
+			return false, errors.New("database connection lost")
+		},
+	}
+	h := newRegistrationHandlerWithSlugChecker(t, tc, ir, sc)
+	w := slugAvailableRequest(h, "my-org")
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestSlugAvailable_MethodNotAllowed(t *testing.T) {
+	tc, ir := defaultStubs()
+	sc := &stubSlugChecker{
+		isAvailableFn: func(_ context.Context, _ string) (bool, error) {
+			return true, nil
+		},
+	}
+	h := newRegistrationHandlerWithSlugChecker(t, tc, ir, sc)
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/slugs/my-org/available", nil)
+	r.SetPathValue("slug", "my-org")
+	w := httptest.NewRecorder()
+	h.HandleSlugAvailable(w, r)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }

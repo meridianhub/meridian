@@ -261,7 +261,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// Wire self-service registration handler (public endpoint, no auth required).
 	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
-	if regOpt := wireRegistration(conns.gormDB("identity"), loopback.rawConn, baseDomain, logger); regOpt != nil {
+	if regOpt := wireRegistration(conns.gormDB("identity"), conns.gormDB("tenant"), loopback.rawConn, baseDomain, logger); regOpt != nil {
 		extraGWOpts = append(extraGWOpts, regOpt)
 	}
 

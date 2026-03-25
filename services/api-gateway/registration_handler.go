@@ -46,10 +46,18 @@ type TenantCreator interface {
 	DeleteTenant(ctx context.Context, tenantID string) error
 }
 
+// SlugChecker abstracts slug availability checks for the registration handler.
+type SlugChecker interface {
+	// IsSlugAvailable returns true if the slug is not in use.
+	IsSlugAvailable(ctx context.Context, slug string) (bool, error)
+}
+
 // RegistrationHandler handles self-service tenant registration.
 // POST /api/v1/register - creates a tenant and an initial admin identity.
+// GET /api/v1/slugs/{slug}/available - checks slug availability.
 type RegistrationHandler struct {
 	tenantCreator TenantCreator
+	slugChecker   SlugChecker
 	identityRepo  identitydomain.Repository
 	rateLimiter   *RegistrationRateLimiter
 	baseDomain    string
@@ -59,6 +67,7 @@ type RegistrationHandler struct {
 // RegistrationHandlerConfig holds dependencies for creating a RegistrationHandler.
 type RegistrationHandlerConfig struct {
 	TenantCreator TenantCreator
+	SlugChecker   SlugChecker
 	IdentityRepo  identitydomain.Repository
 	RateLimiter   *RegistrationRateLimiter
 	BaseDomain    string
@@ -82,6 +91,7 @@ func NewRegistrationHandler(cfg RegistrationHandlerConfig) (*RegistrationHandler
 	}
 	return &RegistrationHandler{
 		tenantCreator: cfg.TenantCreator,
+		slugChecker:   cfg.SlugChecker,
 		identityRepo:  cfg.IdentityRepo,
 		rateLimiter:   rl,
 		baseDomain:    cfg.BaseDomain,
@@ -274,6 +284,53 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 	}
 
 	return nil
+}
+
+// HandleSlugAvailable handles GET /api/v1/slugs/{slug}/available.
+// Returns {"available": true/false} with optional validation errors.
+func (h *RegistrationHandler) HandleSlugAvailable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	slug := r.PathValue("slug")
+	if slug == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required"})
+		return
+	}
+
+	if err := tenantdomain.ValidateSlug(slug); err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"available": false,
+			"reason":    fmt.Sprintf("invalid slug: %v", err),
+		})
+		return
+	}
+
+	if h.slugChecker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "slug availability check not configured",
+		})
+		return
+	}
+
+	available, err := h.slugChecker.IsSlugAvailable(r.Context(), slug)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "slug availability check failed",
+			"slug", slug, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to check slug availability",
+		})
+		return
+	}
+
+	resp := map[string]interface{}{"available": available}
+	if !available {
+		resp["reason"] = "slug is already taken"
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // WithRegistrationHandler sets the self-service registration handler for the server.
