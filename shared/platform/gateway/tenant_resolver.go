@@ -419,10 +419,21 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 			slog.String("error", err.Error()),
 		)
 	} else if !tenantID.IsEmpty() {
-		// Cache hit - also check display name cache
-		displayName, _ := m.displayNameCache.Load(slug)
-		dn, _ := displayName.(string)
-		return resolvedTenant{ID: tenantID, DisplayName: dn}, nil
+		// Cache hit - check local display name cache, backfill from DB on miss.
+		// The slug cache may be shared (Redis) across instances but the display
+		// name cache is process-local, so a cache hit on a fresh instance needs
+		// a one-time DB fetch to populate the display name.
+		if displayName, ok := m.displayNameCache.Load(slug); ok {
+			dn, _ := displayName.(string)
+			return resolvedTenant{ID: tenantID, DisplayName: dn}, nil
+		}
+		// Display name cache miss - backfill from DB (best-effort).
+		if tenantEntity, dbErr := m.tenantRepo.GetBySlug(ctx, slug); dbErr == nil {
+			m.displayNameCache.Store(slug, tenantEntity.DisplayName)
+			return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName}, nil
+		}
+		// DB failed but we have a valid cached ID - return without display name
+		return resolvedTenant{ID: tenantID}, nil
 	}
 
 	// Step 2: Cache miss or error - query database

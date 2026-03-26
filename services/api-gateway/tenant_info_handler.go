@@ -17,6 +17,7 @@ type TenantInfoHandler struct {
 	mu       sync.Mutex
 	limiters map[string]*ipRateLimiter
 	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 type ipRateLimiter struct {
@@ -36,9 +37,9 @@ func NewTenantInfoHandler(logger *slog.Logger) *TenantInfoHandler {
 	return h
 }
 
-// Stop halts the background cleanup goroutine.
+// Stop halts the background cleanup goroutine. Safe to call multiple times.
 func (h *TenantInfoHandler) Stop() {
-	close(h.stop)
+	h.stopOnce.Do(func() { close(h.stop) })
 }
 
 // tenantInfoResponse is the JSON body returned by GET /api/tenant-info.
