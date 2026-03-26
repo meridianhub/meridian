@@ -83,7 +83,7 @@ func TestPostgresOutboxRepository_FetchDispatchable(t *testing.T) {
 	assert.Len(t, entries, 3)
 
 	for _, e := range entries {
-		assert.Contains(t, []email.OutboxStatus{email.StatusPending, email.StatusFailed}, e.Status)
+		assert.Equal(t, email.StatusSending, e.Status)
 	}
 }
 

@@ -65,10 +65,12 @@ type OutboxEntry struct {
 type OutboxStatus string
 
 const (
-	StatusPending   OutboxStatus = "PENDING"
-	StatusSent      OutboxStatus = "SENT"
-	StatusFailed    OutboxStatus = "FAILED"
-	StatusCancelled OutboxStatus = "CANCELLED"
+	StatusPending    OutboxStatus = "PENDING"
+	StatusSending    OutboxStatus = "SENDING"
+	StatusSent       OutboxStatus = "SENT"
+	StatusFailed     OutboxStatus = "FAILED"
+	StatusDeadLetter OutboxStatus = "DEAD_LETTER"
+	StatusCancelled  OutboxStatus = "CANCELLED"
 )
 
 // AuditStatus represents the delivery state tracked in audit logs.

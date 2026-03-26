@@ -16,3 +16,4 @@ CREATE TABLE email_audit_log (
 );
 
 CREATE INDEX idx_email_audit_tenant ON email_audit_log (tenant_id, created_at DESC);
+CREATE INDEX idx_email_audit_outbox ON email_audit_log (outbox_id);
