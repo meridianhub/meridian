@@ -40,6 +40,7 @@ type Server struct {
 	ssoHandler            *SSOHandler
 	registrationHandler   *RegistrationHandler
 	tenantInfoHandler     *TenantInfoHandler
+	resendWebhookHandler  *ResendWebhookHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -230,6 +231,11 @@ func (s *Server) registerRoutes() {
 	// Public tenant info endpoint - tenant resolution but NO auth middleware (pre-auth).
 	// GET /api/tenant-info: returns slug and display name for the login page.
 	s.registerTenantInfoRoute()
+
+	// Resend delivery status webhook - NO middleware (Svix signature IS the auth).
+	if s.resendWebhookHandler != nil {
+		s.mux.Handle("POST /api/v1/webhooks/resend", s.resendWebhookHandler)
+	}
 
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy
