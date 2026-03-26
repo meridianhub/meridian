@@ -1,0 +1,22 @@
+MERIDIAN - Final Warning
+
+Dear Golden Customer,
+
+FINAL NOTICE: This is a final notice regarding invoice INV-GOLDEN for £500.00,
+which is now 45 days overdue.
+
+If payment is not received or a payment arrangement is not made within 48 hours, your account
+will be frozen and all services suspended.
+
+To prevent service interruption, please make payment immediately or contact our support team.
+
+ACCOUNT DETAILS
+---------------
+Invoice:      INV-GOLDEN
+Amount Due:   £500.00
+Days Overdue: 45
+
+Support: support@meridian.io
+
+--
+Meridian - The Operating System for the Real-World Economy

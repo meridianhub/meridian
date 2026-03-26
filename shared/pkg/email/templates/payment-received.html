@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment Received - {{.ReceiptNumber}}</title>
+<style>
+  body { margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, sans-serif; }
+  .wrapper { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 4px; overflow: hidden; }
+  .header { background-color: #166534; padding: 24px 32px; }
+  .header h1 { margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.05em; }
+  .header p { margin: 4px 0 0; color: rgba(255,255,255,0.8); font-size: 14px; }
+  .success-banner { background-color: #dcfce7; padding: 16px 32px; text-align: center; }
+  .success-banner p { margin: 0; color: #166534; font-size: 16px; font-weight: 600; }
+  .body { padding: 32px; }
+  .body p { color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px; }
+  .detail-box { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;
+                padding: 20px 24px; margin: 24px 0; }
+  .detail-box table { width: 100%; border-collapse: collapse; }
+  .detail-box td { padding: 8px 0; font-size: 14px; color: #475569; }
+  .detail-box td:first-child { font-weight: 600; color: #0f172a; width: 40%; }
+  .detail-box tr:not(:last-child) td { border-bottom: 1px solid #f1f5f9; }
+  .footer { background-color: #f8fafc; padding: 24px 32px; text-align: center; }
+  .footer p { margin: 0; color: #94a3b8; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <h1>Meridian</h1>
+    <p>Payment Confirmation</p>
+  </div>
+  <div class="success-banner">
+    <p>Payment received - thank you!</p>
+  </div>
+  <div class="body">
+    <p>Dear {{.CustomerName}},</p>
+    <p>We have received your payment. Your account is up to date. Please keep this email as your receipt.</p>
+    <div class="detail-box">
+      <table>
+        <tr>
+          <td>Receipt Number</td>
+          <td>{{.ReceiptNumber}}</td>
+        </tr>
+        <tr>
+          <td>Invoice Number</td>
+          <td>{{.InvoiceNumber}}</td>
+        </tr>
+        <tr>
+          <td>Amount Paid</td>
+          <td>{{.Amount}}</td>
+        </tr>
+        <tr>
+          <td>Payment Date</td>
+          <td>{{.PaymentDate}}</td>
+        </tr>
+      </table>
+    </div>
+    <p>If you have any questions about this payment, please contact our support team.</p>
+  </div>
+  <div class="footer">
+    <p>&copy; Meridian &mdash; The Operating System for the Real-World Economy</p>
+  </div>
+</div>
+</body>
+</html>

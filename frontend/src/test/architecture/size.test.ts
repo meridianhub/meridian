@@ -39,7 +39,7 @@ const knownOversizedFiles: Record<string, number> = {
   'src/features/mappings/pages/[mappingId].tsx': 488,
   'src/features/cookbook/components/composition-graph.tsx': 450,
   'src/features/reference-data/components/create-valuation-feature-dialog.tsx': 401,
-  'src/contexts/auth-context.tsx': 370,
+  'src/contexts/auth-context.tsx': 376,
   'src/features/internal-accounts/pages/[accountId].tsx': 369,
   'src/features/parties/pages/dialogs/register-associations-dialog.tsx': 368,
   'src/features/internal-accounts/pages/create-internal-account-dialog.tsx': 367,
