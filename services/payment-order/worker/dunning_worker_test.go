@@ -304,6 +304,60 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		assert.False(t, callbackCalled.Load(), "callback should not be called for non-failed billing run")
 	})
 
+	t.Run("cancels pending dunning emails when billing run resolved", func(t *testing.T) {
+		repo := newMockBillingRepo()
+
+		billingRunID := uuid.New()
+		run := &domain.BillingRun{
+			ID:         billingRunID,
+			TenantID:   testTenantID,
+			Status:     domain.BillingRunStatusCompleted, // Resolved
+			CycleStart: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			CycleEnd:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+		}
+		repo.mu.Lock()
+		repo.runs[billingRunID] = run
+		repo.mu.Unlock()
+
+		w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
+			PollInterval:    50 * time.Millisecond,
+			ShutdownTimeout: 2 * time.Second,
+		}, noopCallback, logger, metrics)
+		require.NoError(t, err)
+
+		// Set up email canceller mock
+		var cancelledPattern atomic.Value
+		mockCanceller := &mockEmailCanceller{
+			cancelFunc: func(_ context.Context, pattern string) (int64, error) {
+				cancelledPattern.Store(pattern)
+				return 2, nil
+			},
+		}
+		w.SetEmailCanceller(mockCanceller)
+
+		// Clean ZSET from previous test
+		client.Del(context.Background(), zsetKey)
+
+		err = w.ScheduleDunningRetry(context.Background(), testTenantID, billingRunID, -1*time.Minute)
+		require.NoError(t, err)
+
+		go func() {
+			_ = w.Start(context.Background())
+		}()
+
+		// Wait for email cancellation to happen
+		err = await.Until(func() bool {
+			v := cancelledPattern.Load()
+			return v != nil
+		})
+		require.NoError(t, err, "email canceller should have been called")
+
+		w.Stop()
+
+		expectedPattern := "dunning-%-" + billingRunID.String()
+		assert.Equal(t, expectedPattern, cancelledPattern.Load().(string))
+	})
+
 	t.Run("drops billing run not found", func(t *testing.T) {
 		repo := newMockBillingRepo()
 
@@ -811,4 +865,16 @@ func TestDunningWorker_TenantIsolation_Processing(t *testing.T) {
 	countB, err := client.ZCard(ctx, keyB).Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), countB)
+}
+
+// mockEmailCanceller implements DunningEmailCanceller for testing.
+type mockEmailCanceller struct {
+	cancelFunc func(ctx context.Context, pattern string) (int64, error)
+}
+
+func (m *mockEmailCanceller) CancelByIdempotencyKeyPattern(ctx context.Context, pattern string) (int64, error) {
+	if m.cancelFunc != nil {
+		return m.cancelFunc(ctx, pattern)
+	}
+	return 0, nil
 }

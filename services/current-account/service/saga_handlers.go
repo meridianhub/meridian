@@ -84,7 +84,31 @@ func stubNotImplemented(handlerName string) saga.Handler {
 //   - position_keeping.* for position service handlers
 //   - financial_accounting.* for financial accounting handlers
 //   - current_account.* for domain-specific handlers
-func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
+// RegisterCurrentAccountHandlersOption configures optional handler overrides.
+type RegisterCurrentAccountHandlersOption func(*registerOptions)
+
+type registerOptions struct {
+	notificationHandler saga.Handler
+}
+
+// WithNotificationHandler replaces the notification.send stub with a real handler.
+func WithNotificationHandler(handler saga.Handler) RegisterCurrentAccountHandlersOption {
+	return func(o *registerOptions) {
+		o.notificationHandler = handler
+	}
+}
+
+func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry, opts ...RegisterCurrentAccountHandlersOption) error {
+	options := &registerOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	notifHandler := stubNotImplemented("notification.send")
+	if options.notificationHandler != nil {
+		notifHandler = options.notificationHandler
+	}
+
 	handlers := []struct {
 		name     string
 		handler  saga.Handler
@@ -141,7 +165,7 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry) error {
 		{"current_account.terminate_lien", stubNotImplemented("current_account.terminate_lien"), nil},
 
 		// Platform-wide handlers (stubs - defined in schema for other services)
-		{"notification.send", stubNotImplemented("notification.send"), nil},
+		{"notification.send", notifHandler, nil},
 		{"payment_order.create_lien", stubNotImplemented("payment_order.create_lien"), nil},
 		{"payment_order.execute_lien", stubNotImplemented("payment_order.execute_lien"), nil},
 		{"payment_order.post_ledger_entries", stubNotImplemented("payment_order.post_ledger_entries"), nil},

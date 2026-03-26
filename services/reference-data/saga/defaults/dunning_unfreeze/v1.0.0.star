@@ -99,6 +99,13 @@ def dunning_unfreeze():
     notification.send(
         type="EMAIL",
         recipient=party_id,
+        template="dunning-resolved",
+        data={
+            "amount_cents": ctx.get("amount_cents"),
+            "currency": ctx.get("currency"),
+            "billing_run_id": ctx.get("billing_run_id"),
+        },
+        idempotency_key="dunning-resolved-" + ctx.get("billing_run_id", ""),
     )
     result["notification_sent"] = True
 

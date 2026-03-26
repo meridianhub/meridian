@@ -42,6 +42,13 @@ type DunningWorkerConfig struct {
 // The callback receives the billing run and should trigger the appropriate saga.
 type DunningCallback func(ctx context.Context, run *domain.BillingRun) error
 
+// DunningEmailCanceller cancels pending dunning emails for a billing run.
+// This is used when a billing run is resolved (e.g., payment succeeds) to
+// prevent sending stale dunning notifications.
+type DunningEmailCanceller interface {
+	CancelByIdempotencyKeyPattern(ctx context.Context, pattern string) (int64, error)
+}
+
 // DunningWorker polls a Redis sorted set for due dunning retries and triggers
 // escalation. It uses ZADD to schedule retries with the due timestamp as score
 // and ZRANGEBYSCORE to find items whose due time has passed.
@@ -50,14 +57,15 @@ type DunningCallback func(ctx context.Context, run *domain.BillingRun) error
 // Per-item distributed locking uses redislock.Lock to prevent duplicate
 // processing across replicas.
 type DunningWorker struct {
-	lifecycle *scheduler.WorkerLifecycle
-	repo      persistence.BillingRepository
-	redis     *redis.Client
-	lock      *redislock.Lock
-	config    DunningWorkerConfig
-	callback  DunningCallback
-	logger    *slog.Logger
-	metrics   *BillingMetrics
+	lifecycle      *scheduler.WorkerLifecycle
+	repo           persistence.BillingRepository
+	redis          *redis.Client
+	lock           *redislock.Lock
+	config         DunningWorkerConfig
+	callback       DunningCallback
+	emailCanceller DunningEmailCanceller
+	logger         *slog.Logger
+	metrics        *BillingMetrics
 }
 
 // NewDunningWorker creates a new dunning retry worker.
@@ -110,6 +118,12 @@ func NewDunningWorker(
 		logger:   workerLogger,
 		metrics:  metrics,
 	}, nil
+}
+
+// SetEmailCanceller sets an optional email canceller for cancelling pending
+// dunning emails when a billing run is resolved externally.
+func (w *DunningWorker) SetEmailCanceller(canceller DunningEmailCanceller) {
+	w.emailCanceller = canceller
 }
 
 // Start begins the dunning worker polling loop.
@@ -292,11 +306,12 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 		return false
 	}
 
-	// Billing run resolved externally — remove from retry set
+	// Billing run resolved externally — remove from retry set and cancel pending emails
 	if run.Status != domain.BillingRunStatusFailed {
 		w.logger.Info("billing run no longer failed, skipping dunning",
 			"billing_run_id", billingRunID,
 			"status", run.Status)
+		w.cancelPendingDunningEmails(ctx, billingRunID)
 		return true
 	}
 
@@ -317,6 +332,27 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 		"billing_run_id", billingRunID,
 		"dunning_level", run.DunningLevel)
 	return true
+}
+
+// cancelPendingDunningEmails cancels any pending dunning emails for the given billing run.
+// Uses a LIKE pattern to match all dunning email idempotency keys for the run.
+func (w *DunningWorker) cancelPendingDunningEmails(ctx context.Context, billingRunID uuid.UUID) {
+	if w.emailCanceller == nil {
+		return
+	}
+	pattern := "dunning-%-" + billingRunID.String()
+	cancelled, err := w.emailCanceller.CancelByIdempotencyKeyPattern(ctx, pattern)
+	if err != nil {
+		w.logger.Error("failed to cancel dunning emails",
+			"billing_run_id", billingRunID,
+			"error", err)
+		return
+	}
+	if cancelled > 0 {
+		w.logger.Info("cancelled pending dunning emails",
+			"billing_run_id", billingRunID,
+			"count", cancelled)
+	}
 }
 
 // CancelDunningRetry removes a billing run from the tenant-scoped retry set.
