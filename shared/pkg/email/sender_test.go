@@ -93,7 +93,7 @@ func TestResendSender_Send_NoIdempotencyKey(t *testing.T) {
 
 func TestResendSender_Send_ServerError_TripsCircuitBreaker(t *testing.T) {
 	callCount := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		callCount++
 		w.WriteHeader(http.StatusInternalServerError)
 	}))

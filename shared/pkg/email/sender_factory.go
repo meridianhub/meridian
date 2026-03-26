@@ -9,7 +9,7 @@ import (
 // ErrMissingResendAPIKey is returned when EMAIL_MODE is live or empty but RESEND_API_KEY is not set.
 var ErrMissingResendAPIKey = errors.New("RESEND_API_KEY must be set when EMAIL_MODE is live")
 
-// ErrUnknownEmailMode is returned when EMAIL_MODE contains an unrecognised value.
+// ErrUnknownEmailMode is returned when EMAIL_MODE contains an unrecognized value.
 var ErrUnknownEmailMode = errors.New("unknown EMAIL_MODE: expected disabled, log, or live")
 
 // NewSenderFromEnv constructs a Sender based on the EMAIL_MODE environment variable:
