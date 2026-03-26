@@ -182,16 +182,26 @@ type TemplateRenderer interface {
 The outbox pattern guarantees emails survive crashes. The worker polls
 the outbox independently and delivers via Resend.
 
-**Cross-service write model**: The email outbox repository lives in
-`shared/pkg/email/outbox.go` as a shared package, not behind a service
-boundary. Services that trigger emails import the outbox repository
-directly and write to the email outbox table in the same database
-(Meridian uses a unified database, not per-service databases). For saga
-handlers (`notification.send`), the handler runs in-process and writes
-to the outbox. For direct integration (invoice generator in
-payment-order), the outbox repository is called after invoice creation.
-If the outbox write fails, the billing run logs the failure for manual
-follow-up.
+**Cross-service write model**: Meridian uses database-per-service (ADR
+003). The email outbox migration lives in `services/notification/` but
+the outbox table is added to **each originating service's database** via
+shared migration files. This preserves same-transaction writes:
+
+- **payment-order DB**: Gets `email_outbox` + `email_audit_log` tables.
+  Invoice generator writes outbox row in the same transaction as invoice
+  creation. True transactional guarantee.
+- **reference-data DB**: Gets the same tables. Saga handler
+  (`notification.send`) writes outbox row as part of saga step
+  execution. Same-transaction guarantee via saga runtime.
+- **Email worker**: Polls outbox tables across all service databases.
+  Configured with connection strings for each DB that has email tables.
+
+The outbox repository lives in `shared/pkg/email/outbox.go` as a shared
+package. Each service imports it and connects it to its own DB. The
+worker aggregates across databases.
+
+This matches the existing event outbox pattern where each service has
+its own outbox table polled by a shared worker.
 
 **Delivery guarantee**: At-least-once from Meridian. The idempotency key is
 forwarded as Resend's `Idempotency-Key` header, so Resend deduplicates on
