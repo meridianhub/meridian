@@ -55,15 +55,20 @@ func NewResendWebhookHandler(auditRepo email.AuditRepository, webhookKey string,
 	}
 }
 
+const maxWebhookBody = 1 << 20 // 1 MiB
+
 // readAndVerifyWebhook reads the request body and verifies the Svix signature.
 // Returns the raw body or an error with the appropriate HTTP status code.
 func (h *ResendWebhookHandler) readAndVerifyWebhook(r *http.Request) ([]byte, int, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB limit
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
 	if err := r.Body.Close(); err != nil {
 		h.logger.WarnContext(r.Context(), "resend webhook: failed to close request body", "error", err)
+	}
+	if len(body) > maxWebhookBody {
+		return nil, http.StatusRequestEntityTooLarge, errors.New("webhook: request body too large")
 	}
 	if err := verifySvixSignature(body, r.Header, h.webhookKey); err != nil {
 		return nil, http.StatusUnauthorized, err
