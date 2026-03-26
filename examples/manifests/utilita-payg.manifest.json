@@ -418,7 +418,7 @@
       "legalName": "Utilita Energy Limited",
       "partyType": "ORGANIZATION",
       "externalReference": "GETW",
-      "externalReferenceType": "MPID",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "supplier",
         "company_number": "04849181",
@@ -454,7 +454,7 @@
       "name": "Southern England",
       "partyType": "ORGANIZATION",
       "externalReference": "GSPSOUT",
-      "externalReferenceType": "GSP_GROUP",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "SOUT"
@@ -465,7 +465,7 @@
       "name": "South East England",
       "partyType": "ORGANIZATION",
       "externalReference": "GSPSEEB",
-      "externalReferenceType": "GSP_GROUP",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "SEEB"
@@ -476,7 +476,7 @@
       "name": "South Wales",
       "partyType": "ORGANIZATION",
       "externalReference": "GSPSWAE",
-      "externalReferenceType": "GSP_GROUP",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "SWAE"
@@ -487,7 +487,7 @@
       "name": "West Midlands",
       "partyType": "ORGANIZATION",
       "externalReference": "GSPWMID",
-      "externalReferenceType": "GSP_GROUP",
+      "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "gsp",
         "region": "WMID"
