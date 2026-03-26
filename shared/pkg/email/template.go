@@ -66,8 +66,14 @@ func (r *EmbeddedRenderer) Render(name string, data any) (string, string, error)
 	}
 
 	// Validate typed data structs that have additional constraints.
-	if d, ok := data.(DunningNoticeData); ok {
+	// Handle both value and pointer receivers so callers cannot bypass validation.
+	switch d := data.(type) {
+	case DunningNoticeData:
 		if d.Severity < 1 || d.Severity > 3 {
+			return "", "", fmt.Errorf("%w (got %d)", ErrInvalidDunningSeverity, d.Severity)
+		}
+	case *DunningNoticeData:
+		if d != nil && (d.Severity < 1 || d.Severity > 3) {
 			return "", "", fmt.Errorf("%w (got %d)", ErrInvalidDunningSeverity, d.Severity)
 		}
 	}
