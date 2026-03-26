@@ -97,7 +97,8 @@ existing infrastructure. The net-new Go code is ~700 lines + templates.
 - **Email provider**: Resend (resend.com) - Go SDK v3, 3k emails/mo free
 - **Sending domain**: `meridianhub.cloud` (DNS: DKIM, SPF, DMARC)
 - **From addresses**: `noreply@meridianhub.cloud`, `billing@meridianhub.cloud`
-- **Migration directory**: `services/notification/migrations/`
+- **Migration files**: `shared/pkg/email/migrations/` (applied to each
+  originating service DB: payment-order, reference-data)
 - **Worker hosting**: `cmd/meridian/main.go` (unified binary, alongside existing workers)
 
 ### Architectural Constraints
@@ -368,7 +369,8 @@ Adapted from `shared/platform/events/metrics.go` (rename subsystem):
 
 ### Task 1: Email outbox and audit tables (2 points)
 
-Migrations in `services/notification/migrations/`:
+Shared migration files in `shared/pkg/email/migrations/`, applied to each
+originating service database (payment-order, reference-data):
 
 ```sql
 CREATE TABLE email_outbox (
