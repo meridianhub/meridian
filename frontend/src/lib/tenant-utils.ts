@@ -24,6 +24,7 @@ export function isBaseDomain(hostname: string): boolean {
 export function formatSlugAsDisplayName(slug: string): string {
   return slug
     .split('-')
+    .filter((word) => word.length > 0)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }
