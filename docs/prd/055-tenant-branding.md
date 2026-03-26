@@ -64,7 +64,14 @@ Extend the tenant context package to carry `DisplayName` alongside
 - Update `TenantResolverMiddleware` to inject display name into
   context after resolving the tenant entity
 - This makes display name available to all downstream handlers
-  without additional DB queries
+
+**Cache consideration:** The current `slugCache` only stores
+`TenantID`. On cache hits (common path), the full entity is not
+loaded. The resolver should extend the cache to store display name
+alongside tenant ID, or fall back to a DB query when display name
+is needed. Either approach is acceptable - the display name lookup
+is low-frequency (once per login, once per page load) and the
+tenant table is small.
 
 ### 2. Add display name to JWT claims (backend)
 
@@ -91,14 +98,19 @@ Add `GET /api/tenant-info` to the gateway as a public endpoint
 - This serves the login page where no JWT exists yet
 
 **Abuse protections:**
+- The endpoint resolves tenant from the request's subdomain (Host
+  header), not from a query parameter. There is no lookup-by-slug
+  input - a caller must already be on the tenant's subdomain to
+  get a response. This prevents enumeration: you cannot discover
+  tenants you don't already have the subdomain for.
 - Rate limited per IP (reuse the gateway's existing rate limiter)
 - Positive responses cached via `Cache-Control: public, s-maxage=300`
   to reduce repeated lookups
 - Error responses return a uniform 404 with identical body and
-  timing regardless of whether the slug is malformed, unknown, or
-  absent - the existing tenant resolver already does this
-- The endpoint only returns slug and display name - no tenant IDs,
-  status, or internal metadata are exposed
+  timing regardless of whether the subdomain is invalid, unknown,
+  or absent - the existing tenant resolver already does this
+- Only slug and display name are returned - no tenant IDs, status,
+  or internal metadata are exposed
 
 ### 4. Frontend: consume tenant display name (frontend)
 
