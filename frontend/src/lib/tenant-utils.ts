@@ -17,6 +17,17 @@ export function isBaseDomain(hostname: string): boolean {
   return hostname.toLowerCase() === baseDomain
 }
 
+/**
+ * Formats a tenant slug as a display name by replacing hyphens with spaces
+ * and capitalizing each word. e.g., "volterra-energy" -> "Volterra Energy"
+ */
+export function formatSlugAsDisplayName(slug: string): string {
+  return slug
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
 export function getTenantSlugFromSubdomain(hostname: string): string | null {
   // No subdomain support on localhost
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
