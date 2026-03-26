@@ -46,7 +46,10 @@ def execute_ec_activation():
     # Use timestamp-based correlation ID so EC can be reactivated after repayment.
     # Each activation cycle gets a unique ID; topup_waterfall clears the balance
     # using its own payment_ref, so previous activation IDs don't block new ones.
-    activation_ref = "ec_" + party_id + "_" + fuel_type + "_" + ctx.get("timestamp", "")
+    timestamp = ctx.get("timestamp", "")
+    if not timestamp:
+        return {"status": "VALIDATION_ERROR", "reason": "timestamp is required for EC activation"}
+    activation_ref = "ec_" + party_id + "_" + fuel_type + "_" + timestamp
 
     # Step 1: Check if EC is already active by inspecting the current balance,
     # not log existence. This allows reactivation after topup_waterfall repays EC.

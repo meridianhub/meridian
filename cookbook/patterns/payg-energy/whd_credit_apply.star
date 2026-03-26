@@ -91,7 +91,7 @@ def execute_whd():
     step(name="credit_prepayment")
     if allocatable > Decimal("0"):
         position_keeping.initiate_log(
-            position_id="PREPAYMENT_LIABILITY:" + party_id,
+            position_id="PREPAYMENT_LIABILITY:" + party_id + ":electricity",
             amount=allocatable,
             direction="CREDIT",
             correlation_id=whd_ref,
