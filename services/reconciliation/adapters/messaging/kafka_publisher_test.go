@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
@@ -115,4 +116,70 @@ func TestNoopPublisher_WithNilLogger(t *testing.T) {
 	publisher := NewNoopPublisher(nil)
 	require.NotNil(t, publisher)
 	assert.NotNil(t, publisher.logger)
+}
+
+func TestNewKafkaPublisher_EmptyBrokers(t *testing.T) {
+	_, err := NewKafkaPublisher("", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kafka producer")
+}
+
+func TestNewKafkaPublisher_ValidBrokers(t *testing.T) {
+	// kgo.NewClient connects lazily so this succeeds even without a running broker.
+	publisher, err := NewKafkaPublisher("localhost:9092", nil)
+	require.NoError(t, err)
+	require.NotNil(t, publisher)
+	// Flush has nothing to flush (no pending records) and returns quickly.
+	publisher.Close()
+}
+
+func TestNewKafkaPublisher_NilLoggerUsesDefault(t *testing.T) {
+	publisher, err := NewKafkaPublisher("localhost:9092", nil)
+	require.NoError(t, err)
+	require.NotNil(t, publisher)
+	assert.NotNil(t, publisher.logger)
+	publisher.Close()
+}
+
+func TestKafkaPublisher_Close(t *testing.T) {
+	publisher, err := NewKafkaPublisher("localhost:9092", slog.Default())
+	require.NoError(t, err)
+	// Should not panic; Flush returns immediately with no pending records.
+	publisher.Close()
+}
+
+func TestKafkaPublisher_PublishToTopic_MarshalError(t *testing.T) {
+	publisher, err := NewKafkaPublisher("localhost:9092", slog.Default())
+	require.NoError(t, err)
+	defer publisher.Close()
+
+	ctx := context.Background()
+	// Channels cannot be marshaled to JSON.
+	err = publisher.publishToTopic(ctx, TopicReconciliationRunStarted, make(chan int))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal event")
+}
+
+func TestKafkaPublisher_Publish_MarshalError(t *testing.T) {
+	publisher, err := NewKafkaPublisher("localhost:9092", slog.Default())
+	require.NoError(t, err)
+	defer publisher.Close()
+
+	ctx := context.Background()
+	// Channels cannot be marshaled to JSON; Publish returns the marshal error.
+	err = publisher.Publish(ctx, TopicReconciliationRunStarted, make(chan int))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal event")
+}
+
+func TestKafkaPublisher_Publish_MarshalError_NoDeprecatedPublish(t *testing.T) {
+	publisher, err := NewKafkaPublisher("localhost:9092", slog.Default())
+	require.NoError(t, err)
+	defer publisher.Close()
+
+	ctx := context.Background()
+	// Marshal error on primary topic should not attempt deprecated topic publish.
+	err = publisher.Publish(ctx, "unknown.topic", make(chan int))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to marshal event")
 }
