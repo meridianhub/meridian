@@ -11,3 +11,7 @@ const TenantIDKey = "x-tenant-id"
 // The slug differs from the tenant ID: slug uses hyphens (e.g. "volterra-energy")
 // while the ID uses underscores (e.g. "volterra_energy").
 const TenantSlugKey = "x-tenant-slug"
+
+// TenantDisplayNameKey is the key for the tenant display name (human-readable label).
+// Used in JWT claims so frontends can show the tenant name without an extra API call.
+const TenantDisplayNameKey = "x-tenant-display-name"

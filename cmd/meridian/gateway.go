@@ -128,6 +128,10 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, 
 		return nil, fmt.Errorf("failed to create tenant resolver: %w", err)
 	}
 
+	// Wire public tenant info endpoint for login page branding.
+	tenantInfoHandler := gateway.NewTenantInfoHandler(logger)
+	opts = append(opts, gateway.WithTenantInfoHandler(tenantInfoHandler))
+
 	// Append caller-provided options (e.g., event stream handler).
 	opts = append(opts, extraOpts...)
 
