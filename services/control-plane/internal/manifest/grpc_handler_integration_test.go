@@ -180,9 +180,9 @@ func TestDiffManifestVersions_Integration(t *testing.T) {
 	// Store version 2 with an extra instrument
 	m2 := testManifestProto("2.0")
 	m2.Instruments = append(m2.Instruments, &controlplanev1.InstrumentDefinition{
-		Code: "EUR",
-		Name: "Euro",
-		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+		Code:       "EUR",
+		Name:       "Euro",
+		Type:       controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
 		Dimensions: &controlplanev1.InstrumentDimensions{Unit: "EUR", Precision: 2},
 	})
 	_, err = svc.StoreManifestVersion(ctx, m2, "admin", nil, manifest.ApplyStatusApplied, nil, 0)
