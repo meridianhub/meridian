@@ -11,6 +11,7 @@ import (
 	"github.com/meridianhub/meridian/services/party/domain"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	platformdb "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
@@ -508,16 +509,15 @@ func TestExistsByID_WithOrganizationContext_UsesOrgScope(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, exists, "Party should exist with tenant context")
 
-	// With organization context, the search_path is changed.
-	// Since we include public schema in search_path, the party is still found.
+	// With a non-existent organization context, WithGormTenantScope now fails fast
+	// with ErrTenantSchemaNotProvisioned instead of silently falling through to public.
 	orgID := tenant.TenantID("acme_bank")
 	orgCtx := tenant.WithTenant(ctx, orgID)
 
-	// The query will use the org-scoped transaction
-	exists, err = repo.ExistsByID(orgCtx, party.ID())
-	require.NoError(t, err)
-	// Party may still be found via public schema fallback in search_path
-	t.Logf("ExistsByID with org context: exists=%v, err=%v", exists, err)
+	_, err = repo.ExistsByID(orgCtx, party.ID())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, platformdb.ErrTenantSchemaNotProvisioned,
+		"querying with non-existent tenant schema should fail-fast")
 }
 
 func TestFindByExternalReference_WithOrganizationContext_UsesOrgScope(t *testing.T) {

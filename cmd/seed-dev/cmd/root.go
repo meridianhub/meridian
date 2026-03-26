@@ -28,6 +28,12 @@ var ErrManifestValidation = errors.New("manifest validation failed")
 // ErrManifestApplyFailed is returned when the manifest apply returns a non-success status.
 var ErrManifestApplyFailed = errors.New("manifest apply failed")
 
+// ErrTenantNotActive is returned when the tenant provisioning status is not ACTIVE.
+var ErrTenantNotActive = errors.New("tenant not active")
+
+// ErrProvisioningFailed is returned when tenant provisioning reaches a terminal failure state.
+var ErrProvisioningFailed = errors.New("tenant provisioning failed")
+
 var (
 	gatewayURL       string
 	grpcAddr         string
@@ -134,6 +140,14 @@ func runSeed(_ *cobra.Command, _ []string) error {
 	fmt.Printf("Creating tenant '%s' ...\n", tenantID)
 	if err := createTenant(ctx, conn, tenantID, tenantSlug); err != nil {
 		return fmt.Errorf("create tenant: %w", err)
+	}
+
+	// Wait for tenant provisioning to complete before applying manifests.
+	// The provisioner runs asynchronously - the schema must exist before
+	// any tenant-scoped operations (WithGormTenantScope validates this).
+	fmt.Println("Waiting for tenant provisioning ...")
+	if err := waitForTenantReady(ctx, conn, tenantID); err != nil {
+		return fmt.Errorf("wait for tenant provisioning: %w", err)
 	}
 
 	if skipManifest {
@@ -300,6 +314,41 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 
 	fmt.Println("Manifest applied successfully.")
 	return nil
+}
+
+// waitForTenantReady polls GetTenantProvisioningStatus until the tenant schema
+// is provisioned (status ACTIVE) or the context is cancelled.
+func waitForTenantReady(ctx context.Context, conn *grpc.ClientConn, id string) error {
+	client := tenantv1.NewTenantServiceClient(conn)
+
+	var terminalErr error
+	err := await.New().
+		AtMost(60 * time.Second).
+		PollInterval(2 * time.Second).
+		WithContext(ctx).
+		Until(func() bool {
+			resp, err := client.GetTenantProvisioningStatus(ctx, &tenantv1.GetTenantProvisioningStatusRequest{
+				TenantId: id,
+			})
+			if err != nil {
+				fmt.Printf("  provisioning check failed: %v\n", err)
+				return false
+			}
+			switch resp.GetOverallStatus() { //nolint:exhaustive // default handles remaining transitional states
+			case tenantv1.TenantStatus_TENANT_STATUS_ACTIVE:
+				fmt.Println("Tenant provisioned and active.")
+				return true
+			case tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_FAILED:
+				terminalErr = fmt.Errorf("%w: %s", ErrProvisioningFailed, resp.GetOverallStatus().String())
+				return true // stop polling
+			default:
+				return false
+			}
+		})
+	if terminalErr != nil {
+		return terminalErr
+	}
+	return err
 }
 
 // getEnvOrDefault returns the environment variable value or a default.

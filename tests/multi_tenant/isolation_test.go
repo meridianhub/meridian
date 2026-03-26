@@ -869,14 +869,17 @@ func TestOrganizationDatabaseScopeErrors(t *testing.T) {
 				return err
 			}
 
-			// SET LOCAL should succeed (PostgreSQL allows setting search_path to non-existent schemas)
-			// But querying tables should fail
+			// WithTenantScope fail-fast check prevents reaching this query
+			// when the tenant schema does not exist.
 			var count int
 			return tx.QueryRowContext(orgCtx, "SELECT COUNT(*) FROM accounts").Scan(&count)
 		})
 
 		require.Error(t, err, "query to non-existent schema should fail")
-		assert.Contains(t, err.Error(), "accounts", "error should mention missing table")
+		assert.ErrorIs(t, err, db.ErrTenantSchemaNotProvisioned,
+			"WithTenantScope should fail-fast when schema does not exist")
+		assert.Contains(t, err.Error(), "org_nonexistent_org",
+			"error should mention the missing schema")
 	})
 }
 

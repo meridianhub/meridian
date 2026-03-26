@@ -300,6 +300,86 @@ func TestTenantGuard_Integration_SearchPathRevertsAfterTransaction(t *testing.T)
 		"search_path must revert to the pre-transaction value after commit")
 }
 
+// TestWithGormTenantScope_Integration_NonExistentSchema_ReturnsError verifies that
+// WithGormTenantScope returns ErrTenantSchemaNotProvisioned when the tenant's schema
+// does not exist, rather than silently falling through to the public schema.
+func TestWithGormTenantScope_Integration_NonExistentSchema_ReturnsError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	gormDB, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tenantID := tenant.MustNewTenantID("nonexistent_org")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	err := db.WithGormTenantTransaction(ctx, gormDB, func(tx *gorm.DB) error {
+		return tx.Exec("SELECT 1").Error
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, db.ErrTenantSchemaNotProvisioned)
+}
+
+// TestWithGormTenantScope_Integration_NonExistentSchema_NeverExposesPublicData is a security
+// regression test that verifies a non-existent tenant schema cannot access data in the
+// public schema. Before the fail-fast fix, PostgreSQL silently accepted non-existent schemas
+// in search_path and fell through to public, leaking cross-tenant data.
+func TestWithGormTenantScope_Integration_NonExistentSchema_NeverExposesPublicData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	gormDB, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	bypassCtx := db.WithTenantGuardBypass(context.Background())
+
+	// Seed data in public schema that must never leak to non-existent tenants.
+	require.NoError(t, gormDB.WithContext(bypassCtx).Exec(
+		"CREATE TABLE IF NOT EXISTS public_leak_test (id INT PRIMARY KEY DEFAULT unique_rowid(), secret TEXT NOT NULL)",
+	).Error)
+	require.NoError(t, gormDB.WithContext(bypassCtx).Exec(
+		"INSERT INTO public_leak_test (secret) VALUES ('TOP_SECRET_DATA')",
+	).Error)
+
+	tenantID := tenant.MustNewTenantID("ghost_tenant")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	// Must fail before any query can reach the public schema.
+	err := db.WithGormTenantTransaction(ctx, gormDB, func(tx *gorm.DB) error {
+		var count int64
+		return tx.Table("public_leak_test").Count(&count).Error
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, db.ErrTenantSchemaNotProvisioned,
+		"non-existent schema must fail-fast, never fall through to public")
+}
+
+// TestWithGormTenantScope_Integration_ExistingSchema_StillWorks is a regression test
+// that verifies the schema existence check does not break normal tenant operations.
+func TestWithGormTenantScope_Integration_ExistingSchema_StillWorks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	gormDB, cleanup := setupCockroachDBWithTenantSchemas(t)
+	defer cleanup()
+
+	tenantAlpha := tenant.MustNewTenantID("tenant_alpha")
+	ctx := tenant.WithTenant(context.Background(), tenantAlpha)
+
+	var results []struct{ Payload string }
+	err := db.WithGormTenantTransaction(ctx, gormDB, func(tx *gorm.DB) error {
+		return tx.Table("isolation_test_entities").Find(&results).Error
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+	assert.Equal(t, "alpha-secret-data", results[0].Payload)
+}
+
 // TestTenantGuard_Integration_ConcurrentTenantRequests verifies that simultaneous
 // operations scoped to different tenants do not interfere with one another and each
 // tenant sees only its own data.

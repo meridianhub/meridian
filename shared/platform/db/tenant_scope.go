@@ -50,6 +50,17 @@ func WithTenantScope(ctx context.Context, db DB) (DB, error) {
 		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
 	}
 
+	// Verify the tenant schema actually exists - PostgreSQL allows SET LOCAL to non-existent schemas,
+	// which would silently fall through to public schema and leak cross-tenant data.
+	rawSchema := orgID.SchemaName()
+	var schemaExists bool
+	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = $1)", rawSchema).Scan(&schemaExists); err != nil {
+		return nil, fmt.Errorf("failed to verify tenant schema existence: %w", err)
+	}
+	if !schemaExists {
+		return nil, fmt.Errorf("%w: %s", ErrTenantSchemaNotProvisioned, rawSchema)
+	}
+
 	return db, nil
 }
 

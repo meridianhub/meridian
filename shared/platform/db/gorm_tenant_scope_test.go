@@ -39,6 +39,9 @@ func TestWithGormTenantScope_SetsSearchPath(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_acme_bank").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectRollback()
 
 	tx := gormDB.WithContext(ctx).Begin()
@@ -115,10 +118,13 @@ func TestWithGormTenantTransaction_SetsSearchPathAndExecutes(t *testing.T) {
 	tenantID := tenant.TenantID("acme_bank")
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
-	// Expect transaction begin, SET LOCAL, and commit
+	// Expect transaction begin, SET LOCAL, schema check, and commit
 	mock.ExpectBegin()
 	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_acme_bank").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectCommit()
 
 	// Execute
@@ -212,6 +218,9 @@ func TestWithGormTenantScope_SpecialCharacters_QuotedProperly(t *testing.T) {
 			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
 			mock.ExpectExec(expected).
 				WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectQuery(`SELECT EXISTS`).
+				WithArgs("org_" + tc.tenantID).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 			mock.ExpectRollback()
 
 			tx := gormDB.WithContext(ctx).Begin()
@@ -302,6 +311,77 @@ func TestWithGormTenantTransaction_DatabaseError_ReturnsError(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestWithGormTenantScope_NonExistentSchema_ReturnsError(t *testing.T) {
+	// This tests that WithGormTenantScope returns ErrTenantSchemaNotProvisioned
+	// when the schema does not exist in pg_namespace.
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	tenantID := tenant.TenantID("nonexistent_tenant")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`SET LOCAL search_path TO "org_nonexistent_tenant", public`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_nonexistent_tenant").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectRollback()
+
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+
+	result, err := WithGormTenantScope(ctx, tx)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrTenantSchemaNotProvisioned)
+	assert.Contains(t, err.Error(), "org_nonexistent_tenant")
+	_ = tx.Rollback()
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestWithGormTenantScope_SchemaVerificationFailure_ReturnsError(t *testing.T) {
+	// This tests the error path when the schema existence query itself fails.
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: mockDB,
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	tenantID := tenant.TenantID("acme_bank")
+	ctx := tenant.WithTenant(context.Background(), tenantID)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("org_acme_bank").
+		WillReturnError(errDatabaseConnectionLost)
+	mock.ExpectRollback()
+
+	tx := gormDB.WithContext(ctx).Begin()
+	require.NoError(t, tx.Error)
+
+	result, err := WithGormTenantScope(ctx, tx)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "failed to verify tenant schema existence")
+	assert.ErrorIs(t, err, errDatabaseConnectionLost)
+	_ = tx.Rollback()
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestWithGormTenantScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) {
 	// These test cases verify that pq.QuoteIdentifier properly escapes
 	// potentially malicious tenant IDs to prevent SQL injection.
@@ -367,6 +447,10 @@ func TestWithGormTenantScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) 
 			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
 			mock.ExpectExec(expected).
 				WillReturnResult(sqlmock.NewResult(0, 0))
+			schemaName := tenant.TenantID(tc.tenantID).SchemaName()
+			mock.ExpectQuery("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = $1)").
+				WithArgs(schemaName).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 			mock.ExpectRollback()
 
 			tx := gormDB.WithContext(ctx).Begin()
