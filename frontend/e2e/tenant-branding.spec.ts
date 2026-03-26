@@ -2,24 +2,34 @@ import { test, expect, type Page } from '@playwright/test'
 import { test as authTest, expect as authExpect } from './fixtures'
 
 /**
+ * UTF-8 safe base64url encoder for JWT segments.
+ * btoa() only accepts Latin-1, so non-ASCII display names (e.g., "東京電力") would
+ * throw InvalidCharacterError. TextEncoder handles the full Unicode range.
+ */
+function encodeJwtSegment(value: Record<string, unknown>): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value))
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/**
  * Build a dev-mode JWT with an explicit tenant display name claim.
  * The auth context reads `x-tenant-display-name` to populate `claims.tenantDisplayName`.
  */
 function buildTokenWithDisplayName(displayName: string): string {
-  const header = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
-  const payload = btoa(
-    JSON.stringify({
-      userId: 'e2e-user',
-      tenantId: 'dev-tenant',
-      roles: ['tenant-user'],
-      scopes: ['read', 'write'],
-      'x-tenant-display-name': displayName,
-      exp: Math.floor(Date.now() / 1000) + 86_400,
-      iss: 'meridian-dev',
-      aud: 'meridian-console',
-      sub: 'e2e-user',
-    }),
-  )
+  const header = encodeJwtSegment({ alg: 'none', typ: 'JWT' })
+  const payload = encodeJwtSegment({
+    userId: 'e2e-user',
+    tenantId: 'dev-tenant',
+    roles: ['tenant-user'],
+    scopes: ['read', 'write'],
+    'x-tenant-display-name': displayName,
+    exp: Math.floor(Date.now() / 1000) + 86_400,
+    iss: 'meridian-dev',
+    aud: 'meridian-console',
+    sub: 'e2e-user',
+  })
   return `${header}.${payload}.e2e-signature`
 }
 
