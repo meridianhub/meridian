@@ -51,6 +51,27 @@ func TestSlugFromContext_nil_context(t *testing.T) {
 	assert.Equal(t, "", slug)
 }
 
+func TestWithDisplayName_and_DisplayNameFromContext(t *testing.T) {
+	ctx := WithDisplayName(context.Background(), "Volterra Energy")
+
+	name, ok := DisplayNameFromContext(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "Volterra Energy", name)
+}
+
+func TestDisplayNameFromContext_missing(t *testing.T) {
+	name, ok := DisplayNameFromContext(context.Background())
+	assert.False(t, ok)
+	assert.Equal(t, "", name)
+}
+
+func TestDisplayNameFromContext_nil_context(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	name, ok := DisplayNameFromContext(nil)
+	assert.False(t, ok)
+	assert.Equal(t, "", name)
+}
+
 func TestMustFromContext_success(t *testing.T) {
 	tid := TenantID("acme_corp")
 	ctx := WithTenant(context.Background(), tid)
@@ -82,6 +103,8 @@ func TestRequireFromContext_error_when_missing(t *testing.T) {
 func TestPropagateToBackground_with_tenant(t *testing.T) {
 	tid := TenantID("acme_corp")
 	parent := WithTenant(context.Background(), tid)
+	parent = WithSlug(parent, "acme-corp")
+	parent = WithDisplayName(parent, "Acme Corp")
 
 	asyncCtx := PropagateToBackground(parent)
 
@@ -89,6 +112,16 @@ func TestPropagateToBackground_with_tenant(t *testing.T) {
 	got, ok := FromContext(asyncCtx)
 	assert.True(t, ok)
 	assert.Equal(t, tid, got)
+
+	// Slug propagated
+	slug, ok := SlugFromContext(asyncCtx)
+	assert.True(t, ok)
+	assert.Equal(t, "acme-corp", slug)
+
+	// Display name propagated
+	name, ok := DisplayNameFromContext(asyncCtx)
+	assert.True(t, ok)
+	assert.Equal(t, "Acme Corp", name)
 
 	// No deadline from parent
 	_, hasDeadline := asyncCtx.Deadline()
