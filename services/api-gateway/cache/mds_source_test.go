@@ -288,8 +288,8 @@ func TestMDSSource_GetForwardPriceRange_SkipsMalformedObservations(t *testing.T)
 					ObservedAt:  timestamppb.New(now),
 				},
 				{
-					Value:   "bad-value", // malformed - will be skipped with a warning
-					Quality: marketinformationv1.QualityLevel_QUALITY_LEVEL_ESTIMATE,
+					Value:      "bad-value", // malformed - will be skipped with a warning
+					Quality:    marketinformationv1.QualityLevel_QUALITY_LEVEL_ESTIMATE,
 					ObservedAt: timestamppb.New(now.Add(time.Hour)),
 				},
 			},
