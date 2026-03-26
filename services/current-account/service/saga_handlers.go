@@ -76,15 +76,8 @@ func stubNotImplemented(handlerName string) saga.Handler {
 	}
 }
 
-// RegisterCurrentAccountHandlers registers all Current Account-specific step handlers
-// with the given HandlerRegistry. These handlers are used by the Starlark
-// saga runtime to execute withdrawal and deposit operations.
-//
-// Handler naming convention matches the handler schema:
-//   - position_keeping.* for position service handlers
-//   - financial_accounting.* for financial accounting handlers
-//   - current_account.* for domain-specific handlers
-// RegisterCurrentAccountHandlersOption configures optional handler overrides.
+// RegisterCurrentAccountHandlersOption configures optional handler overrides
+// for RegisterCurrentAccountHandlers.
 type RegisterCurrentAccountHandlersOption func(*registerOptions)
 
 type registerOptions struct {
@@ -98,6 +91,14 @@ func WithNotificationHandler(handler saga.Handler) RegisterCurrentAccountHandler
 	}
 }
 
+// RegisterCurrentAccountHandlers registers all Current Account-specific step handlers
+// with the given HandlerRegistry. These handlers are used by the Starlark
+// saga runtime to execute withdrawal and deposit operations.
+//
+// Handler naming convention matches the handler schema:
+//   - position_keeping.* for position service handlers
+//   - financial_accounting.* for financial accounting handlers
+//   - current_account.* for domain-specific handlers
 func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry, opts ...RegisterCurrentAccountHandlersOption) error {
 	options := &registerOptions{}
 	for _, opt := range opts {

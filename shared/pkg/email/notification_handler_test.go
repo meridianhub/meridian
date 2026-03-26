@@ -16,9 +16,9 @@ import (
 
 // mockOutboxRepository implements email.OutboxRepository for testing.
 type mockOutboxRepository struct {
-	enqueueFunc                      func(ctx context.Context, entry *email.OutboxEntry) error
+	enqueueFunc                       func(ctx context.Context, entry *email.OutboxEntry) error
 	cancelByIdempotencyKeyPatternFunc func(ctx context.Context, pattern string) (int64, error)
-	enqueuedEntries                  []*email.OutboxEntry
+	enqueuedEntries                   []*email.OutboxEntry
 }
 
 func (m *mockOutboxRepository) Enqueue(ctx context.Context, entry *email.OutboxEntry) error {

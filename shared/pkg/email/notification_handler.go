@@ -33,93 +33,99 @@ var (
 // and enqueues the email to the outbox for delivery.
 func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
-		notifType, _ := params["type"].(string)
-		if notifType == "" {
-			return nil, ErrMissingType
-		}
-		if notifType != "EMAIL" {
-			return nil, fmt.Errorf("%w: %s (only EMAIL is supported)", ErrUnsupportedNotificationType, notifType)
+		if err := validateNotificationParams(params); err != nil {
+			return nil, err
 		}
 
 		recipient, _ := params["recipient"].(string)
-		if recipient == "" {
-			return nil, ErrMissingRecipient
-		}
-
-		// Resolve party email
 		emailAddr, err := deps.EmailResolver.ResolveEmail(ctx, recipient)
 		if err != nil {
 			return nil, fmt.Errorf("email: failed to resolve email for party %s: %w", recipient, err)
 		}
 
-		// Build template name
-		templateName, _ := params["template"].(string)
-		if templateName == "" {
-			templateName = "generic-notification"
-		}
-
-		// Build template data
-		templateData := make(map[string]any)
-		if data, ok := params["data"].(map[string]any); ok {
-			for k, v := range data {
-				templateData[k] = v
-			}
-		}
-
-		// Build subject from template name
-		subject := buildSubjectFromTemplate(templateName, templateData)
-
-		// Generate idempotency key
-		idempotencyKey, _ := params["idempotency_key"].(string)
-		if idempotencyKey == "" {
-			idempotencyKey = fmt.Sprintf("saga_%s_step_%s",
-				ctx.SagaExecutionID.String(), ctx.IdempotencyKey)
-		}
-
-		entry := &OutboxEntry{
-			IdempotencyKey: idempotencyKey,
-			ToAddresses:    []string{emailAddr},
-			Subject:        subject,
-			TemplateName:   templateName,
-			TemplateData:   templateData,
-		}
-
+		entry := buildOutboxEntry(ctx, params, emailAddr)
 		err = deps.Outbox.Enqueue(ctx, entry)
 		if err != nil {
-			// Duplicate idempotency is not an error for saga replay
-			if isDuplicateIdempotencyErr(err) {
-				deps.Logger.Info("notification.send idempotent replay detected",
-					"idempotency_key", idempotencyKey,
-					"outbox_id", entry.ID.String())
-				return map[string]any{
-					"status":          "QUEUED",
-					"outbox_id":       entry.ID.String(),
-					"idempotency_key": idempotencyKey,
-					"replay":          true,
-				}, nil
-			}
-			return nil, fmt.Errorf("email: failed to enqueue notification: %w", err)
+			return handleEnqueueResult(deps.Logger, entry, err)
 		}
 
 		deps.Logger.Info("notification enqueued",
 			"outbox_id", entry.ID.String(),
 			"recipient", recipient,
-			"template", templateName,
-			"idempotency_key", idempotencyKey)
+			"template", entry.TemplateName,
+			"idempotency_key", entry.IdempotencyKey)
 
 		return map[string]any{
 			"status":          "QUEUED",
 			"outbox_id":       entry.ID.String(),
-			"idempotency_key": idempotencyKey,
+			"idempotency_key": entry.IdempotencyKey,
 		}, nil
 	}
+}
+
+func validateNotificationParams(params map[string]any) error {
+	notifType, _ := params["type"].(string)
+	if notifType == "" {
+		return ErrMissingType
+	}
+	if notifType != "EMAIL" {
+		return fmt.Errorf("%w: %s (only EMAIL is supported)", ErrUnsupportedNotificationType, notifType)
+	}
+	recipient, _ := params["recipient"].(string)
+	if recipient == "" {
+		return ErrMissingRecipient
+	}
+	return nil
+}
+
+func buildOutboxEntry(ctx *saga.StarlarkContext, params map[string]any, emailAddr string) *OutboxEntry {
+	templateName, _ := params["template"].(string)
+	if templateName == "" {
+		templateName = "generic-notification"
+	}
+
+	templateData := make(map[string]any)
+	if data, ok := params["data"].(map[string]any); ok {
+		for k, v := range data {
+			templateData[k] = v
+		}
+	}
+
+	idempotencyKey, _ := params["idempotency_key"].(string)
+	if idempotencyKey == "" {
+		idempotencyKey = fmt.Sprintf("saga_%s_step_%s",
+			ctx.SagaExecutionID.String(), ctx.IdempotencyKey)
+	}
+
+	return &OutboxEntry{
+		IdempotencyKey: idempotencyKey,
+		ToAddresses:    []string{emailAddr},
+		Subject:        buildSubjectFromTemplate(templateName, templateData),
+		TemplateName:   templateName,
+		TemplateData:   templateData,
+	}
+}
+
+func handleEnqueueResult(logger *slog.Logger, entry *OutboxEntry, err error) (any, error) {
+	if errors.Is(err, ErrDuplicateIdempotency) {
+		logger.Info("notification.send idempotent replay detected",
+			"idempotency_key", entry.IdempotencyKey,
+			"outbox_id", entry.ID.String())
+		return map[string]any{
+			"status":          "QUEUED",
+			"outbox_id":       entry.ID.String(),
+			"idempotency_key": entry.IdempotencyKey,
+			"replay":          true,
+		}, nil
+	}
+	return nil, fmt.Errorf("email: failed to enqueue notification: %w", err)
 }
 
 // buildSubjectFromTemplate generates an email subject line from the template name and data.
 func buildSubjectFromTemplate(templateName string, data map[string]any) string {
 	switch templateName {
 	case "dunning-notice":
-		severity, _ := data["severity"]
+		severity := data["severity"]
 		return fmt.Sprintf("Payment reminder - severity %v", severity)
 	case "account-frozen":
 		return "Your account has been frozen"
@@ -130,9 +136,4 @@ func buildSubjectFromTemplate(templateName string, data map[string]any) string {
 	default:
 		return fmt.Sprintf("Notification: %s", templateName)
 	}
-}
-
-// isDuplicateIdempotencyErr checks if the error wraps ErrDuplicateIdempotency.
-func isDuplicateIdempotencyErr(err error) bool {
-	return errors.Is(err, ErrDuplicateIdempotency)
 }
