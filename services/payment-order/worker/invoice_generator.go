@@ -11,6 +11,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/shopspring/decimal"
 )
 
@@ -34,6 +35,12 @@ type PositionKeepingClient interface {
 	GetPositionLogEntries(ctx context.Context, accountID string, periodStart, periodEnd time.Time) ([]PositionEntry, error)
 }
 
+// PartyClient defines the interface for retrieving party contact information.
+type PartyClient interface {
+	// GetPartyEmail retrieves the contact email address for a party.
+	GetPartyEmail(ctx context.Context, partyID string) (string, error)
+}
+
 // AccountInfo holds basic account information for billing queries.
 type AccountInfo struct {
 	AccountID string
@@ -52,10 +59,13 @@ type PositionEntry struct {
 
 // InvoiceGenerator creates invoices from position-keeping data during a billing run.
 type InvoiceGenerator struct {
-	posClient PositionKeepingClient
-	repo      persistence.BillingRepository
-	metrics   *BillingMetrics
-	logger    *slog.Logger
+	posClient   PositionKeepingClient
+	partyClient PartyClient
+	emailRepo   email.OutboxRepository
+	repo        persistence.BillingRepository
+	metrics     *BillingMetrics
+	shadowMode  bool
+	logger      *slog.Logger
 }
 
 // NewInvoiceGenerator creates a new invoice generator.
@@ -71,6 +81,20 @@ func NewInvoiceGenerator(
 		metrics:   metrics,
 		logger:    logger.With("component", "invoice_generator"),
 	}
+}
+
+// WithEmailDelivery configures the invoice generator to queue invoice emails
+// after successful invoice creation. When partyClient or emailRepo is nil,
+// email delivery is disabled.
+func (g *InvoiceGenerator) WithEmailDelivery(
+	partyClient PartyClient,
+	emailRepo email.OutboxRepository,
+	shadowMode bool,
+) *InvoiceGenerator {
+	g.partyClient = partyClient
+	g.emailRepo = emailRepo
+	g.shadowMode = shadowMode
+	return g
 }
 
 // GenerateInvoices queries position-keeping for accounts with negative balances (amounts owed),
@@ -161,6 +185,8 @@ func (g *InvoiceGenerator) GenerateInvoices(ctx context.Context, billingRun *dom
 		g.metrics.RecordAmountCollected(inv.SubtotalCents)
 		invoices = append(invoices, inv)
 
+		g.queueInvoiceEmail(ctx, inv)
+
 		g.logger.Info("invoice created",
 			"invoice_id", inv.ID,
 			"party_id", partyID,
@@ -178,6 +204,78 @@ func (g *InvoiceGenerator) GenerateInvoices(ctx context.Context, billingRun *dom
 		return invoices, fmt.Errorf("%w: %d parties", ErrPartialInvoiceGeneration, errCount)
 	}
 	return invoices, nil
+}
+
+// invoiceEmailDueIn is the payment due period shown on invoice emails.
+const invoiceEmailDueIn = 30 * 24 * time.Hour
+
+// queueInvoiceEmail enqueues an invoice notification email to the outbox.
+// Errors are non-fatal: the invoice was already created successfully, so
+// a failure here only means the email won't be sent automatically.
+func (g *InvoiceGenerator) queueInvoiceEmail(ctx context.Context, inv *domain.Invoice) {
+	if g.shadowMode {
+		g.logger.Debug("shadow mode: skipping invoice email", "invoice_id", inv.ID)
+		return
+	}
+	if g.partyClient == nil || g.emailRepo == nil {
+		return
+	}
+
+	partyEmail, err := g.partyClient.GetPartyEmail(ctx, inv.PartyID)
+	if err != nil {
+		g.logger.Warn("could not resolve party email, skipping invoice email",
+			"party_id", inv.PartyID,
+			"invoice_id", inv.ID,
+			"error", err)
+		return
+	}
+
+	lineItems := make([]email.LineItem, len(inv.LineItems))
+	for i, li := range inv.LineItems {
+		lineItems[i] = email.LineItem{
+			Description: li.Description,
+			Amount:      formatCents(li.TotalCents, inv.Currency),
+		}
+	}
+
+	dueDate := time.Now().UTC().Add(invoiceEmailDueIn)
+	templateData := email.InvoiceData{
+		InvoiceNumber: inv.InvoiceNumber,
+		LineItems:     lineItems,
+		Total:         formatCents(inv.SubtotalCents, inv.Currency),
+		DueDate:       dueDate.Format("2006-01-02"),
+	}
+
+	entry := &email.OutboxEntry{
+		IdempotencyKey: "invoice-" + inv.ID.String(),
+		ToAddresses:    []string{partyEmail},
+		Subject:        "Invoice " + inv.InvoiceNumber,
+		TemplateName:   "invoice",
+		TemplateData: map[string]any{
+			"InvoiceNumber": templateData.InvoiceNumber,
+			"LineItems":     templateData.LineItems,
+			"Total":         templateData.Total,
+			"DueDate":       templateData.DueDate,
+			"PaymentLink":   templateData.PaymentLink,
+		},
+	}
+
+	if enqueueErr := g.emailRepo.Enqueue(ctx, entry); enqueueErr != nil {
+		g.logger.Error("failed to queue invoice email, invoice already created",
+			"invoice_id", inv.ID,
+			"party_id", inv.PartyID,
+			"error", enqueueErr)
+	}
+}
+
+// formatCents formats an integer cent amount as a human-readable string with currency symbol.
+func formatCents(cents int64, currency string) string {
+	major := cents / 100
+	minor := cents % 100
+	if minor < 0 {
+		minor = -minor
+	}
+	return fmt.Sprintf("%s %d.%02d", currency, major, minor)
 }
 
 // buildLineItemsForParty queries position entries for all accounts belonging to a party
