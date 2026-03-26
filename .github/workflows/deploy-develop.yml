@@ -265,7 +265,7 @@ jobs:
           username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            # seed-dev has its own gateway health polling (2-minute timeout, 2s interval)
+            # seed-dev has its own gateway health polling (60s timeout, 2s interval)
             # so no extra wait needed between restart and seed.
             docker exec meridian-develop /seed-dev \
               --gateway-url=http://localhost:8090 \
