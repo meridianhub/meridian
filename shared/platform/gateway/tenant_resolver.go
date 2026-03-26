@@ -106,7 +106,11 @@ type TenantResolverMiddleware struct {
 	baseDomain       string
 	logger           *slog.Logger
 	localDevMode     bool
-	displayNameCache sync.Map // slug -> string (display name)
+	// displayNameCache stores slug -> display name (string). Entries have no
+	// independent TTL; they refresh when the slug cache entry expires and
+	// triggers a DB re-query. Display names change rarely, so brief staleness
+	// between slug cache eviction cycles is acceptable for cosmetic use.
+	displayNameCache sync.Map
 }
 
 // NewTenantResolverMiddleware creates a new tenant resolver middleware.
