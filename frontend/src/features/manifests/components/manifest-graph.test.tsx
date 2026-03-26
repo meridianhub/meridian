@@ -548,6 +548,7 @@ describe('ManifestGraph', () => {
     const fullManifest = createMockManifest({
       instruments: [
         { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
       ],
       accountTypes: [
         { code: 'CURRENT', name: 'Current Account', normalBalance: 1, allowedInstruments: ['GBP'] },
@@ -644,6 +645,7 @@ describe('ManifestGraph', () => {
     const navManifest = createMockManifest({
       instruments: [
         { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
       ],
       valuationRules: [
         { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'spot' },
