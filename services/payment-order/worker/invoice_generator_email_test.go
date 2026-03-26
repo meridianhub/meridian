@@ -67,8 +67,10 @@ func (m *mockEmailOutbox) MarkFailed(_ context.Context, _ uuid.UUID, _ string) e
 
 func (m *mockEmailOutbox) Cancel(_ context.Context, _ uuid.UUID) error { return nil }
 
-var _ email.OutboxRepository = (*mockEmailOutbox)(nil)
-var _ PartyClient = (*mockPartyClient)(nil)
+var (
+	_ email.OutboxRepository = (*mockEmailOutbox)(nil)
+	_ PartyClient            = (*mockPartyClient)(nil)
+)
 
 // --- Helpers ---
 
