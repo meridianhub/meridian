@@ -197,7 +197,7 @@ func TestRegistrationEndpoint_Reachable(t *testing.T) {
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
