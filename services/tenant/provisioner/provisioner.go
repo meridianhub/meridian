@@ -409,6 +409,23 @@ func DefaultConfig() *Config {
 				MigrationPath: basePath + "/reference-data",
 				DatabaseURL:   getServiceDatabaseURL("reference-data"),
 			},
+			// Services below require org_<tenant> schemas for tenant-scoped
+			// queries but have no provisioner-specific migrations.
+			{
+				Name:          "internal-account",
+				MigrationPath: basePath + "/internal-account",
+				DatabaseURL:   getServiceDatabaseURL("internal-account"),
+			},
+			{
+				Name:          "reconciliation",
+				MigrationPath: basePath + "/reconciliation",
+				DatabaseURL:   getServiceDatabaseURL("reconciliation"),
+			},
+			{
+				Name:          "identity",
+				MigrationPath: basePath + "/identity",
+				DatabaseURL:   getServiceDatabaseURL("identity"),
+			},
 		},
 		ProvisioningTimeout: defaults.DefaultRPCTimeout,
 		DataRetentionPeriod: 7 * 365 * 24 * time.Hour, // 7 years
