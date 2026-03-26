@@ -121,7 +121,6 @@ existing infrastructure. The net-new Go code is ~700 lines + templates.
    in one file. No changes to sagas, templates, outbox, or audit trail.
    This also enables per-tenant provider routing in future (e.g., a tenant
    on a regulated network that requires on-premise SMTP).
-   for email rendering.
 
 ## Solution
 
@@ -206,8 +205,8 @@ prevents the customer from receiving duplicates.
 the established pattern throughout the codebase. No Redis, no distributed
 lock, no new infrastructure.
 
-**Retry policy**: 5 attempts with exponential backoff: 1min, 15min, 1h, 4h,
-24h. Total retry window ~29 hours. After exhaustion, status transitions to
+**Retry policy**: 5 attempts with exponential backoff: 1 min, 15 min, 1 h,
+4 h, 24 h. Total retry window ~29 hours. After exhaustion, status transitions to
 `DEAD_LETTER`. Circuit breaker (via `circuitbreaker.go`) prevents retry
 exhaustion during provider outages by failing fast when Resend is down.
 
@@ -604,6 +603,7 @@ EMAIL_BASE_URL=https://meridianhub.cloud
 | Resend outage (< 1h) | Medium | Low | Circuit breaker + 29h retry window |
 | Resend outage (> 24h) | Low | High | Dead letter queue + manual retry endpoint |
 | Demo spam abuse | Medium | Medium | Registration rate limiter (existing), consider CAPTCHA if volume increases |
+| Runaway saga floods outbox | Low | High | Worker batch size (50/cycle) is natural throttle; add per-tenant hourly cap in outbox write path (configurable, e.g., 500/h default) |
 | Outbox table growth | Low | Medium | Partial index on actionable rows, 90-day retention job for SENT/CANCELLED |
 | Domain reputation damage | Low | High | SPF/DKIM/DMARC from day one, Resend bounce suppression |
 | Dunning email after payment | N/A | N/A | Eliminated by design: payment cancellation + pre-send check + delivery guard |
