@@ -41,6 +41,15 @@ vi.mock('@/hooks/use-oauth-flow', () => ({
 vi.mock('@/lib/tenant-utils', () => ({
   isBaseDomain: () => mockState.isBareDomain,
   getTenantSlugFromSubdomain: () => null,
+  formatSlugAsDisplayName: (slug: string) => slug,
+}))
+
+vi.mock('@/hooks/use-tenant-info', () => ({
+  useTenantInfo: () => ({ displayName: null, slug: null, isLoading: false }),
+}))
+
+vi.mock('@/hooks/use-document-title', () => ({
+  useDocumentTitle: () => {},
 }))
 
 function setup(initialEntries: string[] = ['/login']) {

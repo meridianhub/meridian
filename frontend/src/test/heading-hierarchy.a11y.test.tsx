@@ -64,10 +64,14 @@ vi.mock('@/hooks/use-tenant-context', () => ({
   useClearTenant: () => vi.fn(),
 }))
 
-vi.mock('@/contexts/auth-context', () => ({
-  useAuth: vi.fn(() => ({ accessToken: 'test-token', logout: vi.fn() })),
-  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
+vi.mock('@/contexts/auth-context', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    useAuth: vi.fn(() => ({ accessToken: 'test-token', logout: vi.fn() })),
+    AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  }
+})
 
 vi.mock('@/contexts/tenant-context', () => ({
   useTenantContext: vi.fn(() => ({

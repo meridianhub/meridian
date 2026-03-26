@@ -132,6 +132,20 @@ describe('parseJWT', () => {
     expect(claims).not.toBeNull()
     expect(claims!.roles).toEqual(['platform-admin', 'operator'])
   })
+
+  it('extracts tenantDisplayName from x-tenant-display-name claim', () => {
+    const token = createTenantUserToken('volterra', 'Volterra Energy')
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.tenantDisplayName).toBe('Volterra Energy')
+  })
+
+  it('returns undefined tenantDisplayName when claim is absent', () => {
+    const token = createPlatformAdminToken()
+    const claims = parseJWT(token)
+    expect(claims).not.toBeNull()
+    expect(claims!.tenantDisplayName).toBeUndefined()
+  })
 })
 
 describe('getUserLens', () => {
