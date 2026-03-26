@@ -17,7 +17,7 @@ const (
 	// baselineOversizedFunctions is the number of functions exceeding maxFunctionLines
 	// at the time this test was introduced. The test fails if this count increases,
 	// preventing new violations while allowing gradual cleanup.
-	// Last measured: 2026-03-26 (develop branch)
+	// Last measured: 2026-03-26 (develop branch at 3e0c4a9a)
 	baselineOversizedFunctions = 460
 )
 
