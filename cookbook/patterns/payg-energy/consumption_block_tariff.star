@@ -121,7 +121,7 @@ def execute_consumption():
     daily_threshold = Decimal("2.0")
 
     daily_balance = internal_account.get_balance(
-        account_code=source_account_id,
+        account_id=source_account_id,
         instrument_code=instrument_code,
     )
     # daily_consumed is the cumulative kWh consumed today BEFORE this read

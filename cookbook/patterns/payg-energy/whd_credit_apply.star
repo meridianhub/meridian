@@ -69,7 +69,7 @@ def execute_whd():
     # Step 3: Check outstanding debt (WHD clears debt first per scheme rules)
     step(name="check_debt")
     debt_balance = internal_account.get_balance(
-        account_code="DEBT_RECOVERY:" + party_id,
+        account_id="DEBT_RECOVERY:" + party_id,
         instrument_code="GBP",
     )
     debt_outstanding = Decimal(str(debt_balance.amount)) if debt_balance.amount > 0 else Decimal("0")

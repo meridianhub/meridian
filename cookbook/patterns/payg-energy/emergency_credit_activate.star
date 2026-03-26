@@ -52,7 +52,7 @@ def execute_ec_activation():
     # not log existence. This allows reactivation after topup_waterfall repays EC.
     step(name="check_already_active")
     ec_current_check = internal_account.get_balance(
-        account_code="EMERGENCY_CREDIT:" + party_id,
+        account_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
         instrument_code="GBP",
     )
     if ec_current_check.amount >= ec_limit:
@@ -61,7 +61,7 @@ def execute_ec_activation():
     # Step 2: Verify prepayment balance is below activation threshold
     step(name="check_balance_threshold")
     prepay_balance = internal_account.get_balance(
-        account_code="PREPAYMENT_LIABILITY:" + party_id,
+        account_id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type,
         instrument_code="GBP",
     )
     balance = Decimal(str(prepay_balance.amount))
@@ -88,7 +88,7 @@ def execute_ec_activation():
     # Step 4: Create emergency credit receivable (asset - customer owes supplier)
     step(name="create_ec_receivable")
     position_keeping.initiate_log(
-        position_id="EMERGENCY_CREDIT:" + party_id,
+        position_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
         instrument_code="GBP",
         amount=ec_amount,
         direction="DEBIT",
@@ -99,7 +99,7 @@ def execute_ec_activation():
     # Step 5: Extend prepayment liability (customer can continue consuming)
     step(name="extend_prepayment")
     position_keeping.initiate_log(
-        position_id="PREPAYMENT_LIABILITY:" + party_id,
+        position_id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type,
         instrument_code="GBP",
         amount=ec_amount,
         direction="CREDIT",

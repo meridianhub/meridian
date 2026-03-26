@@ -125,7 +125,7 @@ def execute_topup():
     # Step 4: Check for outstanding emergency credit
     step(name="check_emergency_credit")
     ec_balance = internal_account.get_balance(
-        account_code="EMERGENCY_CREDIT:" + party_id,
+        account_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
         instrument_code="GBP",
     )
     ec_outstanding = Decimal(str(ec_balance.amount)) if ec_balance.amount > 0 else Decimal("0")
@@ -140,7 +140,7 @@ def execute_topup():
 
         # Clear the receivable
         position_keeping.initiate_log(
-            position_id="EMERGENCY_CREDIT:" + party_id,
+            position_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
             instrument_code="GBP",
             amount=ec_repaid,
             direction="CREDIT",
@@ -152,7 +152,7 @@ def execute_topup():
     # Step 6: Check for outstanding debt
     step(name="check_debt")
     debt_balance = internal_account.get_balance(
-        account_code="DEBT_RECOVERY:" + party_id,
+        account_id="DEBT_RECOVERY:" + party_id,
         instrument_code="GBP",
     )
     debt_outstanding = Decimal(str(debt_balance.amount)) if debt_balance.amount > 0 else Decimal("0")
