@@ -140,6 +140,18 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 	return s
 }
 
+// registerTenantInfoRoute registers the public tenant info endpoint if configured.
+func (s *Server) registerTenantInfoRoute() {
+	if s.tenantInfoHandler == nil {
+		return
+	}
+	tenantInfoH := http.Handler(s.tenantInfoHandler.HandleTenantInfo())
+	if s.tenantResolver != nil {
+		tenantInfoH = s.tenantResolver.Handler(tenantInfoH)
+	}
+	s.mux.Handle("GET /api/tenant-info", tenantInfoH)
+}
+
 // registerRoutes sets up the HTTP routes for the gateway.
 //
 // CRITICAL: Health endpoints (/health, /ready) are registered directly on the main mux
@@ -214,13 +226,7 @@ func (s *Server) registerRoutes() {
 
 	// Public tenant info endpoint - tenant resolution but NO auth middleware (pre-auth).
 	// GET /api/tenant-info: returns slug and display name for the login page.
-	if s.tenantInfoHandler != nil {
-		tenantInfoH := http.Handler(s.tenantInfoHandler.HandleTenantInfo())
-		if s.tenantResolver != nil {
-			tenantInfoH = s.tenantResolver.Handler(tenantInfoH)
-		}
-		s.mux.Handle("GET /api/tenant-info", tenantInfoH)
-	}
+	s.registerTenantInfoRoute()
 
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy

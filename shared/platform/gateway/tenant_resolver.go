@@ -101,11 +101,11 @@ func IsPlatformPath(path string) bool {
 // 4. On cache miss, query tenant repository and populate cache
 // 5. Inject tenant ID into request context via x-tenant-id header
 type TenantResolverMiddleware struct {
-	slugCache        slugCache
-	tenantRepo       tenantRepository
-	baseDomain       string
-	logger           *slog.Logger
-	localDevMode     bool
+	slugCache    slugCache
+	tenantRepo   tenantRepository
+	baseDomain   string
+	logger       *slog.Logger
+	localDevMode bool
 	// displayNameCache stores slug -> display name (string). Entries have no
 	// independent TTL; they refresh when the slug cache entry expires and
 	// triggers a DB re-query. Display names change rarely, so brief staleness
