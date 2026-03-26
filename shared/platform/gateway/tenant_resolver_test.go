@@ -414,7 +414,7 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert
 		require.NoError(t, err)
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
 
 		// Verify cache was called
 		mockCache.AssertExpectations(t)
@@ -446,7 +446,8 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert
 		require.NoError(t, err)
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
 
 		// Verify all expected calls were made
 		mockCache.AssertExpectations(t)
@@ -507,7 +508,8 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert: Request should succeed despite cache write failure
 		require.NoError(t, err, "cache write failure should not fail the request")
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
 
 		// Verify all calls were made
 		mockCache.AssertExpectations(t)
@@ -537,7 +539,8 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert: Request should succeed despite cache read failure
 		require.NoError(t, err, "cache read failure should fall through to DB")
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
 
 		// Verify all calls were made (cache get, DB get, cache set)
 		mockCache.AssertExpectations(t)
