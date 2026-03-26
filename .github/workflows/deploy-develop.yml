@@ -222,6 +222,20 @@ jobs:
             docker compose -f /opt/meridian/docker-compose.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f
 
+      - name: Run pre-migration fixups
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            # PostgreSQL requires ALTER TABLE DROP CONSTRAINT for constraint-backed
+            # unique indexes. CockroachDB uses DROP INDEX CASCADE instead. This
+            # pre-migration resolves the divergence on PostgreSQL deployments.
+            docker exec postgres-develop psql -U meridian -d meridian_reference_data -c \
+              "ALTER TABLE IF EXISTS public.platform_saga_definition DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;" \
+              2>/dev/null || true
+
       - name: Run migrations
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
@@ -231,6 +245,19 @@ jobs:
           script: |
             docker exec meridian-develop /meridian --migrate
 
+      - name: Restart meridian-develop post-migration
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            # Restart so the app picks up migrated schemas and provisions tenant
+            # schemas (SCHEMA_PROVISIONING_ENABLED=true). Without this, seed-dev
+            # fails on fresh databases because tenant schemas don't exist yet.
+            cd /opt/meridian-develop
+            docker compose -f docker-compose.develop.yml restart meridian-develop
+
       - name: Seed develop data
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
@@ -238,9 +265,8 @@ jobs:
           username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            # Skip manifest on incremental deploys - manifest only needs to apply
-            # on fresh databases (handled by reset-develop.sh). Full idempotency for
-            # ApplyManifest is tracked as a follow-up.
+            # seed-dev has its own gateway health polling (60s timeout, 2s interval)
+            # so no extra wait needed between restart and seed.
             docker exec meridian-develop /seed-dev \
               --gateway-url=http://localhost:8090 \
               --grpc-addr=localhost:50051 \
