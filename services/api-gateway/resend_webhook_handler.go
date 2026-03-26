@@ -55,6 +55,22 @@ func NewResendWebhookHandler(auditRepo email.AuditRepository, webhookKey string,
 	}
 }
 
+// readAndVerifyWebhook reads the request body and verifies the Svix signature.
+// Returns the raw body or an error with the appropriate HTTP status code.
+func (h *ResendWebhookHandler) readAndVerifyWebhook(r *http.Request) ([]byte, int, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB limit
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	if err := r.Body.Close(); err != nil {
+		h.logger.WarnContext(r.Context(), "resend webhook: failed to close request body", "error", err)
+	}
+	if err := verifySvixSignature(body, r.Header, h.webhookKey); err != nil {
+		return nil, http.StatusUnauthorized, err
+	}
+	return body, 0, nil
+}
+
 // ServeHTTP processes a Resend webhook delivery status callback.
 func (h *ResendWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -63,18 +79,10 @@ func (h *ResendWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB limit
+	body, status, err := h.readAndVerifyWebhook(r)
 	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-	if err := r.Body.Close(); err != nil {
-		h.logger.WarnContext(r.Context(), "resend webhook: failed to close request body", "error", err)
-	}
-
-	if err := verifySvixSignature(body, r.Header, h.webhookKey); err != nil {
-		h.logger.WarnContext(r.Context(), "resend webhook: signature verification failed", "error", err)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		h.logger.WarnContext(r.Context(), "resend webhook: request rejected", "error", err)
+		http.Error(w, http.StatusText(status), status)
 		return
 	}
 
