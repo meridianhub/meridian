@@ -37,8 +37,9 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up buf
-        uses: bufbuild/buf-setup-action@v1
+        uses: bufbuild/buf-action@v1
         with:
+          setup_only: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run buf lint
@@ -81,8 +82,9 @@ jobs:
 
       - name: Set up buf
         if: steps.check-label.outputs.skip != 'true'
-        uses: bufbuild/buf-setup-action@v1
+        uses: bufbuild/buf-action@v1
         with:
+          setup_only: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for breaking proto changes
