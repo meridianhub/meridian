@@ -335,7 +335,7 @@ func TestProvisioningState_IsTerminal(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	assert.Len(t, config.Services, 7)
+	assert.Len(t, config.Services, 10)
 	assert.Equal(t, 30*time.Second, config.ProvisioningTimeout)
 	assert.Equal(t, 7*365*24*time.Hour, config.DataRetentionPeriod) // 7 years
 
@@ -354,6 +354,9 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Contains(t, serviceNames, "payment-order")
 	assert.Contains(t, serviceNames, "market-information")
 	assert.Contains(t, serviceNames, "reference-data")
+	assert.Contains(t, serviceNames, "internal-account")
+	assert.Contains(t, serviceNames, "reconciliation")
+	assert.Contains(t, serviceNames, "identity")
 }
 
 func TestConfig_Validate(t *testing.T) {
