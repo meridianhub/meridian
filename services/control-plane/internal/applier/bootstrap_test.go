@@ -1,8 +1,11 @@
 package applier
 
 import (
+	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -119,6 +122,72 @@ func TestIsSemverGreater_EmptyB(t *testing.T) {
 	// When b is empty, always returns true (any version is greater than nothing)
 	assert.True(t, isSemverGreater("", ""))
 	assert.True(t, isSemverGreater("0.0.0", ""))
+}
+
+// newPlatformSagaPool creates a pgxpool.Pool backed by a PostgreSQL testcontainer
+// with the platform_saga_definition table already created.
+func newPlatformSagaPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool := testdb.NewTestPool(t)
+
+	_, err := pool.Exec(context.Background(), `
+		CREATE TABLE IF NOT EXISTS public.platform_saga_definition (
+			id           uuid         NOT NULL,
+			name         varchar(64)  NOT NULL,
+			version      varchar(16)  NOT NULL,
+			script       text         NOT NULL,
+			status       varchar(16)  NOT NULL DEFAULT 'ACTIVE',
+			display_name varchar(128),
+			description  text,
+			created_at   timestamptz  NOT NULL DEFAULT now(),
+			updated_at   timestamptz  NOT NULL DEFAULT now(),
+			PRIMARY KEY (id),
+			CONSTRAINT chk_platform_saga_definition_version
+				CHECK (version ~ '^[0-9]+\.[0-9]+\.[0-9]+$'),
+			CONSTRAINT chk_platform_saga_definition_script_length
+				CHECK (length(script) <= 65536)
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS uq_platform_saga_definition_name_version
+			ON public.platform_saga_definition (name, version);
+	`)
+	require.NoError(t, err)
+
+	return pool
+}
+
+func TestEnsurePlatformSaga_InsertsNewRow(t *testing.T) {
+	pool := newPlatformSagaPool(t)
+
+	b := NewBootstrap(pool)
+	err := b.EnsurePlatformSaga(context.Background())
+	require.NoError(t, err)
+
+	var count int
+	err = pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM public.platform_saga_definition WHERE name = 'apply_manifest'`).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+}
+
+func TestEnsurePlatformSaga_Idempotent(t *testing.T) {
+	pool := newPlatformSagaPool(t)
+
+	b := NewBootstrap(pool)
+
+	// First call inserts the row.
+	err := b.EnsurePlatformSaga(context.Background())
+	require.NoError(t, err)
+
+	// Second call finds the existing row and returns nil without inserting.
+	err = b.EnsurePlatformSaga(context.Background())
+	require.NoError(t, err)
+
+	// Only one row should exist.
+	var count int
+	err = pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM public.platform_saga_definition WHERE name = 'apply_manifest'`).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
 }
 
 func TestLoadEmbeddedApplyManifest_ReturnsLatestVersion(t *testing.T) {
