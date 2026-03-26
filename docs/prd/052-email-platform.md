@@ -1,29 +1,38 @@
 ---
 name: prd-email-platform
-description: End-to-end email capability for Meridian - transactional emails, templates, and integration with existing billing/auth flows
+description: Email infrastructure MVP for Meridian - outbox, worker, Resend integration, invoice/dunning delivery
 triggers:
   - Setting up email sending infrastructure
-  - Implementing password reset or email verification
   - Sending invoices or billing notifications
   - Dunning escalation email delivery
-  - Customer notification workflows
+  - Wiring the notification.send saga handler
 instructions: |
-  ~34 story points. Start with email service foundation (tasks 1-3),
-  then auth flows (4-6), then billing/invoice delivery (7-10),
-  then UI integration (11-14). Tasks 1-3 unblock everything else.
-  Use Resend as the email provider. Domain: meridianhub.cloud.
+  ~21 story points. Single-phase delivery: outbox + worker + Resend +
+  templates + webhooks + billing wiring. Reuse dispatch.Worker[I],
+  events/metrics.go, circuitbreaker.go, and shared/pkg/tokens.
+  Host worker in unified binary. Domain: meridianhub.cloud.
+  Auth flows (verification, password reset) are PRD 053.
+  Billing UI (dashboard, invoice detail) is PRD 054.
 ---
 
-# Email Platform: Transactional Email for Meridian
+# Email Infrastructure MVP
 
 ## Problem Statement
 
 Meridian has billing infrastructure (invoice generation, dunning escalation,
-billing runs) and auth flows (registration, login) but **zero ability to
-send emails**. The dunning saga calls `notification.send(type="EMAIL")` -
-which silently does nothing. Registration completes without email
-verification. There is no password reset flow. Invoices are generated but
-never delivered. This gap affects every customer-facing workflow.
+billing runs) but zero ability to send emails. The dunning saga calls
+`notification.send(type="EMAIL")` which returns a `stubNotImplemented`
+error. Invoices are generated but never delivered to customers. This gap
+means:
+
+- Customers never receive invoices
+- Dunning escalation cannot notify before freezing accounts
+- Payment confirmations are silent
+- The demo cannot show a complete billing lifecycle
+
+This PRD focuses on the **email infrastructure and billing email delivery**.
+Auth email flows (verification, password reset, invitations) and billing UI
+are separate PRDs (053, 054) that build on this foundation.
 
 ## Technical Context
 
@@ -32,35 +41,44 @@ never delivered. This gap affects every customer-facing workflow.
 | Capability | Status | Location |
 |-----------|--------|----------|
 | Invoice generation | Working | `services/payment-order/worker/invoice_generator.go` |
-| Billing runs & scheduling | Working | `services/payment-order/worker/billing_scheduler.go` |
-| Dunning escalation saga | Working (no email) | `services/reference-data/saga/defaults/dunning_escalation/` |
-| Self-service registration | Working (no verification) | `services/api-gateway/registration_handler.go` |
-| Password auth + JWT | Working | `services/api-gateway/auth_handler.go` |
-| Identity domain (PENDING_INVITE, LOCKED) | Working | `services/identity/domain/identity.go` |
-| Webhook notifications | Working | `services/current-account/webhook/notifier.go` |
+| Billing runs and scheduling | Working | `services/payment-order/worker/billing_scheduler.go` |
+| Dunning escalation saga | Working (errors on email) | `services/reference-data/saga/defaults/dunning_escalation/` |
+| Dunning cancellation | Working | `CancelDunningRetry()` in dunning worker |
 | Customer/Party management | Working | `shared/domain/models/customer.go`, `services/party/` |
-| Frontend registration page | Working (no verify step) | `frontend/src/features/registration/pages/register-page.tsx` |
-| Frontend login page | Working (no reset link) | `frontend/src/pages/login.tsx` |
-| Billing UI | **Missing** | No pages exist |
-| Password reset flow | **Missing** | No backend or frontend |
-| Email verification | **Missing** | No backend or frontend |
-| Email sending | **Missing** | No SMTP/API integration anywhere |
-| Email templates | **Missing** | No template system |
+| Webhook notifications | Working | `services/current-account/webhook/notifier.go` |
+
+### Existing Infrastructure to Reuse
+
+| Component | Location | How It Applies |
+|-----------|----------|----------------|
+| `dispatch.Worker[I]` | `shared/pkg/dispatch/` | Generic poll-dispatch-ack worker with batching, `FOR UPDATE SKIP LOCKED`, circuit breaker, retry policy, CANCELLED status, graceful shutdown |
+| Event outbox pattern | `shared/platform/events/outbox.go` | `FetchAndLockForProcessing`, atomic retry, stuck-entry recovery |
+| Prometheus metrics | `shared/platform/events/metrics.go` | 7 metrics (depth, latency, DLQ, retries) - adapt with `s/event_outbox/email/` |
+| Circuit breaker | `shared/pkg/clients/circuitbreaker.go` | Wraps `sony/gobreaker/v2`, used by 114+ files |
+| Worker lifecycle | `shared/platform/scheduler/lifecycle.go` | Start/stop, graceful shutdown, context cancellation |
+| Token package | `shared/pkg/tokens/` | `GenerateToken`, `HashToken`, `ValidateTokenHash` with constant-time comparison |
+
+**Key insight**: The email worker is `dispatch.Worker[EmailOutboxRow]` with a
+`BatchProcessor` that renders templates and calls Resend. The polling,
+shutdown, batching, retry scheduling, and circuit breaking are handled by
+existing infrastructure. The net-new Go code is ~700 lines + templates.
 
 ### Infrastructure
 
-- **Email provider**: Resend (resend.com) - Go SDK, 3k emails/mo free, scales to enterprise
-- **Sending domain**: `meridianhub.cloud` (DNS records: DKIM, SPF, DMARC)
+- **Email provider**: Resend (resend.com) - Go SDK v3, 3k emails/mo free
+- **Sending domain**: `meridianhub.cloud` (DNS: DKIM, SPF, DMARC)
 - **From addresses**: `noreply@meridianhub.cloud`, `billing@meridianhub.cloud`
-- **Demo environment**: Docker Compose on DigitalOcean droplet (68.183.40.239)
+- **Migration directory**: `services/notification/migrations/`
+- **Worker hosting**: `cmd/meridian/main.go` (unified binary, alongside existing workers)
 
 ### Architectural Constraints
 
-1. **Multi-tenant**: Every email must be scoped to a tenant. Templates may be tenant-customizable later.
-2. **Audit trail**: All email sends must be logged (who, what, when, delivery status) for compliance.
-3. **Idempotency**: Retry-safe. Sending the same invoice email twice must not produce duplicate deliveries.
-4. **Saga integration**: Email sending must be available as a Starlark service module so sagas can trigger emails.
-5. **CockroachDB**: No LISTEN/NOTIFY. Use outbox pattern for reliable email delivery.
+1. **Multi-tenant**: Outbox and audit tables scoped by `tenant_id`.
+2. **Audit trail**: Immutable audit log records every send attempt and delivery status.
+3. **Idempotency**: At-least-once delivery from Meridian, deduplicated at Resend via idempotency key header.
+4. **Saga integration**: Email available via existing `notification.send` handler with real implementation replacing the stub.
+5. **CockroachDB**: No LISTEN/NOTIFY. Outbox pattern with `SELECT FOR UPDATE SKIP LOCKED`.
+6. **Template safety**: Go `html/template` only (auto-escapes by context, template injection structurally impossible). Never use `text/template` for email rendering.
 
 ## Solution
 
@@ -73,24 +91,21 @@ Starlark Sagas / Go Services
   Email Outbox Table (CockroachDB)
         |
         v
-  Email Worker (polls outbox)
+  dispatch.Worker[EmailOutboxRow]
         |
         v
   Template Engine (Go html/template)
         |
         v
-  Resend API (HTTPS)
+  Resend API (HTTPS, circuit breaker)
         |
         v
-  Delivery Status Callback (webhook)
-        |
-        v
-  Email Audit Log Table
+  Resend Webhook -> Audit Log (delivery/bounce status)
 ```
 
 ### Email Service Design
 
-A new `shared/pkg/email/` package providing:
+New `shared/pkg/email/` package:
 
 ```go
 // Core interface - provider-agnostic
@@ -99,64 +114,93 @@ type Sender interface {
 }
 
 type Message struct {
-    To        []string
-    From      string          // defaults to noreply@meridianhub.cloud
-    Subject   string
-    HTML      string          // rendered template
-    Text      string          // plain text fallback
-    TenantID  string
-    IdempotencyKey string     // prevents duplicate sends
-    Tags      map[string]string // for tracking: {"type": "invoice", "invoice_id": "INV-001"}
+    To             []string
+    From           string            // defaults to noreply@meridianhub.cloud
+    Subject        string
+    HTML           string            // rendered template
+    Text           string            // plain text fallback
+    TenantID       string
+    IdempotencyKey string            // forwarded as Resend Idempotency-Key header
+    Tags           map[string]string // for tracking: {"type": "invoice"}
 }
 
 // Template rendering
 type TemplateRenderer interface {
-    Render(templateName string, data any) (html string, text string, err error)
+    Render(name string, data any) (html string, text string, err error)
 }
 ```
 
-**Provider implementation**: `shared/pkg/email/resend/` wraps the Resend Go SDK.
+**Three Sender implementations**:
+- `resend.Sender` - production, wraps Resend Go SDK with circuit breaker
+- `log.Sender` - writes to application log, no API call (for `EMAIL_MODE=log`)
+- `noop.Sender` - discards silently (for `EMAIL_MODE=disabled` and tests)
 
-**Outbox pattern**: Emails are written to an `email_outbox` table within the same
-transaction as the business operation (e.g., invoice creation). A background worker
-polls the outbox and sends via Resend. This guarantees exactly-once delivery
-semantics even if the service crashes mid-operation.
+### Outbox Design
+
+The outbox pattern guarantees emails survive crashes: the outbox row is
+written in the same database transaction as the business operation (e.g.,
+invoice creation). The worker polls independently and delivers via Resend.
+
+**Delivery guarantee**: At-least-once from Meridian. The idempotency key is
+forwarded as Resend's `Idempotency-Key` header, so Resend deduplicates on
+their side. This is honest: the worker can crash after sending but before
+updating status, causing a resend on restart. Resend's deduplication
+prevents the customer from receiving duplicates.
+
+**Locking**: `SELECT FOR UPDATE SKIP LOCKED` via `dispatch.Worker[I]` -
+the established pattern throughout the codebase. No Redis, no distributed
+lock, no new infrastructure.
+
+**Retry policy**: 5 attempts with exponential backoff: 1min, 15min, 1h, 4h,
+24h. Total retry window ~29 hours. After exhaustion, status transitions to
+`DEAD_LETTER`. Circuit breaker (via `circuitbreaker.go`) prevents retry
+exhaustion during provider outages by failing fast when Resend is down.
+
+**Statuses**: `PENDING` -> `SENDING` -> `SENT` | `FAILED` (retryable) |
+`DEAD_LETTER` (exhausted) | `CANCELLED` (superseded by business event).
 
 ### Email Templates
 
-Templates live in `shared/pkg/email/templates/` as Go `html/template` files with plain text fallbacks:
+Four templates using Go `html/template` with `embed.FS`, stored in
+`shared/pkg/email/templates/`:
 
 | Template | Trigger | Data |
 |----------|---------|------|
-| `welcome.html` | Registration complete | tenant name, login URL, getting started link |
-| `verify-email.html` | Registration / email change | verification link (token-based, 24h expiry) |
-| `password-reset.html` | Forgot password request | reset link (token-based, 1h expiry) |
 | `invoice.html` | Invoice issued | invoice number, line items, total, due date, payment link |
+| `dunning-notice.html` | Dunning escalation (parameterized by severity 1/2/3) | invoice number, amount, days overdue, severity-specific copy and action |
 | `payment-received.html` | Payment confirmed | invoice number, amount, receipt |
-| `dunning-notice-1.html` | Dunning level 1 (24h overdue) | invoice number, amount, days overdue, payment link |
-| `dunning-notice-2.html` | Dunning level 2 (72h overdue) | invoice number, amount, days overdue, escalation warning |
-| `dunning-final-warning.html` | Dunning level 3 (168h overdue) | invoice number, amount, account freeze warning |
 | `account-frozen.html` | Account frozen (dunning level 3) | account ID, frozen reason, support contact |
-| `invite-user.html` | Admin invites team member | inviter name, tenant name, accept link |
 
 **Design principles**:
-- Responsive HTML email (single-column, mobile-first)
+- Single dunning template with severity parameter (reduces duplication,
+  ensures brand consistency across escalation levels)
+- Responsive HTML (single-column, mobile-first)
 - Meridian branding: minimal, professional, no heavy images
 - Every HTML email has a plain text fallback
 - All links use absolute URLs with the tenant's subdomain
-- Unsubscribe link on non-critical emails (marketing/notifications, not auth flows)
 
-### Starlark Service Module
+Auth templates (verify-email, password-reset, invite-user, welcome) ship
+with PRD 053.
 
-Email becomes available to sagas via a new service module:
+### Saga Integration
+
+The existing `notification.send` handler stub is replaced with a real
+implementation. No new handler name required - existing saga scripts work
+unchanged:
 
 ```yaml
-# In handlers.yaml
-notification.send_email:
+# handlers.yaml - existing handler, real implementation
+notification.send:
   params:
+    type:
+      type: String
+      required: true       # "EMAIL" (future: "WEBHOOK", "SMS")
     to:
       type: String
-      required: true
+      required: false      # email address, or omit to resolve from party_id
+    party_id:
+      type: String
+      required: false      # resolved server-side to party's email
     template:
       type: String
       required: true
@@ -169,194 +213,252 @@ notification.send_email:
 ```
 
 ```python
-# In dunning_escalation saga (updated)
-notification.send_email(
-    to=party.email,
-    template="dunning-notice-1",
-    data={"invoice_number": invoice.number, "amount": invoice.total},
+# Existing dunning_escalation saga - no changes needed
+notification.send(
+    type="EMAIL",
+    party_id=party.id,
+    template="dunning-notice",
+    data={"invoice_number": invoice.number, "amount": invoice.total,
+          "severity": 1},
     idempotency_key="dunning-1-" + invoice.id,
 )
 ```
 
-This replaces the current no-op `notification.send(type="EMAIL")` calls.
+Using `party_id` instead of raw email addresses closes the
+arbitrary-recipient vector - the handler resolves the address server-side
+from a known party within the tenant.
+
+### Dunning Safety: Pre-Send Validation and Cancellation
+
+Two mechanisms prevent the dunning-after-payment race condition:
+
+**1. Payment cancels pending dunning emails.** When payment confirmation
+marks an invoice as PAID, it also cancels pending dunning outbox rows:
+
+```sql
+UPDATE email_outbox
+SET status = 'CANCELLED', updated_at = NOW()
+WHERE idempotency_key LIKE 'dunning-%'
+  AND template_data->>'invoice_id' = $1
+  AND status = 'PENDING'
+  AND tenant_id = $2;
+```
+
+**2. Worker validates invoice status before sending dunning emails.** The
+worker's `BatchProcessor` checks: if the template is `dunning-notice`,
+query invoice status. If PAID, set outbox row to CANCELLED, skip. This
+catches the narrow race window between payment confirmation and outbox poll.
+
+**3. Dunning delivery guard.** The dunning saga checks prior-level email
+status before escalating. If the prior notification is `DEAD_LETTER` (never
+delivered), pause escalation and flag for manual review instead of silently
+freezing the account.
+
+### Resend Webhook Handler
+
+`POST /api/v1/webhooks/resend` receives delivery status callbacks:
+
+- Verifies `Svix-Signature` header (Resend uses Svix for webhook signing)
+- Updates `email_audit_log` status: `DELIVERED`, `BOUNCED`, `COMPLAINED`
+- Populates `delivered_at` timestamp on successful delivery
+- Logs bounce reasons for operational debugging
+
+Without this, the audit log permanently shows `SENT` for every email -
+including bounced ones. This is the difference between "we sent it" and "we
+know it arrived."
+
+### Observability
+
+Adapted from `shared/platform/events/metrics.go` (rename subsystem):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `email_outbox_pending_total` | Gauge | Current PENDING + FAILED rows |
+| `email_outbox_send_duration_seconds` | Histogram | Resend API call latency |
+| `email_outbox_send_errors_total` | Counter | Failed send attempts |
+| `email_outbox_dead_letter_total` | Counter | Emails that exhausted retries |
+| `email_outbox_cancelled_total` | Counter | Emails cancelled (e.g., payment received) |
+| `email_circuit_breaker_state` | Gauge | 0=closed, 1=half-open, 2=open |
+
+**Alerting rules** (Prometheus/Alertmanager):
+- `email_outbox_pending_total > 100` for 5 minutes -> warn (backlog)
+- `email_outbox_dead_letter_total` increase > 0 -> alert (permanent failure)
+- `email_circuit_breaker_state == 2` for 5 minutes -> alert (Resend down)
 
 ## Detailed Requirements
 
-### Phase 1: Email Service Foundation (8 points)
+### Task 1: Email outbox and audit tables (2 points)
 
-**Task 1: Email outbox and audit tables** (3 points)
-
-Create migrations for:
+Migrations in `services/notification/migrations/`:
 
 ```sql
--- email_outbox: transactional outbox for reliable delivery
 CREATE TABLE email_outbox (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
+    tenant_id VARCHAR(255) NOT NULL,
     idempotency_key VARCHAR(255) NOT NULL,
     to_addresses TEXT[] NOT NULL,
-    from_address VARCHAR(255) NOT NULL DEFAULT 'noreply@meridianhub.cloud',
+    from_address VARCHAR(255) NOT NULL
+        DEFAULT 'noreply@meridianhub.cloud',
     subject VARCHAR(500) NOT NULL,
     template_name VARCHAR(100) NOT NULL,
     template_data JSONB NOT NULL DEFAULT '{}',
-    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',  -- PENDING, SENDING, SENT, FAILED
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     attempts INT NOT NULL DEFAULT 0,
-    max_attempts INT NOT NULL DEFAULT 3,
+    max_attempts INT NOT NULL DEFAULT 5,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_error TEXT,
+    cancelled_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, idempotency_key)
 );
 
--- email_audit_log: immutable record of all sends
+-- Partial index: worker only queries actionable rows
+CREATE INDEX idx_email_outbox_pending
+    ON email_outbox (next_attempt_at)
+    WHERE status IN ('PENDING', 'FAILED')
+    AND attempts < max_attempts;
+
 CREATE TABLE email_audit_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
-    outbox_id UUID NOT NULL REFERENCES email_outbox(id),
-    provider_id VARCHAR(255),          -- Resend delivery ID
+    tenant_id VARCHAR(255) NOT NULL,
+    outbox_id UUID NOT NULL,  -- correlation only, no FK
+    provider_id VARCHAR(255),
     to_addresses TEXT[] NOT NULL,
     from_address VARCHAR(255) NOT NULL,
     subject VARCHAR(500) NOT NULL,
     template_name VARCHAR(100) NOT NULL,
-    status VARCHAR(20) NOT NULL,       -- DELIVERED, BOUNCED, COMPLAINED, FAILED
+    status VARCHAR(20) NOT NULL DEFAULT 'SENT',
     sent_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
+    bounce_reason TEXT,
     provider_response JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_email_audit_tenant
+    ON email_audit_log (tenant_id, created_at DESC);
 ```
 
-**Task 2: Email service package** (3 points)
+**Statuses for email_outbox**: `PENDING`, `SENDING`, `SENT`, `FAILED`,
+`DEAD_LETTER`, `CANCELLED`.
 
-`shared/pkg/email/` with:
-- `Sender` interface and `Message` type
-- `TemplateRenderer` using Go `html/template`
-- Resend provider implementation (`shared/pkg/email/resend/`)
-- Outbox repository (write to outbox, read pending, update status)
-- Configuration: `RESEND_API_KEY`, `EMAIL_FROM_DEFAULT`, `EMAIL_ENABLED` (feature flag)
+**Statuses for email_audit_log**: `SENT`, `DELIVERED`, `BOUNCED`,
+`COMPLAINED`, `FAILED`.
 
-**Task 3: Email worker** (2 points)
+**No foreign key** from audit log to outbox. The outbox is ephemeral
+(retained 90 days). The audit log is the permanent compliance record.
+`outbox_id` is a correlation UUID for debugging, not a constraint.
 
-Background worker that:
-- Polls `email_outbox` for PENDING/FAILED (where attempts < max_attempts and next_attempt_at <= NOW())
-- Renders template, sends via Resend
-- Updates outbox status and writes audit log
-- Exponential backoff on failure (1min, 5min, 30min)
-- Distributed lock to prevent duplicate processing across replicas
-- Graceful shutdown on SIGTERM
+**`tenant_id` type**: `VARCHAR(255)` to match existing billing tables in
+payment-order service.
 
-### Phase 2: Auth Email Flows (8 points)
+### Task 2: Email service package (3 points)
 
-**Task 4: Email verification on registration** (3 points)
+`shared/pkg/email/`:
+- `sender.go` - `Sender` interface, `Message` type
+- `template.go` - `TemplateRenderer` using `html/template` + `embed.FS`
+- `outbox.go` - Outbox repository (write, read pending, update status,
+  cancel by idempotency key pattern)
+- `resend/provider.go` - Resend SDK wrapper implementing `Sender`, wrapped
+  with circuit breaker from `shared/pkg/clients/circuitbreaker.go`
+- `log/provider.go` - Log-mode sender (writes structured log, no API call)
+- `noop/provider.go` - No-op sender for tests
 
-- After registration, identity status stays `PENDING_INVITE` until email verified
-- Generate verification token (crypto/rand, 32 bytes, base64url encoded)
-- Store token hash in `email_verification_tokens` table (token_hash, identity_id, expires_at)
-- Send `verify-email` template with link: `https://{slug}.meridianhub.cloud/verify?token={token}`
-- Verification endpoint: `POST /api/v1/verify-email` validates token, sets identity to ACTIVE
-- Token expiry: 24 hours. Resend button on verification page.
-- Frontend: post-registration redirect to "check your email" page, verification landing page
+**Reuse explicitly**:
+- `circuitbreaker.go` wrapping Resend client
+- `shared/pkg/tokens/` for any future token operations
+- Go `html/template` only (lint rule: no `text/template` in email package)
 
-**Task 5: Password reset flow** (3 points)
+### Task 3: Email worker (3 points)
 
-- `POST /api/v1/forgot-password` accepts email, always returns 200 (timing-safe)
-- If email exists: generate reset token (same pattern as verification), send `password-reset` template
-- Reset link: `https://{slug}.meridianhub.cloud/reset-password?token={token}`
-- `POST /api/v1/reset-password` validates token, accepts new password, invalidates token
-- Token expiry: 1 hour. Single-use (deleted after consumption).
-- Rate limit: 3 reset requests per email per hour
-- Frontend: "Forgot password?" link on login page, reset form page, success confirmation
+Implement `dispatch.DispatchableInstruction` for `EmailOutboxRow`. Write a
+`BatchProcessor` callback that:
+1. Renders template via `TemplateRenderer`
+2. For dunning emails: checks invoice status, cancels if PAID
+3. Calls `Sender.Send()` with idempotency key as Resend header
+4. In same transaction: updates outbox status + inserts audit log entry
+5. On failure: increments attempts, calculates next_attempt_at with backoff
+6. On max attempts exceeded: sets status to `DEAD_LETTER`
 
-**Task 6: User invitation emails** (2 points)
+**Host in unified binary** (`cmd/meridian/main.go`) alongside existing
+workers.
 
-- When admin creates a user (identity with PENDING_INVITE status), send `invite-user` template
-- Invitation link goes to a set-password page (similar to reset flow but for new users)
-- Token expiry: 7 days
-- Frontend: invitation acceptance page with password creation form
+**Circuit breaker integration**: Wrap Resend `Sender` with circuit breaker.
+When open, `Send()` returns immediately with error - worker marks row as
+FAILED for retry. Retries are preserved for transient per-email issues,
+not wasted on a known-down provider.
 
-### Phase 3: Billing Email Delivery (10 points)
+### Task 4: Prometheus metrics (1 point)
 
-**Task 7: Invoice email template** (2 points)
+Copy `shared/platform/events/metrics.go`, rename subsystem from
+`event_outbox` to `email_outbox`. Wire `Record*` calls in the same places
+as the event worker. Add circuit breaker state gauge. Mechanical adaptation.
 
-- Professional invoice template with: tenant logo placeholder, invoice number,
-  date, due date, line items table, subtotal/total, payment instructions
-- Plain text fallback with formatted table
-- PDF attachment support (stretch goal - initially just HTML email)
+### Task 5: Resend webhook endpoint (2 points)
 
-**Task 8: Invoice delivery integration** (3 points)
+`POST /api/v1/webhooks/resend`:
+- Verify `Svix-Signature` header (Resend webhook signing)
+- Parse event type: `email.delivered`, `email.bounced`, `email.complained`
+- Look up audit log entry by `provider_id`
+- Update status and `delivered_at`/`bounce_reason`
+- Return 200 on success (Resend retries on non-2xx)
 
-- After `invoice_generator.go` creates an invoice, write to email outbox
-- Look up party email from party service
-- Idempotency key: `invoice-{invoice_id}`
-- Only send for ISSUED invoices (not DRAFT)
-- Billing run in shadow mode skips email delivery
+Register in api-gateway routes. No authentication (signature verification
+is the auth mechanism).
 
-**Task 9: Dunning email integration** (3 points)
+### Task 6: Templates (3 points)
 
-- Wire dunning saga's `notification.send_email` to the email outbox
-- Three escalation templates with increasing urgency
-- Account freeze notification on level 3
-- Idempotency key: `dunning-{level}-{invoice_id}`
+Four templates in `shared/pkg/email/templates/`:
+- `invoice.html` + `invoice.txt`
+- `dunning-notice.html` + `dunning-notice.txt` (parameterized: severity
+  1/2/3 with `{{if eq .Severity 1}}` blocks)
+- `payment-received.html` + `payment-received.txt`
+- `account-frozen.html` + `account-frozen.txt`
 
-**Task 10: Payment confirmation email** (2 points)
+Responsive HTML, plain text fallbacks, Meridian branding. Loaded via
+`embed.FS` at compile time. This is primarily design work, not engineering
+risk.
 
-- When invoice status transitions to PAID, send `payment-received` template
-- Idempotency key: `payment-confirm-{invoice_id}`
+### Task 7: Invoice and dunning delivery wiring (3 points)
 
-### Phase 4: UI Integration (8 points)
+**Invoice delivery**: After `invoice_generator.go` creates an ISSUED
+invoice, write to email outbox. Look up party email from party service.
+Idempotency key: `invoice-{invoice_id}`. Shadow mode billing runs skip
+email delivery.
 
-**Task 11: Billing dashboard page** (3 points)
+**Dunning wiring**: Replace `notification.send` stub in `saga_handlers.go`
+with real implementation that writes to email outbox. Resolve email from
+`party_id` server-side. Idempotency key: `dunning-{level}-{invoice_id}`.
 
-- New route: `/billing`
-- List view: billing runs with status, period, invoice count, total amount
-- Click-through to billing run detail showing all invoices
-- Invoice detail: line items, status, payment status, email delivery status
+**Payment cancellation**: When invoice transitions to PAID, cancel pending
+dunning outbox rows and send payment-received email. Idempotency key:
+`payment-confirm-{invoice_id}`.
 
-**Task 12: Invoice detail page** (2 points)
+**Dunning delivery guard**: Before escalating to next dunning level, check
+prior level's email status. If `DEAD_LETTER`, pause escalation and flag for
+manual review.
 
-- Route: `/billing/invoices/:invoiceId`
-- Shows: invoice header, line items, totals, status timeline
-- Actions: "Resend email" button, "Mark as paid" (manual override), "Void invoice"
-- Email delivery status indicator (sent, delivered, bounced)
+### Task 8: DNS and Resend setup (1 point)
 
-**Task 13: Auth flow UI updates** (2 points)
-
-- Post-registration "verify your email" page with resend button
-- "Forgot password?" link on login page
-- Password reset form page
-- Invitation acceptance page
-- Success/error states for all flows
-
-**Task 14: User profile page** (1 point)
-
-- Route: `/profile` or `/settings`
-- Shows: email, display name, role
-- Actions: change password (requires current password)
-- Future: email notification preferences
+- Create Resend account
+- Add DKIM, SPF, DMARC records on meridianhub.cloud
+- Provision API key, add to demo `.env`
+- Configure webhook endpoint URL in Resend dashboard
+- Set `EMAIL_MODE=log` in CI, `EMAIL_MODE=live` on demo
+- Verify domain sending with a test email
 
 ## Email Sending Rules
 
-| Email Type | Can Suppress? | Requires Opt-in? | Rate Limit |
-|-----------|--------------|-------------------|------------|
-| Email verification | No | No (system) | 3/hour per email |
-| Password reset | No | No (system) | 3/hour per email |
-| User invitation | No | No (system) | 1/day per recipient |
-| Invoice | No | No (contractual) | 1 per invoice |
-| Payment confirmation | Yes | No (default on) | 1 per payment |
-| Dunning notice | No | No (contractual) | Per escalation schedule |
-| Account frozen | No | No (system) | 1 per freeze event |
-| Welcome email | Yes | No (default on) | 1 per registration |
+| Email Type | Can Suppress? | Rate Control |
+|-----------|--------------|-------------|
+| Invoice | No (contractual) | 1 per invoice (idempotency key) |
+| Payment confirmation | Yes | 1 per payment (idempotency key) |
+| Dunning notice | No (contractual) | Per escalation schedule |
+| Account frozen | No (system) | 1 per freeze event |
 
-## Security Considerations
-
-1. **Token security**: All tokens (verify, reset, invite) stored as SHA-256 hashes. Raw token only exists in the email link.
-2. **Timing safety**: Password reset always returns 200 regardless of email existence (prevents email enumeration).
-3. **Rate limiting**: All token-generating endpoints rate-limited per IP and per email.
-4. **Link expiry**: Verification 24h, reset 1h, invite 7d. Single-use where applicable.
-5. **SPF/DKIM/DMARC**: DNS records on meridianhub.cloud for deliverability and anti-spoofing.
-6. **No PII in logs**: Email addresses logged only in audit table, not in application logs.
-7. **Tenant isolation**: Outbox and audit tables scoped by tenant_id. No cross-tenant email leakage.
+Auth email rules (verification, password reset, invitation) will be defined
+in PRD 053.
 
 ## Configuration
 
@@ -365,48 +467,100 @@ Background worker that:
 RESEND_API_KEY=re_xxxxxxxxxxxx
 
 # Optional (defaults shown)
-EMAIL_ENABLED=true                              # Feature flag - false disables all sending
-EMAIL_FROM_DEFAULT=noreply@meridianhub.cloud    # Default from address
-EMAIL_FROM_BILLING=billing@meridianhub.cloud    # Billing-specific from
-EMAIL_OUTBOX_POLL_INTERVAL=5s                   # Worker poll frequency
-EMAIL_OUTBOX_BATCH_SIZE=50                      # Max emails per poll cycle
-EMAIL_BASE_URL=https://meridianhub.cloud        # For link generation
+EMAIL_MODE=live                  # disabled | log | live
+EMAIL_FROM_DEFAULT=noreply@meridianhub.cloud
+EMAIL_FROM_BILLING=billing@meridianhub.cloud
+EMAIL_OUTBOX_POLL_INTERVAL=5s
+EMAIL_OUTBOX_BATCH_SIZE=50
+EMAIL_MAX_ATTEMPTS=5
+EMAIL_BASE_URL=https://meridianhub.cloud
 ```
+
+**EMAIL_MODE**:
+- `disabled` - No outbox writes, no sending. For unit tests.
+- `log` - Writes outbox + audit log, renders templates, but does not call
+  Resend API. For integration tests and CI.
+- `live` - Full sending via Resend. For demo and production.
 
 ## Success Criteria
 
-1. Registration sends verification email; unverified users cannot log in
-2. Password reset flow works end-to-end (request, email, reset, login)
-3. Invoices delivered via email on billing run completion
-4. Dunning emails sent at each escalation level
-5. All email sends have audit trail entries
-6. Email delivery visible in billing UI (sent/delivered/bounced status)
-7. Resend dashboard shows healthy deliverability metrics (>95% delivery rate)
-8. Demo environment sends real emails to real addresses
+1. Invoice email in outbox within 5s of invoice creation
+2. Worker sends PENDING entries and records `provider_id` in audit log
+3. Dunning emails queued at each escalation level with correct
+   idempotency keys
+4. Payment confirmation cancels pending dunning emails for same invoice
+5. Dead-lettered emails retrievable and manually retryable
+6. `EMAIL_MODE=log` writes outbox + audit, zero Resend API calls
+7. Circuit breaker opens after 5 consecutive Resend failures, closes on
+   recovery
+8. All 6 Prometheus metrics emit correctly under normal and failure
+   conditions
+
+## Security Considerations
+
+1. **Template safety**: Go `html/template` auto-escapes all output by
+   context. Template injection is structurally impossible. Lint rule
+   against `text/template` in the email package.
+2. **Recipient validation**: `notification.send` handler accepts `party_id`,
+   resolves email server-side. Raw `to` addresses validated against known
+   identities/parties within the tenant.
+3. **SPF/DKIM/DMARC**: DNS records on meridianhub.cloud from day one for
+   deliverability and anti-spoofing.
+4. **No PII in application logs**: Email addresses exist only in outbox and
+   audit tables. Structured logging references `outbox_id`, not addresses.
+5. **Tenant isolation**: All queries scoped by `tenant_id`. Worker uses
+   cross-tenant `FindPending()` (worker-only); all user-facing queries
+   require tenant context.
+6. **Webhook verification**: Resend webhook endpoint validates
+   `Svix-Signature` header. No unauthenticated state mutation.
+7. **Tamper evidence**: The outbox is the only path to Resend. Any email in
+   Resend without an outbox entry is evidence of unauthorized activity.
 
 ## Dependencies
 
-- Resend account setup and API key provisioned
+- Resend account and API key provisioned
 - DNS records (DKIM, SPF, DMARC) configured on meridianhub.cloud
-- `EMAIL_ENABLED=false` in CI/test environments to prevent accidental sends
-- Testcontainers-based integration tests use a mock Sender implementation
+- `EMAIL_MODE=log` in CI environments
+- Integration tests use `noop.Sender` or `log.Sender`
 
 ## Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Resend rate limits on free tier | Low | Medium | 3k/mo is generous for demo. Upgrade to paid ($20/mo) when needed |
-| Email deliverability issues | Medium | High | SPF/DKIM/DMARC from day one. Monitor Resend dashboard |
-| Outbox table growth | Low | Low | Add retention policy (delete SENT entries after 90 days) |
-| Token brute-force | Low | High | 256-bit tokens, rate limiting, short expiry windows |
-| Demo spam abuse | Medium | Medium | Rate limit registration. Consider CAPTCHA if abused |
+| Resend outage (< 1h) | Medium | Low | Circuit breaker + 29h retry window |
+| Resend outage (> 24h) | Low | High | Dead letter queue + manual retry endpoint |
+| Demo spam abuse | Medium | Medium | Registration rate limiter (existing), consider CAPTCHA if volume increases |
+| Outbox table growth | Low | Medium | Partial index on actionable rows, 90-day retention job for SENT/CANCELLED |
+| Domain reputation damage | Low | High | SPF/DKIM/DMARC from day one, Resend bounce suppression |
+| Dunning email after payment | N/A | N/A | Eliminated by design: payment cancellation + pre-send check + delivery guard |
 
-## Out of Scope (Future)
+## Retention Policy
 
+- **email_outbox**: SENT and CANCELLED rows deleted after 90 days.
+  DEAD_LETTER rows retained until manually resolved.
+- **email_audit_log**: Retained for 7 years (financial compliance).
+  Audit log access pattern: compliance queries by tenant + date range.
+
+## Related PRDs
+
+| PRD | Scope | Depends On | Status |
+|-----|-------|------------|--------|
+| **052** (this) | Email infrastructure + billing delivery | Nothing | Active |
+| **053** | Auth email flows (verification, password reset, invitations) | 052 | Planned |
+| **054** | Billing UI (dashboard, invoice detail, delivery status) | 052 | Planned |
+
+053 and 054 are independent of each other and can be staffed in parallel
+once 052 lands.
+
+## Out of Scope
+
+- Email verification on registration (PRD 053)
+- Password reset flow (PRD 053)
+- User invitation emails (PRD 053)
+- Welcome email (PRD 053)
+- Billing dashboard and invoice detail UI (PRD 054)
 - Tenant-customizable email templates (brand colors, logos)
 - Marketing/newsletter emails
-- Email notification preferences UI
 - PDF invoice attachments
-- Webhook delivery status callbacks from Resend
 - Multi-language email templates (i18n)
-- In-app notification center (bell icon with email/notification history)
+- In-app notification center
