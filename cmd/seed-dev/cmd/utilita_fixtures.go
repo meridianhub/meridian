@@ -25,9 +25,9 @@ import (
 //   - MPRN: 10-digit gas meter reference
 type utilitaCustomer struct {
 	legalName   string
-	mpan        string // Electricity import MPAN (Southern region)
-	mprn        string // Gas MPRN
-	gspRegion   string // GSP group for wholesale cost attribution
+	mpan        string  // Electricity import MPAN (Southern region)
+	mprn        string  // Gas MPRN
+	gspRegion   string  // GSP group for wholesale cost attribution
 	dailyKwhAvg float64 // Average daily electricity kWh (determines First/Saver split)
 }
 
