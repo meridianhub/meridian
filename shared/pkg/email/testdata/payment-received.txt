@@ -1,0 +1,18 @@
+MERIDIAN - Payment Confirmation
+
+Dear Golden Customer,
+
+We have received your payment. Your account is up to date. Please keep this email as
+your receipt.
+
+PAYMENT DETAILS
+---------------
+Receipt Number: REC-GOLDEN
+Invoice Number: INV-GOLDEN
+Amount Paid:    £1,000.00
+Payment Date:   2026-03-26
+
+If you have any questions about this payment, please contact our support team.
+
+--
+Meridian - The Operating System for the Real-World Economy

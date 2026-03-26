@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice INV-GOLDEN</title>
+<style>
+  body { margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, sans-serif; }
+  .wrapper { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 4px; overflow: hidden; }
+  .header { background-color: #0f172a; padding: 24px 32px; }
+  .header h1 { margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.05em; }
+  .header p { margin: 4px 0 0; color: #94a3b8; font-size: 14px; }
+  .body { padding: 32px; }
+  .body p { color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px; }
+  .table { width: 100%; border-collapse: collapse; margin: 24px 0; }
+  .table th { background-color: #f8fafc; color: #64748b; font-size: 12px; font-weight: 600;
+               text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 12px; text-align: left;
+               border-bottom: 2px solid #e2e8f0; }
+  .table td { padding: 12px; color: #334155; font-size: 14px; border-bottom: 1px solid #f1f5f9; }
+  .table .amount { text-align: right; }
+  .total-row td { font-weight: 700; font-size: 15px; color: #0f172a; border-top: 2px solid #e2e8f0;
+                  border-bottom: none; padding-top: 16px; }
+  .cta { text-align: center; margin: 32px 0; }
+  .cta a { display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none;
+            padding: 14px 32px; border-radius: 4px; font-size: 15px; font-weight: 600; }
+  .footer { background-color: #f8fafc; padding: 24px 32px; text-align: center; }
+  .footer p { margin: 0; color: #94a3b8; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <h1>Meridian</h1>
+    <p>Invoice INV-GOLDEN</p>
+  </div>
+  <div class="body">
+    <p>Dear Golden Corp,</p>
+    <p>Please find your invoice below. Payment is due by <strong>2026-05-01</strong>.</p>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th class="amount">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>Monthly Subscription</td>
+          <td class="amount">£1,000.00</td>
+        </tr>
+        
+        <tr class="total-row">
+          <td>Total</td>
+          <td class="amount">£1,000.00</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="cta">
+      <a href="https://pay.example.com/INV-GOLDEN">Pay Now</a>
+    </div>
+    <p>If you have any questions about this invoice, please contact our support team.</p>
+  </div>
+  <div class="footer">
+    <p>&copy; Meridian &mdash; The Operating System for the Real-World Economy</p>
+  </div>
+</div>
+</body>
+</html>

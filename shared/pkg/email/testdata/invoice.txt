@@ -1,0 +1,18 @@
+MERIDIAN - Invoice INV-GOLDEN
+
+Dear Golden Corp,
+
+Please find your invoice details below. Payment is due by 2026-05-01.
+
+INVOICE DETAILS
+---------------
+Monthly Subscription: £1,000.00
+
+TOTAL: £1,000.00
+
+Pay online: https://pay.example.com/INV-GOLDEN
+
+If you have any questions about this invoice, please contact our support team.
+
+--
+Meridian - The Operating System for the Real-World Economy

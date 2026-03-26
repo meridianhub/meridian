@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{if eq .Severity 1}}Payment Reminder{{else if eq .Severity 2}}Urgent: Payment Overdue{{else}}Final Notice: Account at Risk{{end}}</title>
+<style>
+  body { margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, sans-serif; }
+  .wrapper { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 4px; overflow: hidden; }
+  .header { padding: 24px 32px; }
+  .header.s1 { background-color: #0f172a; }
+  .header.s2 { background-color: #b45309; }
+  .header.s3 { background-color: #991b1b; }
+  .header h1 { margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.05em; }
+  .header p { margin: 4px 0 0; color: rgba(255,255,255,0.7); font-size: 14px; }
+  .alert-bar { padding: 12px 32px; font-size: 14px; font-weight: 600; text-align: center; }
+  .alert-bar.s1 { background-color: #dbeafe; color: #1e40af; }
+  .alert-bar.s2 { background-color: #fef3c7; color: #92400e; }
+  .alert-bar.s3 { background-color: #fee2e2; color: #991b1b; }
+  .body { padding: 32px; }
+  .body p { color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px; }
+  .detail-box { background-color: #f8fafc; border-left: 4px solid #e2e8f0; border-radius: 2px;
+                padding: 16px 20px; margin: 24px 0; }
+  .detail-box.s2 { border-left-color: #f59e0b; }
+  .detail-box.s3 { border-left-color: #ef4444; }
+  .detail-box p { margin: 4px 0; font-size: 14px; color: #475569; }
+  .detail-box strong { color: #0f172a; }
+  .footer { background-color: #f8fafc; padding: 24px 32px; text-align: center; }
+  .footer p { margin: 0; color: #94a3b8; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header {{if eq .Severity 1}}s1{{else if eq .Severity 2}}s2{{else}}s3{{end}}">
+    <h1>Meridian</h1>
+    <p>{{if eq .Severity 1}}Payment Reminder{{else if eq .Severity 2}}Urgent Payment Notice{{else}}Final Warning{{end}}</p>
+  </div>
+  <div class="alert-bar {{if eq .Severity 1}}s1{{else if eq .Severity 2}}s2{{else}}s3{{end}}">
+    {{if eq .Severity 1}}Invoice {{.InvoiceNumber}} is {{.DaysOverdue}} days overdue{{else if eq .Severity 2}}Payment is {{.DaysOverdue}} days overdue - immediate action required{{else}}Account suspension imminent - {{.DaysOverdue}} days overdue{{end}}
+  </div>
+  <div class="body">
+    <p>Dear {{.CustomerName}},</p>
+    {{if eq .Severity 1}}
+    <p>This is a friendly reminder that invoice <strong>{{.InvoiceNumber}}</strong> for <strong>{{.Amount}}</strong> is currently {{.DaysOverdue}} days overdue. If you have already arranged payment, please disregard this notice.</p>
+    <p>Please make payment at your earliest convenience to avoid any disruption to your service.</p>
+    {{else if eq .Severity 2}}
+    <p>We have not yet received payment for invoice <strong>{{.InvoiceNumber}}</strong> totalling <strong>{{.Amount}}</strong>, which is now <strong>{{.DaysOverdue}} days overdue</strong>. This requires your immediate attention.</p>
+    <p>Failure to settle this balance promptly may result in service restrictions. Please arrange payment today or contact our support team to discuss your account.</p>
+    {{else}}
+    <p>This is a final notice regarding invoice <strong>{{.InvoiceNumber}}</strong> for <strong>{{.Amount}}</strong>, which is now <strong>{{.DaysOverdue}} days overdue</strong>.</p>
+    <p><strong>If payment is not received or a payment arrangement is not made within 48 hours, your account will be frozen and all services suspended.</strong></p>
+    <p>To prevent service interruption, please make payment immediately or contact our support team.</p>
+    {{end}}
+    <div class="detail-box {{if eq .Severity 1}}s1{{else if eq .Severity 2}}s2{{else}}s3{{end}}">
+      <p><strong>Invoice:</strong> {{.InvoiceNumber}}</p>
+      <p><strong>Amount Due:</strong> {{.Amount}}</p>
+      <p><strong>Days Overdue:</strong> {{.DaysOverdue}}</p>
+    </div>
+    <p>Contact our support team: <a href="mailto:{{.SupportContact}}">{{.SupportContact}}</a></p>
+  </div>
+  <div class="footer">
+    <p>&copy; Meridian &mdash; The Operating System for the Real-World Economy</p>
+  </div>
+</div>
+</body>
+</html>
