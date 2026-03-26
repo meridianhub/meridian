@@ -269,6 +269,34 @@ handlers:
       proto_rpc: "meridian.market_information.v1.MarketInformationService/ListObservations"
 
   # ---------------------------------------------------------------------------
+  # Notification
+  # ---------------------------------------------------------------------------
+  notification.send:
+    description: "Send a notification (email) to a party"
+    compensation_strategy: none
+    params:
+      type:
+        type: string
+        required: true
+        description: "Notification type: EMAIL"
+      recipient:
+        type: string
+        required: true
+        description: "Party ID (resolved to email server-side)"
+      template:
+        type: string
+        required: false
+        description: "Template name (defaults based on saga context)"
+      data:
+        type: map
+        required: false
+        description: "Template data"
+      idempotency_key:
+        type: string
+        required: false
+        description: "Idempotency key (auto-generated from saga execution ID if omitted)"
+
+  # ---------------------------------------------------------------------------
   # Reference Data
   # ---------------------------------------------------------------------------
   reference_data.retrieve_instrument:

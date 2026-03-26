@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/redislock"
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -42,6 +43,13 @@ type DunningWorkerConfig struct {
 // The callback receives the billing run and should trigger the appropriate saga.
 type DunningCallback func(ctx context.Context, run *domain.BillingRun) error
 
+// DunningEmailCanceller cancels pending dunning emails for a billing run.
+// This is used when a billing run is resolved (e.g., payment succeeds) to
+// prevent sending stale dunning notifications.
+type DunningEmailCanceller interface {
+	CancelByIdempotencyKeyPattern(ctx context.Context, pattern string) (int64, error)
+}
+
 // DunningWorker polls a Redis sorted set for due dunning retries and triggers
 // escalation. It uses ZADD to schedule retries with the due timestamp as score
 // and ZRANGEBYSCORE to find items whose due time has passed.
@@ -50,14 +58,15 @@ type DunningCallback func(ctx context.Context, run *domain.BillingRun) error
 // Per-item distributed locking uses redislock.Lock to prevent duplicate
 // processing across replicas.
 type DunningWorker struct {
-	lifecycle *scheduler.WorkerLifecycle
-	repo      persistence.BillingRepository
-	redis     *redis.Client
-	lock      *redislock.Lock
-	config    DunningWorkerConfig
-	callback  DunningCallback
-	logger    *slog.Logger
-	metrics   *BillingMetrics
+	lifecycle      *scheduler.WorkerLifecycle
+	repo           persistence.BillingRepository
+	redis          *redis.Client
+	lock           *redislock.Lock
+	config         DunningWorkerConfig
+	callback       DunningCallback
+	emailCanceller DunningEmailCanceller
+	logger         *slog.Logger
+	metrics        *BillingMetrics
 }
 
 // NewDunningWorker creates a new dunning retry worker.
@@ -110,6 +119,12 @@ func NewDunningWorker(
 		logger:   workerLogger,
 		metrics:  metrics,
 	}, nil
+}
+
+// SetEmailCanceller sets an optional email canceller for cancelling pending
+// dunning emails when a billing run is resolved externally.
+func (w *DunningWorker) SetEmailCanceller(canceller DunningEmailCanceller) {
+	w.emailCanceller = canceller
 }
 
 // Start begins the dunning worker polling loop.
@@ -292,11 +307,17 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 		return false
 	}
 
-	// Billing run resolved externally — remove from retry set
+	// Billing run resolved externally — remove from retry set and cancel pending emails
 	if run.Status != domain.BillingRunStatusFailed {
 		w.logger.Info("billing run no longer failed, skipping dunning",
 			"billing_run_id", billingRunID,
 			"status", run.Status)
+		if err := w.cancelPendingDunningEmails(tenant.WithTenant(ctx, tenant.TenantID(run.TenantID)), billingRunID); err != nil {
+			w.logger.Error("failed to cancel pending dunning emails",
+				"billing_run_id", billingRunID,
+				"error", err)
+			return false
+		}
 		return true
 	}
 
@@ -317,6 +338,33 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 		"billing_run_id", billingRunID,
 		"dunning_level", run.DunningLevel)
 	return true
+}
+
+// cancelPendingDunningEmails cancels any pending escalation dunning emails for the given billing run.
+// Cancels escalation keys (dunning-1-, dunning-2-, dunning-3-, dunning-frozen-) but not
+// resolution keys (dunning-resolved-) to avoid cancelling confirmation emails.
+func (w *DunningWorker) cancelPendingDunningEmails(ctx context.Context, billingRunID uuid.UUID) error {
+	if w.emailCanceller == nil {
+		return nil
+	}
+	// Cancel escalation emails only. The pattern dunning-[0-9]- and dunning-frozen- match
+	// escalation keys but not dunning-resolved- confirmation emails.
+	runID := billingRunID.String()
+	escalationPrefixes := []string{"dunning-1-", "dunning-2-", "dunning-3-", "dunning-frozen-"}
+	var totalCancelled int64
+	for _, prefix := range escalationPrefixes {
+		cancelled, err := w.emailCanceller.CancelByIdempotencyKeyPattern(ctx, prefix+runID)
+		if err != nil {
+			return fmt.Errorf("cancel dunning emails (prefix %s): %w", prefix, err)
+		}
+		totalCancelled += cancelled
+	}
+	if totalCancelled > 0 {
+		w.logger.Info("cancelled pending dunning emails",
+			"billing_run_id", billingRunID,
+			"count", totalCancelled)
+	}
+	return nil
 }
 
 // CancelDunningRetry removes a billing run from the tenant-scoped retry set.
