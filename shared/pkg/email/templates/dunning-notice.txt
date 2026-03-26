@@ -1,0 +1,33 @@
+MERIDIAN - {{if eq .Severity 1}}Payment Reminder{{else if eq .Severity 2}}Urgent Payment Notice{{else}}Final Warning{{end}}
+
+Dear {{.CustomerName}},
+{{if eq .Severity 1}}
+This is a friendly reminder that invoice {{.InvoiceNumber}} for {{.Amount}} is currently
+{{.DaysOverdue}} days overdue. If you have already arranged payment, please disregard this notice.
+
+Please make payment at your earliest convenience to avoid any disruption to your service.
+{{else if eq .Severity 2}}
+We have not yet received payment for invoice {{.InvoiceNumber}} totalling {{.Amount}}, which is
+now {{.DaysOverdue}} days overdue. This requires your immediate attention.
+
+Failure to settle this balance promptly may result in service restrictions. Please arrange
+payment today or contact our support team to discuss your account.
+{{else}}
+FINAL NOTICE: This is a final notice regarding invoice {{.InvoiceNumber}} for {{.Amount}},
+which is now {{.DaysOverdue}} days overdue.
+
+If payment is not received or a payment arrangement is not made within 48 hours, your account
+will be frozen and all services suspended.
+
+To prevent service interruption, please make payment immediately or contact our support team.
+{{end}}
+ACCOUNT DETAILS
+---------------
+Invoice:      {{.InvoiceNumber}}
+Amount Due:   {{.Amount}}
+Days Overdue: {{.DaysOverdue}}
+
+Support: {{.SupportContact}}
+
+--
+Meridian - The Operating System for the Real-World Economy

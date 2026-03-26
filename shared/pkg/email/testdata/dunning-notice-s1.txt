@@ -1,0 +1,19 @@
+MERIDIAN - Payment Reminder
+
+Dear Golden Customer,
+
+This is a friendly reminder that invoice INV-GOLDEN for £500.00 is currently
+15 days overdue. If you have already arranged payment, please disregard this notice.
+
+Please make payment at your earliest convenience to avoid any disruption to your service.
+
+ACCOUNT DETAILS
+---------------
+Invoice:      INV-GOLDEN
+Amount Due:   £500.00
+Days Overdue: 15
+
+Support: support@meridian.io
+
+--
+Meridian - The Operating System for the Real-World Economy

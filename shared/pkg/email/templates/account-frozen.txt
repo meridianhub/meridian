@@ -1,0 +1,20 @@
+MERIDIAN - Account Frozen - Action Required
+
+Dear {{.CustomerName}},
+
+Your Meridian account ({{.AccountID}}) has been frozen and all services are currently
+suspended.
+
+ACCOUNT DETAILS
+---------------
+Account ID: {{.AccountID}}
+Reason:     {{.FrozenReason}}
+
+To restore access to your account, please contact our support team immediately:
+
+  {{.SupportContact}}
+
+Our team will work with you to resolve this as quickly as possible.
+
+--
+Meridian - The Operating System for the Real-World Economy
