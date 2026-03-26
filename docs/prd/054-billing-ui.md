@@ -43,7 +43,7 @@ parallel.
 | Invoices (DRAFT, ISSUED, PAID, VOID, OVERDUE) | `services/payment-order/domain/billing.go` | No gRPC/HTTP API |
 | Invoice line items (JSONB) | `services/payment-order/adapters/persistence/billing_entity.go` | No API |
 | Dunning escalation (levels 0-3) | `services/payment-order/worker/dunning_worker.go` | No API |
-| Email audit log (SENT, DELIVERED, BOUNCED) | PRD 052: `services/notification/` | Webhook-populated |
+| Email audit log (SENT, DELIVERED, BOUNCED) | PRD 052: `shared/pkg/email/` (tables in each service DB) | Webhook-populated |
 | Billing metrics (Prometheus) | `services/payment-order/worker/billing_metrics.go` | Prometheus only |
 
 ### Key Insight: Backend APIs Must Be Built First
