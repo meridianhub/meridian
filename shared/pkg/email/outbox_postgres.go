@@ -81,40 +81,11 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 			return idempErr
 		}
 
-		// Check hourly rate limit for genuinely new entries
-		var count int64
-		windowStart := now.Add(-rateLimitWindow)
-		if err := tx.Model(&OutboxEntity{}).
-			Where("tenant_id = ? AND created_at >= ?", string(tenantID), windowStart).
-			Count(&count).Error; err != nil {
-			return fmt.Errorf("email: failed to check rate limit: %w", err)
-		}
-		if count >= hourlyRateLimit {
-			return ErrRateLimitExceeded
+		if err := checkTenantRateLimit(tx, string(tenantID), now); err != nil {
+			return err
 		}
 
-		maxAttempts := entry.MaxAttempts
-		if maxAttempts == 0 {
-			maxAttempts = 5
-		}
-
-		entity := OutboxEntity{
-			ID:             entry.ID,
-			TenantID:       string(tenantID),
-			IdempotencyKey: entry.IdempotencyKey,
-			ToAddresses:    entry.ToAddresses,
-			FromAddress:    entry.FromAddress,
-			Subject:        entry.Subject,
-			TemplateName:   entry.TemplateName,
-			TemplateData:   datatypes.JSON(templateJSON),
-			Status:         string(StatusPending),
-			Attempts:       0,
-			MaxAttempts:    maxAttempts,
-			NextAttemptAt:  now,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		}
-
+		entity := newOutboxEntity(entry, string(tenantID), templateJSON, now)
 		result := tx.Create(&entity)
 		if result.Error != nil {
 			if isDuplicateKeyError(result.Error) {
@@ -128,6 +99,43 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 		entry.Status = StatusPending
 		return nil
 	})
+}
+
+func checkTenantRateLimit(tx *gorm.DB, tenantID string, now time.Time) error {
+	var count int64
+	windowStart := now.Add(-rateLimitWindow)
+	if err := tx.Model(&OutboxEntity{}).
+		Where("tenant_id = ? AND created_at >= ?", tenantID, windowStart).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("email: failed to check rate limit: %w", err)
+	}
+	if count >= hourlyRateLimit {
+		return ErrRateLimitExceeded
+	}
+	return nil
+}
+
+func newOutboxEntity(entry *OutboxEntry, tenantID string, templateJSON []byte, now time.Time) OutboxEntity {
+	maxAttempts := entry.MaxAttempts
+	if maxAttempts == 0 {
+		maxAttempts = 5
+	}
+	return OutboxEntity{
+		ID:             entry.ID,
+		TenantID:       tenantID,
+		IdempotencyKey: entry.IdempotencyKey,
+		ToAddresses:    entry.ToAddresses,
+		FromAddress:    entry.FromAddress,
+		Subject:        entry.Subject,
+		TemplateName:   entry.TemplateName,
+		TemplateData:   datatypes.JSON(templateJSON),
+		Status:         string(StatusPending),
+		Attempts:       0,
+		MaxAttempts:    maxAttempts,
+		NextAttemptAt:  now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
 }
 
 // FetchDispatchable atomically claims up to limit pending/failed entries for dispatch.
