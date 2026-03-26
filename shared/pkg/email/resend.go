@@ -37,11 +37,13 @@ func NewResendSenderWithBaseURL(apiKey string, logger *slog.Logger, baseURL stri
 		logger = slog.Default()
 	}
 	cb := clients.NewCircuitBreaker(clients.DefaultCircuitBreakerConfig("resend-email"), logger)
-	c := resendgo.NewCustomClient(&http.Client{}, apiKey)
+	c := resendgo.NewCustomClient(&http.Client{Timeout: 30 * time.Second}, apiKey)
 	if baseURL != "" {
 		parsed, err := url.Parse(baseURL)
 		if err == nil {
 			c.BaseURL = parsed
+		} else {
+			logger.Warn("resend: failed to parse base URL, using default", "base_url", baseURL, "error", err)
 		}
 	}
 	return &ResendSender{
