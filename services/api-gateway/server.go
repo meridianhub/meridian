@@ -39,6 +39,7 @@ type Server struct {
 	authHandler           *AuthHandler
 	ssoHandler            *SSOHandler
 	registrationHandler   *RegistrationHandler
+	tenantInfoHandler     *TenantInfoHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -209,6 +210,16 @@ func (s *Server) registerRoutes() {
 	if s.registrationHandler != nil {
 		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
 		s.mux.Handle("GET /api/v1/slugs/{slug}/available", http.HandlerFunc(s.registrationHandler.HandleSlugAvailable))
+	}
+
+	// Public tenant info endpoint - tenant resolution but NO auth middleware (pre-auth).
+	// GET /api/tenant-info: returns slug and display name for the login page.
+	if s.tenantInfoHandler != nil {
+		tenantInfoH := http.Handler(s.tenantInfoHandler.HandleTenantInfo())
+		if s.tenantResolver != nil {
+			tenantInfoH = s.tenantResolver.Handler(tenantInfoH)
+		}
+		s.mux.Handle("GET /api/tenant-info", tenantInfoH)
 	}
 
 	// API routes - with auth and tenant middleware chain.
