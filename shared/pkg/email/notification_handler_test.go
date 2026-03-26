@@ -216,6 +216,9 @@ func TestNotificationSendHandler_DuplicateIdempotencyIsNotError(t *testing.T) {
 	resultMap := result.(map[string]any)
 	assert.Equal(t, "QUEUED", resultMap["status"])
 	assert.Equal(t, true, resultMap["replay"])
+	expectedKey := fmt.Sprintf("saga_%s_step_%s", ctx.SagaExecutionID.String(), ctx.IdempotencyKey)
+	assert.Equal(t, outboxID.String(), resultMap["outbox_id"])
+	assert.Equal(t, expectedKey, resultMap["idempotency_key"])
 }
 
 func TestNotificationSendHandler_EmailResolverError(t *testing.T) {

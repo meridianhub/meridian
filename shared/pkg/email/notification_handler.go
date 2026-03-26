@@ -32,6 +32,19 @@ var (
 // The handler validates the notification type, resolves the party's email address,
 // and enqueues the email to the outbox for delivery.
 func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
+	if deps.Logger == nil {
+		deps.Logger = slog.Default()
+	}
+	if deps.Outbox == nil {
+		return func(*saga.StarlarkContext, map[string]any) (any, error) {
+			return nil, errors.New("email: outbox repository is required")
+		}
+	}
+	if deps.EmailResolver == nil {
+		return func(*saga.StarlarkContext, map[string]any) (any, error) {
+			return nil, errors.New("email: email resolver is required")
+		}
+	}
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		if err := validateNotificationParams(params); err != nil {
 			return nil, err

@@ -326,11 +326,13 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set up email canceller mock
+		var callCount atomic.Int32
 		var cancelledPattern atomic.Value
 		mockCanceller := &mockEmailCanceller{
 			cancelFunc: func(_ context.Context, pattern string) (int64, error) {
 				cancelledPattern.Store(pattern)
-				return 2, nil
+				callCount.Add(1)
+				return 1, nil
 			},
 		}
 		w.SetEmailCanceller(mockCanceller)
@@ -345,17 +347,17 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 			_ = w.Start(context.Background())
 		}()
 
-		// Wait for email cancellation to happen
-		err = await.Until(func() bool {
-			v := cancelledPattern.Load()
-			return v != nil
+		// Wait for all 4 escalation prefix cancellations to complete
+		err = await.New().AtMost(5 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+			return callCount.Load() >= 4
 		})
-		require.NoError(t, err, "email canceller should have been called")
+		require.NoError(t, err, "email canceller should have been called for all prefixes")
 
 		w.Stop()
 
-		expectedPattern := "dunning-%-" + billingRunID.String()
-		assert.Equal(t, expectedPattern, cancelledPattern.Load().(string))
+		// Cancellation calls with specific prefixes (dunning-1-, dunning-2-, dunning-3-, dunning-frozen-)
+		assert.Equal(t, int32(4), callCount.Load())
+		assert.Contains(t, cancelledPattern.Load().(string), billingRunID.String())
 	})
 
 	t.Run("drops billing run not found", func(t *testing.T) {

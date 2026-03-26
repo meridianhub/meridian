@@ -311,7 +311,12 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 		w.logger.Info("billing run no longer failed, skipping dunning",
 			"billing_run_id", billingRunID,
 			"status", run.Status)
-		w.cancelPendingDunningEmails(ctx, billingRunID)
+		if err := w.cancelPendingDunningEmails(ctx, billingRunID); err != nil {
+			w.logger.Error("failed to cancel pending dunning emails",
+				"billing_run_id", billingRunID,
+				"error", err)
+			return false
+		}
 		return true
 	}
 
@@ -334,25 +339,31 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 	return true
 }
 
-// cancelPendingDunningEmails cancels any pending dunning emails for the given billing run.
-// Uses a LIKE pattern to match all dunning email idempotency keys for the run.
-func (w *DunningWorker) cancelPendingDunningEmails(ctx context.Context, billingRunID uuid.UUID) {
+// cancelPendingDunningEmails cancels any pending escalation dunning emails for the given billing run.
+// Cancels escalation keys (dunning-1-, dunning-2-, dunning-3-, dunning-frozen-) but not
+// resolution keys (dunning-resolved-) to avoid cancelling confirmation emails.
+func (w *DunningWorker) cancelPendingDunningEmails(ctx context.Context, billingRunID uuid.UUID) error {
 	if w.emailCanceller == nil {
-		return
+		return nil
 	}
-	pattern := "dunning-%-" + billingRunID.String()
-	cancelled, err := w.emailCanceller.CancelByIdempotencyKeyPattern(ctx, pattern)
-	if err != nil {
-		w.logger.Error("failed to cancel dunning emails",
-			"billing_run_id", billingRunID,
-			"error", err)
-		return
+	// Cancel escalation emails only. The pattern dunning-[0-9]- and dunning-frozen- match
+	// escalation keys but not dunning-resolved- confirmation emails.
+	runID := billingRunID.String()
+	escalationPrefixes := []string{"dunning-1-", "dunning-2-", "dunning-3-", "dunning-frozen-"}
+	var totalCancelled int64
+	for _, prefix := range escalationPrefixes {
+		cancelled, err := w.emailCanceller.CancelByIdempotencyKeyPattern(ctx, prefix+runID)
+		if err != nil {
+			return fmt.Errorf("cancel dunning emails (prefix %s): %w", prefix, err)
+		}
+		totalCancelled += cancelled
 	}
-	if cancelled > 0 {
+	if totalCancelled > 0 {
 		w.logger.Info("cancelled pending dunning emails",
 			"billing_run_id", billingRunID,
-			"count", cancelled)
+			"count", totalCancelled)
 	}
+	return nil
 }
 
 // CancelDunningRetry removes a billing run from the tenant-scoped retry set.
