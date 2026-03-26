@@ -154,6 +154,7 @@ def execute_consumption():
     step(name="book_retail_charge")
     position_keeping.initiate_log(
         position_id=billing_account_id,
+        instrument_code="GBP",
         amount=total_retail_charge,
         direction="DEBIT",
         correlation_id=correlation_id,
@@ -167,6 +168,7 @@ def execute_consumption():
 
     position_keeping.initiate_log(
         position_id=revenue_account,
+        instrument_code="GBP",
         amount=total_retail_charge,
         direction="CREDIT",
         correlation_id=correlation_id,
@@ -191,6 +193,7 @@ def execute_consumption():
         step(name="book_wholesale_cost")
         position_keeping.initiate_log(
             position_id=wholesale_account_id,
+            instrument_code="GBP",
             amount=wholesale_amount,
             direction="DEBIT",
             correlation_id=correlation_id,

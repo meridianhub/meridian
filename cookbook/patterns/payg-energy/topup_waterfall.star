@@ -111,6 +111,7 @@ def execute_topup():
 
     position_keeping.initiate_log(
         position_id="UTILITA_VAT_OUTPUT",
+        instrument_code="GBP",
         amount=vat_amount,
         direction="CREDIT",
         correlation_id=payment_ref,
@@ -138,6 +139,7 @@ def execute_topup():
         # Clear the receivable
         position_keeping.initiate_log(
             position_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
+            instrument_code="GBP",
             amount=ec_repaid,
             direction="CREDIT",
             correlation_id=payment_ref,
@@ -163,6 +165,7 @@ def execute_topup():
 
         position_keeping.initiate_log(
             position_id="DEBT_RECOVERY:" + party_id,
+            instrument_code="GBP",
             amount=debt_allocated,
             direction="CREDIT",
             correlation_id=payment_ref,
@@ -177,6 +180,7 @@ def execute_topup():
         step(name="credit_prepayment")
         position_keeping.initiate_log(
             position_id="PREPAYMENT_LIABILITY:" + party_id,
+            instrument_code="GBP",
             amount=allocatable,
             direction="CREDIT",
             correlation_id=payment_ref,
