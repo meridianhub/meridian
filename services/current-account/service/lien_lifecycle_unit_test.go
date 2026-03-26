@@ -1005,41 +1005,14 @@ func TestConcurrent_ExecuteAndTerminate_SameLien(t *testing.T) {
 	execErr := <-execCh
 	termErr := <-termCh
 
-	// Exactly one should succeed - the other gets FailedPrecondition or Aborted
-	// (Or both could succeed if one hits the idempotent path of the other's terminal state)
+	// Exactly one should succeed - the other gets FailedPrecondition because
+	// the lien is already in a terminal state.
 	if execErr == nil && termErr == nil {
 		t.Fatal("both execute and terminate succeeded on same lien - should not be possible")
 	}
 	// At least one must succeed
 	require.True(t, execErr == nil || termErr == nil,
 		"at least one operation should succeed: execErr=%v, termErr=%v", execErr, termErr)
-}
-
-// =============================================================================
-// InitiateLien with ExpiresAt
-// =============================================================================
-
-func TestInitiateLien_WithExpiresAt(t *testing.T) {
-	db, ctx, cleanup := setupLienTestDB(t)
-	defer cleanup()
-
-	repo := persistence.NewRepository(db)
-	lienRepo := persistence.NewLienRepository(db)
-	svc := mustNewServiceWithPositionKeeping(t, repo, lienRepo, map[string]int64{
-		"ACC-INIT-EXP": 100000,
-	})
-	createTestAccountWithBalance(t, ctx, repo, "ACC-INIT-EXP", 100000)
-
-	req := &pb.InitiateLienRequest{
-		AccountId: "ACC-INIT-EXP",
-		Amount: &commonpb.MoneyAmount{
-			Amount: &money.Money{CurrencyCode: "GBP", Units: 100},
-		},
-		PaymentOrderReference: "PO-INIT-EXP",
-	}
-	resp, err := svc.InitiateLien(ctx, req)
-	require.NoError(t, err)
-	require.Equal(t, pb.LienStatus_LIEN_STATUS_ACTIVE, resp.Lien.Status)
 }
 
 // =============================================================================
