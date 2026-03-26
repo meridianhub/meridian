@@ -97,6 +97,7 @@ stateDiagram-v2
 | [Email Infrastructure MVP](052-email-platform.md) | Outbox, worker, Resend integration, invoice/dunning email delivery |
 | [Auth Email Flows](053-auth-email-flows.md) | Email verification, password reset, user invitations (depends on 052) |
 | [Billing UI](054-billing-ui.md) | Billing dashboard, invoice detail, email delivery status (depends on 052) |
+| [Tenant Branding](055-tenant-branding.md) | Display name propagation to login page, header, and document title |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -286,6 +287,8 @@ material.
   provider-agnostic Sender interface, per-tenant metering
 - [Billing UI](054-billing-ui.md) -
   Billing dashboard, invoice detail pages, email delivery status visibility
+- [Tenant Branding](055-tenant-branding.md) -
+  Display name propagation to login page, header, and document title
 
 ### Identity & Access Control
 
