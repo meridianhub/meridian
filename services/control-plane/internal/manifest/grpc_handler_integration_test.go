@@ -144,14 +144,30 @@ func TestListManifestVersions_Integration(t *testing.T) {
 		assert.Equal(t, int32(3), resp.TotalCount)
 	})
 
-	t.Run("Pagination with offset returns remaining", func(t *testing.T) {
-		resp, err := handler.ListManifestVersions(ctx, &controlplanev1.ListManifestVersionsRequest{
+	t.Run("Pagination with offset returns remaining without overlap", func(t *testing.T) {
+		firstPage, err := handler.ListManifestVersions(ctx, &controlplanev1.ListManifestVersionsRequest{
+			Limit:  2,
+			Offset: 0,
+		})
+		require.NoError(t, err)
+		require.Len(t, firstPage.Versions, 2)
+
+		secondPage, err := handler.ListManifestVersions(ctx, &controlplanev1.ListManifestVersionsRequest{
 			Limit:  10,
 			Offset: 2,
 		})
 		require.NoError(t, err)
-		assert.Len(t, resp.Versions, 1)
-		assert.Equal(t, int32(3), resp.TotalCount)
+		assert.Len(t, secondPage.Versions, 1)
+		assert.Equal(t, int32(3), secondPage.TotalCount)
+
+		// Verify pages don't overlap
+		firstVersions := make(map[string]bool)
+		for _, v := range firstPage.Versions {
+			firstVersions[v.Version] = true
+		}
+		for _, v := range secondPage.Versions {
+			assert.False(t, firstVersions[v.Version], "version %s appeared in both pages", v.Version)
+		}
 	})
 }
 
@@ -206,6 +222,7 @@ func TestDiffManifestVersions_Integration(t *testing.T) {
 			TargetSequenceNumber: 2,
 		})
 		require.NoError(t, err)
+		assert.Equal(t, int64(1), resp.BaseSequenceNumber)
 		assert.Equal(t, int64(2), resp.TargetSequenceNumber)
 		assert.NotNil(t, resp.Summary)
 	})
