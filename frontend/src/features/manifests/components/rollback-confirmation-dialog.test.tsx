@@ -531,12 +531,14 @@ describe('RollbackConfirmationDialog - cancel and close behavior', () => {
     // Close the dialog while preview is in-flight
     await user.keyboard('{Escape}')
 
-    // Resolve after close - should not update state
+    // Resolve after close - closedRef guard should prevent state update
     await act(async () => {
       resolvePreview({ message: 'late response', status: RollbackStatus.DRY_RUN })
     })
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
+    // Late response should not have populated the preview (closedRef guard)
+    expect(screen.queryByTestId('rollback-preview')).not.toBeInTheDocument()
   })
 
   it('does not call mutateAsync when version is null', async () => {
@@ -606,7 +608,8 @@ describe('RollbackConfirmationDialog - accessibility', () => {
   })
 
   it('has no axe violations when open', async () => {
-    const { container } = render(
+    // Use baseElement to capture Radix UI portal-rendered dialog content
+    const { baseElement } = render(
       <Wrapper>
         <RollbackConfirmationDialog
           open={true}
@@ -617,7 +620,7 @@ describe('RollbackConfirmationDialog - accessibility', () => {
       </Wrapper>,
     )
 
-    const results = await axe(container)
+    const results = await axe(baseElement)
     expect(results).toHaveNoViolations()
   })
 })
