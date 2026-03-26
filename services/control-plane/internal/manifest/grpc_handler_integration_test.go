@@ -246,15 +246,23 @@ func TestExportManifest_Integration(t *testing.T) {
 		assert.Equal(t, "1.0", resp.Manifest.Version)
 	})
 
-	t.Run("Success with section filter", func(t *testing.T) {
+	t.Run("Section filter includes requested section", func(t *testing.T) {
 		resp, err := handler.ExportManifest(ctx, &controlplanev1.ExportManifestRequest{
 			IncludeSections: []string{"instruments"},
 		})
 		require.NoError(t, err)
 		require.NotNil(t, resp.Manifest)
 		assert.NotEmpty(t, resp.Manifest.Instruments)
-		// Non-requested sections should be empty
-		assert.Empty(t, resp.Manifest.Sagas)
+	})
+
+	t.Run("Section filter excludes non-requested sections", func(t *testing.T) {
+		// Request only sagas; instruments are stored but should be absent in response.
+		resp, err := handler.ExportManifest(ctx, &controlplanev1.ExportManifestRequest{
+			IncludeSections: []string{"sagas"},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp.Manifest)
+		assert.Empty(t, resp.Manifest.Instruments)
 	})
 }
 
