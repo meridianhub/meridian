@@ -90,6 +90,7 @@ def execute_ec_activation():
     step(name="create_ec_receivable")
     position_keeping.initiate_log(
         position_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
+        instrument_code="GBP",
         amount=ec_amount,
         direction="DEBIT",
         correlation_id=activation_ref,
@@ -100,6 +101,7 @@ def execute_ec_activation():
     step(name="extend_prepayment")
     position_keeping.initiate_log(
         position_id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type,
+        instrument_code="GBP",
         amount=ec_amount,
         direction="CREDIT",
         correlation_id=activation_ref,
