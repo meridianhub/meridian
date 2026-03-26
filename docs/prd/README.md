@@ -94,6 +94,9 @@ stateDiagram-v2
 | [Auth Flow Architecture](044-auth-flow-architecture.md) | Authentication entry points and tenant context flow |
 | [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) | Control plane owns all economy declarations |
 | [Demo Sandbox](050-demo-sandbox.md) | Self-service AI economy creation on ephemeral demo environment |
+| [Email Infrastructure MVP](052-email-platform.md) | Outbox, worker, Resend integration, invoice/dunning email delivery |
+| [Auth Email Flows](053-auth-email-flows.md) | Email verification, password reset, user invitations (depends on 052) |
+| [Billing UI](054-billing-ui.md) | Billing dashboard, invoice detail, email delivery status (depends on 052) |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -278,6 +281,11 @@ material.
   Control plane owns all structural economy declarations, versioned in DB
 - [Demo Sandbox](050-demo-sandbox.md) -
   Self-service AI economy creation with nightly reset and tenant registration
+- [Email Infrastructure MVP](052-email-platform.md) -
+  Transactional email via outbox pattern, Resend integration, invoice/dunning delivery,
+  provider-agnostic Sender interface, per-tenant metering
+- [Billing UI](054-billing-ui.md) -
+  Billing dashboard, invoice detail pages, email delivery status visibility
 
 ### Identity & Access Control
 
@@ -293,6 +301,9 @@ Meridian separates access control into two service domains:
 - [Auth Flow Architecture](044-auth-flow-architecture.md) -
   **Authentication entry points**: BFF password, BFF SSO, MCP OAuth, and
   tenant context flow through each
+- [Auth Email Flows](053-auth-email-flows.md) -
+  **Email-based auth**: Verification, password reset, user invitations,
+  account lockout notifications (depends on PRD 052)
 
 <!-- markdownlint-enable MD013 -->
 
