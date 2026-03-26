@@ -172,13 +172,13 @@ func TestKafkaPublisher_Publish_MarshalError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to marshal event")
 }
 
-func TestKafkaPublisher_Publish_MarshalError_NoDeprecatedPublish(t *testing.T) {
+func TestKafkaPublisher_Publish_MarshalError_UnknownTopic(t *testing.T) {
 	publisher, err := NewKafkaPublisher("localhost:9092", slog.Default())
 	require.NoError(t, err)
 	defer publisher.Close()
 
 	ctx := context.Background()
-	// Marshal error on primary topic should not attempt deprecated topic publish.
+	// Marshal error is returned even for topics without deprecated mappings.
 	err = publisher.Publish(ctx, "unknown.topic", make(chan int))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to marshal event")

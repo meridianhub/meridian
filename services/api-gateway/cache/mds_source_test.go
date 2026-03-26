@@ -122,7 +122,11 @@ func setupTestMDSSource(t *testing.T, srv *testMIServer, datasetCode, unit strin
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 	})
-	require.NoError(t, err)
+	if err != nil {
+		grpcServer.Stop()
+		_ = lis.Close()
+		t.Fatalf("failed to create miclient: %v", err)
+	}
 
 	source := NewMDSSource(client, datasetCode, unit)
 

@@ -141,7 +141,11 @@ func newPlatformSagaPool(t *testing.T) *pgxpool.Pool {
 			description  text,
 			created_at   timestamptz  NOT NULL DEFAULT now(),
 			updated_at   timestamptz  NOT NULL DEFAULT now(),
-			PRIMARY KEY (id)
+			PRIMARY KEY (id),
+			CONSTRAINT chk_platform_saga_definition_version
+				CHECK (version ~ '^[0-9]+\.[0-9]+\.[0-9]+$'),
+			CONSTRAINT chk_platform_saga_definition_script_length
+				CHECK (length(script) <= 65536)
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_platform_saga_definition_name_version
 			ON public.platform_saga_definition (name, version);
