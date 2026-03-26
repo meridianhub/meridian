@@ -5,6 +5,7 @@ import { getTenantSlugFromSubdomain } from '@/lib/tenant-utils'
 export interface JWTClaims {
   userId: string
   tenantId?: string
+  tenantDisplayName?: string
   roles: string[]
   scopes: string[]
   exp: number
@@ -92,6 +93,10 @@ export function parseJWT(token: unknown): JWTClaims | null {
           : typeof decoded.tenantId === 'string'
             ? decoded.tenantId
             : undefined,
+      tenantDisplayName:
+        typeof decoded['x-tenant-display-name'] === 'string'
+          ? decoded['x-tenant-display-name']
+          : undefined,
       roles: effectiveRoles,
       scopes,
       exp: decoded.exp,
@@ -118,7 +123,8 @@ function getUserLens(claims: JWTClaims | null): 'platform' | 'tenant' {
   return 'tenant'
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null)
+// Exported for hooks that need optional access without throwing (e.g., usePageTitle)
+export const AuthContext = createContext<AuthContextValue | null>(null)
 
 interface AuthProviderProps {
   children: ReactNode
