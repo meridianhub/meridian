@@ -18,25 +18,25 @@ import (
 // --- Mock PartyClient ---
 
 type mockPartyClient struct {
-	mu       sync.Mutex
-	emails   map[string]string
-	emailErr map[string]error
+	mu         sync.Mutex
+	contacts   map[string]PartyContact
+	contactErr map[string]error
 }
 
 func newMockPartyClient() *mockPartyClient {
 	return &mockPartyClient{
-		emails:   make(map[string]string),
-		emailErr: make(map[string]error),
+		contacts:   make(map[string]PartyContact),
+		contactErr: make(map[string]error),
 	}
 }
 
-func (m *mockPartyClient) GetPartyEmail(_ context.Context, partyID string) (string, error) {
+func (m *mockPartyClient) GetPartyContact(_ context.Context, partyID string) (PartyContact, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err, ok := m.emailErr[partyID]; ok {
-		return "", err
+	if err, ok := m.contactErr[partyID]; ok {
+		return PartyContact{}, err
 	}
-	return m.emails[partyID], nil
+	return m.contacts[partyID], nil
 }
 
 // --- Mock OutboxRepository ---
@@ -103,7 +103,7 @@ func makeInvoiceWithLineItems(t *testing.T, billingRunID uuid.UUID, partyID stri
 func TestQueueInvoiceEmail_ShadowMode(t *testing.T) {
 	ctx := context.Background()
 	partyClient := newMockPartyClient()
-	partyClient.emails["party-a"] = "customer@example.com"
+	partyClient.contacts["party-a"] = PartyContact{Email: "customer@example.com", Name: "Acme Corp"}
 	outbox := &mockEmailOutbox{}
 
 	repo := newMockBillingRepo()
@@ -122,10 +122,10 @@ func TestQueueInvoiceEmail_ShadowMode(t *testing.T) {
 	assert.Empty(t, outbox.entries, "shadow mode should skip email queueing")
 }
 
-func TestQueueInvoiceEmail_MissingPartyEmail(t *testing.T) {
+func TestQueueInvoiceEmail_MissingPartyContact(t *testing.T) {
 	ctx := context.Background()
 	partyClient := newMockPartyClient()
-	partyClient.emailErr["party-missing"] = errors.New("party not found")
+	partyClient.contactErr["party-missing"] = errors.New("party not found")
 	outbox := &mockEmailOutbox{}
 
 	repo := newMockBillingRepo()
@@ -148,7 +148,7 @@ func TestQueueInvoiceEmail_MissingPartyEmail(t *testing.T) {
 func TestQueueInvoiceEmail_EnqueueFailure_NonFatal(t *testing.T) {
 	ctx := context.Background()
 	partyClient := newMockPartyClient()
-	partyClient.emails["party-a"] = "customer@example.com"
+	partyClient.contacts["party-a"] = PartyContact{Email: "customer@example.com", Name: "Acme Corp"}
 	outbox := &mockEmailOutbox{enqueueErr: errors.New("database unavailable")}
 
 	periodStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -180,7 +180,7 @@ func TestQueueInvoiceEmail_EnqueueFailure_NonFatal(t *testing.T) {
 func TestQueueInvoiceEmail_Success(t *testing.T) {
 	ctx := context.Background()
 	partyClient := newMockPartyClient()
-	partyClient.emails["party-a"] = "customer@example.com"
+	partyClient.contacts["party-a"] = PartyContact{Email: "customer@example.com", Name: "Acme Corp"}
 	outbox := &mockEmailOutbox{}
 
 	periodStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -218,6 +218,7 @@ func TestQueueInvoiceEmail_Success(t *testing.T) {
 	assert.Contains(t, entry.Subject, invoices[0].InvoiceNumber)
 
 	data := entry.TemplateData
+	assert.Equal(t, "Acme Corp", data["CustomerName"])
 	assert.Equal(t, invoices[0].InvoiceNumber, data["InvoiceNumber"])
 	assert.Equal(t, "GBP 50.00", data["Total"])
 }

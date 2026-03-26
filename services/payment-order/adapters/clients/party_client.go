@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
+	"github.com/meridianhub/meridian/services/payment-order/worker"
 	"google.golang.org/grpc"
 )
 
@@ -34,27 +35,39 @@ func NewPartyClient(conn *grpc.ClientConn) *PartyClientWrapper {
 	}
 }
 
-// GetPartyEmail retrieves the contact email address for a party by looking up
-// the "email" attribute in the party's attribute list.
-func (c *PartyClientWrapper) GetPartyEmail(ctx context.Context, partyID string) (string, error) {
+// GetPartyContact retrieves the contact email and display name for a party.
+// Email is extracted from the party's "email" attribute. Name uses DisplayName if set,
+// falling back to LegalName.
+func (c *PartyClientWrapper) GetPartyContact(ctx context.Context, partyID string) (worker.PartyContact, error) {
 	resp, err := c.client.RetrieveParty(ctx, &partyv1.RetrievePartyRequest{
 		PartyId: partyID,
 	})
 	if err != nil {
-		return "", fmt.Errorf("retrieve party %s: %w", partyID, err)
+		return worker.PartyContact{}, fmt.Errorf("retrieve party %s: %w", partyID, err)
 	}
 
 	if resp.Party == nil {
-		return "", fmt.Errorf("%w: %s", ErrPartyNotFound, partyID)
+		return worker.PartyContact{}, fmt.Errorf("%w: %s", ErrPartyNotFound, partyID)
 	}
 
+	var email string
 	for _, attr := range resp.Party.Attributes {
 		if attr.Key == partyEmailAttributeKey && attr.Value != "" {
-			return attr.Value, nil
+			email = attr.Value
+			break
 		}
 	}
 
-	return "", fmt.Errorf("%w: party %s", ErrPartyEmailMissing, partyID)
+	if email == "" {
+		return worker.PartyContact{}, fmt.Errorf("%w: party %s", ErrPartyEmailMissing, partyID)
+	}
+
+	name := resp.Party.DisplayName
+	if name == "" {
+		name = resp.Party.LegalName
+	}
+
+	return worker.PartyContact{Email: email, Name: name}, nil
 }
 
 // Close terminates the gRPC connection.

@@ -35,10 +35,16 @@ type PositionKeepingClient interface {
 	GetPositionLogEntries(ctx context.Context, accountID string, periodStart, periodEnd time.Time) ([]PositionEntry, error)
 }
 
+// PartyContact holds the contact details for a party needed for email delivery.
+type PartyContact struct {
+	Email string
+	Name  string
+}
+
 // PartyClient defines the interface for retrieving party contact information.
 type PartyClient interface {
-	// GetPartyEmail retrieves the contact email address for a party.
-	GetPartyEmail(ctx context.Context, partyID string) (string, error)
+	// GetPartyContact retrieves the contact email and display name for a party.
+	GetPartyContact(ctx context.Context, partyID string) (PartyContact, error)
 }
 
 // AccountInfo holds basic account information for billing queries.
@@ -221,9 +227,9 @@ func (g *InvoiceGenerator) queueInvoiceEmail(ctx context.Context, inv *domain.In
 		return
 	}
 
-	partyEmail, err := g.partyClient.GetPartyEmail(ctx, inv.PartyID)
+	contact, err := g.partyClient.GetPartyContact(ctx, inv.PartyID)
 	if err != nil {
-		g.logger.Warn("could not resolve party email, skipping invoice email",
+		g.logger.Warn("could not resolve party contact, skipping invoice email",
 			"party_id", inv.PartyID,
 			"invoice_id", inv.ID,
 			"error", err)
@@ -239,24 +245,19 @@ func (g *InvoiceGenerator) queueInvoiceEmail(ctx context.Context, inv *domain.In
 	}
 
 	dueDate := time.Now().UTC().Add(invoiceEmailDueIn)
-	templateData := email.InvoiceData{
-		InvoiceNumber: inv.InvoiceNumber,
-		LineItems:     lineItems,
-		Total:         formatCents(inv.SubtotalCents, inv.Currency),
-		DueDate:       dueDate.Format("2006-01-02"),
-	}
 
 	entry := &email.OutboxEntry{
 		IdempotencyKey: "invoice-" + inv.ID.String(),
-		ToAddresses:    []string{partyEmail},
+		ToAddresses:    []string{contact.Email},
 		Subject:        "Invoice " + inv.InvoiceNumber,
 		TemplateName:   "invoice",
 		TemplateData: map[string]any{
-			"InvoiceNumber": templateData.InvoiceNumber,
-			"LineItems":     templateData.LineItems,
-			"Total":         templateData.Total,
-			"DueDate":       templateData.DueDate,
-			"PaymentLink":   templateData.PaymentLink,
+			"CustomerName":  contact.Name,
+			"InvoiceNumber": inv.InvoiceNumber,
+			"LineItems":     lineItems,
+			"Total":         formatCents(inv.SubtotalCents, inv.Currency),
+			"DueDate":       dueDate.Format("2006-01-02"),
+			"PaymentLink":   "",
 		},
 	}
 
@@ -268,14 +269,17 @@ func (g *InvoiceGenerator) queueInvoiceEmail(ctx context.Context, inv *domain.In
 	}
 }
 
-// formatCents formats an integer cent amount as a human-readable string with currency symbol.
+// formatCents formats an integer cent amount as a human-readable string with currency code.
+// Negative amounts are represented with a leading minus sign.
 func formatCents(cents int64, currency string) string {
+	sign := ""
+	if cents < 0 {
+		sign = "-"
+		cents = -cents
+	}
 	major := cents / 100
 	minor := cents % 100
-	if minor < 0 {
-		minor = -minor
-	}
-	return fmt.Sprintf("%s %d.%02d", currency, major, minor)
+	return fmt.Sprintf("%s%s %d.%02d", sign, currency, major, minor)
 }
 
 // buildLineItemsForParty queries position entries for all accounts belonging to a party
