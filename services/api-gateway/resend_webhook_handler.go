@@ -19,11 +19,11 @@ import (
 
 // Sentinel errors for webhook verification.
 var (
-	ErrMissingSignatureHeaders      = errors.New("webhook: missing svix-id, svix-timestamp, or svix-signature header")
-	ErrInvalidTimestamp             = errors.New("webhook: invalid svix-timestamp value")
-	ErrTimestampOutsideTolerance    = errors.New("webhook: timestamp outside 5-minute tolerance window")
-	ErrSignatureVerificationFailed  = errors.New("webhook: no matching svix signature found")
-	ErrInvalidWebhookSecret         = errors.New("webhook: cannot decode webhook secret")
+	ErrMissingSignatureHeaders     = errors.New("webhook: missing svix-id, svix-timestamp, or svix-signature header")
+	ErrInvalidTimestamp            = errors.New("webhook: invalid svix-timestamp value")
+	ErrTimestampOutsideTolerance   = errors.New("webhook: timestamp outside 5-minute tolerance window")
+	ErrSignatureVerificationFailed = errors.New("webhook: no matching svix signature found")
+	ErrInvalidWebhookSecret        = errors.New("webhook: cannot decode webhook secret")
 )
 
 // resendWebhookPayload is the outer envelope of a Resend webhook event.
@@ -68,7 +68,9 @@ func (h *ResendWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	if err := r.Body.Close(); err != nil {
+		h.logger.WarnContext(r.Context(), "resend webhook: failed to close request body", "error", err)
+	}
 
 	if err := verifySvixSignature(body, r.Header, h.webhookKey); err != nil {
 		h.logger.WarnContext(r.Context(), "resend webhook: signature verification failed", "error", err)
