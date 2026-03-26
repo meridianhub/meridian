@@ -73,6 +73,13 @@ read the display name from context and add it as a JWT claim
 (`x-tenant-display-name`). This propagates the real name to the
 frontend for the entire session without any additional API calls.
 
+**Staleness policy:** The display name in the JWT may become stale
+if a tenant is renamed mid-session. This is acceptable - tenant
+renames are rare administrative operations. The frontend will pick
+up the updated name on next token refresh (session expiry or
+explicit re-login). No token invalidation or forced refresh is
+needed for this claim.
+
 ### 3. Public tenant info endpoint (backend)
 
 Add `GET /api/tenant-info` to the gateway as a public endpoint
@@ -82,6 +89,16 @@ Add `GET /api/tenant-info` to the gateway as a public endpoint
 - Returns `{ slug, displayName }` as JSON
 - Returns 404 if no valid tenant subdomain is present
 - This serves the login page where no JWT exists yet
+
+**Abuse protections:**
+- Rate limited per IP (reuse the gateway's existing rate limiter)
+- Positive responses cached via `Cache-Control: public, s-maxage=300`
+  to reduce repeated lookups
+- Error responses return a uniform 404 with identical body and
+  timing regardless of whether the slug is malformed, unknown, or
+  absent - the existing tenant resolver already does this
+- The endpoint only returns slug and display name - no tenant IDs,
+  status, or internal metadata are exposed
 
 ### 4. Frontend: consume tenant display name (frontend)
 
