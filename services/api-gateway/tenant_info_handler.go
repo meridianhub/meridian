@@ -48,21 +48,32 @@ type tenantInfoResponse struct {
 	DisplayName string `json:"displayName"`
 }
 
+// RateLimitHandler wraps a handler with per-IP rate limiting (30 req/min, burst 10).
+// Uses RemoteAddr (direct connection IP) rather than proxy headers to prevent
+// header spoofing from bypassing rate limits. Behind a reverse proxy, this
+// rate-limits per proxy IP; the proxy itself should enforce per-client limits.
+func (h *TenantInfoHandler) RateLimitHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := remoteAddrIP(r)
+		if !h.allow(ip) {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // HandleTenantInfo returns an http.HandlerFunc for GET /api/tenant-info.
 // It reads tenant context injected by the tenant resolver middleware and
 // returns the slug and display name as JSON.
+//
+// Rate limiting is applied externally via RateLimitHandler so that abusive
+// traffic is rejected before tenant resolution performs cache/DB lookups.
 func (h *TenantInfoHandler) HandleTenantInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// Per-IP rate limiting: 30 requests per minute with burst of 10.
-		ip := getClientIP(r)
-		if !h.allow(ip) {
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
 

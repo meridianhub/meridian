@@ -56,6 +56,66 @@ func TestHandleTenantInfo_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
+func TestRateLimitHandler_RejectsExcessRequests(t *testing.T) {
+	handler := NewTenantInfoHandler(slog.Default())
+	defer handler.Stop()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	wrapped := handler.RateLimitHandler(inner)
+
+	// Burst of 10 should all succeed.
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.1:12345"
+		rec := httptest.NewRecorder()
+		wrapped.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code, "request %d should succeed", i)
+	}
+
+	// 11th request should be rate-limited.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
+func TestRateLimitHandler_UsesRemoteAddr(t *testing.T) {
+	handler := NewTenantInfoHandler(slog.Default())
+	defer handler.Stop()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	wrapped := handler.RateLimitHandler(inner)
+
+	// Exhaust burst for 10.0.0.1.
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.1:12345"
+		rec := httptest.NewRecorder()
+		wrapped.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+	}
+
+	// Different RemoteAddr should still succeed (separate bucket).
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.2:12345"
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Spoofed X-Real-IP should NOT bypass the limit for 10.0.0.1.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:12345"
+	req.Header.Set("X-Real-IP", "10.0.0.99")
+	rec = httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
 func TestHandleTenantInfo_EmptyDisplayName(t *testing.T) {
 	handler := NewTenantInfoHandler(slog.Default())
 

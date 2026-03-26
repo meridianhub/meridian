@@ -430,6 +430,10 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 		// Display name cache miss - backfill from DB (best-effort).
 		if tenantEntity, dbErr := m.tenantRepo.GetBySlug(ctx, slug); dbErr == nil {
 			m.displayNameCache.Store(slug, tenantEntity.DisplayName)
+			// Refresh slug cache if DB returns a different tenant ID.
+			if tenantEntity.ID != tenantID {
+				_ = m.slugCache.Set(ctx, slug, tenantEntity.ID)
+			}
 			return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName}, nil
 		}
 		// DB failed but we have a valid cached ID - return without display name

@@ -141,6 +141,8 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 }
 
 // registerTenantInfoRoute registers the public tenant info endpoint if configured.
+// Rate limiting wraps the entire chain so abusive traffic is rejected before
+// tenant resolution performs cache/DB lookups.
 func (s *Server) registerTenantInfoRoute() {
 	if s.tenantInfoHandler == nil {
 		return
@@ -149,6 +151,7 @@ func (s *Server) registerTenantInfoRoute() {
 	if s.tenantResolver != nil {
 		tenantInfoH = s.tenantResolver.Handler(tenantInfoH)
 	}
+	tenantInfoH = s.tenantInfoHandler.RateLimitHandler(tenantInfoH)
 	s.mux.Handle("GET /api/tenant-info", tenantInfoH)
 }
 
