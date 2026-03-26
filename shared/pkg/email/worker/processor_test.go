@@ -69,6 +69,10 @@ func (m *mockOutboxRepo) Cancel(_ context.Context, _ uuid.UUID) error {
 	return m.cancelErr
 }
 
+func (m *mockOutboxRepo) CancelByIdempotencyKeyPattern(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 type mockAuditRepo struct {
 	recordCalls int
 	recordErr   error
