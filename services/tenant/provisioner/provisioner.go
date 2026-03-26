@@ -409,9 +409,8 @@ func DefaultConfig() *Config {
 				MigrationPath: basePath + "/reference-data",
 				DatabaseURL:   getServiceDatabaseURL("reference-data"),
 			},
-			// Services below use tenant-scoped queries (WithGormTenantScope)
-			// and need org_<tenant> schemas, but have no provisioner-specific
-			// migrations - only the schema needs to exist.
+			// Services below require org_<tenant> schemas for tenant-scoped
+			// queries but have no provisioner-specific migrations.
 			{
 				Name:          "internal-account",
 				MigrationPath: basePath + "/internal-account",
