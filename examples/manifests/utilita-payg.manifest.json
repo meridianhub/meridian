@@ -447,7 +447,9 @@
         "role": "dcc_adapter",
         "product": "Intelligent Data Adapter (IDA)",
         "meters_managed": "1000000+"
-      }
+      },
+      "externalReference": "PROCODE001",
+      "externalReferenceType": "NATIONAL_ID"
     },
     {
       "code": "GSP_SOUT",
