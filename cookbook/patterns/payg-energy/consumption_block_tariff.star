@@ -35,11 +35,12 @@
 #          0.5 kWh @ Saver Rate (26.01p) = GBP 0.1301
 #          Total retail charge:           = GBP 0.3894
 #
-#   DR Prepayment Liability    GBP 0.3894  (customer balance decremented)
-#   CR Revenue - Energy        GBP 0.3894  (revenue recognised at delivery)
+#   DR Prepayment Liability    GBP 0.3709  (customer balance decremented, ex-VAT)
+#   CR Revenue - Energy        GBP 0.3709  (revenue recognised at delivery)
 #
 #   DR Wholesale Cost          GBP 0.0850  (wholesale position, 8.50p/kWh)
-#   CR Energy Supply Pool      GBP 0.0850  (counterparty wholesale leg)
+#   (Counterparty wholesale credit is booked by the platform's cross-instrument
+#    valuation pipeline, not by this saga directly.)
 #
 # Input data (from TransactionCapturedEvent):
 #   - correlation_id: string - Idempotency key
@@ -105,8 +106,13 @@ def execute_consumption():
         value_date=settlement_period,
     )
 
-    first_rate = Decimal(str(first_rate_obs.value))
-    saver_rate = Decimal(str(saver_rate_obs.value))
+    # Market data stores VAT-inclusive rates (as published by Utilita).
+    # Prepayment liability is credited net-of-VAT (topup_waterfall strips VAT
+    # at top-up per HMRC Reg 86), so convert rates to ex-VAT basis here.
+    vat_rate = Decimal("0.05")
+    vat_divisor = Decimal("1") + vat_rate
+    first_rate = Decimal(str(first_rate_obs.value)) / vat_divisor
+    saver_rate = Decimal(str(saver_rate_obs.value)) / vat_divisor
 
     # Query the daily cumulative consumption to determine block position.
     # The daily threshold is 2 kWh (1 kWh for E7 daytime).

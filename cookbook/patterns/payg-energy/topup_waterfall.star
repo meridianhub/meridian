@@ -10,8 +10,8 @@
 # When a customer tops up (e.g., GBP 50.00), the payment is allocated
 # through a strict priority waterfall:
 #
-#   1. Debt recovery siphon (25% of gross, configurable 20-100%)
-#   2. Emergency credit repayment (clear outstanding EC receivable)
+#   1. Emergency credit repayment (clear outstanding EC receivable)
+#   2. Debt recovery siphon (25% of post-EC net, configurable 20-100%)
 #   3. Prepayment liability credit (remainder funds the meter balance)
 #
 # VAT is recognised at top-up, not at consumption (HMRC Regulation 86:
@@ -55,8 +55,8 @@
 #   - amount_pence: int - Top-up amount in pence (e.g., 5000 = GBP 50.00)
 #   - mpxn: string - Meter Point Reference Number (MPAN or MPRN)
 #   - fuel_type: string - "electricity" or "gas"
-#   - payment_reference: string - External payment reference
-#   - debt_recovery_rate: string - Override rate (default "25")
+#   - payment_reference: string - External payment reference (required, must be unique per top-up)
+#   - debt_recovery_rate: string - Override rate (default "25", clamped to 20-100)
 
 topup_saga = saga(name="topup_waterfall")
 
@@ -67,8 +67,16 @@ def execute_topup():
     amount_pence = int(ctx["amount_pence"])
     mpxn = ctx["mpxn"]
     fuel_type = ctx.get("fuel_type", "electricity")
-    payment_ref = ctx.get("payment_reference", "topup_" + party_id)
+    payment_ref = ctx.get("payment_reference", "")
+    if not payment_ref:
+        return {"status": "VALIDATION_ERROR", "reason": "payment_reference is required"}
+
+    # Clamp debt recovery rate to Ofgem-permitted range (20-100%)
     debt_recovery_rate = Decimal(ctx.get("debt_recovery_rate", "25"))
+    if debt_recovery_rate < Decimal("20"):
+        debt_recovery_rate = Decimal("20")
+    if debt_recovery_rate > Decimal("100"):
+        debt_recovery_rate = Decimal("100")
 
     gross_amount = Decimal(str(amount_pence)) / Decimal("100")
     vat_rate = Decimal("0.05")
@@ -96,7 +104,10 @@ def execute_topup():
     # VAT tax point is payment receipt for domestic PAYG energy.
     # This is a critical compliance point: VAT follows cash, not consumption.
     step(name="recognise_vat")
-    vat_amount = gross_amount * vat_rate / (Decimal("1") + vat_rate)
+    # Round VAT to penny precision so ledger and meter amounts match exactly
+    vat_exact = gross_amount * vat_rate / (Decimal("1") + vat_rate)
+    vat_pence = int(vat_exact * Decimal("100"))
+    vat_amount = Decimal(str(vat_pence)) / Decimal("100")
     net_amount = gross_amount - vat_amount
 
     position_keeping.initiate_log(

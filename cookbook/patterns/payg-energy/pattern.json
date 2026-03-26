@@ -4,7 +4,7 @@
     "type": "registry:pattern",
     "title": "Prepayment Energy Billing (PAYG)",
     "description": "Complete prepayment energy billing model with no-standing-charge block tariff, emergency credit, debt recovery waterfall, DCC smart meter integration, and MHHS-ready half-hourly settlement. Models Utilita-style two-tier pricing with VAT at top-up (HMRC Reg 86).",
-    "registryDependencies": ["base-fiat-gbp"],
+    "registryDependencies": ["base-fiat-gbp", "energy-settlement"],
     "categories": ["energy", "utilities", "prepayment", "billing"],
     "meta": {
         "complexity": 5,

@@ -31,6 +31,7 @@
 #   - fuel_type: string - "electricity" or "gas"
 #   - mpxn: string - Meter Point Reference Number
 #   - activation_source: string - "ihd", "keypad", "app", or "remote"
+#   - timestamp: string - ISO 8601 activation timestamp (used in correlation ID)
 
 ec_saga = saga(name="emergency_credit_activate")
 
@@ -42,16 +43,19 @@ def execute_ec_activation():
     mpxn = ctx["mpxn"]
     activation_source = ctx.get("activation_source", "app")
     ec_limit = Decimal("15.00")
-    activation_ref = "ec_" + party_id + "_" + fuel_type
+    # Use timestamp-based correlation ID so EC can be reactivated after repayment.
+    # Each activation cycle gets a unique ID; topup_waterfall clears the balance
+    # using its own payment_ref, so previous activation IDs don't block new ones.
+    activation_ref = "ec_" + party_id + "_" + fuel_type + "_" + ctx.get("timestamp", "")
 
-    # Step 1: Check idempotency - is EC already active?
-    step(name="check_idempotency")
-    existing = position_keeping.query_logs(
-        correlation_id=activation_ref,
+    # Step 1: Check if EC is already active by inspecting the current balance,
+    # not log existence. This allows reactivation after topup_waterfall repays EC.
+    step(name="check_already_active")
+    ec_current_check = internal_account.get_balance(
+        account_code="EMERGENCY_CREDIT:" + party_id,
         instrument_code="GBP",
-        position_id="EMERGENCY_CREDIT:" + party_id,
     )
-    if existing.count > 0:
+    if ec_current_check.amount >= ec_limit:
         return {"status": "ALREADY_ACTIVE", "correlation_id": activation_ref}
 
     # Step 2: Verify prepayment balance is below activation threshold
@@ -70,22 +74,16 @@ def execute_ec_activation():
             "current_balance": str(balance),
         }
 
-    # Step 3: Check existing EC balance (can't stack beyond limit)
-    step(name="check_existing_ec")
-    ec_balance = internal_account.get_balance(
-        account_code="EMERGENCY_CREDIT:" + party_id,
-        instrument_code="GBP",
-    )
-    ec_current = Decimal(str(ec_balance.amount)) if ec_balance.amount > 0 else Decimal("0")
-
-    if ec_current >= ec_limit:
+    # Step 3: Calculate EC amount (top up to limit, accounting for any partial balance)
+    step(name="calculate_ec_amount")
+    ec_current = Decimal(str(ec_current_check.amount)) if ec_current_check.amount > 0 else Decimal("0")
+    ec_amount = ec_limit - ec_current
+    if ec_amount <= Decimal("0"):
         return {
             "status": "EC_LIMIT_REACHED",
             "current_ec": str(ec_current),
             "limit": str(ec_limit),
         }
-
-    ec_amount = ec_limit - ec_current
 
     # Step 4: Create emergency credit receivable (asset - customer owes supplier)
     step(name="create_ec_receivable")
