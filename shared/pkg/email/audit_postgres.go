@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/platform/db"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -40,24 +41,30 @@ func (r *PostgresAuditRepository) Record(ctx context.Context, entry *AuditEntry)
 	}
 
 	now := time.Now().UTC()
-	entity := AuditLogEntity{
-		ID:               entry.ID,
-		TenantID:         entry.TenantID,
-		OutboxID:         entry.OutboxID,
-		ProviderID:       entry.ProviderID,
-		ToAddresses:      entry.ToAddresses,
-		FromAddress:      entry.FromAddress,
-		Subject:          entry.Subject,
-		TemplateName:     entry.TemplateName,
-		Status:           string(entry.Status),
-		SentAt:           entry.SentAt,
-		DeliveredAt:      entry.DeliveredAt,
-		BounceReason:     entry.BounceReason,
-		ProviderResponse: providerResponseJSON,
-		CreatedAt:        now,
-	}
 
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return tenant.ErrMissingTenantContext
+		}
+
+		entity := AuditLogEntity{
+			ID:               entry.ID,
+			TenantID:         string(tenantID),
+			OutboxID:         entry.OutboxID,
+			ProviderID:       entry.ProviderID,
+			ToAddresses:      entry.ToAddresses,
+			FromAddress:      entry.FromAddress,
+			Subject:          entry.Subject,
+			TemplateName:     entry.TemplateName,
+			Status:           string(entry.Status),
+			SentAt:           entry.SentAt,
+			DeliveredAt:      entry.DeliveredAt,
+			BounceReason:     entry.BounceReason,
+			ProviderResponse: providerResponseJSON,
+			CreatedAt:        now,
+		}
+
 		return tx.Create(&entity).Error
 	})
 }

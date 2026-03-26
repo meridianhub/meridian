@@ -29,6 +29,7 @@ var (
 	ErrOutboxNotFound       = errors.New("email: outbox entry not found")
 	ErrInvalidMaxAttempts   = errors.New("email: max attempts must be non-negative")
 	ErrDuplicateIdempotency = errors.New("email: duplicate idempotency key")
+	ErrNilEntry             = errors.New("email: entry must not be nil")
 )
 
 // PostgresOutboxRepository implements OutboxRepository using GORM with
@@ -44,6 +45,9 @@ func NewPostgresOutboxRepository(gormDB *gorm.DB) *PostgresOutboxRepository {
 
 // Enqueue adds a new email to the outbox within a tenant-scoped transaction.
 func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEntry) error {
+	if entry == nil {
+		return ErrNilEntry
+	}
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
 	}
@@ -115,10 +119,14 @@ func checkTenantRateLimit(tx *gorm.DB, tenantID string, now time.Time) error {
 	return nil
 }
 
+// defaultMaxAttempts allows 5 retries with full backoff schedule (1m, 15m, 1h, 4h, 24h)
+// plus the initial attempt, then dead-letters on the 7th failure.
+const defaultMaxAttempts = 6
+
 func newOutboxEntity(entry *OutboxEntry, tenantID string, templateJSON []byte, now time.Time) OutboxEntity {
 	maxAttempts := entry.MaxAttempts
 	if maxAttempts == 0 {
-		maxAttempts = 5
+		maxAttempts = defaultMaxAttempts
 	}
 	return OutboxEntity{
 		ID:             entry.ID,
@@ -140,7 +148,10 @@ func newOutboxEntity(entry *OutboxEntry, tenantID string, templateJSON []byte, n
 
 // FetchDispatchable atomically claims up to limit pending/failed entries for dispatch.
 func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit int) ([]OutboxEntry, error) {
-	if limit <= 0 || limit > maxFetchBatchSize {
+	if limit <= 0 {
+		return nil, nil
+	}
+	if limit > maxFetchBatchSize {
 		limit = maxFetchBatchSize
 	}
 
@@ -181,7 +192,7 @@ func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit 
 }
 
 // MarkSent transitions an outbox entry from SENDING to SENT status.
-// If the entry was cancelled concurrently, the update is a no-op.
+// Returns ErrOutboxNotFound if the entry does not exist or is not in SENDING status.
 func (r *PostgresOutboxRepository) MarkSent(ctx context.Context, id uuid.UUID) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		result := tx.Model(&OutboxEntity{}).
