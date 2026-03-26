@@ -182,18 +182,16 @@ type TemplateRenderer interface {
 The outbox pattern guarantees emails survive crashes. The worker polls
 the outbox independently and delivers via Resend.
 
-**Cross-service write model**: The email outbox lives in the notification
-service's database. Services that trigger emails (payment-order for
-invoices, saga runtime for dunning) write to the outbox via the
-`notification.send` handler or a shared outbox repository call. This is
-an application-level guarantee, not a single DB transaction across
-services. If the outbox write fails after the business operation
-succeeds, the handler returns an error and the saga step retries. The
-saga's own retry/compensation ensures eventual consistency. For direct
-service integration (e.g., invoice generator), the outbox write happens
-in a separate transaction immediately after the business operation - if
-it fails, the invoice exists but the email is not queued, and the
-billing run logs the failure for manual follow-up.
+**Cross-service write model**: The email outbox repository lives in
+`shared/pkg/email/outbox.go` as a shared package, not behind a service
+boundary. Services that trigger emails import the outbox repository
+directly and write to the email outbox table in the same database
+(Meridian uses a unified database, not per-service databases). For saga
+handlers (`notification.send`), the handler runs in-process and writes
+to the outbox. For direct integration (invoice generator in
+payment-order), the outbox repository is called after invoice creation.
+If the outbox write fails, the billing run logs the failure for manual
+follow-up.
 
 **Delivery guarantee**: At-least-once from Meridian. The idempotency key is
 forwarded as Resend's `Idempotency-Key` header, so Resend deduplicates on
@@ -430,7 +428,9 @@ payment-order service.
 - `sender.go` - `Sender` interface, `Message` type
 - `template.go` - `TemplateRenderer` using `html/template` + `embed.FS`
 - `outbox.go` - Outbox repository (write, read pending, update status,
-  cancel by idempotency key pattern)
+  cancel by idempotency key pattern). Enforce configurable per-tenant
+  hourly send cap (default 500/h) at write time; reject with specific
+  error when exceeded (prevents runaway sagas from exhausting Resend quota)
 - `resend/provider.go` - Resend SDK wrapper implementing `Sender`, wrapped
   with circuit breaker from `shared/pkg/clients/circuitbreaker.go`
 - `log/provider.go` - Log-mode sender (writes structured log, no API call)
@@ -494,13 +494,19 @@ risk.
 ### Task 7: Invoice and dunning delivery wiring (3 points)
 
 **Invoice delivery**: After `invoice_generator.go` creates an ISSUED
-invoice, write to email outbox. Look up party email from party service.
+invoice, call the shared outbox repository to queue the email. The
+outbox repository is imported directly by payment-order (shared package,
+not cross-service DB write). Look up party email from party service.
 Idempotency key: `invoice-{invoice_id}`. Shadow mode billing runs skip
 email delivery.
 
 **Dunning wiring**: Replace `notification.send` stub in `saga_handlers.go`
 with real implementation that writes to email outbox. Resolve email from
 `party_id` server-side. Idempotency key: `dunning-{level}-{invoice_id}`.
+Add `notification.send` to `handlers.yaml` with the expanded parameter
+schema so Starlark parameter validation catches type mismatches at script
+load time, not runtime. Update dunning saga scripts to pass `template`,
+`data`, and `idempotency_key` parameters.
 
 **Payment cancellation**: When invoice transitions to PAID, cancel pending
 dunning outbox rows and send payment-received email. Idempotency key:
