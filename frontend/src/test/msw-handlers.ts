@@ -110,6 +110,11 @@ export const handlers = [
   http.get('/api/auth/providers', () => {
     return HttpResponse.json({}, { status: 404 })
   }),
+
+  // Tenant info endpoint - returns 404 by default (bare domain, no tenant subdomain)
+  http.get('/api/tenant-info', () => {
+    return HttpResponse.json({}, { status: 404 })
+  }),
 ]
 
 export const server = setupServer(...handlers)

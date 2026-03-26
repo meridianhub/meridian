@@ -32,12 +32,14 @@ vi.mock('@xyflow/react', () => {
 
   function Handle() { return null }
 
-  function ReactFlow({ nodes, edges, onNodeClick, onNodeDoubleClick, onPaneClick, children }: {
+  function ReactFlow({ nodes, edges, onNodeClick, onNodeDoubleClick, onPaneClick, onNodeMouseEnter, onNodeMouseLeave, children }: {
     nodes: { id: string; type?: string; data: Record<string, unknown> }[]
-    edges: { id: string; source: string; target: string; data?: Record<string, unknown> }[]
+    edges: { id: string; source: string; target: string; data?: Record<string, unknown>; animated?: boolean }[]
     onNodeClick?: (event: unknown, node: unknown) => void
     onNodeDoubleClick?: (event: unknown, node: unknown) => void
     onPaneClick?: () => void
+    onNodeMouseEnter?: (event: unknown, node: unknown) => void
+    onNodeMouseLeave?: (event: unknown, node: unknown) => void
     children?: React.ReactNode
     [key: string]: unknown
   }) {
@@ -56,13 +58,15 @@ vi.mock('@xyflow/react', () => {
               data-highlighted={String((n.data as { highlighted?: boolean }).highlighted ?? false)}
               onClick={(e) => { e.stopPropagation(); onNodeClick?.({}, n) }}
               onDoubleClick={() => onNodeDoubleClick?.({}, n)}
+              onMouseEnter={() => onNodeMouseEnter?.({}, n)}
+              onMouseLeave={() => onNodeMouseLeave?.({}, n)}
             >
               {mn?.label ?? n.id}
             </div>
           )
         })}
         {edges.map((e) => (
-          <div key={e.id} data-testid={`edge-${e.id}`} data-relationship={e.data?.relationship}>
+          <div key={e.id} data-testid={`edge-${e.id}`} data-relationship={e.data?.relationship} data-animated={String(e.animated ?? false)}>
             {e.source} -&gt; {e.target}
           </div>
         ))}
@@ -453,6 +457,334 @@ describe('ManifestGraph', () => {
       const closeButton = screen.getByTestId('close-event-chain-panel')
       fireEvent.click(closeButton)
       expect(screen.queryByTestId('event-chain-side-panel')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('node hover highlighting', () => {
+    it('dims unconnected nodes on hover', async () => {
+      renderGraph(energyManifest)
+      const instrumentNode = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.mouseEnter(instrumentNode)
+      await waitFor(() => {
+        expect(instrumentNode).toHaveAttribute('data-highlighted', 'true')
+      })
+      // Saga nodes not connected to KWH should be dimmed
+      const sagaNode = screen.getByTestId('node-saga:daily_reconciliation')
+      expect(sagaNode).toHaveAttribute('data-dimmed', 'true')
+    })
+
+    it('clears highlighting on mouse leave', async () => {
+      renderGraph(energyManifest)
+      const instrumentNode = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.mouseEnter(instrumentNode)
+      await waitFor(() => {
+        expect(instrumentNode).toHaveAttribute('data-highlighted', 'true')
+      })
+      fireEvent.mouseLeave(instrumentNode)
+      await waitFor(() => {
+        expect(instrumentNode).toHaveAttribute('data-highlighted', 'false')
+      })
+    })
+
+    it('highlights the hovered node itself', async () => {
+      renderGraph(energyManifest)
+      const sagaNode = await screen.findByTestId('node-saga:usage_to_value')
+      fireEvent.mouseEnter(sagaNode)
+      await waitFor(() => {
+        expect(sagaNode).toHaveAttribute('data-highlighted', 'true')
+        expect(sagaNode).toHaveAttribute('data-dimmed', 'false')
+      })
+    })
+  })
+
+  describe('edit resource modal', () => {
+    it('shows edit button for instrument nodes', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('edit-resource-button')).toBeInTheDocument()
+    })
+
+    it('shows edit button for account type nodes', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-account_type:ENERGY_HOLDING')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('edit-resource-button')).toBeInTheDocument()
+    })
+
+    it('shows edit button for saga nodes', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-saga:usage_to_value')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('edit-resource-button')).toBeInTheDocument()
+    })
+
+    it('does not show edit button for event channel nodes', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-event_channel:position-keeping.transaction-captured.v1')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('node-toolbar')).toBeInTheDocument()
+      expect(screen.queryByTestId('edit-resource-button')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('fullscreen button', () => {
+    it('shows fullscreen button when no node is selected', async () => {
+      renderGraph(energyManifest)
+      await screen.findByTestId('react-flow')
+      expect(screen.getByLabelText('View fullscreen')).toBeInTheDocument()
+    })
+
+    it('hides fullscreen button when a node is selected', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      await screen.findByTestId('node-toolbar')
+      expect(screen.queryByLabelText('View fullscreen')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('additional node types', () => {
+    const fullManifest = createMockManifest({
+      instruments: [
+        { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
+      ],
+      accountTypes: [
+        { code: 'CURRENT', name: 'Current Account', normalBalance: 1, allowedInstruments: ['GBP'] },
+      ],
+      valuationRules: [
+        { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'spot' },
+      ],
+      sagas: [
+        { name: 'test_saga', trigger: 'api:test', script: 'def main(): pass' },
+      ],
+      paymentRails: [
+        { provider: 'stripe', name: 'Stripe Rail' },
+      ],
+      partyTypes: [
+        { partyType: 'CUSTOMER' },
+      ],
+      mappings: [
+        { name: 'stripe_inbound' },
+      ],
+      operationalGateway: {
+        providerConnections: [
+          { connectionId: 'conn-1', providerName: 'Stripe' },
+        ],
+        instructionRoutes: [
+          { instructionType: 'payment', connectionId: 'conn-1' },
+        ],
+      },
+      marketData: [
+        { code: 'SPOT', name: 'Spot Price' },
+      ],
+      organizations: [
+        { code: 'ACME', name: 'Acme Corp' },
+      ],
+      internalAccounts: [
+        { code: 'OPS_GBP', name: 'Operating GBP', accountType: 'CURRENT' },
+      ],
+    })
+
+    it('renders payment rail nodes', async () => {
+      renderGraph(fullManifest)
+      const node = await screen.findByTestId('node-payment_rail:stripe')
+      expect(node).toBeInTheDocument()
+      expect(node).toHaveAttribute('data-node-type', 'payment_rail')
+    })
+
+    it('renders party type nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-party_type:CUSTOMER')).toBeInTheDocument()
+    })
+
+    it('renders mapping nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-mapping:stripe_inbound')).toBeInTheDocument()
+    })
+
+    it('renders operational gateway nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-operational_gateway:default')).toBeInTheDocument()
+    })
+
+    it('renders provider connection nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-provider_connection:conn-1')).toBeInTheDocument()
+    })
+
+    it('renders instruction route nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-instruction_route:payment')).toBeInTheDocument()
+    })
+
+    it('renders market data nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-market_data:SPOT')).toBeInTheDocument()
+    })
+
+    it('renders organization nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-organization:ACME')).toBeInTheDocument()
+    })
+
+    it('renders internal account nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-internal_account:OPS_GBP')).toBeInTheDocument()
+    })
+
+    it('renders api trigger badge for api-triggered sagas', async () => {
+      renderGraph(fullManifest)
+      const sagaNode = await screen.findByTestId('node-saga:test_saga')
+      expect(sagaNode).toBeInTheDocument()
+    })
+  })
+
+  describe('additional double-click navigation', () => {
+    const navManifest = createMockManifest({
+      instruments: [
+        { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
+        { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
+      ],
+      valuationRules: [
+        { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'spot' },
+      ],
+      paymentRails: [
+        { provider: 'stripe', name: 'Stripe Rail' },
+      ],
+      partyTypes: [
+        { partyType: 'CUSTOMER' },
+      ],
+      mappings: [
+        { name: 'stripe_inbound' },
+      ],
+      operationalGateway: {
+        providerConnections: [
+          { connectionId: 'conn-1', providerName: 'Stripe' },
+        ],
+        instructionRoutes: [
+          { instructionType: 'payment', connectionId: 'conn-1' },
+        ],
+      },
+      marketData: [
+        { code: 'SPOT', name: 'Spot Price' },
+      ],
+      organizations: [
+        { code: 'ACME', name: 'Acme Corp' },
+      ],
+      internalAccounts: [
+        { code: 'OPS_GBP', name: 'Operating GBP', accountType: 'CURRENT' },
+      ],
+    })
+
+    it('navigates to valuation rules page', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-valuation_rule:KWH:GBP:0')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/reference-data/valuation-rules')
+    })
+
+    it('navigates to reference-data for payment rails', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-payment_rail:stripe')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
+    })
+
+    it('navigates to parties page for party types', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-party_type:CUSTOMER')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/parties')
+    })
+
+    it('navigates to gateway-mappings for mapping nodes', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-mapping:stripe_inbound')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/gateway-mappings')
+    })
+
+    it('navigates to reference-data for operational gateway', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-operational_gateway:default')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
+    })
+
+    it('navigates to reference-data for provider connection', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-provider_connection:conn-1')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
+    })
+
+    it('navigates to reference-data for instruction route', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-instruction_route:payment')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
+    })
+
+    it('navigates to market-data page for market data nodes', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-market_data:SPOT')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/market-data/SPOT')
+    })
+
+    it('navigates to reference-data/nodes for organization nodes', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-organization:ACME')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/reference-data/nodes')
+    })
+
+    it('navigates to internal-accounts for internal account nodes', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-internal_account:OPS_GBP')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/internal-accounts')
+    })
+  })
+
+  describe('filter sidebar toggling clears selection', () => {
+    it('clears selected node when its type is hidden', async () => {
+      renderGraph(energyManifest)
+      const node = await screen.findByTestId('node-instrument:KWH')
+      fireEvent.click(node)
+      expect(await screen.findByTestId('node-toolbar')).toBeInTheDocument()
+      const instrumentCheckbox = screen.getByLabelText('Show Instruments')
+      fireEvent.click(instrumentCheckbox)
+      expect(screen.queryByTestId('node-toolbar')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('edge rendering', () => {
+    it('renders edges with relationship data', async () => {
+      renderGraph(energyManifest)
+      const flow = await screen.findByTestId('react-flow')
+      const edgeCount = parseInt(flow.getAttribute('data-edge-count') ?? '0', 10)
+      expect(edgeCount).toBeGreaterThan(0)
+    })
+
+    it('renders allowed_by edges between account types and instruments', async () => {
+      renderGraph(energyManifest)
+      await screen.findByTestId('react-flow')
+      const edges = screen.getAllByTestId(/^edge-/)
+      const allowedByEdge = edges.find(e => e.getAttribute('data-relationship') === 'allowed_by')
+      expect(allowedByEdge).toBeDefined()
+    })
+
+    it('renders converts_from and converts_to edges for valuation rules', async () => {
+      renderGraph(energyManifest)
+      await screen.findByTestId('react-flow')
+      const edges = screen.getAllByTestId(/^edge-/)
+      const convertsFrom = edges.find(e => e.getAttribute('data-relationship') === 'converts_from')
+      const convertsTo = edges.find(e => e.getAttribute('data-relationship') === 'converts_to')
+      expect(convertsFrom).toBeDefined()
+      expect(convertsTo).toBeDefined()
     })
   })
 })

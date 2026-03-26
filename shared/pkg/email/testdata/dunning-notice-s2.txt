@@ -1,0 +1,20 @@
+MERIDIAN - Urgent Payment Notice
+
+Dear Golden Customer,
+
+We have not yet received payment for invoice INV-GOLDEN totalling £500.00, which is
+now 30 days overdue. This requires your immediate attention.
+
+Failure to settle this balance promptly may result in service restrictions. Please arrange
+payment today or contact our support team to discuss your account.
+
+ACCOUNT DETAILS
+---------------
+Invoice:      INV-GOLDEN
+Amount Due:   £500.00
+Days Overdue: 30
+
+Support: support@meridian.io
+
+--
+Meridian - The Operating System for the Real-World Economy

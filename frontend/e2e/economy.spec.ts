@@ -16,8 +16,10 @@ import { test, expect, navigateTo } from './fixtures'
 test.describe('Economy Overview', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/economy')
-    // Wait for lazy-loaded page to resolve from Suspense
-    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"], h1', { timeout: 15_000 })
+    // Wait for lazy-loaded component to mount (any component-specific state)
+    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"]', { timeout: 15_000 })
+    // Wait for loading to finish so tests start in a terminal state
+    await expect(page.getByTestId('overview-loading')).toHaveCount(0, { timeout: 15_000 })
   })
 
   test('renders the Economy page without error', async ({ authenticatedPage: page }) => {
@@ -32,19 +34,13 @@ test.describe('Economy Overview', () => {
   test('renders empty state or overview content', async ({ authenticatedPage: page }) => {
     // The page can resolve to empty state (NotFound), error state, or rendered content.
     // All are valid outcomes — the page loaded without crashing.
-    const emptyState = page.getByTestId('overview-empty')
-    const errorState = page.getByTestId('overview-error')
-    const loadingState = page.getByTestId('overview-loading')
-
-    // Wait for loading to complete
-    await expect(loadingState).toHaveCount(0, { timeout: 15_000 })
-
-    // One of empty, error, or content (h1 heading) should be visible
-    const isEmpty = await emptyState.isVisible().catch(() => false)
-    const isError = await errorState.isVisible().catch(() => false)
-    const hasContent = await page.getByRole('heading', { level: 1 }).isVisible().catch(() => false)
-
-    expect(isEmpty || isError || hasContent).toBe(true)
+    // Use expect.poll() to retry the check during React state transitions.
+    await expect.poll(async () => {
+      const isEmpty = await page.getByTestId('overview-empty').isVisible().catch(() => false)
+      const isError = await page.getByTestId('overview-error').isVisible().catch(() => false)
+      const hasContent = await page.getByRole('heading', { level: 1 }).isVisible().catch(() => false)
+      return isEmpty || isError || hasContent
+    }, { timeout: 15_000 }).toBe(true)
   })
 
   test('empty state has Configure Economy button', async ({ authenticatedPage: page }) => {
@@ -73,7 +69,10 @@ test.describe('Economy Overview', () => {
 test.describe('Economy Explorer', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/economy/explore')
-    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"], h1', { timeout: 15_000 })
+    // Wait for component to mount (any component-specific state)
+    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"]', { timeout: 15_000 })
+    // Wait for loading to finish so tests start in a terminal state
+    await expect(page.getByTestId('explorer-loading')).toHaveCount(0, { timeout: 15_000 })
   })
 
   test('renders the Economy Explorer page without error', async ({ authenticatedPage: page }) => {
@@ -87,21 +86,25 @@ test.describe('Economy Explorer', () => {
   })
 
   test('renders empty state or explorer content', async ({ authenticatedPage: page }) => {
-    const emptyState = page.getByTestId('explorer-empty')
-    const errorState = page.getByTestId('explorer-error')
-    const loadingState = page.getByTestId('explorer-loading')
-
-    await expect(loadingState).toHaveCount(0, { timeout: 15_000 })
-
-    // One of empty, error, or content (h1 heading) should be visible
-    const isEmpty = await emptyState.isVisible().catch(() => false)
-    const isError = await errorState.isVisible().catch(() => false)
-    const hasContent = await page.getByRole('heading', { level: 1 }).isVisible().catch(() => false)
-
-    expect(isEmpty || isError || hasContent).toBe(true)
+    // Use expect.poll() to retry the check during React state transitions.
+    await expect.poll(async () => {
+      const isEmpty = await page.getByTestId('explorer-empty').isVisible().catch(() => false)
+      const isError = await page.getByTestId('explorer-error').isVisible().catch(() => false)
+      const hasContent = await page.getByRole('heading', { level: 1 }).isVisible().catch(() => false)
+      return isEmpty || isError || hasContent
+    }, { timeout: 15_000 }).toBe(true)
   })
 
   test('shows tab triggers when manifest data is present', async ({ authenticatedPage: page }) => {
+    // Wait for a terminal state to appear before checking skip conditions.
+    // Without this, snapshot isVisible() checks can run during React transitions.
+    await expect.poll(async () => {
+      const isEmpty = await page.getByTestId('explorer-empty').isVisible().catch(() => false)
+      const isError = await page.getByTestId('explorer-error').isVisible().catch(() => false)
+      const hasTabs = await page.getByRole('tab', { name: 'Event Channels' }).isVisible().catch(() => false)
+      return isEmpty || isError || hasTabs
+    }, { timeout: 15_000 }).toBe(true)
+
     const isEmpty = await page.getByTestId('explorer-empty').isVisible().catch(() => false)
     const isError = await page.getByTestId('explorer-error').isVisible().catch(() => false)
     test.skip(isEmpty || isError, 'Requires manifest data to validate tab triggers')
@@ -193,7 +196,8 @@ test.describe('Economy navigation flow', () => {
 test.describe('Economy as platform-admin', () => {
   test('can access /economy as platform-admin', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/economy')
-    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"], h1', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"]', { timeout: 15_000 })
+    await expect(page.getByTestId('overview-loading')).toHaveCount(0, { timeout: 15_000 })
 
     await expect(page.getByText(/Something went wrong/i)).not.toBeVisible()
   })
@@ -207,7 +211,8 @@ test.describe('Economy as platform-admin', () => {
 
   test('can access /economy/explore as platform-admin', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/economy/explore')
-    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"], h1', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"]', { timeout: 15_000 })
+    await expect(page.getByTestId('explorer-loading')).toHaveCount(0, { timeout: 15_000 })
 
     await expect(page.getByText(/Something went wrong/i)).not.toBeVisible()
   })
