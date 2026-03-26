@@ -88,8 +88,7 @@ func TestPostgresOutboxRepository_Enqueue_NegativeMaxAttempts(t *testing.T) {
 	entry.MaxAttempts = -1
 
 	err := repo.Enqueue(ctx, entry)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "non-negative")
+	require.ErrorIs(t, err, email.ErrInvalidMaxAttempts)
 }
 
 func TestPostgresOutboxRepository_FetchDispatchable(t *testing.T) {

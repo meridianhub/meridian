@@ -25,8 +25,9 @@ const (
 
 // Sentinel errors for outbox operations.
 var (
-	ErrRateLimitExceeded = errors.New("email: tenant hourly rate limit exceeded")
-	ErrOutboxNotFound    = errors.New("email: outbox entry not found")
+	ErrRateLimitExceeded  = errors.New("email: tenant hourly rate limit exceeded")
+	ErrOutboxNotFound     = errors.New("email: outbox entry not found")
+	ErrInvalidMaxAttempts = errors.New("email: max attempts must be non-negative")
 )
 
 // PostgresOutboxRepository implements OutboxRepository using GORM with
@@ -70,7 +71,7 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 	}
 
 	if entity.MaxAttempts < 0 {
-		return fmt.Errorf("email: max attempts must be non-negative")
+		return ErrInvalidMaxAttempts
 	}
 	if entity.MaxAttempts == 0 {
 		entity.MaxAttempts = 5
