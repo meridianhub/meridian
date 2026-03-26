@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync/atomic"
@@ -358,6 +359,56 @@ func TestDunningWorker_ScheduleAndProcess(t *testing.T) {
 		// Cancellation calls with specific prefixes (dunning-1-, dunning-2-, dunning-3-, dunning-frozen-)
 		assert.Equal(t, int32(4), callCount.Load())
 		assert.Contains(t, cancelledPattern.Load().(string), billingRunID.String())
+	})
+
+	t.Run("retries when email cancellation fails", func(t *testing.T) {
+		repo := newMockBillingRepo()
+
+		billingRunID := uuid.New()
+		run := &domain.BillingRun{
+			ID:         billingRunID,
+			TenantID:   testTenantID,
+			Status:     domain.BillingRunStatusCompleted, // Not failed - triggers cancellation
+			CycleStart: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			CycleEnd:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+		}
+		repo.mu.Lock()
+		repo.runs[billingRunID] = run
+		repo.mu.Unlock()
+
+		w, err := NewDunningWorker(repo, client, DunningWorkerConfig{
+			PollInterval:    50 * time.Millisecond,
+			ShutdownTimeout: 2 * time.Second,
+		}, noopCallback, logger, metrics)
+		require.NoError(t, err)
+
+		// Set up email canceller that fails
+		var cancelAttempts atomic.Int32
+		mockCanceller := &mockEmailCanceller{
+			cancelFunc: func(_ context.Context, _ string) (int64, error) {
+				cancelAttempts.Add(1)
+				return 0, fmt.Errorf("outbox connection error")
+			},
+		}
+		w.SetEmailCanceller(mockCanceller)
+
+		// Clean ZSET from previous test
+		client.Del(context.Background(), zsetKey)
+
+		err = w.ScheduleDunningRetry(context.Background(), testTenantID, billingRunID, -1*time.Minute)
+		require.NoError(t, err)
+
+		go func() {
+			_ = w.Start(context.Background())
+		}()
+
+		// Wait for at least 2 cancel attempts (proves retry happened)
+		err = await.New().AtMost(5 * time.Second).PollInterval(10 * time.Millisecond).Until(func() bool {
+			return cancelAttempts.Load() >= 2
+		})
+		require.NoError(t, err, "cancellation should be retried on failure")
+
+		w.Stop()
 	})
 
 	t.Run("drops billing run not found", func(t *testing.T) {

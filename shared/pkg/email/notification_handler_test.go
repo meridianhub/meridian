@@ -314,3 +314,71 @@ func TestNotificationSendHandler_SubjectGeneration(t *testing.T) {
 		})
 	}
 }
+
+func TestNotificationSendHandler_NilOutboxReturnsError(t *testing.T) {
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		EmailResolver: &mockEmailResolver{},
+		Logger:        slog.Default(),
+	})
+
+	_, err := handler(newTestStarlarkContext(), map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, email.ErrMissingOutbox)
+}
+
+func TestNotificationSendHandler_NilEmailResolverReturnsError(t *testing.T) {
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox: &mockOutboxRepository{},
+		Logger: slog.Default(),
+	})
+
+	_, err := handler(newTestStarlarkContext(), map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, email.ErrMissingEmailResolver)
+}
+
+func TestNotificationSendHandler_NilLoggerUsesDefault(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:        outbox,
+		EmailResolver: &mockEmailResolver{},
+	})
+
+	result, err := handler(newTestStarlarkContext(), map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+	})
+
+	require.NoError(t, err)
+	resultMap := result.(map[string]any)
+	assert.Equal(t, "QUEUED", resultMap["status"])
+}
+
+func TestNotificationSendHandler_EnqueueError(t *testing.T) {
+	outbox := &mockOutboxRepository{
+		enqueueFunc: func(_ context.Context, _ *email.OutboxEntry) error {
+			return errors.New("database connection lost")
+		},
+	}
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:        outbox,
+		EmailResolver: &mockEmailResolver{},
+		Logger:        slog.Default(),
+	})
+
+	_, err := handler(newTestStarlarkContext(), map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to enqueue notification")
+}
