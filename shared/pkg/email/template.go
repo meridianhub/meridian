@@ -1,3 +1,5 @@
+// Package email provides types and utilities for sending transactional emails,
+// including template rendering, data types, and delivery via the outbox pattern.
 package email
 
 import (
