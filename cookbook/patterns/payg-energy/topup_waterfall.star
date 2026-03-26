@@ -23,7 +23,7 @@
 # the Operational Gateway to Procode's IDA, which delivers the credit
 # to the SMETS2 meter over the WAN.
 #
-# Trigger: api:/v1/topups
+# Trigger: scheduled:payg_topup
 #
 # Double-Entry Accounting (GBP 50.00 top-up, GBP 10 debt, GBP 5 EC):
 #

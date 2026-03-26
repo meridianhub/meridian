@@ -18,7 +18,7 @@
 # Friendly Credit hours (2pm-10am weekdays, all weekend/bank holidays),
 # supply continues even beyond EC exhaustion.
 #
-# Trigger: api:/v1/emergency-credit/activate
+# Trigger: scheduled:payg_emergency_credit
 #
 # Double-Entry (GBP 15 EC activation):
 #   DR Emergency Credit Receivable  GBP 15.00  (asset: customer owes us)

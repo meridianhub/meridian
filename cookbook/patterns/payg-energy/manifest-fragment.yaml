@@ -121,14 +121,14 @@ valuationRules:
 
 sagas:
   - name: topup_waterfall
-    trigger: "api:/v1/topups"
+    trigger: "scheduled:payg_topup"
   - name: consumption_block_tariff
     trigger: "event:position-keeping.transaction-captured.v1"
     filter: "(event.instrument_code == 'KWH_ELEC' || event.instrument_code == 'KWH_GAS') && event.direction == 'DEBIT'"
   - name: emergency_credit_activate
-    trigger: "api:/v1/emergency-credit/activate"
+    trigger: "scheduled:payg_emergency_credit"
   - name: whd_credit_apply
-    trigger: "api:/v1/whd/apply"
+    trigger: "scheduled:payg_whd_credit"
 
 # DCC integration uses the Operational Gateway for meter commands.
 # SRV 2.2 (Top Up Device) is the critical path for prepayment operations.

@@ -18,7 +18,7 @@
 # subject of a GBP 277,000 enforcement action against Utilita in 2025
 # for missing the scheme year deadline by 12 days.
 #
-# Trigger: api:/v1/whd/apply
+# Trigger: scheduled:payg_whd_credit
 #
 # Double-Entry (GBP 150 WHD, GBP 30 outstanding debt):
 #   DR WHD Scheme Obligation      GBP 150.00  (social obligation cost)
