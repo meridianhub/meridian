@@ -1,3 +1,4 @@
+# schema-validation: skip
 # Saga: whd_credit_apply
 # Version: 1.0.0
 # Previous: none

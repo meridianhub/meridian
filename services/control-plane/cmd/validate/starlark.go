@@ -343,7 +343,7 @@ func permissiveValue(name string) starlark.Value {
 	intFields := map[string]bool{
 		"amount_cents": true, "max_members": true, "count": true,
 	}
-	if intFields[name] || strings.HasSuffix(name, "_cents") || strings.HasSuffix(name, "_minor_units") {
+	if intFields[name] || strings.HasSuffix(name, "_cents") || strings.HasSuffix(name, "_minor_units") || strings.HasSuffix(name, "_pence") {
 		return starlark.MakeInt(10)
 	}
 	// Decimal/float fields - used where handlers expect TypeDecimal

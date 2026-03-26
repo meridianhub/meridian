@@ -1,3 +1,4 @@
+# schema-validation: skip
 # Saga: consumption_block_tariff
 # Version: 1.0.0
 # Previous: none

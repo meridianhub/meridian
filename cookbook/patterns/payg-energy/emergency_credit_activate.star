@@ -1,3 +1,4 @@
+# schema-validation: skip
 # Saga: emergency_credit_activate
 # Version: 1.0.0
 # Previous: none

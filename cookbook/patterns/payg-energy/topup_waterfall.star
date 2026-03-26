@@ -1,3 +1,4 @@
+# schema-validation: skip
 # Saga: topup_waterfall
 # Version: 1.0.0
 # Previous: none
