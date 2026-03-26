@@ -139,15 +139,15 @@ ssh "${DEVELOP_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
   --with-fixtures"
 
 echo ""
-echo "=== Step 7b: Seed Utilita PAYG develop tenant ==="
+echo "=== Step 7b: Seed PAYG Energy develop tenant ==="
 ssh "${DEVELOP_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
   --gateway-url=http://localhost:8090 \
   --grpc-addr=localhost:50051 \
-  --tenant-id=utilita_payg \
-  --tenant-slug=utilita-payg \
-  --display-name='Utilita PAYG' \
-  --subdomain=utilita-payg.develop.meridianhub.cloud \
-  --manifest=/app/examples/manifests/utilita-payg.manifest.json \
+  --tenant-id=payg_energy \
+  --tenant-slug=payg-energy \
+  --display-name='PAYG Energy' \
+  --subdomain=payg-energy.develop.meridianhub.cloud \
+  --manifest=/app/examples/manifests/payg-energy.manifest.json \
   --with-fixtures"
 
 echo ""
@@ -176,7 +176,7 @@ echo "=== Develop Reset Complete ==="
 echo "  Tenant:  volterra_energy (slug: volterra-energy)"
 echo "  URL:     https://volterra-energy.develop.meridianhub.cloud"
 echo ""
-echo "  Tenant:  utilita_payg (slug: utilita-payg)"
-echo "  URL:     https://utilita-payg.develop.meridianhub.cloud"
+echo "  Tenant:  payg_energy (slug: payg-energy)"
+echo "  URL:     https://payg-energy.develop.meridianhub.cloud"
 echo ""
 echo "  Verify:  ssh ${DEVELOP_HOST} 'docker logs ${APP_CONTAINER} --tail 10'"

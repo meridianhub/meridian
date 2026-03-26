@@ -6,7 +6,7 @@
 # Author: Meridian Platform Team
 # Date: 2026-03-26
 #
-# Prepayment top-up allocation waterfall for Utilita's PAYG model.
+# Prepayment top-up allocation waterfall for PAYG energy billing.
 #
 # When a customer tops up (e.g., GBP 50.00), the payment is allocated
 # through a strict priority waterfall:
@@ -111,7 +111,7 @@ def execute_topup():
     net_amount = gross_amount - vat_amount
 
     position_keeping.initiate_log(
-        position_id="UTILITA_VAT_OUTPUT",
+        position_id="SUPPLIER_VAT_OUTPUT",
         instrument_code="GBP",
         amount=vat_amount,
         direction="CREDIT",

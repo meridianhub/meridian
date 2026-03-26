@@ -17,13 +17,13 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// ─── Utilita PAYG Customer Definitions ──────────────────────────────────────
+// ─── PAYG Customer Definitions ──────────────────────────────────────────────
 
-// utilitaCustomer represents a dual-fuel PAYG customer with valid meter references.
+// paygCustomer represents a dual-fuel PAYG customer with valid meter references.
 // MPANs use the Southern Electric (SEEB/SOUT) distribution area format:
 //   - Import MPAN: 19 00 801 0123 456 (profile class 01 = domestic unrestricted)
 //   - MPRN: 10-digit gas meter reference
-type utilitaCustomer struct {
+type paygCustomer struct {
 	legalName   string
 	mpan        string  // Electricity import MPAN (Southern region)
 	mprn        string  // Gas MPRN
@@ -31,12 +31,12 @@ type utilitaCustomer struct {
 	dailyKwhAvg float64 // Average daily electricity kWh (determines First/Saver split)
 }
 
-// Customers in Utilita's heartland (Southern England, Hampshire/Eastleigh area).
+// Sample PAYG customers in Southern England (SEEB/SOUT distribution areas).
 // Mix of usage profiles to demonstrate block tariff behavior:
 //   - Low use (3-5 kWh/day): mostly First Rate, higher margin per kWh
 //   - Medium use (8-10 kWh/day): mixed First/Saver, typical household
 //   - High use (15+ kWh/day): mostly Saver Rate, lower margin per kWh
-var utilitaCustomers = []utilitaCustomer{
+var paygCustomers = []paygCustomer{
 	{
 		legalName:   "Margaret Thornton",
 		mpan:        "1900801012345601",
@@ -74,34 +74,34 @@ var utilitaCustomers = []utilitaCustomer{
 	},
 }
 
-// ─── Utilita Fixture Entry Point ────────────────────────────────────────────
+// ─── PAYG Fixture Entry Point ───────────────────────────────────────────────
 
-// runUtilitaFixtures seeds demo data for the Utilita PAYG tenant:
+// runPaygFixtures seeds demo data for the PAYG energy tenant:
 //   - 5 dual-fuel customers with valid MPANs/MPRNs
 //   - 30 days of block tariff rates (First Rate, Saver Rate for elec + gas)
 //   - 30 days of wholesale electricity + gas prices
 //   - 30 days of GBP billing based on block tariff consumption
-func runUtilitaFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) error {
+func runPaygFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) error {
 	tCtx := withTenantCtx(ctx, tid)
 
-	// 1. Resolve the Utilita organization party for account ownership.
-	fmt.Println("\n--- Resolve Utilita Organization ---")
-	utilitaPartyID, err := resolveOrganizationPartyID(tCtx, conn, "GETW")
+	// 1. Resolve the supplier organization party for account ownership.
+	fmt.Println("\n--- Resolve Supplier Organization ---")
+	supplierPartyID, err := resolveOrganizationPartyID(tCtx, conn, "GETW")
 	if err != nil {
-		return fmt.Errorf("resolve Utilita party: %w", err)
+		return fmt.Errorf("resolve supplier party: %w", err)
 	}
-	fmt.Printf("  Utilita party ID: %s (MPID: GETW)\n", utilitaPartyID)
+	fmt.Printf("  Supplier party ID: %s (MPID: GETW)\n", supplierPartyID)
 
 	// 2. Register dual-fuel customers with valid MPANs.
-	fmt.Println("\n--- Register Utilita PAYG Customers ---")
-	customerPartyIDs, err := registerUtilitaCustomers(tCtx, conn)
+	fmt.Println("\n--- Register PAYG Customers ---")
+	customerPartyIDs, err := registerPaygCustomers(tCtx, conn)
 	if err != nil {
 		return fmt.Errorf("register customers: %w", err)
 	}
 
 	// 3. Create prepayment accounts (GBP billing per fuel).
 	fmt.Println("\n--- Create Prepayment Accounts ---")
-	if err := createUtilitaAccounts(tCtx, conn, utilitaPartyID, customerPartyIDs); err != nil {
+	if err := createPaygAccounts(tCtx, conn, supplierPartyID, customerPartyIDs); err != nil {
 		return fmt.Errorf("create accounts: %w", err)
 	}
 
@@ -113,18 +113,18 @@ func runUtilitaFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) 
 
 	// 5. Seed wholesale energy prices.
 	fmt.Println("\n--- Seed Wholesale Prices ---")
-	if err := seedUtilitaWholesalePrices(tCtx, conn); err != nil {
+	if err := seedWholesalePrices(tCtx, conn); err != nil {
 		return fmt.Errorf("seed wholesale prices: %w", err)
 	}
 
 	// 6. Seed consumption billing (GBP charges based on block tariff).
 	fmt.Println("\n--- Seed Consumption Billing ---")
-	if err := seedUtilitaBilling(tCtx, conn, customerPartyIDs); err != nil {
+	if err := seedPaygBilling(tCtx, conn, customerPartyIDs); err != nil {
 		return fmt.Errorf("seed billing: %w", err)
 	}
 
-	fmt.Println("\n=== Utilita Fixture Seed Complete ===")
-	fmt.Printf("  Customers:  %d dual-fuel (MPAN + MPRN)\n", len(utilitaCustomers))
+	fmt.Println("\n=== PAYG Fixture Seed Complete ===")
+	fmt.Printf("  Customers:  %d dual-fuel (MPAN + MPRN)\n", len(paygCustomers))
 	fmt.Printf("  Tariffs:    First Rate / Saver Rate for electricity + gas (30 days)\n")
 	fmt.Printf("  Wholesale:  Electricity + gas spot prices (30 days)\n")
 	fmt.Printf("  Billing:    GBP charges with block tariff applied (30 days per customer)\n")
@@ -133,11 +133,11 @@ func runUtilitaFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) 
 
 // ─── Customer Registration ──────────────────────────────────────────────────
 
-func registerUtilitaCustomers(ctx context.Context, conn *grpc.ClientConn) ([]string, error) {
+func registerPaygCustomers(ctx context.Context, conn *grpc.ClientConn) ([]string, error) {
 	client := partyv1.NewPartyServiceClient(conn)
 
-	partyIDs := make([]string, len(utilitaCustomers))
-	for i, cust := range utilitaCustomers {
+	partyIDs := make([]string, len(paygCustomers))
+	for i, cust := range paygCustomers {
 		// Register using MPAN as external reference (primary meter identifier).
 		partyID, err := registerParty(ctx, client, &partyv1.RegisterPartyRequest{
 			PartyType:             partyv1.PartyType_PARTY_TYPE_PERSON,
@@ -159,15 +159,15 @@ func registerUtilitaCustomers(ctx context.Context, conn *grpc.ClientConn) ([]str
 
 // ─── Account Creation ───────────────────────────────────────────────────────
 
-func createUtilitaAccounts(ctx context.Context, conn *grpc.ClientConn, utilitaPartyID string, customerPartyIDs []string) error {
+func createPaygAccounts(ctx context.Context, conn *grpc.ClientConn, supplierPartyID string, customerPartyIDs []string) error {
 	client := currentaccountv1.NewCurrentAccountServiceClient(conn)
 
 	for i, partyID := range customerPartyIDs {
-		cust := utilitaCustomers[i]
+		cust := paygCustomers[i]
 
 		// Electricity prepayment account (GBP)
 		elecID, err := createAccountIdempotent(ctx, client, partyID,
-			fmt.Sprintf("UT-ELEC-%s", cust.mpan), "GBP", utilitaPartyID)
+			fmt.Sprintf("UT-ELEC-%s", cust.mpan), "GBP", supplierPartyID)
 		if err != nil {
 			return fmt.Errorf("create electricity account for %s: %w", cust.legalName, err)
 		}
@@ -175,7 +175,7 @@ func createUtilitaAccounts(ctx context.Context, conn *grpc.ClientConn, utilitaPa
 
 		// Gas prepayment account (GBP)
 		gasID, err := createAccountIdempotent(ctx, client, partyID,
-			fmt.Sprintf("UT-GAS-%s", cust.mprn), "GBP", utilitaPartyID)
+			fmt.Sprintf("UT-GAS-%s", cust.mprn), "GBP", supplierPartyID)
 		if err != nil {
 			return fmt.Errorf("create gas account for %s: %w", cust.legalName, err)
 		}
@@ -187,7 +187,7 @@ func createUtilitaAccounts(ctx context.Context, conn *grpc.ClientConn, utilitaPa
 
 // ─── Block Tariff Rate Seeding ──────────────────────────────────────────────
 
-// seedBlockTariffRates records 30 days of Utilita's block tariff rates.
+// seedBlockTariffRates records 30 days of block tariff rates.
 // Rates are VAT-inclusive as published (Oct 2025 cap period):
 //   - Electricity First Rate: 51.85p/kWh (first 2 kWh/day)
 //   - Electricity Saver Rate: 26.010p/kWh (above 2 kWh/day)
@@ -196,17 +196,17 @@ func createUtilitaAccounts(ctx context.Context, conn *grpc.ClientConn, utilitaPa
 func seedBlockTariffRates(ctx context.Context, conn *grpc.ClientConn) error {
 	client := marketv1.NewMarketInformationServiceClient(conn)
 
-	const sourceCode = "UTILITA_TARIFF"
+	const sourceCode = "RETAIL_TARIFF"
 
 	tariffRates := []struct {
 		datasetCode string
 		value       string
 		label       string
 	}{
-		{"UTILITA_ELEC_FIRST_RATE", "0.5185", "Electricity First Rate: 51.85p/kWh"},
-		{"UTILITA_ELEC_SAVER_RATE", "0.26010", "Electricity Saver Rate: 26.010p/kWh"},
-		{"UTILITA_GAS_FIRST_RATE", "0.23355", "Gas First Rate: 23.355p/kWh"},
-		{"UTILITA_GAS_SAVER_RATE", "0.06211", "Gas Saver Rate: 6.211p/kWh"},
+		{"PAYG_ELEC_FIRST_RATE", "0.5185", "Electricity First Rate: 51.85p/kWh"},
+		{"PAYG_ELEC_SAVER_RATE", "0.26010", "Electricity Saver Rate: 26.010p/kWh"},
+		{"PAYG_GAS_FIRST_RATE", "0.23355", "Gas First Rate: 23.355p/kWh"},
+		{"PAYG_GAS_SAVER_RATE", "0.06211", "Gas Saver Rate: 6.211p/kWh"},
 	}
 
 	now := time.Now().UTC()
@@ -246,11 +246,11 @@ func seedBlockTariffRates(ctx context.Context, conn *grpc.ClientConn) error {
 
 // ─── Wholesale Price Seeding ────────────────────────────────────────────────
 
-// seedUtilitaWholesalePrices records 30 days of wholesale electricity and gas prices.
+// seedWholesalePrices records 30 days of wholesale electricity and gas prices.
 // Prices are synthetic but realistic for UK wholesale markets:
 //   - Electricity: base 8.5p/kWh with ±3p daily variation (seasonal + volatility)
 //   - Gas: base 3.2p/kWh with ±1.5p daily variation
-func seedUtilitaWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
+func seedWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 	client := marketv1.NewMarketInformationServiceClient(conn)
 
 	const sourceCode = "WHOLESALE_MARKET"
@@ -307,10 +307,10 @@ func seedUtilitaWholesalePrices(ctx context.Context, conn *grpc.ClientConn) erro
 
 // ─── Consumption Billing Seeding ────────────────────────────────────────────
 
-// seedUtilitaBilling seeds 30 days of GBP billing for each customer.
+// seedPaygBilling seeds 30 days of GBP billing for each customer.
 // Applies the block tariff logic: first 2 kWh at First Rate, remainder at Saver Rate.
 // Gas usage is ~60% of electricity kWh for a typical dual-fuel household.
-func seedUtilitaBilling(ctx context.Context, conn *grpc.ClientConn, customerPartyIDs []string) error {
+func seedPaygBilling(ctx context.Context, conn *grpc.ClientConn, customerPartyIDs []string) error {
 	client := currentaccountv1.NewCurrentAccountServiceClient(conn)
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic
 
@@ -326,7 +326,7 @@ func seedUtilitaBilling(ctx context.Context, conn *grpc.ClientConn, customerPart
 	now := time.Now().UTC()
 
 	for i, partyID := range customerPartyIDs {
-		cust := utilitaCustomers[i]
+		cust := paygCustomers[i]
 		totalElecGBP := 0.0
 		totalGasGBP := 0.0
 

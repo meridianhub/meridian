@@ -1,9 +1,9 @@
 {
   "version": "1.0",
   "metadata": {
-    "name": "Utilita PAYG Billing",
+    "name": "PAYG Energy Billing",
     "industry": "energy",
-    "description": "Prepayment energy billing with no-standing-charge block tariff, emergency credit, debt recovery waterfall, and DCC smart meter integration. Models Utilita's two-tier pricing (First Rate / Saver Rate with daily 2kWh threshold), VAT recognition at top-up (HMRC Reg 86), and MHHS-ready half-hourly consumption settlement."
+    "description": "Prepayment energy billing with no-standing-charge block tariff, emergency credit, debt recovery waterfall, and DCC smart meter integration. Two-tier pricing (First Rate / Saver Rate with daily 2kWh threshold), VAT recognition at top-up (HMRC Reg 86), and MHHS-ready half-hourly consumption settlement."
   },
   "instruments": [
     {
@@ -163,25 +163,25 @@
       "fromInstrument": "KWH_ELEC",
       "toInstrument": "GBP",
       "method": "VALUATION_METHOD_FIXED",
-      "source": "UTILITA_ELEC_FIRST_RATE"
+      "source": "PAYG_ELEC_FIRST_RATE"
     },
     {
       "fromInstrument": "KWH_ELEC",
       "toInstrument": "GBP",
       "method": "VALUATION_METHOD_FIXED",
-      "source": "UTILITA_ELEC_SAVER_RATE"
+      "source": "PAYG_ELEC_SAVER_RATE"
     },
     {
       "fromInstrument": "KWH_GAS",
       "toInstrument": "GBP",
       "method": "VALUATION_METHOD_FIXED",
-      "source": "UTILITA_GAS_FIRST_RATE"
+      "source": "PAYG_GAS_FIRST_RATE"
     },
     {
       "fromInstrument": "KWH_GAS",
       "toInstrument": "GBP",
       "method": "VALUATION_METHOD_FIXED",
-      "source": "UTILITA_GAS_SAVER_RATE"
+      "source": "PAYG_GAS_SAVER_RATE"
     },
     {
       "fromInstrument": "KWH_ELEC",
@@ -284,7 +284,7 @@
         "auth": {
           "oauth2": {
             "tokenUrl": "https://ida.procode.co.uk/oauth/token",
-            "clientId": "utilita-meridian",
+            "clientId": "payg-meridian",
             "clientSecretRef": "sm://procode/client_secret",
             "scopes": [
               "meter:topup",
@@ -336,8 +336,8 @@
   "marketData": {
     "sources": [
       {
-        "code": "UTILITA_TARIFF",
-        "name": "Utilita Tariff Engine",
+        "code": "RETAIL_TARIFF",
+        "name": "Retail Tariff Engine",
         "description": "Quarterly tariff rates set to comply with Ofgem prepayment price cap. No-standing-charge two-tier block pricing.",
         "trustLevel": 100
       },
@@ -350,42 +350,42 @@
     ],
     "datasets": [
       {
-        "code": "UTILITA_ELEC_FIRST_RATE",
+        "code": "PAYG_ELEC_FIRST_RATE",
         "category": "DATA_CATEGORY_ENERGY_PRICE",
         "unit": "GBP/kWh",
-        "sourceCode": "UTILITA_TARIFF",
+        "sourceCode": "RETAIL_TARIFF",
         "displayName": "Electricity First Rate (0-2 kWh/day)",
-        "description": "Block 1 electricity rate: applies to first 2 kWh consumed per day. Embeds standing charge recovery. Oct 2025: 51.85p/kWh inc. 5% VAT.",
+        "description": "Block 1 electricity rate: applies to first 2 kWh consumed per day. Embeds standing charge recovery. Example: 51.85p/kWh inc. 5% VAT.",
         "validationExpression": "value > 0",
         "resolutionKeyExpression": "observed_at"
       },
       {
-        "code": "UTILITA_ELEC_SAVER_RATE",
+        "code": "PAYG_ELEC_SAVER_RATE",
         "category": "DATA_CATEGORY_ENERGY_PRICE",
         "unit": "GBP/kWh",
-        "sourceCode": "UTILITA_TARIFF",
+        "sourceCode": "RETAIL_TARIFF",
         "displayName": "Electricity Saver Rate (above 2 kWh/day)",
-        "description": "Block 2 electricity rate: applies to all consumption above 2 kWh daily threshold. Oct 2025: 26.010p/kWh inc. 5% VAT.",
+        "description": "Block 2 electricity rate: applies to all consumption above 2 kWh daily threshold. Example: 26.010p/kWh inc. 5% VAT.",
         "validationExpression": "value > 0",
         "resolutionKeyExpression": "observed_at"
       },
       {
-        "code": "UTILITA_GAS_FIRST_RATE",
+        "code": "PAYG_GAS_FIRST_RATE",
         "category": "DATA_CATEGORY_ENERGY_PRICE",
         "unit": "GBP/kWh",
-        "sourceCode": "UTILITA_TARIFF",
+        "sourceCode": "RETAIL_TARIFF",
         "displayName": "Gas First Rate (0-2 kWh/day)",
-        "description": "Block 1 gas rate: applies to first 2 kWh consumed per day. Oct 2025: 23.355p/kWh inc. 5% VAT.",
+        "description": "Block 1 gas rate: applies to first 2 kWh consumed per day. Example: 23.355p/kWh inc. 5% VAT.",
         "validationExpression": "value > 0",
         "resolutionKeyExpression": "observed_at"
       },
       {
-        "code": "UTILITA_GAS_SAVER_RATE",
+        "code": "PAYG_GAS_SAVER_RATE",
         "category": "DATA_CATEGORY_ENERGY_PRICE",
         "unit": "GBP/kWh",
-        "sourceCode": "UTILITA_TARIFF",
+        "sourceCode": "RETAIL_TARIFF",
         "displayName": "Gas Saver Rate (above 2 kWh/day)",
-        "description": "Block 2 gas rate: applies to all consumption above 2 kWh daily threshold. Oct 2025: 6.211p/kWh inc. 5% VAT.",
+        "description": "Block 2 gas rate: applies to all consumption above 2 kWh daily threshold. Example: 6.211p/kWh inc. 5% VAT.",
         "validationExpression": "value > 0",
         "resolutionKeyExpression": "observed_at"
       },
@@ -413,16 +413,14 @@
   },
   "organizations": [
     {
-      "code": "UTILITA",
-      "name": "Utilita Energy Limited",
-      "legalName": "Utilita Energy Limited",
+      "code": "ACME_ENERGY",
+      "name": "Acme Energy Ltd",
+      "legalName": "Acme Energy Ltd",
       "partyType": "ORGANIZATION",
       "externalReference": "GETW",
       "externalReferenceType": "NATIONAL_ID",
       "attributes": {
         "role": "supplier",
-        "company_number": "04849181",
-        "vat_number": "823 8184 22",
         "key_meter_supplier_id": "33",
         "ppmip": "ITRI"
       }
@@ -498,45 +496,45 @@
   ],
   "internalAccounts": [
     {
-      "code": "UTILITA_VAT_OUTPUT",
+      "code": "SUPPLIER_VAT_OUTPUT",
       "accountType": "VAT_OUTPUT",
       "instrument": "GBP",
-      "ownerOrganization": "UTILITA",
+      "ownerOrganization": "ACME_ENERGY",
       "description": "VAT output tax liability - recognised at top-up per HMRC Regulation 86"
     },
     {
-      "code": "UTILITA_REVENUE_ELEC",
+      "code": "SUPPLIER_REVENUE_ELEC",
       "accountType": "REVENUE_ENERGY",
       "instrument": "GBP",
-      "ownerOrganization": "UTILITA",
+      "ownerOrganization": "ACME_ENERGY",
       "description": "Electricity revenue - recognised at consumption, split by First Rate and Saver Rate tiers"
     },
     {
-      "code": "UTILITA_REVENUE_GAS",
+      "code": "SUPPLIER_REVENUE_GAS",
       "accountType": "REVENUE_ENERGY",
       "instrument": "GBP",
-      "ownerOrganization": "UTILITA",
+      "ownerOrganization": "ACME_ENERGY",
       "description": "Gas revenue - recognised at consumption, split by First Rate and Saver Rate tiers"
     },
     {
-      "code": "UTILITA_WHOLESALE_ELEC",
+      "code": "SUPPLIER_WHOLESALE_ELEC",
       "accountType": "WHOLESALE_COST",
       "instrument": "GBP",
-      "ownerOrganization": "UTILITA",
+      "ownerOrganization": "ACME_ENERGY",
       "description": "Wholesale electricity cost position - for hedging P&L and margin attribution"
     },
     {
-      "code": "UTILITA_WHOLESALE_GAS",
+      "code": "SUPPLIER_WHOLESALE_GAS",
       "accountType": "WHOLESALE_COST",
       "instrument": "GBP",
-      "ownerOrganization": "UTILITA",
+      "ownerOrganization": "ACME_ENERGY",
       "description": "Wholesale gas cost position - for hedging P&L and margin attribution"
     },
     {
-      "code": "UTILITA_WHD",
+      "code": "SUPPLIER_WHD",
       "accountType": "WHD_OBLIGATION",
       "instrument": "GBP",
-      "ownerOrganization": "UTILITA",
+      "ownerOrganization": "ACME_ENERGY",
       "description": "Warm Home Discount scheme obligation cost, socialised across customer base"
     },
     {
@@ -557,7 +555,7 @@
       "code": "SUPPLY_POOL_GAS",
       "accountType": "ENERGY_SUPPLY_POOL",
       "instrument": "KWH_GAS",
-      "ownerOrganization": "UTILITA",
+      "ownerOrganization": "ACME_ENERGY",
       "description": "Gas supply pool - national (gas has no regional GSP groups)"
     }
   ]

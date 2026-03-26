@@ -10,7 +10,7 @@
 #
 # When a customer's prepayment balance falls below GBP 1.00, they can
 # activate emergency credit (GBP 15 per fuel) via the IHD, meter keypad,
-# or My Utilita app. This flips the accounting model: the customer's
+# or the supplier's app. This flips the accounting model: the customer's
 # prepayment liability is exhausted, and the supplier extends credit,
 # creating a receivable.
 #

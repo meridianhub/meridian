@@ -6,7 +6,7 @@
 # Author: Meridian Platform Team
 # Date: 2026-03-26
 #
-# Block tariff consumption valuation for Utilita's no-standing-charge model.
+# Block tariff consumption valuation for the no-standing-charge PAYG model.
 #
 # When half-hourly meter data arrives (via DCC or MHHS Data Integration
 # Platform), this saga values the kWh consumption at the correct tiered
@@ -91,11 +91,11 @@ def execute_consumption():
     # The block tariff has two fixed rates per fuel, set quarterly
     # to comply with the Ofgem prepayment price cap.
     step(name="lookup_tariff_rates")
-    first_rate_dataset = "UTILITA_ELEC_FIRST_RATE"
-    saver_rate_dataset = "UTILITA_ELEC_SAVER_RATE"
+    first_rate_dataset = "PAYG_ELEC_FIRST_RATE"
+    saver_rate_dataset = "PAYG_ELEC_SAVER_RATE"
     if fuel_type == "gas":
-        first_rate_dataset = "UTILITA_GAS_FIRST_RATE"
-        saver_rate_dataset = "UTILITA_GAS_SAVER_RATE"
+        first_rate_dataset = "PAYG_GAS_FIRST_RATE"
+        saver_rate_dataset = "PAYG_GAS_SAVER_RATE"
 
     first_rate_obs = market_information.get_rate(
         dataset_code=first_rate_dataset,
@@ -106,7 +106,7 @@ def execute_consumption():
         value_date=settlement_period,
     )
 
-    # Market data stores VAT-inclusive rates (as published by Utilita).
+    # Market data stores VAT-inclusive rates (as published by the supplier).
     # Prepayment liability is credited net-of-VAT (topup_waterfall strips VAT
     # at top-up per HMRC Reg 86), so convert rates to ex-VAT basis here.
     vat_rate = Decimal("0.05")
@@ -163,9 +163,9 @@ def execute_consumption():
     )
 
     step(name="book_revenue")
-    revenue_account = "UTILITA_REVENUE_ELEC"
+    revenue_account = "SUPPLIER_REVENUE_ELEC"
     if fuel_type == "gas":
-        revenue_account = "UTILITA_REVENUE_GAS"
+        revenue_account = "SUPPLIER_REVENUE_GAS"
 
     position_keeping.initiate_log(
         position_id=revenue_account,

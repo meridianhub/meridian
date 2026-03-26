@@ -177,8 +177,8 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		fmt.Println("\n=== Seeding Fixture Data ===")
 		var fixtureErr error
 		switch tenantID {
-		case "utilita_payg":
-			fixtureErr = runUtilitaFixtures(ctx, conn, tenantID)
+		case "payg_energy":
+			fixtureErr = runPaygFixtures(ctx, conn, tenantID)
 		default:
 			fixtureErr = runFixtures(ctx, conn, tenantID)
 		}

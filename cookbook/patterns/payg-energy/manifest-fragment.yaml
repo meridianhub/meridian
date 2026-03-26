@@ -97,19 +97,19 @@ valuationRules:
   - fromInstrument: KWH_ELEC
     toInstrument: GBP
     method: VALUATION_METHOD_FIXED
-    source: UTILITA_ELEC_FIRST_RATE
+    source: PAYG_ELEC_FIRST_RATE
   - fromInstrument: KWH_ELEC
     toInstrument: GBP
     method: VALUATION_METHOD_FIXED
-    source: UTILITA_ELEC_SAVER_RATE
+    source: PAYG_ELEC_SAVER_RATE
   - fromInstrument: KWH_GAS
     toInstrument: GBP
     method: VALUATION_METHOD_FIXED
-    source: UTILITA_GAS_FIRST_RATE
+    source: PAYG_GAS_FIRST_RATE
   - fromInstrument: KWH_GAS
     toInstrument: GBP
     method: VALUATION_METHOD_FIXED
-    source: UTILITA_GAS_SAVER_RATE
+    source: PAYG_GAS_SAVER_RATE
   - fromInstrument: KWH_ELEC
     toInstrument: GBP
     method: VALUATION_METHOD_SPOT_RATE

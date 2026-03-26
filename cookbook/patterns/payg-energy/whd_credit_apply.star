@@ -15,8 +15,8 @@
 # Critical: if the customer has outstanding debt, WHD must be applied
 # to clear that debt FIRST before crediting the prepayment balance.
 # This priority waterfall is required by scheme rules and was the
-# subject of a GBP 277,000 enforcement action against Utilita in 2025
-# for missing the scheme year deadline by 12 days.
+# subject of Ofgem enforcement actions against suppliers for missing
+# scheme year deadlines.
 #
 # Trigger: scheduled:payg_whd_credit
 #
@@ -48,7 +48,7 @@ def execute_whd():
     step(name="check_idempotency")
     existing = position_keeping.query_logs(
         correlation_id=whd_ref,
-        position_id="UTILITA_WHD",
+        position_id="SUPPLIER_WHD",
     )
     if existing.count > 0:
         return {"status": "ALREADY_APPLIED", "correlation_id": whd_ref}
@@ -56,7 +56,7 @@ def execute_whd():
     # Step 2: Book WHD as social obligation cost
     step(name="book_whd_obligation")
     position_keeping.initiate_log(
-        position_id="UTILITA_WHD",
+        position_id="SUPPLIER_WHD",
         instrument_code="GBP",
         amount=whd_amount,
         direction="DEBIT",
