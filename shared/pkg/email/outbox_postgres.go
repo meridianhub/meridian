@@ -69,17 +69,36 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 		UpdatedAt:      now,
 	}
 
+	if entity.MaxAttempts < 0 {
+		return fmt.Errorf("email: max attempts must be non-negative")
+	}
 	if entity.MaxAttempts == 0 {
 		entity.MaxAttempts = 5
 	}
 
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
-		// Check hourly rate limit for this tenant
 		tenantID, ok := tenant.FromContext(ctx)
 		if !ok {
 			return tenant.ErrMissingTenantContext
 		}
 
+		// Check for existing entry with the same idempotency key before
+		// rate limiting, so retries are not rejected when the tenant is at quota.
+		var existing OutboxEntity
+		idempErr := tx.Where("tenant_id = ? AND idempotency_key = ?", string(tenantID), entry.IdempotencyKey).
+			First(&existing).Error
+		if idempErr == nil {
+			entry.ID = existing.ID
+			entry.Status = OutboxStatus(existing.Status)
+			entry.CreatedAt = existing.CreatedAt
+			entry.UpdatedAt = existing.UpdatedAt
+			return fmt.Errorf("email: duplicate idempotency key %q: %w", entry.IdempotencyKey, idempErr)
+		}
+		if !errors.Is(idempErr, gorm.ErrRecordNotFound) {
+			return idempErr
+		}
+
+		// Check hourly rate limit for genuinely new entries
 		var count int64
 		windowStart := now.Add(-rateLimitWindow)
 		if err := tx.Model(&OutboxEntity{}).
@@ -148,11 +167,12 @@ func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit 
 	return entries, nil
 }
 
-// MarkSent transitions an outbox entry to SENT status.
+// MarkSent transitions an outbox entry from SENDING to SENT status.
+// If the entry was cancelled concurrently, the update is a no-op.
 func (r *PostgresOutboxRepository) MarkSent(ctx context.Context, id uuid.UUID) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		result := tx.Model(&OutboxEntity{}).
-			Where("id = ?", id).
+			Where("id = ? AND status = ?", id, string(StatusSending)).
 			Updates(map[string]any{
 				"status":     string(StatusSent),
 				"updated_at": time.Now().UTC(),
@@ -178,10 +198,11 @@ var retryBackoffs = []time.Duration{
 }
 
 // MarkFailed records a failed send attempt with backoff, or dead-letters if exhausted.
+// Only transitions entries in SENDING status to prevent reopening cancelled rows.
 func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		var current OutboxEntity
-		if err := tx.Where("id = ?", id).First(&current).Error; err != nil {
+		if err := tx.Where("id = ? AND status = ?", id, string(StatusSending)).First(&current).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrOutboxNotFound
 			}
@@ -194,7 +215,7 @@ func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID,
 		// Dead-letter if all attempts exhausted
 		if newAttempts >= current.MaxAttempts {
 			return tx.Model(&OutboxEntity{}).
-				Where("id = ?", id).
+				Where("id = ? AND status = ?", id, string(StatusSending)).
 				Updates(map[string]any{
 					"status":     string(StatusDeadLetter),
 					"attempts":   newAttempts,
@@ -211,7 +232,7 @@ func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID,
 		nextAttempt := now.Add(retryBackoffs[backoffIdx])
 
 		return tx.Model(&OutboxEntity{}).
-			Where("id = ?", id).
+			Where("id = ? AND status = ?", id, string(StatusSending)).
 			Updates(map[string]any{
 				"status":          string(StatusFailed),
 				"attempts":        newAttempts,

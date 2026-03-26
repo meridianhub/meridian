@@ -35,6 +35,18 @@ func newTestOutboxEntry() *email.OutboxEntry {
 	}
 }
 
+// enqueueAndClaim is a helper that enqueues an entry and transitions it to
+// SENDING via FetchDispatchable, returning the claimed entry.
+func enqueueAndClaim(t *testing.T, ctx context.Context, repo *email.PostgresOutboxRepository, entry *email.OutboxEntry) email.OutboxEntry {
+	t.Helper()
+	require.NoError(t, repo.Enqueue(ctx, entry))
+	entries, err := repo.FetchDispatchable(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, entry.ID, entries[0].ID)
+	return entries[0]
+}
+
 func TestPostgresOutboxRepository_Enqueue(t *testing.T) {
 	db, ctx, cleanup := setupOutboxTestDB(t)
 	defer cleanup()
@@ -67,6 +79,19 @@ func TestPostgresOutboxRepository_Enqueue_DuplicateIdempotencyKey(t *testing.T) 
 	assert.Contains(t, err.Error(), "duplicate")
 }
 
+func TestPostgresOutboxRepository_Enqueue_NegativeMaxAttempts(t *testing.T) {
+	db, ctx, cleanup := setupOutboxTestDB(t)
+	defer cleanup()
+
+	repo := email.NewPostgresOutboxRepository(db)
+	entry := newTestOutboxEntry()
+	entry.MaxAttempts = -1
+
+	err := repo.Enqueue(ctx, entry)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-negative")
+}
+
 func TestPostgresOutboxRepository_FetchDispatchable(t *testing.T) {
 	db, ctx, cleanup := setupOutboxTestDB(t)
 	defer cleanup()
@@ -94,9 +119,9 @@ func TestPostgresOutboxRepository_MarkSent(t *testing.T) {
 
 	repo := email.NewPostgresOutboxRepository(db)
 	entry := newTestOutboxEntry()
-	require.NoError(t, repo.Enqueue(ctx, entry))
+	claimed := enqueueAndClaim(t, ctx, repo, entry)
 
-	err := repo.MarkSent(ctx, entry.ID)
+	err := repo.MarkSent(ctx, claimed.ID)
 	require.NoError(t, err)
 
 	// Should no longer be dispatchable
@@ -120,9 +145,9 @@ func TestPostgresOutboxRepository_MarkFailed(t *testing.T) {
 
 	repo := email.NewPostgresOutboxRepository(db)
 	entry := newTestOutboxEntry()
-	require.NoError(t, repo.Enqueue(ctx, entry))
+	claimed := enqueueAndClaim(t, ctx, repo, entry)
 
-	err := repo.MarkFailed(ctx, entry.ID, "provider timeout")
+	err := repo.MarkFailed(ctx, claimed.ID, "provider timeout")
 	require.NoError(t, err)
 
 	// Entry should not be immediately dispatchable (backoff)
@@ -172,11 +197,11 @@ func TestPostgresOutboxRepository_Cancel_AlreadySent(t *testing.T) {
 
 	repo := email.NewPostgresOutboxRepository(db)
 	entry := newTestOutboxEntry()
-	require.NoError(t, repo.Enqueue(ctx, entry))
-	require.NoError(t, repo.MarkSent(ctx, entry.ID))
+	claimed := enqueueAndClaim(t, ctx, repo, entry)
+	require.NoError(t, repo.MarkSent(ctx, claimed.ID))
 
 	// Cannot cancel a sent entry
-	err := repo.Cancel(ctx, entry.ID)
+	err := repo.Cancel(ctx, claimed.ID)
 	require.ErrorIs(t, err, email.ErrOutboxNotFound)
 }
 
@@ -186,9 +211,9 @@ func TestPostgresOutboxRepository_FetchDispatchable_RespectsNextAttemptAt(t *tes
 
 	repo := email.NewPostgresOutboxRepository(db)
 
-	// Enqueue and fail an entry to push next_attempt_at into the future
+	// Enqueue, claim, and fail an entry to push next_attempt_at into the future
 	entry := newTestOutboxEntry()
-	require.NoError(t, repo.Enqueue(ctx, entry))
+	enqueueAndClaim(t, ctx, repo, entry)
 	require.NoError(t, repo.MarkFailed(ctx, entry.ID, "timeout"))
 
 	// Fresh entry should still be fetchable
