@@ -2,13 +2,13 @@ package email_test
 
 import (
 	"context"
-	"testing"
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"testing"
 )
 
 const testTenantID = "test_tenant"

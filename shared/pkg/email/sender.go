@@ -64,6 +64,7 @@ type OutboxEntry struct {
 // OutboxStatus represents the lifecycle state of an outbox entry.
 type OutboxStatus string
 
+// Outbox lifecycle statuses.
 const (
 	StatusPending    OutboxStatus = "PENDING"
 	StatusSending    OutboxStatus = "SENDING"
@@ -76,6 +77,7 @@ const (
 // AuditStatus represents the delivery state tracked in audit logs.
 type AuditStatus string
 
+// Audit log delivery statuses.
 const (
 	AuditStatusSent      AuditStatus = "SENT"
 	AuditStatusDelivered AuditStatus = "DELIVERED"

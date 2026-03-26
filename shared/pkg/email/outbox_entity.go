@@ -28,6 +28,7 @@ type OutboxEntity struct {
 	UpdatedAt      time.Time `gorm:"not null"`
 }
 
+// TableName returns the database table name for OutboxEntity.
 func (OutboxEntity) TableName() string {
 	return "email_outbox"
 }
@@ -50,6 +51,7 @@ type AuditLogEntity struct {
 	CreatedAt        time.Time      `gorm:"not null"`
 }
 
+// TableName returns the database table name for AuditLogEntity.
 func (AuditLogEntity) TableName() string {
 	return "email_audit_log"
 }

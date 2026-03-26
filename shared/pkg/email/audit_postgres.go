@@ -24,6 +24,7 @@ func NewPostgresAuditRepository(gormDB *gorm.DB) *PostgresAuditRepository {
 	return &PostgresAuditRepository{db: gormDB}
 }
 
+// Record persists a new audit log entry within a tenant-scoped transaction.
 func (r *PostgresAuditRepository) Record(ctx context.Context, entry *AuditEntry) error {
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
@@ -61,6 +62,7 @@ func (r *PostgresAuditRepository) Record(ctx context.Context, entry *AuditEntry)
 	})
 }
 
+// FindByOutboxID returns all audit entries for the given outbox ID, newest first.
 func (r *PostgresAuditRepository) FindByOutboxID(ctx context.Context, outboxID uuid.UUID) ([]AuditEntry, error) {
 	var entities []AuditLogEntity
 

@@ -18,11 +18,12 @@ import (
 var _ OutboxRepository = (*PostgresOutboxRepository)(nil)
 
 const (
-	hourlyRateLimit    = 500
-	rateLimitWindow    = time.Hour
-	maxFetchBatchSize  = 100
+	hourlyRateLimit   = 500
+	rateLimitWindow   = time.Hour
+	maxFetchBatchSize = 100
 )
 
+// Sentinel errors for outbox operations.
 var (
 	ErrRateLimitExceeded = errors.New("email: tenant hourly rate limit exceeded")
 	ErrOutboxNotFound    = errors.New("email: outbox entry not found")
@@ -39,6 +40,7 @@ func NewPostgresOutboxRepository(gormDB *gorm.DB) *PostgresOutboxRepository {
 	return &PostgresOutboxRepository{db: gormDB}
 }
 
+// Enqueue adds a new email to the outbox within a tenant-scoped transaction.
 func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEntry) error {
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
@@ -104,6 +106,7 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 	})
 }
 
+// FetchDispatchable atomically claims up to limit pending/failed entries for dispatch.
 func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit int) ([]OutboxEntry, error) {
 	if limit <= 0 || limit > maxFetchBatchSize {
 		limit = maxFetchBatchSize
@@ -145,6 +148,7 @@ func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit 
 	return entries, nil
 }
 
+// MarkSent transitions an outbox entry to SENT status.
 func (r *PostgresOutboxRepository) MarkSent(ctx context.Context, id uuid.UUID) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		result := tx.Model(&OutboxEntity{}).
@@ -173,6 +177,7 @@ var retryBackoffs = []time.Duration{
 	24 * time.Hour,
 }
 
+// MarkFailed records a failed send attempt with backoff, or dead-letters if exhausted.
 func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		var current OutboxEntity
@@ -217,6 +222,7 @@ func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID,
 	})
 }
 
+// Cancel transitions a pending, sending, or failed entry to CANCELLED status.
 func (r *PostgresOutboxRepository) Cancel(ctx context.Context, id uuid.UUID) error {
 	now := time.Now().UTC()
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
