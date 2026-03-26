@@ -215,11 +215,13 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 	returnURL := sanitizeReturnURL(r.URL.Query().Get("return_url"))
 
 	tenantSlug, _ := tenant.SlugFromContext(ctx)
+	tenantDisplayName, _ := tenant.DisplayNameFromContext(ctx)
 	stateKey, err := h.stateStore.Set(StateData{
-		CodeVerifier: codeVerifier,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		ReturnURL:    returnURL,
+		CodeVerifier:      codeVerifier,
+		TenantID:          tenantID,
+		TenantSlug:        tenantSlug,
+		TenantDisplayName: tenantDisplayName,
+		ReturnURL:         returnURL,
 	})
 	if err != nil {
 		h.logger.ErrorContext(ctx, "sso: failed to store state", "error", err)
@@ -346,6 +348,9 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	claims := connector.BuildClaims(identity, stateData.TenantID)
 	if stateData.TenantSlug != "" {
 		claims[tenant.TenantSlugKey] = stateData.TenantSlug
+	}
+	if stateData.TenantDisplayName != "" {
+		claims[tenant.TenantDisplayNameKey] = stateData.TenantDisplayName
 	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
