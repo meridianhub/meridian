@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { ManifestDiffGraph } from './manifest-diff-graph'
 import type { ManifestGraph } from '../lib/manifest-graph-model'
 
