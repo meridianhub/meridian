@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -87,6 +88,49 @@ func (r *PostgresAuditRepository) FindByOutboxID(ctx context.Context, outboxID u
 		entries[i] = entityToAuditEntry(e)
 	}
 	return entries, nil
+}
+
+// RecordByProviderID looks up existing audit entries by providerID (without tenant scope),
+// resolves the tenant from the first match, then records a new status update entry.
+func (r *PostgresAuditRepository) RecordByProviderID(ctx context.Context, providerID string, status AuditStatus, payload map[string]any) error {
+	// Cross-tenant lookup: find any existing audit entry with this provider ID.
+	var existing AuditLogEntity
+	if err := r.db.Where("provider_id = ?", providerID).First(&existing).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrAuditEntryNotFound
+		}
+		return fmt.Errorf("email: lookup audit entry by provider ID: %w", err)
+	}
+
+	tid, err := tenant.NewTenantID(existing.TenantID)
+	if err != nil {
+		return fmt.Errorf("email: invalid tenant ID in audit entry: %w", err)
+	}
+	tenantCtx := tenant.WithTenant(ctx, tid)
+
+	now := time.Now().UTC()
+
+	var delivered *time.Time
+	var bounceReason *string
+	if status == AuditStatusDelivered {
+		delivered = &now
+	}
+
+	entry := &AuditEntry{
+		ID:               uuid.New(),
+		OutboxID:         existing.OutboxID,
+		ProviderID:       &providerID,
+		ToAddresses:      []string(existing.ToAddresses),
+		FromAddress:      existing.FromAddress,
+		Subject:          existing.Subject,
+		TemplateName:     existing.TemplateName,
+		Status:           status,
+		DeliveredAt:      delivered,
+		BounceReason:     bounceReason,
+		ProviderResponse: payload,
+	}
+
+	return r.Record(tenantCtx, entry)
 }
 
 func entityToAuditEntry(e AuditLogEntity) AuditEntry {

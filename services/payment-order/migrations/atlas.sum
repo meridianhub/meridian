@@ -1,4 +1,4 @@
-h1:J6J8b29E6gkk6NnXMh5pOLykok8mJyb3c5HbD0OXRDk=
+h1:FEtO1kPnW0ggNmB/+dxvGpdZh2ur+GCkgSgsgedzzWc=
 20251216000001_initial.sql h1:9Pt9iC/k1YkmfjyO/F0ioNbPswzzgCP2aHtFlFHnSMY=
 20251217000001_audit_system.sql h1:YD9HdFm+NRTihCM/PBU7EYEmdttWjvGPCIE408A8HFg=
 20251223000001_fix_audit_schema_compatibility.sql h1:QxqR4DwdQ5cNXHCxTvtHgQmhSnD8xptkoFnxNcZ5ehY=
@@ -17,3 +17,4 @@ h1:J6J8b29E6gkk6NnXMh5pOLykok8mJyb3c5HbD0OXRDk=
 20260326000001_email_outbox.sql h1:UpwgKGZ6AJoDLcSPqG7SOOd9ogtd+0BybSmW7zUajic=
 20260326000002_email_outbox_index.sql h1:YkH+wCNp1EA5RxQuF3gG0WJA7h6ooO1NXEr4rG4NgyM=
 20260326000003_email_audit_log.sql h1:j8G5/uH6F2ZjOUsKfaYvp8/kGblS36E8oZOlkQ3Bo1M=
+20260326000004_email_audit_provider_id_index.sql h1:1NruszJ83yvkMnBTQr36juoM8yxjmX/JsX5bmuTZHlQ=

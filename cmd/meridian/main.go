@@ -282,6 +282,11 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		extraGWOpts = append(extraGWOpts, regOpt)
 	}
 
+	// Wire Resend webhook handler (public endpoint, Svix signature auth).
+	if webhookOpt := wireResendWebhook(conns.gormDB("payment-order"), logger); webhookOpt != nil {
+		extraGWOpts = append(extraGWOpts, webhookOpt)
+	}
+
 	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)

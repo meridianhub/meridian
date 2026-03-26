@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -37,4 +38,13 @@ type AuditRepository interface {
 
 	// FindByOutboxID returns all audit entries for a given outbox entry.
 	FindByOutboxID(ctx context.Context, outboxID uuid.UUID) ([]AuditEntry, error)
+
+	// RecordByProviderID records a webhook delivery status update for the email
+	// identified by providerID. It looks up the tenant from existing audit entries
+	// and records a new status entry with the supplied payload. Returns
+	// ErrAuditEntryNotFound if no audit entry with the given providerID exists.
+	RecordByProviderID(ctx context.Context, providerID string, status AuditStatus, payload map[string]any) error
 }
+
+// ErrAuditEntryNotFound is returned when no audit entry matches the given criteria.
+var ErrAuditEntryNotFound = fmt.Errorf("email: audit entry not found")
