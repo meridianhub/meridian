@@ -74,8 +74,9 @@ jobs:
     # Set up buf for protobuf generation (pinned version for reproducibility)
     - name: Set up buf
       if: matrix.language == 'go'
-      uses: bufbuild/buf-setup-action@v1.50.0
+      uses: bufbuild/buf-action@v1
       with:
+        setup_only: true
         github_token: ${{ secrets.GITHUB_TOKEN }}
 
     # Generate protobuf files before CodeQL analysis
