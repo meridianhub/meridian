@@ -24,6 +24,11 @@ type OutboxRepository interface {
 
 	// Cancel marks an outbox entry as cancelled.
 	Cancel(ctx context.Context, id uuid.UUID) error
+
+	// CancelByIdempotencyKeyPattern cancels all pending/failed outbox entries
+	// whose idempotency key matches the given SQL LIKE pattern.
+	// Returns the number of entries cancelled.
+	CancelByIdempotencyKeyPattern(ctx context.Context, pattern string) (int64, error)
 }
 
 // AuditRepository records email delivery events for compliance and debugging.

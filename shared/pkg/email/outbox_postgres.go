@@ -306,6 +306,32 @@ func (r *PostgresOutboxRepository) Cancel(ctx context.Context, id uuid.UUID) err
 	})
 }
 
+// CancelByIdempotencyKeyPattern cancels all pending/failed outbox entries
+// whose idempotency key matches the given SQL LIKE pattern within the tenant scope.
+func (r *PostgresOutboxRepository) CancelByIdempotencyKeyPattern(ctx context.Context, pattern string) (int64, error) {
+	now := time.Now().UTC()
+	var rowsAffected int64
+	err := db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return tenant.ErrMissingTenantContext
+		}
+		result := tx.Model(&OutboxEntity{}).
+			Where("tenant_id = ? AND idempotency_key LIKE ? AND status IN ('PENDING', 'FAILED')", string(tenantID), pattern).
+			Updates(map[string]any{
+				"status":       string(StatusCancelled),
+				"cancelled_at": now,
+				"updated_at":   now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		rowsAffected = result.RowsAffected
+		return nil
+	})
+	return rowsAffected, err
+}
+
 func entityToOutboxEntry(e OutboxEntity) OutboxEntry {
 	var templateData map[string]any
 	if len(e.TemplateData) > 0 {

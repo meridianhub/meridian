@@ -67,6 +67,10 @@ func (m *mockEmailOutbox) MarkFailed(_ context.Context, _ uuid.UUID, _ string) e
 
 func (m *mockEmailOutbox) Cancel(_ context.Context, _ uuid.UUID) error { return nil }
 
+func (m *mockEmailOutbox) CancelByIdempotencyKeyPattern(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 var (
 	_ email.OutboxRepository = (*mockEmailOutbox)(nil)
 	_ PartyClient            = (*mockPartyClient)(nil)
