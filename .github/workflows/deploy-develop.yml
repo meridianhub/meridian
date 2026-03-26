@@ -222,6 +222,20 @@ jobs:
             docker compose -f /opt/meridian/docker-compose.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f
 
+      - name: Run pre-migration fixups
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            # PostgreSQL requires ALTER TABLE DROP CONSTRAINT for constraint-backed
+            # unique indexes. CockroachDB uses DROP INDEX CASCADE instead. This
+            # pre-migration resolves the divergence on PostgreSQL deployments.
+            docker exec postgres-develop psql -U meridian -d meridian_reference_data -c \
+              "ALTER TABLE IF EXISTS public.platform_saga_definition DROP CONSTRAINT IF EXISTS uq_platform_saga_definition_name;" \
+              2>/dev/null || true
+
       - name: Run migrations
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
