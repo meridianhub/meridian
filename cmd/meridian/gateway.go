@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream/adapters"
 	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/shared/pkg/email"
 
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -238,6 +239,21 @@ type loopbackSlugChecker struct {
 
 func (c *loopbackSlugChecker) IsSlugAvailable(ctx context.Context, slug string) (bool, error) {
 	return c.repo.IsSlugAvailable(ctx, slug)
+}
+
+// wireResendWebhook creates the Resend delivery status webhook handler and returns
+// a ServerOption. Returns nil if RESEND_WEBHOOK_SECRET is not set (webhook disabled).
+func wireResendWebhook(paymentOrderDB *gorm.DB, logger *slog.Logger) gateway.ServerOption {
+	secret := env.GetEnvOrDefault("RESEND_WEBHOOK_SECRET", "")
+	if secret == "" {
+		logger.Info("resend webhook disabled: RESEND_WEBHOOK_SECRET not set")
+		return nil
+	}
+
+	auditRepo := email.NewPostgresAuditRepository(paymentOrderDB)
+	handler := gateway.NewResendWebhookHandler(auditRepo, secret, logger)
+	logger.Info("resend webhook handler initialized")
+	return gateway.WithResendWebhookHandler(handler)
 }
 
 // wireRegistration creates the self-service registration handler and returns

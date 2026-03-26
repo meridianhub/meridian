@@ -76,10 +76,11 @@ type AuditStatus string
 
 // Audit log delivery statuses.
 const (
-	AuditStatusSent      AuditStatus = "SENT"
-	AuditStatusDelivered AuditStatus = "DELIVERED"
-	AuditStatusBounced   AuditStatus = "BOUNCED"
-	AuditStatusFailed    AuditStatus = "FAILED"
+	AuditStatusSent       AuditStatus = "SENT"
+	AuditStatusDelivered  AuditStatus = "DELIVERED"
+	AuditStatusBounced    AuditStatus = "BOUNCED"
+	AuditStatusFailed     AuditStatus = "FAILED"
+	AuditStatusComplained AuditStatus = "COMPLAINED"
 )
 
 // AuditEntry represents a record in the email audit log.

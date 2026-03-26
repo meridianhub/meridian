@@ -39,6 +39,7 @@ type Server struct {
 	authHandler           *AuthHandler
 	ssoHandler            *SSOHandler
 	registrationHandler   *RegistrationHandler
+	resendWebhookHandler  *ResendWebhookHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -209,6 +210,11 @@ func (s *Server) registerRoutes() {
 	if s.registrationHandler != nil {
 		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
 		s.mux.Handle("GET /api/v1/slugs/{slug}/available", http.HandlerFunc(s.registrationHandler.HandleSlugAvailable))
+	}
+
+	// Resend delivery status webhook - NO middleware (Svix signature IS the auth).
+	if s.resendWebhookHandler != nil {
+		s.mux.Handle("POST /api/v1/webhooks/resend", s.resendWebhookHandler)
 	}
 
 	// API routes - with auth and tenant middleware chain.
