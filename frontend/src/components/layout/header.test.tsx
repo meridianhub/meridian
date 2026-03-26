@@ -34,11 +34,18 @@ function renderWithProviders(ui: React.ReactElement, token?: string) {
 
 describe('Header', () => {
   describe('basic rendering', () => {
-    it('renders the Meridian logo/brand text', () => {
+    it('renders the tenant display name from JWT for tenant users', () => {
       const token = createTenantUserToken()
       renderWithProviders(<Header onMenuToggle={() => {}} />, token)
 
-      expect(screen.getByText(/meridian/i)).toBeInTheDocument()
+      expect(screen.getByText('Test Tenant')).toBeInTheDocument()
+    })
+
+    it('renders Meridian for platform admins without selected tenant', () => {
+      const token = createPlatformAdminToken()
+      renderWithProviders(<Header onMenuToggle={() => {}} />, token)
+
+      expect(screen.getByText('Meridian')).toBeInTheDocument()
     })
 
     it('renders a menu toggle button', () => {

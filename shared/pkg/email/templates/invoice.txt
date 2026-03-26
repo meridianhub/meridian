@@ -1,0 +1,18 @@
+MERIDIAN - Invoice {{.InvoiceNumber}}
+
+Dear {{.CustomerName}},
+
+Please find your invoice details below. Payment is due by {{.DueDate}}.
+
+INVOICE DETAILS
+---------------
+{{range .LineItems}}{{.Description}}: {{.Amount}}
+{{end}}
+TOTAL: {{.Total}}
+
+Pay online: {{.PaymentLink}}
+
+If you have any questions about this invoice, please contact our support team.
+
+--
+Meridian - The Operating System for the Real-World Economy

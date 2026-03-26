@@ -135,6 +135,16 @@ func runMigrations(ctx context.Context, migrationFS fs.FS, superuserDSN string, 
 		return err
 	}
 
+	// PostgreSQL compatibility: run pre-migration fixups before applying migrations.
+	// CockroachDB and PostgreSQL handle certain DDL operations differently (e.g.,
+	// DROP INDEX CASCADE vs ALTER TABLE DROP CONSTRAINT for unique constraints).
+	// These fixups resolve the divergence so the same migration files work on both.
+	if driver == DriverPostgres {
+		if err := runPostgresPreMigrationFixups(ctx, superuserDSN, driver, logger); err != nil {
+			return fmt.Errorf("postgres pre-migration fixups: %w", err)
+		}
+	}
+
 	// Group migrations by target database.
 	byDB := groupByDatabase(migrations)
 
@@ -542,4 +552,41 @@ func buildSuperuserDSN(superuserDSN string, dbName string, driver Driver) string
 // quoteIdent wraps a SQL identifier in double quotes, escaping any embedded double quotes.
 func quoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// runPostgresPreMigrationFixups resolves CockroachDB/PostgreSQL DDL divergences
+// before migration files are applied. This is only called when driver == DriverPostgres.
+//
+// Background: CockroachDB uses DROP INDEX CASCADE to remove unique-constraint-backed
+// indexes (which also drops the constraint). PostgreSQL requires ALTER TABLE DROP
+// CONSTRAINT first, then DROP INDEX. Since CockroachDB v24.1 doesn't support PL/pgSQL
+// DO blocks, we can't handle this in SQL migration files. Instead, we run the
+// PostgreSQL-specific fixup here at the Go level.
+func runPostgresPreMigrationFixups(ctx context.Context, superuserDSN string, driver Driver, logger *slog.Logger) error {
+	// Fix: reference-data migration 20260127000001 uses DROP INDEX CASCADE on
+	// uq_platform_saga_definition_name. On PostgreSQL, the constraint must be
+	// dropped first. This is a no-op if the constraint doesn't exist (already
+	// applied or fresh DB before the table is created - ALTER TABLE IF EXISTS
+	// handles that).
+	dbName := "meridian_reference_data"
+	dsn := buildSuperuserDSN(superuserDSN, dbName, driver)
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		// Database might not exist yet on first run - that's fine, migrations will create it.
+		logger.Debug("skipping pre-migration fixup (database not ready)", "database", dbName, "error", err)
+		return nil
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	fixupSQL := `ALTER TABLE IF EXISTS "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`
+	if _, err := conn.Exec(ctx, fixupSQL); err != nil {
+		logger.Warn("pre-migration fixup failed (non-fatal)", "database", dbName, "error", err)
+		// Non-fatal: the constraint might not exist, or the table might not exist yet.
+		// If the migration truly needs this fixup and it didn't run, the migration itself
+		// will fail with a clear error.
+	} else {
+		logger.Info("pre-migration fixup applied", "database", dbName, "fixup", "drop_saga_unique_constraint")
+	}
+
+	return nil
 }
