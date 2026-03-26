@@ -75,8 +75,7 @@ func TestPostgresOutboxRepository_Enqueue_DuplicateIdempotencyKey(t *testing.T) 
 	duplicate := newTestOutboxEntry()
 	duplicate.IdempotencyKey = entry.IdempotencyKey
 	err = repo.Enqueue(ctx, duplicate)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate")
+	require.ErrorIs(t, err, email.ErrDuplicateIdempotency)
 }
 
 func TestPostgresOutboxRepository_Enqueue_NegativeMaxAttempts(t *testing.T) {

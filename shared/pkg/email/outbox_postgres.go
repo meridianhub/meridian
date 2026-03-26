@@ -25,9 +25,10 @@ const (
 
 // Sentinel errors for outbox operations.
 var (
-	ErrRateLimitExceeded  = errors.New("email: tenant hourly rate limit exceeded")
-	ErrOutboxNotFound     = errors.New("email: outbox entry not found")
-	ErrInvalidMaxAttempts = errors.New("email: max attempts must be non-negative")
+	ErrRateLimitExceeded    = errors.New("email: tenant hourly rate limit exceeded")
+	ErrOutboxNotFound       = errors.New("email: outbox entry not found")
+	ErrInvalidMaxAttempts   = errors.New("email: max attempts must be non-negative")
+	ErrDuplicateIdempotency = errors.New("email: duplicate idempotency key")
 )
 
 // PostgresOutboxRepository implements OutboxRepository using GORM with
@@ -52,30 +53,11 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 		return fmt.Errorf("email: failed to marshal template data: %w", err)
 	}
 
-	now := time.Now().UTC()
-	entity := OutboxEntity{
-		ID:             entry.ID,
-		TenantID:       entry.TenantID,
-		IdempotencyKey: entry.IdempotencyKey,
-		ToAddresses:    entry.ToAddresses,
-		FromAddress:    entry.FromAddress,
-		Subject:        entry.Subject,
-		TemplateName:   entry.TemplateName,
-		TemplateData:   datatypes.JSON(templateJSON),
-		Status:         string(StatusPending),
-		Attempts:       0,
-		MaxAttempts:    entry.MaxAttempts,
-		NextAttemptAt:  now,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-
-	if entity.MaxAttempts < 0 {
+	if entry.MaxAttempts < 0 {
 		return ErrInvalidMaxAttempts
 	}
-	if entity.MaxAttempts == 0 {
-		entity.MaxAttempts = 5
-	}
+
+	now := time.Now().UTC()
 
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
 		tenantID, ok := tenant.FromContext(ctx)
@@ -93,7 +75,7 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 			entry.Status = OutboxStatus(existing.Status)
 			entry.CreatedAt = existing.CreatedAt
 			entry.UpdatedAt = existing.UpdatedAt
-			return fmt.Errorf("email: duplicate idempotency key %q: %w", entry.IdempotencyKey, idempErr)
+			return fmt.Errorf("%w: %q", ErrDuplicateIdempotency, entry.IdempotencyKey)
 		}
 		if !errors.Is(idempErr, gorm.ErrRecordNotFound) {
 			return idempErr
@@ -111,10 +93,32 @@ func (r *PostgresOutboxRepository) Enqueue(ctx context.Context, entry *OutboxEnt
 			return ErrRateLimitExceeded
 		}
 
+		maxAttempts := entry.MaxAttempts
+		if maxAttempts == 0 {
+			maxAttempts = 5
+		}
+
+		entity := OutboxEntity{
+			ID:             entry.ID,
+			TenantID:       string(tenantID),
+			IdempotencyKey: entry.IdempotencyKey,
+			ToAddresses:    entry.ToAddresses,
+			FromAddress:    entry.FromAddress,
+			Subject:        entry.Subject,
+			TemplateName:   entry.TemplateName,
+			TemplateData:   datatypes.JSON(templateJSON),
+			Status:         string(StatusPending),
+			Attempts:       0,
+			MaxAttempts:    maxAttempts,
+			NextAttemptAt:  now,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}
+
 		result := tx.Create(&entity)
 		if result.Error != nil {
 			if isDuplicateKeyError(result.Error) {
-				return fmt.Errorf("email: duplicate idempotency key %q: %w", entry.IdempotencyKey, result.Error)
+				return fmt.Errorf("%w: %q", ErrDuplicateIdempotency, entry.IdempotencyKey)
 			}
 			return result.Error
 		}
