@@ -24,6 +24,7 @@ var (
 	ErrTimestampOutsideTolerance   = errors.New("webhook: timestamp outside 5-minute tolerance window")
 	ErrSignatureVerificationFailed = errors.New("webhook: no matching svix signature found")
 	ErrInvalidWebhookSecret        = errors.New("webhook: cannot decode webhook secret")
+	ErrRequestBodyTooLarge         = errors.New("webhook: request body too large")
 )
 
 // resendWebhookPayload is the outer envelope of a Resend webhook event.
@@ -68,7 +69,7 @@ func (h *ResendWebhookHandler) readAndVerifyWebhook(r *http.Request) ([]byte, in
 		h.logger.WarnContext(r.Context(), "resend webhook: failed to close request body", "error", err)
 	}
 	if len(body) > maxWebhookBody {
-		return nil, http.StatusRequestEntityTooLarge, errors.New("webhook: request body too large")
+		return nil, http.StatusRequestEntityTooLarge, ErrRequestBodyTooLarge
 	}
 	if err := verifySvixSignature(body, r.Header, h.webhookKey); err != nil {
 		return nil, http.StatusUnauthorized, err
