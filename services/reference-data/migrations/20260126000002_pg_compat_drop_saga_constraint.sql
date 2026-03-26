@@ -17,8 +17,11 @@
 DO $$ BEGIN
   ALTER TABLE IF EXISTS "public"."platform_saga_definition"
     DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name";
-EXCEPTION WHEN OTHERS THEN
-  -- CockroachDB: "unimplemented: cannot drop UNIQUE constraint using ALTER TABLE"
-  -- Safe to ignore - the next migration (20260127000001) handles it via DROP INDEX CASCADE.
-  NULL;
+EXCEPTION
+  WHEN SQLSTATE '0A000' THEN
+    -- CockroachDB v24.1: "unimplemented: cannot drop UNIQUE constraint using ALTER TABLE"
+    -- Safe to ignore - the next migration (20260127000001) handles it via DROP INDEX CASCADE.
+    NULL;
+  WHEN OTHERS THEN
+    RAISE;
 END $$;
