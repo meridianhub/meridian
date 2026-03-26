@@ -3,6 +3,7 @@ package email
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	textTemplate "text/template"
@@ -10,6 +11,20 @@ import (
 
 //go:embed templates/*.html templates/*.txt
 var templateFS embed.FS
+
+// Sentinel errors returned by Render.
+var (
+	// ErrRendererNotInitialized is returned when Render is called on a nil or
+	// partially initialized EmbeddedRenderer.
+	ErrRendererNotInitialized = errors.New("embedded renderer is not initialized")
+
+	// ErrEmptyTemplateName is returned when Render is called with an empty name.
+	ErrEmptyTemplateName = errors.New("template name cannot be empty")
+
+	// ErrInvalidDunningSeverity is returned when DunningNoticeData.Severity is
+	// not 1, 2, or 3.
+	ErrInvalidDunningSeverity = errors.New("DunningNoticeData.Severity must be 1, 2, or 3")
+)
 
 // TemplateRenderer renders named email templates with provided data.
 type TemplateRenderer interface {
@@ -44,16 +59,16 @@ func NewEmbeddedRenderer() (*EmbeddedRenderer, error) {
 // returning both the HTML and plain-text outputs.
 func (r *EmbeddedRenderer) Render(name string, data any) (string, string, error) {
 	if r == nil || r.htmlTemplates == nil || r.textTemplates == nil {
-		return "", "", fmt.Errorf("embedded renderer is not initialized")
+		return "", "", ErrRendererNotInitialized
 	}
 	if name == "" {
-		return "", "", fmt.Errorf("template name cannot be empty")
+		return "", "", ErrEmptyTemplateName
 	}
 
 	// Validate typed data structs that have additional constraints.
 	if d, ok := data.(DunningNoticeData); ok {
 		if d.Severity < 1 || d.Severity > 3 {
-			return "", "", fmt.Errorf("DunningNoticeData.Severity must be 1, 2, or 3 (got %d)", d.Severity)
+			return "", "", fmt.Errorf("%w (got %d)", ErrInvalidDunningSeverity, d.Severity)
 		}
 	}
 

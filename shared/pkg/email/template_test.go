@@ -46,15 +46,13 @@ func TestNewEmbeddedRenderer_Success(t *testing.T) {
 func TestRender_NilRenderer_ReturnsError(t *testing.T) {
 	var r *EmbeddedRenderer
 	_, _, err := r.Render("invoice", InvoiceData{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	require.ErrorIs(t, err, ErrRendererNotInitialized)
 }
 
 func TestRender_EmptyName_ReturnsError(t *testing.T) {
 	r := newTestRenderer(t)
 	_, _, err := r.Render("", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "template name cannot be empty")
+	require.ErrorIs(t, err, ErrEmptyTemplateName)
 }
 
 // ---- Missing template ----
@@ -145,8 +143,7 @@ func TestRender_DunningNotice_InvalidSeverity_ReturnsError(t *testing.T) {
 			SupportContact: "support@meridian.io",
 		}
 		_, _, err := r.Render("dunning-notice", data)
-		require.Errorf(t, err, "expected error for severity %d", severity)
-		assert.Contains(t, err.Error(), "Severity")
+		require.ErrorIsf(t, err, ErrInvalidDunningSeverity, "expected ErrInvalidDunningSeverity for severity %d", severity)
 	}
 }
 
