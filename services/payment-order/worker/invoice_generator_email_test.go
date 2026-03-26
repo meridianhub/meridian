@@ -18,8 +18,8 @@ import (
 // --- Mock PartyClient ---
 
 type mockPartyClient struct {
-	mu      sync.Mutex
-	emails  map[string]string
+	mu       sync.Mutex
+	emails   map[string]string
 	emailErr map[string]error
 }
 
@@ -42,8 +42,8 @@ func (m *mockPartyClient) GetPartyEmail(_ context.Context, partyID string) (stri
 // --- Mock OutboxRepository ---
 
 type mockEmailOutbox struct {
-	mu      sync.Mutex
-	entries []*email.OutboxEntry
+	mu         sync.Mutex
+	entries    []*email.OutboxEntry
 	enqueueErr error
 }
 
