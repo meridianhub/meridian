@@ -69,13 +69,23 @@ modification to Flow 1 in PRD 044.
 
 1. Email verification on registration (optional, per-tenant config)
 2. Password reset (forgot password) flow
-3. User invitation emails
+3. **Staff/operator** invitation emails (identity service users)
 4. Welcome email on registration
 5. Frontend pages for all flows
 6. Account lockout notification email
 
+**Invitation scope**: This PRD covers invitations for **platform users**
+(operators, admins, auditors) - identities in the identity service who
+log in and use the Meridian UI. Customer/party notifications (invoices,
+dunning, payment confirmations) are handled by PRD 052 via the
+`notification.send` saga handler. A future customer self-service portal
+(parties logging in to view their own invoices) would be a separate
+concern bridging the party service to authentication (see PRD 031).
+
 ### Out of Scope
 
+- Customer/party invitation or onboarding emails (handled by 052 sagas)
+- Customer self-service portal access (PRD 031 territory)
 - Email change flow (re-verification on email update)
 - MFA setup/recovery emails
 - Login-from-new-context alerts
