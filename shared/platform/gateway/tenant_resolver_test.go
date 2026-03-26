@@ -393,7 +393,7 @@ func TestResolveTenant(t *testing.T) {
 		Status:      domain.StatusActive,
 	}
 
-	t.Run("cache hit returns tenant ID without DB call", func(t *testing.T) {
+	t.Run("cache hit with display name cache populated skips DB", func(t *testing.T) {
 		mockCache := new(MockSlugCache)
 		mockRepo := new(MockTenantRepository)
 		logger := slog.Default()
@@ -401,7 +401,40 @@ func TestResolveTenant(t *testing.T) {
 		// Setup: Cache returns tenant ID
 		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
 
-		// Create middleware
+		// Create middleware with pre-populated display name cache
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: "meridian.io",
+			logger:     logger,
+		}
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
+
+		// Execute
+		result, err := middleware.resolveTenant(ctx, testSlug)
+
+		// Assert
+		require.NoError(t, err)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
+
+		// Verify cache was called
+		mockCache.AssertExpectations(t)
+
+		// Verify repository was NOT called (both caches hit)
+		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
+
+	t.Run("cache hit with display name cache miss backfills from DB", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Slug cache hit but display name cache is empty
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
+
+		// Create middleware (no pre-populated display name cache)
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
@@ -414,13 +447,12 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert
 		require.NoError(t, err)
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
 
-		// Verify cache was called
+		// Verify DB was called to backfill display name
 		mockCache.AssertExpectations(t)
-
-		// Verify repository was NOT called (cache hit)
-		mockRepo.AssertNotCalled(t, "GetBySlug")
+		mockRepo.AssertExpectations(t)
 	})
 
 	t.Run("cache miss triggers DB lookup and cache population", func(t *testing.T) {
@@ -446,7 +478,8 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert
 		require.NoError(t, err)
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
 
 		// Verify all expected calls were made
 		mockCache.AssertExpectations(t)
@@ -507,7 +540,8 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert: Request should succeed despite cache write failure
 		require.NoError(t, err, "cache write failure should not fail the request")
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
 
 		// Verify all calls were made
 		mockCache.AssertExpectations(t)
@@ -537,7 +571,8 @@ func TestResolveTenant(t *testing.T) {
 
 		// Assert: Request should succeed despite cache read failure
 		require.NoError(t, err, "cache read failure should fall through to DB")
-		assert.Equal(t, testTenantID, result)
+		assert.Equal(t, testTenantID, result.ID)
+		assert.Equal(t, "Acme Corp", result.DisplayName)
 
 		// Verify all calls were made (cache get, DB get, cache set)
 		mockCache.AssertExpectations(t)
@@ -633,13 +668,14 @@ func TestServeHTTP(t *testing.T) {
 		// Setup: Cache hit
 		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
 
-		// Create middleware
+		// Create middleware with pre-populated display name cache
 		middleware := &TenantResolverMiddleware{
 			slugCache:  mockCache,
 			tenantRepo: mockRepo,
 			baseDomain: baseDomain,
 			logger:     logger,
 		}
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: testTenant.DisplayName})
 
 		// Create test request
 		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
@@ -823,6 +859,7 @@ func TestServeHTTP(t *testing.T) {
 			baseDomain: baseDomain,
 			logger:     logger,
 		}
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: testTenant.DisplayName})
 
 		// Create test request with port number
 		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+":8080/api/test", nil)
@@ -861,6 +898,7 @@ func TestServeHTTP(t *testing.T) {
 			baseDomain: baseDomain,
 			logger:     logger,
 		}
+		middleware.displayNameCache.Store(multiLevelSlug, cachedDisplayName{tenantID: multiLevelTenantID, displayName: "Multi-Level Tenant"})
 
 		// Create test request
 		req := httptest.NewRequest(http.MethodGet, "http://"+multiLevelHost+"/api/test", nil)
@@ -1008,6 +1046,7 @@ func TestLocalDevMode(t *testing.T) {
 			logger:       logger,
 			localDevMode: true,
 		}
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
 
 		// Create test request with X-Tenant-Slug header (no valid subdomain)
 		req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
@@ -1090,6 +1129,7 @@ func TestLocalDevMode(t *testing.T) {
 			logger:       logger,
 			localDevMode: true,
 		}
+		middleware.displayNameCache.Store(headerSlug, cachedDisplayName{tenantID: headerTenantID, displayName: "Header Tenant"})
 
 		// Create test request with BOTH valid subdomain AND header
 		req := httptest.NewRequest(http.MethodGet, "http://acme.api.meridian.io/api/test", nil)
@@ -1136,6 +1176,7 @@ func TestLocalDevMode(t *testing.T) {
 			logger:       logger,
 			localDevMode: true,
 		}
+		middleware.displayNameCache.Store(subdomainSlug, cachedDisplayName{tenantID: subdomainTenantID, displayName: "Subdomain Tenant"})
 
 		// Create test request with valid subdomain but no header
 		req := httptest.NewRequest(http.MethodGet, "http://acme.api.meridian.io/api/test", nil)
@@ -1231,6 +1272,7 @@ func TestLocalDevMode(t *testing.T) {
 					logger:       logger,
 					localDevMode: true,
 				}
+				middleware.displayNameCache.Store(validSlug, cachedDisplayName{tenantID: validSlugTenantID, displayName: "Valid Tenant"})
 
 				req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
 				req.Header.Set(TenantSlugHeader, validSlug)
@@ -1271,6 +1313,7 @@ func TestHandlerOptionalTenant_WithValidSubdomain(t *testing.T) {
 		baseDomain: baseDomain,
 		logger:     logger,
 	}
+	middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
 
 	req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
 	req = req.WithContext(ctx)
@@ -1436,6 +1479,7 @@ func TestHandlerOptionalTenant_LocalDevMode_ValidSlugFromHeader(t *testing.T) {
 		logger:       logger,
 		localDevMode: true,
 	}
+	middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
 
 	req := httptest.NewRequest(http.MethodGet, "http://"+baseDomain+"/api/test", nil)
 	req.Header.Set(TenantSlugHeader, testSlug)

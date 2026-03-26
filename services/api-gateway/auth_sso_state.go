@@ -17,10 +17,11 @@ var ErrStateStoreFull = errors.New("state store: capacity limit reached")
 
 // StateData holds the PKCE and tenant context for an in-flight SSO authorization.
 type StateData struct {
-	CodeVerifier string
-	TenantID     tenant.TenantID
-	TenantSlug   string // subdomain slug for JWT claims (may differ from TenantID)
-	ReturnURL    string
+	CodeVerifier      string
+	TenantID          tenant.TenantID
+	TenantSlug        string // subdomain slug for JWT claims (may differ from TenantID)
+	TenantDisplayName string // human-readable tenant name for JWT claims
+	ReturnURL         string
 }
 
 // stateEntry pairs data with an expiry time.

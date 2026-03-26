@@ -141,6 +141,9 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if slug, ok := tenant.SlugFromContext(ctx); ok && slug != "" {
 		claims[tenant.TenantSlugKey] = slug
 	}
+	if displayName, ok := tenant.DisplayNameFromContext(ctx); ok && displayName != "" {
+		claims[tenant.TenantDisplayNameKey] = displayName
+	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "auth: failed to sign token",
