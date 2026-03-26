@@ -1,6 +1,3 @@
-// Package email provides the core types and interfaces for transactional email
-// delivery in Meridian. It implements an outbox pattern for reliable, at-least-once
-// email delivery with audit logging.
 package email
 
 import (
