@@ -135,6 +135,18 @@ ssh "${DEMO_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
   --with-fixtures"
 
 echo ""
+echo "=== Step 7b: Seed Utilita PAYG demo tenant ==="
+ssh "${DEMO_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
+  --gateway-url=http://localhost:8090 \
+  --grpc-addr=localhost:50051 \
+  --tenant-id=utilita_payg \
+  --tenant-slug=utilita-payg \
+  --display-name='Utilita PAYG' \
+  --subdomain=utilita-payg.demo.meridianhub.cloud \
+  --manifest=/app/examples/manifests/utilita-payg.manifest.json \
+  --with-fixtures"
+
+echo ""
 echo "=== Step 8: Start mcp-server ==="
 ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose up -d mcp-server"
 
@@ -159,5 +171,8 @@ echo ""
 echo "=== Demo Reset Complete ==="
 echo "  Tenant:  volterra_energy (slug: volterra-energy)"
 echo "  URL:     https://volterra-energy.demo.meridianhub.cloud"
+echo ""
+echo "  Tenant:  utilita_payg (slug: utilita-payg)"
+echo "  URL:     https://utilita-payg.demo.meridianhub.cloud"
 echo ""
 echo "  Verify:  ssh ${DEMO_HOST} 'docker logs ${APP_CONTAINER} --tail 10'"

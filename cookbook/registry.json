@@ -16,6 +16,7 @@
         {"name": "entity-distribution", "type": "registry:pattern", "title": "Entity Hierarchy Distribution"},
         {"name": "phantom-cost-basis", "type": "registry:pattern", "title": "Phantom Cost Basis Adjustment"},
         {"name": "tote-betting", "type": "registry:pattern", "title": "Tote (Parimutuel) Betting Platform"},
+        {"name": "payg-energy", "type": "registry:pattern", "title": "Prepayment Energy Billing (PAYG)"},
         {"name": "activity-feed", "type": "registry:ui", "title": "Activity Feed"},
         {"name": "audit-trail", "type": "registry:ui", "title": "Audit Trail", "categories": ["audit", "timeline", "display"]},
         {"name": "balance-indicator", "type": "registry:ui", "title": "Balance Indicator"},

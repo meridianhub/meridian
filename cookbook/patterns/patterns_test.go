@@ -387,6 +387,7 @@ var allEconomyPatterns = []string{
 	"entity-distribution",
 	"phantom-cost-basis",
 	"tote-betting",
+	"payg-energy",
 }
 
 func TestEconomyPatterns_PatternJSONValidatesAgainstSchema(t *testing.T) {
@@ -485,6 +486,7 @@ func TestEconomyPatterns_StarFilesExistForSagaPatterns(t *testing.T) {
 		"payment-gateway-stripe":   {"stripe_payment_received.star"},
 		"entity-distribution":      {"race_result_distribution.star"},
 		"phantom-cost-basis":       {"corporate_action_cost_adjustment.star"},
+		"payg-energy":              {"topup_waterfall.star", "consumption_block_tariff.star", "emergency_credit_activate.star", "whd_credit_apply.star"},
 	}
 
 	for name, starFiles := range patternsWithStarFiles {

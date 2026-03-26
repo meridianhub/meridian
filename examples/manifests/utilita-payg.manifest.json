@@ -1,0 +1,571 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "Utilita PAYG Billing",
+    "industry": "energy",
+    "description": "Prepayment energy billing with no-standing-charge block tariff, emergency credit, debt recovery waterfall, and DCC smart meter integration. Models Utilita's two-tier pricing (First Rate / Saver Rate with daily 2kWh threshold), VAT recognition at top-up (HMRC Reg 86), and MHHS-ready half-hourly consumption settlement."
+  },
+  "instruments": [
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "GBP",
+        "precision": 2
+      }
+    },
+    {
+      "code": "KWH_ELEC",
+      "name": "Kilowatt Hour (Electricity)",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "kWh",
+        "precision": 3
+      }
+    },
+    {
+      "code": "KWH_GAS",
+      "name": "Kilowatt Hour (Gas)",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "kWh",
+        "precision": 3
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "PREPAYMENT_LIABILITY",
+      "name": "Customer Prepayment Liability",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.fuel_type"
+      }
+    },
+    {
+      "code": "EMERGENCY_CREDIT",
+      "name": "Emergency Credit Receivable",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "amount >= 0 && amount <= 15",
+        "bucketing": "attributes.fuel_type"
+      }
+    },
+    {
+      "code": "POWER_UP_RECEIVABLE",
+      "name": "POWER UP (ASC) Receivable",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "DEBT_RECOVERY",
+      "name": "Debt Recovery Receivable",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "REVENUE_ENERGY",
+      "name": "Energy Revenue",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.fuel_type + ':' + attributes.rate_tier"
+      }
+    },
+    {
+      "code": "VAT_OUTPUT",
+      "name": "VAT Output Tax",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.tax_period"
+      }
+    },
+    {
+      "code": "CONSUMPTION_METERED",
+      "name": "Metered Consumption",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "KWH_ELEC",
+        "KWH_GAS"
+      ],
+      "policies": {
+        "validation": "amount > 0",
+        "bucketing": "instrument_code + ':' + attributes.settlement_date"
+      }
+    },
+    {
+      "code": "ENERGY_SUPPLY_POOL",
+      "name": "Energy Supply Pool",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "KWH_ELEC",
+        "KWH_GAS"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "instrument_code + ':' + attributes.gsp_group"
+      }
+    },
+    {
+      "code": "WHOLESALE_COST",
+      "name": "Wholesale Energy Cost",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.fuel_type + ':' + attributes.settlement_period"
+      }
+    },
+    {
+      "code": "WHD_OBLIGATION",
+      "name": "Warm Home Discount Obligation",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.scheme_year"
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "KWH_ELEC",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "UTILITA_ELEC_FIRST_RATE"
+    },
+    {
+      "fromInstrument": "KWH_ELEC",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "UTILITA_ELEC_SAVER_RATE"
+    },
+    {
+      "fromInstrument": "KWH_GAS",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "UTILITA_GAS_FIRST_RATE"
+    },
+    {
+      "fromInstrument": "KWH_GAS",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "UTILITA_GAS_SAVER_RATE"
+    },
+    {
+      "fromInstrument": "KWH_ELEC",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "WHOLESALE_ELEC_GBP_KWH"
+    },
+    {
+      "fromInstrument": "KWH_GAS",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "WHOLESALE_GAS_GBP_KWH"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "topup_waterfall",
+      "trigger": "api:/v1/topups",
+      "script": "# Saga: topup_waterfall\n# Version: 1.0.0\n# Previous: none\n# Changed: Initial implementation\n# Author: Meridian Platform Team\n# Date: 2026-03-26\n#\n# Prepayment top-up allocation waterfall for Utilita's PAYG model.\n#\n# When a customer tops up (e.g., GBP 50.00), the payment is allocated\n# through a strict priority waterfall:\n#\n#   1. Debt recovery siphon (25% of gross, configurable 20-100%)\n#   2. Emergency credit repayment (clear outstanding EC receivable)\n#   3. Prepayment liability credit (remainder funds the meter balance)\n#\n# VAT is recognised at top-up, not at consumption (HMRC Regulation 86:\n# tax point for continuous energy supply is earlier of payment receipt\n# or invoice issuance; domestic PAYG customers receive no invoice).\n#\n# After ledger entries, dispatches DCC SRV 2.2 (Top Up Device) via\n# the Operational Gateway to Procode's IDA, which delivers the credit\n# to the SMETS2 meter over the WAN.\n#\n# Trigger: api:/v1/topups\n#\n# Double-Entry Accounting (GBP 50.00 top-up, GBP 10 debt, GBP 5 EC):\n#\n#   DR Cash / Bank                GBP 50.00   (payment received)\n#   CR VAT Output Tax             GBP  2.38   (5% VAT on gross)\n#   CR Debt Recovery Receivable   GBP 10.00   (25% of GBP 40 ex-EC net)\n#   CR Emergency Credit Recv      GBP  5.00   (clear outstanding EC)\n#   CR Prepayment Liability       GBP 32.62   (remainder to meter)\n#\n# Steps (executed sequentially):\n#   1. validate_topup: Check amount and customer exist\n#   2. check_idempotency: Prevent duplicate processing\n#   3. recognise_vat: VAT at top-up (HMRC Reg 86)\n#   4. check_emergency_credit: Query outstanding EC balance\n#   5. repay_emergency_credit: Clear EC receivable if outstanding\n#   6. check_debt: Query outstanding debt balance\n#   7. allocate_debt_recovery: Siphon 25% for debt repayment\n#   8. credit_prepayment: Remainder to prepayment liability\n#   9. dispatch_meter_topup: DCC SRV 2.2 via Procode IDA\n#\n# Compensation Order (LIFO):\n#   9. Cancel DCC instruction (operational_gateway.cancel_instruction)\n#   8. Reverse prepayment credit\n#   7. Reverse debt allocation\n#   5. Reverse EC repayment\n#   3. Reverse VAT recognition\n#\n# Input data:\n#   - party_id: string - Customer party identifier\n#   - amount_pence: int - Top-up amount in pence (e.g., 5000 = GBP 50.00)\n#   - mpxn: string - Meter Point Reference Number (MPAN or MPRN)\n#   - fuel_type: string - \"electricity\" or \"gas\"\n#   - payment_reference: string - External payment reference\n#   - debt_recovery_rate: string - Override rate (default \"25\")\n\n\ndef execute_topup():\n    ctx = input_data\n    if not ctx:\n        return {\"status\": \"NO_INPUT\"}\n\n    party_id = ctx.get(\"party_id\", \"\")\n    amount_pence = int(ctx.get(\"amount_pence\", \"0\"))\n    mpxn = ctx.get(\"mpxn\", \"\")\n    fuel_type = ctx.get(\"fuel_type\", \"electricity\")\n    payment_ref = ctx.get(\"payment_reference\", \"topup_\" + party_id)\n    debt_recovery_rate = Decimal(ctx.get(\"debt_recovery_rate\", \"25\"))\n\n    gross_amount = Decimal(str(amount_pence)) / Decimal(\"100\")\n    vat_rate = Decimal(\"0.05\")\n\n    # Step 1: Validate the top-up\n    if amount_pence <= 0:\n        return {\"status\": \"VALIDATION_ERROR\", \"reason\": \"amount must be positive\"}\n\n    customer = reference_data.get_account(id=\"PREPAYMENT_LIABILITY:\" + party_id)\n    if not customer:\n        return {\"status\": \"VALIDATION_ERROR\", \"reason\": \"customer not found\"}\n\n    # Step 2: Idempotency - check if this top-up was already processed\n    existing = position_keeping.query_logs(\n        correlation_id=payment_ref,\n        instrument_code=\"GBP\",\n        position_id=\"PREPAYMENT_LIABILITY:\" + party_id,\n    )\n    if existing.count > 0:\n        return {\"status\": \"ALREADY_PROCESSED\", \"correlation_id\": payment_ref}\n\n    # Step 3: Recognise VAT at top-up (HMRC Regulation 86)\n    # VAT tax point is payment receipt for domestic PAYG energy.\n    # This is a critical compliance point: VAT follows cash, not consumption.\n    vat_amount = gross_amount * vat_rate / (Decimal(\"1\") + vat_rate)\n    net_amount = gross_amount - vat_amount\n\n    position_keeping.initiate_log(\n        position_id=\"UTILITA_VAT_OUTPUT\",\n        instrument_code=\"GBP\",\n        amount=vat_amount,\n        direction=\"CREDIT\",\n        correlation_id=payment_ref,\n        description=\"VAT on top-up (HMRC Reg 86): \" + payment_ref,\n    )\n\n    # Remaining amount after VAT for allocation waterfall\n    allocatable = net_amount\n\n    # Step 4: Check for outstanding emergency credit\n    ec_balance = internal_account.get_balance(\n        account_code=\"EMERGENCY_CREDIT:\" + party_id,\n        instrument_code=\"GBP\",\n    )\n    ec_outstanding = Decimal(str(ec_balance.amount)) if ec_balance.amount > 0 else Decimal(\"0\")\n\n    # Step 5: Repay emergency credit first (highest priority after VAT)\n    ec_repaid = Decimal(\"0\")\n    if ec_outstanding > Decimal(\"0\"):\n        ec_repaid = ec_outstanding\n        if ec_repaid > allocatable:\n            ec_repaid = allocatable\n\n        # Clear the receivable\n        position_keeping.initiate_log(\n            position_id=\"EMERGENCY_CREDIT:\" + party_id,\n            instrument_code=\"GBP\",\n            amount=ec_repaid,\n            direction=\"CREDIT\",\n            correlation_id=payment_ref,\n            description=\"EC repayment from top-up\",\n        )\n        allocatable = allocatable - ec_repaid\n\n    # Step 6: Check for outstanding debt\n    debt_balance = internal_account.get_balance(\n        account_code=\"DEBT_RECOVERY:\" + party_id,\n        instrument_code=\"GBP\",\n    )\n    debt_outstanding = Decimal(str(debt_balance.amount)) if debt_balance.amount > 0 else Decimal(\"0\")\n\n    # Step 7: Allocate debt recovery (25% of remaining, capped at outstanding debt)\n    debt_allocated = Decimal(\"0\")\n    if debt_outstanding > Decimal(\"0\") and allocatable > Decimal(\"0\"):\n        debt_siphon = allocatable * debt_recovery_rate / Decimal(\"100\")\n        debt_allocated = debt_siphon\n        if debt_allocated > debt_outstanding:\n            debt_allocated = debt_outstanding\n\n        position_keeping.initiate_log(\n            position_id=\"DEBT_RECOVERY:\" + party_id,\n            instrument_code=\"GBP\",\n            amount=debt_allocated,\n            direction=\"CREDIT\",\n            correlation_id=payment_ref,\n            description=\"Debt recovery at \" + str(debt_recovery_rate) + \"% from top-up\",\n        )\n        allocatable = allocatable - debt_allocated\n\n    # Step 8: Credit remainder to prepayment liability (funds the meter)\n    position_keeping.initiate_log(\n        position_id=\"PREPAYMENT_LIABILITY:\" + party_id,\n        instrument_code=\"GBP\",\n        amount=allocatable,\n        direction=\"CREDIT\",\n        correlation_id=payment_ref,\n        description=\"Prepayment credit from top-up\",\n    )\n\n    # Step 9: Dispatch DCC SRV 2.2 (Top Up Device) to the smart meter\n    # Procode IDA handles DUIS XML construction, cryptographic signing,\n    # and WAN delivery via the appropriate CSP (Telefonica/Arqiva).\n    meter_credit_pence = int(allocatable * Decimal(\"100\"))\n\n    dcc_result = operational_gateway.dispatch_instruction(\n        instruction_type=\"meter.topup\",\n        correlation_id=payment_ref,\n        payload={\n            \"mpxn\": mpxn,\n            \"amount_pence\": str(meter_credit_pence),\n            \"fuel_type\": fuel_type,\n            \"srv_type\": \"SRV_2_2\",\n        },\n    )\n\n    return {\n        \"status\": \"TOPPED_UP\",\n        \"gross_amount\": str(gross_amount),\n        \"vat_amount\": str(vat_amount),\n        \"ec_repaid\": str(ec_repaid),\n        \"debt_allocated\": str(debt_allocated),\n        \"meter_credit\": str(allocatable),\n        \"dcc_instruction_id\": dcc_result.instruction_id,\n        \"correlation_id\": payment_ref,\n    }\n\noutput = execute_topup()\n"
+    },
+    {
+      "name": "consumption_block_tariff",
+      "trigger": "event:position-keeping.transaction-captured.v1",
+      "filter": "(event.instrument_code == 'KWH_ELEC' || event.instrument_code == 'KWH_GAS') && event.direction == 'DEBIT'",
+      "script": "# Saga: consumption_block_tariff\n# Version: 1.0.0\n# Previous: none\n# Changed: Initial implementation\n# Author: Meridian Platform Team\n# Date: 2026-03-26\n#\n# Block tariff consumption valuation for Utilita's no-standing-charge model.\n#\n# When half-hourly meter data arrives (via DCC or MHHS Data Integration\n# Platform), this saga values the kWh consumption at the correct tiered\n# rate based on daily cumulative usage:\n#\n#   First Rate: first 2 kWh per day (embeds standing charge recovery)\n#   Saver Rate: all consumption above 2 kWh daily threshold\n#\n# The daily block counter tracks cumulative consumption and resets at\n# midnight. Each HH read (0.5 kWh typical, up to ~3 kWh for high users)\n# may straddle the threshold - e.g., if daily total is 1.5 kWh and the\n# read is 1.0 kWh, then 0.5 kWh is valued at First Rate and 0.5 kWh\n# at Saver Rate.\n#\n# Revenue is recognised at consumption, not at top-up (IFRS 15 / FRS 102\n# Section 23). The performance obligation is energy delivery.\n#\n# A parallel wholesale valuation is booked for hedging P&L attribution,\n# enabling margin analysis per GSP group.\n#\n# Trigger: event:position-keeping.transaction-captured.v1\n# Filter:  (event.instrument_code == 'KWH_ELEC' || event.instrument_code == 'KWH_GAS') && event.direction == 'DEBIT'\n#\n# Double-Entry (1.0 kWh electricity, daily total at 1.5 kWh before this read):\n#\n#   Split: 0.5 kWh @ First Rate (51.85p) = GBP 0.2593\n#          0.5 kWh @ Saver Rate (26.01p) = GBP 0.1301\n#          Total retail charge:           = GBP 0.3894\n#\n#   DR Prepayment Liability    GBP 0.3894  (customer balance decremented)\n#   CR Revenue - Energy        GBP 0.3894  (revenue recognised at delivery)\n#\n#   DR Wholesale Cost          GBP 0.0850  (wholesale position, 8.50p/kWh)\n#   CR Energy Supply Pool      GBP 0.0850  (counterparty wholesale leg)\n#\n# Input data (from TransactionCapturedEvent):\n#   - correlation_id: string - Idempotency key\n#   - account_id: string - Metered consumption account\n#   - instrument_code: string - \"KWH_ELEC\" or \"KWH_GAS\"\n#   - instrument_amount: dict - {amount, instrument_code}\n#   - timestamp: string - ISO 8601 settlement period start\n\n\ndef execute_consumption():\n    ctx = input_data\n    if not ctx:\n        return {\"status\": \"NO_INPUT\"}\n\n    correlation_id = ctx.get(\"correlation_id\", \"\")\n    source_account_id = ctx.get(\"account_id\", \"\")\n    kwh_consumed = Decimal((ctx.get(\"instrument_amount\", {}) or {}).get(\"amount\", \"0\"))\n    instrument_code = ctx.get(\"instrument_code\", \"\")\n    settlement_period = ctx.get(\"timestamp\", \"\")\n\n    # Resolve account to get billing and wholesale account references\n    account = reference_data.get_account(id=source_account_id)\n    metadata = account.metadata or {}\n\n    billing_account_id = metadata.get(\"billing_account_id\", \"\")\n    wholesale_account_id = metadata.get(\"wholesale_account_id\", \"\")\n    party_id = metadata.get(\"party_id\", \"\")\n\n    if not billing_account_id:\n        return {\"status\": \"CONFIG_ERROR\", \"correlation_id\": correlation_id}\n\n    # Idempotency check - ensure we haven't already valued this read\n    existing = position_keeping.query_logs(\n        correlation_id=correlation_id,\n        instrument_code=\"GBP\",\n        position_id=billing_account_id,\n    )\n    if existing.count > 0:\n        return {\"status\": \"ALREADY_VALUED\", \"correlation_id\": correlation_id}\n\n    # Determine fuel type from instrument code\n    fuel_type = \"electricity\"\n    if instrument_code == \"KWH_GAS\":\n        fuel_type = \"gas\"\n\n    # Look up the two tariff rates from Market Data.\n    # The block tariff has two fixed rates per fuel, set quarterly\n    # to comply with the Ofgem prepayment price cap.\n    first_rate_dataset = \"UTILITA_ELEC_FIRST_RATE\"\n    saver_rate_dataset = \"UTILITA_ELEC_SAVER_RATE\"\n    if fuel_type == \"gas\":\n        first_rate_dataset = \"UTILITA_GAS_FIRST_RATE\"\n        saver_rate_dataset = \"UTILITA_GAS_SAVER_RATE\"\n\n    first_rate_obs = market_information.get_rate(\n        dataset_code=first_rate_dataset,\n        value_date=settlement_period,\n    )\n    saver_rate_obs = market_information.get_rate(\n        dataset_code=saver_rate_dataset,\n        value_date=settlement_period,\n    )\n\n    first_rate = Decimal(str(first_rate_obs.value))\n    saver_rate = Decimal(str(saver_rate_obs.value))\n\n    # Query the daily cumulative consumption to determine block position.\n    # The daily threshold is 2 kWh (1 kWh for E7 daytime).\n    # This counter resets at midnight via the settlement_date bucketing.\n    daily_threshold = Decimal(\"2.0\")\n\n    daily_balance = internal_account.get_balance(\n        account_code=source_account_id,\n        instrument_code=instrument_code,\n    )\n    # daily_consumed is the cumulative kWh consumed today BEFORE this read\n    daily_consumed = Decimal(str(daily_balance.amount)) if daily_balance.amount > 0 else Decimal(\"0\")\n    daily_consumed_before = daily_consumed - kwh_consumed\n    if daily_consumed_before < Decimal(\"0\"):\n        daily_consumed_before = Decimal(\"0\")\n\n    # Calculate the tiered charge.\n    # If daily total straddles the 2 kWh threshold, split the read:\n    #   - portion below threshold valued at First Rate\n    #   - portion above threshold valued at Saver Rate\n    remaining_first_rate_kwh = daily_threshold - daily_consumed_before\n    if remaining_first_rate_kwh < Decimal(\"0\"):\n        remaining_first_rate_kwh = Decimal(\"0\")\n\n    first_rate_kwh = kwh_consumed\n    if first_rate_kwh > remaining_first_rate_kwh:\n        first_rate_kwh = remaining_first_rate_kwh\n\n    saver_rate_kwh = kwh_consumed - first_rate_kwh\n\n    first_rate_charge = first_rate_kwh * first_rate\n    saver_rate_charge = saver_rate_kwh * saver_rate\n    total_retail_charge = first_rate_charge + saver_rate_charge\n\n    # No VAT entry needed - VAT was recognised at top-up (HMRC Reg 86).\n    # Revenue is recognised ex-VAT.\n\n    # Book retail charge: debit prepayment liability, credit revenue\n    position_keeping.initiate_log(\n        position_id=billing_account_id,\n        instrument_code=\"GBP\",\n        amount=total_retail_charge,\n        direction=\"DEBIT\",\n        correlation_id=correlation_id,\n        description=fuel_type + \" \" + str(kwh_consumed) + \"kWh (\" + str(first_rate_kwh) + \" @ first, \" + str(saver_rate_kwh) + \" @ saver)\",\n    )\n\n    revenue_account = \"UTILITA_REVENUE_ELEC\"\n    if fuel_type == \"gas\":\n        revenue_account = \"UTILITA_REVENUE_GAS\"\n\n    position_keeping.initiate_log(\n        position_id=revenue_account,\n        instrument_code=\"GBP\",\n        amount=total_retail_charge,\n        direction=\"CREDIT\",\n        correlation_id=correlation_id,\n        description=\"Revenue: \" + settlement_period,\n    )\n\n    # Book wholesale cost for hedging P&L (if wholesale account configured)\n    wholesale_amount = Decimal(\"0\")\n    if wholesale_account_id:\n        wholesale_dataset = \"WHOLESALE_ELEC_GBP_KWH\"\n        if fuel_type == \"gas\":\n            wholesale_dataset = \"WHOLESALE_GAS_GBP_KWH\"\n\n        wholesale_obs = market_information.get_rate(\n            dataset_code=wholesale_dataset,\n            value_date=settlement_period,\n        )\n        wholesale_rate = Decimal(str(wholesale_obs.value))\n        wholesale_amount = kwh_consumed * wholesale_rate\n\n        position_keeping.initiate_log(\n            position_id=wholesale_account_id,\n            instrument_code=\"GBP\",\n            amount=wholesale_amount,\n            direction=\"DEBIT\",\n            correlation_id=correlation_id,\n            description=\"Wholesale: \" + settlement_period,\n        )\n\n    return {\n        \"status\": \"VALUED\",\n        \"fuel_type\": fuel_type,\n        \"kwh_consumed\": str(kwh_consumed),\n        \"first_rate_kwh\": str(first_rate_kwh),\n        \"saver_rate_kwh\": str(saver_rate_kwh),\n        \"first_rate_charge\": str(first_rate_charge),\n        \"saver_rate_charge\": str(saver_rate_charge),\n        \"total_retail_charge\": str(total_retail_charge),\n        \"wholesale_cost\": str(wholesale_amount),\n        \"retail_margin\": str(total_retail_charge - wholesale_amount),\n        \"settlement_period\": settlement_period,\n        \"correlation_id\": correlation_id,\n    }\n\noutput = execute_consumption()\n"
+    },
+    {
+      "name": "emergency_credit_activate",
+      "trigger": "api:/v1/emergency-credit/activate",
+      "script": "# Saga: emergency_credit_activate\n# Version: 1.0.0\n# Previous: none\n# Changed: Initial implementation\n# Author: Meridian Platform Team\n# Date: 2026-03-26\n#\n# Emergency Credit activation for PAYG customers.\n#\n# When a customer's prepayment balance falls below GBP 1.00, they can\n# activate emergency credit (GBP 15 per fuel) via the IHD, meter keypad,\n# or My Utilita app. This flips the accounting model: the customer's\n# prepayment liability is exhausted, and the supplier extends credit,\n# creating a receivable.\n#\n# The meter balance goes negative, running down to -GBP 15. During\n# Friendly Credit hours (2pm-10am weekdays, all weekend/bank holidays),\n# supply continues even beyond EC exhaustion.\n#\n# Trigger: api:/v1/emergency-credit/activate\n#\n# Double-Entry (GBP 15 EC activation):\n#   DR Emergency Credit Receivable  GBP 15.00  (asset: customer owes us)\n#   CR Prepayment Liability         GBP 15.00  (extends available balance)\n#\n# The EC receivable is automatically cleared at next top-up (topup_waterfall\n# saga handles this in its allocation priority).\n#\n# Input data:\n#   - party_id: string - Customer party identifier\n#   - fuel_type: string - \"electricity\" or \"gas\"\n#   - mpxn: string - Meter Point Reference Number\n#   - activation_source: string - \"ihd\", \"keypad\", \"app\", or \"remote\"\n\n\ndef execute_ec_activation():\n    ctx = input_data\n    if not ctx:\n        return {\"status\": \"NO_INPUT\"}\n\n    party_id = ctx.get(\"party_id\", \"\")\n    fuel_type = ctx.get(\"fuel_type\", \"electricity\")\n    mpxn = ctx.get(\"mpxn\", \"\")\n    activation_source = ctx.get(\"activation_source\", \"app\")\n    ec_limit = Decimal(\"15.00\")\n    activation_ref = \"ec_\" + party_id + \"_\" + fuel_type\n\n    # Step 1: Check idempotency - is EC already active?\n    existing = position_keeping.query_logs(\n        correlation_id=activation_ref,\n        instrument_code=\"GBP\",\n        position_id=\"EMERGENCY_CREDIT:\" + party_id,\n    )\n    if existing.count > 0:\n        return {\"status\": \"ALREADY_ACTIVE\", \"correlation_id\": activation_ref}\n\n    # Step 2: Verify prepayment balance is below activation threshold\n    prepay_balance = internal_account.get_balance(\n        account_code=\"PREPAYMENT_LIABILITY:\" + party_id,\n        instrument_code=\"GBP\",\n    )\n    balance = Decimal(str(prepay_balance.amount))\n    activation_threshold = Decimal(\"1.00\")\n\n    if balance > activation_threshold:\n        return {\n            \"status\": \"NOT_ELIGIBLE\",\n            \"reason\": \"balance above threshold\",\n            \"current_balance\": str(balance),\n        }\n\n    # Step 3: Check existing EC balance (can't stack beyond limit)\n    ec_balance = internal_account.get_balance(\n        account_code=\"EMERGENCY_CREDIT:\" + party_id,\n        instrument_code=\"GBP\",\n    )\n    ec_current = Decimal(str(ec_balance.amount)) if ec_balance.amount > 0 else Decimal(\"0\")\n\n    if ec_current >= ec_limit:\n        return {\n            \"status\": \"EC_LIMIT_REACHED\",\n            \"current_ec\": str(ec_current),\n            \"limit\": str(ec_limit),\n        }\n\n    ec_amount = ec_limit - ec_current\n\n    # Step 4: Create emergency credit receivable (asset - customer owes supplier)\n    position_keeping.initiate_log(\n        position_id=\"EMERGENCY_CREDIT:\" + party_id,\n        instrument_code=\"GBP\",\n        amount=ec_amount,\n        direction=\"DEBIT\",\n        correlation_id=activation_ref,\n        description=\"Emergency credit activated via \" + activation_source,\n    )\n\n    # Step 5: Extend prepayment liability (customer can continue consuming)\n    position_keeping.initiate_log(\n        position_id=\"PREPAYMENT_LIABILITY:\" + party_id,\n        instrument_code=\"GBP\",\n        amount=ec_amount,\n        direction=\"CREDIT\",\n        correlation_id=activation_ref,\n        description=\"Emergency credit extension: \" + fuel_type,\n    )\n\n    # Step 6: Dispatch DCC SRV 2.5 to activate EC on the meter\n    dcc_result = operational_gateway.dispatch_instruction(\n        instruction_type=\"meter.activate_emergency_credit\",\n        correlation_id=activation_ref,\n        payload={\n            \"mpxn\": mpxn,\n            \"fuel_type\": fuel_type,\n            \"ec_amount_pence\": str(int(ec_amount * Decimal(\"100\"))),\n            \"srv_type\": \"SRV_2_5\",\n        },\n    )\n\n    return {\n        \"status\": \"EC_ACTIVATED\",\n        \"ec_amount\": str(ec_amount),\n        \"fuel_type\": fuel_type,\n        \"activation_source\": activation_source,\n        \"dcc_instruction_id\": dcc_result.instruction_id,\n        \"correlation_id\": activation_ref,\n    }\n\noutput = execute_ec_activation()\n"
+    },
+    {
+      "name": "whd_credit_apply",
+      "trigger": "api:/v1/whd/apply",
+      "script": "# Saga: whd_credit_apply\n# Version: 1.0.0\n# Previous: none\n# Changed: Initial implementation\n# Author: Meridian Platform Team\n# Date: 2026-03-26\n#\n# Warm Home Discount (WHD) credit application.\n#\n# GBP 150 government-mandated credit for eligible households, applied\n# to the electricity meter. WHD is a supplier-funded social obligation\n# cost, socialised across all customer bills.\n#\n# Critical: if the customer has outstanding debt, WHD must be applied\n# to clear that debt FIRST before crediting the prepayment balance.\n# This priority waterfall is required by scheme rules and was the\n# subject of a GBP 277,000 enforcement action against Utilita in 2025\n# for missing the scheme year deadline by 12 days.\n#\n# Trigger: api:/v1/whd/apply\n#\n# Double-Entry (GBP 150 WHD, GBP 30 outstanding debt):\n#   DR WHD Scheme Obligation      GBP 150.00  (social obligation cost)\n#   CR Debt Recovery Receivable   GBP  30.00  (clear debt first)\n#   CR Prepayment Liability       GBP 120.00  (remainder to meter)\n#\n# Input data:\n#   - party_id: string - Customer party identifier\n#   - scheme_year: string - WHD scheme year (e.g., \"2025-26\")\n#   - mpxn: string - Electricity MPAN (WHD is electricity only)\n#   - eligibility_ref: string - DWP or supplier eligibility reference\n\n\ndef execute_whd():\n    ctx = input_data\n    if not ctx:\n        return {\"status\": \"NO_INPUT\"}\n\n    party_id = ctx.get(\"party_id\", \"\")\n    scheme_year = ctx.get(\"scheme_year\", \"2025-26\")\n    mpxn = ctx.get(\"mpxn\", \"\")\n    eligibility_ref = ctx.get(\"eligibility_ref\", \"\")\n    whd_ref = \"whd_\" + party_id + \"_\" + scheme_year\n\n    whd_amount = Decimal(\"150.00\")\n\n    # Step 1: Idempotency - ensure WHD not already applied this scheme year\n    existing = position_keeping.query_logs(\n        correlation_id=whd_ref,\n        instrument_code=\"GBP\",\n        position_id=\"UTILITA_WHD\",\n    )\n    if existing.count > 0:\n        return {\"status\": \"ALREADY_APPLIED\", \"correlation_id\": whd_ref}\n\n    # Step 2: Book WHD as social obligation cost\n    position_keeping.initiate_log(\n        position_id=\"UTILITA_WHD\",\n        instrument_code=\"GBP\",\n        amount=whd_amount,\n        direction=\"DEBIT\",\n        correlation_id=whd_ref,\n        description=\"WHD \" + scheme_year + \" for \" + party_id,\n    )\n\n    allocatable = whd_amount\n\n    # Step 3: Check outstanding debt (WHD clears debt first per scheme rules)\n    debt_balance = internal_account.get_balance(\n        account_code=\"DEBT_RECOVERY:\" + party_id,\n        instrument_code=\"GBP\",\n    )\n    debt_outstanding = Decimal(str(debt_balance.amount)) if debt_balance.amount > 0 else Decimal(\"0\")\n\n    debt_cleared = Decimal(\"0\")\n    if debt_outstanding > Decimal(\"0\"):\n        debt_cleared = debt_outstanding\n        if debt_cleared > allocatable:\n            debt_cleared = allocatable\n\n        position_keeping.initiate_log(\n            position_id=\"DEBT_RECOVERY:\" + party_id,\n            instrument_code=\"GBP\",\n            amount=debt_cleared,\n            direction=\"CREDIT\",\n            correlation_id=whd_ref,\n            description=\"Debt cleared from WHD \" + scheme_year,\n        )\n        allocatable = allocatable - debt_cleared\n\n    # Step 4: Credit remainder to prepayment liability\n    if allocatable > Decimal(\"0\"):\n        position_keeping.initiate_log(\n            position_id=\"PREPAYMENT_LIABILITY:\" + party_id,\n            instrument_code=\"GBP\",\n            amount=allocatable,\n            direction=\"CREDIT\",\n            correlation_id=whd_ref,\n            description=\"WHD \" + scheme_year + \" credit\",\n        )\n\n    # Step 5: Top up the meter with the prepayment portion\n    if allocatable > Decimal(\"0\"):\n        meter_credit_pence = int(allocatable * Decimal(\"100\"))\n        operational_gateway.dispatch_instruction(\n            instruction_type=\"meter.topup\",\n            correlation_id=whd_ref,\n            payload={\n                \"mpxn\": mpxn,\n                \"amount_pence\": str(meter_credit_pence),\n                \"fuel_type\": \"electricity\",\n                \"srv_type\": \"SRV_2_2\",\n                \"source\": \"WHD\",\n            },\n        )\n\n    return {\n        \"status\": \"WHD_APPLIED\",\n        \"whd_amount\": str(whd_amount),\n        \"debt_cleared\": str(debt_cleared),\n        \"meter_credit\": str(allocatable),\n        \"scheme_year\": scheme_year,\n        \"correlation_id\": whd_ref,\n    }\n\noutput = execute_whd()\n"
+    }
+  ],
+  "seedData": {
+    "tariff_rates_oct_2025": {
+      "electricity": {
+        "first_rate_pence_per_kwh": "51.85",
+        "saver_rate_pence_per_kwh": "26.010",
+        "daily_threshold_kwh": "2.0",
+        "vat_rate": "0.05"
+      },
+      "gas": {
+        "first_rate_pence_per_kwh": "23.355",
+        "saver_rate_pence_per_kwh": "6.211",
+        "daily_threshold_kwh": "2.0",
+        "vat_rate": "0.05"
+      }
+    },
+    "emergency_credit": {
+      "electricity_limit_gbp": "15.00",
+      "gas_limit_gbp": "15.00",
+      "activation_threshold_gbp": "1.00"
+    },
+    "debt_recovery": {
+      "default_rate_pct": "25",
+      "transfer_rate_pct": "35",
+      "min_rate_pct": "20",
+      "max_rate_pct": "100"
+    },
+    "friendly_credit": {
+      "weekday_start": "14:00",
+      "weekday_end": "10:00",
+      "weekend": "all_day",
+      "bank_holidays": "all_day",
+      "loyalty_extension_years": 3,
+      "loyalty_extension": "all_day_monday"
+    },
+    "power_up_asc": {
+      "electricity_limit_gbp": "40.00",
+      "gas_limit_gbp": "60.00",
+      "cooldown_hours": 10
+    },
+    "warm_home_discount": {
+      "amount_gbp": "150.00",
+      "scheme_year": "2025-26"
+    },
+    "dcc_service_requests": {
+      "SRV_2_2": "Top Up Device",
+      "SRV_2_1": "Update Prepay Configuration",
+      "SRV_1_1_1": "Update Import Tariff (Block Tariff)",
+      "SRV_2_5": "Activate Emergency Credit",
+      "SRV_4_3": "Read Instantaneous Prepay Values"
+    }
+  },
+  "paymentRails": [],
+  "partyTypes": [],
+  "mappings": [],
+  "operationalGateway": {
+    "providerConnections": [
+      {
+        "connectionId": "procode-ida",
+        "providerName": "Procode Intelligent Data Adapter",
+        "providerType": "dcc_adapter",
+        "protocol": "PROVIDER_PROTOCOL_HTTPS",
+        "baseUrl": "https://ida.procode.co.uk/api/v2",
+        "auth": {
+          "oauth2": {
+            "tokenUrl": "https://ida.procode.co.uk/oauth/token",
+            "clientId": "utilita-meridian",
+            "clientSecretRef": "sm://procode/client_secret",
+            "scopes": [
+              "meter:topup",
+              "meter:config",
+              "meter:read"
+            ]
+          }
+        },
+        "retryPolicy": {
+          "maxAttempts": 3,
+          "initialBackoffSeconds": 2,
+          "maxBackoffSeconds": 30,
+          "backoffMultiplier": 2.0
+        },
+        "rateLimit": {
+          "requestsPerSecond": 100.0,
+          "burstSize": 200
+        }
+      }
+    ],
+    "instructionRoutes": [
+      {
+        "instructionType": "meter.topup",
+        "connectionId": "procode-ida",
+        "httpMethod": "POST",
+        "pathTemplate": "/meters/{mpxn}/topup"
+      },
+      {
+        "instructionType": "meter.config_update",
+        "connectionId": "procode-ida",
+        "httpMethod": "POST",
+        "pathTemplate": "/meters/{mpxn}/configuration"
+      },
+      {
+        "instructionType": "meter.activate_emergency_credit",
+        "connectionId": "procode-ida",
+        "httpMethod": "POST",
+        "pathTemplate": "/meters/{mpxn}/emergency-credit/activate"
+      },
+      {
+        "instructionType": "meter.read_prepay",
+        "connectionId": "procode-ida",
+        "httpMethod": "GET",
+        "pathTemplate": "/meters/{mpxn}/prepay-values"
+      }
+    ],
+    "inboundRoutes": [
+      {
+        "externalType": "dcc.topup.confirmed",
+        "handlerSaga": "topup_waterfall"
+      },
+      {
+        "externalType": "dcc.meter_read.hh",
+        "handlerSaga": "consumption_block_tariff"
+      }
+    ]
+  },
+  "marketData": {
+    "sources": [
+      {
+        "code": "UTILITA_TARIFF",
+        "name": "Utilita Tariff Engine",
+        "description": "Quarterly tariff rates set to comply with Ofgem prepayment price cap. No-standing-charge two-tier block pricing.",
+        "trustLevel": 100
+      },
+      {
+        "code": "WHOLESALE_MARKET",
+        "name": "Wholesale Energy Market",
+        "description": "Day-ahead and intraday wholesale energy prices for hedging and P&L attribution",
+        "trustLevel": 90
+      }
+    ],
+    "datasets": [
+      {
+        "code": "UTILITA_ELEC_FIRST_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "UTILITA_TARIFF",
+        "displayName": "Electricity First Rate (0-2 kWh/day)",
+        "description": "Block 1 electricity rate: applies to first 2 kWh consumed per day. Embeds standing charge recovery. Oct 2025: 51.85p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "UTILITA_ELEC_SAVER_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "UTILITA_TARIFF",
+        "displayName": "Electricity Saver Rate (above 2 kWh/day)",
+        "description": "Block 2 electricity rate: applies to all consumption above 2 kWh daily threshold. Oct 2025: 26.010p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "UTILITA_GAS_FIRST_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "UTILITA_TARIFF",
+        "displayName": "Gas First Rate (0-2 kWh/day)",
+        "description": "Block 1 gas rate: applies to first 2 kWh consumed per day. Oct 2025: 23.355p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "UTILITA_GAS_SAVER_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "UTILITA_TARIFF",
+        "displayName": "Gas Saver Rate (above 2 kWh/day)",
+        "description": "Block 2 gas rate: applies to all consumption above 2 kWh daily threshold. Oct 2025: 6.211p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "WHOLESALE_ELEC_GBP_KWH",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "WHOLESALE_MARKET",
+        "displayName": "Wholesale Electricity Price",
+        "description": "UK wholesale electricity spot price for hedging position and retail margin calculation",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "WHOLESALE_GAS_GBP_KWH",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "WHOLESALE_MARKET",
+        "displayName": "Wholesale Gas Price",
+        "description": "UK wholesale gas spot price for hedging position and retail margin calculation",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      }
+    ]
+  },
+  "organizations": [
+    {
+      "code": "UTILITA",
+      "name": "Utilita Energy Limited",
+      "legalName": "Utilita Energy Limited",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GETW",
+      "externalReferenceType": "MPID",
+      "attributes": {
+        "role": "supplier",
+        "company_number": "04849181",
+        "vat_number": "823 8184 22",
+        "key_meter_supplier_id": "33",
+        "ppmip": "ITRI"
+      }
+    },
+    {
+      "code": "DCC",
+      "name": "Data Communications Company",
+      "partyType": "ORGANIZATION",
+      "externalReference": "DCC",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "data_communications",
+        "csp_south": "telefonica",
+        "csp_north": "arqiva"
+      }
+    },
+    {
+      "code": "PROCODE",
+      "name": "Procode Technology Group",
+      "partyType": "ORGANIZATION",
+      "attributes": {
+        "role": "dcc_adapter",
+        "product": "Intelligent Data Adapter (IDA)",
+        "meters_managed": "1000000+"
+      }
+    },
+    {
+      "code": "GSP_SOUT",
+      "name": "Southern England",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPSOUT",
+      "externalReferenceType": "GSP_GROUP",
+      "attributes": {
+        "role": "gsp",
+        "region": "SOUT"
+      }
+    },
+    {
+      "code": "GSP_SEEB",
+      "name": "South East England",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPSEEB",
+      "externalReferenceType": "GSP_GROUP",
+      "attributes": {
+        "role": "gsp",
+        "region": "SEEB"
+      }
+    },
+    {
+      "code": "GSP_SWAE",
+      "name": "South Wales",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPSWAE",
+      "externalReferenceType": "GSP_GROUP",
+      "attributes": {
+        "role": "gsp",
+        "region": "SWAE"
+      }
+    },
+    {
+      "code": "GSP_WMID",
+      "name": "West Midlands",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPWMID",
+      "externalReferenceType": "GSP_GROUP",
+      "attributes": {
+        "role": "gsp",
+        "region": "WMID"
+      }
+    }
+  ],
+  "internalAccounts": [
+    {
+      "code": "UTILITA_VAT_OUTPUT",
+      "accountType": "VAT_OUTPUT",
+      "instrument": "GBP",
+      "ownerOrganization": "UTILITA",
+      "description": "VAT output tax liability - recognised at top-up per HMRC Regulation 86"
+    },
+    {
+      "code": "UTILITA_REVENUE_ELEC",
+      "accountType": "REVENUE_ENERGY",
+      "instrument": "GBP",
+      "ownerOrganization": "UTILITA",
+      "description": "Electricity revenue - recognised at consumption, split by First Rate and Saver Rate tiers"
+    },
+    {
+      "code": "UTILITA_REVENUE_GAS",
+      "accountType": "REVENUE_ENERGY",
+      "instrument": "GBP",
+      "ownerOrganization": "UTILITA",
+      "description": "Gas revenue - recognised at consumption, split by First Rate and Saver Rate tiers"
+    },
+    {
+      "code": "UTILITA_WHOLESALE_ELEC",
+      "accountType": "WHOLESALE_COST",
+      "instrument": "GBP",
+      "ownerOrganization": "UTILITA",
+      "description": "Wholesale electricity cost position - for hedging P&L and margin attribution"
+    },
+    {
+      "code": "UTILITA_WHOLESALE_GAS",
+      "accountType": "WHOLESALE_COST",
+      "instrument": "GBP",
+      "ownerOrganization": "UTILITA",
+      "description": "Wholesale gas cost position - for hedging P&L and margin attribution"
+    },
+    {
+      "code": "UTILITA_WHD",
+      "accountType": "WHD_OBLIGATION",
+      "instrument": "GBP",
+      "ownerOrganization": "UTILITA",
+      "description": "Warm Home Discount scheme obligation cost, socialised across customer base"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_SOUT",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_SOUT",
+      "description": "Electricity supply pool for Southern England GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_SEEB",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_SEEB",
+      "description": "Electricity supply pool for South East England GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "UTILITA",
+      "description": "Gas supply pool - national (gas has no regional GSP groups)"
+    }
+  ]
+}
