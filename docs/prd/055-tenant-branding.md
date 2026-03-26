@@ -111,6 +111,8 @@ Add `GET /api/tenant-info` to the gateway as a public endpoint
   or absent - the existing tenant resolver already does this
 - Only slug and display name are returned - no tenant IDs, status,
   or internal metadata are exposed
+- Suspended tenants still return their display name (users need to
+  know where they are). Deprovisioned tenants return 404.
 
 ### 4. Frontend: consume tenant display name (frontend)
 
@@ -124,7 +126,8 @@ Add `GET /api/tenant-info` to the gateway as a public endpoint
 - For tenant users: read `x-tenant-display-name` from JWT claims
 - For platform admins: use `currentTenant.name` (already available
   from tenant selector)
-- Fall back to formatted slug, then to "Meridian"
+- Fall back to formatted slug (title-case, hyphens to spaces:
+  `volterra-energy` becomes `Volterra Energy`), then to "Meridian"
 
 **Document title:**
 - Set `document.title` dynamically based on tenant context
