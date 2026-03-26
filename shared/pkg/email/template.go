@@ -43,6 +43,20 @@ func NewEmbeddedRenderer() (*EmbeddedRenderer, error) {
 // Render executes the named template (name.html and name.txt) with data,
 // returning both the HTML and plain-text outputs.
 func (r *EmbeddedRenderer) Render(name string, data any) (string, string, error) {
+	if r == nil || r.htmlTemplates == nil || r.textTemplates == nil {
+		return "", "", fmt.Errorf("embedded renderer is not initialized")
+	}
+	if name == "" {
+		return "", "", fmt.Errorf("template name cannot be empty")
+	}
+
+	// Validate typed data structs that have additional constraints.
+	if d, ok := data.(DunningNoticeData); ok {
+		if d.Severity < 1 || d.Severity > 3 {
+			return "", "", fmt.Errorf("DunningNoticeData.Severity must be 1, 2, or 3 (got %d)", d.Severity)
+		}
+	}
+
 	htmlName := name + ".html"
 	textName := name + ".txt"
 

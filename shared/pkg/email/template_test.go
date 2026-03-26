@@ -41,6 +41,22 @@ func TestNewEmbeddedRenderer_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// ---- Guard conditions ----
+
+func TestRender_NilRenderer_ReturnsError(t *testing.T) {
+	var r *EmbeddedRenderer
+	_, _, err := r.Render("invoice", InvoiceData{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not initialized")
+}
+
+func TestRender_EmptyName_ReturnsError(t *testing.T) {
+	r := newTestRenderer(t)
+	_, _, err := r.Render("", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template name cannot be empty")
+}
+
 // ---- Missing template ----
 
 func TestRender_UnknownTemplate_ReturnsError(t *testing.T) {
@@ -116,6 +132,23 @@ func TestRender_Invoice_GoldenHTML(t *testing.T) {
 }
 
 // ---- Dunning Notice ----
+
+func TestRender_DunningNotice_InvalidSeverity_ReturnsError(t *testing.T) {
+	r := newTestRenderer(t)
+	for _, severity := range []int{0, 4, -1} {
+		data := DunningNoticeData{
+			CustomerName:   "Test",
+			InvoiceNumber:  "INV-ERR",
+			Amount:         "£100.00",
+			DaysOverdue:    5,
+			Severity:       severity,
+			SupportContact: "support@meridian.io",
+		}
+		_, _, err := r.Render("dunning-notice", data)
+		require.Errorf(t, err, "expected error for severity %d", severity)
+		assert.Contains(t, err.Error(), "Severity")
+	}
+}
 
 func TestRender_DunningNotice_Severity1(t *testing.T) {
 	r := newTestRenderer(t)
