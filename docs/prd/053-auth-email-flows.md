@@ -32,6 +32,13 @@ established by PRD 052.
 **Requires PRD 052** (Email Infrastructure MVP) to be complete. This PRD
 uses the outbox, worker, Sender interface, and template system from 052.
 
+**Modifies flows from PRD 044** (Auth Flow Architecture). PRD 044
+documents the current BFF password login and Dex SSO flows. This PRD
+adds email verification as an optional gate before login and adds
+password reset as a new unauthenticated flow. The registration handler
+behavior change (optional `PENDING_VERIFICATION` status) is a
+modification to Flow 1 in PRD 044.
+
 **Independent of PRD 054** (Billing UI). These can be staffed in parallel.
 
 ## Technical Context

@@ -7,7 +7,8 @@ triggers:
   - Dunning escalation email delivery
   - Wiring the notification.send saga handler
 instructions: |
-  ~21 story points. Single-phase delivery: outbox + worker + Resend +
+  ~21 story points (8 tasks totaling 18 base + buffer for integration
+  seams). Single-phase delivery: outbox + worker + Resend +
   templates + webhooks + billing wiring. Reuse dispatch.Worker[I],
   events/metrics.go, circuitbreaker.go, and shared/pkg/tokens.
   Host worker in unified binary. Domain: meridianhub.cloud.
@@ -179,9 +180,21 @@ type TemplateRenderer interface {
 
 ### Outbox Design
 
-The outbox pattern guarantees emails survive crashes: the outbox row is
-written in the same database transaction as the business operation (e.g.,
-invoice creation). The worker polls independently and delivers via Resend.
+The outbox pattern guarantees emails survive crashes. The worker polls
+the outbox independently and delivers via Resend.
+
+**Cross-service write model**: The email outbox lives in the notification
+service's database. Services that trigger emails (payment-order for
+invoices, saga runtime for dunning) write to the outbox via the
+`notification.send` handler or a shared outbox repository call. This is
+an application-level guarantee, not a single DB transaction across
+services. If the outbox write fails after the business operation
+succeeds, the handler returns an error and the saga step retries. The
+saga's own retry/compensation ensures eventual consistency. For direct
+service integration (e.g., invoice generator), the outbox write happens
+in a separate transaction immediately after the business operation - if
+it fails, the invoice exists but the email is not queued, and the
+billing run logs the failure for manual follow-up.
 
 **Delivery guarantee**: At-least-once from Meridian. The idempotency key is
 forwarded as Resend's `Idempotency-Key` header, so Resend deduplicates on
@@ -227,38 +240,48 @@ with PRD 053.
 ### Saga Integration
 
 The existing `notification.send` handler stub is replaced with a real
-implementation. No new handler name required - existing saga scripts work
-unchanged:
+implementation. The handler name stays the same, but the **existing
+dunning sagas must be updated** to pass the additional parameters
+required for email delivery (template, data, idempotency_key).
+
+**Current saga calls** (today, hitting a stub that returns error):
+
+```python
+# dunning_escalation/v1.0.0.star - current call signature
+notification.send(
+    type="EMAIL",
+    recipient=party_id,
+)
+```
+
+**Updated handler schema and saga calls** (after this PRD):
 
 ```yaml
-# handlers.yaml - existing handler, real implementation
+# handlers.yaml - expanded parameters
 notification.send:
   params:
     type:
       type: String
       required: true       # "EMAIL" (future: "WEBHOOK", "SMS")
-    to:
+    recipient:
       type: String
-      required: false      # email address, or omit to resolve from party_id
-    party_id:
-      type: String
-      required: false      # resolved server-side to party's email
+      required: true       # party_id, resolved server-side to email
     template:
       type: String
-      required: true
+      required: false      # defaults based on saga context if omitted
     data:
       type: Map
       required: false
     idempotency_key:
       type: String
-      required: true
+      required: false      # auto-generated from saga execution ID if omitted
 ```
 
 ```python
-# Existing dunning_escalation saga - no changes needed
+# dunning_escalation/v1.0.0.star - updated with template + data
 notification.send(
     type="EMAIL",
-    party_id=party.id,
+    recipient=party_id,
     template="dunning-notice",
     data={"invoice_number": invoice.number, "amount": invoice.total,
           "severity": 1},
@@ -266,7 +289,14 @@ notification.send(
 )
 ```
 
-Using `party_id` instead of raw email addresses closes the
+**Backward compatibility**: The `recipient` param name is preserved from
+existing sagas. `template` and `idempotency_key` default to sensible
+values when omitted (template derived from saga name + step name,
+idempotency key from saga execution ID), so existing scripts would work
+without changes at a basic level. However, the saga updates in Task 7
+add explicit template and data params for proper email content.
+
+Using `recipient` (party_id) instead of raw email addresses closes the
 arbitrary-recipient vector - the handler resolves the address server-side
 from a known party within the tenant.
 
@@ -531,7 +561,9 @@ EMAIL_BASE_URL=https://meridianhub.cloud
 3. Dunning emails queued at each escalation level with correct
    idempotency keys
 4. Payment confirmation cancels pending dunning emails for same invoice
-5. Dead-lettered emails retrievable and manually retryable
+5. Dead-lettered emails queryable by tenant and manually retryable via
+   `UPDATE email_outbox SET status='PENDING', attempts=0` (admin operation,
+   no dedicated endpoint in this PRD)
 6. `EMAIL_MODE=log` writes outbox + audit, zero Resend API calls
 7. Circuit breaker opens after 5 consecutive Resend failures, closes on
    recovery
@@ -543,9 +575,9 @@ EMAIL_BASE_URL=https://meridianhub.cloud
 1. **Template safety**: Go `html/template` auto-escapes all output by
    context. Template injection is structurally impossible. Lint rule
    against `text/template` in the email package.
-2. **Recipient validation**: `notification.send` handler accepts `party_id`,
-   resolves email server-side. Raw `to` addresses validated against known
-   identities/parties within the tenant.
+2. **Recipient validation**: `notification.send` handler accepts `recipient`
+   (party_id), resolves email server-side from a known party within the
+   tenant. No raw email addresses accepted from saga scripts.
 3. **SPF/DKIM/DMARC**: DNS records on meridianhub.cloud from day one for
    deliverability and anti-spoofing.
 4. **No PII in application logs**: Email addresses exist only in outbox and
@@ -606,3 +638,7 @@ once 052 lands.
 - PDF invoice attachments
 - Multi-language email templates (i18n)
 - In-app notification center
+- Dedicated dead-letter retry API endpoint (manual SQL update suffices
+  for MVP; API endpoint added when operational volume justifies it)
+- Outbox retention cleanup job (policy defined above; implement as
+  scheduled task when table growth warrants it)
