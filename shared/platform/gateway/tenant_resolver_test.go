@@ -408,7 +408,7 @@ func TestResolveTenant(t *testing.T) {
 			baseDomain: "meridian.io",
 			logger:     logger,
 		}
-		middleware.displayNameCache.Store(testSlug, "Acme Corp")
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
 
 		// Execute
 		result, err := middleware.resolveTenant(ctx, testSlug)
@@ -675,7 +675,7 @@ func TestServeHTTP(t *testing.T) {
 			baseDomain: baseDomain,
 			logger:     logger,
 		}
-		middleware.displayNameCache.Store(testSlug, testTenant.DisplayName)
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: testTenant.DisplayName})
 
 		// Create test request
 		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
@@ -859,7 +859,7 @@ func TestServeHTTP(t *testing.T) {
 			baseDomain: baseDomain,
 			logger:     logger,
 		}
-		middleware.displayNameCache.Store(testSlug, testTenant.DisplayName)
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: testTenant.DisplayName})
 
 		// Create test request with port number
 		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+":8080/api/test", nil)
@@ -898,7 +898,7 @@ func TestServeHTTP(t *testing.T) {
 			baseDomain: baseDomain,
 			logger:     logger,
 		}
-		middleware.displayNameCache.Store(multiLevelSlug, "Multi-Level Tenant")
+		middleware.displayNameCache.Store(multiLevelSlug, cachedDisplayName{tenantID: multiLevelTenantID, displayName: "Multi-Level Tenant"})
 
 		// Create test request
 		req := httptest.NewRequest(http.MethodGet, "http://"+multiLevelHost+"/api/test", nil)
@@ -1046,7 +1046,7 @@ func TestLocalDevMode(t *testing.T) {
 			logger:       logger,
 			localDevMode: true,
 		}
-		middleware.displayNameCache.Store(testSlug, "Acme Corp")
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
 
 		// Create test request with X-Tenant-Slug header (no valid subdomain)
 		req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
@@ -1129,7 +1129,7 @@ func TestLocalDevMode(t *testing.T) {
 			logger:       logger,
 			localDevMode: true,
 		}
-		middleware.displayNameCache.Store(headerSlug, "Header Tenant")
+		middleware.displayNameCache.Store(headerSlug, cachedDisplayName{tenantID: headerTenantID, displayName: "Header Tenant"})
 
 		// Create test request with BOTH valid subdomain AND header
 		req := httptest.NewRequest(http.MethodGet, "http://acme.api.meridian.io/api/test", nil)
@@ -1176,7 +1176,7 @@ func TestLocalDevMode(t *testing.T) {
 			logger:       logger,
 			localDevMode: true,
 		}
-		middleware.displayNameCache.Store(subdomainSlug, "Subdomain Tenant")
+		middleware.displayNameCache.Store(subdomainSlug, cachedDisplayName{tenantID: subdomainTenantID, displayName: "Subdomain Tenant"})
 
 		// Create test request with valid subdomain but no header
 		req := httptest.NewRequest(http.MethodGet, "http://acme.api.meridian.io/api/test", nil)
@@ -1272,7 +1272,7 @@ func TestLocalDevMode(t *testing.T) {
 					logger:       logger,
 					localDevMode: true,
 				}
-				middleware.displayNameCache.Store(validSlug, "Valid Tenant")
+				middleware.displayNameCache.Store(validSlug, cachedDisplayName{tenantID: validSlugTenantID, displayName: "Valid Tenant"})
 
 				req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/test", nil)
 				req.Header.Set(TenantSlugHeader, validSlug)
@@ -1313,7 +1313,7 @@ func TestHandlerOptionalTenant_WithValidSubdomain(t *testing.T) {
 		baseDomain: baseDomain,
 		logger:     logger,
 	}
-	middleware.displayNameCache.Store(testSlug, "Acme Corp")
+	middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
 
 	req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
 	req = req.WithContext(ctx)
@@ -1479,7 +1479,7 @@ func TestHandlerOptionalTenant_LocalDevMode_ValidSlugFromHeader(t *testing.T) {
 		logger:       logger,
 		localDevMode: true,
 	}
-	middleware.displayNameCache.Store(testSlug, "Acme Corp")
+	middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
 
 	req := httptest.NewRequest(http.MethodGet, "http://"+baseDomain+"/api/test", nil)
 	req.Header.Set(TenantSlugHeader, testSlug)

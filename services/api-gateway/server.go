@@ -540,6 +540,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.registrationHandler.rateLimiter.Stop()
 	}
 
+	// Stop tenant info handler background cleanup goroutine.
+	if s.tenantInfoHandler != nil {
+		s.tenantInfoHandler.Stop()
+	}
+
 	s.logger.Info("HTTP server stopped")
 	return nil
 }
