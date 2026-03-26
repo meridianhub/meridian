@@ -324,9 +324,11 @@ describe('ManifestDiffGraph', () => {
     it('does not show 0-count categories', async () => {
       render(<ManifestDiffGraph before={emptyGraph} after={graphWithInstrument} />)
       await screen.findByTestId('diff-summary')
-      // Only added, no removed or modified
+      // Only added nodes, no removed/modified nodes or edge changes
       expect(screen.queryByText(/-\d+ removed/)).not.toBeInTheDocument()
       expect(screen.queryByText(/~\d+ modified/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/\+\d+ edge/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/-\d+ edge/)).not.toBeInTheDocument()
     })
   })
 

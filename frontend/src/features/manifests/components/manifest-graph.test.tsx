@@ -575,6 +575,15 @@ describe('ManifestGraph', () => {
           { instructionType: 'payment', connectionId: 'conn-1' },
         ],
       },
+      marketData: [
+        { code: 'SPOT', name: 'Spot Price' },
+      ],
+      organizations: [
+        { code: 'ACME', name: 'Acme Corp' },
+      ],
+      internalAccounts: [
+        { code: 'OPS_GBP', name: 'Operating GBP', accountType: 'CURRENT' },
+      ],
     })
 
     it('renders payment rail nodes', async () => {
@@ -609,6 +618,21 @@ describe('ManifestGraph', () => {
       expect(await screen.findByTestId('node-instruction_route:payment')).toBeInTheDocument()
     })
 
+    it('renders market data nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-market_data:SPOT')).toBeInTheDocument()
+    })
+
+    it('renders organization nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-organization:ACME')).toBeInTheDocument()
+    })
+
+    it('renders internal account nodes', async () => {
+      renderGraph(fullManifest)
+      expect(await screen.findByTestId('node-internal_account:OPS_GBP')).toBeInTheDocument()
+    })
+
     it('renders api trigger badge for api-triggered sagas', async () => {
       renderGraph(fullManifest)
       const sagaNode = await screen.findByTestId('node-saga:test_saga')
@@ -641,6 +665,15 @@ describe('ManifestGraph', () => {
           { instructionType: 'payment', connectionId: 'conn-1' },
         ],
       },
+      marketData: [
+        { code: 'SPOT', name: 'Spot Price' },
+      ],
+      organizations: [
+        { code: 'ACME', name: 'Acme Corp' },
+      ],
+      internalAccounts: [
+        { code: 'OPS_GBP', name: 'Operating GBP', accountType: 'CURRENT' },
+      ],
     })
 
     it('navigates to valuation rules page', async () => {
@@ -690,6 +723,27 @@ describe('ManifestGraph', () => {
       const node = await screen.findByTestId('node-instruction_route:payment')
       fireEvent.doubleClick(node)
       expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
+    })
+
+    it('navigates to market-data page for market data nodes', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-market_data:SPOT')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/market-data/SPOT')
+    })
+
+    it('navigates to reference-data/nodes for organization nodes', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-organization:ACME')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/reference-data/nodes')
+    })
+
+    it('navigates to internal-accounts for internal account nodes', async () => {
+      renderGraph(navManifest)
+      const node = await screen.findByTestId('node-internal_account:OPS_GBP')
+      fireEvent.doubleClick(node)
+      expect(mockNavigate).toHaveBeenCalledWith('/internal-accounts')
     })
   })
 
