@@ -223,6 +223,29 @@ func TestQueueInvoiceEmail_Success(t *testing.T) {
 	assert.Equal(t, "GBP 50.00", data["Total"])
 }
 
+func TestQueueInvoiceEmail_EmptyEmail(t *testing.T) {
+	ctx := context.Background()
+	partyClient := newMockPartyClient()
+	// Party resolved successfully but with no email address
+	partyClient.contacts["party-no-email"] = PartyContact{Email: "", Name: "Acme Corp"}
+	outbox := &mockEmailOutbox{}
+
+	repo := newMockBillingRepo()
+	gen := NewInvoiceGenerator(
+		&mockPositionClient{},
+		repo,
+		testInvoiceMetrics(t),
+		testInvoiceLogger(),
+	).WithEmailDelivery(partyClient, outbox, false)
+
+	inv := makeInvoiceWithLineItems(t, uuid.New(), "party-no-email")
+	gen.queueInvoiceEmail(ctx, inv)
+
+	outbox.mu.Lock()
+	defer outbox.mu.Unlock()
+	assert.Empty(t, outbox.entries, "empty email should log warning and not enqueue")
+}
+
 func TestQueueInvoiceEmail_NoEmailClient(t *testing.T) {
 	ctx := context.Background()
 	// No WithEmailDelivery call — email delivery not configured

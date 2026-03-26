@@ -235,6 +235,12 @@ func (g *InvoiceGenerator) queueInvoiceEmail(ctx context.Context, inv *domain.In
 			"error", err)
 		return
 	}
+	if contact.Email == "" {
+		g.logger.Warn("party has no email address, skipping invoice email",
+			"party_id", inv.PartyID,
+			"invoice_id", inv.ID)
+		return
+	}
 
 	lineItems := make([]email.LineItem, len(inv.LineItems))
 	for i, li := range inv.LineItems {
@@ -244,7 +250,8 @@ func (g *InvoiceGenerator) queueInvoiceEmail(ctx context.Context, inv *domain.In
 		}
 	}
 
-	dueDate := time.Now().UTC().Add(invoiceEmailDueIn)
+	// Derive due date from invoice creation time so it is stable across retries.
+	dueDate := inv.CreatedAt.UTC().Add(invoiceEmailDueIn)
 
 	entry := &email.OutboxEntry{
 		IdempotencyKey: "invoice-" + inv.ID.String(),
