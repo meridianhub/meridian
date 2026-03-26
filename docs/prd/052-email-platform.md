@@ -76,9 +76,13 @@ existing infrastructure. The net-new Go code is ~700 lines + templates.
 1. **Multi-tenant**: Outbox and audit tables scoped by `tenant_id`.
 2. **Audit trail**: Immutable audit log records every send attempt and delivery status.
 3. **Idempotency**: At-least-once delivery from Meridian, deduplicated at Resend via idempotency key header.
-4. **Saga integration**: Email available via existing `notification.send` handler with real implementation replacing the stub.
-5. **CockroachDB**: No LISTEN/NOTIFY. Outbox pattern with `SELECT FOR UPDATE SKIP LOCKED`.
-6. **Template safety**: Go `html/template` only (auto-escapes by context, template injection structurally impossible). Never use `text/template` for email rendering.
+4. **Saga integration**: Email available via existing `notification.send`
+   handler with real implementation replacing the stub.
+5. **CockroachDB**: No LISTEN/NOTIFY. Outbox pattern with
+   `SELECT FOR UPDATE SKIP LOCKED`.
+6. **Template safety**: Go `html/template` only (auto-escapes by context,
+   template injection structurally impossible). Never use `text/template`
+   for email rendering.
 
 ## Solution
 
