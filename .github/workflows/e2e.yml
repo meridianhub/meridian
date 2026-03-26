@@ -42,8 +42,9 @@ jobs:
           cache: true
 
       - name: Set up buf
-        uses: bufbuild/buf-setup-action@v1
+        uses: bufbuild/buf-action@v1
         with:
+          setup_only: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Node.js
