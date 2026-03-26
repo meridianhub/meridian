@@ -52,15 +52,18 @@ func (m *mockOutboxRepo) Enqueue(_ context.Context, _ *email.OutboxEntry) error 
 func (m *mockOutboxRepo) FetchDispatchable(_ context.Context, _ int) ([]email.OutboxEntry, error) {
 	return m.fetchResult, m.fetchErr
 }
+
 func (m *mockOutboxRepo) MarkSent(_ context.Context, _ uuid.UUID) error {
 	m.markSentCalls++
 	return m.markSentErr
 }
+
 func (m *mockOutboxRepo) MarkFailed(_ context.Context, _ uuid.UUID, errMsg string) error {
 	m.markFailedCalls++
 	m.lastFailedMsg = errMsg
 	return m.markFailedErr
 }
+
 func (m *mockOutboxRepo) Cancel(_ context.Context, _ uuid.UUID) error {
 	m.cancelCalls++
 	return m.cancelErr
@@ -75,9 +78,11 @@ func (m *mockAuditRepo) Record(_ context.Context, _ *email.AuditEntry) error {
 	m.recordCalls++
 	return m.recordErr
 }
+
 func (m *mockAuditRepo) FindByOutboxID(_ context.Context, _ uuid.UUID) ([]email.AuditEntry, error) {
 	return nil, nil
 }
+
 func (m *mockAuditRepo) RecordByProviderID(_ context.Context, _ string, _ email.AuditStatus, _ map[string]any) error {
 	return nil
 }

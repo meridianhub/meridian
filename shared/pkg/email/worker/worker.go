@@ -10,8 +10,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/email"
 )
 
-// EmailMetrics is the metrics interface used by the processor.
-// It matches the email.Metrics type methods needed by the worker.
+// EmailMetrics wraps email.Metrics for use in the worker package.
 type EmailMetrics struct {
 	inner *email.Metrics
 }
@@ -24,10 +23,19 @@ func NewEmailMetrics(m *email.Metrics) *EmailMetrics {
 	return &EmailMetrics{inner: m}
 }
 
+// ObserveSendDuration records the duration of an email send.
 func (m *EmailMetrics) ObserveSendDuration(seconds float64) { m.inner.ObserveSendDuration(seconds) }
-func (m *EmailMetrics) RecordSendError(tmpl, errType string) { m.inner.RecordSendError(tmpl, errType) }
-func (m *EmailMetrics) RecordDeadLetter()                     { m.inner.RecordDeadLetter() }
-func (m *EmailMetrics) RecordCancelled()                      { m.inner.RecordCancelled() }
+
+// RecordSendError increments the send error counter for a template and error type.
+func (m *EmailMetrics) RecordSendError(tmpl, errType string) {
+	m.inner.RecordSendError(tmpl, errType)
+}
+
+// RecordDeadLetter increments the dead letter counter.
+func (m *EmailMetrics) RecordDeadLetter() { m.inner.RecordDeadLetter() }
+
+// RecordCancelled increments the cancellation counter.
+func (m *EmailMetrics) RecordCancelled() { m.inner.RecordCancelled() }
 
 // NewEmailWorker creates a dispatch.Worker configured for the email outbox.
 func NewEmailWorker(

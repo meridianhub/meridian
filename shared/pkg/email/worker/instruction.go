@@ -15,16 +15,31 @@ type OutboxInstruction struct {
 	Entry email.OutboxEntry
 }
 
-func (o *OutboxInstruction) GetID() string            { return o.Entry.ID.String() }
-func (o *OutboxInstruction) GetTenantID() string       { return o.Entry.TenantID }
+// GetID returns the outbox entry UUID as a string.
+func (o *OutboxInstruction) GetID() string { return o.Entry.ID.String() }
+
+// GetTenantID returns the tenant that owns this email.
+func (o *OutboxInstruction) GetTenantID() string { return o.Entry.TenantID }
+
+// GetInstructionType returns the template name as the instruction type.
 func (o *OutboxInstruction) GetInstructionType() string { return o.Entry.TemplateName }
-func (o *OutboxInstruction) GetConnectionID() string    { return "email" }
+
+// GetConnectionID returns a fixed "email" connection identifier.
+func (o *OutboxInstruction) GetConnectionID() string { return "email" }
+
+// GetStatus maps the outbox status to a dispatch instruction status.
 func (o *OutboxInstruction) GetStatus() dispatch.InstructionStatus {
 	return outboxToDispatchStatus(o.Entry.Status)
 }
+
+// GetAttemptCount returns the number of send attempts made so far.
 func (o *OutboxInstruction) GetAttemptCount() int { return o.Entry.Attempts }
-func (o *OutboxInstruction) GetMaxAttempts() int  { return o.Entry.MaxAttempts }
-func (o *OutboxInstruction) CanRetry() bool       { return o.Entry.Attempts < o.Entry.MaxAttempts }
+
+// GetMaxAttempts returns the maximum number of send attempts allowed.
+func (o *OutboxInstruction) GetMaxAttempts() int { return o.Entry.MaxAttempts }
+
+// CanRetry returns true if the entry has remaining send attempts.
+func (o *OutboxInstruction) CanRetry() bool { return o.Entry.Attempts < o.Entry.MaxAttempts }
 
 func outboxToDispatchStatus(s email.OutboxStatus) dispatch.InstructionStatus {
 	switch s {
