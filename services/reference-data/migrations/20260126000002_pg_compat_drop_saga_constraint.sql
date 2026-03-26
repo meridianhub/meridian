@@ -6,13 +6,19 @@
 -- DROP INDEX fails when the index backs a constraint - the constraint must
 -- be dropped first with ALTER TABLE DROP CONSTRAINT.
 --
--- This migration runs ALTER TABLE DROP CONSTRAINT IF EXISTS, which:
---   - PostgreSQL: drops the constraint, freeing the index for the next migration
---   - CockroachDB: drops the constraint (and its backing index) - the next
---     migration's DROP INDEX IF EXISTS becomes a safe no-op
+-- CockroachDB does not support ALTER TABLE DROP CONSTRAINT for UNIQUE constraints
+-- (requires DROP INDEX CASCADE instead). We use a PL/pgSQL block with exception
+-- handling so the statement is a no-op on CockroachDB - the error is caught and
+-- ignored, and the next migration's DROP INDEX CASCADE handles it.
 --
 -- On existing environments where 20260127000001 already ran successfully,
--- the constraint no longer exists, so DROP CONSTRAINT IF EXISTS is a no-op.
+-- the constraint no longer exists, so this is a no-op on both databases.
 
-ALTER TABLE IF EXISTS "public"."platform_saga_definition"
-  DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name";
+DO $$ BEGIN
+  ALTER TABLE IF EXISTS "public"."platform_saga_definition"
+    DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name";
+EXCEPTION WHEN OTHERS THEN
+  -- CockroachDB: "unimplemented: cannot drop UNIQUE constraint using ALTER TABLE"
+  -- Safe to ignore - the next migration (20260127000001) handles it via DROP INDEX CASCADE.
+  NULL;
+END $$;
