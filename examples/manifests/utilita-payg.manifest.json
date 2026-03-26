@@ -279,7 +279,7 @@
         "connectionId": "procode-ida",
         "providerName": "Procode Intelligent Data Adapter",
         "providerType": "dcc_adapter",
-        "protocol": "PROVIDER_PROTOCOL_HTTPS",
+        "protocol": "HTTPS",
         "baseUrl": "https://ida.procode.co.uk/api/v2",
         "auth": {
           "oauth2": {
