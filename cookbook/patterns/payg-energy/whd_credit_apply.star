@@ -47,7 +47,6 @@ def execute_whd():
     step(name="check_idempotency")
     existing = position_keeping.query_logs(
         correlation_id=whd_ref,
-        instrument_code="GBP",
         position_id="UTILITA_WHD",
     )
     if existing.count > 0:
@@ -57,7 +56,6 @@ def execute_whd():
     step(name="book_whd_obligation")
     position_keeping.initiate_log(
         position_id="UTILITA_WHD",
-        instrument_code="GBP",
         amount=whd_amount,
         direction="DEBIT",
         correlation_id=whd_ref,
@@ -70,7 +68,6 @@ def execute_whd():
     step(name="check_debt")
     debt_balance = internal_account.get_balance(
         account_id="DEBT_RECOVERY:" + party_id,
-        instrument_code="GBP",
     )
     debt_outstanding = Decimal(str(debt_balance.amount)) if debt_balance.amount > 0 else Decimal("0")
 
@@ -83,7 +80,6 @@ def execute_whd():
 
         position_keeping.initiate_log(
             position_id="DEBT_RECOVERY:" + party_id,
-            instrument_code="GBP",
             amount=debt_cleared,
             direction="CREDIT",
             correlation_id=whd_ref,
@@ -96,7 +92,6 @@ def execute_whd():
     if allocatable > Decimal("0"):
         position_keeping.initiate_log(
             position_id="PREPAYMENT_LIABILITY:" + party_id,
-            instrument_code="GBP",
             amount=allocatable,
             direction="CREDIT",
             correlation_id=whd_ref,

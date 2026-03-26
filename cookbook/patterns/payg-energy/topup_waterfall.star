@@ -94,7 +94,6 @@ def execute_topup():
     step(name="check_idempotency")
     existing = position_keeping.query_logs(
         correlation_id=payment_ref,
-        instrument_code="GBP",
         position_id="PREPAYMENT_LIABILITY:" + party_id,
     )
     if existing.count > 0:
@@ -112,7 +111,6 @@ def execute_topup():
 
     position_keeping.initiate_log(
         position_id="UTILITA_VAT_OUTPUT",
-        instrument_code="GBP",
         amount=vat_amount,
         direction="CREDIT",
         correlation_id=payment_ref,
@@ -126,7 +124,6 @@ def execute_topup():
     step(name="check_emergency_credit")
     ec_balance = internal_account.get_balance(
         account_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
-        instrument_code="GBP",
     )
     ec_outstanding = Decimal(str(ec_balance.amount)) if ec_balance.amount > 0 else Decimal("0")
 
@@ -141,7 +138,6 @@ def execute_topup():
         # Clear the receivable
         position_keeping.initiate_log(
             position_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
-            instrument_code="GBP",
             amount=ec_repaid,
             direction="CREDIT",
             correlation_id=payment_ref,
@@ -153,7 +149,6 @@ def execute_topup():
     step(name="check_debt")
     debt_balance = internal_account.get_balance(
         account_id="DEBT_RECOVERY:" + party_id,
-        instrument_code="GBP",
     )
     debt_outstanding = Decimal(str(debt_balance.amount)) if debt_balance.amount > 0 else Decimal("0")
 
@@ -168,7 +163,6 @@ def execute_topup():
 
         position_keeping.initiate_log(
             position_id="DEBT_RECOVERY:" + party_id,
-            instrument_code="GBP",
             amount=debt_allocated,
             direction="CREDIT",
             correlation_id=payment_ref,
@@ -177,32 +171,35 @@ def execute_topup():
         allocatable = allocatable - debt_allocated
 
     # Step 8: Credit remainder to prepayment liability (funds the meter)
-    step(name="credit_prepayment")
-    position_keeping.initiate_log(
-        position_id="PREPAYMENT_LIABILITY:" + party_id,
-        instrument_code="GBP",
-        amount=allocatable,
-        direction="CREDIT",
-        correlation_id=payment_ref,
-        description="Prepayment credit from top-up",
-    )
+    # Guard: if EC + debt consumed the entire net amount, skip credit and meter dispatch
+    dcc_result_id = ""
+    if allocatable > Decimal("0"):
+        step(name="credit_prepayment")
+        position_keeping.initiate_log(
+            position_id="PREPAYMENT_LIABILITY:" + party_id,
+            amount=allocatable,
+            direction="CREDIT",
+            correlation_id=payment_ref,
+            description="Prepayment credit from top-up",
+        )
 
-    # Step 9: Dispatch DCC SRV 2.2 (Top Up Device) to the smart meter
-    # Procode IDA handles DUIS XML construction, cryptographic signing,
-    # and WAN delivery via the appropriate CSP (Telefonica/Arqiva).
-    step(name="dispatch_meter_topup")
-    meter_credit_pence = int(allocatable * Decimal("100"))
+        # Step 9: Dispatch DCC SRV 2.2 (Top Up Device) to the smart meter
+        # Procode IDA handles DUIS XML construction, cryptographic signing,
+        # and WAN delivery via the appropriate CSP (Telefonica/Arqiva).
+        step(name="dispatch_meter_topup")
+        meter_credit_pence = int(allocatable * Decimal("100"))
 
-    dcc_result = operational_gateway.dispatch_instruction(
-        instruction_type="meter.topup",
-        correlation_id=payment_ref,
-        payload={
-            "mpxn": mpxn,
-            "amount_pence": str(meter_credit_pence),
-            "fuel_type": fuel_type,
-            "srv_type": "SRV_2_2",
-        },
-    )
+        dcc_result = operational_gateway.dispatch_instruction(
+            instruction_type="meter.topup",
+            correlation_id=payment_ref,
+            payload={
+                "mpxn": mpxn,
+                "amount_pence": str(meter_credit_pence),
+                "fuel_type": fuel_type,
+                "srv_type": "SRV_2_2",
+            },
+        )
+        dcc_result_id = dcc_result.instruction_id
 
     return {
         "status": "TOPPED_UP",
@@ -211,7 +208,7 @@ def execute_topup():
         "ec_repaid": str(ec_repaid),
         "debt_allocated": str(debt_allocated),
         "meter_credit": str(allocatable),
-        "dcc_instruction_id": dcc_result.instruction_id,
+        "dcc_instruction_id": dcc_result_id,
         "correlation_id": payment_ref,
     }
 

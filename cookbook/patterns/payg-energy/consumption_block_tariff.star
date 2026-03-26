@@ -76,7 +76,6 @@ def execute_consumption():
     step(name="check_idempotency")
     existing = position_keeping.query_logs(
         correlation_id=correlation_id,
-        instrument_code="GBP",
         position_id=billing_account_id,
     )
     if existing.count > 0:
@@ -122,7 +121,6 @@ def execute_consumption():
 
     daily_balance = internal_account.get_balance(
         account_id=source_account_id,
-        instrument_code=instrument_code,
     )
     # daily_consumed is the cumulative kWh consumed today BEFORE this read
     daily_consumed = Decimal(str(daily_balance.amount)) if daily_balance.amount > 0 else Decimal("0")
@@ -156,7 +154,6 @@ def execute_consumption():
     step(name="book_retail_charge")
     position_keeping.initiate_log(
         position_id=billing_account_id,
-        instrument_code="GBP",
         amount=total_retail_charge,
         direction="DEBIT",
         correlation_id=correlation_id,
@@ -170,7 +167,6 @@ def execute_consumption():
 
     position_keeping.initiate_log(
         position_id=revenue_account,
-        instrument_code="GBP",
         amount=total_retail_charge,
         direction="CREDIT",
         correlation_id=correlation_id,
@@ -195,7 +191,6 @@ def execute_consumption():
         step(name="book_wholesale_cost")
         position_keeping.initiate_log(
             position_id=wholesale_account_id,
-            instrument_code="GBP",
             amount=wholesale_amount,
             direction="DEBIT",
             correlation_id=correlation_id,

@@ -53,7 +53,6 @@ def execute_ec_activation():
     step(name="check_already_active")
     ec_current_check = internal_account.get_balance(
         account_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
-        instrument_code="GBP",
     )
     if ec_current_check.amount >= ec_limit:
         return {"status": "ALREADY_ACTIVE", "correlation_id": activation_ref}
@@ -62,12 +61,11 @@ def execute_ec_activation():
     step(name="check_balance_threshold")
     prepay_balance = internal_account.get_balance(
         account_id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type,
-        instrument_code="GBP",
     )
     balance = Decimal(str(prepay_balance.amount))
     activation_threshold = Decimal("1.00")
 
-    if balance > activation_threshold:
+    if balance >= activation_threshold:
         return {
             "status": "NOT_ELIGIBLE",
             "reason": "balance above threshold",
@@ -89,7 +87,6 @@ def execute_ec_activation():
     step(name="create_ec_receivable")
     position_keeping.initiate_log(
         position_id="EMERGENCY_CREDIT:" + party_id + ":" + fuel_type,
-        instrument_code="GBP",
         amount=ec_amount,
         direction="DEBIT",
         correlation_id=activation_ref,
@@ -100,7 +97,6 @@ def execute_ec_activation():
     step(name="extend_prepayment")
     position_keeping.initiate_log(
         position_id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type,
-        instrument_code="GBP",
         amount=ec_amount,
         direction="CREDIT",
         correlation_id=activation_ref,
