@@ -26,6 +26,8 @@ var (
 	ErrUnsupportedNotificationType = fmt.Errorf("email: unsupported notification type")
 	ErrMissingRecipient            = fmt.Errorf("email: missing required parameter: recipient")
 	ErrMissingType                 = fmt.Errorf("email: missing required parameter: type")
+	ErrMissingOutbox               = fmt.Errorf("email: outbox repository is required")
+	ErrMissingEmailResolver        = fmt.Errorf("email: email resolver is required")
 )
 
 // NewNotificationSendHandler creates a saga handler for notification.send.
@@ -37,12 +39,12 @@ func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
 	}
 	if deps.Outbox == nil {
 		return func(*saga.StarlarkContext, map[string]any) (any, error) {
-			return nil, errors.New("email: outbox repository is required")
+			return nil, ErrMissingOutbox
 		}
 	}
 	if deps.EmailResolver == nil {
 		return func(*saga.StarlarkContext, map[string]any) (any, error) {
-			return nil, errors.New("email: email resolver is required")
+			return nil, ErrMissingEmailResolver
 		}
 	}
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
