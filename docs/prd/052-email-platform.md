@@ -29,10 +29,38 @@ means:
 - Dunning escalation cannot notify before freezing accounts
 - Payment confirmations are silent
 - The demo cannot show a complete billing lifecycle
+- Email is a platform cost with no tenant attribution or metering
 
 This PRD focuses on the **email infrastructure and billing email delivery**.
 Auth email flows (verification, password reset, invitations) and billing UI
 are separate PRDs (053, 054) that build on this foundation.
+
+### Cost Attribution: Email as a Metered Platform Resource
+
+Email sending has a direct cost (Resend charges per email). As a
+multi-tenant platform, Meridian must attribute this cost to tenants.
+The outbox table is the natural metering record - every email has
+`tenant_id`, `template_name`, `status`, and `created_at`.
+
+Platform-level email billing becomes a saga that queries the outbox:
+
+```sql
+SELECT tenant_id, COUNT(*) as emails_sent
+FROM email_outbox
+WHERE status = 'SENT'
+  AND created_at BETWEEN $period_start AND $period_end
+GROUP BY tenant_id;
+```
+
+This feeds into Meridian's own billing infrastructure - the platform
+bills tenants for email usage using the same invoice generation and
+dunning escalation that tenants use for their customers. The audit log
+(7-year retention) provides the dispute-proof record.
+
+This is the "Kubernetes for economies" thesis in practice: the platform
+operates its own commercial model using the same primitives it offers
+tenants. Any tenant-defined saga can include `notification.send` steps,
+and the platform meters every send.
 
 ## Technical Context
 
