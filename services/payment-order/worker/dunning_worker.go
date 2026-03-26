@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	"github.com/meridianhub/meridian/shared/platform/redislock"
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -311,7 +312,7 @@ func (w *DunningWorker) executeRetry(ctx context.Context, billingRunID uuid.UUID
 		w.logger.Info("billing run no longer failed, skipping dunning",
 			"billing_run_id", billingRunID,
 			"status", run.Status)
-		if err := w.cancelPendingDunningEmails(ctx, billingRunID); err != nil {
+		if err := w.cancelPendingDunningEmails(tenant.WithTenant(ctx, tenant.TenantID(run.TenantID)), billingRunID); err != nil {
 			w.logger.Error("failed to cancel pending dunning emails",
 				"billing_run_id", billingRunID,
 				"error", err)

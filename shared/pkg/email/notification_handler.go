@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 )
 
@@ -124,14 +125,17 @@ func buildOutboxEntry(ctx *saga.StarlarkContext, params map[string]any, emailAdd
 func handleEnqueueResult(logger *slog.Logger, entry *OutboxEntry, err error) (any, error) {
 	if errors.Is(err, ErrDuplicateIdempotency) {
 		logger.Info("notification.send idempotent replay detected",
-			"idempotency_key", entry.IdempotencyKey,
-			"outbox_id", entry.ID.String())
-		return map[string]any{
+			"idempotency_key", entry.IdempotencyKey)
+		result := map[string]any{
 			"status":          "QUEUED",
-			"outbox_id":       entry.ID.String(),
 			"idempotency_key": entry.IdempotencyKey,
 			"replay":          true,
-		}, nil
+		}
+		// entry.ID is not populated by Enqueue on duplicate - only include if set
+		if entry.ID != (uuid.UUID{}) {
+			result["outbox_id"] = entry.ID.String()
+		}
+		return result, nil
 	}
 	return nil, fmt.Errorf("email: failed to enqueue notification: %w", err)
 }
@@ -140,7 +144,10 @@ func handleEnqueueResult(logger *slog.Logger, entry *OutboxEntry, err error) (an
 func buildSubjectFromTemplate(templateName string, data map[string]any) string {
 	switch templateName {
 	case "dunning-notice":
-		severity := data["severity"]
+		severity, ok := data["severity"]
+		if !ok || severity == nil {
+			return "Payment reminder"
+		}
 		return fmt.Sprintf("Payment reminder - severity %v", severity)
 	case "account-frozen":
 		return "Your account has been frozen"
