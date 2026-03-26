@@ -119,9 +119,10 @@ func checkTenantRateLimit(tx *gorm.DB, tenantID string, now time.Time) error {
 	return nil
 }
 
-// defaultMaxAttempts allows 5 retries with full backoff schedule (1m, 15m, 1h, 4h, 24h)
-// plus the initial attempt, then dead-letters on the 7th failure.
-const defaultMaxAttempts = 6
+// defaultMaxAttempts matches the migration DEFAULT and PRD "5 attempts with
+// exponential backoff". The 24h backoff slot exists for entries with custom
+// higher max_attempts values.
+const defaultMaxAttempts = 5
 
 func newOutboxEntity(entry *OutboxEntry, tenantID string, templateJSON []byte, now time.Time) OutboxEntity {
 	maxAttempts := entry.MaxAttempts
@@ -195,8 +196,12 @@ func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit 
 // Returns ErrOutboxNotFound if the entry does not exist or is not in SENDING status.
 func (r *PostgresOutboxRepository) MarkSent(ctx context.Context, id uuid.UUID) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return tenant.ErrMissingTenantContext
+		}
 		result := tx.Model(&OutboxEntity{}).
-			Where("id = ? AND status = ?", id, string(StatusSending)).
+			Where("id = ? AND tenant_id = ? AND status = ?", id, string(tenantID), string(StatusSending)).
 			Updates(map[string]any{
 				"status":     string(StatusSent),
 				"updated_at": time.Now().UTC(),
@@ -225,8 +230,12 @@ var retryBackoffs = []time.Duration{
 // Only transitions entries in SENDING status to prevent reopening cancelled rows.
 func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return tenant.ErrMissingTenantContext
+		}
 		var current OutboxEntity
-		if err := tx.Where("id = ? AND status = ?", id, string(StatusSending)).First(&current).Error; err != nil {
+		if err := tx.Where("id = ? AND tenant_id = ? AND status = ?", id, string(tenantID), string(StatusSending)).First(&current).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrOutboxNotFound
 			}
@@ -271,8 +280,12 @@ func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID,
 func (r *PostgresOutboxRepository) Cancel(ctx context.Context, id uuid.UUID) error {
 	now := time.Now().UTC()
 	return db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return tenant.ErrMissingTenantContext
+		}
 		result := tx.Model(&OutboxEntity{}).
-			Where("id = ? AND status IN ('PENDING', 'SENDING', 'FAILED')", id).
+			Where("id = ? AND tenant_id = ? AND status IN ('PENDING', 'SENDING', 'FAILED')", id, string(tenantID)).
 			Updates(map[string]any{
 				"status":       string(StatusCancelled),
 				"cancelled_at": now,
