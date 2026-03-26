@@ -934,7 +934,7 @@ func TestConcurrent_InitiateMultipleLiens_SameAccount(t *testing.T) {
 	results := make(chan error, numLiens)
 
 	for i := 0; i < numLiens; i++ {
-		go func(idx int) {
+		go func() {
 			// Each goroutine needs its own tenant context
 			tid, _ := tenant.FromContext(ctx)
 			goCtx := tenant.WithTenant(ctx, tid)
@@ -948,7 +948,7 @@ func TestConcurrent_InitiateMultipleLiens_SameAccount(t *testing.T) {
 			}
 			_, err := svc.InitiateLien(goCtx, req)
 			results <- err
-		}(i)
+		}()
 	}
 
 	successCount := 0
