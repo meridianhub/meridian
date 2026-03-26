@@ -123,7 +123,7 @@ function getUserLens(claims: JWTClaims | null): 'platform' | 'tenant' {
   return 'tenant'
 }
 
-// Exported for hooks that need optional access without throwing (e.g., usePageTitle)
+// eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext<AuthContextValue | null>(null)
 
 interface AuthProviderProps {
