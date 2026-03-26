@@ -10,6 +10,7 @@ function base64UrlEncode(str: string): string {
 interface TokenPayload {
   userId?: string
   tenantId?: string
+  tenantDisplayName?: string
   roles?: string[]
   groups?: string[]
   scopes?: string[]
@@ -31,7 +32,11 @@ export function createTestToken(payload: TokenPayload): string {
     sub: payload.userId ?? 'user-123',
   }
 
-  const fullPayload = { ...defaults, ...payload }
+  const { tenantDisplayName, ...rest } = payload
+  const fullPayload: Record<string, unknown> = { ...defaults, ...rest }
+  if (tenantDisplayName) {
+    fullPayload['x-tenant-display-name'] = tenantDisplayName
+  }
 
   const encodedHeader = base64UrlEncode(JSON.stringify(header))
   const encodedPayload = base64UrlEncode(JSON.stringify(fullPayload))
@@ -56,10 +61,11 @@ export function createPlatformAdminToken(): string {
   })
 }
 
-export function createTenantUserToken(tenantId = 'tenant-789'): string {
+export function createTenantUserToken(tenantId = 'tenant-789', tenantDisplayName = 'Test Tenant'): string {
   return createTestToken({
     userId: 'user-123',
     tenantId,
+    tenantDisplayName,
     roles: ['tenant-admin'],
     scopes: ['read', 'write'],
   })

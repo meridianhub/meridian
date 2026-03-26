@@ -3,7 +3,9 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
 import { useAuthProviders, type AuthProvider as AuthProviderType } from '@/hooks/use-auth-providers'
 import { useOAuthFlow } from '@/hooks/use-oauth-flow'
-import { isBaseDomain } from '@/lib/tenant-utils'
+import { useTenantInfo } from '@/hooks/use-tenant-info'
+import { useDocumentTitle } from '@/hooks/use-document-title'
+import { isBaseDomain, getTenantSlugFromSubdomain, formatSlugAsDisplayName } from '@/lib/tenant-utils'
 import { ProviderButton } from '@/components/auth/provider-button'
 import { AuthDivider } from '@/components/auth/auth-divider'
 
@@ -11,11 +13,21 @@ function isBareDomain(): boolean {
   return isBaseDomain(window.location.hostname)
 }
 
+function useConsoleName(): string {
+  const { displayName } = useTenantInfo()
+  if (displayName) return `${displayName} Operations Console`
+  const slug = getTenantSlugFromSubdomain(window.location.hostname)
+  if (slug) return `${formatSlugAsDisplayName(slug)} Operations Console`
+  return 'Meridian Operations Console'
+}
+
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const justRegistered = searchParams.get('registered') === '1'
+  const consoleName = useConsoleName()
+  useDocumentTitle()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -90,7 +102,7 @@ export function LoginPage() {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="w-full max-w-sm space-y-6 px-4 text-center">
-          <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
+          <h1 className="text-2xl font-semibold">{consoleName}</h1>
           <p className="mt-2 text-muted-foreground">
             Please access your organization&apos;s login page at:
           </p>
@@ -112,7 +124,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="text-center">
-          <h1 className="text-2xl font-semibold">Meridian Operations Console</h1>
+          <h1 className="text-2xl font-semibold">{consoleName}</h1>
           <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
         </div>
 
