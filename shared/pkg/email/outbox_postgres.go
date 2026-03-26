@@ -160,6 +160,10 @@ func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit 
 	now := time.Now().UTC()
 
 	err := db.WithGormTenantTransaction(ctx, r.db, func(tx *gorm.DB) error {
+		tenantID, ok := tenant.FromContext(ctx)
+		if !ok {
+			return tenant.ErrMissingTenantContext
+		}
 		// Atomically select and claim rows by setting status to SENDING.
 		// The CTE locks rows with FOR UPDATE SKIP LOCKED, then the UPDATE
 		// sets status to SENDING before returning. This prevents concurrent
@@ -167,7 +171,8 @@ func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit 
 		return tx.Raw(`
 			WITH claimable AS (
 				SELECT id FROM email_outbox
-				WHERE status IN ('PENDING', 'FAILED')
+				WHERE tenant_id = ?
+				AND status IN ('PENDING', 'FAILED')
 				AND attempts < max_attempts
 				AND next_attempt_at <= ?
 				ORDER BY next_attempt_at ASC
@@ -179,7 +184,7 @@ func (r *PostgresOutboxRepository) FetchDispatchable(ctx context.Context, limit 
 			FROM claimable
 			WHERE email_outbox.id = claimable.id
 			RETURNING email_outbox.*
-		`, now, limit, now).Scan(&entities).Error
+		`, string(tenantID), now, limit, now).Scan(&entities).Error
 	})
 	if err != nil {
 		return nil, fmt.Errorf("email: failed to fetch dispatchable entries: %w", err)
@@ -248,7 +253,7 @@ func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID,
 		// Dead-letter if all attempts exhausted
 		if newAttempts >= current.MaxAttempts {
 			return tx.Model(&OutboxEntity{}).
-				Where("id = ? AND status = ?", id, string(StatusSending)).
+				Where("id = ? AND tenant_id = ? AND status = ?", id, string(tenantID), string(StatusSending)).
 				Updates(map[string]any{
 					"status":     string(StatusDeadLetter),
 					"attempts":   newAttempts,
@@ -265,7 +270,7 @@ func (r *PostgresOutboxRepository) MarkFailed(ctx context.Context, id uuid.UUID,
 		nextAttempt := now.Add(retryBackoffs[backoffIdx])
 
 		return tx.Model(&OutboxEntity{}).
-			Where("id = ? AND status = ?", id, string(StatusSending)).
+			Where("id = ? AND tenant_id = ? AND status = ?", id, string(tenantID), string(StatusSending)).
 			Updates(map[string]any{
 				"status":          string(StatusFailed),
 				"attempts":        newAttempts,
