@@ -106,11 +106,11 @@ test.describe('Tenant branding - header after login', () => {
     await expect(page.locator('header').getByText('Volterra Energy')).toBeVisible()
   })
 
-  authTest('header shows "Meridian" for platform admin with no tenant selected', async ({
-    platformAdminPage: page,
+  authTest('header shows formatted slug when JWT has no display name', async ({
+    authenticatedPage: page,
   }) => {
-    // Platform admin token has no tenantId and no x-tenant-display-name.
-    // With no tenant selected in the UI, tenantSlug is null -> falls back to "Meridian".
-    await authExpect(page.locator('header').getByText('Meridian')).toBeVisible()
+    // Tenant user with tenantId='dev-tenant' but no x-tenant-display-name in the JWT.
+    // Falls back to formatSlugAsDisplayName('dev-tenant') = "Dev Tenant".
+    await authExpect(page.locator('header').getByText('Dev Tenant')).toBeVisible()
   })
 })
