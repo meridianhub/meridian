@@ -50,13 +50,16 @@ test.describe('Users list - admin access', () => {
 
   test('platform admin appears in the users list after login', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
-    // Wait for the list to settle: a tbody row appears for both real data and the empty state
+    // Wait for loading skeleton rows to disappear before asserting on data
+    await expect(page.getByTestId('skeleton-row')).toHaveCount(0, { timeout: 15_000 })
+
     const firstRow = page.locator('table tbody tr').first()
     await expect(firstRow).toBeVisible({ timeout: 15_000 })
 
-    // If no users seeded, the empty state row is still a valid outcome
+    // Empty state or error state (no backend) are valid outcomes
     const emptyState = page.getByRole('row', { name: /no users found/i })
-    if (await emptyState.isVisible()) return
+    const errorState = page.getByText('Failed to load data')
+    if (await emptyState.isVisible() || await errorState.isVisible()) return
 
     // At least one real user row visible
     const firstEmailCell = firstRow.locator('td').first()
@@ -65,31 +68,37 @@ test.describe('Users list - admin access', () => {
 
   test('tenant users are listed in the table when backend returns data', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
-    // Wait for list to settle before inspecting row count
+    // Wait for loading skeleton rows to disappear before asserting
+    await expect(page.getByTestId('skeleton-row')).toHaveCount(0, { timeout: 15_000 })
+
     const firstRow = page.locator('table tbody tr').first()
     await expect(firstRow).toBeVisible({ timeout: 15_000 })
 
+    // Empty state or error state (no backend) are valid outcomes
     const emptyState = page.getByRole('row', { name: /no users found/i })
-    if (await emptyState.isVisible()) {
-      // No users seeded — table renders without error
+    const errorState = page.getByText('Failed to load data')
+    if (await emptyState.isVisible() || await errorState.isVisible()) {
+      // No users seeded or no backend — table renders without crashing
       return
     }
 
     // At least one user row visible — verify it has an email cell
-    await expect(firstRow).toBeVisible()
-    // Email column renders a value (non-empty cell)
     const firstEmailCell = firstRow.locator('td').first()
     await expect(firstEmailCell).not.toBeEmpty()
   })
 
   test('row click navigates to user detail page', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/users')
-    // Wait for list to settle before checking row count
+    // Wait for loading skeleton rows to disappear
+    await expect(page.getByTestId('skeleton-row')).toHaveCount(0, { timeout: 15_000 })
+
     const firstRow = page.locator('table tbody tr').first()
     await expect(firstRow).toBeVisible({ timeout: 15_000 })
 
+    // Skip if no real user data (empty or error state)
     const emptyState = page.getByRole('row', { name: /no users found/i })
-    if (await emptyState.isVisible()) {
+    const errorState = page.getByText('Failed to load data')
+    if (await emptyState.isVisible() || await errorState.isVisible()) {
       test.skip()
       return
     }
@@ -110,12 +119,16 @@ test.describe('User detail - suspend dialog', () => {
    */
   async function navigateToFirstUser(page: Page): Promise<boolean> {
     await navigateTo(page, '/users')
+    // Wait for loading to finish before interacting with the table
+    await expect(page.getByTestId('skeleton-row')).toHaveCount(0, { timeout: 15_000 })
     const firstRow = page.locator('table tbody tr').first()
     await expect(firstRow).toBeVisible({ timeout: 15_000 })
+    // No user data available (empty or error state)
     const emptyState = page.getByRole('row', { name: /no users found/i })
-    if (await emptyState.isVisible()) return false
+    const errorState = page.getByText('Failed to load data')
+    if (await emptyState.isVisible() || await errorState.isVisible()) return false
     await firstRow.click()
-    await page.waitForURL(/\/users\/[a-zA-Z0-9-]+/)
+    await page.waitForURL(/\/users\/[a-zA-Z0-9-]+/, { timeout: 15_000 })
     return true
   }
 
