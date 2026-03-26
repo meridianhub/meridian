@@ -36,12 +36,15 @@ type failingOutboxRepo struct {
 func (r *failingOutboxRepo) Insert(_ context.Context, _ *gorm.DB, _ *events.EventOutbox) error {
 	return r.insertErr
 }
+
 func (r *failingOutboxRepo) FetchUnprocessed(_ context.Context, _ string, _ int) ([]events.EventOutbox, error) {
 	return nil, nil
 }
+
 func (r *failingOutboxRepo) FetchAndLockForProcessing(_ context.Context, _ string, _ int) ([]events.EventOutbox, error) {
 	return nil, nil
 }
+
 func (r *failingOutboxRepo) MarkProcessing(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
@@ -49,9 +52,11 @@ func (r *failingOutboxRepo) MarkCompleted(_ context.Context, _ uuid.UUID) error 
 func (r *failingOutboxRepo) MarkFailed(_ context.Context, _ uuid.UUID, _ error, _ int) error {
 	return nil
 }
+
 func (r *failingOutboxRepo) GetPendingCount(_ context.Context, _ string) (int64, error) {
 	return 0, nil
 }
+
 func (r *failingOutboxRepo) ResetStuckEntries(_ context.Context, _ string, _ time.Duration) (int64, error) {
 	return 0, nil
 }
@@ -71,12 +76,15 @@ func (r *countedOutboxRepo) Insert(_ context.Context, _ *gorm.DB, _ *events.Even
 	}
 	return nil
 }
+
 func (r *countedOutboxRepo) FetchUnprocessed(_ context.Context, _ string, _ int) ([]events.EventOutbox, error) {
 	return nil, nil
 }
+
 func (r *countedOutboxRepo) FetchAndLockForProcessing(_ context.Context, _ string, _ int) ([]events.EventOutbox, error) {
 	return nil, nil
 }
+
 func (r *countedOutboxRepo) MarkProcessing(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
@@ -84,9 +92,11 @@ func (r *countedOutboxRepo) MarkCompleted(_ context.Context, _ uuid.UUID) error 
 func (r *countedOutboxRepo) MarkFailed(_ context.Context, _ uuid.UUID, _ error, _ int) error {
 	return nil
 }
+
 func (r *countedOutboxRepo) GetPendingCount(_ context.Context, _ string) (int64, error) {
 	return 0, nil
 }
+
 func (r *countedOutboxRepo) ResetStuckEntries(_ context.Context, _ string, _ time.Duration) (int64, error) {
 	return 0, nil
 }
