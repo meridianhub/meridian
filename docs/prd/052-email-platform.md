@@ -184,9 +184,9 @@ The outbox pattern guarantees emails survive crashes. The worker polls
 the outbox independently and delivers via Resend.
 
 **Cross-service write model**: Meridian uses database-per-service (ADR
-003). The email outbox migration lives in `services/notification/` but
-the outbox table is added to **each originating service's database** via
-shared migration files. This preserves same-transaction writes:
+003). The email outbox migration files live in
+`shared/pkg/email/migrations/` and are applied to **each originating
+service's database**. This preserves same-transaction writes:
 
 - **payment-order DB**: Gets `email_outbox` + `email_audit_log` tables.
   Invoice generator writes outbox row in the same transaction as invoice
@@ -194,15 +194,15 @@ shared migration files. This preserves same-transaction writes:
 - **reference-data DB**: Gets the same tables. Saga handler
   (`notification.send`) writes outbox row as part of saga step
   execution. Same-transaction guarantee via saga runtime.
-- **Email worker**: Polls outbox tables across all service databases.
-  Configured with connection strings for each DB that has email tables.
+- **Email worker**: One `dispatch.Worker[EmailOutboxRow]` instance per
+  service database. The unified binary (`cmd/meridian/main.go`) creates
+  one worker per DB connection that has email tables, each with its own
+  `InstructionFetcher`. This matches how the existing event outbox
+  worker operates - one worker per service DB, all hosted in the same
+  process.
 
 The outbox repository lives in `shared/pkg/email/outbox.go` as a shared
-package. Each service imports it and connects it to its own DB. The
-worker aggregates across databases.
-
-This matches the existing event outbox pattern where each service has
-its own outbox table polled by a shared worker.
+package. Each service imports it and connects it to its own DB.
 
 **Delivery guarantee**: At-least-once from Meridian. The idempotency key is
 forwarded as Resend's `Idempotency-Key` header, so Resend deduplicates on
