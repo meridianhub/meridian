@@ -247,6 +247,28 @@ describe('useInvoiceDetail', () => {
     renderHook(() => useInvoiceDetail(undefined), { wrapper: createWrapper() })
     expect(mockGetInvoice).not.toHaveBeenCalled()
   })
+
+  it('returns null on NotFound error', async () => {
+    mockGetInvoice.mockRejectedValue(new ConnectError('not found', Code.NotFound))
+
+    const { result } = renderHook(() => useInvoiceDetail('inv-1'), {
+      wrapper: createWrapper(),
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBeNull()
+  })
+
+  it('returns null on Unimplemented error', async () => {
+    mockGetInvoice.mockRejectedValue(new ConnectError('unimplemented', Code.Unimplemented))
+
+    const { result } = renderHook(() => useInvoiceDetail('inv-1'), {
+      wrapper: createWrapper(),
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBeNull()
+  })
 })
 
 describe('useInvoiceEmails', () => {

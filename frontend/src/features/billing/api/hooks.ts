@@ -9,7 +9,9 @@ import type { Timestamp } from '@bufbuild/protobuf/wkt'
 
 function timestampToISO(ts?: Timestamp): string {
   if (!ts) return ''
-  return new Date(Number(ts.seconds) * 1000).toISOString()
+  return new Date(
+    Number(ts.seconds) * 1000 + Math.trunc((ts.nanos ?? 0) / 1_000_000),
+  ).toISOString()
 }
 
 function billingRunStatus(raw: unknown): BillingRun['status'] {
@@ -157,27 +159,37 @@ export function useInvoiceDetail(invoiceId: string | undefined) {
   return useQuery({
     queryKey: tenantKeys.invoice(tenantSlug ?? '', invoiceId ?? ''),
     queryFn: async (): Promise<Invoice | null> => {
-      const response = await clients.billing.getInvoice({ id: invoiceId ?? '' })
-      const inv = response.invoice
-      if (!inv) return null
-      return {
-        id: inv.id ?? '',
-        billingRunId: inv.billingRunId ?? '',
-        partyId: inv.partyId ?? '',
-        invoiceNumber: inv.invoiceNumber ?? '',
-        lineItems: (inv.lineItems ?? []).map((li) => ({
-          description: li.description ?? '',
-          quantity: li.quantity ?? '',
-          unitPriceCents: Number(li.unitPriceCents ?? 0),
-          totalCents: Number(li.totalCents ?? 0),
-          valuationAnalysis: li.valuationAnalysis as Record<string, unknown> | undefined,
-        })),
-        subtotalCents: Number(inv.subtotalCents ?? 0),
-        currency: inv.currency ?? '',
-        status: invoiceStatus(inv.status),
-        dueDate: inv.dueDate || undefined,
-        createdAt: timestampToISO(inv.createdAt),
-        updatedAt: timestampToISO(inv.updatedAt),
+      try {
+        const response = await clients.billing.getInvoice({ id: invoiceId ?? '' })
+        const inv = response.invoice
+        if (!inv) return null
+        return {
+          id: inv.id ?? '',
+          billingRunId: inv.billingRunId ?? '',
+          partyId: inv.partyId ?? '',
+          invoiceNumber: inv.invoiceNumber ?? '',
+          lineItems: (inv.lineItems ?? []).map((li) => ({
+            description: li.description ?? '',
+            quantity: li.quantity ?? '',
+            unitPriceCents: Number(li.unitPriceCents ?? 0),
+            totalCents: Number(li.totalCents ?? 0),
+            valuationAnalysis: li.valuationAnalysis as Record<string, unknown> | undefined,
+          })),
+          subtotalCents: Number(inv.subtotalCents ?? 0),
+          currency: inv.currency ?? '',
+          status: invoiceStatus(inv.status),
+          dueDate: inv.dueDate || undefined,
+          createdAt: timestampToISO(inv.createdAt),
+          updatedAt: timestampToISO(inv.updatedAt),
+        }
+      } catch (error) {
+        if (
+          error instanceof ConnectError &&
+          (error.code === Code.NotFound || error.code === Code.Unimplemented)
+        ) {
+          return null
+        }
+        throw error
       }
     },
     enabled: Boolean(tenantSlug && invoiceId),
@@ -194,19 +206,29 @@ export function useInvoiceEmails(invoiceId: string | undefined) {
   return useQuery({
     queryKey: tenantKeys.invoiceEmails(tenantSlug ?? '', invoiceId ?? ''),
     queryFn: async (): Promise<InvoiceEmail[]> => {
-      const response = await clients.billing.listInvoiceEmails({
-        invoiceId: invoiceId ?? '',
-        pagination: { pageSize: 100, pageToken: '' },
-      })
-      return (response.emails ?? []).map((email) => ({
-        idempotencyKey: email.idempotencyKey ?? '',
-        templateName: email.templateName ?? '',
-        toAddresses: email.toAddresses ?? [],
-        status: emailStatus(email.status),
-        sentAt: email.sentAt ? timestampToISO(email.sentAt) : undefined,
-        deliveredAt: email.deliveredAt ? timestampToISO(email.deliveredAt) : undefined,
-        bounceReason: email.bounceReason || undefined,
-      }))
+      try {
+        const response = await clients.billing.listInvoiceEmails({
+          invoiceId: invoiceId ?? '',
+          pagination: { pageSize: 100, pageToken: '' },
+        })
+        return (response.emails ?? []).map((email) => ({
+          idempotencyKey: email.idempotencyKey ?? '',
+          templateName: email.templateName ?? '',
+          toAddresses: email.toAddresses ?? [],
+          status: emailStatus(email.status),
+          sentAt: email.sentAt ? timestampToISO(email.sentAt) : undefined,
+          deliveredAt: email.deliveredAt ? timestampToISO(email.deliveredAt) : undefined,
+          bounceReason: email.bounceReason || undefined,
+        }))
+      } catch (error) {
+        if (
+          error instanceof ConnectError &&
+          (error.code === Code.NotFound || error.code === Code.Unimplemented)
+        ) {
+          return []
+        }
+        throw error
+      }
     },
     enabled: Boolean(tenantSlug && invoiceId),
   })
