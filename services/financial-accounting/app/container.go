@@ -89,47 +89,49 @@ type Container struct {
 }
 
 // NewContainer creates and initializes a new dependency injection container.
-func NewContainer(ctx context.Context, logger *slog.Logger, version string) (_ *Container, err error) {
+func NewContainer(ctx context.Context, logger *slog.Logger, version string) (*Container, error) {
 	c := &Container{
 		Logger: logger,
 	}
 
 	// If initialization fails partway, close already-initialized resources.
+	succeeded := false
 	defer func() {
-		if err != nil {
-			c.Close()
+		if !succeeded {
+			c.Close() //nolint:contextcheck // Close manages its own shutdown contexts
 		}
 	}()
 
-	if err = c.initTracer(ctx, version); err != nil {
+	if err := c.initTracer(ctx, version); err != nil {
 		return nil, err
 	}
 
-	if err = c.initDatabase(ctx); err != nil {
+	if err := c.initDatabase(ctx); err != nil {
 		return nil, err
 	}
 
 	c.initAuditPublisher()
 	c.initRepositories()
 
-	if err = c.initKafka(ctx); err != nil {
+	if err := c.initKafka(ctx); err != nil {
 		return nil, err
 	}
 
-	if err = c.initBankCashAccount(); err != nil {
+	if err := c.initBankCashAccount(); err != nil {
 		return nil, err
 	}
 
-	if err = c.initRedis(ctx); err != nil {
+	if err := c.initRedis(ctx); err != nil {
 		return nil, err
 	}
 
 	c.initReferenceDataClient(ctx)
 
-	if err = c.initAuth(ctx); err != nil {
+	if err := c.initAuth(ctx); err != nil {
 		return nil, err
 	}
 
+	succeeded = true
 	logger.Info("dependency container initialized successfully")
 	return c, nil
 }

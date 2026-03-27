@@ -111,53 +111,55 @@ type Container struct {
 // It initializes infrastructure, repositories, external clients, messaging,
 // and background workers in dependency order. The caller is responsible for
 // calling Close when the container is no longer needed.
-func NewContainer(ctx context.Context, cfg *config.ServiceConfig, logger *slog.Logger, version string) (_ *Container, err error) {
+func NewContainer(ctx context.Context, cfg *config.ServiceConfig, logger *slog.Logger, version string) (*Container, error) {
 	c := &Container{
 		Config: cfg,
 		Logger: logger,
 	}
 
 	// If initialization fails partway, close already-initialized resources.
+	succeeded := false
 	defer func() {
-		if err != nil {
-			c.Close()
+		if !succeeded {
+			c.Close() //nolint:contextcheck // Close manages its own shutdown contexts
 		}
 	}()
 
-	if err = c.initTracer(ctx, version); err != nil {
+	if err := c.initTracer(ctx, version); err != nil {
 		return nil, err
 	}
 
-	if err = c.initDatabase(ctx); err != nil {
+	if err := c.initDatabase(ctx); err != nil {
 		return nil, err
 	}
 
 	c.initRepositories()
 
-	if err = c.initExternalClients(ctx); err != nil {
+	if err := c.initExternalClients(ctx); err != nil {
 		return nil, err
 	}
 
-	if err = c.initPaymentGateway(); err != nil { //nolint:contextcheck // gateway client.New manages its own connection
+	if err := c.initPaymentGateway(); err != nil { //nolint:contextcheck // gateway client.New manages its own connection
 		return nil, err
 	}
 
 	c.initKafka(ctx)
 
-	if err = c.initRedis(ctx); err != nil {
+	if err := c.initRedis(ctx); err != nil {
 		return nil, err
 	}
 
 	c.initHandlerRegistry(ctx)
 
-	if err = c.initBillingWorkers(ctx); err != nil {
+	if err := c.initBillingWorkers(ctx); err != nil {
 		return nil, err
 	}
 
-	if err = c.initAuth(ctx); err != nil {
+	if err := c.initAuth(ctx); err != nil {
 		return nil, err
 	}
 
+	succeeded = true
 	logger.Info("dependency container initialized successfully")
 	return c, nil
 }
