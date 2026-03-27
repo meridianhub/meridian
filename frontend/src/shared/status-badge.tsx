@@ -38,6 +38,16 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   COEFFICIENT: 'info',
   ACTUAL: 'success',
   REVISED: 'info',
+  // Invoice statuses
+  ISSUED: 'info',
+  PAID: 'success',
+  VOID: 'neutral',
+  OVERDUE: 'error',
+  // Email delivery statuses
+  SENT: 'info',
+  DELIVERED: 'success',
+  BOUNCED: 'error',
+  DEAD_LETTER: 'error',
 }
 
 const VARIANT_STYLES: Record<StatusVariant, string> = {
