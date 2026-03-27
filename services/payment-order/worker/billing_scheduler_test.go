@@ -125,6 +125,26 @@ func (m *mockBillingRepo) UpdateInvoice(_ context.Context, inv *domain.Invoice) 
 	return nil
 }
 
+func (m *mockBillingRepo) ListBillingRuns(_ context.Context, _ persistence.BillingRunFilter, _ int, _ string) (*persistence.BillingRunPage, error) {
+	return &persistence.BillingRunPage{}, nil
+}
+
+func (m *mockBillingRepo) ListInvoices(_ context.Context, _ persistence.InvoiceFilter, _ int, _ string) (*persistence.InvoicePage, error) {
+	return &persistence.InvoicePage{}, nil
+}
+
+func (m *mockBillingRepo) CountInvoicesByBillingRun(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockBillingRepo) SumInvoiceTotalsByBillingRun(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockBillingRepo) ListEmailsByInvoice(_ context.Context, _ uuid.UUID) ([]*persistence.EmailAuditEntry, error) {
+	return nil, nil
+}
+
 func (m *mockBillingRepo) getRunCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
