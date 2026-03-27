@@ -1,0 +1,14 @@
+{{.TenantName}} - Verify your email address
+
+Please verify your email address to activate your account.
+
+Verification link: {{.VerificationLink}}
+
+This link expires in 24 hours.
+
+If you did not create an account, you can safely ignore this email.
+
+Need help? Contact us at {{.SupportEmail}}.
+
+--
+Meridian - The Operating System for the Real-World Economy

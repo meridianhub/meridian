@@ -20,4 +20,6 @@ var (
 	ErrInsufficientRolePermissions = errors.New("insufficient permissions to grant this role")
 	ErrVersionConflict             = errors.New("version conflict: resource was modified by another transaction")
 	ErrTenantIDRequired            = errors.New("tenant ID is required")
+	ErrNotPendingVerification      = errors.New("identity is not in PENDING_VERIFICATION status")
+	ErrEmailNotVerified            = errors.New("email address has not been verified")
 )

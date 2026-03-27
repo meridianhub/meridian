@@ -309,3 +309,70 @@ func TestNewIdentity_EmptyTenantID_ReturnsError(t *testing.T) {
 	assert.Nil(t, identity)
 	assert.ErrorIs(t, err, ErrTenantIDRequired)
 }
+
+func TestNewSelfRegisteredIdentity_VerificationRequired(t *testing.T) {
+	id, err := NewSelfRegisteredIdentity(testTenantID, "self@example.com", true)
+	require.NoError(t, err)
+	assert.NotEqual(t, uuid.Nil, id.ID())
+	assert.Equal(t, "self@example.com", id.Email())
+	assert.Equal(t, IdentityStatusPendingVerification, id.Status())
+	assert.Equal(t, int64(1), id.Version())
+	assert.NotZero(t, id.CreatedAt())
+	assert.NotZero(t, id.UpdatedAt())
+}
+
+func TestNewSelfRegisteredIdentity_VerificationNotRequired(t *testing.T) {
+	id, err := NewSelfRegisteredIdentity(testTenantID, "self@example.com", false)
+	require.NoError(t, err)
+	assert.Equal(t, IdentityStatusActive, id.Status())
+}
+
+func TestNewSelfRegisteredIdentity_InvalidEmail(t *testing.T) {
+	_, err := NewSelfRegisteredIdentity(testTenantID, "not-an-email", true)
+	assert.ErrorIs(t, err, ErrInvalidEmail)
+}
+
+func TestNewSelfRegisteredIdentity_EmptyTenantID(t *testing.T) {
+	_, err := NewSelfRegisteredIdentity("", "self@example.com", true)
+	assert.ErrorIs(t, err, ErrTenantIDRequired)
+}
+
+func TestIdentity_Verify_FromPendingVerification(t *testing.T) {
+	id, err := NewSelfRegisteredIdentity(testTenantID, "self@example.com", true)
+	require.NoError(t, err)
+	require.Equal(t, IdentityStatusPendingVerification, id.Status())
+
+	versionBefore := id.Version()
+	err = id.Verify()
+	require.NoError(t, err)
+	assert.Equal(t, IdentityStatusActive, id.Status())
+	assert.Greater(t, id.Version(), versionBefore)
+}
+
+func TestIdentity_Verify_FromWrongStatus(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Identity)
+	}{
+		{name: "active", setup: func(id *Identity) { _ = id.Activate() }},
+		{name: "pending invite", setup: func(_ *Identity) {}},
+		{name: "suspended", setup: func(id *Identity) { _ = id.Activate(); _ = id.Suspend() }},
+		{name: "locked", setup: func(id *Identity) { _ = id.Activate(); _ = id.Lock() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, err := NewIdentity(testTenantID, "user@example.com")
+			require.NoError(t, err)
+			tt.setup(id)
+			err = id.Verify()
+			assert.ErrorIs(t, err, ErrNotPendingVerification)
+		})
+	}
+}
+
+func TestIdentity_RecordLoginAttempt_RejectsPendingVerification(t *testing.T) {
+	id, err := NewSelfRegisteredIdentity(testTenantID, "self@example.com", true)
+	require.NoError(t, err)
+	err = id.RecordLoginAttempt(false)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
