@@ -72,6 +72,8 @@ enum IdentityStatus {
   IDENTITY_STATUS_SUSPENDED = 3;
   // IDENTITY_STATUS_LOCKED means the identity has been locked due to excessive failed authentication attempts.
   IDENTITY_STATUS_LOCKED = 4;
+  // IDENTITY_STATUS_PENDING_VERIFICATION means the identity has self-registered but has not yet verified their email address.
+  IDENTITY_STATUS_PENDING_VERIFICATION = 5;
 }
 
 // Role defines the set of predefined roles that can be assigned to an identity.

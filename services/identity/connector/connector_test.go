@@ -520,3 +520,17 @@ func TestLogin_TenantContextPropagation(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestLogin_PendingVerificationAccount_ReturnsErrEmailNotVerified(t *testing.T) {
+	id, err := domain.NewSelfRegisteredIdentity(connTestTID, "unverified@example.com", true)
+	require.NoError(t, err)
+
+	repo := &mockRepo{identity: id}
+	c := newConnector(t, repo)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Login(ctx, nil, "unverified@example.com", testPassword)
+
+	assert.False(t, valid)
+	assert.ErrorIs(t, err, domain.ErrEmailNotVerified)
+}

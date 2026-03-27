@@ -42,3 +42,40 @@ type AccountFrozenData struct {
 	FrozenReason   string
 	SupportContact string
 }
+
+// VerifyEmailData holds the data required to render an email verification email.
+type VerifyEmailData struct {
+	TenantName       string
+	VerificationLink string
+	SupportEmail     string
+}
+
+// PasswordResetData holds the data required to render a password reset email.
+type PasswordResetData struct {
+	TenantName   string
+	ResetLink    string
+	SupportEmail string
+}
+
+// InviteUserData holds the data required to render a user invitation email.
+type InviteUserData struct {
+	TenantName   string
+	TenantSlug   string
+	InviterEmail string
+	AcceptLink   string
+	SupportEmail string
+}
+
+// WelcomeData holds the data required to render a welcome email.
+type WelcomeData struct {
+	TenantName        string
+	LoginURL          string
+	GettingStartedURL string
+}
+
+// AccountLockoutData holds the data required to render an account lockout email.
+type AccountLockoutData struct {
+	TenantName   string
+	SupportEmail string
+	LockoutTime  string
+}
