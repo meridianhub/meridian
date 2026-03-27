@@ -101,40 +101,9 @@ func runPaygFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) err
 
 	// 3. Resolve DNO and GSP parties, register party hierarchy.
 	fmt.Println("\n--- Register Party Hierarchy (DNO -> GSP -> Customer) ---")
-	dnoPartyID, err := resolveOrganizationPartyID(tCtx, conn, "SEPD")
-	if err != nil {
-		return fmt.Errorf("resolve DNO party: %w", err)
+	if err := registerPartyHierarchy(tCtx, conn, supplierPartyID, customerPartyIDs); err != nil {
+		return fmt.Errorf("register party hierarchy: %w", err)
 	}
-	fmt.Printf("  DNO party ID: %s (SEPD)\n", dnoPartyID)
-
-	gspExtRefs := []string{"GSPSOUT", "GSPSEEB", "GSPSWAE", "GSPWMID"}
-	gspPartyIDs := make([]string, len(gspExtRefs))
-	for i, ref := range gspExtRefs {
-		gspPartyIDs[i], err = resolveOrganizationPartyID(tCtx, conn, ref)
-		if err != nil {
-			return fmt.Errorf("resolve GSP %s: %w", ref, err)
-		}
-	}
-
-	// Register associations:
-	//   - Customer -> Supplier (energy supply relationship)
-	//   - Customer -> DNO (network customer)
-	//   - DNO -> GSP (DNO operates GSP areas)
-	// Note: GSP association is via the MPAN (meter location), not the customer.
-	// A customer may have MPANs in multiple GSP areas. The kWh consumption
-	// accounts carry the GSP context via their account metadata, enabling
-	// aggregation queries like "consumption by GSP" without a direct
-	// customer -> GSP party link.
-	partyClient := partyv1.NewPartyServiceClient(conn)
-	for _, custPartyID := range customerPartyIDs {
-		_ = registerAssociationIdempotent(tCtx, partyClient, custPartyID, supplierPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
-		_ = registerAssociationIdempotent(tCtx, partyClient, custPartyID, dnoPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
-	}
-	for _, gspPartyID := range gspPartyIDs {
-		_ = registerAssociationIdempotent(tCtx, partyClient, dnoPartyID, gspPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
-	}
-	fmt.Printf("  Registered: %d customer->supplier, %d customer->DNO, %d DNO->GSP associations\n",
-		len(customerPartyIDs), len(customerPartyIDs), len(gspPartyIDs))
 
 	// 4. Create prepayment and consumption accounts (GBP billing + kWh tracking per fuel).
 	fmt.Println("\n--- Create Customer Accounts ---")
@@ -196,6 +165,40 @@ func registerPaygCustomers(ctx context.Context, conn *grpc.ClientConn) ([]string
 	}
 
 	return partyIDs, nil
+}
+
+// ─── Party Hierarchy ────────────────────────────────────────────────────────
+
+// registerPartyHierarchy resolves the DNO and GSP parties, then registers
+// associations: Customer -> Supplier, Customer -> DNO, DNO -> GSP.
+// GSP association is via the MPAN (meter location), not the customer.
+func registerPartyHierarchy(ctx context.Context, conn *grpc.ClientConn, supplierPartyID string, customerPartyIDs []string) error {
+	dnoPartyID, err := resolveOrganizationPartyID(ctx, conn, "SEPD")
+	if err != nil {
+		return fmt.Errorf("resolve DNO party: %w", err)
+	}
+	fmt.Printf("  DNO party ID: %s (SEPD)\n", dnoPartyID)
+
+	gspExtRefs := []string{"GSPSOUT", "GSPSEEB", "GSPSWAE", "GSPWMID"}
+	gspPartyIDs := make([]string, len(gspExtRefs))
+	for i, ref := range gspExtRefs {
+		gspPartyIDs[i], err = resolveOrganizationPartyID(ctx, conn, ref)
+		if err != nil {
+			return fmt.Errorf("resolve GSP %s: %w", ref, err)
+		}
+	}
+
+	partyClient := partyv1.NewPartyServiceClient(conn)
+	for _, custPartyID := range customerPartyIDs {
+		_ = registerAssociationIdempotent(ctx, partyClient, custPartyID, supplierPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
+		_ = registerAssociationIdempotent(ctx, partyClient, custPartyID, dnoPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
+	}
+	for _, gspPartyID := range gspPartyIDs {
+		_ = registerAssociationIdempotent(ctx, partyClient, dnoPartyID, gspPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
+	}
+	fmt.Printf("  Registered: %d customer->supplier, %d customer->DNO, %d DNO->GSP associations\n",
+		len(customerPartyIDs), len(customerPartyIDs), len(gspPartyIDs))
+	return nil
 }
 
 // ─── Account Creation ───────────────────────────────────────────────────────
@@ -376,31 +379,37 @@ func seedWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 
 // ─── Consumption Billing Seeding ────────────────────────────────────────────
 
+// Block tariff rates (ex-VAT for billing, since prepayment balance is net-of-VAT).
+const (
+	elecFirstRate = 0.49381 // 51.85p / 1.05 = 49.381p ex-VAT
+	elecSaverRate = 0.24771 // 26.010p / 1.05 = 24.771p ex-VAT
+	gasFirstRate  = 0.22243 // 23.355p / 1.05 = 22.243p ex-VAT
+	gasSaverRate  = 0.05915 // 6.211p / 1.05 = 5.915p ex-VAT
+	blockThreshold = 2.0    // kWh daily block threshold
+)
+
+// blockTariffCharge calculates the GBP charge for a given kWh consumption
+// using the two-tier block tariff: first blockThreshold kWh at first rate,
+// remainder at saver rate.
+func blockTariffCharge(kwh, firstRate, saverRate float64) (firstKwh, saverKwh, charge float64) {
+	firstKwh = math.Min(kwh, blockThreshold)
+	saverKwh = math.Max(kwh-blockThreshold, 0)
+	charge = firstKwh*firstRate + saverKwh*saverRate
+	return firstKwh, saverKwh, charge
+}
+
 // seedPaygBilling seeds 30 days of GBP billing for each customer.
 // Applies the block tariff logic: first 2 kWh at First Rate, remainder at Saver Rate.
 // Gas usage is ~60% of electricity kWh for a typical dual-fuel household.
 func seedPaygBilling(ctx context.Context, conn *grpc.ClientConn, customerPartyIDs []string) error {
 	client := currentaccountv1.NewCurrentAccountServiceClient(conn)
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic
-
-	// Block tariff rates (ex-VAT for billing, since prepayment balance is net-of-VAT)
-	const (
-		elecFirstRate = 0.49381 // 51.85p / 1.05 = 49.381p ex-VAT
-		elecSaverRate = 0.24771 // 26.010p / 1.05 = 24.771p ex-VAT
-		gasFirstRate  = 0.22243 // 23.355p / 1.05 = 22.243p ex-VAT
-		gasSaverRate  = 0.05915 // 6.211p / 1.05 = 5.915p ex-VAT
-		threshold     = 2.0     // kWh daily block threshold
-	)
-
 	now := time.Now().UTC()
 
 	for i, partyID := range customerPartyIDs {
 		cust := paygCustomers[i]
-		totalElecGBP := 0.0
-		totalGasGBP := 0.0
-
-		// Find the customer's electricity account ID
 		custRef := fmt.Sprintf("CUST%03d", i+1)
+
 		elecAccountID, err := findAccountByExternalID(ctx, client, fmt.Sprintf("PPM-ELEC-%s", custRef))
 		if err != nil {
 			return fmt.Errorf("find elec account for %s: %w", cust.legalName, err)
@@ -410,44 +419,46 @@ func seedPaygBilling(ctx context.Context, conn *grpc.ClientConn, customerPartyID
 			return fmt.Errorf("find gas account for %s: %w", cust.legalName, err)
 		}
 
-		for day := 30; day >= 1; day-- {
-			date := now.AddDate(0, 0, -day)
-			dailyVariation := 0.7 + rng.Float64()*0.6 // 70-130% of average
-
-			// Electricity consumption with block tariff
-			elecKwh := cust.dailyKwhAvg * dailyVariation
-			elecFirstKwh := math.Min(elecKwh, threshold)
-			elecSaverKwh := math.Max(elecKwh-threshold, 0)
-			elecCharge := elecFirstKwh*elecFirstRate + elecSaverKwh*elecSaverRate
-			totalElecGBP += elecCharge
-
-			ref := fmt.Sprintf("ELEC-%s-%s", partyID, date.Format("20060102"))
-			desc := fmt.Sprintf("Electricity %s: %.1fkWh (%.1f@first + %.1f@saver) = £%.2f",
-				date.Format("2006-01-02"), elecKwh, elecFirstKwh, elecSaverKwh, elecCharge)
-
-			if err := depositIdempotent(ctx, client, elecAccountID, elecCharge, "GBP", desc, ref, ""); err != nil {
-				return fmt.Errorf("deposit elec for %s day %d: %w", cust.legalName, day, err)
-			}
-
-			// Gas consumption with block tariff (~60% of elec kWh, different rates)
-			gasKwh := elecKwh * (0.5 + rng.Float64()*0.3) // 50-80% of elec
-			gasFirstKwh := math.Min(gasKwh, threshold)
-			gasSaverKwh := math.Max(gasKwh-threshold, 0)
-			gasCharge := gasFirstKwh*gasFirstRate + gasSaverKwh*gasSaverRate
-			totalGasGBP += gasCharge
-
-			gasRef := fmt.Sprintf("GAS-%s-%s", partyID, date.Format("20060102"))
-			gasDesc := fmt.Sprintf("Gas %s: %.1fkWh (%.1f@first + %.1f@saver) = £%.2f",
-				date.Format("2006-01-02"), gasKwh, gasFirstKwh, gasSaverKwh, gasCharge)
-
-			if err := depositIdempotent(ctx, client, gasAccountID, gasCharge, "GBP", gasDesc, gasRef, ""); err != nil {
-				return fmt.Errorf("deposit gas for %s day %d: %w", cust.legalName, day, err)
-			}
+		totalElecGBP, totalGasGBP, err := seedCustomerBilling(ctx, client, cust, partyID, elecAccountID, gasAccountID, now, rng)
+		if err != nil {
+			return err
 		}
-
 		fmt.Printf("  %s: Elec £%.2f + Gas £%.2f = £%.2f (30 days, avg %.0f kWh/day elec)\n",
 			cust.legalName, totalElecGBP, totalGasGBP, totalElecGBP+totalGasGBP, cust.dailyKwhAvg)
 	}
 
 	return nil
+}
+
+// seedCustomerBilling seeds 30 days of dual-fuel billing for a single customer.
+func seedCustomerBilling(ctx context.Context, client currentaccountv1.CurrentAccountServiceClient, cust paygCustomer, partyID, elecAccountID, gasAccountID string, now time.Time, rng *rand.Rand) (totalElecGBP, totalGasGBP float64, err error) {
+	for day := 30; day >= 1; day-- {
+		date := now.AddDate(0, 0, -day)
+		dailyVariation := 0.7 + rng.Float64()*0.6
+
+		// Electricity
+		elecKwh := cust.dailyKwhAvg * dailyVariation
+		elecFirstKwh, elecSaverKwh, elecCharge := blockTariffCharge(elecKwh, elecFirstRate, elecSaverRate)
+		totalElecGBP += elecCharge
+
+		ref := fmt.Sprintf("ELEC-%s-%s", partyID, date.Format("20060102"))
+		desc := fmt.Sprintf("Electricity %s: %.1fkWh (%.1f@first + %.1f@saver) = £%.2f",
+			date.Format("2006-01-02"), elecKwh, elecFirstKwh, elecSaverKwh, elecCharge)
+		if err := depositIdempotent(ctx, client, elecAccountID, elecCharge, "GBP", desc, ref, ""); err != nil {
+			return 0, 0, fmt.Errorf("deposit elec for %s day %d: %w", cust.legalName, day, err)
+		}
+
+		// Gas (~50-80% of elec kWh, different rates)
+		gasKwh := elecKwh * (0.5 + rng.Float64()*0.3)
+		gasFirstKwh, gasSaverKwh, gasCharge := blockTariffCharge(gasKwh, gasFirstRate, gasSaverRate)
+		totalGasGBP += gasCharge
+
+		gasRef := fmt.Sprintf("GAS-%s-%s", partyID, date.Format("20060102"))
+		gasDesc := fmt.Sprintf("Gas %s: %.1fkWh (%.1f@first + %.1f@saver) = £%.2f",
+			date.Format("2006-01-02"), gasKwh, gasFirstKwh, gasSaverKwh, gasCharge)
+		if err := depositIdempotent(ctx, client, gasAccountID, gasCharge, "GBP", gasDesc, gasRef, ""); err != nil {
+			return 0, 0, fmt.Errorf("deposit gas for %s day %d: %w", cust.legalName, day, err)
+		}
+	}
+	return totalElecGBP, totalGasGBP, nil
 }
