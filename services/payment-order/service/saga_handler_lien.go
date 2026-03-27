@@ -173,7 +173,6 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 			}
 			return nil
 		})
-
 		if err != nil {
 			// Record retry exhaustion metric - indicates payment may require manual reconciliation
 			poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeExhausted)
