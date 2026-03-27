@@ -25,21 +25,12 @@ const (
 // Each entry must be removed when the file is split to comply.
 // Do NOT add new entries — split large files instead.
 var knownOversizedFiles = map[string]bool{
-	"services/control-plane/internal/applier/grpc_handler.go":               true,
-	"services/control-plane/internal/generator/validate_fix.go":             true,
-	"services/identity/service/server.go":                                   true,
-	"services/internal-account/service/server.go":                           true,
-	"services/market-information/service/observation_service.go":            true,
-	"services/mcp-server/internal/tools/economy.go":                         true,
-	"services/mcp-server/internal/tools/refdata.go":                         true,
-	"services/party/adapters/persistence/repository.go":                     true,
-	"services/position-keeping/adapters/persistence/position_repository.go": true,
-	"services/reconciliation/service/server.go":                             true,
-	"services/reference-data/handler/account_type_handler.go":               true,
-	"services/reference-data/registry/postgres_registry.go":                 true,
-	"services/reference-data/saga/grpc_handler.go":                          true,
-	"services/reference-data/saga/postgres_registry.go":                     true,
-	"shared/pkg/saga/schema/schema.go":                                      true,
+	"services/identity/service/server.go":                        true,
+	"services/market-information/service/observation_service.go": true,
+	"services/mcp-server/internal/tools/economy.go":              true,
+	"services/mcp-server/internal/tools/refdata.go":              true,
+	"services/party/adapters/persistence/repository.go":          true,
+	"shared/pkg/saga/schema/schema.go":                           true,
 }
 
 // TestFileSize validates that no non-test, non-generated Go file exceeds maxFileLines.
