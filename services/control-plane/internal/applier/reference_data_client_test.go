@@ -98,8 +98,8 @@ func (f *fakeAccountTypeServer) DeprecateAccountType(_ context.Context, req *ref
 
 type fakeSagaRegistryServer struct {
 	sagav1.UnimplementedSagaRegistryServiceServer
-	createDraftFn  func(context.Context, *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error)
-	getActiveFn    func(context.Context, *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error)
+	createDraftFn func(context.Context, *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error)
+	getActiveFn   func(context.Context, *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error)
 }
 
 func (f *fakeSagaRegistryServer) CreateSagaDraft(ctx context.Context, req *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
