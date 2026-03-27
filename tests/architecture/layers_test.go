@@ -45,6 +45,7 @@ var knownCrossServiceDomainImports = map[string]bool{
 	"services/current-account/service/deposit_orchestrator.go":              true,
 	"services/current-account/service/fungibility_validator.go":             true,
 	"services/current-account/service/grpc_account_endpoints.go":            true,
+	"services/current-account/service/validators.go":                        true,
 	"services/current-account/service/server.go":                            true,
 	"services/current-account/service/withdrawal_orchestrator.go":           true,
 	"services/event-router/adapters/grpc/position_keeping_client.go":        true,
