@@ -26,7 +26,7 @@ accountTypes:
     normalBalance: NORMAL_BALANCE_DEBIT
     allowedInstruments: [GBP]
     policies:
-      validation: "amount >= 0 && amount <= 15"
+      validation: "amount >= 0"
       bucketing: "attributes.fuel_type"
 
   - code: POWER_UP_RECEIVABLE
@@ -42,7 +42,7 @@ accountTypes:
     normalBalance: NORMAL_BALANCE_DEBIT
     allowedInstruments: [GBP]
     policies:
-      validation: "amount > 0"
+      validation: "amount >= 0"
       bucketing: ""
 
   - code: REVENUE_ENERGY
@@ -66,7 +66,7 @@ accountTypes:
     normalBalance: NORMAL_BALANCE_DEBIT
     allowedInstruments: [KWH_ELEC, KWH_GAS]
     policies:
-      validation: "amount > 0"
+      validation: "amount >= 0"
       bucketing: "instrument_code + ':' + attributes.settlement_period + ':' + attributes.mpxn"
 
   - code: ENERGY_SUPPLY_POOL

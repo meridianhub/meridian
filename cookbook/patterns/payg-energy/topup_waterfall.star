@@ -94,7 +94,7 @@ def execute_topup():
     if amount_pence <= 0:
         return {"status": "VALIDATION_ERROR", "reason": "amount must be positive"}
 
-    customer = reference_data.get_account(id="PREPAYMENT_LIABILITY:" + party_id)
+    customer = reference_data.get_account(id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type)
     if not customer:
         return {"status": "VALIDATION_ERROR", "reason": "customer not found"}
 
@@ -102,7 +102,7 @@ def execute_topup():
     step(name="check_idempotency")
     existing = position_keeping.query_logs(
         correlation_id=payment_ref,
-        position_id="PREPAYMENT_LIABILITY:" + party_id,
+        position_id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type,
     )
     if existing.count > 0:
         return {"status": "ALREADY_PROCESSED", "correlation_id": payment_ref}
@@ -187,7 +187,7 @@ def execute_topup():
     if allocatable > Decimal("0"):
         step(name="credit_prepayment")
         position_keeping.initiate_log(
-            position_id="PREPAYMENT_LIABILITY:" + party_id,
+            position_id="PREPAYMENT_LIABILITY:" + party_id + ":" + fuel_type,
             instrument_code="GBP",
             amount=allocatable,
             direction="CREDIT",

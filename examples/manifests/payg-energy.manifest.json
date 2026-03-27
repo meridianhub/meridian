@@ -55,7 +55,7 @@
         "GBP"
       ],
       "policies": {
-        "validation": "amount >= 0 && amount <= 15",
+        "validation": "amount >= 0",
         "bucketing": "attributes.fuel_type"
       }
     },
@@ -79,7 +79,7 @@
         "GBP"
       ],
       "policies": {
-        "validation": "amount > 0",
+        "validation": "amount >= 0",
         "bucketing": ""
       }
     },
