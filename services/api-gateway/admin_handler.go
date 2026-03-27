@@ -82,7 +82,9 @@ func (h *AdminHandler) HandleVerifyOverride(w http.ResponseWriter, r *http.Reque
 
 	if err := h.identityRepo.Save(ctx, identity); err != nil {
 		h.logger.ErrorContext(ctx, "admin verify override: failed to save identity",
-			"identity_id", identityID, "error", err)
+			"identity_id", identityID, "admin_id", adminID,
+			"previous_status", string(previousStatus), "new_status", string(identity.Status()),
+			"error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save identity"})
 		return
 	}
