@@ -133,7 +133,7 @@ func TestEmailVerificationToken_UniqueHashConstraint(t *testing.T) {
 		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	err := db.Create(token2).Error
-	assert.Error(t, err, "expected unique constraint violation on token_hash")
+	assert.True(t, isDuplicateKeyError(err), "expected unique constraint violation on token_hash, got: %v", err)
 }
 
 // TestEmailVerificationToken_MultiplePerIdentity verifies multiple pending tokens can exist per identity.
@@ -162,7 +162,8 @@ func TestEmailVerificationToken_MultiplePerIdentity(t *testing.T) {
 	}
 
 	var count int64
-	db.Model(&EmailVerificationTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
+	result := db.Model(&EmailVerificationTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
+	require.NoError(t, result.Error)
 	assert.Equal(t, int64(3), count)
 }
 
@@ -262,7 +263,7 @@ func TestPasswordResetToken_UniqueHashConstraint(t *testing.T) {
 		ExpiresAt:  time.Now().Add(1 * time.Hour),
 	}
 	err := db.Create(token2).Error
-	assert.Error(t, err, "expected unique constraint violation on token_hash")
+	assert.True(t, isDuplicateKeyError(err), "expected unique constraint violation on token_hash, got: %v", err)
 }
 
 // TestPasswordResetToken_RateLimitIndex verifies multiple tokens per identity are retrievable by created_at order.
@@ -291,6 +292,7 @@ func TestPasswordResetToken_RateLimitIndex(t *testing.T) {
 	}
 
 	var count int64
-	db.Model(&PasswordResetTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
+	result := db.Model(&PasswordResetTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
+	require.NoError(t, result.Error)
 	assert.Equal(t, int64(3), count)
 }
