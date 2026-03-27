@@ -92,7 +92,7 @@
       ],
       "policies": {
         "validation": "",
-        "bucketing": "attributes.fuel_type + ':' + attributes.rate_tier"
+        "bucketing": "attributes.fuel_type + ':' + attributes.rate_tier + ':' + attributes.settlement_period"
       }
     },
     {
@@ -117,7 +117,7 @@
       ],
       "policies": {
         "validation": "amount > 0",
-        "bucketing": "instrument_code + ':' + attributes.settlement_date"
+        "bucketing": "instrument_code + ':' + attributes.settlement_period + ':' + attributes.mpxn"
       }
     },
     {
@@ -130,7 +130,7 @@
       ],
       "policies": {
         "validation": "",
-        "bucketing": "instrument_code + ':' + attributes.gsp_group"
+        "bucketing": "instrument_code + ':' + attributes.settlement_period + ':' + attributes.gsp_group"
       }
     },
     {

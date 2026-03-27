@@ -51,7 +51,7 @@ accountTypes:
     allowedInstruments: [GBP]
     policies:
       validation: ""
-      bucketing: "attributes.fuel_type + ':' + attributes.rate_tier"
+      bucketing: "attributes.fuel_type + ':' + attributes.rate_tier + ':' + attributes.settlement_period"
 
   - code: VAT_OUTPUT
     name: VAT Output Tax
@@ -67,7 +67,7 @@ accountTypes:
     allowedInstruments: [KWH_ELEC, KWH_GAS]
     policies:
       validation: "amount > 0"
-      bucketing: "instrument_code + ':' + attributes.settlement_date"
+      bucketing: "instrument_code + ':' + attributes.settlement_period + ':' + attributes.mpxn"
 
   - code: ENERGY_SUPPLY_POOL
     name: Energy Supply Pool
@@ -75,7 +75,7 @@ accountTypes:
     allowedInstruments: [KWH_ELEC, KWH_GAS]
     policies:
       validation: ""
-      bucketing: "instrument_code + ':' + attributes.gsp_group"
+      bucketing: "instrument_code + ':' + attributes.settlement_period + ':' + attributes.gsp_group"
 
   - code: WHOLESALE_COST
     name: Wholesale Energy Cost
