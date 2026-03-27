@@ -32,7 +32,7 @@ const knownOversizedFiles: Record<string, number> = {
   'src/features/manifests/components/manifest-diff-graph.tsx': 657,
   'src/features/reconciliation/pages/detail.tsx': 638,
   'src/features/cookbook/components/saga-flow.tsx': 614,
-  'src/App.tsx': 396,
+  'src/App.tsx': 390,
   'src/features/reference-data/pages/account-types/create-account-type-dialog.tsx': 516,
   'src/features/accounts/pages/[accountId].tsx': 497,
   'src/features/economy/components/deploy-wizard.tsx': 490,

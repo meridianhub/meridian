@@ -28,6 +28,9 @@ import { StarlarkDetailPage } from '@/features/sagas/pages/detail'
 import { MappingDetailPage } from '@/features/mappings/pages/[mappingId]'
 import { InternalAccountDetailPage } from '@/features/internal-accounts/pages/[accountId]'
 import { UserDetailPage } from '@/features/identity/pages/user-detail-page'
+import { BillingRunsPage } from '@/features/billing/pages/index'
+import { InvoicesPage } from '@/features/billing/pages/invoices'
+import { InvoiceDetailPage } from '@/features/billing/pages/invoice-detail'
 
 // List pages (lazy-loaded: split per route for faster initial load)
 const AccountsPage = lazy(() =>
@@ -72,16 +75,6 @@ const TransactionsPage = lazy(() =>
 const UsersListPage = lazy(() =>
   import('@/features/identity/pages/users-list-page').then((m) => ({ default: m.UsersListPage })),
 )
-const BillingRunsPage = lazy(() =>
-  import('@/features/billing/pages/index').then((m) => ({ default: m.BillingRunsPage })),
-)
-const InvoicesPage = lazy(() =>
-  import('@/features/billing/pages/invoices').then((m) => ({ default: m.InvoicesPage })),
-)
-const InvoiceDetailPage = lazy(() =>
-  import('@/features/billing/pages/invoice-detail').then((m) => ({ default: m.InvoiceDetailPage })),
-)
-
 const CookbookPage = lazy(() =>
   import('@/features/cookbook/pages/index').then((m) => ({ default: m.CookbookPage })),
 )
@@ -194,9 +187,10 @@ function AppShellLayout() {
         <Route path="/internal-accounts/:accountId" element={<FeatureGuard feature="internal-accounts">{guarded(<InternalAccountDetailPage />)}</FeatureGuard>} />
         <Route path="/payments" element={<FeatureGuard feature="payments"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PaymentsPage />)}</Suspense></FeatureGuard>} />
         <Route path="/payments/:paymentOrderId" element={<FeatureGuard feature="payments">{guarded(<PaymentDetailPage />)}</FeatureGuard>} />
-        <Route path="/billing" element={<FeatureGuard feature="billing"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<BillingRunsPage />)}</Suspense></FeatureGuard>} />
-        <Route path="/billing/invoices" element={<FeatureGuard feature="billing"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<InvoicesPage />)}</Suspense></FeatureGuard>} />
-        <Route path="/billing/invoices/:invoiceId" element={<FeatureGuard feature="billing"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<InvoiceDetailPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/billing" element={<FeatureGuard feature="billing">{guarded(<BillingRunsPage />)}</FeatureGuard>} />
+        <Route path="/billing/runs/:id" element={<FeatureGuard feature="billing">{guarded(<PlaceholderPage title="Billing Run Detail" />)}</FeatureGuard>} />
+        <Route path="/billing/invoices" element={<FeatureGuard feature="billing">{guarded(<InvoicesPage />)}</FeatureGuard>} />
+        <Route path="/billing/invoices/:id" element={<FeatureGuard feature="billing">{guarded(<InvoiceDetailPage />)}</FeatureGuard>} />
         <Route path="/transactions" element={<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<TransactionsPage />)}</Suspense>} />
         <Route path="/positions" element={<FeatureGuard feature="positions"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PositionsPage />)}</Suspense></FeatureGuard>} />
         <Route path="/positions/:logId" element={<FeatureGuard feature="positions">{guarded(<PositionDetailPage />)}</FeatureGuard>} />
