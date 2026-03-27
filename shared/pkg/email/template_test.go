@@ -538,11 +538,12 @@ func TestRender_AccountLockout_ReturnsBothOutputs(t *testing.T) {
 	assert.Contains(t, html, "Acme Platform")
 	assert.Contains(t, html, "support@acme.example.com")
 	assert.Contains(t, html, "2026-03-27 14:32:00 UTC")
-	assert.Contains(t, html, "5")
+	assert.Contains(t, html, "5 consecutive failed sign-in attempts")
 
 	assert.Contains(t, text, "Acme Platform")
 	assert.Contains(t, text, "support@acme.example.com")
 	assert.Contains(t, text, "2026-03-27 14:32:00 UTC")
+	assert.Contains(t, text, "5 consecutive failed sign-in attempts")
 }
 
 func TestRender_AccountLockout_HTMLEscaping(t *testing.T) {
