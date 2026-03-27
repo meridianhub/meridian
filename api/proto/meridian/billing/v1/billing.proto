@@ -475,12 +475,18 @@ message ListInvoiceEmailsRequest {
     min_len: 1
     max_len: 100
   }];
+
+  // pagination controls the page size and cursor.
+  meridian.common.v1.Pagination pagination = 2;
 }
 
 // ListInvoiceEmailsResponse returns the email audit log for an invoice.
 message ListInvoiceEmailsResponse {
   // emails is the list of email entries for this invoice.
   repeated InvoiceEmail emails = 1;
+
+  // pagination contains the next page token and total count.
+  meridian.common.v1.PaginationResponse pagination = 2;
 }
 
 // BillingService provides operations for managing billing runs, invoices, and email delivery.
