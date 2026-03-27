@@ -207,6 +207,8 @@ export function useInvoiceEmails(invoiceId: string | undefined) {
     queryKey: tenantKeys.invoiceEmails(tenantSlug ?? '', invoiceId ?? ''),
     queryFn: async (): Promise<InvoiceEmail[]> => {
       try {
+        // Fetch up to 100 emails. Invoices typically have < 10 email records
+        // (initial send + a handful of resends), so pagination is not needed.
         const response = await clients.billing.listInvoiceEmails({
           invoiceId: invoiceId ?? '',
           pagination: { pageSize: 100, pageToken: '' },
