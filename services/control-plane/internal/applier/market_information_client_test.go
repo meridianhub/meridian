@@ -25,6 +25,7 @@ type fakeMarketInformationServer struct {
 	registerDataSourceErr error
 	registerDataSetErr    error
 	activateDataSetErr    error
+	retrieveDataSetFn     func(context.Context, *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error)
 }
 
 func (f *fakeMarketInformationServer) RegisterDataSource(_ context.Context, req *marketinformationv1.RegisterDataSourceRequest) (*marketinformationv1.RegisterDataSourceResponse, error) {
@@ -62,6 +63,20 @@ func (f *fakeMarketInformationServer) ActivateDataSet(_ context.Context, req *ma
 			Id:      "ds-uuid-1",
 			Code:    req.Code,
 			Version: req.Version,
+			Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE,
+		},
+	}, nil
+}
+
+func (f *fakeMarketInformationServer) RetrieveDataSet(ctx context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+	if f.retrieveDataSetFn != nil {
+		return f.retrieveDataSetFn(ctx, req)
+	}
+	return &marketinformationv1.RetrieveDataSetResponse{
+		Dataset: &marketinformationv1.DataSetDefinition{
+			Id:      "ds-existing-uuid",
+			Code:    req.Code,
+			Version: 1,
 			Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE,
 		},
 	}, nil
@@ -155,15 +170,31 @@ func TestMarketInformationClient_RegisterDataSource_MinimalParams(t *testing.T) 
 	assert.Equal(t, "MINIMAL", m["code"])
 }
 
-func TestMarketInformationClient_RegisterDataSource_GRPCError(t *testing.T) {
+func TestMarketInformationClient_RegisterDataSource_AlreadyExists_TreatedAsSuccess(t *testing.T) {
 	srv := &fakeMarketInformationServer{
 		registerDataSourceErr: status.Error(codes.AlreadyExists, "data source already exists"),
 	}
 	conn := newMarketInformationTestServer(t, srv)
 	client := NewMarketInformationClient(conn)
 
-	_, err := client.RegisterDataSource(testStarlarkCtx(), map[string]any{
+	result, err := client.RegisterDataSource(testStarlarkCtx(), map[string]any{
 		"code": "DUPLICATE",
+	})
+	require.NoError(t, err, "AlreadyExists should be treated as idempotent success")
+	m := result.(map[string]any)
+	assert.Equal(t, "DUPLICATE", m["code"])
+	assert.Equal(t, "REGISTERED", m["status"])
+}
+
+func TestMarketInformationClient_RegisterDataSource_OtherError_Propagated(t *testing.T) {
+	srv := &fakeMarketInformationServer{
+		registerDataSourceErr: status.Error(codes.Internal, "database unavailable"),
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	_, err := client.RegisterDataSource(testStarlarkCtx(), map[string]any{
+		"code": "WILL_FAIL",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "register data source")
@@ -302,5 +333,84 @@ func TestMarketInformationClient_ActivateDataSet_GRPCError(t *testing.T) {
 		"code": "MISSING",
 	})
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "activate data set")
+}
+
+// ─── Idempotency tests ──────────────────────────────────────────────────────
+
+func TestMarketInformationClient_RegisterDataSet_AlreadyExists_TreatedAsSuccess(t *testing.T) {
+	srv := &fakeMarketInformationServer{
+		registerDataSetErr: status.Error(codes.AlreadyExists, "dataset already exists"),
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.RegisterDataSet(testStarlarkCtx(), map[string]any{
+		"code": "EXISTING_DS",
+	})
+	require.NoError(t, err, "AlreadyExists should be treated as idempotent success")
+	m := result.(map[string]any)
+	assert.Equal(t, "ds-existing-uuid", m["dataset_id"])
+	assert.Equal(t, "EXISTING_DS", m["code"])
+	assert.Equal(t, int32(1), m["version"])
+}
+
+func TestMarketInformationClient_RegisterDataSet_AlreadyExists_LookupFails(t *testing.T) {
+	srv := &fakeMarketInformationServer{
+		registerDataSetErr: status.Error(codes.AlreadyExists, "dataset already exists"),
+		retrieveDataSetFn: func(_ context.Context, _ *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return nil, status.Error(codes.NotFound, "dataset not found")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	_, err := client.RegisterDataSet(testStarlarkCtx(), map[string]any{
+		"code": "GHOST_DS",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup failed")
+}
+
+func TestMarketInformationClient_ActivateDataSet_AlreadyActive_TreatedAsSuccess(t *testing.T) {
+	srv := &fakeMarketInformationServer{
+		activateDataSetErr: status.Error(codes.FailedPrecondition, "invalid status transition: ACTIVE to ACTIVE"),
+		// RetrieveDataSet returns ACTIVE status, confirming idempotent completion
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.ActivateDataSet(testStarlarkCtx(), map[string]any{
+		"code":    "ALREADY_ACTIVE",
+		"version": int32(1),
+	})
+	require.NoError(t, err, "FailedPrecondition for already-active should be treated as idempotent success")
+	m := result.(map[string]any)
+	assert.Equal(t, "ds-existing-uuid", m["dataset_id"])
+	assert.Equal(t, "ALREADY_ACTIVE", m["code"])
+}
+
+func TestMarketInformationClient_ActivateDataSet_NotActive_ErrorPropagated(t *testing.T) {
+	srv := &fakeMarketInformationServer{
+		activateDataSetErr: status.Error(codes.FailedPrecondition, "invalid status transition: DEPRECATED to ACTIVE"),
+		retrieveDataSetFn: func(_ context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return &marketinformationv1.RetrieveDataSetResponse{
+				Dataset: &marketinformationv1.DataSetDefinition{
+					Id:      "ds-uuid-1",
+					Code:    req.Code,
+					Version: 1,
+					Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_DEPRECATED,
+				},
+			}, nil
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	_, err := client.ActivateDataSet(testStarlarkCtx(), map[string]any{
+		"code":    "DEPRECATED_DS",
+		"version": int32(1),
+	})
+	require.Error(t, err, "FailedPrecondition for non-ACTIVE should propagate")
 	assert.Contains(t, err.Error(), "activate data set")
 }

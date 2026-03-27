@@ -1,0 +1,15 @@
+{{.TenantName}} - Your account has been locked
+
+SECURITY NOTICE
+
+Your account has been locked due to 5 consecutive failed sign-in attempts.
+
+Locked at: {{.LockoutTime}}
+
+If this was you, please contact our support team to unlock your account:
+{{.SupportEmail}}
+
+If this was not you, your account may be under attack. Contact support immediately at {{.SupportEmail}} so we can help secure your account.
+
+--
+Meridian - The Operating System for the Real-World Economy
