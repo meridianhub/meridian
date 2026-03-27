@@ -1,4 +1,4 @@
-h1:tj3Jg1uQyVH9Ifmwj4cCnngqDLNdgtYsdgERYfS7aOs=
+h1:xbgRG8E+zdJyGcRwycP8LbFHdnIROS2nl4g6f4WXnyg=
 20260302000001_initial.sql h1:SsQN4cGTrm/6qs12GD9YXoSO6QyKTIpNZrM+4rRBWJA=
 20260326000001_add_tenant_id.sql h1:+/NF9LBhT7EjKVqu5gxY1B+vJ+YDM9acG8lLSXGJEWs=
 20260326000002_add_tenant_id_indexes.sql h1:Ov5Wfsl+MTIrtNdnqdh9p5qGpaeBW/wBPXILN4JvuvM=
@@ -6,3 +6,5 @@ h1:tj3Jg1uQyVH9Ifmwj4cCnngqDLNdgtYsdgERYfS7aOs=
 20260327000002_add_pending_verification_status.sql h1:U138QbPEfysvyueXoWetj2yVZu2vhHRHLeRa+N8qckc=
 20260327000003_email_verification_tokens.sql h1:WZD2iEMMvwG5A3kVyv5oK2Nso7A+LTuOkCnsXJvDkZQ=
 20260327000004_password_reset_tokens.sql h1:KbLBrcNV5fCjyj04r6YNETLkNXg1dwSUGL4ZHk1pqqQ=
+20260327000005_drop_role_constraint.sql h1:d4mxJFQHkcJEtDEZ+ztR+U1j7Z47eud+KorVVr50TUQ=
+20260327000006_add_role_constraint.sql h1:e30q9QI8eubEtiAY4KimBmpD/DKRUbLSfCO/uEJaEUw=
