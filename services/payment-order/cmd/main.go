@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	billingpb "github.com/meridianhub/meridian/api/proto/meridian/billing/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
 	webhookhttp "github.com/meridianhub/meridian/services/payment-order/adapters/http"
 	pomessaging "github.com/meridianhub/meridian/services/payment-order/adapters/messaging"
@@ -516,6 +517,12 @@ func run(logger *slog.Logger) error {
 
 	// Register gRPC services
 	pb.RegisterPaymentOrderServiceServer(grpcServer, paymentOrderService)
+
+	// Register billing gRPC service (uses same billing repo + optional email outbox)
+	billingRepo := persistence.NewBillingRepository(db)
+	billingGRPCService := service.NewBillingService(billingRepo, nil, logger)
+	billingpb.RegisterBillingServiceServer(grpcServer, billingGRPCService)
+
 	grpc_health_v1.RegisterHealthServer(grpcServer, &simpleHealthServer{})
 	reflection.Register(grpcServer)
 	logger.Info("gRPC services registered")
