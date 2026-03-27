@@ -1,4 +1,6 @@
-h1:s3/ru7NYET/Cs0jNqC0Ndlwp53iY9kthZRxlRIqdizM=
+h1:UoToOiu37+2v6U4VGVPBFfeGo+iVqn/sP0+/L+CinjU=
 20260302000001_initial.sql h1:SsQN4cGTrm/6qs12GD9YXoSO6QyKTIpNZrM+4rRBWJA=
 20260326000001_add_tenant_id.sql h1:+/NF9LBhT7EjKVqu5gxY1B+vJ+YDM9acG8lLSXGJEWs=
 20260326000002_add_tenant_id_indexes.sql h1:Ov5Wfsl+MTIrtNdnqdh9p5qGpaeBW/wBPXILN4JvuvM=
+20260327000001_email_verification_tokens.sql h1:MZxHzdQuGml4qNmVzit1m6oXC+LPyTsFTkSnnDHlnaQ=
+20260327000002_password_reset_tokens.sql h1:NbyBQopzDDUgU0BYTtQewwGN2N4uv1z4IMZtVXNqjRs=
