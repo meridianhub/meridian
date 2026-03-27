@@ -267,6 +267,26 @@ func toProtoAccountServiceDomain(domain string) commonv1.AccountServiceDomain {
 	}
 }
 
+// fromProtoTransactionStatus converts protobuf TransactionStatus to domain.
+func fromProtoTransactionStatus(status commonv1.TransactionStatus) domain.TransactionStatus {
+	switch status {
+	case commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING:
+		return domain.TransactionStatusPending
+	case commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED:
+		return domain.TransactionStatusPosted
+	case commonv1.TransactionStatus_TRANSACTION_STATUS_FAILED:
+		return domain.TransactionStatusFailed
+	case commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED:
+		return domain.TransactionStatusCancelled
+	case commonv1.TransactionStatus_TRANSACTION_STATUS_REVERSED:
+		return domain.TransactionStatusReversed
+	case commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED:
+		return domain.TransactionStatusPending // Default unspecified to Pending
+	default:
+		return domain.TransactionStatusPending
+	}
+}
+
 // parseUUID parses a string as a UUID, returning an error if invalid.
 func parseUUID(s string) (uuid.UUID, error) {
 	if s == "" {
