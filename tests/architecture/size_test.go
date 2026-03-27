@@ -27,7 +27,6 @@ const (
 var knownOversizedFiles = map[string]bool{
 	"services/current-account/service/saga_handlers.go":          true,
 	"services/identity/service/server.go":                        true,
-	"services/market-information/service/observation_service.go": true,
 	"services/mcp-server/internal/tools/economy.go":              true,
 	"services/mcp-server/internal/tools/refdata.go":              true,
 	"services/party/adapters/persistence/repository.go":          true,
