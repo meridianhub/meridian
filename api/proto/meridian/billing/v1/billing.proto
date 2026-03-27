@@ -1,0 +1,597 @@
+syntax = "proto3";
+
+package meridian.billing.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/meridianhub/meridian/api/proto/meridian/billing/v1;billingv1";
+
+// OpenAPI specification metadata for Billing Service
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Meridian Billing Service API"
+    version: "1.0"
+    description: "Billing operations for managing billing runs, invoices, and email delivery. "
+                 "Provides visibility into automated billing cycles, invoice lifecycle management, "
+                 "and email audit trails."
+    contact: {
+      name: "Meridian API Team"
+      url: "https://github.com/meridianhub/meridian"
+    }
+    license: {
+      name: "Apache 2.0"
+      url: "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
+  security_definitions: {
+    security: {
+      key: "Bearer"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "Bearer token authentication"
+      }
+    }
+  }
+  security: {
+    security_requirement: {
+      key: "Bearer"
+      value: {}
+    }
+  }
+  responses: {
+    key: "401"
+    value: {
+      description: "Unauthorized - Missing or invalid Bearer token"
+    }
+  }
+  responses: {
+    key: "403"
+    value: {
+      description: "Forbidden - Insufficient permissions for this operation"
+    }
+  }
+};
+
+// BillingRunStatus defines the lifecycle state of a billing run.
+enum BillingRunStatus {
+  // BILLING_RUN_STATUS_UNSPECIFIED means the status is unknown.
+  BILLING_RUN_STATUS_UNSPECIFIED = 0;
+  // BILLING_RUN_STATUS_INITIATED means the billing run has been created and is queued for processing.
+  BILLING_RUN_STATUS_INITIATED = 1;
+  // BILLING_RUN_STATUS_PROCESSING means the billing run is actively generating invoices.
+  BILLING_RUN_STATUS_PROCESSING = 2;
+  // BILLING_RUN_STATUS_COMPLETED means the billing run finished successfully.
+  BILLING_RUN_STATUS_COMPLETED = 3;
+  // BILLING_RUN_STATUS_FAILED means the billing run encountered an error during processing.
+  BILLING_RUN_STATUS_FAILED = 4;
+}
+
+// InvoiceStatus defines the lifecycle state of an invoice.
+enum InvoiceStatus {
+  // INVOICE_STATUS_UNSPECIFIED means the status is unknown.
+  INVOICE_STATUS_UNSPECIFIED = 0;
+  // INVOICE_STATUS_DRAFT means the invoice has been generated but not yet issued.
+  INVOICE_STATUS_DRAFT = 1;
+  // INVOICE_STATUS_ISSUED means the invoice has been issued to the customer.
+  INVOICE_STATUS_ISSUED = 2;
+  // INVOICE_STATUS_PAID means the invoice has been marked as paid.
+  INVOICE_STATUS_PAID = 3;
+  // INVOICE_STATUS_VOID means the invoice has been voided and is no longer valid.
+  INVOICE_STATUS_VOID = 4;
+  // INVOICE_STATUS_OVERDUE means the invoice has passed its due date without payment.
+  INVOICE_STATUS_OVERDUE = 5;
+}
+
+// EmailStatus defines the lifecycle state of an email delivery.
+enum EmailStatus {
+  // EMAIL_STATUS_UNSPECIFIED means the status is unknown.
+  EMAIL_STATUS_UNSPECIFIED = 0;
+  // EMAIL_STATUS_PENDING means the email is queued for sending.
+  EMAIL_STATUS_PENDING = 1;
+  // EMAIL_STATUS_SENT means the email has been sent to the mail provider.
+  EMAIL_STATUS_SENT = 2;
+  // EMAIL_STATUS_DELIVERED means the email was confirmed delivered.
+  EMAIL_STATUS_DELIVERED = 3;
+  // EMAIL_STATUS_BOUNCED means the email bounced.
+  EMAIL_STATUS_BOUNCED = 4;
+  // EMAIL_STATUS_DEAD_LETTER means the email failed permanently after retries.
+  EMAIL_STATUS_DEAD_LETTER = 5;
+  // EMAIL_STATUS_CANCELLED means the email delivery was cancelled.
+  EMAIL_STATUS_CANCELLED = 6;
+}
+
+// BillingRun represents a single billing cycle execution.
+// A billing run generates invoices for all eligible accounts within the billing period.
+message BillingRun {
+  // id is the unique identifier for this billing run.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // tenant_id identifies the tenant this billing run belongs to.
+  string tenant_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // period_start is the beginning of the billing period (inclusive).
+  google.protobuf.Timestamp period_start = 3 [(buf.validate.field).required = true];
+
+  // period_end is the end of the billing period (exclusive).
+  google.protobuf.Timestamp period_end = 4 [(buf.validate.field).required = true];
+
+  // status is the current state of the billing run.
+  BillingRunStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+  }];
+
+  // dunning_level indicates the escalation level for this billing run (0 = initial, 1+ = dunning).
+  int32 dunning_level = 6 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 10
+  }];
+
+  // failure_reason describes why the billing run failed (populated only if status is FAILED).
+  string failure_reason = 7 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+
+  // invoice_count is the total number of invoices generated in this billing run.
+  int32 invoice_count = 8 [(buf.validate.field).int32 = {gte: 0}];
+
+  // total_amount_cents is the sum of all invoice amounts in this billing run (in minor currency units).
+  int64 total_amount_cents = 9;
+
+  // created_at is when this billing run was initiated.
+  google.protobuf.Timestamp created_at = 10 [(buf.validate.field).required = true];
+
+  // updated_at is when this billing run was last modified.
+  google.protobuf.Timestamp updated_at = 11 [(buf.validate.field).required = true];
+}
+
+// InvoiceLineItem represents a single line item on an invoice.
+message InvoiceLineItem {
+  // description is a human-readable description of the charge.
+  string description = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 500
+  }];
+
+  // quantity is the number of units charged.
+  string quantity = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // unit_price_cents is the price per unit in minor currency units.
+  int64 unit_price_cents = 3;
+
+  // total_cents is the total charge for this line item in minor currency units.
+  int64 total_cents = 4;
+
+  // valuation_analysis contains structured valuation breakdown data.
+  google.protobuf.Struct valuation_analysis = 5;
+}
+
+// Invoice represents a billing invoice issued to a party.
+message Invoice {
+  // id is the unique identifier for this invoice.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // billing_run_id references the billing run that generated this invoice.
+  string billing_run_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // party_id identifies the party (customer) this invoice is for.
+  string party_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // account_id identifies the account this invoice is associated with.
+  string account_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // invoice_number is the human-readable invoice number (e.g., INV-2026-00123).
+  string invoice_number = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+
+  // period_start is the beginning of the invoiced period (inclusive).
+  google.protobuf.Timestamp period_start = 6 [(buf.validate.field).required = true];
+
+  // period_end is the end of the invoiced period (exclusive).
+  google.protobuf.Timestamp period_end = 7 [(buf.validate.field).required = true];
+
+  // line_items contains the individual charges on this invoice.
+  repeated InvoiceLineItem line_items = 8;
+
+  // subtotal_cents is the total amount before tax in minor currency units.
+  int64 subtotal_cents = 9;
+
+  // currency is the ISO 4217 currency code for this invoice (e.g., "GBP", "USD").
+  string currency = 10 [(buf.validate.field).string = {
+    pattern: "^[A-Z]{3}$"
+  }];
+
+  // status is the current state of the invoice.
+  InvoiceStatus status = 11 [(buf.validate.field).enum = {
+    defined_only: true
+  }];
+
+  // due_date is when payment is expected in YYYY-MM-DD format.
+  string due_date = 12 [(buf.validate.field).string = {
+    pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+  }];
+
+  // created_at is when this invoice was generated.
+  google.protobuf.Timestamp created_at = 13 [(buf.validate.field).required = true];
+}
+
+// EmailDeliveryStatus represents the delivery status of an outbox email entry.
+message EmailDeliveryStatus {
+  // outbox_id is the unique identifier from the email outbox.
+  string outbox_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // status is the current delivery state.
+  EmailStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+  }];
+
+  // sent_at is when the email was sent to the mail provider.
+  google.protobuf.Timestamp sent_at = 3;
+
+  // delivered_at is when the email was confirmed delivered.
+  google.protobuf.Timestamp delivered_at = 4;
+
+  // bounce_reason describes why the email bounced (populated only if status is BOUNCED).
+  string bounce_reason = 5 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+}
+
+// InvoiceEmail represents an email sent for an invoice, used for the audit log.
+message InvoiceEmail {
+  // idempotency_key is the unique key for this email dispatch.
+  string idempotency_key = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // template_name identifies the email template used.
+  string template_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+
+  // to_addresses are the recipient email addresses.
+  repeated string to_addresses = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      string: {
+        min_len: 1
+        max_len: 255
+      }
+    }
+  }];
+
+  // status is the current delivery state.
+  EmailStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+  }];
+
+  // sent_at is when the email was sent to the mail provider.
+  google.protobuf.Timestamp sent_at = 5;
+
+  // delivered_at is when the email was confirmed delivered.
+  google.protobuf.Timestamp delivered_at = 6;
+
+  // bounce_reason describes why the email bounced (populated only if status is BOUNCED).
+  string bounce_reason = 7 [(buf.validate.field).string = {
+    max_len: 1000
+  }];
+}
+
+// --- Request/Response Messages ---
+
+// ListBillingRunsRequest returns a paginated list of billing runs.
+message ListBillingRunsRequest {
+  // status filters by billing run status. Empty means all statuses.
+  repeated BillingRunStatus status = 1;
+
+  // pagination controls the page size and cursor.
+  meridian.common.v1.Pagination pagination = 2;
+}
+
+// ListBillingRunsResponse returns a paginated list of billing runs.
+message ListBillingRunsResponse {
+  // billing_runs is the list of billing runs matching the filter criteria.
+  repeated BillingRun billing_runs = 1;
+
+  // pagination contains the next page token and total count.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
+// GetBillingRunRequest retrieves a billing run by ID.
+message GetBillingRunRequest {
+  // id is the unique identifier of the billing run.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// GetBillingRunResponse returns the billing run with invoice summary.
+message GetBillingRunResponse {
+  // billing_run is the requested billing run.
+  BillingRun billing_run = 1 [(buf.validate.field).required = true];
+}
+
+// ListInvoicesRequest returns a paginated list of invoices with filtering.
+message ListInvoicesRequest {
+  // status filters by invoice status. Empty means all statuses.
+  repeated InvoiceStatus status = 1;
+
+  // party_id filters by the party (customer) ID.
+  string party_id = 2 [(buf.validate.field).string = {
+    max_len: 100
+  }];
+
+  // billing_run_id filters by the billing run that generated the invoices.
+  string billing_run_id = 3 [(buf.validate.field).string = {
+    max_len: 100
+  }];
+
+  // pagination controls the page size and cursor.
+  meridian.common.v1.Pagination pagination = 4;
+}
+
+// ListInvoicesResponse returns a paginated list of invoices.
+message ListInvoicesResponse {
+  // invoices is the list of invoices matching the filter criteria.
+  repeated Invoice invoices = 1;
+
+  // pagination contains the next page token and total count.
+  meridian.common.v1.PaginationResponse pagination = 2;
+}
+
+// GetInvoiceRequest retrieves an invoice by ID.
+message GetInvoiceRequest {
+  // id is the unique identifier of the invoice.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// GetInvoiceResponse returns the invoice with line items.
+message GetInvoiceResponse {
+  // invoice is the requested invoice with all line items populated.
+  Invoice invoice = 1 [(buf.validate.field).required = true];
+}
+
+// ResendInvoiceEmailRequest queues a new email for an invoice.
+message ResendInvoiceEmailRequest {
+  // invoice_id is the unique identifier of the invoice to resend email for.
+  string invoice_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// ResendInvoiceEmailResponse confirms the email has been queued.
+message ResendInvoiceEmailResponse {
+  // email is the newly queued email entry.
+  InvoiceEmail email = 1 [(buf.validate.field).required = true];
+}
+
+// MarkInvoicePaidRequest marks an invoice as paid.
+message MarkInvoicePaidRequest {
+  // invoice_id is the unique identifier of the invoice to mark as paid.
+  string invoice_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// MarkInvoicePaidResponse returns the updated invoice.
+message MarkInvoicePaidResponse {
+  // invoice is the updated invoice with PAID status.
+  Invoice invoice = 1 [(buf.validate.field).required = true];
+}
+
+// VoidInvoiceRequest voids an invoice and cancels pending emails.
+message VoidInvoiceRequest {
+  // invoice_id is the unique identifier of the invoice to void.
+  string invoice_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// VoidInvoiceResponse returns the voided invoice.
+message VoidInvoiceResponse {
+  // invoice is the updated invoice with VOID status.
+  Invoice invoice = 1 [(buf.validate.field).required = true];
+}
+
+// ListInvoiceEmailsRequest returns email audit log entries for an invoice.
+message ListInvoiceEmailsRequest {
+  // invoice_id is the unique identifier of the invoice.
+  string invoice_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+  }];
+}
+
+// ListInvoiceEmailsResponse returns the email audit log for an invoice.
+message ListInvoiceEmailsResponse {
+  // emails is the list of email entries for this invoice.
+  repeated InvoiceEmail emails = 1;
+}
+
+// BillingService provides operations for managing billing runs, invoices, and email delivery.
+// This service exposes read-heavy endpoints for the billing UI dashboard, along with
+// administrative actions for invoice lifecycle management.
+service BillingService {
+  // ListBillingRuns returns a paginated list of billing runs with optional status filtering.
+  rpc ListBillingRuns(ListBillingRunsRequest) returns (ListBillingRunsResponse) {
+    option (google.api.http) = {
+      get: "/v1/billing-runs"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List billing runs"
+      description: "Returns a paginated list of billing runs with optional status filtering."
+    };
+  }
+
+  // GetBillingRun retrieves a billing run by ID with invoice summary.
+  rpc GetBillingRun(GetBillingRunRequest) returns (GetBillingRunResponse) {
+    option (google.api.http) = {
+      get: "/v1/billing-runs/{id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get billing run details"
+      responses: {
+        key: "404"
+        value: {
+          description: "Billing run not found"
+        }
+      }
+    };
+  }
+
+  // ListInvoices returns a paginated list of invoices with optional filtering.
+  rpc ListInvoices(ListInvoicesRequest) returns (ListInvoicesResponse) {
+    option (google.api.http) = {
+      get: "/v1/invoices"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List invoices"
+      description: "Returns a paginated list of invoices with optional filtering "
+                   "by status, party, and billing run."
+    };
+  }
+
+  // GetInvoice retrieves an invoice by ID with all line items.
+  rpc GetInvoice(GetInvoiceRequest) returns (GetInvoiceResponse) {
+    option (google.api.http) = {
+      get: "/v1/invoices/{id}"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get invoice details"
+      responses: {
+        key: "404"
+        value: {
+          description: "Invoice not found"
+        }
+      }
+    };
+  }
+
+  // ResendInvoiceEmail queues a new email delivery for an invoice.
+  rpc ResendInvoiceEmail(ResendInvoiceEmailRequest) returns (ResendInvoiceEmailResponse) {
+    option (google.api.http) = {
+      post: "/v1/invoices/{invoice_id}/resend-email"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Resend invoice email"
+      description: "Queues a new email delivery for the specified invoice."
+      responses: {
+        key: "404"
+        value: {
+          description: "Invoice not found"
+        }
+      }
+    };
+  }
+
+  // MarkInvoicePaid updates an invoice status to PAID and triggers a confirmation email.
+  rpc MarkInvoicePaid(MarkInvoicePaidRequest) returns (MarkInvoicePaidResponse) {
+    option (google.api.http) = {
+      post: "/v1/invoices/{invoice_id}/mark-paid"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Mark invoice as paid"
+      description: "Updates the invoice status to PAID and triggers a payment confirmation email."
+      responses: {
+        key: "404"
+        value: {
+          description: "Invoice not found"
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "Invoice is not in a payable state"
+        }
+      }
+    };
+  }
+
+  // VoidInvoice voids an invoice and cancels any pending email deliveries.
+  rpc VoidInvoice(VoidInvoiceRequest) returns (VoidInvoiceResponse) {
+    option (google.api.http) = {
+      post: "/v1/invoices/{invoice_id}/void"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Void an invoice"
+      description: "Voids the invoice and cancels any pending email deliveries."
+      responses: {
+        key: "404"
+        value: {
+          description: "Invoice not found"
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "Invoice cannot be voided in its current state"
+        }
+      }
+    };
+  }
+
+  // ListInvoiceEmails returns the email audit log for an invoice.
+  rpc ListInvoiceEmails(ListInvoiceEmailsRequest) returns (ListInvoiceEmailsResponse) {
+    option (google.api.http) = {
+      get: "/v1/invoices/{invoice_id}/emails"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List invoice emails"
+      description: "Returns the email audit log for the specified invoice, including "
+                   "delivery status, timestamps, and bounce reasons."
+      responses: {
+        key: "404"
+        value: {
+          description: "Invoice not found"
+        }
+      }
+    };
+  }
+}
