@@ -118,14 +118,20 @@ func TestLockout_Integration_IdempotentConcurrentLockout(t *testing.T) {
 	infra.createActiveIdentity(t, ctx, "idemp@example.com", "IdempPass123!")
 
 	// Fail login 4 times to prime the counter.
-	for range 4 {
-		_, _, _ = conn.Login(ctx, nil, "idemp@example.com", "WrongPassword999!")
+	for i := range 4 {
+		_, valid, loginErr := conn.Login(ctx, nil, "idemp@example.com", "WrongPassword999!")
+		require.NoError(t, loginErr, "prime attempt %d should not return an error", i+1)
+		assert.False(t, valid, "prime attempt %d should return false", i+1)
 	}
 
 	// Two concurrent 5th failures: simulate by calling sequentially.
 	// First call locks and queues email; second call is rejected at status check (already locked).
-	_, _, _ = conn.Login(ctx, nil, "idemp@example.com", "WrongPassword999!")
-	_, _, _ = conn.Login(ctx, nil, "idemp@example.com", "WrongPassword999!")
+	_, valid, loginErr := conn.Login(ctx, nil, "idemp@example.com", "WrongPassword999!")
+	require.NoError(t, loginErr)
+	assert.False(t, valid)
+	_, valid, loginErr = conn.Login(ctx, nil, "idemp@example.com", "WrongPassword999!")
+	require.NoError(t, loginErr)
+	assert.False(t, valid)
 
 	// Exactly one email should be in the outbox regardless.
 	var count int64

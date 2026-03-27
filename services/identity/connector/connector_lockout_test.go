@@ -139,3 +139,18 @@ func TestLogin_OutboxEnqueueError_DoesNotFailLogin(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, valid)
 }
+
+func TestLogin_SaveFailureOnLockout_DoesNotQueueEmail(t *testing.T) {
+	// If Save() fails, the lock is not persisted — no lockout email should be sent.
+	identity := makeIdentityWithNFailures(t, "savefail@example.com", 4)
+	outbox := &mockOutbox{}
+	repo := &mockRepo{identity: identity, saveErr: assert.AnError}
+	c := newConnectorWithOutbox(t, repo, outbox)
+	ctx := ctxWithTenant(t, "volterra")
+
+	_, valid, err := c.Login(ctx, nil, "savefail@example.com", "WrongPassword999!")
+
+	require.NoError(t, err)
+	assert.False(t, valid)
+	assert.Empty(t, outbox.entries, "no lockout email should be queued when save fails")
+}

@@ -177,8 +177,9 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 			c.logger.ErrorContext(ctx, "connector: failed to persist failed login attempt",
 				"identity_id", identity.ID(),
 				"error", saveErr)
-		}
-		if justLocked {
+		} else if justLocked {
+			// Queue lockout email only after the lock state is successfully persisted.
+			// If save failed, the lock was not committed and no notification should be sent.
 			c.queueLockoutEmail(ctx, identity, tenantID)
 		}
 		c.logger.InfoContext(ctx, "connector: invalid password",
@@ -231,6 +232,7 @@ func (c *Connector) queueLockoutEmail(ctx context.Context, identity *domain.Iden
 	entry := &email.OutboxEntry{
 		IdempotencyKey: "account-lockout:" + identity.ID().String(),
 		ToAddresses:    []string{identity.Email()},
+		FromAddress:    "noreply@meridianhub.cloud",
 		Subject:        "Your account has been locked",
 		TemplateName:   "account-lockout",
 		TemplateData: map[string]any{
