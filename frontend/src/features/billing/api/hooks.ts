@@ -6,6 +6,15 @@ import { tenantKeys } from '@/lib/query-keys'
 import type { DataTableQueryParams, DataTableResult } from '@/shared/data-table'
 import type { BillingRun, Invoice, InvoiceEmail, EmailDeliveryStatus } from './types'
 import type { Timestamp } from '@bufbuild/protobuf/wkt'
+import { InvoiceStatus } from '@/api/gen/meridian/billing/v1/billing_pb'
+
+const INVOICE_STATUS_MAP: Record<string, InvoiceStatus> = {
+  DRAFT: InvoiceStatus.INVOICE_STATUS_DRAFT,
+  ISSUED: InvoiceStatus.INVOICE_STATUS_ISSUED,
+  PAID: InvoiceStatus.INVOICE_STATUS_PAID,
+  VOID: InvoiceStatus.INVOICE_STATUS_VOID,
+  OVERDUE: InvoiceStatus.INVOICE_STATUS_OVERDUE,
+}
 
 function timestampToISO(ts?: Timestamp): string {
   if (!ts) return ''
@@ -119,6 +128,9 @@ export function useInvoicesTable() {
         },
         ...(params.filters?.billing_run_id ? { billingRunId: params.filters.billing_run_id } : {}),
         ...(params.filters?.party_id ? { partyId: params.filters.party_id } : {}),
+        ...(params.filters?.status && INVOICE_STATUS_MAP[params.filters.status] !== undefined
+          ? { status: [INVOICE_STATUS_MAP[params.filters.status]] }
+          : {}),
       })
 
       const items: Invoice[] = (response.invoices ?? []).map((inv) => ({

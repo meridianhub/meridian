@@ -10,3 +10,6 @@ export {
 } from './api/hooks'
 export { EmailDeliveryStatusBadge } from './components/email-delivery-status-badge'
 export { BillingRunsPage } from './pages'
+export { InvoiceActions } from './components/invoice-actions'
+export { InvoicesPage } from './pages/invoices'
+export { InvoiceDetailPage } from './pages/invoice-detail'
