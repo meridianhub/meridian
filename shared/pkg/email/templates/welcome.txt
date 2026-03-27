@@ -1,0 +1,12 @@
+Welcome to {{.TenantName}}
+
+Your email address has been verified and your account is now active.
+
+You are ready to get started with {{.TenantName}}.
+
+Sign in: {{.LoginURL}}
+
+Getting Started Guide: {{.GettingStartedURL}}
+
+--
+Meridian - The Operating System for the Real-World Economy

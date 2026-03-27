@@ -344,3 +344,224 @@ func TestRender_AccountFrozen_Golden(t *testing.T) {
 	assertGolden(t, html, "account-frozen.html")
 	assertGolden(t, text, "account-frozen.txt")
 }
+
+// ---- Verify Email ----
+
+func TestRender_VerifyEmail_ReturnsBothOutputs(t *testing.T) {
+	r := newTestRenderer(t)
+	data := VerifyEmailData{
+		TenantName:       "Acme Platform",
+		VerificationLink: "https://app.example.com/verify?token=abc123",
+		SupportEmail:     "support@acme.example.com",
+	}
+
+	html, text, err := r.Render("verify-email", data)
+	require.NoError(t, err)
+
+	assert.Contains(t, html, "Acme Platform")
+	assert.Contains(t, html, "https://app.example.com/verify?token=abc123")
+	assert.Contains(t, html, "support@acme.example.com")
+	assert.Contains(t, html, "24 hours")
+
+	assert.Contains(t, text, "Acme Platform")
+	assert.Contains(t, text, "https://app.example.com/verify?token=abc123")
+	assert.Contains(t, text, "24 hours")
+}
+
+func TestRender_VerifyEmail_HTMLEscaping(t *testing.T) {
+	r := newTestRenderer(t)
+	data := VerifyEmailData{
+		TenantName:       "<script>evil</script>",
+		VerificationLink: "https://app.example.com/verify",
+		SupportEmail:     "support@example.com",
+	}
+
+	html, _, err := r.Render("verify-email", data)
+	require.NoError(t, err)
+	assert.NotContains(t, html, "<script>")
+	assert.Contains(t, html, "&lt;script&gt;")
+}
+
+func TestRender_VerifyEmail_EmptyData_DoesNotPanic(t *testing.T) {
+	r := newTestRenderer(t)
+	_, _, err := r.Render("verify-email", VerifyEmailData{})
+	require.NoError(t, err)
+}
+
+// ---- Password Reset ----
+
+func TestRender_PasswordReset_ReturnsBothOutputs(t *testing.T) {
+	r := newTestRenderer(t)
+	data := PasswordResetData{
+		TenantName:   "Acme Platform",
+		ResetLink:    "https://app.example.com/reset?token=xyz789",
+		SupportEmail: "support@acme.example.com",
+	}
+
+	html, text, err := r.Render("password-reset", data)
+	require.NoError(t, err)
+
+	assert.Contains(t, html, "Acme Platform")
+	assert.Contains(t, html, "https://app.example.com/reset?token=xyz789")
+	assert.Contains(t, html, "support@acme.example.com")
+	assert.Contains(t, html, "1 hour")
+
+	assert.Contains(t, text, "Acme Platform")
+	assert.Contains(t, text, "https://app.example.com/reset?token=xyz789")
+	assert.Contains(t, text, "1 hour")
+}
+
+func TestRender_PasswordReset_HTMLEscaping(t *testing.T) {
+	r := newTestRenderer(t)
+	data := PasswordResetData{
+		TenantName:   "<b>Hacker</b>",
+		ResetLink:    "https://app.example.com/reset",
+		SupportEmail: "support@example.com",
+	}
+
+	html, _, err := r.Render("password-reset", data)
+	require.NoError(t, err)
+	assert.NotContains(t, html, "<b>Hacker</b>")
+	assert.Contains(t, html, "&lt;b&gt;Hacker&lt;/b&gt;")
+}
+
+func TestRender_PasswordReset_EmptyData_DoesNotPanic(t *testing.T) {
+	r := newTestRenderer(t)
+	_, _, err := r.Render("password-reset", PasswordResetData{})
+	require.NoError(t, err)
+}
+
+// ---- Invite User ----
+
+func TestRender_InviteUser_ReturnsBothOutputs(t *testing.T) {
+	r := newTestRenderer(t)
+	data := InviteUserData{
+		TenantName:   "Acme Platform",
+		TenantSlug:   "acme-corp",
+		InviterEmail: "admin@acme.example.com",
+		AcceptLink:   "https://app.example.com/invite?token=inv456",
+		SupportEmail: "support@acme.example.com",
+	}
+
+	html, text, err := r.Render("invite-user", data)
+	require.NoError(t, err)
+
+	assert.Contains(t, html, "Acme Platform")
+	assert.Contains(t, html, "acme-corp")
+	assert.Contains(t, html, "admin@acme.example.com")
+	assert.Contains(t, html, "https://app.example.com/invite?token=inv456")
+	assert.Contains(t, html, "72 hours")
+
+	assert.Contains(t, text, "acme-corp")
+	assert.Contains(t, text, "admin@acme.example.com")
+	assert.Contains(t, text, "https://app.example.com/invite?token=inv456")
+	assert.Contains(t, text, "72 hours")
+}
+
+func TestRender_InviteUser_HTMLEscaping(t *testing.T) {
+	r := newTestRenderer(t)
+	data := InviteUserData{
+		TenantName:   "Acme <>&",
+		TenantSlug:   "acme-corp",
+		InviterEmail: "admin@acme.example.com",
+		AcceptLink:   "https://app.example.com/invite",
+		SupportEmail: "support@example.com",
+	}
+
+	html, _, err := r.Render("invite-user", data)
+	require.NoError(t, err)
+	assert.NotContains(t, html, "Acme <>&")
+	assert.Contains(t, html, "Acme &lt;&gt;&amp;")
+}
+
+func TestRender_InviteUser_EmptyData_DoesNotPanic(t *testing.T) {
+	r := newTestRenderer(t)
+	_, _, err := r.Render("invite-user", InviteUserData{})
+	require.NoError(t, err)
+}
+
+// ---- Welcome ----
+
+func TestRender_Welcome_ReturnsBothOutputs(t *testing.T) {
+	r := newTestRenderer(t)
+	data := WelcomeData{
+		TenantName:        "Acme Platform",
+		LoginURL:          "https://app.example.com/login",
+		GettingStartedURL: "https://docs.example.com/getting-started",
+	}
+
+	html, text, err := r.Render("welcome", data)
+	require.NoError(t, err)
+
+	assert.Contains(t, html, "Acme Platform")
+	assert.Contains(t, html, "https://app.example.com/login")
+	assert.Contains(t, html, "https://docs.example.com/getting-started")
+
+	assert.Contains(t, text, "Acme Platform")
+	assert.Contains(t, text, "https://app.example.com/login")
+	assert.Contains(t, text, "https://docs.example.com/getting-started")
+}
+
+func TestRender_Welcome_HTMLEscaping(t *testing.T) {
+	r := newTestRenderer(t)
+	data := WelcomeData{
+		TenantName:        "<script>xss</script>",
+		LoginURL:          "https://app.example.com/login",
+		GettingStartedURL: "https://docs.example.com/getting-started",
+	}
+
+	html, _, err := r.Render("welcome", data)
+	require.NoError(t, err)
+	assert.NotContains(t, html, "<script>")
+	assert.Contains(t, html, "&lt;script&gt;")
+}
+
+func TestRender_Welcome_EmptyData_DoesNotPanic(t *testing.T) {
+	r := newTestRenderer(t)
+	_, _, err := r.Render("welcome", WelcomeData{})
+	require.NoError(t, err)
+}
+
+// ---- Account Lockout ----
+
+func TestRender_AccountLockout_ReturnsBothOutputs(t *testing.T) {
+	r := newTestRenderer(t)
+	data := AccountLockoutData{
+		TenantName:   "Acme Platform",
+		SupportEmail: "support@acme.example.com",
+		LockoutTime:  "2026-03-27 14:32:00 UTC",
+	}
+
+	html, text, err := r.Render("account-lockout", data)
+	require.NoError(t, err)
+
+	assert.Contains(t, html, "Acme Platform")
+	assert.Contains(t, html, "support@acme.example.com")
+	assert.Contains(t, html, "2026-03-27 14:32:00 UTC")
+	assert.Contains(t, html, "5 consecutive failed sign-in attempts")
+
+	assert.Contains(t, text, "Acme Platform")
+	assert.Contains(t, text, "support@acme.example.com")
+	assert.Contains(t, text, "2026-03-27 14:32:00 UTC")
+	assert.Contains(t, text, "5 consecutive failed sign-in attempts")
+}
+
+func TestRender_AccountLockout_HTMLEscaping(t *testing.T) {
+	r := newTestRenderer(t)
+	data := AccountLockoutData{
+		TenantName:   "Acme <>&",
+		SupportEmail: "support@example.com",
+		LockoutTime:  "2026-03-27 14:32:00 UTC",
+	}
+
+	html, _, err := r.Render("account-lockout", data)
+	require.NoError(t, err)
+	assert.NotContains(t, html, "Acme <>&")
+	assert.Contains(t, html, "Acme &lt;&gt;&amp;")
+}
+
+func TestRender_AccountLockout_EmptyData_DoesNotPanic(t *testing.T) {
+	r := newTestRenderer(t)
+	_, _, err := r.Render("account-lockout", AccountLockoutData{})
+	require.NoError(t, err)
+}

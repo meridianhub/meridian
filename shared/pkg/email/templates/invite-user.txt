@@ -1,0 +1,16 @@
+{{.TenantName}} - You have been invited to join {{.TenantSlug}}
+
+You have been invited to join {{.TenantSlug}} on {{.TenantName}}.
+
+This invitation was sent by {{.InviterEmail}}.
+
+Accept your invitation: {{.AcceptLink}}
+
+This invitation expires in 72 hours.
+
+If you were not expecting this invitation, you can safely ignore this email.
+
+Need help? Contact us at {{.SupportEmail}}.
+
+--
+Meridian - The Operating System for the Real-World Economy
