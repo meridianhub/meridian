@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -13,6 +14,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/pkg/tokens"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -26,25 +28,57 @@ var (
 	ErrRepositoryNil = errors.New("repository cannot be nil")
 )
 
+// OutboxWriter queues an email for delivery. A narrow interface so the service
+// does not depend on the full email.OutboxRepository.
+type OutboxWriter interface {
+	Enqueue(ctx context.Context, entry *email.OutboxEntry) error
+}
+
+// Option configures a Service.
+type Option func(*Service)
+
+// WithEmailOutbox sets the outbox writer used to queue notification emails.
+// If not provided (or nil), email notifications are silently skipped.
+func WithEmailOutbox(outbox OutboxWriter) Option {
+	return func(s *Service) {
+		s.emailOutbox = outbox
+	}
+}
+
+// WithBaseURL sets the base URL used to construct invitation accept links.
+// Defaults to "https://app.meridianhub.cloud" if not provided.
+func WithBaseURL(baseURL string) Option {
+	return func(s *Service) {
+		s.baseURL = baseURL
+	}
+}
+
 // Service implements the IdentityService gRPC service.
 type Service struct {
 	pb.UnimplementedIdentityServiceServer
-	repo   domain.Repository
-	logger *slog.Logger
+	repo        domain.Repository
+	logger      *slog.Logger
+	emailOutbox OutboxWriter
+	baseURL     string
 }
 
 // NewService creates a new identity service with the required repository dependency.
-func NewService(repo domain.Repository, logger *slog.Logger) (*Service, error) {
+func NewService(repo domain.Repository, logger *slog.Logger, opts ...Option) (*Service, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
 	}
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
-	return &Service{
-		repo:   repo,
-		logger: logger,
-	}, nil
+	svc := &Service{
+		repo:    repo,
+		logger:  logger,
+		baseURL: "https://app.meridianhub.cloud",
+	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc, nil
 }
 
 // --- Identity CRUD ---
@@ -625,6 +659,8 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 	s.logger.InfoContext(ctx, "invitation created",
 		"identity_id", identity.ID())
 
+	s.queueInvitationEmail(ctx, identity, inviterID, plaintextToken, tenantID)
+
 	// Grant the initial role if specified.
 	if req.GetRole() != pb.Role_ROLE_UNSPECIFIED {
 		granterRole := s.getCallerHighestRole(ctx)
@@ -900,5 +936,52 @@ func mapDomainError(err error, entity string) error {
 		return status.Errorf(codes.Aborted, "version conflict: resource was modified by another transaction")
 	default:
 		return status.Errorf(codes.Internal, "internal error")
+	}
+}
+
+// queueInvitationEmail enqueues an invitation email for the given invitee.
+// Best-effort: errors are logged but not surfaced to the caller.
+// The inviter's email is looked up by inviterID; if the lookup fails, "unknown" is used.
+func (s *Service) queueInvitationEmail(ctx context.Context, invitee *domain.Identity, inviterID uuid.UUID, plaintextToken string, tenantID tenant.TenantID) {
+	if s.emailOutbox == nil {
+		return
+	}
+
+	inviterEmail := "unknown"
+	if inviter, err := s.repo.FindByID(ctx, inviterID); err == nil {
+		inviterEmail = inviter.Email()
+	}
+
+	tenantSlug := string(tenantID)
+	if slug, ok := tenant.SlugFromContext(ctx); ok {
+		tenantSlug = slug
+	}
+
+	acceptLink := fmt.Sprintf("%s/auth/accept-invitation?token=%s", s.baseURL, plaintextToken)
+
+	entry := &email.OutboxEntry{
+		IdempotencyKey: "invite-user:" + invitee.ID().String(),
+		ToAddresses:    []string{invitee.Email()},
+		FromAddress:    "noreply@meridianhub.cloud",
+		Subject:        "You've been invited",
+		TemplateName:   "invite-user",
+		TemplateData: map[string]any{
+			"TenantName":   string(tenantID),
+			"TenantSlug":   tenantSlug,
+			"InviterEmail": inviterEmail,
+			"AcceptLink":   acceptLink,
+			"SupportEmail": "support@meridianhub.cloud",
+		},
+	}
+
+	if err := s.emailOutbox.Enqueue(ctx, entry); err != nil {
+		if errors.Is(err, email.ErrDuplicateIdempotency) {
+			s.logger.InfoContext(ctx, "invitation email already queued (idempotent)",
+				"identity_id", invitee.ID())
+			return
+		}
+		s.logger.ErrorContext(ctx, "failed to queue invitation email",
+			"identity_id", invitee.ID(),
+			"error", err)
 	}
 }

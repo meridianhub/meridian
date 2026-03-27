@@ -41,6 +41,7 @@ type Server struct {
 	registrationHandler   *RegistrationHandler
 	tenantInfoHandler     *TenantInfoHandler
 	resendWebhookHandler  *ResendWebhookHandler
+	adminHandler          *AdminHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -141,6 +142,24 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 	return s
 }
 
+// registerAdminRoutes registers admin identity management endpoints if configured.
+// Routes use wrapWithAuthChain which includes tenantAuthzMiddleware. This is intentional:
+// TenantAuthorizationMiddleware already bypasses the JWT/tenant mismatch check for
+// platform-admin and super-admin roles (see authorizeWithoutTenantClaim), allowing
+// cross-tenant admin access. The handler's own isAdminRole check provides the
+// role-based authorization layer.
+func (s *Server) registerAdminRoutes() {
+	if s.adminHandler == nil {
+		return
+	}
+	if s.authMiddleware == nil {
+		s.logger.Error("admin routes not registered: auth middleware is not configured")
+		return
+	}
+	adminVerifyH := s.wrapWithAuthChain(http.HandlerFunc(s.adminHandler.HandleVerifyOverride))
+	s.mux.Handle("POST /api/v1/admin/identities/{identity_id}/verify", adminVerifyH)
+}
+
 // registerTenantInfoRoute registers the public tenant info endpoint if configured.
 // Rate limiting wraps the entire chain so abusive traffic is rejected before
 // tenant resolution performs cache/DB lookups.
@@ -236,6 +255,9 @@ func (s *Server) registerRoutes() {
 	if s.resendWebhookHandler != nil {
 		s.mux.Handle("POST /api/v1/webhooks/resend", s.resendWebhookHandler)
 	}
+
+	// Admin identity management endpoints - full auth middleware chain.
+	s.registerAdminRoutes()
 
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy

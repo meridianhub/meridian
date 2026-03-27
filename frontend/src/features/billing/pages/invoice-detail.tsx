@@ -93,11 +93,11 @@ export function InvoiceDetailPage() {
   const queryClient = useQueryClient()
 
   const { data, isLoading, isError } = useInvoiceDetail(id)
-  const { data: emails = [], isLoading: emailsLoading } = useInvoiceEmails(id)
+  const { data: emails = [], isLoading: emailsLoading, isError: emailsError } = useInvoiceEmails(id)
 
   usePageTitle(data ? `Invoice ${data.invoiceNumber}` : 'Invoice')
 
-  const queryKey = tenantSlug && id ? tenantKeys.invoice(tenantSlug, id) : ['invoices', id]
+  const queryKey = tenantKeys.invoice(tenantSlug ?? '', id ?? '')
 
   function handleActionSuccess() {
     void queryClient.invalidateQueries({ queryKey })
@@ -256,6 +256,10 @@ export function InvoiceDetailPage() {
                   {[1, 2].map((i) => (
                     <div key={i} className="h-12 animate-pulse rounded bg-muted" />
                   ))}
+                </div>
+              ) : emailsError ? (
+                <div className="flex items-center justify-center py-12 text-sm text-destructive">
+                  Failed to load email history.
                 </div>
               ) : emails.length === 0 ? (
                 <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">

@@ -57,11 +57,21 @@ export function useBillingRunsTable() {
     if (!tenantSlug) return { items: [] }
 
     try {
+      const STATUS_ENUM: Record<string, number> = {
+        INITIATED: 1,
+        PROCESSING: 2,
+        COMPLETED: 3,
+        FAILED: 4,
+      }
+      const statusFilter = params.filters?.status
+      const statusEnum = statusFilter ? STATUS_ENUM[statusFilter] : undefined
+
       const response = await clients.billing.listBillingRuns({
         pagination: {
           pageSize: params.pageSize,
           pageToken: params.pageToken ?? '',
         },
+        ...(statusEnum !== undefined ? { status: [statusEnum as never] } : {}),
       })
 
       const items: BillingRun[] = (response.billingRuns ?? []).map((run) => ({
