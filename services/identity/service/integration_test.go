@@ -210,7 +210,7 @@ func TestIntegration_GrantRole(t *testing.T) {
 	assert.Equal(t, pb.Role_ROLE_OPERATOR, grantResp.RoleAssignment.Role)
 
 	// Verify role persisted
-	listResp, err := svc.ListRoleAssignments(ctx, &pb.ListRoleAssignmentsRequest{
+	listResp, err := svc.ListRoleAssignments(authCtx, &pb.ListRoleAssignmentsRequest{
 		IdentityId: identityID,
 	})
 	require.NoError(t, err)
@@ -249,7 +249,7 @@ func TestIntegration_InviteUser(t *testing.T) {
 	assert.Equal(t, pb.IdentityStatus_IDENTITY_STATUS_PENDING_INVITE, retrieved.Identity.Status)
 
 	// Verify role assigned
-	roles, err := svc.ListRoleAssignments(ctx, &pb.ListRoleAssignmentsRequest{
+	roles, err := svc.ListRoleAssignments(authCtx, &pb.ListRoleAssignmentsRequest{
 		IdentityId: resp.Identity.Id,
 	})
 	require.NoError(t, err)
@@ -447,7 +447,7 @@ func TestIntegration_FullFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 5: Verify roles in list
-	listResp, err := svc.ListRoleAssignments(ctx, &pb.ListRoleAssignmentsRequest{
+	listResp, err := svc.ListRoleAssignments(ownerCtx, &pb.ListRoleAssignmentsRequest{
 		IdentityId: identityID,
 	})
 	require.NoError(t, err)
