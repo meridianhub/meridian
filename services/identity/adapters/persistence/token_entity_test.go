@@ -127,7 +127,9 @@ func TestEmailVerificationToken_CascadeDelete(t *testing.T) {
 	}
 	require.NoError(t, db.Create(token).Error)
 
-	require.NoError(t, db.Delete(identity).Error)
+	// Use Unscoped to issue a hard DELETE (not a soft-delete UPDATE),
+	// which triggers the ON DELETE CASCADE FK constraint.
+	require.NoError(t, db.Unscoped().Delete(identity).Error)
 
 	var count int64
 	db.Model(&EmailVerificationTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
@@ -224,7 +226,9 @@ func TestPasswordResetToken_CascadeDelete(t *testing.T) {
 	}
 	require.NoError(t, db.Create(token).Error)
 
-	require.NoError(t, db.Delete(identity).Error)
+	// Use Unscoped to issue a hard DELETE (not a soft-delete UPDATE),
+	// which triggers the ON DELETE CASCADE FK constraint.
+	require.NoError(t, db.Unscoped().Delete(identity).Error)
 
 	var count int64
 	db.Model(&PasswordResetTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
