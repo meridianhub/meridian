@@ -79,6 +79,7 @@ import (
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 
 	// Shared platform
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -651,7 +652,16 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 
 func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	repo := identitypersistence.NewRepository(db)
-	svc, err := identityservice.NewService(repo, logger)
+
+	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "app.meridianhub.cloud")
+	baseURL := "https://" + baseDomain
+
+	emailOutboxRepo := email.NewPostgresOutboxRepository(db)
+
+	svc, err := identityservice.NewService(repo, logger,
+		identityservice.WithEmailOutbox(emailOutboxRepo),
+		identityservice.WithBaseURL(baseURL),
+	)
 	if err != nil {
 		return err
 	}

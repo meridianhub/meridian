@@ -11,6 +11,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/pkg/tokens"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -1916,4 +1917,93 @@ func TestRoleAssignmentToProto_WithRevocation(t *testing.T) {
 	assert.True(t, proto.Revoked)
 	assert.NotNil(t, proto.RevokedAt)
 	assert.Equal(t, revokedBy.String(), proto.RevokedBy)
+}
+
+// --- mockOutbox ---
+
+type mockOutbox struct {
+	entries  []*email.OutboxEntry
+	enqueueErr error
+}
+
+func (m *mockOutbox) Enqueue(_ context.Context, entry *email.OutboxEntry) error {
+	if m.enqueueErr != nil {
+		return m.enqueueErr
+	}
+	m.entries = append(m.entries, entry)
+	return nil
+}
+
+func newTestServiceWithOutbox(t *testing.T) (*Service, *mockRepository, *mockOutbox) {
+	t.Helper()
+	repo := newMockRepository()
+	outbox := &mockOutbox{}
+	svc, err := NewService(repo, slog.Default(), WithEmailOutbox(outbox), WithBaseURL("https://app.example.com"))
+	require.NoError(t, err)
+	return svc, repo, outbox
+}
+
+// --- InviteUser email outbox tests ---
+
+func TestInviteUser_QueuesInvitationEmail(t *testing.T) {
+	svc, repo, outbox := newTestServiceWithOutbox(t)
+
+	inviterID := uuid.New()
+	inviter := domain.ReconstructIdentity(
+		inviterID, svcTestTID, "inviter@example.com",
+		domain.IdentityStatusActive, "", "", "", 0,
+		time.Now(), time.Now(), 0,
+	)
+	repo.addIdentity(inviter)
+
+	ctx := contextWithAuth(inviterID, []string{"ADMIN"})
+	resp, err := svc.InviteUser(ctx, &pb.InviteUserRequest{
+		Email: "invited@example.com",
+		Role:  pb.Role_ROLE_OPERATOR,
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, resp.Invitation)
+	require.Len(t, outbox.entries, 1)
+
+	entry := outbox.entries[0]
+	assert.Equal(t, "invite-user", entry.TemplateName)
+	assert.Equal(t, []string{"invited@example.com"}, entry.ToAddresses)
+	assert.Equal(t, "inviter@example.com", entry.TemplateData["InviterEmail"])
+	assert.NotEmpty(t, entry.TemplateData["AcceptLink"])
+	assert.Contains(t, entry.TemplateData["AcceptLink"].(string), resp.InvitationToken)
+	assert.Equal(t, string(svcTestTID), entry.TemplateData["TenantName"])
+}
+
+func TestInviteUser_NilOutbox_NoEmailQueued(t *testing.T) {
+	// No WithEmailOutbox option - outbox is nil, no panic, invitation still created.
+	svc, repo := newTestService(t)
+
+	inviterID := uuid.New()
+	ctx := contextWithAuth(inviterID, []string{"ADMIN"})
+	resp, err := svc.InviteUser(ctx, &pb.InviteUserRequest{
+		Email: "invited@example.com",
+		Role:  pb.Role_ROLE_OPERATOR,
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, resp.Invitation)
+	assert.Len(t, repo.invitations, 1)
+}
+
+func TestInviteUser_OutboxError_InvitationStillSucceeds(t *testing.T) {
+	// Outbox enqueue failure must not fail the RPC - email is best-effort.
+	svc, repo, outbox := newTestServiceWithOutbox(t)
+	outbox.enqueueErr = errors.New("db unavailable")
+
+	inviterID := uuid.New()
+	ctx := contextWithAuth(inviterID, []string{"ADMIN"})
+	resp, err := svc.InviteUser(ctx, &pb.InviteUserRequest{
+		Email: "invited@example.com",
+		Role:  pb.Role_ROLE_OPERATOR,
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, resp.Invitation)
+	assert.Len(t, repo.invitations, 1)
 }
