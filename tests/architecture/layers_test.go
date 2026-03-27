@@ -15,6 +15,9 @@ const modulePath = "github.com/meridianhub/meridian"
 // because they wire the application together.
 var compositionRootAllowlist = map[string]bool{
 	"cmd/meridian/wire_services.go": true,
+	"cmd/meridian/wire_grpc.go":     true,
+	"cmd/meridian/wire_adapters.go": true,
+	"cmd/meridian/wire_gateway.go":  true,
 	"cmd/meridian/main.go":          true,
 }
 
