@@ -26,8 +26,6 @@ const (
 // Do NOT add new entries — split large files instead.
 var knownOversizedFiles = map[string]bool{
 	"services/identity/service/server.go":                        true,
-	"services/mcp-server/internal/tools/economy.go":              true,
-	"services/mcp-server/internal/tools/refdata.go":              true,
 	"services/party/adapters/persistence/repository.go":          true,
 	"shared/pkg/saga/schema/schema.go":                           true,
 }
