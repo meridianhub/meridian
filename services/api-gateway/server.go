@@ -143,7 +143,11 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 }
 
 // registerAdminRoutes registers admin identity management endpoints if configured.
-// Routes are wrapped with the full auth middleware chain (auth + tenant + tenant_authz).
+// Routes use wrapWithAuthChain which includes tenantAuthzMiddleware. This is intentional:
+// TenantAuthorizationMiddleware already bypasses the JWT/tenant mismatch check for
+// platform-admin and super-admin roles (see authorizeWithoutTenantClaim), allowing
+// cross-tenant admin access. The handler's own isAdminRole check provides the
+// role-based authorization layer.
 func (s *Server) registerAdminRoutes() {
 	if s.adminHandler == nil {
 		return

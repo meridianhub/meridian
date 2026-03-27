@@ -19,6 +19,10 @@ var (
 
 // AdminHandler handles admin override operations for identity management.
 // POST /api/v1/admin/identities/{identity_id}/verify
+//
+// This handler uses the identity domain repository directly rather than routing
+// through the gRPC identity service. This is consistent with other gateway handlers
+// (e.g. RegistrationHandler) that operate on identity aggregates via the repository.
 type AdminHandler struct {
 	identityRepo identitydomain.Repository
 	logger       *slog.Logger
@@ -112,7 +116,7 @@ func (h *AdminHandler) applyVerifyTransition(w http.ResponseWriter, r *http.Requ
 		if err := identity.Verify(); err != nil {
 			h.logger.ErrorContext(ctx, "admin verify override: failed to verify identity",
 				"identity_id", identityID, "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify identity"})
+			writeJSON(w, domainTransitionHTTPStatus(err), map[string]string{"error": "failed to verify identity"})
 			return false
 		}
 
@@ -120,7 +124,7 @@ func (h *AdminHandler) applyVerifyTransition(w http.ResponseWriter, r *http.Requ
 		if err := identity.Activate(); err != nil {
 			h.logger.ErrorContext(ctx, "admin verify override: failed to activate identity",
 				"identity_id", identityID, "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to activate identity"})
+			writeJSON(w, domainTransitionHTTPStatus(err), map[string]string{"error": "failed to activate identity"})
 			return false
 		}
 
@@ -151,6 +155,16 @@ func isAdminRole(claims *platformauth.Claims) bool {
 	return claims.HasRole(platformauth.RoleTenantOwner.String()) ||
 		claims.HasRole(platformauth.RolePlatformAdmin.String()) ||
 		claims.HasRole(platformauth.RoleSuperAdmin.String())
+}
+
+// domainTransitionHTTPStatus maps domain status-transition errors to HTTP 409 Conflict.
+// Unknown errors fall through to 500 Internal Server Error.
+func domainTransitionHTTPStatus(err error) int {
+	if errors.Is(err, identitydomain.ErrNotPendingVerification) ||
+		errors.Is(err, identitydomain.ErrInvalidStatusTransition) {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }
 
 // WithAdminHandler sets the admin handler for the server.
