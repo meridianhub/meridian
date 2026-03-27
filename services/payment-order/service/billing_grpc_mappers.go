@@ -140,6 +140,8 @@ func mapProtoBillingRunStatuses(statuses []billingpb.BillingRunStatus) []string 
 			result = append(result, string(domain.BillingRunStatusCompleted))
 		case billingpb.BillingRunStatus_BILLING_RUN_STATUS_FAILED:
 			result = append(result, string(domain.BillingRunStatusFailed))
+		case billingpb.BillingRunStatus_BILLING_RUN_STATUS_UNSPECIFIED:
+			// Skip unspecified status.
 		}
 	}
 	return result
@@ -163,6 +165,8 @@ func mapProtoInvoiceStatuses(statuses []billingpb.InvoiceStatus) []string {
 			result = append(result, string(domain.InvoiceStatusVoid))
 		case billingpb.InvoiceStatus_INVOICE_STATUS_OVERDUE:
 			result = append(result, string(domain.InvoiceStatusOverdue))
+		case billingpb.InvoiceStatus_INVOICE_STATUS_UNSPECIFIED:
+			// Skip unspecified status.
 		}
 	}
 	return result

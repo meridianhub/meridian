@@ -41,6 +41,7 @@ func NewBillingService(billingRepo persistence.BillingRepository, emailRepo emai
 	}
 }
 
+// ListBillingRuns returns a paginated list of billing runs with optional status filtering.
 func (s *BillingService) ListBillingRuns(ctx context.Context, req *billingpb.ListBillingRunsRequest) (*billingpb.ListBillingRunsResponse, error) {
 	pageSize, pageToken := parsePagination(req.GetPagination())
 
@@ -85,6 +86,7 @@ func (s *BillingService) ListBillingRuns(ctx context.Context, req *billingpb.Lis
 	}, nil
 }
 
+// GetBillingRun retrieves a single billing run by ID, enriched with invoice summary.
 func (s *BillingService) GetBillingRun(ctx context.Context, req *billingpb.GetBillingRunRequest) (*billingpb.GetBillingRunResponse, error) {
 	id, err := uuid.Parse(req.GetId())
 	if err != nil {
@@ -113,6 +115,7 @@ func (s *BillingService) GetBillingRun(ctx context.Context, req *billingpb.GetBi
 	}, nil
 }
 
+// ListInvoices returns a paginated list of invoices with optional filtering.
 func (s *BillingService) ListInvoices(ctx context.Context, req *billingpb.ListInvoicesRequest) (*billingpb.ListInvoicesResponse, error) {
 	pageSize, pageToken := parsePagination(req.GetPagination())
 
@@ -145,6 +148,7 @@ func (s *BillingService) ListInvoices(ctx context.Context, req *billingpb.ListIn
 	}, nil
 }
 
+// GetInvoice retrieves a single invoice by ID.
 func (s *BillingService) GetInvoice(ctx context.Context, req *billingpb.GetInvoiceRequest) (*billingpb.GetInvoiceResponse, error) {
 	id, err := uuid.Parse(req.GetId())
 	if err != nil {
@@ -165,6 +169,7 @@ func (s *BillingService) GetInvoice(ctx context.Context, req *billingpb.GetInvoi
 	}, nil
 }
 
+// ResendInvoiceEmail enqueues an invoice email for re-delivery.
 func (s *BillingService) ResendInvoiceEmail(ctx context.Context, req *billingpb.ResendInvoiceEmailRequest) (*billingpb.ResendInvoiceEmailResponse, error) {
 	invoiceID, err := uuid.Parse(req.GetInvoiceId())
 	if err != nil {
@@ -225,6 +230,7 @@ func (s *BillingService) ResendInvoiceEmail(ctx context.Context, req *billingpb.
 	}, nil
 }
 
+// MarkInvoicePaid transitions an invoice to paid status. Idempotent if already paid.
 func (s *BillingService) MarkInvoicePaid(ctx context.Context, req *billingpb.MarkInvoicePaidRequest) (*billingpb.MarkInvoicePaidResponse, error) {
 	invoiceID, err := uuid.Parse(req.GetInvoiceId())
 	if err != nil {
@@ -262,6 +268,7 @@ func (s *BillingService) MarkInvoicePaid(ctx context.Context, req *billingpb.Mar
 	}, nil
 }
 
+// VoidInvoice cancels an invoice and any pending email deliveries. Idempotent if already voided.
 func (s *BillingService) VoidInvoice(ctx context.Context, req *billingpb.VoidInvoiceRequest) (*billingpb.VoidInvoiceResponse, error) {
 	invoiceID, err := uuid.Parse(req.GetInvoiceId())
 	if err != nil {
@@ -309,6 +316,7 @@ func (s *BillingService) VoidInvoice(ctx context.Context, req *billingpb.VoidInv
 	}, nil
 }
 
+// ListInvoiceEmails returns the email delivery audit log for an invoice.
 func (s *BillingService) ListInvoiceEmails(ctx context.Context, req *billingpb.ListInvoiceEmailsRequest) (*billingpb.ListInvoiceEmailsResponse, error) {
 	invoiceID, err := uuid.Parse(req.GetInvoiceId())
 	if err != nil {
