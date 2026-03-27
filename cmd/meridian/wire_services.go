@@ -78,6 +78,7 @@ import (
 
 	// Shared platform
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -92,7 +93,8 @@ import (
 )
 
 // registerServices wires all gRPC services into the shared server in tier dependency order,
-// then enables health checking and reflection.
+// then enables health checking and reflection. It returns the multi-tenant audit worker
+// (if started) so that the caller can stop it during graceful shutdown.
 func registerServices(
 	ctx context.Context,
 	grpcServer *grpc.Server,
@@ -106,9 +108,12 @@ func registerServices(
 	schemaProvisioner tenantprovisioner.SchemaProvisioner,
 	tracer *observability.Tracer,
 	logger *slog.Logger,
-) error {
+) (*audit.MultiTenantWorker, error) {
 	// refDataComps is populated by wireReferenceData and used by wireInternalAccount for the account type cache.
 	var refDataComps *refDataComponents
+
+	// auditWorker is populated by wireAudit and stopped during graceful shutdown.
+	var auditWorker *audit.MultiTenantWorker
 
 	// Tier 0: No gRPC dependencies
 	for _, wire := range []struct {
@@ -129,11 +134,15 @@ func registerServices(
 		{"control-plane", func() error {
 			return wireControlPlane(ctx, grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), loopback, logger)
 		}},
-		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
+		{"audit", func() error {
+			var err error
+			auditWorker, err = wireAudit(ctx, grpcServer, conns.gormDB("party"), logger)
+			return err
+		}},
 		{"identity", func() error { return wireIdentity(grpcServer, conns.gormDB("identity"), logger) }},
 	} {
 		if err := wire.fn(); err != nil {
-			return fmt.Errorf("%s: %w", wire.name, err)
+			return nil, fmt.Errorf("%s: %w", wire.name, err)
 		}
 	}
 	logger.Info("Tier 0 services registered")
@@ -165,7 +174,7 @@ func registerServices(
 		{"forecasting", func() error { return wireForecasting(grpcServer, conns.pgxPool("forecasting"), loopback.mds, logger) }},
 	} {
 		if err := wire.fn(); err != nil {
-			return fmt.Errorf("%s: %w", wire.name, err)
+			return nil, fmt.Errorf("%s: %w", wire.name, err)
 		}
 	}
 	logger.Info("Tier 1 services registered")
@@ -173,7 +182,7 @@ func registerServices(
 	// Tier 2: Depend on Tier 1 (current-account needs PK, FA loopback clients for saga orchestration)
 	caOutboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("current-account"))
 	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, loopback.party, idempotencySvc, caOutboxRepo, refDataComps, tracer, logger); err != nil {
-		return fmt.Errorf("current-account: %w", err)
+		return nil, fmt.Errorf("current-account: %w", err)
 	}
 	logger.Info("Tier 2 services registered")
 
@@ -188,7 +197,7 @@ func registerServices(
 		{"reconciliation", func() error { return wireReconciliation(grpcServer, conns.gormDB("reconciliation"), logger) }},
 	} {
 		if err := wire.fn(); err != nil {
-			return fmt.Errorf("%s: %w", wire.name, err)
+			return nil, fmt.Errorf("%s: %w", wire.name, err)
 		}
 	}
 	logger.Info("Tier 3 services registered")
@@ -199,7 +208,7 @@ func registerServices(
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 	reflection.Register(grpcServer)
 
-	return nil
+	return auditWorker, nil
 }
 
 // ─── Tier 0 Wiring ──────────────────────────────────────────────────────────
@@ -635,14 +644,22 @@ func wireReconciliation(
 
 // ─── Audit Wiring ────────────────────────────────────────────────────────────
 
-func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+func wireAudit(ctx context.Context, server *grpc.Server, db *gorm.DB, logger *slog.Logger) (*audit.MultiTenantWorker, error) {
 	svc, err := auditservice.NewAuditService(db, logger)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	auditv1.RegisterAuditServiceServer(server, svc)
-	logger.Info("registered audit service")
-	return nil
+
+	// Start multi-tenant audit worker that discovers tenant schemas dynamically
+	// and processes audit_outbox -> audit_log within each tenant schema.
+	mtWorker := audit.NewMultiTenantWorker(db, "org_%", logger,
+		audit.WithAdaptivePolling(100*time.Millisecond, 30*time.Second),
+	)
+	mtWorker.Start(ctx)
+
+	logger.Info("registered audit service and started multi-tenant audit worker")
+	return mtWorker, nil
 }
 
 // wireEmbeddedDex creates the embedded Dex OIDC server and returns a gateway
