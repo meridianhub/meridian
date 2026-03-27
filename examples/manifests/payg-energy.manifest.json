@@ -450,6 +450,18 @@
       "externalReferenceType": "NATIONAL_ID"
     },
     {
+      "code": "SEPD",
+      "name": "Southern Electric Power Distribution",
+      "legalName": "Southern Electric Power Distribution plc",
+      "partyType": "ORGANIZATION",
+      "externalReference": "SEPD",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "dno",
+        "licence_area": "southern"
+      }
+    },
+    {
       "code": "GSP_SOUT",
       "name": "Southern England",
       "partyType": "ORGANIZATION",
@@ -552,11 +564,46 @@
       "description": "Electricity supply pool for South East England GSP group"
     },
     {
-      "code": "SUPPLY_POOL_GAS",
+      "code": "SUPPLY_POOL_GAS_SOUT",
       "accountType": "ENERGY_SUPPLY_POOL",
       "instrument": "KWH_GAS",
-      "ownerOrganization": "ACME_ENERGY",
-      "description": "Gas supply pool - national (gas has no regional GSP groups)"
+      "ownerOrganization": "GSP_SOUT",
+      "description": "Gas supply pool for SOUT GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS_SEEB",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "GSP_SEEB",
+      "description": "Gas supply pool for SEEB GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_SWAE",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_SWAE",
+      "description": "Electricity supply pool for SWAE GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS_SWAE",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "GSP_SWAE",
+      "description": "Gas supply pool for SWAE GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_WMID",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_WMID",
+      "description": "Electricity supply pool for WMID GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS_WMID",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "GSP_WMID",
+      "description": "Gas supply pool for WMID GSP group"
     }
   ]
 }

@@ -99,25 +99,62 @@ func runPaygFixtures(ctx context.Context, conn *grpc.ClientConn, tid string) err
 		return fmt.Errorf("register customers: %w", err)
 	}
 
-	// 3. Create prepayment accounts (GBP billing per fuel).
-	fmt.Println("\n--- Create Prepayment Accounts ---")
+	// 3. Resolve DNO and GSP parties, register party hierarchy.
+	fmt.Println("\n--- Register Party Hierarchy (DNO -> GSP -> Customer) ---")
+	dnoPartyID, err := resolveOrganizationPartyID(tCtx, conn, "SEPD")
+	if err != nil {
+		return fmt.Errorf("resolve DNO party: %w", err)
+	}
+	fmt.Printf("  DNO party ID: %s (SEPD)\n", dnoPartyID)
+
+	gspExtRefs := []string{"GSPSOUT", "GSPSEEB", "GSPSWAE", "GSPWMID"}
+	gspPartyIDs := make([]string, len(gspExtRefs))
+	for i, ref := range gspExtRefs {
+		gspPartyIDs[i], err = resolveOrganizationPartyID(tCtx, conn, ref)
+		if err != nil {
+			return fmt.Errorf("resolve GSP %s: %w", ref, err)
+		}
+	}
+
+	// Register associations:
+	//   - Customer -> Supplier (energy supply relationship)
+	//   - Customer -> DNO (network customer)
+	//   - DNO -> GSP (DNO operates GSP areas)
+	// Note: GSP association is via the MPAN (meter location), not the customer.
+	// A customer may have MPANs in multiple GSP areas. The kWh consumption
+	// accounts carry the GSP context via their account metadata, enabling
+	// aggregation queries like "consumption by GSP" without a direct
+	// customer -> GSP party link.
+	partyClient := partyv1.NewPartyServiceClient(conn)
+	for _, custPartyID := range customerPartyIDs {
+		_ = registerAssociationIdempotent(tCtx, partyClient, custPartyID, supplierPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
+		_ = registerAssociationIdempotent(tCtx, partyClient, custPartyID, dnoPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
+	}
+	for _, gspPartyID := range gspPartyIDs {
+		_ = registerAssociationIdempotent(tCtx, partyClient, dnoPartyID, gspPartyID, partyv1.RelationshipType_RELATIONSHIP_TYPE_BUSINESS_PARTNER)
+	}
+	fmt.Printf("  Registered: %d customer->supplier, %d customer->DNO, %d DNO->GSP associations\n",
+		len(customerPartyIDs), len(customerPartyIDs), len(gspPartyIDs))
+
+	// 4. Create prepayment and consumption accounts (GBP billing + kWh tracking per fuel).
+	fmt.Println("\n--- Create Customer Accounts ---")
 	if err := createPaygAccounts(tCtx, conn, supplierPartyID, customerPartyIDs); err != nil {
 		return fmt.Errorf("create accounts: %w", err)
 	}
 
-	// 4. Seed block tariff rates into market data.
+	// 6. Seed block tariff rates into market data.
 	fmt.Println("\n--- Seed Block Tariff Rates ---")
 	if err := seedBlockTariffRates(tCtx, conn); err != nil {
 		return fmt.Errorf("seed tariff rates: %w", err)
 	}
 
-	// 5. Seed wholesale energy prices.
+	// 7. Seed wholesale energy prices.
 	fmt.Println("\n--- Seed Wholesale Prices ---")
 	if err := seedWholesalePrices(tCtx, conn); err != nil {
 		return fmt.Errorf("seed wholesale prices: %w", err)
 	}
 
-	// 6. Seed consumption billing (GBP charges based on block tariff).
+	// 8. Seed consumption billing (GBP charges based on block tariff).
 	fmt.Println("\n--- Seed Consumption Billing ---")
 	if err := seedPaygBilling(tCtx, conn, customerPartyIDs); err != nil {
 		return fmt.Errorf("seed billing: %w", err)
@@ -180,6 +217,22 @@ func createPaygAccounts(ctx context.Context, conn *grpc.ClientConn, supplierPart
 			return fmt.Errorf("create gas account for %s: %w", cust.legalName, err)
 		}
 		fmt.Printf("  Gas:  %s (%s, MPRN: %s)\n", gasID, cust.legalName, cust.mprn)
+
+		// Electricity consumption tracking account (KWH_ELEC)
+		elecKwhID, err := createAccountIdempotent(ctx, client, partyID,
+			fmt.Sprintf("KWH-ELEC-%s", cust.mpan), "KWH_ELEC", supplierPartyID)
+		if err != nil {
+			return fmt.Errorf("create elec kWh account for %s: %w", cust.legalName, err)
+		}
+		fmt.Printf("  kWh(E): %s (%s)\n", elecKwhID, cust.legalName)
+
+		// Gas consumption tracking account (KWH_GAS)
+		gasKwhID, err := createAccountIdempotent(ctx, client, partyID,
+			fmt.Sprintf("KWH-GAS-%s", cust.mprn), "KWH_GAS", supplierPartyID)
+		if err != nil {
+			return fmt.Errorf("create gas kWh account for %s: %w", cust.legalName, err)
+		}
+		fmt.Printf("  kWh(G): %s (%s)\n", gasKwhID, cust.legalName)
 	}
 
 	return nil
