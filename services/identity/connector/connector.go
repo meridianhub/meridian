@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -63,24 +65,47 @@ type PasswordConnector interface {
 // ErrRepositoryNil is returned by New when a nil repository is provided.
 var ErrRepositoryNil = errors.New("connector: repository must not be nil")
 
+// OutboxWriter queues an email for delivery. A narrow interface so the connector
+// does not depend on the full email.OutboxRepository.
+type OutboxWriter interface {
+	Enqueue(ctx context.Context, entry *email.OutboxEntry) error
+}
+
+// Option configures a Connector.
+type Option func(*Connector)
+
+// WithEmailOutbox sets the outbox writer used to queue notification emails.
+// If not provided (or nil), email notifications are silently skipped.
+func WithEmailOutbox(outbox OutboxWriter) Option {
+	return func(c *Connector) {
+		c.emailOutbox = outbox
+	}
+}
+
 // Connector is the local implementation of PasswordConnector.
 // It performs credential validation and role resolution directly against the
 // identity domain repository, avoiding any network hop.
 type Connector struct {
-	repo   domain.Repository
-	logger *slog.Logger
+	repo        domain.Repository
+	logger      *slog.Logger
+	emailOutbox OutboxWriter
 }
 
 // New creates a Connector with the given repository. If logger is nil a default
-// JSON logger writing to stdout is used.
-func New(repo domain.Repository, logger *slog.Logger) (*Connector, error) {
+// JSON logger writing to stdout is used. Optional Option functions may be
+// provided to configure additional behaviour such as email notifications.
+func New(repo domain.Repository, logger *slog.Logger, opts ...Option) (*Connector, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
 	}
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
-	return &Connector{repo: repo, logger: logger}, nil
+	c := &Connector{repo: repo, logger: logger}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c, nil
 }
 
 // Login validates the supplied username (email) and password against the identity
@@ -147,10 +172,14 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 	if err := credentials.ValidatePassword(password, identity.PasswordHash()); err != nil {
 		// Record the failed attempt; best-effort — do not surface save errors to caller.
 		_ = identity.RecordLoginAttempt(false)
+		justLocked := identity.IsLocked()
 		if saveErr := c.repo.Save(ctx, identity); saveErr != nil {
 			c.logger.ErrorContext(ctx, "connector: failed to persist failed login attempt",
 				"identity_id", identity.ID(),
 				"error", saveErr)
+		}
+		if justLocked {
+			c.queueLockoutEmail(ctx, identity, tenantID)
 		}
 		c.logger.InfoContext(ctx, "connector: invalid password",
 			"tenant_id", tenantID,
@@ -190,6 +219,36 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 		"roles", groups)
 
 	return connIdentity, true, nil
+}
+
+// queueLockoutEmail enqueues an account-lockout notification for the given identity.
+// Best-effort: errors are logged but not surfaced to the caller.
+// ErrDuplicateIdempotency is silently ignored to handle concurrent lockout attempts.
+func (c *Connector) queueLockoutEmail(ctx context.Context, identity *domain.Identity, tenantID tenant.TenantID) {
+	if c.emailOutbox == nil {
+		return
+	}
+	entry := &email.OutboxEntry{
+		IdempotencyKey: "account-lockout:" + identity.ID().String(),
+		ToAddresses:    []string{identity.Email()},
+		Subject:        "Your account has been locked",
+		TemplateName:   "account-lockout",
+		TemplateData: map[string]any{
+			"TenantName":   string(tenantID),
+			"SupportEmail": "support@meridianhub.cloud",
+			"LockoutTime":  time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+	if err := c.emailOutbox.Enqueue(ctx, entry); err != nil {
+		if errors.Is(err, email.ErrDuplicateIdempotency) {
+			c.logger.InfoContext(ctx, "connector: lockout email already queued (idempotent)",
+				"identity_id", identity.ID())
+			return
+		}
+		c.logger.ErrorContext(ctx, "connector: failed to queue lockout email",
+			"identity_id", identity.ID(),
+			"error", err)
+	}
 }
 
 // activeRoles returns the string role names for all non-revoked, non-expired
