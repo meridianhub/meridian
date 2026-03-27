@@ -25,9 +25,9 @@ const (
 // Each entry must be removed when the file is split to comply.
 // Do NOT add new entries — split large files instead.
 var knownOversizedFiles = map[string]bool{
-	"services/identity/service/server.go":                        true,
-	"services/party/adapters/persistence/repository.go":          true,
-	"shared/pkg/saga/schema/schema.go":                           true,
+	"services/identity/service/server.go":               true,
+	"services/party/adapters/persistence/repository.go": true,
+	"shared/pkg/saga/schema/schema.go":                  true,
 }
 
 // TestFileSize validates that no non-test, non-generated Go file exceeds maxFileLines.
