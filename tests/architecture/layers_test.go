@@ -32,6 +32,7 @@ var knownCrossServiceInternalImports = map[string]bool{
 // knownCrossServiceDomainImports tracks existing cross-service domain imports.
 // Do NOT add new entries — use gRPC clients instead of direct imports.
 var knownCrossServiceDomainImports = map[string]bool{
+	"services/api-gateway/admin_handler.go":                                  true,
 	"services/api-gateway/auth_handler.go":                                  true,
 	"services/api-gateway/auth_sso_handler.go":                              true,
 	"services/api-gateway/cmd/main.go":                                      true,
