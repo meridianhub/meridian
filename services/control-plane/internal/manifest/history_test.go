@@ -479,7 +479,7 @@ func testManifest(version string) *controlplanev1.Manifest {
 
 func TestVersionEntity_TableName(t *testing.T) {
 	entity := VersionEntity{}
-	assert.Equal(t, "manifest_versions", entity.TableName())
+	assert.Equal(t, "manifest_version", entity.TableName())
 }
 
 func TestVersionEntity_GetPhaseStatus_InvalidJSON(t *testing.T) {

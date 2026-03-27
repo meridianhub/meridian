@@ -57,7 +57,7 @@ type PhaseStatusEntry struct {
 // (e.g., "phase_1", "phase_2").
 type PhaseStatusMap map[string]PhaseStatusEntry
 
-// VersionEntity represents a row in the manifest_versions table.
+// VersionEntity represents a row in the manifest_version table.
 type VersionEntity struct {
 	ID                uuid.UUID   `gorm:"column:id;type:uuid;primaryKey"`
 	Version           string      `gorm:"column:version;type:varchar(50);not null"`
@@ -106,7 +106,7 @@ func (e *VersionEntity) SetPhaseStatus(m PhaseStatusMap) error {
 
 // TableName returns the table name for GORM.
 func (VersionEntity) TableName() string {
-	return "manifest_versions"
+	return "manifest_version"
 }
 
 // Repository provides persistence operations for manifest versions.

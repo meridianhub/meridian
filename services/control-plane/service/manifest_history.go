@@ -77,7 +77,7 @@ func RegisterManifestHistoryService(server *grpc.Server, cfg ManifestHistoryServ
 }
 
 // SeedManifestVersion stores a manifest as the initial applied version in the
-// tenant's manifest_versions table. Idempotent - returns (false, nil) if a
+// tenant's manifest_version table. Idempotent - returns (false, nil) if a
 // manifest version already exists. The context must carry tenant identity via
 // tenant.WithTenant. Returns (true, nil) when a new version was stored.
 func SeedManifestVersion(ctx context.Context, db *gorm.DB, mf *controlplanev1.Manifest, appliedBy string) (bool, error) {
