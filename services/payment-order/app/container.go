@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -110,43 +111,50 @@ type Container struct {
 // It initializes infrastructure, repositories, external clients, messaging,
 // and background workers in dependency order. The caller is responsible for
 // calling Close when the container is no longer needed.
-func NewContainer(ctx context.Context, cfg *config.ServiceConfig, logger *slog.Logger, version string) (*Container, error) {
+func NewContainer(ctx context.Context, cfg *config.ServiceConfig, logger *slog.Logger, version string) (_ *Container, err error) {
 	c := &Container{
 		Config: cfg,
 		Logger: logger,
 	}
 
-	if err := c.initTracer(ctx, version); err != nil {
+	// If initialization fails partway, close already-initialized resources.
+	defer func() {
+		if err != nil {
+			c.Close()
+		}
+	}()
+
+	if err = c.initTracer(ctx, version); err != nil {
 		return nil, err
 	}
 
-	if err := c.initDatabase(ctx); err != nil {
+	if err = c.initDatabase(ctx); err != nil {
 		return nil, err
 	}
 
 	c.initRepositories()
 
-	if err := c.initExternalClients(ctx); err != nil {
+	if err = c.initExternalClients(ctx); err != nil {
 		return nil, err
 	}
 
-	if err := c.initPaymentGateway(); err != nil { //nolint:contextcheck // gateway client.New manages its own connection
+	if err = c.initPaymentGateway(); err != nil { //nolint:contextcheck // gateway client.New manages its own connection
 		return nil, err
 	}
 
 	c.initKafka(ctx)
 
-	if err := c.initRedis(ctx); err != nil {
+	if err = c.initRedis(ctx); err != nil {
 		return nil, err
 	}
 
 	c.initHandlerRegistry(ctx)
 
-	if err := c.initBillingWorkers(ctx); err != nil {
+	if err = c.initBillingWorkers(ctx); err != nil {
 		return nil, err
 	}
 
-	if err := c.initAuth(ctx); err != nil {
+	if err = c.initAuth(ctx); err != nil {
 		return nil, err
 	}
 
@@ -436,15 +444,19 @@ func (c *Container) initBillingWorkers(ctx context.Context) error {
 		return nil
 	}
 
-	if err := c.initBillingScheduler(ctx); err != nil {
+	// Create metrics once and share between billing scheduler and dunning worker
+	// to avoid duplicate prometheus.MustRegister panics via promauto.
+	billingMetrics := worker.NewBillingMetrics()
+
+	if err := c.initBillingScheduler(ctx, billingMetrics); err != nil {
 		return err
 	}
 
-	return c.initDunningWorker()
+	return c.initDunningWorker(billingMetrics)
 }
 
 // initBillingScheduler creates the billing cron scheduler with execution store and distributed lock.
-func (c *Container) initBillingScheduler(ctx context.Context) error {
+func (c *Container) initBillingScheduler(ctx context.Context, billingMetrics *worker.BillingMetrics) error {
 	tenantID := env.GetEnvOrDefault("BILLING_TENANT_ID", "default")
 
 	pgxPool, execStore, err := c.createSchedulerExecutionStore(ctx)
@@ -462,7 +474,7 @@ func (c *Container) initBillingScheduler(ctx context.Context) error {
 	billingExecutor := worker.NewBillingExecutor(
 		c.BillingRepo,
 		c.RedisClient,
-		worker.NewBillingMetrics(),
+		billingMetrics,
 		worker.BillingExecutorConfig{ShadowMode: c.Config.BillingShadowMode},
 		c.Logger,
 	)
@@ -505,16 +517,20 @@ func (c *Container) createSchedulerExecutionStore(ctx context.Context) (*pgxpool
 
 	execStore, err := scheduler.NewPgExecutionStore(pgxPool) //nolint:contextcheck // NewPgExecutionStore validates table existence without context
 	if err != nil {
-		c.Logger.Warn("scheduler_execution table not found, audit trail disabled", "error", err)
-		return pgxPool, nil, nil
+		// Only suppress missing-table errors (PostgreSQL/CockroachDB code 42P01).
+		// Other errors (permissions, connectivity) should propagate.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
+			c.Logger.Warn("scheduler_execution table not found, audit trail disabled", "error", err)
+			return pgxPool, nil, nil
+		}
+		return nil, nil, fmt.Errorf("failed to initialize scheduler execution store: %w", err)
 	}
 	return pgxPool, execStore, nil
 }
 
 // initDunningWorker creates the dunning escalation worker.
-func (c *Container) initDunningWorker() error {
-	billingMetrics := worker.NewBillingMetrics()
-
+func (c *Container) initDunningWorker(billingMetrics *worker.BillingMetrics) error {
 	// DunningCallback is a no-op for now; saga runner integration comes in Task 5
 	dunningCallback := func(_ context.Context, run *domain.BillingRun) error {
 		c.Logger.Info("dunning escalation triggered (no-op: saga runner not wired)",
