@@ -96,9 +96,9 @@ func NewContainer(ctx context.Context, logger *slog.Logger, version string) (*Co
 
 	// If initialization fails partway, close already-initialized resources.
 	succeeded := false
-	defer func() {
+	defer func() { //nolint:contextcheck // Close manages its own shutdown contexts
 		if !succeeded {
-			c.Close() //nolint:contextcheck // Close manages its own shutdown contexts
+			c.Close()
 		}
 	}()
 
