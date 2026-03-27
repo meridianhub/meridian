@@ -93,7 +93,7 @@ type Connector struct {
 
 // New creates a Connector with the given repository. If logger is nil a default
 // JSON logger writing to stdout is used. Optional Option functions may be
-// provided to configure additional behaviour such as email notifications.
+// provided to configure additional behavior such as email notifications.
 func New(repo domain.Repository, logger *slog.Logger, opts ...Option) (*Connector, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
