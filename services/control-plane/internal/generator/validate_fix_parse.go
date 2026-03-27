@@ -122,20 +122,21 @@ func advancePastString(s string, i int) int {
 func renameKwargs(callBody string, reverseMapping map[string]string) string {
 	var result strings.Builder
 	i := 0
+	depth := 0
 	for i < len(callBody) {
-		i = renameKwargsStep(&result, callBody, i, reverseMapping)
+		i, depth = renameKwargsStep(&result, callBody, i, depth, reverseMapping)
 	}
 	return result.String()
 }
 
-// renameKwargsStep processes one token at position i and returns the next position.
-func renameKwargsStep(result *strings.Builder, s string, i int, reverseMapping map[string]string) int {
+// renameKwargsStep processes one token at position i and returns the next position and depth.
+func renameKwargsStep(result *strings.Builder, s string, i int, depth int, reverseMapping map[string]string) (int, int) {
 	ch := s[i]
 	if ch == '"' || ch == '\'' {
 		start := i
 		i = advancePastString(s, i)
 		result.WriteString(s[start:i])
-		return i
+		return i, depth
 	}
 	if ch == '#' {
 		start := i
@@ -143,16 +144,28 @@ func renameKwargsStep(result *strings.Builder, s string, i int, reverseMapping m
 			i++
 		}
 		result.WriteString(s[start:i])
-		return i
+		return i, depth
 	}
-	if isIdentStart(ch) {
-		return renameKwargIdent(result, s, i, reverseMapping)
+	switch ch {
+	case '(':
+		result.WriteByte(ch)
+		return i + 1, depth + 1
+	case ')':
+		result.WriteByte(ch)
+		if depth > 0 {
+			depth--
+		}
+		return i + 1, depth
+	}
+	if depth == 0 && isIdentStart(ch) {
+		return renameKwargIdent(result, s, i, reverseMapping), depth
 	}
 	result.WriteByte(ch)
-	return i + 1
+	return i + 1, depth
 }
 
 // renameKwargIdent handles an identifier at position i, renaming it if it is a kwarg.
+// Only called at depth 0 to restrict renames to the deprecated call's top level.
 func renameKwargIdent(result *strings.Builder, s string, i int, reverseMapping map[string]string) int {
 	start := i
 	for i < len(s) && isScriptIdentChar(s[i]) {
@@ -211,7 +224,22 @@ func injectMissingDefaults(callBody string, defaults map[string]string) string {
 	if closeParen < 0 {
 		return callBody
 	}
-	before := strings.TrimRight(callBody[:closeParen], " \t\n")
+
+	// Find the insertion point, accounting for trailing line comments.
+	// If the last line before ')' has a '#' comment, insert before the comment
+	// so the injected args don't end up commented out.
+	insertAt := closeParen
+	lastNewline := strings.LastIndex(callBody[:closeParen], "\n")
+	searchStart := 0
+	if lastNewline >= 0 {
+		searchStart = lastNewline
+	}
+	commentIdx := findUnquotedComment(callBody[searchStart:closeParen])
+	if commentIdx >= 0 {
+		insertAt = searchStart + commentIdx
+	}
+
+	before := strings.TrimRight(callBody[:insertAt], " \t\n")
 	var sb strings.Builder
 	sb.WriteString(before)
 	for _, entry := range missing {
@@ -223,8 +251,28 @@ func injectMissingDefaults(callBody string, defaults map[string]string) string {
 		sb.WriteString(entry.v)
 		before = sb.String() // update before for subsequent iterations
 	}
+	// Append any trailing comment and whitespace between insertAt and closeParen
+	if insertAt < closeParen {
+		sb.WriteString(callBody[insertAt:closeParen])
+	}
 	sb.WriteString(callBody[closeParen:]) // append rest from closing paren onwards
 	return sb.String()
+}
+
+// findUnquotedComment returns the index of the first '#' in s that is not inside
+// a string literal. Returns -1 if no unquoted comment is found.
+func findUnquotedComment(s string) int {
+	for i := 0; i < len(s); {
+		if s[i] == '"' || s[i] == '\'' {
+			i = advancePastString(s, i)
+			continue
+		}
+		if s[i] == '#' {
+			return i
+		}
+		i++
+	}
+	return -1
 }
 
 // collectTopLevelKwargNames scans callBody and returns the set of keyword argument

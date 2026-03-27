@@ -51,8 +51,8 @@ type ValidateFixOptions struct {
 	// Validator performs dry-run manifest validation.
 	Validator ManifestValidator
 
-	// SchemaRegistry is used for error enrichment (available handlers, topics).
-	// May be nil - enrichment is skipped when no registry is provided.
+	// SchemaRegistry is used for schema-backed enrichment and deprecated-handler rewrites.
+	// May be nil - handler enrichment and mutating-phase rewrites are skipped when absent.
 	SchemaRegistry *schema.Registry
 }
 
