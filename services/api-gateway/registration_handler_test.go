@@ -40,14 +40,14 @@ func (s *stubTenantCreator) DeleteTenant(ctx context.Context, tenantID string) e
 }
 
 type stubIdentityRepo struct {
-	saveIdentityWithRolesFn           func(ctx context.Context, identity *identitydomain.Identity, roles []*identitydomain.RoleAssignment) error
-	findByIDFn                        func(ctx context.Context, id uuid.UUID) (*identitydomain.Identity, error)
-	findByEmailFn                     func(ctx context.Context, email string) (*identitydomain.Identity, error)
-	findVerificationTokenByHashFn     func(ctx context.Context, hash string) (*identitydomain.VerificationToken, error)
-	countVerificationTokensInWindowFn func(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
-	findPasswordResetTokenByHashFn    func(ctx context.Context, hash string) (*identitydomain.PasswordResetToken, error)
+	saveIdentityWithRolesFn            func(ctx context.Context, identity *identitydomain.Identity, roles []*identitydomain.RoleAssignment) error
+	findByIDFn                         func(ctx context.Context, id uuid.UUID) (*identitydomain.Identity, error)
+	findByEmailFn                      func(ctx context.Context, email string) (*identitydomain.Identity, error)
+	findVerificationTokenByHashFn      func(ctx context.Context, hash string) (*identitydomain.VerificationToken, error)
+	countVerificationTokensInWindowFn  func(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
+	findPasswordResetTokenByHashFn     func(ctx context.Context, hash string) (*identitydomain.PasswordResetToken, error)
 	countPasswordResetTokensInWindowFn func(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
-	saveFn                            func(ctx context.Context, identity *identitydomain.Identity) error
+	saveFn                             func(ctx context.Context, identity *identitydomain.Identity) error
 }
 
 func (s *stubIdentityRepo) Save(ctx context.Context, identity *identitydomain.Identity) error {

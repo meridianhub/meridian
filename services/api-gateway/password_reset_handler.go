@@ -168,82 +168,79 @@ func (h *PasswordResetHandler) HandleResetPassword(w http.ResponseWriter, r *htt
 		return
 	}
 
-	ctx := r.Context()
-	tokenHash := tokens.HashToken(req.Token)
+	status, resp := h.executeResetPassword(r.Context(), req.Token, req.NewPassword)
+	writeJSON(w, status, resp)
+}
+
+// executeResetPassword performs the token lookup, consumption, password update, and persistence.
+func (h *PasswordResetHandler) executeResetPassword(ctx context.Context, rawToken, newPassword string) (int, map[string]string) {
+	tokenHash := tokens.HashToken(rawToken)
 
 	ptoken, err := h.identityRepo.FindPasswordResetTokenByHash(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, identitydomain.ErrPasswordResetTokenNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "password reset token not found"})
-			return
+			return http.StatusNotFound, map[string]string{"error": "password reset token not found"}
 		}
 		h.logger.ErrorContext(ctx, "password-reset: failed to find token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := ptoken.Consume(); err != nil {
-		if errors.Is(err, identitydomain.ErrPasswordResetTokenExpired) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password reset token has expired"})
-			return
-		}
-		if errors.Is(err, identitydomain.ErrPasswordResetTokenAlreadyConsumed) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password reset token has already been consumed"})
-			return
-		}
-		h.logger.ErrorContext(ctx, "password-reset: failed to consume token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return h.handleResetConsumeError(ctx, err)
 	}
 
-	// Set tenant context for identity lookup.
 	tid, err := tenant.NewTenantID(ptoken.TenantID())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: invalid tenant ID on token", "tenant_id", ptoken.TenantID(), "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
 	identity, err := h.identityRepo.FindByID(tenantCtx, ptoken.IdentityID())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to find identity", "identity_id", ptoken.IdentityID(), "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
-	hash, err := credentials.HashPassword(req.NewPassword)
+	hash, err := credentials.HashPassword(newPassword)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to hash password", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := identity.SetPassword(hash); err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to set password", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := h.identityRepo.SavePasswordResetToken(tenantCtx, ptoken); err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to save consumed token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := h.identityRepo.Save(tenantCtx, identity); err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to save identity", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
-	// Invalidate all other reset tokens for this identity.
+	// Invalidate all other reset tokens for this identity (non-fatal).
 	if err := h.identityRepo.MarkPasswordResetTokensConsumedForIdentity(tenantCtx, ptoken.IdentityID()); err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to invalidate other tokens", "error", err)
-		// Non-fatal: password was already changed successfully.
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "password_reset"})
+	return http.StatusOK, map[string]string{"status": "password_reset"}
+}
+
+// handleResetConsumeError maps password reset token Consume errors to HTTP responses.
+func (h *PasswordResetHandler) handleResetConsumeError(ctx context.Context, err error) (int, map[string]string) {
+	if errors.Is(err, identitydomain.ErrPasswordResetTokenExpired) {
+		return http.StatusBadRequest, map[string]string{"error": "password reset token has expired"}
+	}
+	if errors.Is(err, identitydomain.ErrPasswordResetTokenAlreadyConsumed) {
+		return http.StatusBadRequest, map[string]string{"error": "password reset token has already been consumed"}
+	}
+	h.logger.ErrorContext(ctx, "password-reset: failed to consume token", "error", err)
+	return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 }
 
 // queuePasswordResetEmail enqueues a password reset email via the outbox.

@@ -27,10 +27,10 @@ type stubOutboxRepo struct {
 	entries   []*email.OutboxEntry
 }
 
-func (s *stubOutboxRepo) Enqueue(_ context.Context, entry *email.OutboxEntry) error {
+func (s *stubOutboxRepo) Enqueue(ctx context.Context, entry *email.OutboxEntry) error {
 	s.entries = append(s.entries, entry)
 	if s.enqueueFn != nil {
-		return s.enqueueFn(context.Background(), entry)
+		return s.enqueueFn(ctx, entry)
 	}
 	return nil
 }

@@ -69,14 +69,14 @@ type RegistrationHandler struct {
 
 // RegistrationHandlerConfig holds dependencies for creating a RegistrationHandler.
 type RegistrationHandlerConfig struct {
-	TenantCreator              TenantCreator
-	SlugChecker                SlugChecker
-	IdentityRepo               identitydomain.Repository
-	OutboxRepo                 email.OutboxRepository
-	RateLimiter                *RegistrationRateLimiter
-	BaseDomain                 string
-	EmailVerificationRequired  bool
-	Logger                     *slog.Logger
+	TenantCreator             TenantCreator
+	SlugChecker               SlugChecker
+	IdentityRepo              identitydomain.Repository
+	OutboxRepo                email.OutboxRepository
+	RateLimiter               *RegistrationRateLimiter
+	BaseDomain                string
+	EmailVerificationRequired bool
+	Logger                    *slog.Logger
 }
 
 // NewRegistrationHandler creates a handler for self-service tenant registration.

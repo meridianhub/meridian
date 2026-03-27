@@ -91,76 +91,72 @@ func (h *VerificationHandler) HandleVerifyEmail(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	ctx := r.Context()
-	tokenHash := tokens.HashToken(req.Token)
+	status, resp := h.executeVerifyEmail(r.Context(), req.Token)
+	writeJSON(w, status, resp)
+}
+
+// executeVerifyEmail performs the token lookup, consumption, identity verification, and persistence.
+func (h *VerificationHandler) executeVerifyEmail(ctx context.Context, rawToken string) (int, map[string]string) {
+	tokenHash := tokens.HashToken(rawToken)
 
 	vtoken, err := h.identityRepo.FindVerificationTokenByHash(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, identitydomain.ErrVerificationTokenNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "verification token not found"})
-			return
+			return http.StatusNotFound, map[string]string{"error": "verification token not found"}
 		}
 		h.logger.ErrorContext(ctx, "verification: failed to find token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := vtoken.Consume(); err != nil {
-		if errors.Is(err, identitydomain.ErrVerificationTokenExpired) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "verification token has expired"})
-			return
-		}
-		if errors.Is(err, identitydomain.ErrVerificationTokenAlreadyConsumed) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "verification token has already been consumed"})
-			return
-		}
-		h.logger.ErrorContext(ctx, "verification: failed to consume token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return h.handleConsumeError(ctx, err)
 	}
 
-	// Set tenant context for identity lookup.
 	tid, err := tenant.NewTenantID(vtoken.TenantID())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "verification: invalid tenant ID on token", "tenant_id", vtoken.TenantID(), "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
 	identity, err := h.identityRepo.FindByID(tenantCtx, vtoken.IdentityID())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "verification: failed to find identity", "identity_id", vtoken.IdentityID(), "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := identity.Verify(); err != nil {
 		if errors.Is(err, identitydomain.ErrNotPendingVerification) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "identity is not pending verification"})
-			return
+			return http.StatusBadRequest, map[string]string{"error": "identity is not pending verification"}
 		}
 		h.logger.ErrorContext(ctx, "verification: failed to verify identity", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := h.identityRepo.SaveVerificationToken(tenantCtx, vtoken); err != nil {
 		h.logger.ErrorContext(ctx, "verification: failed to save consumed token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
 	if err := h.identityRepo.Save(tenantCtx, identity); err != nil {
 		h.logger.ErrorContext(ctx, "verification: failed to save verified identity", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
-	// Queue welcome email.
 	h.queueWelcomeEmail(tenantCtx, identity)
+	return http.StatusOK, map[string]string{"status": "verified"}
+}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "verified"})
+// handleConsumeError maps verification token Consume errors to HTTP responses.
+func (h *VerificationHandler) handleConsumeError(ctx context.Context, err error) (int, map[string]string) {
+	if errors.Is(err, identitydomain.ErrVerificationTokenExpired) {
+		return http.StatusBadRequest, map[string]string{"error": "verification token has expired"}
+	}
+	if errors.Is(err, identitydomain.ErrVerificationTokenAlreadyConsumed) {
+		return http.StatusBadRequest, map[string]string{"error": "verification token has already been consumed"}
+	}
+	h.logger.ErrorContext(ctx, "verification: failed to consume token", "error", err)
+	return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 }
 
 // HandleResendVerification handles POST /api/v1/resend-verification.
