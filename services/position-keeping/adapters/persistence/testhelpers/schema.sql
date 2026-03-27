@@ -40,6 +40,10 @@ ALTER TABLE position_keeping.financial_position_log
     ADD CONSTRAINT chk_financial_position_log_reconciliation_status
     CHECK (reconciliation_status IN ('UNRECONCILED', 'MATCHED', 'MISMATCHED', 'RESOLVED'));
 
+ALTER TABLE position_keeping.financial_position_log
+    ADD CONSTRAINT chk_financial_position_log_previous_status
+    CHECK (previous_status IS NULL OR previous_status IN ('PENDING', 'RECONCILED', 'POSTED', 'CANCELLED', 'FAILED', 'REJECTED', 'AMENDED', 'REVERSED'));
+
 CREATE TABLE position_keeping.transaction_log_entry (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -155,6 +159,10 @@ CREATE INDEX idx_position_active ON position_keeping.position (account_id, instr
 CREATE INDEX idx_position_reference_id ON position_keeping.position (reference_id);
 CREATE INDEX idx_position_created_at ON position_keeping.position (created_at);
 
+-- NOTE: This trigger provides defense-in-depth for tests but does NOT exist in
+-- production CockroachDB deployments (PL/pgSQL triggers unsupported). Append-only
+-- enforcement in production relies on the repository layer.
+-- See migration 20260105000002_positions_append_only.sql.
 CREATE OR REPLACE FUNCTION position_keeping.positions_append_only()
 RETURNS TRIGGER AS $$
 BEGIN
