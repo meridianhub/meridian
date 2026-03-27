@@ -14,10 +14,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
-	celutil "github.com/meridianhub/meridian/services/reference-data/cel"
-	"github.com/meridianhub/meridian/services/reference-data/registry"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -35,213 +32,52 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		caobservability.RecordOperationDuration("initiate_account", operationStatus, time.Since(start))
 	}()
 
-	// Generate account ID
 	accountID := fmt.Sprintf("ACC-%s", uuid.New().String()[:8])
 
-	// Validate instrument_code is provided
 	instrumentCode := req.InstrumentCode
 	if instrumentCode == "" {
 		operationStatus = operationStatusInvalidCurrency
 		return nil, status.Errorf(codes.InvalidArgument, "instrument_code is required")
 	}
 
-	// Resolve dimension and precision from Reference Data service.
-	// Reference Data is required - fail closed if unavailable.
-	if s.instrumentGetter == nil {
-		operationStatus = "reference_data_unavailable"
-		s.logger.Error("instrumentGetter not configured, cannot create account",
-			"instrument_code", instrumentCode,
-			"account_id", accountID)
-		return nil, status.Errorf(codes.FailedPrecondition, "Reference Data service is required for account creation")
-	}
-
-	cachedInstrument, err := s.instrumentGetter.GetInstrument(ctx, instrumentCode, 0)
+	// Resolve dimension and precision from Reference Data service
+	resolved, opStatus, err := s.resolveInstrument(ctx, instrumentCode, accountID)
 	if err != nil {
-		switch {
-		case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
-			operationStatus = "request_canceled"
-			return nil, status.Error(codes.Canceled, "request canceled")
-		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
-			operationStatus = "instrument_lookup_timeout"
-			return nil, status.Error(codes.DeadlineExceeded, "instrument lookup timed out")
-		case errors.Is(err, registry.ErrNotFound):
-			operationStatus = "instrument_not_found"
-			s.logger.Warn("instrument not found in Reference Data, cannot create account",
-				"instrument_code", instrumentCode,
-				"account_id", accountID)
-			return nil, status.Errorf(codes.InvalidArgument, "unknown instrument_code: %s", instrumentCode)
-		default:
-			// Transient failure (network error, service unavailable)
-			operationStatus = "instrument_lookup_failed"
-			s.logger.Error("instrument lookup failed due to transient error, cannot create account",
-				"instrument_code", instrumentCode,
-				"account_id", accountID,
-				"error", err)
-			caobservability.RecordExternalServiceError("reference_data", "get_instrument")
-			return nil, status.Errorf(codes.Unavailable, "instrument lookup failed, please retry")
-		}
+		operationStatus = opStatus
+		return nil, err
 	}
-	// Map from reference-data registry dimension ("MONETARY") to domain quantity
-	// dimension ("CURRENCY"). The registry uses "MONETARY" while the domain quantity
-	// package uses "CURRENCY" - other dimensions are identical across both packages.
-	dimension := mapRegistryDimension(string(cachedInstrument.Definition.Dimension))
-	precision := cachedInstrument.Definition.Precision
 
 	// Validate party exists and is active (if party client is configured)
 	if s.partyClient != nil {
-		partyValidationStart := time.Now()
-		s.logger.Info("validating party for account creation",
-			"party_id", req.PartyId,
-			"account_id", accountID)
-
-		if err := s.partyClient.ValidateParty(ctx, req.PartyId); err != nil {
-			caobservability.RecordPartyValidationDuration(time.Since(partyValidationStart), false)
-
-			if errors.Is(err, ErrPartyNotFound) {
-				operationStatus = "party_not_found"
-				s.logger.Warn("party not found during account creation",
-					"party_id", req.PartyId,
-					"account_id", accountID)
-				return nil, status.Errorf(codes.InvalidArgument, "party not found: %s", req.PartyId)
-			}
-			if errors.Is(err, ErrPartyNotActive) {
-				operationStatus = "party_not_active"
-				s.logger.Warn("party not active during account creation",
-					"party_id", req.PartyId,
-					"account_id", accountID)
-				return nil, status.Errorf(codes.FailedPrecondition, "party not active: %s", req.PartyId)
-			}
-			operationStatus = "party_validation_failed"
-			s.logger.Error("party validation failed during account creation",
-				"party_id", req.PartyId,
-				"account_id", accountID,
-				"error", err)
-			caobservability.RecordExternalServiceError("party", "validate_party")
-			return nil, status.Errorf(codes.Internal, "party validation failed: %v", err)
+		if opStatus, err := s.validatePartyForAccountCreation(ctx, req.PartyId, accountID); err != nil {
+			operationStatus = opStatus
+			return nil, err
 		}
-
-		caobservability.RecordPartyValidationDuration(time.Since(partyValidationStart), true)
-		s.logger.Info("party validated successfully",
-			"party_id", req.PartyId,
-			"account_id", accountID)
 	}
 
-	// Resolve product type if provided
+	// Build account options
 	var opts []domain.AccountOption
-	var cachedType *CachedAccountType
 
 	// Set org_party_id if provided (for org-scoped accounts)
 	if req.OrgPartyId != "" {
-		orgPartyUUID, err := uuid.Parse(req.OrgPartyId)
+		orgPartyUUID, err := validateOrgPartyID(req.OrgPartyId)
 		if err != nil {
 			operationStatus = "invalid_org_party_id"
-			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: must be a valid UUID")
-		}
-		if orgPartyUUID == uuid.Nil {
-			operationStatus = "invalid_org_party_id"
-			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: zero UUID is not allowed")
+			return nil, err
 		}
 		opts = append(opts, domain.WithOrgPartyID(orgPartyUUID))
 	}
 
-	if req.ProductTypeCode != "" && s.accountTypeCache != nil {
-		tenantID, ok := tenant.FromContext(ctx)
-		if !ok {
-			operationStatus = "missing_tenant"
-			return nil, status.Error(codes.FailedPrecondition, "tenant context is required for product type resolution")
-		}
-
-		var err error
-		cachedType, err = s.accountTypeCache.GetOrLoad(ctx, tenantID, req.ProductTypeCode)
-		if err != nil {
-			operationStatus = "product_type_not_found"
-			s.logger.Warn("product type resolution failed",
-				"product_type_code", req.ProductTypeCode,
-				"account_id", accountID,
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "product type not found: %s", req.ProductTypeCode)
-		}
-
-		// Gate: BehaviorClass must be CUSTOMER for current accounts
-		if cachedType.Definition.BehaviorClass != accounttype.BehaviorClassCustomer {
-			operationStatus = "invalid_behavior_class"
-			s.logger.Warn("product type has non-CUSTOMER behavior class",
-				"product_type_code", req.ProductTypeCode,
-				"behavior_class", cachedType.Definition.BehaviorClass,
-				"account_id", accountID)
-			return nil, status.Errorf(codes.InvalidArgument,
-				"product type %s has behavior class %s, expected CUSTOMER",
-				req.ProductTypeCode, cachedType.Definition.BehaviorClass)
-		}
-
-		// Evaluate CEL eligibility if an eligibility program is configured
-		if cachedType.EligibilityProgram != nil {
-			if s.partyClient == nil {
-				operationStatus = "eligibility_unavailable"
-				s.logger.Error("party client not configured but eligibility program requires it",
-					"product_type_code", req.ProductTypeCode,
-					"party_id", req.PartyId,
-					"account_id", accountID)
-				return nil, status.Error(codes.FailedPrecondition, "party service is required for eligibility checks")
-			}
-			eligible, eligErr := s.evaluateEligibility(ctx, cachedType, req.PartyId, req.Attributes)
-			if eligErr != nil {
-				operationStatus = "eligibility_check_failed"
-				s.logger.Error("eligibility evaluation failed",
-					"product_type_code", req.ProductTypeCode,
-					"party_id", req.PartyId,
-					"account_id", accountID,
-					"error", eligErr)
-				return nil, status.Errorf(codes.Internal, "eligibility check failed: %v", eligErr)
-			}
-			if !eligible {
-				operationStatus = "party_not_eligible"
-				s.logger.Warn("party not eligible for product type",
-					"product_type_code", req.ProductTypeCode,
-					"party_id", req.PartyId,
-					"account_id", accountID)
-				return nil, status.Errorf(codes.FailedPrecondition,
-					"party %s is not eligible for product type %s", req.PartyId, req.ProductTypeCode)
-			}
-		}
-
-		// Validate attributes against JSON Schema if schema is defined.
-		// Always validate when a schema exists - this catches missing required fields
-		// even when no attributes are provided.
-		if cachedType.CompiledSchema != nil {
-			attrs := req.Attributes
-			if attrs == nil {
-				attrs = map[string]string{}
-			}
-			if err := validateAttributes(cachedType.CompiledSchema, attrs); err != nil {
-				operationStatus = "invalid_attributes"
-				return nil, status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
-			}
-		}
-
-		// Determine version: use requested version or latest from definition.
-		// When a specific version is requested, validate it does not exceed the
-		// latest known version since the cache only holds the latest definition.
-		version := cachedType.Definition.Version
-		if req.ProductTypeVersion != nil {
-			requested := int(*req.ProductTypeVersion)
-			if requested > cachedType.Definition.Version {
-				operationStatus = "invalid_version"
-				return nil, status.Errorf(codes.InvalidArgument,
-					"requested version %d exceeds latest version %d for product type %s",
-					requested, cachedType.Definition.Version, req.ProductTypeCode)
-			}
-			version = requested
-		}
-
-		opts = append(opts, domain.WithProductType(req.ProductTypeCode, version))
-		opts = append(opts, domain.WithBehaviorClass(string(cachedType.Definition.BehaviorClass)))
-
-		s.logger.Info("product type resolved for account creation",
-			"product_type_code", req.ProductTypeCode,
-			"product_type_version", version,
-			"behavior_class", cachedType.Definition.BehaviorClass,
-			"account_id", accountID)
+	// Resolve product type if provided
+	var cachedType *CachedAccountType
+	pt, opStatus, err := s.resolveProductType(ctx, req.ProductTypeCode, req.ProductTypeVersion, req.PartyId, req.Attributes, accountID)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
+	}
+	if pt != nil {
+		cachedType = pt.cachedType
+		opts = append(opts, pt.opts...)
 	}
 
 	// Create domain model with resolved instrument, dimension, and precision
@@ -250,8 +86,8 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		req.ExternalIdentifier,
 		req.PartyId,
 		instrumentCode,
-		dimension,
-		precision,
+		resolved.dimension,
+		resolved.precision,
 		opts...,
 	)
 	if err != nil {
@@ -268,7 +104,6 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	// Seed ValuationFeatures from product type templates (best-effort after account creation)
 	if cachedType != nil && len(cachedType.Definition.ValuationMethods) > 0 && s.valuationFeatureRepo != nil {
 		if err := s.seedValuationFeatures(ctx, account.ID(), cachedType.Definition); err != nil {
-			// Log but do not fail account creation - VF seeding is best-effort
 			s.logger.Error("failed to seed valuation features",
 				"account_id", accountID,
 				"product_type_code", req.ProductTypeCode,
@@ -276,30 +111,12 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 		}
 	}
 
-	// Record initial balance
 	caobservability.RecordBalance(safeMinorUnits(account.Balance()), instrumentCode)
 
-	// Convert to proto response
 	return &pb.InitiateCurrentAccountResponse{
 		AccountId: accountID,
 		Facility:  toProtoFacility(account),
 	}, nil
-}
-
-// evaluateEligibility retrieves party details and evaluates the CEL eligibility expression.
-func (s *Service) evaluateEligibility(ctx context.Context, cachedType *CachedAccountType, partyID string, attributes map[string]string) (bool, error) {
-	party, err := s.partyClient.GetParty(ctx, partyID)
-	if err != nil {
-		return false, fmt.Errorf("failed to retrieve party for eligibility: %w", err)
-	}
-
-	// Map proto enum values to the string keys expected by CEL expressions.
-	// Proto enums use names like "PARTY_TYPE_PERSON" - strip prefix for CEL.
-	partyType := stripEnumPrefix(party.GetPartyType().String(), "PARTY_TYPE_")
-	partyStatus := stripEnumPrefix(party.GetStatus().String(), "PARTY_STATUS_")
-	extRefType := stripEnumPrefix(party.GetExternalReferenceType().String(), "EXTERNAL_REFERENCE_TYPE_")
-
-	return celutil.EvalEligibility(cachedType.EligibilityProgram, partyType, partyStatus, extRefType, attributes)
 }
 
 // stripEnumPrefix removes the proto enum prefix to produce CEL-friendly values.

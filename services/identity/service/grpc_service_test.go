@@ -873,7 +873,7 @@ func TestRevokeRole_AlreadyRevoked(t *testing.T) {
 
 func TestListRoleAssignments_Success(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
@@ -895,7 +895,7 @@ func TestListRoleAssignments_Success(t *testing.T) {
 
 func TestListRoleAssignments_ExcludeRevoked(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
@@ -919,7 +919,7 @@ func TestListRoleAssignments_ExcludeRevoked(t *testing.T) {
 
 func TestListRoleAssignments_IncludeRevoked(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	targetIdentity, err := domain.NewIdentity(svcTestTID, "target@example.com")
 	require.NoError(t, err)
@@ -1733,7 +1733,7 @@ func TestRevokeRole_InvalidAssignmentID(t *testing.T) {
 
 func TestListRoleAssignments_InvalidIdentityID(t *testing.T) {
 	svc, _ := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 
 	_, err := svc.ListRoleAssignments(ctx, &pb.ListRoleAssignmentsRequest{
 		IdentityId: "not-a-uuid",
@@ -1745,7 +1745,7 @@ func TestListRoleAssignments_InvalidIdentityID(t *testing.T) {
 
 func TestListRoleAssignments_InternalError(t *testing.T) {
 	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
+	ctx := contextWithAuth(uuid.New(), []string{"ADMIN"})
 	repo.findRolesErr = errors.New("db down")
 
 	_, err := svc.ListRoleAssignments(ctx, &pb.ListRoleAssignmentsRequest{
