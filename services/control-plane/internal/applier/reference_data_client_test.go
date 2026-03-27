@@ -24,8 +24,8 @@ var _ ReferenceDataService = (*ReferenceDataClient)(nil)
 
 type fakeReferenceDataServer struct {
 	referencedatav1.UnimplementedReferenceDataServiceServer
-	activateInstrumentFn  func(context.Context, *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error)
-	retrieveInstrumentFn  func(context.Context, *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error)
+	activateInstrumentFn func(context.Context, *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error)
+	retrieveInstrumentFn func(context.Context, *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error)
 }
 
 func (f *fakeReferenceDataServer) RegisterInstrument(_ context.Context, req *referencedatav1.RegisterInstrumentRequest) (*referencedatav1.RegisterInstrumentResponse, error) {
