@@ -103,7 +103,9 @@ func New(repo domain.Repository, logger *slog.Logger, opts ...Option) (*Connecto
 	}
 	c := &Connector{repo: repo, logger: logger}
 	for _, opt := range opts {
-		opt(c)
+		if opt != nil {
+			opt(c)
+		}
 	}
 	return c, nil
 }

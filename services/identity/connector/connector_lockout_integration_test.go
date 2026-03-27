@@ -3,7 +3,6 @@
 package connector_test
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -136,7 +135,7 @@ func TestLockout_Integration_IdempotentConcurrentLockout(t *testing.T) {
 	// Exactly one email should be in the outbox regardless.
 	var count int64
 	err = db.Table("email_outbox").
-		Where(fmt.Sprintf("tenant_id = '%s' AND template_name = 'account-lockout'", idempTenant)).
+		Where("tenant_id = ? AND template_name = ?", idempTenant, "account-lockout").
 		Count(&count).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count, "concurrent lockout must produce exactly one outbox entry")
