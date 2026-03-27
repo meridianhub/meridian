@@ -231,8 +231,11 @@ func (c *Connector) queueLockoutEmail(ctx context.Context, identity *domain.Iden
 	if c.emailOutbox == nil {
 		return
 	}
+	now := time.Now().UTC()
+	// Include date in idempotency key so a re-lock after admin unlock on a
+	// different day produces a new notification.
 	entry := &email.OutboxEntry{
-		IdempotencyKey: "account-lockout:" + identity.ID().String(),
+		IdempotencyKey: "account-lockout:" + identity.ID().String() + ":" + now.Format("2006-01-02"),
 		ToAddresses:    []string{identity.Email()},
 		FromAddress:    "noreply@meridianhub.cloud",
 		Subject:        "Your account has been locked",
@@ -240,7 +243,7 @@ func (c *Connector) queueLockoutEmail(ctx context.Context, identity *domain.Iden
 		TemplateData: map[string]any{
 			"TenantName":   string(tenantID),
 			"SupportEmail": "support@meridianhub.cloud",
-			"LockoutTime":  time.Now().UTC().Format(time.RFC3339),
+			"LockoutTime":  now.Format(time.RFC3339),
 		},
 	}
 	if err := c.emailOutbox.Enqueue(ctx, entry); err != nil {
