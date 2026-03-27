@@ -209,10 +209,24 @@ func (s *BillingService) ResendInvoiceEmail(ctx context.Context, req *billingpb.
 		return nil, status.Error(codes.Unavailable, "email delivery not configured")
 	}
 
+	if enqueueErr := s.enqueueInvoiceEmail(ctx, inv, idempKey); enqueueErr != nil {
+		return nil, enqueueErr
+	}
+
+	return &billingpb.ResendInvoiceEmailResponse{
+		Email: &billingpb.InvoiceEmail{
+			IdempotencyKey: idempKey,
+			TemplateName:   "invoice_issued",
+			Status:         billingpb.EmailStatus_EMAIL_STATUS_PENDING,
+		},
+	}, nil
+}
+
+func (s *BillingService) enqueueInvoiceEmail(ctx context.Context, inv *domain.Invoice, idempKey string) error {
 	entry := &email.OutboxEntry{
 		IdempotencyKey: idempKey,
 		TemplateName:   "invoice_issued",
-		ToAddresses:    []string{}, // Will be resolved by the email worker via party lookup.
+		ToAddresses:    []string{}, // Resolved by the email worker via party lookup.
 		Subject:        fmt.Sprintf("Invoice %s", inv.InvoiceNumber),
 		TemplateData: map[string]any{
 			"invoice_id":     inv.ID.String(),
@@ -226,19 +240,12 @@ func (s *BillingService) ResendInvoiceEmail(ctx context.Context, req *billingpb.
 	if enqueueErr := s.emailRepo.Enqueue(ctx, entry); enqueueErr != nil {
 		if errors.Is(enqueueErr, email.ErrDuplicateIdempotency) {
 			s.logger.Info("duplicate email resend request", "idempotency_key", idempKey)
-		} else {
-			s.logger.Error("failed to enqueue invoice email", "error", enqueueErr)
-			return nil, status.Error(codes.Internal, "failed to queue email")
+			return nil
 		}
+		s.logger.Error("failed to enqueue invoice email", "error", enqueueErr)
+		return status.Error(codes.Internal, "failed to queue email")
 	}
-
-	return &billingpb.ResendInvoiceEmailResponse{
-		Email: &billingpb.InvoiceEmail{
-			IdempotencyKey: idempKey,
-			TemplateName:   "invoice_issued",
-			Status:         billingpb.EmailStatus_EMAIL_STATUS_PENDING,
-		},
-	}, nil
+	return nil
 }
 
 // MarkInvoicePaid transitions an invoice to paid status. Idempotent if already paid.

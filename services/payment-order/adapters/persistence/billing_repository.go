@@ -390,33 +390,23 @@ func (r *BillingRepositoryImpl) ListBillingRuns(ctx context.Context, filter Bill
 
 	var page *BillingRunPage
 	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		query := tx.Model(&BillingRunEntity{})
-		if len(filter.Statuses) > 0 {
-			query = query.Where("status IN ?", filter.Statuses)
+		applyFilter := func(q *gorm.DB) *gorm.DB {
+			if len(filter.Statuses) > 0 {
+				q = q.Where("status IN ?", filter.Statuses)
+			}
+			return q
 		}
 
-		var totalCount int64
-		if countErr := query.Count(&totalCount).Error; countErr != nil {
+		totalCount, countErr := countWithFilter(tx, &BillingRunEntity{}, applyFilter)
+		if countErr != nil {
 			return countErr
 		}
-
 		if totalCount == 0 {
 			page = &BillingRunPage{BillingRuns: []*domain.BillingRun{}, TotalCount: 0}
 			return nil
 		}
 
-		// Re-build query for rows (Count mutates the query builder).
-		rowQuery := tx.Model(&BillingRunEntity{})
-		if len(filter.Statuses) > 0 {
-			rowQuery = rowQuery.Where("status IN ?", filter.Statuses)
-		}
-		if !cursorTime.IsZero() {
-			rowQuery = rowQuery.Where(
-				"(created_at < ?) OR (created_at = ? AND id < ?)",
-				cursorTime, cursorTime, cursorID,
-			)
-		}
-
+		rowQuery := applyCursor(applyFilter(tx.Model(&BillingRunEntity{})), cursorTime, cursorID)
 		var entities []BillingRunEntity
 		if findErr := rowQuery.Order("created_at DESC, id DESC").Limit(pageSize + 1).Find(&entities).Error; findErr != nil {
 			return findErr
@@ -437,7 +427,6 @@ func (r *BillingRepositoryImpl) ListBillingRuns(ctx context.Context, filter Bill
 			last := entities[len(entities)-1]
 			nextCursor = encodeBillingCursor(last.CreatedAt, last.ID)
 		}
-
 		page = &BillingRunPage{
 			BillingRuns: runs,
 			NextCursor:  nextCursor,
@@ -460,28 +449,18 @@ func (r *BillingRepositoryImpl) ListInvoices(ctx context.Context, filter Invoice
 
 	var page *InvoicePage
 	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		query := tx.Model(&InvoiceEntity{})
-		query = applyInvoiceFilter(query, filter)
+		applyFilter := func(q *gorm.DB) *gorm.DB { return applyInvoiceFilter(q, filter) }
 
-		var totalCount int64
-		if countErr := query.Count(&totalCount).Error; countErr != nil {
+		totalCount, countErr := countWithFilter(tx, &InvoiceEntity{}, applyFilter)
+		if countErr != nil {
 			return countErr
 		}
-
 		if totalCount == 0 {
 			page = &InvoicePage{Invoices: []*domain.Invoice{}, TotalCount: 0}
 			return nil
 		}
 
-		rowQuery := tx.Model(&InvoiceEntity{})
-		rowQuery = applyInvoiceFilter(rowQuery, filter)
-		if !cursorTime.IsZero() {
-			rowQuery = rowQuery.Where(
-				"(created_at < ?) OR (created_at = ? AND id < ?)",
-				cursorTime, cursorTime, cursorID,
-			)
-		}
-
+		rowQuery := applyCursor(applyFilter(tx.Model(&InvoiceEntity{})), cursorTime, cursorID)
 		var entities []InvoiceEntity
 		if findErr := rowQuery.Order("created_at DESC, id DESC").Limit(pageSize + 1).Find(&entities).Error; findErr != nil {
 			return findErr
@@ -506,7 +485,6 @@ func (r *BillingRepositoryImpl) ListInvoices(ctx context.Context, filter Invoice
 			last := entities[len(entities)-1]
 			nextCursor = encodeBillingCursor(last.CreatedAt, last.ID)
 		}
-
 		page = &InvoicePage{
 			Invoices:   invoices,
 			NextCursor: nextCursor,
@@ -529,6 +507,26 @@ func applyInvoiceFilter(query *gorm.DB, filter InvoiceFilter) *gorm.DB {
 	}
 	if filter.BillingRunID != "" {
 		query = query.Where("billing_run_id = ?", filter.BillingRunID)
+	}
+	return query
+}
+
+// countWithFilter counts rows with an applied filter, returning 0 on empty sets.
+func countWithFilter(tx *gorm.DB, model any, applyFilter func(*gorm.DB) *gorm.DB) (int64, error) {
+	var count int64
+	if err := applyFilter(tx.Model(model)).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// applyCursor adds cursor-based pagination conditions to the query.
+func applyCursor(query *gorm.DB, cursorTime time.Time, cursorID uuid.UUID) *gorm.DB {
+	if !cursorTime.IsZero() {
+		query = query.Where(
+			"(created_at < ?) OR (created_at = ? AND id < ?)",
+			cursorTime, cursorTime, cursorID,
+		)
 	}
 	return query
 }
