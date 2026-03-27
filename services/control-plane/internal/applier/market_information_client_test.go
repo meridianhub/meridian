@@ -355,9 +355,27 @@ func TestMarketInformationClient_RegisterDataSet_AlreadyExists_TreatedAsSuccess(
 	assert.Equal(t, int32(1), m["version"])
 }
 
-func TestMarketInformationClient_ActivateDataSet_FailedPrecondition_TreatedAsSuccess(t *testing.T) {
+func TestMarketInformationClient_RegisterDataSet_AlreadyExists_LookupFails(t *testing.T) {
+	srv := &fakeMarketInformationServer{
+		registerDataSetErr: status.Error(codes.AlreadyExists, "dataset already exists"),
+		retrieveDataSetFn: func(_ context.Context, _ *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return nil, status.Error(codes.NotFound, "dataset not found")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	_, err := client.RegisterDataSet(testStarlarkCtx(), map[string]any{
+		"code": "GHOST_DS",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup failed")
+}
+
+func TestMarketInformationClient_ActivateDataSet_AlreadyActive_TreatedAsSuccess(t *testing.T) {
 	srv := &fakeMarketInformationServer{
 		activateDataSetErr: status.Error(codes.FailedPrecondition, "invalid status transition: ACTIVE to ACTIVE"),
+		// RetrieveDataSet returns ACTIVE status, confirming idempotent completion
 	}
 	conn := newMarketInformationTestServer(t, srv)
 	client := NewMarketInformationClient(conn)
@@ -370,4 +388,29 @@ func TestMarketInformationClient_ActivateDataSet_FailedPrecondition_TreatedAsSuc
 	m := result.(map[string]any)
 	assert.Equal(t, "ds-existing-uuid", m["dataset_id"])
 	assert.Equal(t, "ALREADY_ACTIVE", m["code"])
+}
+
+func TestMarketInformationClient_ActivateDataSet_NotActive_ErrorPropagated(t *testing.T) {
+	srv := &fakeMarketInformationServer{
+		activateDataSetErr: status.Error(codes.FailedPrecondition, "invalid status transition: DEPRECATED to ACTIVE"),
+		retrieveDataSetFn: func(_ context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return &marketinformationv1.RetrieveDataSetResponse{
+				Dataset: &marketinformationv1.DataSetDefinition{
+					Id:      "ds-uuid-1",
+					Code:    req.Code,
+					Version: 1,
+					Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_DEPRECATED,
+				},
+			}, nil
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	_, err := client.ActivateDataSet(testStarlarkCtx(), map[string]any{
+		"code":    "DEPRECATED_DS",
+		"version": int32(1),
+	})
+	require.Error(t, err, "FailedPrecondition for non-ACTIVE should propagate")
+	assert.Contains(t, err.Error(), "activate data set")
 }

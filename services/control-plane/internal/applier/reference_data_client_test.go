@@ -362,6 +362,25 @@ func TestReferenceDataClient_RegisterSagaDefinition_AlreadyExists_TreatedAsSucce
 	assert.Contains(t, m["status"].(string), "ACTIVE")
 }
 
+func TestReferenceDataClient_RegisterSagaDefinition_AlreadyExists_LookupFails(t *testing.T) {
+	sagaSrv := &fakeSagaRegistryServer{
+		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "saga already exists")
+		},
+		getActiveFn: func(_ context.Context, _ *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+			return nil, status.Error(codes.NotFound, "no active saga found")
+		},
+	}
+	conn := newRefDataTestServerWith(t, sagaSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	_, err := client.RegisterSagaDefinition(testStarlarkCtx(), map[string]any{
+		"saga_name": "test-saga",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup failed")
+}
+
 func TestReferenceDataClient_RegisterSagaDefinition_OtherError_Propagated(t *testing.T) {
 	sagaSrv := &fakeSagaRegistryServer{
 		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {

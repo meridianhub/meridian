@@ -265,24 +265,19 @@ func (c *ReferenceDataClient) RegisterSagaDefinition(ctx *saga.StarlarkContext, 
 }
 
 // handleSagaAlreadyExists resolves the existing active saga by name so that
-// downstream saga steps receive the saga_id. Falls back to a best-effort
-// result without saga_id if the lookup fails.
+// downstream saga steps receive the saga_id. Returns an error if the lookup fails.
 func (c *ReferenceDataClient) handleSagaAlreadyExists(ctx context.Context, name string) (any, error) {
 	resp, err := c.sagas.GetActiveSaga(ctx, &sagav1.GetActiveSagaRequest{
 		Name: name,
 	})
-	if err == nil {
-		s := resp.GetSaga()
-		return map[string]any{
-			"saga_name": s.GetName(),
-			"saga_id":   s.GetId(),
-			"status":    s.GetStatus().String(),
-		}, nil
+	if err != nil {
+		return nil, fmt.Errorf("create saga draft: saga already exists but lookup failed: %w", err)
 	}
-	// Best-effort fallback when lookup fails
+	s := resp.GetSaga()
 	return map[string]any{
-		"saga_name": name,
-		"status":    "ACTIVE",
+		"saga_name": s.GetName(),
+		"saga_id":   s.GetId(),
+		"status":    s.GetStatus().String(),
 	}, nil
 }
 

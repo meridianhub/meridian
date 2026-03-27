@@ -24,6 +24,7 @@ var _ InternalAccountService = (*InternalAccountClient)(nil)
 type fakeInternalAccountServer struct {
 	internalaccountv1.UnimplementedInternalAccountServiceServer
 	initiateFn func(context.Context, *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error)
+	retrieveFn func(context.Context, *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error)
 }
 
 func (f *fakeInternalAccountServer) InitiateInternalAccount(ctx context.Context, req *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
@@ -34,6 +35,19 @@ func (f *fakeInternalAccountServer) InitiateInternalAccount(ctx context.Context,
 		AccountId: "ia-uuid-1",
 		Facility: &internalaccountv1.InternalAccountFacility{
 			AccountCode:   req.AccountCode,
+			AccountStatus: internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+		},
+	}, nil
+}
+
+func (f *fakeInternalAccountServer) RetrieveInternalAccount(ctx context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+	if f.retrieveFn != nil {
+		return f.retrieveFn(ctx, req)
+	}
+	return &internalaccountv1.RetrieveInternalAccountResponse{
+		Facility: &internalaccountv1.InternalAccountFacility{
+			AccountId:     "existing-ia-uuid",
+			AccountCode:   req.AccountId, // The service accepts code as account_id
 			AccountStatus: internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
 		},
 	}, nil
@@ -119,8 +133,29 @@ func TestInternalAccountClient_InitiateAccount_AlreadyExists_TreatedAsSuccess(t 
 	})
 	require.NoError(t, err, "AlreadyExists should be treated as idempotent success")
 	m := result.(map[string]any)
+	assert.Equal(t, "existing-ia-uuid", m["account_id"])
 	assert.Equal(t, "CLEARING_GBP", m["account_code"])
-	assert.Equal(t, "ACCOUNT_STATUS_ACTIVE", m["status"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestInternalAccountClient_InitiateAccount_AlreadyExists_LookupFails(t *testing.T) {
+	srv := &fakeInternalAccountServer{
+		initiateFn: func(_ context.Context, _ *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "account code already exists")
+		},
+		retrieveFn: func(_ context.Context, _ *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+			return nil, status.Error(codes.NotFound, "account not found")
+		},
+	}
+	conn := newInternalAccountTestServerWith(t, srv)
+	client := NewInternalAccountClient(conn)
+
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	_, err := client.InitiateAccount(ctx, map[string]any{
+		"account_code": "MISSING",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup failed")
 }
 
 func TestInternalAccountClient_InitiateAccount_OtherError_Propagated(t *testing.T) {
