@@ -11,6 +11,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// sha256hex returns a 64-character hex string for use as a token_hash in tests.
+// Prefix identifies the test context; remainder is zero-padded to 64 chars.
+func sha256hex(prefix string) string {
+	const maxLen = 64
+	if len(prefix) >= maxLen {
+		return prefix[:maxLen]
+	}
+	result := make([]byte, maxLen)
+	copy(result, prefix)
+	for i := len(prefix); i < maxLen; i++ {
+		result[i] = '0'
+	}
+	return string(result)
+}
+
 var tokenModels = []interface{}{
 	&IdentityEntity{},
 	&EmailVerificationTokenEntity{},
@@ -40,7 +55,7 @@ func TestEmailVerificationToken_InsertAndRetrieve(t *testing.T) {
 	token := &EmailVerificationTokenEntity{
 		TenantID:   testTenantIDStr,
 		IdentityID: identityID,
-		TokenHash:  "abc123hashvalue0000000000000000000000000000000000000000000000000",
+		TokenHash:  sha256hex("ev-insert"),
 		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	require.NoError(t, db.Create(token).Error)
@@ -70,7 +85,7 @@ func TestEmailVerificationToken_UniqueHashConstraint(t *testing.T) {
 	}
 	require.NoError(t, db.Create(identity).Error)
 
-	hash := "dupehash000000000000000000000000000000000000000000000000000000000"
+	hash := sha256hex("ev-dupe")
 	token1 := &EmailVerificationTokenEntity{
 		TenantID:   testTenantIDStr,
 		IdentityID: identityID,
@@ -107,7 +122,7 @@ func TestEmailVerificationToken_CascadeDelete(t *testing.T) {
 	token := &EmailVerificationTokenEntity{
 		TenantID:   testTenantIDStr,
 		IdentityID: identityID,
-		TokenHash:  "cascadehash0000000000000000000000000000000000000000000000000000000",
+		TokenHash:  sha256hex("ev-cascade"),
 		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	require.NoError(t, db.Create(token).Error)
@@ -137,7 +152,7 @@ func TestPasswordResetToken_InsertAndRetrieve(t *testing.T) {
 	token := &PasswordResetTokenEntity{
 		TenantID:   testTenantIDStr,
 		IdentityID: identityID,
-		TokenHash:  "resethash00000000000000000000000000000000000000000000000000000000",
+		TokenHash:  sha256hex("pr-insert"),
 		ExpiresAt:  time.Now().Add(1 * time.Hour),
 	}
 	require.NoError(t, db.Create(token).Error)
@@ -167,7 +182,7 @@ func TestPasswordResetToken_UniqueHashConstraint(t *testing.T) {
 	}
 	require.NoError(t, db.Create(identity).Error)
 
-	hash := "dupeprhash0000000000000000000000000000000000000000000000000000000"
+	hash := sha256hex("pr-dupe")
 	token1 := &PasswordResetTokenEntity{
 		TenantID:   testTenantIDStr,
 		IdentityID: identityID,
@@ -204,7 +219,7 @@ func TestPasswordResetToken_CascadeDelete(t *testing.T) {
 	token := &PasswordResetTokenEntity{
 		TenantID:   testTenantIDStr,
 		IdentityID: identityID,
-		TokenHash:  "cascadeprhash000000000000000000000000000000000000000000000000000",
+		TokenHash:  sha256hex("pr-cascade"),
 		ExpiresAt:  time.Now().Add(1 * time.Hour),
 	}
 	require.NoError(t, db.Create(token).Error)
