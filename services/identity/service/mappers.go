@@ -91,6 +91,8 @@ func domainStatusToProto(s domain.IdentityStatus) pb.IdentityStatus {
 		return pb.IdentityStatus_IDENTITY_STATUS_SUSPENDED
 	case domain.IdentityStatusLocked:
 		return pb.IdentityStatus_IDENTITY_STATUS_LOCKED
+	case domain.IdentityStatusPendingVerification:
+		return pb.IdentityStatus_IDENTITY_STATUS_PENDING_VERIFICATION
 	default:
 		return pb.IdentityStatus_IDENTITY_STATUS_UNSPECIFIED
 	}
