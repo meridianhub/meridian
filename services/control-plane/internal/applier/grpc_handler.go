@@ -1,7 +1,10 @@
 // Package applier provides the ApplyManifest gRPC handler that orchestrates
 // manifest validation, diffing, planning, and execution.
 //
-//meridian:large-file - known oversized file; split tracked in backlog
+// The handler logic is split across three files:
+//   - grpc_handler.go: struct, constructor, main handler, step helpers, history recording
+//   - grpc_handler_mappers.go: proto-to-domain mappers (buildExecutorInput, extractors)
+//   - grpc_handler_phase.go: phase status tracking (build, update, classify, convert)
 package applier
 
 import (
@@ -9,12 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
-	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/meridianhub/meridian/services/control-plane/internal/manifest"
 	"github.com/meridianhub/meridian/services/control-plane/internal/planner"
@@ -22,7 +22,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Sentinel errors for handler configuration validation.
@@ -345,7 +344,7 @@ func (h *ApplyManifestHandler) diff(
 ) diffOutput {
 	// Get the last-applied manifest (nil means first apply).
 	// When skipImmutability is true we model a new-tenant create, so there
-	// is no baseline to diff against — everything is treated as CREATE.
+	// is no baseline to diff against - everything is treated as CREATE.
 	var lastApplied *controlplanev1.Manifest
 	if h.versionStore != nil && !skipImmutability {
 		prev, err := h.versionStore.GetLatestApplied(ctx)
@@ -489,107 +488,6 @@ func (h *ApplyManifestHandler) execute(
 	}
 }
 
-// buildInitialPhaseStatus creates a PhaseStatusMap with PENDING entries for each
-// phase present in the execution plan.
-func buildInitialPhaseStatus(plan *planner.ExecutionPlan) manifest.PhaseStatusMap {
-	phases := plan.Phases()
-	m := make(manifest.PhaseStatusMap, len(phases))
-	for _, p := range phases {
-		key := fmt.Sprintf("phase_%d", p)
-		m[key] = manifest.PhaseStatusEntry{
-			Status: manifest.PhaseStatusPending,
-		}
-	}
-	return m
-}
-
-// updatePhaseStatus updates phase entries based on the execution result.
-// On success, all phases are marked COMPLETED.
-// On failure, phases are marked based on step results: completed phases get COMPLETED,
-// the phase containing the failing step gets FAILED, and remaining phases get SKIPPED.
-func updatePhaseStatus(
-	phaseStatus manifest.PhaseStatusMap,
-	plan *planner.ExecutionPlan,
-	result *ApplyManifestResult,
-	execErr error,
-) {
-	now := time.Now().UTC()
-	phases := plan.Phases()
-
-	if execErr == nil && result != nil {
-		// All phases completed successfully
-		for _, p := range phases {
-			key := fmt.Sprintf("phase_%d", p)
-			entry := phaseStatus[key]
-			entry.Status = manifest.PhaseStatusCompleted
-			entry.StartedAt = &now
-			entry.CompletedAt = &now
-			phaseStatus[key] = entry
-		}
-		return
-	}
-
-	// On failure: mark phases based on step results.
-	// Steps are executed in phase order. We mark phases as COMPLETED until we
-	// find a failed step, then the containing phase is FAILED and the rest are SKIPPED.
-	failedPhase := findFailedPhase(plan, result)
-
-	for _, p := range phases {
-		key := fmt.Sprintf("phase_%d", p)
-		entry := phaseStatus[key]
-		entry.StartedAt = &now
-
-		if failedPhase > 0 && p < failedPhase {
-			entry.Status = manifest.PhaseStatusCompleted
-			entry.CompletedAt = &now
-		} else if failedPhase > 0 && p == failedPhase {
-			entry.Status = manifest.PhaseStatusFailed
-			entry.CompletedAt = &now
-			if result != nil {
-				entry.Error = result.Error
-			} else if execErr != nil {
-				entry.Error = execErr.Error()
-			}
-		} else if failedPhase > 0 {
-			entry.Status = manifest.PhaseStatusSkipped
-			entry.StartedAt = nil
-		} else {
-			// No phase-level info available; mark all as failed
-			entry.Status = manifest.PhaseStatusFailed
-			entry.CompletedAt = &now
-			if execErr != nil {
-				entry.Error = execErr.Error()
-			}
-		}
-		phaseStatus[key] = entry
-	}
-}
-
-// findFailedPhase returns the phase number of the first failed step, or 0 if
-// it cannot be determined from step results.
-//
-// Step results are ordered by execution sequence, matching the call order in
-// the execution plan. We use positional correlation: step result at index i
-// corresponds to planned call at index i. This avoids the naming mismatch
-// between saga handler names (e.g. "reference_data.register_instrument") and
-// gRPC method paths in the execution plan.
-func findFailedPhase(plan *planner.ExecutionPlan, result *ApplyManifestResult) planner.Phase {
-	if result == nil || len(result.StepResults) == 0 {
-		return 0
-	}
-
-	for i, step := range result.StepResults {
-		if !step.Success {
-			if i < len(plan.Calls) {
-				return plan.Calls[i].Phase
-			}
-			return 0
-		}
-	}
-
-	return 0
-}
-
 // recordHistory stores the manifest version in the history service.
 // expectedSeq is passed through for atomic optimistic locking; 0 skips the check.
 // Returns (nil, nil) if historyService is not configured.
@@ -633,50 +531,6 @@ func (h *ApplyManifestHandler) recordHistory(
 	return proto, nil
 }
 
-// classifyFailure examines phase statuses to determine if this is a partial
-// or complete failure. Returns both the internal ApplyStatus and proto status.
-func classifyFailure(ps manifest.PhaseStatusMap) (manifest.ApplyStatus, controlplanev1.ApplyManifestStatus) {
-	if ps == nil {
-		return manifest.ApplyStatusFailed, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED
-	}
-	hasCompleted := false
-	hasFailed := false
-	for _, entry := range ps {
-		switch entry.Status { //nolint:exhaustive // only COMPLETED/FAILED affect classification
-		case manifest.PhaseStatusCompleted:
-			hasCompleted = true
-		case manifest.PhaseStatusFailed:
-			hasFailed = true
-		}
-	}
-	if hasCompleted && hasFailed {
-		return manifest.ApplyStatusPartial, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_PARTIAL
-	}
-	return manifest.ApplyStatusFailed, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED
-}
-
-// phaseStatusMapToResponseProto converts a PhaseStatusMap to proto map for the response.
-func phaseStatusMapToResponseProto(ps manifest.PhaseStatusMap) map[string]*controlplanev1.PhaseStatusDetail {
-	if ps == nil {
-		return nil
-	}
-	result := make(map[string]*controlplanev1.PhaseStatusDetail, len(ps))
-	for key, entry := range ps {
-		detail := &controlplanev1.PhaseStatusDetail{
-			Status: string(entry.Status),
-			Error:  entry.Error,
-		}
-		if entry.StartedAt != nil {
-			detail.StartedAt = timestamppb.New(*entry.StartedAt)
-		}
-		if entry.CompletedAt != nil {
-			detail.CompletedAt = timestamppb.New(*entry.CompletedAt)
-		}
-		result[key] = detail
-	}
-	return result
-}
-
 // recordHistoryWithPhaseStatus stores the manifest version in history with phase status.
 func (h *ApplyManifestHandler) recordHistoryWithPhaseStatus(
 	ctx context.Context,
@@ -716,287 +570,4 @@ func (h *ApplyManifestHandler) recordHistoryWithPhaseStatus(
 	}
 
 	return proto, nil
-}
-
-// buildExecutorInput converts a Manifest proto into the ApplyManifestInput
-// consumed by the saga-based ManifestExecutor.
-func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
-	input := &ApplyManifestInput{
-		ManifestVersion: mf.GetVersion(),
-	}
-
-	for _, inst := range mf.GetInstruments() {
-		dim := instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit())
-		if dim == "" {
-			// Fallback: the Starlark script's .get("dimension", "CURRENCY") only
-			// kicks in when the key is absent, not when it's empty. Use CURRENCY
-			// as a safe default so the saga can proceed. A future manifest proto
-			// change should add an explicit dimension field.
-			dim = "CURRENCY"
-		}
-		input.Instruments = append(input.Instruments, InstrumentInput{
-			Code:          inst.GetCode(),
-			DisplayName:   inst.GetName(),
-			Dimension:     dim,
-			DecimalPlaces: int(inst.GetDimensions().GetPrecision()),
-		})
-	}
-
-	for _, acct := range mf.GetAccountTypes() {
-		nb := stripEnumPrefix(acct.GetNormalBalance().String(), "NORMAL_BALANCE_")
-		if nb == "UNSPECIFIED" {
-			nb = "DEBIT"
-		}
-		// Use the first allowed instrument as the account type's instrument code.
-		var instrumentCode string
-		if instruments := acct.GetAllowedInstruments(); len(instruments) > 0 {
-			instrumentCode = instruments[0]
-		}
-		input.AccountTypes = append(input.AccountTypes, AccountTypeInput{
-			Code:           acct.GetCode(),
-			DisplayName:    acct.GetName(),
-			NormalBalance:  nb,
-			BehaviorClass:  "HOLDING",
-			InstrumentCode: instrumentCode,
-			AccountType:    acct.GetCode(), // used by saga auto-derivation for internal accounts
-		})
-	}
-
-	for _, vr := range mf.GetValuationRules() {
-		input.ValuationRules = append(input.ValuationRules, ValuationRuleInput{
-			FromInstrument: vr.GetFromInstrument(),
-			ToInstrument:   vr.GetToInstrument(),
-			RuleType:       vr.GetMethod().String(),
-		})
-	}
-
-	extractMarketData(mf, input)
-	extractPartyAndAccounts(mf, input)
-
-	for _, saga := range mf.GetSagas() {
-		input.SagaDefinitions = append(input.SagaDefinitions, SagaDefinitionInput{
-			Name:   saga.GetName(),
-			Script: saga.GetScript(),
-		})
-	}
-
-	extractOperationalGateway(mf, input)
-
-	return input
-}
-
-// extractMarketData converts market data sources and data sets from the manifest proto.
-func extractMarketData(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
-	md := mf.GetMarketData()
-	if md == nil {
-		return
-	}
-	for _, src := range md.GetSources() {
-		input.MarketDataSources = append(input.MarketDataSources, MarketDataSourceInput{
-			Code:        src.GetCode(),
-			Name:        src.GetName(),
-			Description: src.GetDescription(),
-			TrustLevel:  int(src.GetTrustLevel()),
-		})
-	}
-	for _, ds := range md.GetDatasets() {
-		input.MarketDataSets = append(input.MarketDataSets, MarketDataSetInput{
-			Code:                    ds.GetCode(),
-			Category:                stripEnumPrefix(ds.GetCategory().String(), "DATA_CATEGORY_"),
-			Unit:                    ds.GetUnit(),
-			SourceCode:              ds.GetSourceCode(),
-			DisplayName:             ds.GetDisplayName(),
-			Description:             ds.GetDescription(),
-			ValidationExpression:    ds.GetValidationExpression(),
-			ResolutionKeyExpression: ds.GetResolutionKeyExpression(),
-		})
-	}
-}
-
-// extractPartyAndAccounts converts organizations and internal accounts from the manifest proto.
-func extractPartyAndAccounts(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
-	for _, org := range mf.GetOrganizations() {
-		// Resolve legal_name with fallback chain: legal_name -> name -> code
-		legalName := org.GetLegalName()
-		if legalName == "" {
-			legalName = org.GetName()
-		}
-		if legalName == "" {
-			legalName = org.GetCode()
-		}
-
-		// Resolve display_name with fallback chain: display_name -> legal_name
-		displayName := org.GetDisplayName()
-		if displayName == "" {
-			displayName = legalName
-		}
-
-		// Resolve external_reference with fallback: external_reference -> code
-		extRef := org.GetExternalReference()
-		if extRef == "" {
-			extRef = org.GetCode()
-		}
-
-		input.Organizations = append(input.Organizations, OrganizationInput{
-			Code:                  org.GetCode(),
-			Name:                  org.GetName(),
-			LegalName:             legalName,
-			DisplayName:           displayName,
-			ExternalReference:     extRef,
-			ExternalReferenceType: org.GetExternalReferenceType(),
-			PartyType:             org.GetPartyType(),
-			Attributes:            org.GetAttributes(),
-		})
-	}
-	for _, ia := range mf.GetInternalAccounts() {
-		input.InternalAccounts = append(input.InternalAccounts, InternalAccountInput{
-			Code:              ia.GetCode(),
-			AccountType:       ia.GetAccountType(),
-			InstrumentCode:    ia.GetInstrument(),
-			OwnerOrganization: ia.GetOwnerOrganization(),
-			Description:       ia.GetDescription(),
-		})
-	}
-}
-
-// extractOperationalGateway converts operational gateway config from the manifest proto.
-func extractOperationalGateway(mf *controlplanev1.Manifest, input *ApplyManifestInput) {
-	gw := mf.GetOperationalGateway()
-	if gw == nil {
-		return
-	}
-	for _, conn := range gw.GetProviderConnections() {
-		pc := ProviderConnectionInput{
-			ConnectionID: conn.GetConnectionId(),
-			ProviderName: conn.GetProviderName(),
-			ProviderType: conn.GetProviderType(),
-			Protocol:     conn.GetProtocol().String(),
-			BaseURL:      conn.GetBaseUrl(),
-		}
-		pc.AuthType, pc.AuthConfig = extractAuthConfig(conn.GetAuth())
-		if rp := conn.GetRetryPolicy(); rp != nil {
-			pc.RetryPolicy = map[string]any{
-				"max_attempts":            rp.GetMaxAttempts(),
-				"initial_backoff_seconds": rp.GetInitialBackoffSeconds(),
-				"max_backoff_seconds":     rp.GetMaxBackoffSeconds(),
-				"backoff_multiplier":      rp.GetBackoffMultiplier(),
-			}
-		}
-		if rl := conn.GetRateLimit(); rl != nil {
-			pc.RateLimitConfig = map[string]any{
-				"requests_per_second": rl.GetRequestsPerSecond(),
-				"burst_size":          rl.GetBurstSize(),
-			}
-		}
-		input.ProviderConnections = append(input.ProviderConnections, pc)
-	}
-
-	for _, route := range gw.GetInstructionRoutes() {
-		input.InstructionRoutes = append(input.InstructionRoutes, InstructionRouteInput{
-			InstructionType:      route.GetInstructionType(),
-			ConnectionID:         route.GetConnectionId(),
-			FallbackConnectionID: route.GetFallbackConnectionId(),
-			OutboundMapping:      route.GetOutboundMappingId(),
-			InboundMapping:       route.GetInboundMappingId(),
-			HTTPMethod:           route.GetHttpMethod(),
-			PathTemplate:         route.GetPathTemplate(),
-		})
-	}
-}
-
-// unitToDimension maps common instrument unit names to their Dimension enum values.
-// Unit names in manifests (e.g., "kWh", "TONNE_CO2E") don't match Dimension enum
-// names (ENERGY, CARBON), so we need an explicit mapping table.
-var unitToDimension = map[string]string{
-	"KWH":        "ENERGY",
-	"MWH":        "ENERGY",
-	"WH":         "ENERGY",
-	"TONNE_CO2E": "CARBON",
-	"KG_CO2E":    "CARBON",
-	"GPU_HOUR":   "COMPUTE",
-	"CPU_HOUR":   "COMPUTE",
-	"GB":         "DATA",
-	"TB":         "DATA",
-	"LITER":      "VOLUME",
-	"LITRE":      "VOLUME", //nolint:misspell // British English variant is a valid unit name
-	"GALLON":     "VOLUME",
-	"KG":         "MASS",
-	"TONNE":      "MASS",
-	"SECOND":     "TIME",
-	"MINUTE":     "TIME",
-	"HOUR":       "TIME",
-	"POINTS":     "COUNT",
-}
-
-// instrumentTypeToDimension derives the Dimension enum name from the manifest
-// InstrumentType and unit. FIAT->CURRENCY, VOUCHER->COUNT. For COMMODITY and
-// other types, uses a unit-to-dimension mapping table since unit names (kWh)
-// don't match dimension enum names (ENERGY).
-func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit string) string {
-	switch instType {
-	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:
-		return "CURRENCY"
-	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER:
-		return "COUNT"
-	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
-		controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED:
-		upper := strings.ToUpper(unit)
-		// First check the unit-to-dimension mapping table.
-		if dim, ok := unitToDimension[upper]; ok {
-			return dim
-		}
-		// Fall back to checking if the uppercased unit IS a valid Dimension name.
-		if _, ok := referencedatav1.Dimension_value["DIMENSION_"+upper]; ok {
-			return upper
-		}
-		return ""
-	}
-	return ""
-}
-
-// stripEnumPrefix removes a common prefix from a proto enum string representation.
-// For example, stripEnumPrefix("NORMAL_BALANCE_DEBIT", "NORMAL_BALANCE_") returns "DEBIT".
-// Returns the original string if the prefix is not found.
-func stripEnumPrefix(s, prefix string) string {
-	return strings.TrimPrefix(s, prefix)
-}
-
-// extractAuthConfig converts a manifest AuthConfigManifest oneof to (authType, configMap).
-func extractAuthConfig(auth *controlplanev1.AuthConfigManifest) (string, map[string]any) {
-	if auth == nil {
-		return "", nil
-	}
-	switch v := auth.GetAuthConfig().(type) {
-	case *controlplanev1.AuthConfigManifest_ApiKey:
-		return "api_key", map[string]any{
-			"header_name": v.ApiKey.GetHeaderName(),
-			"secret_ref":  v.ApiKey.GetApiKeySecretRef(),
-		}
-	case *controlplanev1.AuthConfigManifest_Basic:
-		return "basic", map[string]any{
-			"username":     v.Basic.GetUsername(),
-			"password_ref": v.Basic.GetPasswordSecretRef(),
-		}
-	case *controlplanev1.AuthConfigManifest_Oauth2:
-		return "oauth2", map[string]any{
-			"token_url":         v.Oauth2.GetTokenUrl(),
-			"client_id":         v.Oauth2.GetClientId(),
-			"client_secret_ref": v.Oauth2.GetClientSecretRef(),
-			"scopes":            v.Oauth2.GetScopes(),
-		}
-	case *controlplanev1.AuthConfigManifest_Hmac:
-		return "hmac", map[string]any{
-			"algorithm":        v.Hmac.GetAlgorithm(),
-			"secret_ref":       v.Hmac.GetSecretRef(),
-			"signature_header": v.Hmac.GetSignatureHeader(),
-		}
-	case *controlplanev1.AuthConfigManifest_Mtls:
-		return "mtls", map[string]any{
-			"client_cert_ref": v.Mtls.GetClientCertSecretRef(),
-			"client_key_ref":  v.Mtls.GetClientKeySecretRef(),
-			"ca_cert_ref":     v.Mtls.GetCaCertSecretRef(),
-		}
-	default:
-		return "", nil
-	}
 }
