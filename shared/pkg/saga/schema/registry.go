@@ -35,34 +35,63 @@ func NewRegistry() *Registry {
 }
 
 // LoadFromYAML parses and loads a schema from YAML bytes.
+// If proto-referenced handlers are present, call ResolveProtoTypes on the
+// returned schema after loading to populate Params/Returns from proto reflection.
 func (r *Registry) LoadFromYAML(data []byte) error {
 	schema, err := Parse(data)
 	if err != nil {
 		return err
 	}
 
+	// Resolve proto-referenced handlers so Params/Returns are populated
+	// before the schema enters the registry. This ensures ValidateHandlerParams
+	// works correctly for proto-backed handlers.
+	if err := schema.ResolveProtoTypes(nil); err != nil {
+		return fmt.Errorf("resolve proto types: %w", err)
+	}
+
+	// Build temporary maps and validate before mutating the registry,
+	// so a duplicate-alias error doesn't leave partial state.
+	tempHandlers := make(map[string]*HandlerDef, len(schema.Handlers))
+	tempDeprecated := make(map[string]*DeprecatedMapping)
+
+	for name, handler := range schema.Handlers {
+		tempHandlers[name] = handler
+		for i := range handler.Conversions {
+			conv := &handler.Conversions[i]
+			if conv.FromName == "" {
+				continue
+			}
+			// Check against both existing registry state and new batch
+			if existing, exists := tempDeprecated[conv.FromName]; exists {
+				return fmt.Errorf(
+					"%w: duplicate deprecated alias %q maps to both %s and %s",
+					ErrInvalidConversionRule, conv.FromName, existing.CurrentName, name,
+				)
+			}
+			if existing, exists := r.deprecatedNames[conv.FromName]; exists {
+				return fmt.Errorf(
+					"%w: duplicate deprecated alias %q maps to both %s and %s",
+					ErrInvalidConversionRule, conv.FromName, existing.CurrentName, name,
+				)
+			}
+			tempDeprecated[conv.FromName] = &DeprecatedMapping{
+				CurrentName:    name,
+				ConversionRule: conv,
+			}
+		}
+	}
+
+	// Validation passed - merge atomically under the lock.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.schemas = append(r.schemas, schema)
-	for name, handler := range schema.Handlers {
+	for name, handler := range tempHandlers {
 		r.handlers[name] = handler
-		// Index deprecated name mappings from conversion rules
-		for i := range handler.Conversions {
-			conv := &handler.Conversions[i]
-			if conv.FromName != "" {
-				if existing, exists := r.deprecatedNames[conv.FromName]; exists {
-					return fmt.Errorf(
-						"%w: duplicate deprecated alias %q maps to both %s and %s",
-						ErrInvalidConversionRule, conv.FromName, existing.CurrentName, name,
-					)
-				}
-				r.deprecatedNames[conv.FromName] = &DeprecatedMapping{
-					CurrentName:    name,
-					ConversionRule: conv,
-				}
-			}
-		}
+	}
+	for oldName, mapping := range tempDeprecated {
+		r.deprecatedNames[oldName] = mapping
 	}
 
 	return nil
@@ -185,6 +214,10 @@ func (r *Registry) ToSchema() *Schema {
 // NewRegistryFromSchema creates a Registry pre-populated with handler definitions from a Schema.
 // This is the inverse of ToSchema() and enables creating a Registry from proto-derived schemas.
 // It also rebuilds the deprecatedNames index from conversion rules that specify FromName.
+//
+// The caller is responsible for ensuring proto-referenced handlers have already been resolved
+// (via ResolveProtoTypes or DeriveSchemaFromProto) before passing the schema here. All current
+// callers use derived schemas where proto types are already populated.
 func NewRegistryFromSchema(s *Schema) *Registry {
 	r := NewRegistry()
 	if s != nil {
