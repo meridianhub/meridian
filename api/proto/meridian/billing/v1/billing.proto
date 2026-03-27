@@ -154,6 +154,11 @@ message BillingRun {
   // total_amount_cents is the sum of all invoice amounts in this billing run (in minor currency units).
   int64 total_amount_cents = 9;
 
+  // currency is the ISO 4217 currency code for this billing run (e.g., "GBP", "USD").
+  string currency = 12 [(buf.validate.field).string = {
+    pattern: "^[A-Z]{3}$"
+  }];
+
   // created_at is when this billing run was initiated.
   google.protobuf.Timestamp created_at = 10 [(buf.validate.field).required = true];
 
@@ -241,6 +246,8 @@ message Invoice {
   }];
 
   // due_date is when payment is expected in YYYY-MM-DD format.
+  // Shape validation only (consistent with common.v1.DateRange); semantic date
+  // validation (valid month/day) is enforced at the service layer.
   string due_date = 12 [(buf.validate.field).string = {
     pattern: "^\\d{4}-\\d{2}-\\d{2}$"
   }];
