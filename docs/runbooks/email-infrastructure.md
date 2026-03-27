@@ -2,13 +2,16 @@
 
 ## Overview
 
-Meridian sends transactional emails (payment confirmations, dunning notices) via the email dispatch worker. Emails are queued in an outbox table in the payment-order database and dispatched by a background worker that polls for pending entries.
+Meridian sends transactional emails (payment confirmations, dunning notices)
+via the email dispatch worker. Emails are queued in an outbox table in the
+payment-order database and dispatched by a background worker that polls for
+pending entries.
 
 **Provider**: [Resend](https://resend.com) (HTTP API, Svix-signed webhooks for delivery status).
 
 ## Architecture
 
-```
+```text
 Saga/Service -> OutboxRepository (INSERT) -> email_outbox table
                                                   |
                                           Email Worker (polls)
@@ -44,7 +47,7 @@ Configure these DNS records for the sending domain:
 
 ### SPF
 
-```
+```text
 TXT  meridianhub.cloud  "v=spf1 include:amazonses.com ~all"
 ```
 
@@ -52,7 +55,7 @@ TXT  meridianhub.cloud  "v=spf1 include:amazonses.com ~all"
 
 Add the DKIM records provided by Resend during domain verification. Typically three CNAME records:
 
-```
+```text
 CNAME  resend._domainkey.meridianhub.cloud  -> (value from Resend)
 CNAME  s1._domainkey.meridianhub.cloud      -> (value from Resend)
 CNAME  s2._domainkey.meridianhub.cloud      -> (value from Resend)
@@ -60,7 +63,7 @@ CNAME  s2._domainkey.meridianhub.cloud      -> (value from Resend)
 
 ### DMARC
 
-```
+```text
 TXT  _dmarc.meridianhub.cloud  "v=DMARC1; p=quarantine; rua=mailto:dmarc@meridianhub.cloud"
 ```
 
@@ -109,7 +112,8 @@ WHERE id = '<uuid>';
 
 The email processor includes a circuit breaker that opens after repeated send failures. When open, all sends are skipped until the half-open timeout expires.
 
-Monitor via Prometheus metric: `meridian_email_outbox_circuit_breaker_state` (0=closed, 1=half-open, 2=open).
+Monitor via Prometheus metric:
+`meridian_email_outbox_circuit_breaker_state` (0=closed, 1=half-open, 2=open).
 
 ### Webhook delivery failures
 
