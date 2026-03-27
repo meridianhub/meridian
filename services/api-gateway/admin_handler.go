@@ -100,7 +100,7 @@ func (h *AdminHandler) HandleVerifyOverride(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-	default:
+	case identitydomain.IdentityStatusLocked, identitydomain.IdentityStatusSuspended:
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "cannot override identity in current status",
 		})

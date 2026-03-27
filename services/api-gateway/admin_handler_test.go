@@ -229,6 +229,29 @@ func TestAdminHandler_HandleVerifyOverride_Locked(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
+func TestAdminHandler_HandleVerifyOverride_Suspended(t *testing.T) {
+	identity, identityID := makeTestIdentity(t, identitydomain.IdentityStatusSuspended)
+
+	repo := &adminTestRepo{
+		findByIDFn: func(_ context.Context, id uuid.UUID) (*identitydomain.Identity, error) {
+			if id == identityID {
+				return identity, nil
+			}
+			return nil, identitydomain.ErrIdentityNotFound
+		},
+	}
+
+	handler := newAdminHandler(t, repo)
+	r := withAdminClaims(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		platformauth.RoleTenantOwner.String(),
+		"admin-user-id",
+	)
+	w := postVerifyOverride(handler, identityID, r)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
 func TestAdminHandler_HandleVerifyOverride_NonAdmin_NoClaims(t *testing.T) {
 	identityID := uuid.New()
 	repo := &adminTestRepo{}

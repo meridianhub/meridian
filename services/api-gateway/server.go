@@ -142,6 +142,16 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 	return s
 }
 
+// registerAdminRoutes registers admin identity management endpoints if configured.
+// Routes are wrapped with the full auth middleware chain (auth + tenant + tenant_authz).
+func (s *Server) registerAdminRoutes() {
+	if s.adminHandler == nil {
+		return
+	}
+	adminVerifyH := s.wrapWithAuthChain(http.HandlerFunc(s.adminHandler.HandleVerifyOverride))
+	s.mux.Handle("POST /api/v1/admin/identities/{identity_id}/verify", adminVerifyH)
+}
+
 // registerTenantInfoRoute registers the public tenant info endpoint if configured.
 // Rate limiting wraps the entire chain so abusive traffic is rejected before
 // tenant resolution performs cache/DB lookups.
@@ -239,11 +249,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Admin identity management endpoints - full auth middleware chain.
-	// Registered before the "/" catch-all so the specific pattern takes precedence.
-	if s.adminHandler != nil {
-		adminVerifyH := s.wrapWithAuthChain(http.HandlerFunc(s.adminHandler.HandleVerifyOverride))
-		s.mux.Handle("POST /api/v1/admin/identities/{identity_id}/verify", adminVerifyH)
-	}
+	s.registerAdminRoutes()
 
 	// API routes - with auth and tenant middleware chain.
 	// Prefer the Vanguard transcoder when configured; fall back to the legacy
