@@ -147,87 +147,98 @@ func (v *validationVisitor) walkStmt(stmt syntax.Stmt) error {
 	switch s := stmt.(type) {
 	case *syntax.ExprStmt:
 		return v.walkExpr(s.X)
-
 	case *syntax.AssignStmt:
-		if err := v.walkExpr(s.LHS); err != nil {
-			return err
-		}
-		return v.walkExpr(s.RHS)
-
+		return v.walkAssignStmt(s)
 	case *syntax.DefStmt:
-		for _, stmt := range s.Body {
-			if err := v.walkStmt(stmt); err != nil {
-				return err
-			}
-		}
-
+		return v.walkDefStmt(s)
 	case *syntax.IfStmt:
-		if err := v.walkExpr(s.Cond); err != nil {
-			return err
-		}
-		for _, stmt := range s.True {
-			if err := v.walkStmt(stmt); err != nil {
-				return err
-			}
-		}
-		for _, stmt := range s.False {
-			if err := v.walkStmt(stmt); err != nil {
-				return err
-			}
-		}
-
+		return v.walkIfStmt(s)
 	case *syntax.ForStmt:
-		// Track loop nesting
-		v.loopDepth++
-		if v.loopDepth > v.maxDepth {
-			v.maxDepth = v.loopDepth
-		}
-
-		if err := v.walkExpr(s.X); err != nil {
-			v.loopDepth--
-			return err
-		}
-		for _, stmt := range s.Body {
-			if err := v.walkStmt(stmt); err != nil {
-				v.loopDepth--
-				return err
-			}
-		}
-		v.loopDepth--
-
+		return v.walkForStmt(s)
 	case *syntax.WhileStmt:
-		// Track loop nesting (though Starlark doesn't support while by default)
-		v.loopDepth++
-		if v.loopDepth > v.maxDepth {
-			v.maxDepth = v.loopDepth
-		}
-
-		if err := v.walkExpr(s.Cond); err != nil {
-			v.loopDepth--
-			return err
-		}
-		for _, stmt := range s.Body {
-			if err := v.walkStmt(stmt); err != nil {
-				v.loopDepth--
-				return err
-			}
-		}
-		v.loopDepth--
-
+		return v.walkWhileStmt(s)
 	case *syntax.ReturnStmt:
 		if s.Result != nil {
 			return v.walkExpr(s.Result)
 		}
-
 	case *syntax.LoadStmt:
-		// load() is blocked
 		return fmt.Errorf("%w: load at line %d", ErrBlockedFunction, s.Load.Line)
-
 	case *syntax.BranchStmt:
 		// break, continue, pass - all safe
+	}
+	return nil
+}
 
+func (v *validationVisitor) walkAssignStmt(s *syntax.AssignStmt) error {
+	if err := v.walkExpr(s.LHS); err != nil {
+		return err
+	}
+	return v.walkExpr(s.RHS)
+}
+
+func (v *validationVisitor) walkDefStmt(s *syntax.DefStmt) error {
+	for _, stmt := range s.Body {
+		if err := v.walkStmt(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *validationVisitor) walkIfStmt(s *syntax.IfStmt) error {
+	if err := v.walkExpr(s.Cond); err != nil {
+		return err
+	}
+	for _, stmt := range s.True {
+		if err := v.walkStmt(stmt); err != nil {
+			return err
+		}
+	}
+	for _, stmt := range s.False {
+		if err := v.walkStmt(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *validationVisitor) walkForStmt(s *syntax.ForStmt) error {
+	v.loopDepth++
+	if v.loopDepth > v.maxDepth {
+		v.maxDepth = v.loopDepth
 	}
 
+	if err := v.walkExpr(s.X); err != nil {
+		v.loopDepth--
+		return err
+	}
+	for _, stmt := range s.Body {
+		if err := v.walkStmt(stmt); err != nil {
+			v.loopDepth--
+			return err
+		}
+	}
+	v.loopDepth--
+	return nil
+}
+
+func (v *validationVisitor) walkWhileStmt(s *syntax.WhileStmt) error {
+	v.loopDepth++
+	if v.loopDepth > v.maxDepth {
+		v.maxDepth = v.loopDepth
+	}
+
+	if err := v.walkExpr(s.Cond); err != nil {
+		v.loopDepth--
+		return err
+	}
+	for _, stmt := range s.Body {
+		if err := v.walkStmt(stmt); err != nil {
+			v.loopDepth--
+			return err
+		}
+	}
+	v.loopDepth--
 	return nil
 }
 
@@ -239,127 +250,133 @@ func (v *validationVisitor) walkExpr(expr syntax.Expr) error {
 
 	switch e := expr.(type) {
 	case *syntax.CallExpr:
-		// Check for blocked function calls
-		if ident, ok := e.Fn.(*syntax.Ident); ok {
-			if blockedFunctions[ident.Name] {
-				return fmt.Errorf("%w: %s at line %d", ErrBlockedFunction, ident.Name, ident.NamePos.Line)
-			}
-		}
-
-		// Walk function and arguments
-		if err := v.walkExpr(e.Fn); err != nil {
-			return err
-		}
-		for _, arg := range e.Args {
-			if err := v.walkExpr(arg); err != nil {
-				return err
-			}
-		}
-
+		return v.walkCallExpr(e)
 	case *syntax.BinaryExpr:
 		if err := v.walkExpr(e.X); err != nil {
 			return err
 		}
 		return v.walkExpr(e.Y)
-
 	case *syntax.UnaryExpr:
 		return v.walkExpr(e.X)
-
 	case *syntax.CondExpr:
-		if err := v.walkExpr(e.Cond); err != nil {
-			return err
-		}
-		if err := v.walkExpr(e.True); err != nil {
-			return err
-		}
-		return v.walkExpr(e.False)
-
+		return v.walkCondExpr(e)
 	case *syntax.IndexExpr:
 		if err := v.walkExpr(e.X); err != nil {
 			return err
 		}
 		return v.walkExpr(e.Y)
-
 	case *syntax.SliceExpr:
-		if err := v.walkExpr(e.X); err != nil {
-			return err
-		}
-		if err := v.walkExpr(e.Lo); err != nil {
-			return err
-		}
-		if err := v.walkExpr(e.Hi); err != nil {
-			return err
-		}
-		return v.walkExpr(e.Step)
-
+		return v.walkSliceExpr(e)
 	case *syntax.ListExpr:
-		for _, elem := range e.List {
-			if err := v.walkExpr(elem); err != nil {
-				return err
-			}
-		}
-
+		return v.walkExprList(e.List)
 	case *syntax.DictExpr:
-		for _, entry := range e.List {
-			if dictEntry, ok := entry.(*syntax.DictEntry); ok {
-				if err := v.walkExpr(dictEntry.Key); err != nil {
-					return err
-				}
-				if err := v.walkExpr(dictEntry.Value); err != nil {
-					return err
-				}
-			}
-		}
-
+		return v.walkDictExpr(e)
 	case *syntax.TupleExpr:
-		for _, elem := range e.List {
-			if err := v.walkExpr(elem); err != nil {
-				return err
-			}
-		}
-
+		return v.walkExprList(e.List)
 	case *syntax.Comprehension:
-		// List/Dict comprehension - clauses are nested; track cumulative depth.
-		// In Starlark, [body for x in xs for y in ys] desugars to nested for loops.
-		savedDepth := v.loopDepth
-		localDepth := v.loopDepth
-		for _, clause := range e.Clauses {
-			if forClause, ok := clause.(*syntax.ForClause); ok {
-				localDepth++
-				if localDepth > v.maxDepth {
-					v.maxDepth = localDepth
-				}
-				if err := v.walkExpr(forClause.X); err != nil {
-					return err
-				}
-			}
-			if ifClause, ok := clause.(*syntax.IfClause); ok {
-				if err := v.walkExpr(ifClause.Cond); err != nil {
-					return err
-				}
-			}
-		}
-
-		v.loopDepth = localDepth
-		if err := v.walkExpr(e.Body); err != nil {
-			v.loopDepth = savedDepth
-			return err
-		}
-		v.loopDepth = savedDepth
-
+		return v.walkComprehension(e)
 	case *syntax.LambdaExpr:
 		return v.walkExpr(e.Body)
-
 	case *syntax.DotExpr:
 		return v.walkExpr(e.X)
-
 	case *syntax.ParenExpr:
 		return v.walkExpr(e.X)
-
 	case *syntax.Ident, *syntax.Literal:
 		// Safe, no nested expressions
 	}
 
+	return nil
+}
+
+func (v *validationVisitor) walkCallExpr(e *syntax.CallExpr) error {
+	if ident, ok := e.Fn.(*syntax.Ident); ok {
+		if blockedFunctions[ident.Name] {
+			return fmt.Errorf("%w: %s at line %d", ErrBlockedFunction, ident.Name, ident.NamePos.Line)
+		}
+	}
+	if err := v.walkExpr(e.Fn); err != nil {
+		return err
+	}
+	for _, arg := range e.Args {
+		if err := v.walkExpr(arg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *validationVisitor) walkCondExpr(e *syntax.CondExpr) error {
+	if err := v.walkExpr(e.Cond); err != nil {
+		return err
+	}
+	if err := v.walkExpr(e.True); err != nil {
+		return err
+	}
+	return v.walkExpr(e.False)
+}
+
+func (v *validationVisitor) walkSliceExpr(e *syntax.SliceExpr) error {
+	if err := v.walkExpr(e.X); err != nil {
+		return err
+	}
+	if err := v.walkExpr(e.Lo); err != nil {
+		return err
+	}
+	if err := v.walkExpr(e.Hi); err != nil {
+		return err
+	}
+	return v.walkExpr(e.Step)
+}
+
+func (v *validationVisitor) walkExprList(exprs []syntax.Expr) error {
+	for _, elem := range exprs {
+		if err := v.walkExpr(elem); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *validationVisitor) walkDictExpr(e *syntax.DictExpr) error {
+	for _, entry := range e.List {
+		if dictEntry, ok := entry.(*syntax.DictEntry); ok {
+			if err := v.walkExpr(dictEntry.Key); err != nil {
+				return err
+			}
+			if err := v.walkExpr(dictEntry.Value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (v *validationVisitor) walkComprehension(e *syntax.Comprehension) error {
+	savedDepth := v.loopDepth
+	localDepth := v.loopDepth
+	for _, clause := range e.Clauses {
+		if forClause, ok := clause.(*syntax.ForClause); ok {
+			localDepth++
+			if localDepth > v.maxDepth {
+				v.maxDepth = localDepth
+			}
+			if err := v.walkExpr(forClause.X); err != nil {
+				return err
+			}
+		}
+		if ifClause, ok := clause.(*syntax.IfClause); ok {
+			if err := v.walkExpr(ifClause.Cond); err != nil {
+				return err
+			}
+		}
+	}
+
+	v.loopDepth = localDepth
+	if err := v.walkExpr(e.Body); err != nil {
+		v.loopDepth = savedDepth
+		return err
+	}
+	v.loopDepth = savedDepth
 	return nil
 }
 
