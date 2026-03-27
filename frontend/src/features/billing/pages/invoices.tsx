@@ -89,7 +89,11 @@ const columns: ColumnDef<Invoice>[] = [
     cell: ({ row }) => {
       const dueDate = row.original.dueDate
       if (!dueDate) return <span className="text-muted-foreground">-</span>
-      const d = new Date(dueDate)
+      // Parse YYYY-MM-DD as local midnight to avoid UTC-offset day shifts
+      const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate)
+      const d = parts
+        ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
+        : new Date(dueDate)
       return isNaN(d.getTime()) ? (
         <span>{dueDate}</span>
       ) : (

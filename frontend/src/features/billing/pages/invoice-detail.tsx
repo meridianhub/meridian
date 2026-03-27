@@ -43,7 +43,11 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 
 function formatDate(iso: string | undefined): string {
   if (!iso) return '-'
-  const d = new Date(iso)
+  // Parse YYYY-MM-DD as local midnight to avoid UTC-offset day shifts
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  const d = parts
+    ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
+    : new Date(iso)
   if (isNaN(d.getTime())) return '-'
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }

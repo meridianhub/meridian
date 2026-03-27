@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { UseMutationResult } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,10 @@ export function InvoiceActions({ invoiceId, status, onActionSuccess }: InvoiceAc
   const [markPaidOpen, setMarkPaidOpen] = React.useState(false)
   const [voidOpen, setVoidOpen] = React.useState(false)
 
+  const resend = useResendInvoiceEmail()
+  const markPaid = useMarkInvoicePaid()
+  const voidInvoice = useVoidInvoice()
+
   const showActionableButtons = ACTIONABLE_STATUSES.has(status)
 
   return (
@@ -45,23 +50,39 @@ export function InvoiceActions({ invoiceId, status, onActionSuccess }: InvoiceAc
         )}
       </div>
 
-      <ResendEmailDialog
+      <ActionDialog
         open={resendOpen}
         onOpenChange={setResendOpen}
         invoiceId={invoiceId}
         onSuccess={onActionSuccess}
+        mutation={resend}
+        title="Resend Invoice Email"
+        description="Resend the invoice email for this invoice. The recipient will receive a new copy."
+        confirmLabel="Resend Email"
+        pendingLabel="Sending..."
       />
-      <MarkPaidDialog
+      <ActionDialog
         open={markPaidOpen}
         onOpenChange={setMarkPaidOpen}
         invoiceId={invoiceId}
         onSuccess={onActionSuccess}
+        mutation={markPaid}
+        title="Mark Invoice as Paid"
+        description="Confirm that this invoice has been paid. This will update the invoice status to PAID."
+        confirmLabel="Mark as Paid"
+        pendingLabel="Updating..."
       />
-      <VoidInvoiceDialog
+      <ActionDialog
         open={voidOpen}
         onOpenChange={setVoidOpen}
         invoiceId={invoiceId}
         onSuccess={onActionSuccess}
+        mutation={voidInvoice}
+        title="Void Invoice"
+        description="Void this invoice and cancel any pending email deliveries. This action cannot be undone."
+        confirmLabel="Void Invoice"
+        pendingLabel="Voiding..."
+        confirmVariant="destructive"
       />
     </>
   )
@@ -72,22 +93,39 @@ interface ActionDialogProps {
   onOpenChange: (open: boolean) => void
   invoiceId: string
   onSuccess?: () => void
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mutation: UseMutationResult<any, Error, string>
+  title: string
+  description: string
+  confirmLabel: string
+  pendingLabel: string
+  confirmVariant?: 'default' | 'destructive' | 'outline'
 }
 
-function ResendEmailDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionDialogProps) {
-  const resend = useResendInvoiceEmail()
+function ActionDialog({
+  open,
+  onOpenChange,
+  invoiceId,
+  onSuccess,
+  mutation,
+  title,
+  description,
+  confirmLabel,
+  pendingLabel,
+  confirmVariant = 'default',
+}: ActionDialogProps) {
   const [error, setError] = React.useState<string | undefined>()
 
   React.useEffect(() => {
-    if (!open && !resend.isPending) {
+    if (!open && !mutation.isPending) {
       setError(undefined)
-      resend.reset()
+      mutation.reset()
     }
-  }, [open, resend.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, mutation.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleConfirm() {
     try {
-      await resend.mutateAsync(invoiceId)
+      await mutation.mutateAsync(invoiceId)
       onSuccess?.()
       onOpenChange(false)
     } catch (err) {
@@ -100,118 +138,8 @@ function ResendEmailDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionD
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Resend Invoice Email</DialogTitle>
-          <DialogDescription>
-            Resend the invoice email for this invoice. The recipient will receive a new copy.
-          </DialogDescription>
-        </DialogHeader>
-
-        {error && (
-          <div
-            role="alert"
-            className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => void handleConfirm()} disabled={resend.isPending}>
-            {resend.isPending ? 'Sending...' : 'Resend Email'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function MarkPaidDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionDialogProps) {
-  const markPaid = useMarkInvoicePaid()
-  const [error, setError] = React.useState<string | undefined>()
-
-  React.useEffect(() => {
-    if (!open && !markPaid.isPending) {
-      setError(undefined)
-      markPaid.reset()
-    }
-  }, [open, markPaid.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleConfirm() {
-    try {
-      await markPaid.mutateAsync(invoiceId)
-      onSuccess?.()
-      onOpenChange(false)
-    } catch (err) {
-      const result = handleConnectError(err)
-      setError(result.message)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Mark Invoice as Paid</DialogTitle>
-          <DialogDescription>
-            Confirm that this invoice has been paid. This will update the invoice status to PAID.
-          </DialogDescription>
-        </DialogHeader>
-
-        {error && (
-          <div
-            role="alert"
-            className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => void handleConfirm()} disabled={markPaid.isPending}>
-            {markPaid.isPending ? 'Updating...' : 'Mark as Paid'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function VoidInvoiceDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionDialogProps) {
-  const voidInvoice = useVoidInvoice()
-  const [error, setError] = React.useState<string | undefined>()
-
-  React.useEffect(() => {
-    if (!open && !voidInvoice.isPending) {
-      setError(undefined)
-      voidInvoice.reset()
-    }
-  }, [open, voidInvoice.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleConfirm() {
-    try {
-      await voidInvoice.mutateAsync(invoiceId)
-      onSuccess?.()
-      onOpenChange(false)
-    } catch (err) {
-      const result = handleConnectError(err)
-      setError(result.message)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Void Invoice</DialogTitle>
-          <DialogDescription>
-            Void this invoice and cancel any pending email deliveries. This action cannot be undone.
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
         {error && (
@@ -228,11 +156,11 @@ function VoidInvoiceDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionD
             Cancel
           </Button>
           <Button
-            variant="destructive"
+            variant={confirmVariant}
             onClick={() => void handleConfirm()}
-            disabled={voidInvoice.isPending}
+            disabled={mutation.isPending}
           >
-            {voidInvoice.isPending ? 'Voiding...' : 'Void Invoice'}
+            {mutation.isPending ? pendingLabel : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
