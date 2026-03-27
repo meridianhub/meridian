@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/services/identity/domain"
 )
 
 // EmailVerificationTokenEntity represents the database persistence model for email verification tokens.
@@ -21,4 +22,30 @@ type EmailVerificationTokenEntity struct {
 // TableName overrides the default table name.
 func (EmailVerificationTokenEntity) TableName() string {
 	return "email_verification_token"
+}
+
+// toVerificationTokenEntity converts a domain VerificationToken to a persistence entity.
+func toVerificationTokenEntity(vt *domain.VerificationToken) *EmailVerificationTokenEntity {
+	return &EmailVerificationTokenEntity{
+		ID:         vt.ID(),
+		TenantID:   vt.TenantID(),
+		IdentityID: vt.IdentityID(),
+		TokenHash:  vt.TokenHash(),
+		ExpiresAt:  vt.ExpiresAt(),
+		ConsumedAt: vt.ConsumedAt(),
+		CreatedAt:  vt.CreatedAt(),
+	}
+}
+
+// toVerificationTokenDomain converts a persistence entity to a domain VerificationToken.
+func toVerificationTokenDomain(entity *EmailVerificationTokenEntity) *domain.VerificationToken {
+	return domain.ReconstructVerificationToken(
+		entity.ID,
+		entity.TenantID,
+		entity.IdentityID,
+		entity.TokenHash,
+		entity.ExpiresAt,
+		entity.ConsumedAt,
+		entity.CreatedAt,
+	)
 }

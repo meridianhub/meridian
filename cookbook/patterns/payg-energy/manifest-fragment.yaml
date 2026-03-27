@@ -1,0 +1,139 @@
+instruments:
+  - code: KWH_ELEC
+    name: Kilowatt Hour (Electricity)
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: kWh
+      precision: 3
+  - code: KWH_GAS
+    name: Kilowatt Hour (Gas)
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: kWh
+      precision: 3
+
+accountTypes:
+  - code: PREPAYMENT_LIABILITY
+    name: Customer Prepayment Liability
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: "attributes.fuel_type"
+
+  - code: EMERGENCY_CREDIT
+    name: Emergency Credit Receivable
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount >= 0"
+      bucketing: "attributes.fuel_type"
+
+  - code: POWER_UP_RECEIVABLE
+    name: POWER UP (ASC) Receivable
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: ""
+
+  - code: DEBT_RECOVERY
+    name: Debt Recovery Receivable
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount >= 0"
+      bucketing: ""
+
+  - code: REVENUE_ENERGY
+    name: Energy Revenue
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: "attributes.fuel_type + ':' + attributes.rate_tier + ':' + attributes.settlement_period"
+
+  - code: VAT_OUTPUT
+    name: VAT Output Tax
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: "attributes.tax_period"
+
+  - code: CONSUMPTION_METERED
+    name: Metered Consumption
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [KWH_ELEC, KWH_GAS]
+    policies:
+      validation: "amount >= 0"
+      bucketing: "instrument_code + ':' + attributes.settlement_period + ':' + attributes.mpxn"
+
+  - code: ENERGY_SUPPLY_POOL
+    name: Energy Supply Pool
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [KWH_ELEC, KWH_GAS]
+    policies:
+      validation: ""
+      bucketing: "instrument_code + ':' + attributes.settlement_period + ':' + attributes.gsp_group"
+
+  - code: WHOLESALE_COST
+    name: Wholesale Energy Cost
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: "attributes.fuel_type + ':' + attributes.settlement_period"
+
+  - code: WHD_OBLIGATION
+    name: Warm Home Discount Obligation
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: "attributes.scheme_year"
+
+valuationRules:
+  - fromInstrument: KWH_ELEC
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: PAYG_ELEC_FIRST_RATE
+  - fromInstrument: KWH_ELEC
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: PAYG_ELEC_SAVER_RATE
+  - fromInstrument: KWH_GAS
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: PAYG_GAS_FIRST_RATE
+  - fromInstrument: KWH_GAS
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: PAYG_GAS_SAVER_RATE
+  - fromInstrument: KWH_ELEC
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: WHOLESALE_ELEC_GBP_KWH
+  - fromInstrument: KWH_GAS
+    toInstrument: GBP
+    method: VALUATION_METHOD_SPOT_RATE
+    source: WHOLESALE_GAS_GBP_KWH
+
+sagas:
+  - name: topup_waterfall
+    trigger: "scheduled:payg_topup"
+  - name: consumption_block_tariff
+    trigger: "event:position-keeping.transaction-captured.v1"
+    filter: "(event.instrument_code == 'KWH_ELEC' || event.instrument_code == 'KWH_GAS') && event.direction == 'DEBIT'"
+  - name: emergency_credit_activate
+    trigger: "scheduled:payg_emergency_credit"
+  - name: whd_credit_apply
+    trigger: "scheduled:payg_whd_credit"
+
+# DCC integration uses the Operational Gateway for meter commands.
+# SRV 2.2 (Top Up Device) is the critical path for prepayment operations.
+# Procode's Intelligent Data Adapter (IDA) handles DUIS XML construction,
+# cryptographic UTRN generation, and WAN delivery.
+#
+# Payment collection (customer top-ups via card/bank) would use the
+# Financial Gateway with Stripe or a PSP integration, not shown here.

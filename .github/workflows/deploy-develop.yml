@@ -262,7 +262,7 @@ jobs:
               --tenant-slug=volterra-energy \
               --display-name='Volterra Energy' \
               --subdomain=volterra-energy.develop.meridianhub.cloud \
-              --skip-manifest \
+              --manifest=/app/examples/manifests/energy.json \
               --with-fixtures
 
       - name: Verify deployment health

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/services/identity/domain"
 )
 
 // PasswordResetTokenEntity represents the database persistence model for password reset tokens.
@@ -21,4 +22,30 @@ type PasswordResetTokenEntity struct {
 // TableName overrides the default table name.
 func (PasswordResetTokenEntity) TableName() string {
 	return "password_reset_token"
+}
+
+// toPasswordResetTokenEntity converts a domain PasswordResetToken to a persistence entity.
+func toPasswordResetTokenEntity(prt *domain.PasswordResetToken) *PasswordResetTokenEntity {
+	return &PasswordResetTokenEntity{
+		ID:         prt.ID(),
+		TenantID:   prt.TenantID(),
+		IdentityID: prt.IdentityID(),
+		TokenHash:  prt.TokenHash(),
+		ExpiresAt:  prt.ExpiresAt(),
+		ConsumedAt: prt.ConsumedAt(),
+		CreatedAt:  prt.CreatedAt(),
+	}
+}
+
+// toPasswordResetTokenDomain converts a persistence entity to a domain PasswordResetToken.
+func toPasswordResetTokenDomain(entity *PasswordResetTokenEntity) *domain.PasswordResetToken {
+	return domain.ReconstructPasswordResetToken(
+		entity.ID,
+		entity.TenantID,
+		entity.IdentityID,
+		entity.TokenHash,
+		entity.ExpiresAt,
+		entity.ConsumedAt,
+		entity.CreatedAt,
+	)
 }
