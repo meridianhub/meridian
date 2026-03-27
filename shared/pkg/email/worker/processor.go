@@ -84,12 +84,10 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 	}
 
 	// Render the template. Render errors are deterministic (same template+data will
-	// always fail), so we set attempts to max to dead-letter immediately rather than
-	// burning through retries.
+	// always fail), so we cancel immediately rather than burning through retries.
 	htmlBody, textBody, err := p.renderer.Render(entry.TemplateName, entry.TemplateData)
 	if err != nil {
-		entry.Attempts = entry.MaxAttempts - 1 // next MarkFailed will dead-letter
-		return p.handleSendFailure(ctx, entry, fmt.Sprintf("template render failed: %v", err))
+		return p.handleRenderFailure(ctx, entry, fmt.Sprintf("template render failed: %v", err))
 	}
 
 	// Build and send message.
@@ -191,6 +189,23 @@ func (p *EmailProcessor) checkDunningCancellation(ctx context.Context, entry *em
 	}
 
 	return false, nil
+}
+
+// handleRenderFailure cancels the outbox entry immediately for deterministic render errors.
+// Render failures will never succeed on retry, so we dead-letter without burning attempts.
+func (p *EmailProcessor) handleRenderFailure(ctx context.Context, entry *email.OutboxEntry, errMsg string) error {
+	if err := p.outboxRepo.MarkFailed(ctx, entry.ID, errMsg); err != nil {
+		return fmt.Errorf("marking outbox entry failed (render): %w", err)
+	}
+	if p.metrics != nil {
+		p.metrics.RecordDeadLetter()
+	}
+	p.logger.WarnContext(ctx, "email dead-lettered due to render failure",
+		"outbox_id", entry.ID,
+		"template", entry.TemplateName,
+		"error", errMsg,
+	)
+	return nil
 }
 
 // handleSendFailure marks the outbox entry as failed, which triggers backoff/dead-letter
