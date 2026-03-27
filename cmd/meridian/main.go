@@ -34,6 +34,9 @@ import (
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
 	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/pkg/dispatch"
+	"github.com/meridianhub/meridian/shared/pkg/email"
+	emailworker "github.com/meridianhub/meridian/shared/pkg/email/worker"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
@@ -42,6 +45,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/observability"
 
 	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
+
+	"gorm.io/gorm"
 )
 
 // Version information injected at build time via ldflags.
@@ -117,6 +122,7 @@ func setDevDefaults() {
 	defaults := map[string]string{
 		"AUTH_MODE":       "disabled",
 		"BILLING_ENABLED": "false",
+		"EMAIL_MODE":      "disabled",
 		"ENVIRONMENT":     "development",
 		"REDIS_ENABLED":   "false",
 		"KAFKA_ENABLED":   "false",
@@ -239,6 +245,10 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		defer provisionerCleanup()
 	}
 
+	// ─── Email Dispatch Worker (optional) ───────────────────────────────
+
+	emailWorker := startEmailWorker(ctx, conns.gormDB("payment-order"), logger)
+
 	// ─── Start gRPC Server ───────────────────────────────────────────────
 
 	grpcAddr := fmt.Sprintf(":%d", grpcPort)
@@ -318,10 +328,14 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		return fmt.Errorf("gateway server: %w", err)
 	}
 
-	// Stop provisioning worker first (drains in-flight work)
+	// Stop workers first (drain in-flight work)
 	if provisioningWorker != nil {
 		provisioningWorker.Stop()
 		logger.Info("provisioning worker stopped")
+	}
+	if emailWorker != nil {
+		emailWorker.Stop()
+		logger.Info("email worker stopped")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -335,6 +349,47 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	logger.Info("servers stopped")
 
 	return nil
+}
+
+// ─── Email Worker ────────────────────────────────────────────────────────────
+
+// startEmailWorker creates and starts the email dispatch worker if email is
+// configured (EMAIL_MODE != "disabled"). Returns the worker for graceful shutdown,
+// or nil if email is disabled or misconfigured.
+func startEmailWorker(ctx context.Context, paymentOrderDB *gorm.DB, logger *slog.Logger) *dispatch.Worker[*emailworker.OutboxInstruction] {
+	sender, err := email.NewSenderFromEnv(logger)
+	if err != nil {
+		logger.Info("email worker disabled", "reason", err.Error())
+		return nil
+	}
+
+	renderer, err := email.NewEmbeddedRenderer()
+	if err != nil {
+		logger.Error("email renderer init failed, email worker disabled", "error", err)
+		return nil
+	}
+
+	outboxRepo := email.NewPostgresOutboxRepository(paymentOrderDB)
+	auditRepo := email.NewPostgresAuditRepository(paymentOrderDB)
+	metrics := email.NewMetrics()
+
+	w := emailworker.NewEmailWorker(
+		outboxRepo,
+		auditRepo,
+		renderer,
+		sender,
+		nil, // invoiceChecker - not wired yet (dunning validation)
+		metrics,
+		dispatch.WorkerConfig{
+			BatchSize:    env.GetEnvAsInt("EMAIL_WORKER_BATCH_SIZE", dispatch.DefaultBatchSize),
+			PollInterval: env.GetEnvAsDuration("EMAIL_WORKER_POLL_INTERVAL", 5*time.Second),
+		},
+		logger.With("component", "email-worker"),
+	)
+
+	w.Start(ctx)
+	logger.Info("email worker started")
+	return w
 }
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────────
