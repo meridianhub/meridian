@@ -38,7 +38,7 @@ Saga/Service -> OutboxRepository (INSERT) -> email_outbox table
 ### Modes
 
 - **disabled**: No-op sender, worker does not start. Default in local dev.
-- **log**: Logs email content to stdout via slog. Useful for integration testing.
+- **log**: Logs email content to stdout via slog. Local dev and CI only.
 - **live**: Sends real emails via Resend API. Requires `RESEND_API_KEY`.
 
 ## DNS Setup (meridianhub.cloud)
@@ -93,9 +93,9 @@ Check logs for `email worker disabled`. Common causes:
 Emails that exhaust all retry attempts are moved to `dead_letter` status. Query:
 
 ```sql
-SELECT id, tenant_id, template_name, recipient_email, last_error, attempts, max_attempts
+SELECT id, tenant_id, template_name, to_addresses, last_error, attempts, max_attempts
 FROM email_outbox
-WHERE status = 'dead_letter'
+WHERE status = 'DEAD_LETTER'
 ORDER BY updated_at DESC
 LIMIT 20;
 ```
@@ -104,7 +104,7 @@ To retry dead-lettered emails, reset their status:
 
 ```sql
 UPDATE email_outbox
-SET status = 'pending', attempts = 0, last_error = NULL
+SET status = 'PENDING', attempts = 0, last_error = NULL
 WHERE id = '<uuid>';
 ```
 
@@ -125,8 +125,8 @@ If the Resend webhook is not updating delivery status:
 - Review audit table for received events:
 
 ```sql
-SELECT id, resend_email_id, event_type, created_at
-FROM email_audit
+SELECT id, outbox_id, provider_id, template_name, status, created_at
+FROM email_audit_log
 ORDER BY created_at DESC
 LIMIT 20;
 ```

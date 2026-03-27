@@ -354,12 +354,22 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 // ─── Email Worker ────────────────────────────────────────────────────────────
 
 // startEmailWorker creates and starts the email dispatch worker if email is
-// configured (EMAIL_MODE != "disabled"). Returns the worker for graceful shutdown,
-// or nil if email is disabled or misconfigured.
+// configured (EMAIL_MODE is "log" or "live"). Returns the worker for graceful
+// shutdown, or nil if email is disabled or misconfigured.
+//
+// When EMAIL_MODE is "disabled" (the dev default), the worker is not started at
+// all. This prevents the NoopSender from silently consuming outbox entries and
+// marking them as sent without actual delivery.
 func startEmailWorker(ctx context.Context, paymentOrderDB *gorm.DB, logger *slog.Logger) *dispatch.Worker[*emailworker.OutboxInstruction] {
+	mode := os.Getenv("EMAIL_MODE")
+	if mode == "disabled" {
+		logger.Info("email worker disabled", "email_mode", mode)
+		return nil
+	}
+
 	sender, err := email.NewSenderFromEnv(logger)
 	if err != nil {
-		logger.Info("email worker disabled", "reason", err.Error())
+		logger.Warn("email sender not configured, email worker disabled", "error", err)
 		return nil
 	}
 
