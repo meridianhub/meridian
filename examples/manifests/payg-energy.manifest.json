@@ -274,63 +274,8 @@
   "partyTypes": [],
   "mappings": [],
   "operationalGateway": {
-    "providerConnections": [
-      {
-        "connectionId": "procode-ida",
-        "providerName": "Procode Intelligent Data Adapter",
-        "providerType": "dcc_adapter",
-        "protocol": 1,
-        "baseUrl": "https://ida.procode.co.uk/api/v2",
-        "auth": {
-          "oauth2": {
-            "tokenUrl": "https://ida.procode.co.uk/oauth/token",
-            "clientId": "payg-meridian",
-            "clientSecretRef": "sm://procode/client_secret",
-            "scopes": [
-              "meter:topup",
-              "meter:config",
-              "meter:read"
-            ]
-          }
-        },
-        "retryPolicy": {
-          "maxAttempts": 3,
-          "initialBackoffSeconds": 2,
-          "maxBackoffSeconds": 30,
-          "backoffMultiplier": 2.0
-        },
-        "rateLimit": {
-          "requestsPerSecond": 100.0,
-          "burstSize": 200
-        }
-      }
-    ],
-    "instructionRoutes": [
-      {
-        "instructionType": "meter.topup",
-        "connectionId": "procode-ida",
-        "httpMethod": "POST",
-        "pathTemplate": "/meters/{mpxn}/topup"
-      },
-      {
-        "instructionType": "meter.config_update",
-        "connectionId": "procode-ida",
-        "httpMethod": "POST",
-        "pathTemplate": "/meters/{mpxn}/configuration"
-      },
-      {
-        "instructionType": "meter.activate_emergency_credit",
-        "connectionId": "procode-ida",
-        "httpMethod": "POST",
-        "pathTemplate": "/meters/{mpxn}/emergency-credit/activate"
-      },
-      {
-        "instructionType": "meter.read_prepay",
-        "connectionId": "procode-ida",
-        "httpMethod": "GET",
-        "pathTemplate": "/meters/{mpxn}/prepay-values"
-      }
-    ],
+    "providerConnections": [],
+    "instructionRoutes": [],
     "inboundRoutes": []
   },
   "marketData": {
