@@ -175,20 +175,24 @@ func registerPaygCustomers(ctx context.Context, conn *grpc.ClientConn) ([]string
 
 	partyIDs := make([]string, len(paygCustomers))
 	for i, cust := range paygCustomers {
-		// Register using MPAN as external reference (primary meter identifier).
+		// Register party with a customer reference - NOT the MPAN.
+		// The MPAN identifies the supply point (meter), not the person.
+		// A customer can have multiple MPANs across different GSP areas.
+		// MPANs are stored as external IDs on the kWh consumption accounts.
+		custRef := fmt.Sprintf("CUST%03d", i+1)
 		partyID, err := registerParty(ctx, client, &partyv1.RegisterPartyRequest{
 			PartyType:             partyv1.PartyType_PARTY_TYPE_PERSON,
 			LegalName:             cust.legalName,
 			DisplayName:           cust.legalName,
-			ExternalReference:     cust.mpan,
+			ExternalReference:     custRef,
 			ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_NATIONAL_ID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("register %s: %w", cust.legalName, err)
 		}
 		partyIDs[i] = partyID
-		fmt.Printf("  %s: MPAN=%s MPRN=%s GSP=%s avg=%.0fkWh/day\n",
-			cust.legalName, cust.mpan, cust.mprn, cust.gspRegion, cust.dailyKwhAvg)
+		fmt.Printf("  %s (%s): MPAN=%s MPRN=%s GSP=%s avg=%.0fkWh/day\n",
+			cust.legalName, custRef, cust.mpan, cust.mprn, cust.gspRegion, cust.dailyKwhAvg)
 	}
 
 	return partyIDs, nil
@@ -201,38 +205,41 @@ func createPaygAccounts(ctx context.Context, conn *grpc.ClientConn, supplierPart
 
 	for i, partyID := range customerPartyIDs {
 		cust := paygCustomers[i]
+		custRef := fmt.Sprintf("CUST%03d", i+1)
 
-		// Electricity prepayment account (GBP)
+		// GBP prepayment accounts - keyed by customer reference + fuel.
+		// These are the financial accounts (what the customer owes/is owed).
 		elecID, err := createAccountIdempotent(ctx, client, partyID,
-			fmt.Sprintf("UT-ELEC-%s", cust.mpan), "GBP", supplierPartyID)
+			fmt.Sprintf("PPM-ELEC-%s", custRef), "GBP", supplierPartyID)
 		if err != nil {
-			return fmt.Errorf("create electricity account for %s: %w", cust.legalName, err)
+			return fmt.Errorf("create electricity billing account for %s: %w", cust.legalName, err)
 		}
-		fmt.Printf("  Elec: %s (%s, MPAN: %s)\n", elecID, cust.legalName, cust.mpan)
+		fmt.Printf("  GBP(E): %s (%s)\n", elecID, cust.legalName)
 
-		// Gas prepayment account (GBP)
 		gasID, err := createAccountIdempotent(ctx, client, partyID,
-			fmt.Sprintf("UT-GAS-%s", cust.mprn), "GBP", supplierPartyID)
+			fmt.Sprintf("PPM-GAS-%s", custRef), "GBP", supplierPartyID)
 		if err != nil {
-			return fmt.Errorf("create gas account for %s: %w", cust.legalName, err)
+			return fmt.Errorf("create gas billing account for %s: %w", cust.legalName, err)
 		}
-		fmt.Printf("  Gas:  %s (%s, MPRN: %s)\n", gasID, cust.legalName, cust.mprn)
+		fmt.Printf("  GBP(G): %s (%s)\n", gasID, cust.legalName)
 
-		// Electricity consumption tracking account (KWH_ELEC)
+		// kWh consumption accounts - keyed by MPAN/MPRN (the supply point).
+		// The MPAN identifies the physical meter and its GSP location.
+		// Account metadata carries gsp_group for routing to the correct
+		// supply pool (enabling "consumption by GSP" aggregation queries).
 		elecKwhID, err := createAccountIdempotent(ctx, client, partyID,
-			fmt.Sprintf("KWH-ELEC-%s", cust.mpan), "KWH_ELEC", supplierPartyID)
+			fmt.Sprintf("MPAN-%s", cust.mpan), "KWH_ELEC", supplierPartyID)
 		if err != nil {
 			return fmt.Errorf("create elec kWh account for %s: %w", cust.legalName, err)
 		}
-		fmt.Printf("  kWh(E): %s (%s)\n", elecKwhID, cust.legalName)
+		fmt.Printf("  kWh(E): %s (MPAN: %s, GSP: %s)\n", elecKwhID, cust.mpan, cust.gspRegion)
 
-		// Gas consumption tracking account (KWH_GAS)
 		gasKwhID, err := createAccountIdempotent(ctx, client, partyID,
-			fmt.Sprintf("KWH-GAS-%s", cust.mprn), "KWH_GAS", supplierPartyID)
+			fmt.Sprintf("MPRN-%s", cust.mprn), "KWH_GAS", supplierPartyID)
 		if err != nil {
 			return fmt.Errorf("create gas kWh account for %s: %w", cust.legalName, err)
 		}
-		fmt.Printf("  kWh(G): %s (%s)\n", gasKwhID, cust.legalName)
+		fmt.Printf("  kWh(G): %s (MPRN: %s)\n", gasKwhID, cust.mprn)
 	}
 
 	return nil
@@ -384,11 +391,12 @@ func seedPaygBilling(ctx context.Context, conn *grpc.ClientConn, customerPartyID
 		totalGasGBP := 0.0
 
 		// Find the customer's electricity account ID
-		elecAccountID, err := findAccountByExternalID(ctx, client, fmt.Sprintf("UT-ELEC-%s", cust.mpan))
+		custRef := fmt.Sprintf("CUST%03d", i+1)
+		elecAccountID, err := findAccountByExternalID(ctx, client, fmt.Sprintf("PPM-ELEC-%s", custRef))
 		if err != nil {
 			return fmt.Errorf("find elec account for %s: %w", cust.legalName, err)
 		}
-		gasAccountID, err := findAccountByExternalID(ctx, client, fmt.Sprintf("UT-GAS-%s", cust.mprn))
+		gasAccountID, err := findAccountByExternalID(ctx, client, fmt.Sprintf("PPM-GAS-%s", custRef))
 		if err != nil {
 			return fmt.Errorf("find gas account for %s: %w", cust.legalName, err)
 		}
