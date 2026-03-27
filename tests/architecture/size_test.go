@@ -31,7 +31,6 @@ var knownOversizedFiles = map[string]bool{
 	"services/mcp-server/internal/tools/economy.go":              true,
 	"services/mcp-server/internal/tools/refdata.go":              true,
 	"services/party/adapters/persistence/repository.go":          true,
-	"shared/pkg/saga/schema/schema.go":                           true,
 }
 
 // TestFileSize validates that no non-test, non-generated Go file exceeds maxFileLines.
