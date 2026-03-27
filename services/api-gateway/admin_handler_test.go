@@ -77,6 +77,34 @@ func (r *adminTestRepo) FindInvitationByTokenHash(_ context.Context, _ string) (
 	return nil, identitydomain.ErrInvitationNotFound
 }
 
+func (r *adminTestRepo) SaveVerificationToken(_ context.Context, _ *identitydomain.VerificationToken) error {
+	return nil
+}
+
+func (r *adminTestRepo) FindVerificationTokenByHash(_ context.Context, _ string) (*identitydomain.VerificationToken, error) {
+	return nil, identitydomain.ErrVerificationTokenNotFound
+}
+
+func (r *adminTestRepo) CountVerificationTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (r *adminTestRepo) SavePasswordResetToken(_ context.Context, _ *identitydomain.PasswordResetToken) error {
+	return nil
+}
+
+func (r *adminTestRepo) FindPasswordResetTokenByHash(_ context.Context, _ string) (*identitydomain.PasswordResetToken, error) {
+	return nil, identitydomain.ErrPasswordResetTokenNotFound
+}
+
+func (r *adminTestRepo) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (r *adminTestRepo) MarkPasswordResetTokensConsumedForIdentity(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 // helpers
 
 func newAdminHandler(t *testing.T, repo identitydomain.Repository) *gateway.AdminHandler {
