@@ -353,25 +353,25 @@ func (v *validationVisitor) walkDictExpr(e *syntax.DictExpr) error {
 
 func (v *validationVisitor) walkComprehension(e *syntax.Comprehension) error {
 	savedDepth := v.loopDepth
-	localDepth := v.loopDepth
 	for _, clause := range e.Clauses {
 		if forClause, ok := clause.(*syntax.ForClause); ok {
-			localDepth++
-			if localDepth > v.maxDepth {
-				v.maxDepth = localDepth
+			v.loopDepth++
+			if v.loopDepth > v.maxDepth {
+				v.maxDepth = v.loopDepth
 			}
 			if err := v.walkExpr(forClause.X); err != nil {
+				v.loopDepth = savedDepth
 				return err
 			}
 		}
 		if ifClause, ok := clause.(*syntax.IfClause); ok {
 			if err := v.walkExpr(ifClause.Cond); err != nil {
+				v.loopDepth = savedDepth
 				return err
 			}
 		}
 	}
 
-	v.loopDepth = localDepth
 	if err := v.walkExpr(e.Body); err != nil {
 		v.loopDepth = savedDepth
 		return err

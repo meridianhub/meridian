@@ -28,6 +28,18 @@ CREATE TABLE position_keeping.financial_position_log (
 CREATE UNIQUE INDEX idx_position_keeping_financial_position_log_log_id
 ON position_keeping.financial_position_log (log_id);
 
+CREATE INDEX idx_financial_position_log_account_id ON position_keeping.financial_position_log (account_id);
+CREATE INDEX idx_financial_position_log_current_status ON position_keeping.financial_position_log (current_status);
+CREATE INDEX idx_financial_position_log_deleted_at ON position_keeping.financial_position_log (deleted_at);
+
+ALTER TABLE position_keeping.financial_position_log
+    ADD CONSTRAINT chk_financial_position_log_current_status
+    CHECK (current_status IN ('PENDING', 'RECONCILED', 'POSTED', 'CANCELLED', 'FAILED', 'REJECTED', 'AMENDED', 'REVERSED'));
+
+ALTER TABLE position_keeping.financial_position_log
+    ADD CONSTRAINT chk_financial_position_log_reconciliation_status
+    CHECK (reconciliation_status IN ('UNRECONCILED', 'MATCHED', 'MISMATCHED', 'RESOLVED'));
+
 CREATE TABLE position_keeping.transaction_log_entry (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -53,6 +65,20 @@ CREATE TABLE position_keeping.transaction_log_entry (
         ON DELETE CASCADE
 );
 
+CREATE UNIQUE INDEX idx_transaction_log_entry_entry_id ON position_keeping.transaction_log_entry (entry_id);
+CREATE INDEX idx_transaction_log_entry_deleted_at ON position_keeping.transaction_log_entry (deleted_at);
+CREATE INDEX idx_transaction_log_entry_log_id ON position_keeping.transaction_log_entry (financial_position_log_id);
+CREATE INDEX idx_transaction_log_entry_timestamp ON position_keeping.transaction_log_entry (timestamp);
+CREATE INDEX idx_transaction_log_entry_transaction_id ON position_keeping.transaction_log_entry (transaction_id);
+
+ALTER TABLE position_keeping.transaction_log_entry
+    ADD CONSTRAINT chk_transaction_log_entry_currency
+    CHECK (char_length(currency) = 3);
+
+ALTER TABLE position_keeping.transaction_log_entry
+    ADD CONSTRAINT chk_transaction_log_entry_direction
+    CHECK (direction IN ('DEBIT', 'CREDIT'));
+
 CREATE TABLE position_keeping.transaction_lineage (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -72,6 +98,11 @@ CREATE TABLE position_keeping.transaction_lineage (
         REFERENCES position_keeping.financial_position_log(id)
         ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX idx_transaction_lineage_log_id ON position_keeping.transaction_lineage (financial_position_log_id);
+CREATE INDEX idx_transaction_lineage_deleted_at ON position_keeping.transaction_lineage (deleted_at);
+CREATE INDEX idx_transaction_lineage_parent_id ON position_keeping.transaction_lineage (parent_transaction_id);
+CREATE INDEX idx_transaction_lineage_transaction_id ON position_keeping.transaction_lineage (transaction_id);
 
 CREATE TABLE position_keeping.audit_trail_entry (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -94,6 +125,12 @@ CREATE TABLE position_keeping.audit_trail_entry (
         REFERENCES position_keeping.financial_position_log(id)
         ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX idx_audit_trail_entry_audit_id ON position_keeping.audit_trail_entry (audit_id);
+CREATE INDEX idx_audit_trail_entry_deleted_at ON position_keeping.audit_trail_entry (deleted_at);
+CREATE INDEX idx_audit_trail_entry_log_id ON position_keeping.audit_trail_entry (financial_position_log_id);
+CREATE INDEX idx_audit_trail_entry_timestamp ON position_keeping.audit_trail_entry (timestamp);
+CREATE INDEX idx_audit_trail_entry_user_id ON position_keeping.audit_trail_entry (user_id);
 
 CREATE TABLE position_keeping.position (
     id uuid NOT NULL DEFAULT gen_random_uuid(),

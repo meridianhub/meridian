@@ -87,13 +87,11 @@ func newDNSConn(ctx context.Context, cfg ConnConfig) (*grpc.ClientConn, error) {
 }
 
 // newDirectConn creates a direct gRPC connection to a target address.
+// Always injects insecure credentials (direct connections are for local/dev use).
 func newDirectConn(cfg ConnConfig) (*grpc.ClientConn, error) {
-	dialOpts := cfg.DialOptions
-	if dialOpts == nil {
-		dialOpts = []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		}
-	}
+	dialOpts := append([]grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}, cfg.DialOptions...)
 
 	dialOpts = appendTracingOpts(dialOpts, cfg.Tracer)
 

@@ -143,29 +143,47 @@ func (e *referenceExtractor) walkCallExpr(ex *syntax.CallExpr) {
 }
 
 func (e *referenceExtractor) extractResolveInstrument(ex *syntax.CallExpr, ident *syntax.Ident) {
-	if len(ex.Args) > 0 {
-		if lit, ok := ex.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
-			code := strings.Trim(lit.Raw, `"'`)
-			e.references = append(e.references, Reference{
-				Type:       ReferenceTypeInstrument,
-				Key:        code,
-				LineNumber: int(ident.NamePos.Line),
-			})
-		}
+	code := extractStringArg(ex, "reference")
+	if code != "" {
+		e.references = append(e.references, Reference{
+			Type:       ReferenceTypeInstrument,
+			Key:        code,
+			LineNumber: int(ident.NamePos.Line),
+		})
 	}
 }
 
 func (e *referenceExtractor) extractResolveAccount(ex *syntax.CallExpr, ident *syntax.Ident) {
-	if len(ex.Args) > 0 {
-		if lit, ok := ex.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
-			code := strings.Trim(lit.Raw, `"'`)
-			e.references = append(e.references, Reference{
-				Type:       ReferenceTypeAccount,
-				Key:        code,
-				LineNumber: int(ident.NamePos.Line),
-			})
+	code := extractStringArg(ex, "reference")
+	if code != "" {
+		e.references = append(e.references, Reference{
+			Type:       ReferenceTypeAccount,
+			Key:        code,
+			LineNumber: int(ident.NamePos.Line),
+		})
+	}
+}
+
+// extractStringArg extracts a string value from either the first positional argument
+// or a named keyword argument in a call expression.
+func extractStringArg(call *syntax.CallExpr, kwargName string) string {
+	// Check first positional argument
+	if len(call.Args) > 0 {
+		if lit, ok := call.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
+			return strings.Trim(lit.Raw, `"'`)
 		}
 	}
+	// Check keyword arguments
+	for _, arg := range call.Args {
+		if binExpr, ok := arg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
+			if nameIdent, ok := binExpr.X.(*syntax.Ident); ok && nameIdent.Name == kwargName {
+				if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
+					return strings.Trim(lit.Raw, `"'`)
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (e *referenceExtractor) extractInvokeSaga(ex *syntax.CallExpr, ident *syntax.Ident) {
@@ -209,7 +227,7 @@ func (e *referenceExtractor) extractStep(ex *syntax.CallExpr, ident *syntax.Iden
 		if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
 			if nameIdent, ok := binExpr.X.(*syntax.Ident); ok {
 				switch nameIdent.Name {
-				case "action":
+				case "action", "handler":
 					if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
 						handler = strings.Trim(lit.Raw, `"'`)
 						lineNum = int(ident.NamePos.Line)

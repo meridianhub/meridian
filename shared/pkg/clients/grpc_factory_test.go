@@ -36,7 +36,8 @@ func TestNewConn_ServiceName(t *testing.T) {
 }
 
 func TestNewConn_ServiceNamePreferred(t *testing.T) {
-	// When both ServiceName and Target are set, ServiceName takes precedence
+	// When both ServiceName and Target are set, ServiceName takes precedence.
+	// The DNS path produces a "dns:///..." target, while direct produces the literal address.
 	conn, cleanup, err := clients.NewConn(context.Background(), clients.ConnConfig{
 		ServiceName: "test-service",
 		Port:        50051,
@@ -44,5 +45,6 @@ func TestNewConn_ServiceNamePreferred(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, conn)
+	assert.Contains(t, conn.Target(), "dns:///", "expected DNS-based target when ServiceName is set")
 	cleanup()
 }

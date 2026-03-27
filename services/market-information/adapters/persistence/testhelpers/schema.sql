@@ -42,7 +42,21 @@ CREATE TABLE dataset_definition (
     PRIMARY KEY (id),
     CONSTRAINT uq_dataset_definition_code_version UNIQUE (code, version),
     CONSTRAINT chk_dataset_definition_status CHECK (status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')),
-    CONSTRAINT chk_dataset_definition_access_level CHECK (access_level IN ('PUBLIC', 'PRIVATE', 'RESTRICTED'))
+    CONSTRAINT chk_dataset_definition_access_level CHECK (access_level IN ('PUBLIC', 'PRIVATE', 'RESTRICTED')),
+    CONSTRAINT chk_dataset_definition_lifecycle_timestamps CHECK (
+        (status = 'DRAFT' AND activated_at IS NULL AND deprecated_at IS NULL) OR
+        (status = 'ACTIVE' AND activated_at IS NOT NULL AND deprecated_at IS NULL) OR
+        (status = 'DEPRECATED' AND deprecated_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_dataset_definition_validation_expression_length CHECK (
+        validation_expression IS NULL OR length(validation_expression) <= 4096
+    ),
+    CONSTRAINT chk_dataset_definition_resolution_key_expression_length CHECK (
+        length(resolution_key_expression) <= 4096
+    ),
+    CONSTRAINT chk_dataset_definition_error_message_length CHECK (
+        error_message_expression IS NULL OR length(error_message_expression) <= 4096
+    )
 );
 
 CREATE INDEX idx_dataset_definition_code_active ON dataset_definition (code) WHERE status = 'ACTIVE';
@@ -96,6 +110,16 @@ CREATE INDEX idx_observation_causation
 
 CREATE INDEX idx_data_source_trust_level ON data_source (trust_level DESC);
 CREATE INDEX idx_data_source_deleted_at ON data_source (deleted_at);
+
+-- Cursor pagination indexes (from 20260123000003_add_cursor_pagination_indexes.sql)
+CREATE INDEX idx_data_source_cursor
+    ON data_source (created_at DESC, id DESC)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_dataset_definition_cursor
+    ON dataset_definition (created_at DESC, id DESC)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_market_price_observation_cursor
+    ON market_price_observation (created_at DESC, id DESC);
 
 CREATE TABLE tenant_data_entitlements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
