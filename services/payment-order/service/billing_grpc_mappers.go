@@ -1,6 +1,8 @@
 package service
 
 import (
+	"log/slog"
+
 	billingpb "github.com/meridianhub/meridian/api/proto/meridian/billing/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
@@ -46,7 +48,11 @@ func invoiceToProto(inv *domain.Invoice) *billingpb.Invoice {
 			TotalCents:     li.TotalCents,
 		}
 		if len(li.ValuationAnalysis) > 0 {
-			pbItem.ValuationAnalysis, _ = structpb.NewStruct(li.ValuationAnalysis)
+			s, err := structpb.NewStruct(li.ValuationAnalysis)
+			if err != nil {
+				slog.Warn("failed to convert valuation analysis to proto", "error", err)
+			}
+			pbItem.ValuationAnalysis = s
 		}
 		pb.LineItems = append(pb.LineItems, pbItem)
 	}
@@ -55,22 +61,12 @@ func invoiceToProto(inv *domain.Invoice) *billingpb.Invoice {
 }
 
 func emailAuditToProto(entry *persistence.EmailAuditEntry) *billingpb.InvoiceEmail {
-	pb := &billingpb.InvoiceEmail{
+	return &billingpb.InvoiceEmail{
 		IdempotencyKey: entry.IdempotencyKey,
 		TemplateName:   entry.TemplateName,
 		ToAddresses:    entry.ToAddresses,
 		Status:         mapEmailStatusToProto(entry.Status),
 	}
-	if entry.SentAt != nil {
-		pb.SentAt = timestamppb.New(*entry.SentAt)
-	}
-	if entry.DeliveredAt != nil {
-		pb.DeliveredAt = timestamppb.New(*entry.DeliveredAt)
-	}
-	if entry.BounceReason != nil {
-		pb.BounceReason = *entry.BounceReason
-	}
-	return pb
 }
 
 func mapBillingRunStatusToProto(s domain.BillingRunStatus) billingpb.BillingRunStatus {

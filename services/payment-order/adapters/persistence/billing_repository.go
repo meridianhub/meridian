@@ -52,14 +52,14 @@ type InvoicePage struct {
 }
 
 // EmailAuditEntry represents an email audit record linked to an invoice.
+// Delivery status fields (SentAt, DeliveredAt, BounceReason) live on the
+// AuditLogEntity and are not yet surfaced here - this maps from the outbox only.
 type EmailAuditEntry struct {
 	IdempotencyKey string
 	TemplateName   string
 	ToAddresses    []string
 	Status         string
-	SentAt         *time.Time
-	DeliveredAt    *time.Time
-	BounceReason   *string
+	CreatedAt      time.Time
 }
 
 // BillingRepository defines the contract for billing persistence.
@@ -584,6 +584,7 @@ func (r *BillingRepositoryImpl) ListEmailsByInvoice(ctx context.Context, invoice
 				TemplateName:   e.TemplateName,
 				ToAddresses:    []string(e.ToAddresses),
 				Status:         e.Status,
+				CreatedAt:      e.CreatedAt,
 			}
 			entries = append(entries, entry)
 		}

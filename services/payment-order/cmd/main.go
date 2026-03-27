@@ -518,9 +518,10 @@ func run(logger *slog.Logger) error {
 	// Register gRPC services
 	pb.RegisterPaymentOrderServiceServer(grpcServer, paymentOrderService)
 
-	// Register billing gRPC service (uses same billing repo + optional email outbox)
+	// Register billing gRPC service. Email outbox is nil until the email worker
+	// is wired into this service; ResendInvoiceEmail returns Unavailable until then.
 	billingRepo := persistence.NewBillingRepository(db)
-	billingGRPCService := service.NewBillingService(billingRepo, nil, logger)
+	billingGRPCService := service.NewBillingService(billingRepo, nil /* emailRepo */, logger)
 	billingpb.RegisterBillingServiceServer(grpcServer, billingGRPCService)
 
 	grpc_health_v1.RegisterHealthServer(grpcServer, &simpleHealthServer{})

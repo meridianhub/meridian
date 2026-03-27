@@ -104,10 +104,16 @@ func (s *BillingService) GetBillingRun(ctx context.Context, req *billingpb.GetBi
 
 	pbRun := billingRunToProto(run)
 
-	count, _ := s.billingRepo.CountInvoicesByBillingRun(ctx, id)
+	count, countErr := s.billingRepo.CountInvoicesByBillingRun(ctx, id)
+	if countErr != nil {
+		s.logger.Error("failed to count invoices for billing run", "billing_run_id", id, "error", countErr)
+	}
 	pbRun.InvoiceCount = int32(count)
 
-	total, _ := s.billingRepo.SumInvoiceTotalsByBillingRun(ctx, id)
+	total, totalErr := s.billingRepo.SumInvoiceTotalsByBillingRun(ctx, id)
+	if totalErr != nil {
+		s.logger.Error("failed to sum invoice totals for billing run", "billing_run_id", id, "error", totalErr)
+	}
 	pbRun.TotalAmountCents = total
 
 	return &billingpb.GetBillingRunResponse{
