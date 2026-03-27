@@ -14,7 +14,6 @@ import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { useInvoicesTable } from '../api/hooks'
-import { EmailDeliveryStatusBadge } from '../components/email-delivery-status-badge'
 import type { Invoice } from '../api/types'
 
 const STATUS_OPTIONS = [
@@ -34,10 +33,16 @@ function useBillingRunOptions() {
     queryFn: async () => {
       if (!tenantSlug) return []
       try {
-        const response = await clients.billing.listBillingRuns({
-          pagination: { pageSize: 100, pageToken: '' },
-        })
-        return response.billingRuns ?? []
+        const allRuns = []
+        let pageToken = ''
+        do {
+          const response = await clients.billing.listBillingRuns({
+            pagination: { pageSize: 100, pageToken },
+          })
+          allRuns.push(...(response.billingRuns ?? []))
+          pageToken = response.pagination?.nextPageToken ?? ''
+        } while (pageToken)
+        return allRuns
       } catch (error) {
         if (
           error instanceof ConnectError &&
@@ -77,11 +82,6 @@ const columns: ColumnDef<Invoice>[] = [
     accessorKey: 'status',
     header: 'Status',
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
-  },
-  {
-    id: 'email',
-    header: 'Email',
-    cell: () => <EmailDeliveryStatusBadge status={undefined} />,
   },
   {
     accessorKey: 'dueDate',

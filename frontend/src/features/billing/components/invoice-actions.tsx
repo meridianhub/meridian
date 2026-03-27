@@ -79,11 +79,11 @@ function ResendEmailDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionD
   const [error, setError] = React.useState<string | undefined>()
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open && !resend.isPending) {
       setError(undefined)
       resend.reset()
     }
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, resend.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleConfirm() {
     try {
@@ -133,11 +133,11 @@ function MarkPaidDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionDial
   const [error, setError] = React.useState<string | undefined>()
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open && !markPaid.isPending) {
       setError(undefined)
       markPaid.reset()
     }
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, markPaid.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleConfirm() {
     try {
@@ -187,11 +187,11 @@ function VoidInvoiceDialog({ open, onOpenChange, invoiceId, onSuccess }: ActionD
   const [error, setError] = React.useState<string | undefined>()
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open && !voidInvoice.isPending) {
       setError(undefined)
       voidInvoice.reset()
     }
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, voidInvoice.isPending]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleConfirm() {
     try {
