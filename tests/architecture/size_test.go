@@ -31,10 +31,6 @@ var knownOversizedFiles = map[string]bool{
 	"services/mcp-server/internal/tools/economy.go":              true,
 	"services/mcp-server/internal/tools/refdata.go":              true,
 	"services/party/adapters/persistence/repository.go":          true,
-	"services/reference-data/handler/account_type_handler.go":    true,
-	"services/reference-data/registry/postgres_registry.go":      true,
-	"services/reference-data/saga/grpc_handler.go":               true,
-	"services/reference-data/saga/postgres_registry.go":          true,
 	"shared/pkg/saga/schema/schema.go":                           true,
 }
 

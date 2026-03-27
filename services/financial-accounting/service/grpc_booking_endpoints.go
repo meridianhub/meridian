@@ -3,23 +3,17 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"time"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
-	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
-	"github.com/meridianhub/meridian/services/financial-accounting/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
-	"github.com/meridianhub/meridian/shared/pkg/refdata"
-	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // InitiateFinancialBookingLog creates a new financial booking log.
@@ -69,48 +63,19 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		}
 	}
 
-	// Validate account type
-	if req.FinancialAccountType == "" {
-		return nil, status.Error(codes.InvalidArgument, "financial_account_type must be specified")
+	// Validate request fields
+	params, err := s.validateInitiateBookingLogRequest(ctx, req)
+	if err != nil {
+		return nil, err
 	}
-	accountType := fromProtoAccountType(req.FinancialAccountType)
-
-	// Validate product service reference
-	if req.ProductServiceReference == "" {
-		return nil, status.Error(codes.InvalidArgument, "product_service_reference is required")
-	}
-
-	// Validate business unit reference
-	if req.BusinessUnitReference == "" {
-		return nil, status.Error(codes.InvalidArgument, "business_unit_reference is required")
-	}
-
-	// Validate chart of accounts rules
-	if req.ChartOfAccountsRules == "" {
-		return nil, status.Error(codes.InvalidArgument, "chart_of_accounts_rules is required")
-	}
-
-	// Validate base instrument code
-	if req.BaseInstrumentCode == "" {
-		return nil, status.Error(codes.InvalidArgument, "base_instrument_code must be specified")
-	}
-	if s.instrumentResolver != nil {
-		if _, err := s.instrumentResolver.Resolve(ctx, req.BaseInstrumentCode); err != nil {
-			if errors.Is(err, refdata.ErrUnknownInstrument) {
-				return nil, status.Errorf(codes.InvalidArgument, "unknown base_instrument_code: %s", req.BaseInstrumentCode)
-			}
-			return nil, status.Errorf(codes.Unavailable, "instrument lookup failed for %s, please retry", req.BaseInstrumentCode)
-		}
-	}
-	baseCurrency := domain.Currency(req.BaseInstrumentCode)
 
 	// Create domain entity
 	bookingLog := domain.NewFinancialBookingLog(
-		accountType,
-		req.ProductServiceReference,
-		req.BusinessUnitReference,
-		req.ChartOfAccountsRules,
-		baseCurrency,
+		params.AccountType,
+		params.ProductServiceReference,
+		params.BusinessUnitReference,
+		params.ChartOfAccountsRules,
+		params.BaseCurrency,
 	)
 
 	// Persist booking log
@@ -127,17 +92,7 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 	if req.IdempotencyKey != nil {
 		correlationID = req.IdempotencyKey.Key
 	}
-	event := &eventsv1.FinancialBookingLogInitiatedEvent{
-		BookingLogId:            bookingLog.ID.String(),
-		FinancialAccountType:    toProtoAccountType(bookingLog.FinancialAccountType),
-		ProductServiceReference: bookingLog.ProductServiceReference,
-		BusinessUnitReference:   bookingLog.BusinessUnitReference,
-		BaseInstrumentCode:      string(bookingLog.BaseCurrency),
-		CorrelationId:           correlationID,
-		CausationId:             correlationID, // Request caused this event
-		Timestamp:               timestamppb.Now(),
-		Version:                 1, // Initial version for newly created booking log
-	}
+	event := buildBookingLogInitiatedEvent(bookingLog, correlationID)
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		slog.Error("failed to publish FinancialBookingLogInitiatedEvent",
 			"error", err,
@@ -355,64 +310,9 @@ func (s *FinancialAccountingService) executeUpdateFinancialBookingLog(
 
 	// Enforce double-entry bookkeeping constraint when transitioning to POSTED
 	if newStatus == domain.TransactionStatusPosted {
-		validationStart := time.Now()
-		postings, err := s.repository.GetPostingsByBookingLogID(ctx, bookingLogID)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to retrieve postings for balance validation: %v", err)
+		if err := s.validateDoubleEntryBalance(ctx, bookingLogID); err != nil {
+			return nil, err
 		}
-
-		// Empty postings are not allowed for POSTED status
-		if len(postings) == 0 {
-			observability.RecordBalanceValidationDuration(time.Since(validationStart))
-			observability.RecordDoubleEntryValidation(observability.ValidationResultUnbalanced, observability.CurrencyUnknown)
-			observability.LogBalanceValidationFailure(
-				bookingLogID.String(),
-				observability.CurrencyUnknown,
-				"0",
-				"0",
-				"0",
-			)
-			return nil, status.Error(codes.FailedPrecondition,
-				"cannot post booking log with no postings")
-		}
-
-		// Calculate debit and credit totals
-		debitTotal := decimal.Zero
-		creditTotal := decimal.Zero
-		var currency string
-		for _, posting := range postings {
-			// Capture currency from first posting
-			if currency == "" {
-				currency = posting.Amount.Instrument.Code
-			}
-			switch posting.Direction {
-			case domain.PostingDirectionDebit:
-				debitTotal = debitTotal.Add(posting.Amount.Amount)
-			case domain.PostingDirectionCredit:
-				creditTotal = creditTotal.Add(posting.Amount.Amount)
-			}
-		}
-
-		observability.RecordBalanceValidationDuration(time.Since(validationStart))
-
-		// Validate double-entry balance
-		if !debitTotal.Equal(creditTotal) {
-			imbalance := debitTotal.Sub(creditTotal)
-			observability.RecordDoubleEntryValidation(observability.ValidationResultUnbalanced, currency)
-			observability.LogBalanceValidationFailure(
-				bookingLogID.String(),
-				currency,
-				debitTotal.String(),
-				creditTotal.String(),
-				imbalance.String(),
-			)
-			return nil, status.Error(codes.FailedPrecondition,
-				fmt.Sprintf("cannot post unbalanced booking log: debits=%s credits=%s imbalance=%s",
-					debitTotal.String(), creditTotal.String(), imbalance.String()))
-		}
-
-		// Record successful balance validation
-		observability.RecordDoubleEntryValidation(observability.ValidationResultBalanced, currency)
 	}
 
 	// Apply status update
@@ -437,18 +337,7 @@ func (s *FinancialAccountingService) executeUpdateFinancialBookingLog(
 	if req.IdempotencyKey != nil {
 		correlationID = req.IdempotencyKey.Key
 	}
-	event := &eventsv1.FinancialBookingLogUpdatedEvent{
-		BookingLogId:         bookingLogID.String(),
-		Status:               toProtoTransactionStatus(newStatus),
-		PreviousStatus:       toProtoTransactionStatus(previousStatus),
-		ChartOfAccountsRules: updated.ChartOfAccountsRules,
-		Reason:               fmt.Sprintf("Status updated from %s to %s", previousStatus, newStatus),
-		UpdatedBy:            extractUserFromContext(ctx),
-		CorrelationId:        correlationID,
-		CausationId:          correlationID, // Request caused this event
-		Timestamp:            timestamppb.Now(),
-		Version:              1, // Version tracking would need to be added to domain model
-	}
+	event := buildBookingLogUpdatedEvent(bookingLogID, &updated, previousStatus, newStatus, correlationID, extractUserFromContext(ctx))
 
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		slog.Error("failed to publish FinancialBookingLogUpdatedEvent",
