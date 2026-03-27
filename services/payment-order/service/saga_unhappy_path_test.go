@@ -762,12 +762,7 @@ func TestExecuteLienHandler_RetryExhaustion(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "lien execution failed after")
-
-	// Result should still be returned with execution status
-	resultMap := result.(map[string]any)
-	execStatus := resultMap["execution_status"].(map[string]any)
-	assert.False(t, execStatus["success"].(bool))
-	assert.GreaterOrEqual(t, execStatus["attempts"], 1) // At least initial attempt
+	assert.Nil(t, result, "error path should return nil result")
 }
 
 func TestExecuteLienHandler_MissingLienID(t *testing.T) {
