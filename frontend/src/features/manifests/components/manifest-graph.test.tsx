@@ -576,9 +576,10 @@ describe('ManifestGraph', () => {
           { instructionType: 'payment', connectionId: 'conn-1' },
         ],
       },
-      marketData: [
-        { code: 'SPOT', name: 'Spot Price' },
-      ],
+      marketData: {
+        sources: [{ code: 'SPOT', name: 'Spot Price' }],
+        datasets: [],
+      },
       organizations: [
         { code: 'ACME', name: 'Acme Corp' },
       ],
@@ -667,9 +668,10 @@ describe('ManifestGraph', () => {
           { instructionType: 'payment', connectionId: 'conn-1' },
         ],
       },
-      marketData: [
-        { code: 'SPOT', name: 'Spot Price' },
-      ],
+      marketData: {
+        sources: [{ code: 'SPOT', name: 'Spot Price' }],
+        datasets: [],
+      },
       organizations: [
         { code: 'ACME', name: 'Acme Corp' },
       ],
