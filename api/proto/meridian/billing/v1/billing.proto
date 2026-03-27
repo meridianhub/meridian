@@ -254,6 +254,9 @@ message Invoice {
 
   // created_at is when this invoice was generated.
   google.protobuf.Timestamp created_at = 13 [(buf.validate.field).required = true];
+
+  // updated_at is when this invoice was last modified (e.g., status transition).
+  google.protobuf.Timestamp updated_at = 14 [(buf.validate.field).required = true];
 }
 
 // EmailDeliveryStatus represents the delivery status of an outbox email entry.
