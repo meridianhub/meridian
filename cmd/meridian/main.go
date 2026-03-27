@@ -231,7 +231,8 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// ─── Register All Services ──────────────────────────────────────────
 
-	if err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, provIface, tracer, logger); err != nil {
+	auditWorker, err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, provIface, tracer, logger)
+	if err != nil {
 		return err
 	}
 
@@ -345,6 +346,10 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	}
 
 	// Stop workers first (drain in-flight work)
+	if auditWorker != nil {
+		auditWorker.Stop()
+		logger.Info("audit worker stopped")
+	}
 	if provisioningWorker != nil {
 		provisioningWorker.Stop()
 		logger.Info("provisioning worker stopped")
