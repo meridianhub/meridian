@@ -39,6 +39,8 @@ type Server struct {
 	authHandler           *AuthHandler
 	ssoHandler            *SSOHandler
 	registrationHandler   *RegistrationHandler
+	verificationHandler   *VerificationHandler
+	passwordResetHandler  *PasswordResetHandler
 	tenantInfoHandler     *TenantInfoHandler
 	resendWebhookHandler  *ResendWebhookHandler
 	adminHandler          *AdminHandler
@@ -241,15 +243,8 @@ func (s *Server) registerRoutes() {
 		s.mux.Handle("GET /api/auth/callback", http.HandlerFunc(s.ssoHandler.HandleCallback))
 	}
 
-	// Self-service registration endpoints - NO middleware (public, unauthenticated).
-	if s.registrationHandler != nil {
-		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
-		s.mux.Handle("GET /api/v1/slugs/{slug}/available", http.HandlerFunc(s.registrationHandler.HandleSlugAvailable))
-	}
-
-	// Public tenant info endpoint - tenant resolution but NO auth middleware (pre-auth).
-	// GET /api/tenant-info: returns slug and display name for the login page.
-	s.registerTenantInfoRoute()
+	// Public self-service endpoints (registration, verification, password reset, tenant info).
+	s.registerPublicAPIRoutes()
 
 	// Resend delivery status webhook - NO middleware (Svix signature IS the auth).
 	if s.resendWebhookHandler != nil {
@@ -304,6 +299,24 @@ func (s *Server) registerRoutes() {
 		wsHandler := s.buildEventStreamHandler()
 		s.mux.Handle("GET /ws/events", wsHandler)
 	}
+}
+
+// registerPublicAPIRoutes registers unauthenticated public API routes for
+// self-service registration, email verification, password reset, and tenant info.
+func (s *Server) registerPublicAPIRoutes() {
+	if s.registrationHandler != nil {
+		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
+		s.mux.Handle("GET /api/v1/slugs/{slug}/available", http.HandlerFunc(s.registrationHandler.HandleSlugAvailable))
+	}
+	if s.verificationHandler != nil {
+		s.mux.Handle("POST /api/v1/verify-email", http.HandlerFunc(s.verificationHandler.HandleVerifyEmail))
+		s.mux.Handle("POST /api/v1/resend-verification", http.HandlerFunc(s.verificationHandler.HandleResendVerification))
+	}
+	if s.passwordResetHandler != nil {
+		s.mux.Handle("POST /api/v1/forgot-password", http.HandlerFunc(s.passwordResetHandler.HandleForgotPassword))
+		s.mux.Handle("POST /api/v1/reset-password", http.HandlerFunc(s.passwordResetHandler.HandleResetPassword))
+	}
+	s.registerTenantInfoRoute()
 }
 
 // buildEventStreamHandler wraps the eventstream.Handler with a claims bridge and

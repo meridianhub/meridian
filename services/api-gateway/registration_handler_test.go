@@ -40,18 +40,34 @@ func (s *stubTenantCreator) DeleteTenant(ctx context.Context, tenantID string) e
 }
 
 type stubIdentityRepo struct {
-	saveIdentityWithRolesFn func(ctx context.Context, identity *identitydomain.Identity, roles []*identitydomain.RoleAssignment) error
+	saveIdentityWithRolesFn            func(ctx context.Context, identity *identitydomain.Identity, roles []*identitydomain.RoleAssignment) error
+	findByIDFn                         func(ctx context.Context, id uuid.UUID) (*identitydomain.Identity, error)
+	findByEmailFn                      func(ctx context.Context, email string) (*identitydomain.Identity, error)
+	findVerificationTokenByHashFn      func(ctx context.Context, hash string) (*identitydomain.VerificationToken, error)
+	countVerificationTokensInWindowFn  func(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
+	findPasswordResetTokenByHashFn     func(ctx context.Context, hash string) (*identitydomain.PasswordResetToken, error)
+	countPasswordResetTokensInWindowFn func(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
+	saveFn                             func(ctx context.Context, identity *identitydomain.Identity) error
 }
 
-func (s *stubIdentityRepo) Save(_ context.Context, _ *identitydomain.Identity) error {
+func (s *stubIdentityRepo) Save(ctx context.Context, identity *identitydomain.Identity) error {
+	if s.saveFn != nil {
+		return s.saveFn(ctx, identity)
+	}
 	return nil
 }
 
-func (s *stubIdentityRepo) FindByID(_ context.Context, _ uuid.UUID) (*identitydomain.Identity, error) {
+func (s *stubIdentityRepo) FindByID(ctx context.Context, id uuid.UUID) (*identitydomain.Identity, error) {
+	if s.findByIDFn != nil {
+		return s.findByIDFn(ctx, id)
+	}
 	return nil, identitydomain.ErrIdentityNotFound
 }
 
-func (s *stubIdentityRepo) FindByEmail(_ context.Context, _ string) (*identitydomain.Identity, error) {
+func (s *stubIdentityRepo) FindByEmail(ctx context.Context, em string) (*identitydomain.Identity, error) {
+	if s.findByEmailFn != nil {
+		return s.findByEmailFn(ctx, em)
+	}
 	return nil, identitydomain.ErrIdentityNotFound
 }
 
@@ -94,11 +110,17 @@ func (s *stubIdentityRepo) SaveVerificationToken(_ context.Context, _ *identityd
 	return nil
 }
 
-func (s *stubIdentityRepo) FindVerificationTokenByHash(_ context.Context, _ string) (*identitydomain.VerificationToken, error) {
+func (s *stubIdentityRepo) FindVerificationTokenByHash(ctx context.Context, hash string) (*identitydomain.VerificationToken, error) {
+	if s.findVerificationTokenByHashFn != nil {
+		return s.findVerificationTokenByHashFn(ctx, hash)
+	}
 	return nil, identitydomain.ErrVerificationTokenNotFound
 }
 
-func (s *stubIdentityRepo) CountVerificationTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+func (s *stubIdentityRepo) CountVerificationTokensInWindow(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error) {
+	if s.countVerificationTokensInWindowFn != nil {
+		return s.countVerificationTokensInWindowFn(ctx, identityID, window)
+	}
 	return 0, nil
 }
 
@@ -106,11 +128,17 @@ func (s *stubIdentityRepo) SavePasswordResetToken(_ context.Context, _ *identity
 	return nil
 }
 
-func (s *stubIdentityRepo) FindPasswordResetTokenByHash(_ context.Context, _ string) (*identitydomain.PasswordResetToken, error) {
+func (s *stubIdentityRepo) FindPasswordResetTokenByHash(ctx context.Context, hash string) (*identitydomain.PasswordResetToken, error) {
+	if s.findPasswordResetTokenByHashFn != nil {
+		return s.findPasswordResetTokenByHashFn(ctx, hash)
+	}
 	return nil, identitydomain.ErrPasswordResetTokenNotFound
 }
 
-func (s *stubIdentityRepo) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+func (s *stubIdentityRepo) CountPasswordResetTokensInWindow(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error) {
+	if s.countPasswordResetTokensInWindowFn != nil {
+		return s.countPasswordResetTokensInWindowFn(ctx, identityID, window)
+	}
 	return 0, nil
 }
 
@@ -602,4 +630,67 @@ func TestSlugAvailable_MethodNotAllowed(t *testing.T) {
 	h.HandleSlugAvailable(w, r)
 
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+// --- Email Verification Required Tests ---
+
+func TestRegistrationHandler_VerificationRequired_Success(t *testing.T) {
+	tc := &stubTenantCreator{
+		createFn: func(_ context.Context, tenantID, _, _ string) (string, error) {
+			return tenantID, nil
+		},
+	}
+
+	var capturedIdentityStatus identitydomain.IdentityStatus
+	ir := &stubIdentityRepo{
+		saveIdentityWithRolesFn: func(_ context.Context, identity *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
+			capturedIdentityStatus = identity.Status()
+			return nil
+		},
+	}
+	or := &stubOutboxRepo{}
+
+	h, err := gateway.NewRegistrationHandler(gateway.RegistrationHandlerConfig{
+		TenantCreator:             tc,
+		IdentityRepo:              ir,
+		OutboxRepo:                or,
+		RateLimiter:               gateway.NewRegistrationRateLimiter(100),
+		BaseDomain:                "meridian.app",
+		EmailVerificationRequired: true,
+		Logger:                    slog.Default(),
+	})
+	require.NoError(t, err)
+
+	w := postRegister(h, map[string]string{
+		"slug":     "acme-corp",
+		"email":    "admin@acme.com",
+		"password": "SecurePass123!",
+	})
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	resp := parseResponse(t, w)
+	assert.Equal(t, true, resp["verification_required"])
+
+	// Identity should be in PENDING_VERIFICATION status.
+	assert.Equal(t, identitydomain.IdentityStatusPendingVerification, capturedIdentityStatus)
+
+	// Verification email should be queued.
+	assert.Len(t, or.entries, 1)
+	assert.Equal(t, "verify-email", or.entries[0].TemplateName)
+}
+
+func TestRegistrationHandler_NoVerificationRequired_DefaultBehavior(t *testing.T) {
+	tc, ir := defaultStubs()
+	h := newRegistrationHandler(t, tc, ir)
+
+	w := postRegister(h, map[string]string{
+		"slug":     "acme-corp",
+		"email":    "admin@acme.com",
+		"password": "SecurePass123!",
+	})
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	resp := parseResponse(t, w)
+	assert.Equal(t, false, resp["verification_required"])
 }
