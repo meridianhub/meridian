@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/meridianhub/meridian/services/financial-accounting/app"
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/stretchr/testify/assert"
@@ -86,13 +87,13 @@ func TestIsProductionEnvironmentDetection(t *testing.T) {
 }
 
 func TestNoopEventPublisher_Publish(t *testing.T) {
-	publisher := &noopEventPublisher{}
+	publisher := &app.NoopEventPublisher{}
 	err := publisher.Publish(context.Background(), &emptypb.Empty{})
 	assert.NoError(t, err)
 }
 
 func TestNoopEventPublisher_PublishBatch(t *testing.T) {
-	publisher := &noopEventPublisher{}
+	publisher := &app.NoopEventPublisher{}
 	err := publisher.PublishBatch(context.Background(), nil)
 	assert.NoError(t, err)
 }
@@ -101,22 +102,22 @@ func TestCachedInstrumentResultAdapter_GetBucketKeyProgram(t *testing.T) {
 	cached := &cache.CachedInstrument{
 		BucketKeyProgram: nil,
 	}
-	adapter := &cachedInstrumentResultAdapter{cached: cached}
+	adapter := &app.CachedInstrumentResultAdapter{Cached: cached}
 	result := adapter.GetBucketKeyProgram()
 	assert.Nil(t, result)
 }
 
 func TestStaticErrors_Defined(t *testing.T) {
-	assert.NotNil(t, ErrBankCashAccountIDRequired)
-	assert.NotNil(t, ErrBankCashAccountIDInvalid)
-	assert.NotNil(t, ErrRedisRequiredInProduction)
-	assert.NotNil(t, ErrKafkaRequiredInProduction)
+	assert.NotNil(t, app.ErrBankCashAccountIDRequired)
+	assert.NotNil(t, app.ErrBankCashAccountIDInvalid)
+	assert.NotNil(t, app.ErrRedisRequiredInProduction)
+	assert.NotNil(t, app.ErrKafkaRequiredInProduction)
 }
 
 func TestCreateRedisClient_InvalidURL(t *testing.T) {
 	t.Setenv("REDIS_URL", "://not-a-valid-url")
 	logger := slog.Default()
-	client, err := createRedisClient(logger)
+	client, err := app.CreateRedisClient(logger)
 	require.Error(t, err)
 	assert.Nil(t, client)
 	assert.Contains(t, err.Error(), "invalid REDIS_URL")
