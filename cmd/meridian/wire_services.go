@@ -15,7 +15,6 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
-	identityv1 "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
@@ -44,7 +43,6 @@ import (
 	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
 	identityconnector "github.com/meridianhub/meridian/services/identity/connector"
 	identitydex "github.com/meridianhub/meridian/services/identity/dex"
-	identityservice "github.com/meridianhub/meridian/services/identity/service"
 	internalaccountpersistence "github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	internalaccountservice "github.com/meridianhub/meridian/services/internal-account/service"
 	marketinformationpersistence "github.com/meridianhub/meridian/services/market-information/adapters/persistence"
@@ -644,19 +642,6 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	}
 	auditv1.RegisterAuditServiceServer(server, svc)
 	logger.Info("registered audit service")
-	return nil
-}
-
-// ─── Identity Wiring ─────────────────────────────────────────────────────────
-
-func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
-	repo := identitypersistence.NewRepository(db)
-	svc, err := identityservice.NewService(repo, logger)
-	if err != nil {
-		return err
-	}
-	identityv1.RegisterIdentityServiceServer(server, svc)
-	logger.Info("registered identity service")
 	return nil
 }
 
