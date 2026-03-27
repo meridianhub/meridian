@@ -80,7 +80,14 @@ def execute_topup():
         debt_recovery_rate = Decimal("100")
 
     gross_amount = Decimal(str(amount_pence)) / Decimal("100")
-    vat_rate = Decimal("0.05")
+
+    # Look up VAT rate from market data (data-driven, not hardcoded).
+    step(name="lookup_vat_rate")
+    vat_obs = market_information.get_rate(
+        dataset_code="PAYG_VAT_RATE",
+        value_date=ctx.get("timestamp", ""),
+    )
+    vat_rate = Decimal(str(vat_obs.value))
 
     # Step 1: Validate the top-up
     step(name="validate_topup")

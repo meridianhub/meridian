@@ -263,10 +263,19 @@ func seedBlockTariffRates(ctx context.Context, conn *grpc.ClientConn) error {
 		value       string
 		label       string
 	}{
+		// Unit rates (VAT-inclusive as published)
 		{"PAYG_ELEC_FIRST_RATE", "0.5185", "Electricity First Rate: 51.85p/kWh"},
 		{"PAYG_ELEC_SAVER_RATE", "0.26010", "Electricity Saver Rate: 26.010p/kWh"},
 		{"PAYG_GAS_FIRST_RATE", "0.23355", "Gas First Rate: 23.355p/kWh"},
 		{"PAYG_GAS_SAVER_RATE", "0.06211", "Gas Saver Rate: 6.211p/kWh"},
+		// Tariff structure (enables war-gaming without saga code changes)
+		{"PAYG_ELEC_BLOCK_THRESHOLD", "2.0", "Electricity Block Threshold: 2 kWh/day"},
+		{"PAYG_GAS_BLOCK_THRESHOLD", "2.0", "Gas Block Threshold: 2 kWh/day"},
+		{"PAYG_VAT_RATE", "0.05", "VAT Rate: 5%"},
+		{"PAYG_EC_LIMIT_ELEC", "15.00", "Emergency Credit Limit (Elec): GBP 15"},
+		{"PAYG_EC_LIMIT_GAS", "15.00", "Emergency Credit Limit (Gas): GBP 15"},
+		{"PAYG_WHD_AMOUNT", "150.00", "Warm Home Discount: GBP 150"},
+		{"PAYG_DEBT_RECOVERY_DEFAULT", "25", "Default Debt Recovery Rate: 25%"},
 	}
 
 	now := time.Now().UTC()

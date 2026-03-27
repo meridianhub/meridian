@@ -408,6 +408,76 @@
         "description": "UK wholesale gas spot price for hedging position and retail margin calculation",
         "validationExpression": "value > 0",
         "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_ELEC_BLOCK_THRESHOLD",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Electricity Block Threshold",
+        "description": "Daily kWh threshold for First Rate / Saver Rate split. Currently 2 kWh (1 kWh for E7 daytime). Change this to war-game threshold adjustments.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_GAS_BLOCK_THRESHOLD",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Gas Block Threshold",
+        "description": "Daily kWh threshold for gas First Rate / Saver Rate split.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_VAT_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "rate",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "VAT Rate (Domestic Energy)",
+        "description": "VAT rate for domestic energy supply. Currently 5%. Publish new observation to model rate changes.",
+        "validationExpression": "value >= 0 && value <= 1",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_EC_LIMIT_ELEC",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Emergency Credit Limit (Electricity)",
+        "description": "Maximum emergency credit per electricity meter. Currently GBP 15.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_EC_LIMIT_GAS",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Emergency Credit Limit (Gas)",
+        "description": "Maximum emergency credit per gas meter. Currently GBP 15.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_WHD_AMOUNT",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Warm Home Discount Amount",
+        "description": "WHD credit amount per eligible household per scheme year. Currently GBP 150.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_DEBT_RECOVERY_DEFAULT",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "percent",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Default Debt Recovery Rate",
+        "description": "Percentage of top-up allocated to debt recovery. Currently 25%. Range: 20-100%.",
+        "validationExpression": "value >= 20 && value <= 100",
+        "resolutionKeyExpression": "observed_at"
       }
     ]
   },

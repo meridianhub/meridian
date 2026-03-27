@@ -43,7 +43,18 @@ def execute_ec_activation():
     fuel_type = ctx.get("fuel_type", "electricity")
     mpxn = ctx["mpxn"]
     activation_source = ctx.get("activation_source", "app")
-    ec_limit = Decimal("15.00")
+
+    # Look up EC limit from market data (data-driven for war-gaming).
+    step(name="lookup_ec_config")
+    ec_limit_dataset = "PAYG_EC_LIMIT_ELEC"
+    if fuel_type == "gas":
+        ec_limit_dataset = "PAYG_EC_LIMIT_GAS"
+    ec_limit_obs = market_information.get_rate(
+        dataset_code=ec_limit_dataset,
+        value_date=ctx.get("timestamp", ""),
+    )
+    ec_limit = Decimal(str(ec_limit_obs.value))
+
     # Use timestamp-based correlation ID so EC can be reactivated after repayment.
     # Each activation cycle gets a unique ID; topup_waterfall clears the balance
     # using its own payment_ref, so previous activation IDs don't block new ones.

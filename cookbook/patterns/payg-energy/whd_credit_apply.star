@@ -42,9 +42,15 @@ def execute_whd():
     eligibility_ref = ctx.get("eligibility_ref", "")
     whd_ref = "whd_" + party_id + "_" + scheme_year
 
-    whd_amount = Decimal("150.00")
+    # Look up WHD amount from market data (changes per scheme year).
+    step(name="lookup_whd_amount")
+    whd_obs = market_information.get_rate(
+        dataset_code="PAYG_WHD_AMOUNT",
+        value_date=ctx.get("timestamp", ""),
+    )
+    whd_amount = Decimal(str(whd_obs.value))
 
-    # Step 1: Idempotency - ensure WHD not already applied this scheme year
+    # Step 2: Idempotency - ensure WHD not already applied this scheme year
     step(name="check_idempotency")
     existing = position_keeping.query_logs(
         correlation_id=whd_ref,

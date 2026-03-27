@@ -106,19 +106,31 @@ def execute_consumption():
         value_date=settlement_period,
     )
 
-    # Market data stores VAT-inclusive rates (as published by the supplier).
-    # Prepayment liability is credited net-of-VAT (topup_waterfall strips VAT
-    # at top-up per HMRC Reg 86), so convert rates to ex-VAT basis here.
-    vat_rate = Decimal("0.05")
+    # Look up tariff structure from market data (enables war-gaming).
+    # All parameters are data-driven - change the threshold, VAT rate,
+    # or block rates by publishing new observations, no saga code changes.
+    step(name="lookup_tariff_structure")
+    threshold_dataset = "PAYG_ELEC_BLOCK_THRESHOLD"
+    if fuel_type == "gas":
+        threshold_dataset = "PAYG_GAS_BLOCK_THRESHOLD"
+
+    threshold_obs = market_information.get_rate(
+        dataset_code=threshold_dataset,
+        value_date=settlement_period,
+    )
+    vat_obs = market_information.get_rate(
+        dataset_code="PAYG_VAT_RATE",
+        value_date=settlement_period,
+    )
+
+    vat_rate = Decimal(str(vat_obs.value))
     vat_divisor = Decimal("1") + vat_rate
     first_rate = Decimal(str(first_rate_obs.value)) / vat_divisor
     saver_rate = Decimal(str(saver_rate_obs.value)) / vat_divisor
 
     # Query the daily cumulative consumption to determine block position.
-    # The daily threshold is 2 kWh (1 kWh for E7 daytime).
-    # This counter resets at midnight via the settlement_date bucketing.
     step(name="query_daily_consumption")
-    daily_threshold = Decimal("2.0")
+    daily_threshold = Decimal(str(threshold_obs.value))
 
     daily_balance = internal_account.get_balance(
         account_id=source_account_id,
