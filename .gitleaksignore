@@ -4,3 +4,7 @@
 
 # Example API key in README documentation (not a real secret)
 91c7b67b6ec6570f9821c1c1fd579669f0080712:services/api-gateway/README.md:curl-auth-header:162
+
+# Atlas migration checksums are cryptographic hashes, not secrets
+26b16bbcb337d331473a64f4dc19e64c90927d55:services/identity/migrations/atlas.sum:generic-api-key:5
+26b16bbcb337d331473a64f4dc19e64c90927d55:services/identity/migrations/atlas.sum:generic-api-key:6
