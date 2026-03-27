@@ -175,8 +175,15 @@ func runSeed(_ *cobra.Command, _ []string) error {
 
 	if withFixtures {
 		fmt.Println("\n=== Seeding Fixture Data ===")
-		if err := runFixtures(ctx, conn, tenantID); err != nil {
-			return fmt.Errorf("seed fixtures: %w", err)
+		var fixtureErr error
+		switch tenantID {
+		case "payg_energy":
+			fixtureErr = runPaygFixtures(ctx, conn, tenantID)
+		default:
+			fixtureErr = runFixtures(ctx, conn, tenantID)
+		}
+		if fixtureErr != nil {
+			return fmt.Errorf("seed fixtures: %w", fixtureErr)
 		}
 	}
 
