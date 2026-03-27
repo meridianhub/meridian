@@ -297,6 +297,9 @@ export function useVoidInvoice() {
         void queryClient.invalidateQueries({
           queryKey: tenantKeys.billingRuns(tenantSlug),
         })
+        void queryClient.invalidateQueries({
+          queryKey: tenantKeys.invoiceEmails(tenantSlug, invoiceId),
+        })
       }
     },
   })
