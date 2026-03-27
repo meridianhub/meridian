@@ -305,7 +305,7 @@ func (c *Container) initBankCashAccount() error {
 
 // initRedis initializes the Redis client and idempotency service.
 func (c *Container) initRedis(_ context.Context) error {
-	redisClient, err := CreateRedisClient(c.Logger)
+	redisClient, err := CreateRedisClient(c.Logger) //nolint:contextcheck // CreateRedisClient manages its own timeout context
 	if err != nil {
 		if env.IsProduction() {
 			c.Logger.Error("CRITICAL: Redis unavailable in production - failing fast",
@@ -340,7 +340,7 @@ func (c *Container) initRedis(_ context.Context) error {
 		} else {
 			c.IdempotencyCleanupWorker = cleanupWorker
 			// Start cleanup worker in background
-			go func() {
+			go func() { //nolint:contextcheck // Worker needs independent context for lifecycle management
 				if err := cleanupWorker.Start(context.Background()); err != nil {
 					c.Logger.Error("idempotency cleanup worker error", "error", err)
 				}
@@ -495,10 +495,12 @@ func CreateRedisClient(logger *slog.Logger) (*redis.Client, error) {
 // NoopEventPublisher provides a no-operation implementation of service.EventPublisher.
 type NoopEventPublisher struct{}
 
+// Publish is a no-op implementation of service.EventPublisher.Publish.
 func (p *NoopEventPublisher) Publish(_ context.Context, _ service.DomainEvent) error {
 	return nil
 }
 
+// PublishBatch is a no-op implementation of service.EventPublisher.PublishBatch.
 func (p *NoopEventPublisher) PublishBatch(_ context.Context, _ []service.DomainEvent) error {
 	return nil
 }
@@ -526,4 +528,3 @@ type CachedInstrumentResultAdapter struct {
 func (a *CachedInstrumentResultAdapter) GetBucketKeyProgram() interface{} {
 	return a.Cached.BucketKeyProgram
 }
-

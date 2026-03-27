@@ -70,8 +70,8 @@ type Container struct {
 	// External clients
 	CurrentAccountClient      service.CurrentAccountClient
 	FinancialAccountingClient service.FinancialAccountingClient
-	InternalAccountClient     service.InternalAccountClient     // nil when internal clearing disabled
-	ReferenceDataClient       service.ReferenceDataClient       // nil when reference-data unavailable
+	InternalAccountClient     service.InternalAccountClient // nil when internal clearing disabled
+	ReferenceDataClient       service.ReferenceDataClient   // nil when reference-data unavailable
 	InternalClearingEnabled   bool
 
 	// Payment gateway
@@ -130,7 +130,7 @@ func NewContainer(ctx context.Context, cfg *config.ServiceConfig, logger *slog.L
 		return nil, err
 	}
 
-	if err := c.initPaymentGateway(); err != nil {
+	if err := c.initPaymentGateway(); err != nil { //nolint:contextcheck // gateway client.New manages its own connection
 		return nil, err
 	}
 
@@ -196,7 +196,7 @@ func (c *Container) initExternalClients(ctx context.Context) error {
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
 	// Current Account client (required)
-	caClient, caCleanup, err := c.createCurrentAccountClient(namespace)
+	caClient, caCleanup, err := c.createCurrentAccountClient(namespace) //nolint:contextcheck // client.New manages its own connection
 	if err != nil {
 		return fmt.Errorf("failed to create current account client: %w", err)
 	}
@@ -214,7 +214,7 @@ func (c *Container) initExternalClients(ctx context.Context) error {
 	// Internal Account client (optional - only when INTERNAL_CLEARING_ENABLED)
 	c.InternalClearingEnabled = env.GetEnvAsBool("INTERNAL_CLEARING_ENABLED", false)
 	if c.InternalClearingEnabled {
-		iaClient, iaCleanup, err := c.createInternalAccountClient(namespace)
+		iaClient, iaCleanup, err := c.createInternalAccountClient(namespace) //nolint:contextcheck // client.New manages its own connection
 		if err != nil {
 			return fmt.Errorf("failed to create internal account client: %w", err)
 		}
@@ -313,7 +313,7 @@ func (c *Container) initKafka(ctx context.Context) {
 // In production, Redis is required (fails fast). In non-production, falls back to NoopService.
 func (c *Container) initRedis(_ context.Context) error {
 	var redisErr error
-	c.RedisClient, redisErr = createRedisClient(c.Logger)
+	c.RedisClient, redisErr = createRedisClient(c.Logger) //nolint:contextcheck // createRedisClient manages its own timeout context
 	if redisErr != nil {
 		if env.IsProduction() {
 			c.Logger.Error("CRITICAL: Redis unavailable in production - failing fast", "error", redisErr)
@@ -339,7 +339,7 @@ func (c *Container) initHandlerRegistry(ctx context.Context) {
 	c.HandlerRegistry = saga.NewHandlerRegistry()
 
 	// Register handlers from existing clients (already initialized)
-	c.registerExistingClientHandlers()
+	c.registerExistingClientHandlers() //nolint:contextcheck // handler registration callbacks receive context at invocation time
 
 	// Register handlers from Starlark-only clients (created here)
 	c.registerStarlarkOnlyClientHandlers(ctx)
@@ -384,7 +384,7 @@ func (c *Container) registerStarlarkOnlyClientHandlers(ctx context.Context) {
 		c.Logger.Warn("position-keeping client unavailable, Starlark handlers not registered", "error", err)
 	} else {
 		c.cleanups = append(c.cleanups, posKeepingCleanup)
-		if err := positionkeepingclient.RegisterStarlarkHandlers(c.HandlerRegistry, posKeepingClient); err != nil {
+		if err := positionkeepingclient.RegisterStarlarkHandlers(c.HandlerRegistry, posKeepingClient); err != nil { //nolint:contextcheck // handler callbacks receive context at invocation time
 			c.Logger.Warn("failed to register position-keeping handlers", "error", err)
 		}
 	}
@@ -401,13 +401,13 @@ func (c *Container) registerStarlarkOnlyClientHandlers(ctx context.Context) {
 		c.Logger.Warn("party client unavailable, Starlark party handlers not registered", "error", err)
 	} else {
 		c.cleanups = append(c.cleanups, partyCleanup)
-		if err := partyclient.RegisterStarlarkHandlers(c.HandlerRegistry, partyClient); err != nil {
+		if err := partyclient.RegisterStarlarkHandlers(c.HandlerRegistry, partyClient); err != nil { //nolint:contextcheck // handler callbacks receive context at invocation time
 			c.Logger.Warn("failed to register party handlers", "error", err)
 		}
 	}
 
 	// Financial-gateway handlers (optional)
-	fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
+	fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{ //nolint:contextcheck // client.New manages its own connection
 		ServiceName: financialgatewayclient.ServiceName,
 		Namespace:   namespace,
 		Port:        financialgatewayclient.DefaultPort,
@@ -418,7 +418,7 @@ func (c *Container) registerStarlarkOnlyClientHandlers(ctx context.Context) {
 		c.Logger.Warn("financial-gateway client unavailable, Starlark financial_gateway handlers not registered", "error", err)
 	} else {
 		c.cleanups = append(c.cleanups, fgCleanup)
-		if err := financialgatewayclient.RegisterStarlarkHandlers(c.HandlerRegistry, fgClient); err != nil {
+		if err := financialgatewayclient.RegisterStarlarkHandlers(c.HandlerRegistry, fgClient); err != nil { //nolint:contextcheck // handler callbacks receive context at invocation time
 			c.Logger.Warn("failed to register financial-gateway handlers", "error", err)
 		}
 	}
@@ -503,7 +503,7 @@ func (c *Container) createSchedulerExecutionStore(ctx context.Context) (*pgxpool
 		return nil, nil, fmt.Errorf("failed to create pgxpool for scheduler execution store: %w", err)
 	}
 
-	execStore, err := scheduler.NewPgExecutionStore(pgxPool)
+	execStore, err := scheduler.NewPgExecutionStore(pgxPool) //nolint:contextcheck // NewPgExecutionStore validates table existence without context
 	if err != nil {
 		c.Logger.Warn("scheduler_execution table not found, audit trail disabled", "error", err)
 		return pgxPool, nil, nil

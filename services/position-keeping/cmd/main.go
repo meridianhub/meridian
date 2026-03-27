@@ -323,7 +323,7 @@ func run(logger *slog.Logger) error {
 // startOutboxWorker initializes and starts the event outbox worker with lazy Kafka resolution.
 func startOutboxWorker(ctx context.Context, container *app.Container, config *app.Config, logger *slog.Logger, outboxShutdownCh, kafkaCleanupCh chan func()) {
 	if container.KafkaProducer() != nil {
-		startOutboxWorkerDirect(container, logger, outboxShutdownCh)
+		startOutboxWorkerDirect(container, logger, outboxShutdownCh) //nolint:contextcheck // worker uses its own context for lifecycle management
 	} else if config.Kafka.Enabled {
 		startOutboxWorkerLazy(ctx, container, config, logger, outboxShutdownCh, kafkaCleanupCh)
 	} else {

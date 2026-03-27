@@ -112,7 +112,7 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 		return nil, err
 	}
 
-	if err := container.initializeAccountValidation(); err != nil {
+	if err := container.initializeAccountValidation(); err != nil { //nolint:contextcheck // instrument resolver manages its own gRPC connections
 		return nil, err
 	}
 
