@@ -51,8 +51,7 @@ func (h *AdminHandler) HandleVerifyOverride(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	identityIDStr := r.PathValue("identity_id")
-	identityID, err := uuid.Parse(identityIDStr)
+	identityID, err := uuid.Parse(r.PathValue("identity_id"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid identity_id"})
 		return
@@ -65,63 +64,70 @@ func (h *AdminHandler) HandleVerifyOverride(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		h.logger.ErrorContext(ctx, "admin verify override: failed to find identity",
-			"identity_id", identityID,
-			"error", err)
+			"identity_id", identityID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load identity"})
 		return
 	}
 
-	previousStatus := identity.Status()
 	adminID, _ := gwauth.GetUserIDFromContext(ctx)
+	previousStatus := identity.Status()
 
+	if !h.applyVerifyTransition(w, r, identity, identityID, adminID) {
+		return
+	}
+
+	if previousStatus == identitydomain.IdentityStatusActive {
+		return
+	}
+
+	if err := h.identityRepo.Save(ctx, identity); err != nil {
+		h.logger.ErrorContext(ctx, "admin verify override: failed to save identity",
+			"identity_id", identityID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save identity"})
+		return
+	}
+
+	h.logger.InfoContext(ctx, "admin verify override: identity activated",
+		"identity_id", identityID, "admin_id", adminID,
+		"previous_status", string(previousStatus), "new_status", string(identity.Status()))
+	writeJSON(w, http.StatusOK, map[string]string{"status": string(identity.Status())})
+}
+
+// applyVerifyTransition applies the status transition for a verify override and writes
+// the response for terminal cases (already active, conflict). Returns false if the
+// response was written and the caller should return.
+func (h *AdminHandler) applyVerifyTransition(w http.ResponseWriter, r *http.Request, identity *identitydomain.Identity, identityID uuid.UUID, adminID string) bool {
+	ctx := r.Context()
 	switch identity.Status() {
 	case identitydomain.IdentityStatusActive:
 		h.logger.InfoContext(ctx, "admin verify override: identity already active",
-			"identity_id", identityID,
-			"admin_id", adminID)
+			"identity_id", identityID, "admin_id", adminID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": string(identity.Status())})
-		return
+		return false
 
 	case identitydomain.IdentityStatusPendingVerification:
 		if err := identity.Verify(); err != nil {
 			h.logger.ErrorContext(ctx, "admin verify override: failed to verify identity",
-				"identity_id", identityID,
-				"error", err)
+				"identity_id", identityID, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify identity"})
-			return
+			return false
 		}
 
 	case identitydomain.IdentityStatusPendingInvite:
 		if err := identity.Activate(); err != nil {
 			h.logger.ErrorContext(ctx, "admin verify override: failed to activate identity",
-				"identity_id", identityID,
-				"error", err)
+				"identity_id", identityID, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to activate identity"})
-			return
+			return false
 		}
 
 	case identitydomain.IdentityStatusLocked, identitydomain.IdentityStatusSuspended:
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "cannot override identity in current status",
 		})
-		return
+		return false
 	}
-
-	if err := h.identityRepo.Save(ctx, identity); err != nil {
-		h.logger.ErrorContext(ctx, "admin verify override: failed to save identity",
-			"identity_id", identityID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save identity"})
-		return
-	}
-
-	h.logger.InfoContext(ctx, "admin verify override: identity activated",
-		"identity_id", identityID,
-		"admin_id", adminID,
-		"previous_status", string(previousStatus),
-		"new_status", string(identity.Status()))
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": string(identity.Status())})
+	return true
 }
 
 // isAdminRole returns true if claims contain a tenant-owner, platform-admin, or super-admin role.
