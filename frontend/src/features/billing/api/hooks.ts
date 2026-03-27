@@ -262,6 +262,9 @@ export function useMarkInvoicePaid() {
         void queryClient.invalidateQueries({
           queryKey: tenantKeys.invoices(tenantSlug),
         })
+        void queryClient.invalidateQueries({
+          queryKey: tenantKeys.billingRuns(tenantSlug),
+        })
       }
     },
   })
@@ -290,6 +293,9 @@ export function useVoidInvoice() {
         })
         void queryClient.invalidateQueries({
           queryKey: tenantKeys.invoices(tenantSlug),
+        })
+        void queryClient.invalidateQueries({
+          queryKey: tenantKeys.billingRuns(tenantSlug),
         })
       }
     },
