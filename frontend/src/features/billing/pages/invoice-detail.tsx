@@ -107,7 +107,7 @@ export function InvoiceDetailPage() {
     return <InvoiceDetailSkeleton />
   }
 
-  if (isError || !data) {
+  if (isError) {
     return (
       <div data-testid="invoice-detail-error">
         <PageShell className="p-6">
@@ -119,6 +119,23 @@ export function InvoiceDetailPage() {
             ]}
           />
           <ErrorState message="Failed to load invoice details." />
+        </PageShell>
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <div data-testid="invoice-detail-not-found">
+        <PageShell className="p-6">
+          <Breadcrumbs
+            items={[
+              { label: 'Billing', href: '/billing' },
+              { label: 'Invoices', href: '/billing/invoices' },
+              { label: 'Not found' },
+            ]}
+          />
+          <ErrorState message="Invoice not found." />
         </PageShell>
       </div>
     )
