@@ -226,100 +226,124 @@ func (s *Service) saveWithOutboxEvent(
 			return err
 		}
 
-		// Build and publish the lifecycle event to the outbox based on the control action
-		switch req.ControlAction {
-		case pb.ControlAction_CONTROL_ACTION_FREEZE:
-			event := &eventsv1.AccountFrozenEvent{
-				EventId:       uuid.New().String(),
-				AccountId:     accountID,
-				Reason:        req.Reason,
-				FrozenAt:      timestamppb.New(actionTimestamp),
-				FrozenBy:      actorID,
-				CorrelationId: correlationID,
-				CausationId:   correlationID,
-				Timestamp:     timestamppb.New(now),
-				Version:       account.Version(),
-			}
-			if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
-				EventType:     "current_account.account_frozen.v1",
-				Topic:         topics.CurrentAccountAccountFrozenV1,
-				AggregateType: "CurrentAccount",
-				AggregateID:   accountID,
-				CorrelationID: correlationID,
-				CausationID:   correlationID,
-			}); err != nil {
-				return fmt.Errorf("failed to write account frozen event to outbox: %w", err)
-			}
+		// Publish the lifecycle event to the outbox within the same transaction
+		return s.publishControlEvent(ctx, tx, req.ControlAction, account, accountID, req.Reason, actorID, correlationID, actionTimestamp, now)
+	})
+}
 
-		case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
-			event := &eventsv1.AccountUnfrozenEvent{
-				EventId:       uuid.New().String(),
-				AccountId:     accountID,
-				UnfrozenAt:    timestamppb.New(actionTimestamp),
-				UnfrozenBy:    actorID,
-				CorrelationId: correlationID,
-				CausationId:   correlationID,
-				Timestamp:     timestamppb.New(now),
-				Version:       account.Version(),
-			}
-			if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
-				EventType:     "current_account.account_unfrozen.v1",
-				Topic:         topics.CurrentAccountAccountUnfrozenV1,
-				AggregateType: "CurrentAccount",
-				AggregateID:   accountID,
-				CorrelationID: correlationID,
-				CausationID:   correlationID,
-			}); err != nil {
-				return fmt.Errorf("failed to write account unfrozen event to outbox: %w", err)
-			}
-
-		case pb.ControlAction_CONTROL_ACTION_CLOSE:
-			balanceCents, _ := account.Balance().ToMinorUnits()
-			// Derive the divisor from the account's precision so the conversion is
-			// correct for any currency (e.g., JPY precision=0, GBP precision=2, KWH precision=3).
-			precision := account.Balance().Precision()
-			divisor := int64(1)
-			for i := 0; i < precision; i++ {
-				divisor *= 10
-			}
-			var nanosMultiplier int32
-			if divisor > 0 {
-				nanosMultiplier = int32(1_000_000_000 / divisor)
-			}
-			closingBalance := &money.Money{
-				CurrencyCode: account.Balance().InstrumentCode(),
-				Units:        balanceCents / divisor,
-				Nanos:        int32(balanceCents%divisor) * nanosMultiplier,
-			}
-			event := &eventsv1.AccountClosedEvent{
-				EventId:        uuid.New().String(),
-				AccountId:      accountID,
-				ClosingBalance: closingBalance,
-				ClosureReason:  req.Reason,
-				ClosedBy:       actorID,
-				ClosureDate:    timestamppb.New(actionTimestamp),
-				CorrelationId:  correlationID,
-				CausationId:    correlationID,
-				Timestamp:      timestamppb.New(now),
-				Version:        account.Version(),
-			}
-			if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
-				EventType:     "current_account.account_closed.v1",
-				Topic:         topics.CurrentAccountAccountClosedV1,
-				AggregateType: "CurrentAccount",
-				AggregateID:   accountID,
-				CorrelationID: correlationID,
-				CausationID:   correlationID,
-			}); err != nil {
-				return fmt.Errorf("failed to write account closed event to outbox: %w", err)
-			}
-
-		case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
-			// No event for unspecified action
+// publishControlEvent publishes a lifecycle event to the outbox for the given control action.
+func (s *Service) publishControlEvent(
+	ctx context.Context,
+	tx *gorm.DB,
+	action pb.ControlAction,
+	account *domain.CurrentAccount,
+	accountID, reason, actorID, correlationID string,
+	actionTimestamp, now time.Time,
+) error {
+	switch action {
+	case pb.ControlAction_CONTROL_ACTION_FREEZE:
+		event := &eventsv1.AccountFrozenEvent{
+			EventId:       uuid.New().String(),
+			AccountId:     accountID,
+			Reason:        reason,
+			FrozenAt:      timestamppb.New(actionTimestamp),
+			FrozenBy:      actorID,
+			CorrelationId: correlationID,
+			CausationId:   correlationID,
+			Timestamp:     timestamppb.New(now),
+			Version:       account.Version(),
+		}
+		if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+			EventType:     "current_account.account_frozen.v1",
+			Topic:         topics.CurrentAccountAccountFrozenV1,
+			AggregateType: "CurrentAccount",
+			AggregateID:   accountID,
+			CorrelationID: correlationID,
+			CausationID:   correlationID,
+		}); err != nil {
+			return fmt.Errorf("failed to write account frozen event to outbox: %w", err)
 		}
 
-		return nil
-	})
+	case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
+		event := &eventsv1.AccountUnfrozenEvent{
+			EventId:       uuid.New().String(),
+			AccountId:     accountID,
+			UnfrozenAt:    timestamppb.New(actionTimestamp),
+			UnfrozenBy:    actorID,
+			CorrelationId: correlationID,
+			CausationId:   correlationID,
+			Timestamp:     timestamppb.New(now),
+			Version:       account.Version(),
+		}
+		if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+			EventType:     "current_account.account_unfrozen.v1",
+			Topic:         topics.CurrentAccountAccountUnfrozenV1,
+			AggregateType: "CurrentAccount",
+			AggregateID:   accountID,
+			CorrelationID: correlationID,
+			CausationID:   correlationID,
+		}); err != nil {
+			return fmt.Errorf("failed to write account unfrozen event to outbox: %w", err)
+		}
+
+	case pb.ControlAction_CONTROL_ACTION_CLOSE:
+		if err := s.publishAccountClosedEvent(ctx, tx, account, accountID, reason, actorID, correlationID, actionTimestamp, now); err != nil {
+			return err
+		}
+
+	case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
+		// No event for unspecified action
+	}
+
+	return nil
+}
+
+// publishAccountClosedEvent builds and publishes an account closed event to the outbox.
+func (s *Service) publishAccountClosedEvent(
+	ctx context.Context,
+	tx *gorm.DB,
+	account *domain.CurrentAccount,
+	accountID, reason, actorID, correlationID string,
+	actionTimestamp, now time.Time,
+) error {
+	balanceCents, _ := account.Balance().ToMinorUnits()
+	precision := account.Balance().Precision()
+	divisor := int64(1)
+	for i := 0; i < precision; i++ {
+		divisor *= 10
+	}
+	var nanosMultiplier int32
+	if divisor > 0 {
+		nanosMultiplier = int32(1_000_000_000 / divisor)
+	}
+	closingBalance := &money.Money{
+		CurrencyCode: account.Balance().InstrumentCode(),
+		Units:        balanceCents / divisor,
+		Nanos:        int32(balanceCents%divisor) * nanosMultiplier,
+	}
+	event := &eventsv1.AccountClosedEvent{
+		EventId:        uuid.New().String(),
+		AccountId:      accountID,
+		ClosingBalance: closingBalance,
+		ClosureReason:  reason,
+		ClosedBy:       actorID,
+		ClosureDate:    timestamppb.New(actionTimestamp),
+		CorrelationId:  correlationID,
+		CausationId:    correlationID,
+		Timestamp:      timestamppb.New(now),
+		Version:        account.Version(),
+	}
+	if err := s.outboxPublisher.Publish(ctx, tx, event, events.PublishConfig{
+		EventType:     "current_account.account_closed.v1",
+		Topic:         topics.CurrentAccountAccountClosedV1,
+		AggregateType: "CurrentAccount",
+		AggregateID:   accountID,
+		CorrelationID: correlationID,
+		CausationID:   correlationID,
+	}); err != nil {
+		return fmt.Errorf("failed to write account closed event to outbox: %w", err)
+	}
+	return nil
 }
 
 // sendControlActionWebhook sends webhook notifications for regulatory compliance events.

@@ -69,31 +69,14 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 		return nil, status.Errorf(codes.FailedPrecondition, "cannot initiate withdrawal on closed account: %s", req.AccountId)
 	}
 
-	// Validate currency matches
-	if req.Amount.Amount.CurrencyCode != account.Balance().InstrumentCode() {
-		operationStatus = opStatusCurrencyMismatch
-		return nil, status.Errorf(codes.InvalidArgument,
-			"currency mismatch: expected %s, got %s",
-			account.Balance().InstrumentCode(), req.Amount.Amount.CurrencyCode)
+	// Validate and convert amount
+	amount, opStatus, amountErr := validateWithdrawalAmount(req.Amount, account)
+	if amountErr != nil {
+		operationStatus = opStatus
+		return nil, amountErr
 	}
 
-	// Convert amount from proto using the account's instrument (supports any dimension/precision).
-	// The proto CurrencyCode is already validated against the account's instrument code above.
-	amount, err := protoMoneyToAmount(req.Amount, account)
-	if err != nil {
-		operationStatus = operationStatusInvalidCurrency
-		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
-	}
-
-	amountMinor, err := amount.ToMinorUnits()
-	if err != nil {
-		operationStatus = opStatusAmountOverflow
-		return nil, status.Errorf(codes.InvalidArgument, "amount too large: %v", err)
-	}
-	if amountMinor <= 0 {
-		operationStatus = opStatusInvalidAmount
-		return nil, status.Errorf(codes.InvalidArgument, "withdrawal amount must be positive")
-	}
+	amountMinor, _ := amount.ToMinorUnits()
 
 	// Check available balance (warning only - balance could change before execution)
 	availMinor, _ := account.AvailableBalance().ToMinorUnits()
@@ -234,123 +217,122 @@ func (s *Service) RetrieveWithdrawal(ctx context.Context, req *pb.RetrieveWithdr
 		caobservability.RecordOperationDuration("retrieve_withdrawal", operationStatus, time.Since(start))
 	}()
 
-	// Validate that at least one identifier is provided first
 	if req.WithdrawalId == "" && req.AccountId == "" {
 		operationStatus = opStatusMissingIdentifier
 		return nil, status.Error(codes.InvalidArgument, "either withdrawal_id or account_id is required")
 	}
 
-	// Single withdrawal lookup by ID
 	if req.WithdrawalId != "" {
-		withdrawal, err := s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
+		resp, opStatus, err := s.retrieveSingleWithdrawal(ctx, req.WithdrawalId)
 		if err != nil {
-			if errors.Is(err, persistence.ErrWithdrawalNotFound) {
-				operationStatus = opStatusWithdrawalNotFound
-				return nil, status.Errorf(codes.NotFound, "withdrawal not found: %s", req.WithdrawalId)
-			}
-			operationStatus = opStatusRetrieveFailed
-			s.logger.Error("failed to retrieve withdrawal",
-				"withdrawal_id", req.WithdrawalId,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
+			operationStatus = opStatus
+			return nil, err
 		}
-
-		// Get account to retrieve business account ID for response
-		account, err := s.repo.FindByUUID(ctx, withdrawal.AccountID)
-		if err != nil {
-			if errors.Is(err, persistence.ErrAccountNotFound) {
-				operationStatus = opStatusAccountNotFound
-				return nil, status.Errorf(codes.NotFound, "account not found for withdrawal")
-			}
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-		}
-
-		s.logger.Debug("withdrawal retrieved",
-			"withdrawal_id", req.WithdrawalId,
-			"account_id", account.AccountID(),
-			"status", withdrawal.Status)
-
-		return &pb.RetrieveWithdrawalResponse{
-			Withdrawals: []*pb.Withdrawal{toProtoWithdrawal(withdrawal, account.AccountID())},
-			Pagination: &commonpb.PaginationResponse{
-				TotalCount: 1,
-			},
-		}, nil
+		return resp, nil
 	}
 
-	// List withdrawals by account
-	if req.AccountId != "" {
-		// Validate account exists and get the internal UUID
-		account, err := s.repo.FindByID(ctx, req.AccountId)
-		if err != nil {
-			if errors.Is(err, persistence.ErrAccountNotFound) {
-				operationStatus = opStatusAccountNotFound
-				return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-			}
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-		}
+	resp, opStatus, err := s.listWithdrawalsByAccount(ctx, req.AccountId, req.Pagination)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
+	}
+	return resp, nil
+}
 
-		// Parse pagination parameters
-		pagination := persistence.PaginationParams{
-			Limit:  50, // Default limit
-			Offset: 0,
+// retrieveSingleWithdrawal looks up a single withdrawal by reference ID.
+func (s *Service) retrieveSingleWithdrawal(ctx context.Context, withdrawalID string) (*pb.RetrieveWithdrawalResponse, string, error) {
+	withdrawal, err := s.withdrawalRepo.FindByReference(ctx, withdrawalID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrWithdrawalNotFound) {
+			return nil, opStatusWithdrawalNotFound,
+				status.Errorf(codes.NotFound, "withdrawal not found: %s", withdrawalID)
 		}
-		if req.Pagination != nil {
-			if req.Pagination.PageSize > 0 {
-				pagination.Limit = int(req.Pagination.PageSize)
-			}
-			// Simple offset-based pagination from page token
-			// In production, consider cursor-based pagination for better performance
-			if req.Pagination.PageToken != "" {
-				// Page token contains the offset
-				var offset int
-				if _, err := fmt.Sscanf(req.Pagination.PageToken, "%d", &offset); err != nil {
-					operationStatus = opStatusRetrieveFailed
-					return nil, status.Errorf(codes.InvalidArgument, "invalid page token: %s", req.Pagination.PageToken)
-				}
-				pagination.Offset = offset
-			}
-		}
-
-		// List withdrawals for the account
-		withdrawals, err := s.withdrawalRepo.List(ctx, account.ID(), pagination)
-		if err != nil {
-			operationStatus = opStatusRetrieveFailed
-			s.logger.Error("failed to list withdrawals",
-				"account_id", req.AccountId,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to list withdrawals: %v", err)
-		}
-
-		// Convert domain withdrawals to proto
-		protoWithdrawals := make([]*pb.Withdrawal, 0, len(withdrawals))
-		for _, w := range withdrawals {
-			protoWithdrawals = append(protoWithdrawals, toProtoWithdrawal(w, req.AccountId))
-		}
-
-		// Build pagination response
-		var nextPageToken string
-		if len(withdrawals) == pagination.Limit {
-			// There might be more results
-			nextPageToken = fmt.Sprintf("%d", pagination.Offset+pagination.Limit)
-		}
-
-		s.logger.Debug("withdrawals listed",
-			"account_id", req.AccountId,
-			"count", len(withdrawals),
-			"has_more", nextPageToken != "")
-
-		return &pb.RetrieveWithdrawalResponse{
-			Withdrawals: protoWithdrawals,
-			Pagination: &commonpb.PaginationResponse{
-				NextPageToken: nextPageToken,
-				TotalCount:    int64(len(withdrawals)),
-			},
-		}, nil
+		s.logger.Error("failed to retrieve withdrawal",
+			"withdrawal_id", withdrawalID,
+			"error", err)
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
 	}
 
-	operationStatus = opStatusMissingIdentifier
-	return nil, status.Error(codes.InvalidArgument, "either withdrawal_id or account_id is required")
+	account, err := s.repo.FindByUUID(ctx, withdrawal.AccountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return nil, opStatusAccountNotFound,
+				status.Errorf(codes.NotFound, "account not found for withdrawal")
+		}
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	s.logger.Debug("withdrawal retrieved",
+		"withdrawal_id", withdrawalID,
+		"account_id", account.AccountID(),
+		"status", withdrawal.Status)
+
+	return &pb.RetrieveWithdrawalResponse{
+		Withdrawals: []*pb.Withdrawal{toProtoWithdrawal(withdrawal, account.AccountID())},
+		Pagination: &commonpb.PaginationResponse{
+			TotalCount: 1,
+		},
+	}, "", nil
+}
+
+// listWithdrawalsByAccount returns a paginated list of withdrawals for an account.
+func (s *Service) listWithdrawalsByAccount(ctx context.Context, accountID string, paginationReq *commonpb.Pagination) (*pb.RetrieveWithdrawalResponse, string, error) {
+	account, err := s.repo.FindByID(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return nil, opStatusAccountNotFound,
+				status.Errorf(codes.NotFound, "account not found: %s", accountID)
+		}
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	pagination := persistence.PaginationParams{Limit: 50, Offset: 0}
+	if paginationReq != nil {
+		if paginationReq.PageSize > 0 {
+			pagination.Limit = int(paginationReq.PageSize)
+		}
+		if paginationReq.PageToken != "" {
+			var offset int
+			if _, err := fmt.Sscanf(paginationReq.PageToken, "%d", &offset); err != nil {
+				return nil, opStatusRetrieveFailed,
+					status.Errorf(codes.InvalidArgument, "invalid page token: %s", paginationReq.PageToken)
+			}
+			pagination.Offset = offset
+		}
+	}
+
+	withdrawals, err := s.withdrawalRepo.List(ctx, account.ID(), pagination)
+	if err != nil {
+		s.logger.Error("failed to list withdrawals",
+			"account_id", accountID,
+			"error", err)
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to list withdrawals: %v", err)
+	}
+
+	protoWithdrawals := make([]*pb.Withdrawal, 0, len(withdrawals))
+	for _, w := range withdrawals {
+		protoWithdrawals = append(protoWithdrawals, toProtoWithdrawal(w, accountID))
+	}
+
+	var nextPageToken string
+	if len(withdrawals) == pagination.Limit {
+		nextPageToken = fmt.Sprintf("%d", pagination.Offset+pagination.Limit)
+	}
+
+	s.logger.Debug("withdrawals listed",
+		"account_id", accountID,
+		"count", len(withdrawals),
+		"has_more", nextPageToken != "")
+
+	return &pb.RetrieveWithdrawalResponse{
+		Withdrawals: protoWithdrawals,
+		Pagination: &commonpb.PaginationResponse{
+			NextPageToken: nextPageToken,
+			TotalCount:    int64(len(withdrawals)),
+		},
+	}, "", nil
 }
