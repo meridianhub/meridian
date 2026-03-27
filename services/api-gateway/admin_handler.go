@@ -101,7 +101,8 @@ func (h *AdminHandler) applyVerifyTransition(w http.ResponseWriter, r *http.Requ
 	switch identity.Status() {
 	case identitydomain.IdentityStatusActive:
 		h.logger.InfoContext(ctx, "admin verify override: identity already active",
-			"identity_id", identityID, "admin_id", adminID)
+			"identity_id", identityID, "admin_id", adminID,
+			"previous_status", string(identity.Status()), "new_status", string(identity.Status()))
 		writeJSON(w, http.StatusOK, map[string]string{"status": string(identity.Status())})
 		return false
 
@@ -122,6 +123,16 @@ func (h *AdminHandler) applyVerifyTransition(w http.ResponseWriter, r *http.Requ
 		}
 
 	case identitydomain.IdentityStatusLocked, identitydomain.IdentityStatusSuspended:
+		h.logger.WarnContext(ctx, "admin verify override: identity in non-overridable status",
+			"identity_id", identityID, "admin_id", adminID, "status", string(identity.Status()))
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "cannot override identity in current status",
+		})
+		return false
+
+	default:
+		h.logger.WarnContext(ctx, "admin verify override: unrecognized identity status",
+			"identity_id", identityID, "admin_id", adminID, "status", string(identity.Status()))
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "cannot override identity in current status",
 		})

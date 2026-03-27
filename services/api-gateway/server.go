@@ -148,6 +148,10 @@ func (s *Server) registerAdminRoutes() {
 	if s.adminHandler == nil {
 		return
 	}
+	if s.authMiddleware == nil {
+		s.logger.Error("admin routes not registered: auth middleware is not configured")
+		return
+	}
 	adminVerifyH := s.wrapWithAuthChain(http.HandlerFunc(s.adminHandler.HandleVerifyOverride))
 	s.mux.Handle("POST /api/v1/admin/identities/{identity_id}/verify", adminVerifyH)
 }
