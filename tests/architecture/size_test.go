@@ -25,8 +25,6 @@ const (
 // Each entry must be removed when the file is split to comply.
 // Do NOT add new entries — split large files instead.
 var knownOversizedFiles = map[string]bool{
-	"services/control-plane/internal/applier/grpc_handler.go":               true,
-	"services/control-plane/internal/generator/validate_fix.go":             true,
 	"services/current-account/service/saga_handlers.go":                     true,
 	"services/identity/service/server.go":                                   true,
 	"services/market-information/service/observation_service.go":            true,
