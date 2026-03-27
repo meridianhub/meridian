@@ -15,7 +15,6 @@ import (
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	forecastingv1 "github.com/meridianhub/meridian/api/proto/meridian/forecasting/v1"
-	identityv1 "github.com/meridianhub/meridian/api/proto/meridian/identity/v1"
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
@@ -44,7 +43,6 @@ import (
 	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
 	identityconnector "github.com/meridianhub/meridian/services/identity/connector"
 	identitydex "github.com/meridianhub/meridian/services/identity/dex"
-	identityservice "github.com/meridianhub/meridian/services/identity/service"
 	internalaccountpersistence "github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	internalaccountservice "github.com/meridianhub/meridian/services/internal-account/service"
 	marketinformationpersistence "github.com/meridianhub/meridian/services/market-information/adapters/persistence"
@@ -79,7 +77,6 @@ import (
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 
 	// Shared platform
-	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -648,27 +645,6 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	return nil
 }
 
-// ─── Identity Wiring ─────────────────────────────────────────────────────────
-
-func wireIdentity(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
-	repo := identitypersistence.NewRepository(db)
-
-	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "app.meridianhub.cloud")
-	baseURL := "https://" + baseDomain
-
-	emailOutboxRepo := email.NewPostgresOutboxRepository(db)
-
-	svc, err := identityservice.NewService(repo, logger,
-		identityservice.WithEmailOutbox(emailOutboxRepo),
-		identityservice.WithBaseURL(baseURL),
-	)
-	if err != nil {
-		return err
-	}
-	identityv1.RegisterIdentityServiceServer(server, svc)
-	logger.Info("registered identity service")
-	return nil
-}
 
 // wireEmbeddedDex creates the embedded Dex OIDC server and returns a gateway
 // ServerOption that mounts its HTTP handler at /dex/*. When DEX_ISSUER is not
