@@ -91,6 +91,18 @@ export const tenantKeys = {
     [...tenantKeys.all(tenantId), 'reconciliation-runs'] as const,
   reconciliationRun: (tenantId: string, runId: string) =>
     [...tenantKeys.reconciliationRuns(tenantId), runId] as const,
+
+  // Billing
+  billingRuns: (tenantId: string) =>
+    [...tenantKeys.all(tenantId), 'billing-runs'] as const,
+  billingRun: (tenantId: string, runId: string) =>
+    [...tenantKeys.billingRuns(tenantId), runId] as const,
+  invoices: (tenantId: string) =>
+    [...tenantKeys.all(tenantId), 'invoices'] as const,
+  invoice: (tenantId: string, invoiceId: string) =>
+    [...tenantKeys.invoices(tenantId), invoiceId] as const,
+  invoiceEmails: (tenantId: string, invoiceId: string) =>
+    [...tenantKeys.invoice(tenantId, invoiceId), 'emails'] as const,
 } as const
 
 export const platformKeys = {
