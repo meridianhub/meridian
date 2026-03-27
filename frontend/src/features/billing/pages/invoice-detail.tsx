@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table'
 import { MoneyDisplay } from '@/shared/money-display'
 import { StatusBadge } from '@/shared/status-badge'
-import { Breadcrumbs, PageShell, ErrorState } from '@/shared'
+import { Breadcrumbs, PageHeader, PageShell, ErrorState } from '@/shared'
 import { tenantKeys } from '@/lib/query-keys'
 import { useTenantSlug } from '@/hooks/use-tenant-context'
 import { usePageTitle } from '@/hooks/use-page-title'
@@ -134,18 +134,19 @@ export function InvoiceDetailPage() {
         ]}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-semibold">{data.invoiceNumber}</h1>
-          <StatusBadge status={data.status} />
-        </div>
-
-        <InvoiceActions
-          invoiceId={data.id}
-          status={data.status}
-          onActionSuccess={handleActionSuccess}
-        />
-      </div>
+      <PageHeader
+        title={data.invoiceNumber}
+        actions={
+          <>
+            <StatusBadge status={data.status} />
+            <InvoiceActions
+              invoiceId={data.id}
+              status={data.status}
+              onActionSuccess={handleActionSuccess}
+            />
+          </>
+        }
+      />
 
       <Tabs defaultValue="overview">
         <TabsList>
