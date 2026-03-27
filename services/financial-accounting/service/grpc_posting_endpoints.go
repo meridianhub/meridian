@@ -3,17 +3,14 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
-	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
@@ -159,31 +156,11 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid financial_booking_log_id: %v", err)
 	}
 
-	// Validate booking log exists (optional check - could be deferred to database constraint)
-	// For now we'll trust the database foreign key constraint
-
-	// Parse and validate posting amount
-	postingAmount, err := fromProtoMoney(req.GetPostingAmount())
+	// Validate request fields
+	validated, err := validateCapturePostingRequest(req)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid posting_amount: %v", err)
+		return nil, err
 	}
-
-	// Validate posting direction
-	if req.PostingDirection == commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED {
-		return nil, status.Error(codes.InvalidArgument, "posting_direction must be specified")
-	}
-	direction := fromProtoPostingDirection(req.PostingDirection)
-
-	// Validate account ID
-	if req.AccountId == "" {
-		return nil, status.Error(codes.InvalidArgument, "account_id is required")
-	}
-
-	// Validate value date
-	if req.ValueDate == nil {
-		return nil, status.Error(codes.InvalidArgument, "value_date is required")
-	}
-	valueDate := req.ValueDate.AsTime()
 
 	// Extract correlation ID from idempotency key (or use empty string)
 	correlationID := ""
@@ -194,23 +171,18 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 	// Create domain entity with validation
 	posting, err := domain.NewLedgerPosting(
 		bookingLogID,
-		direction,
-		postingAmount,
-		req.AccountId,
-		valueDate,
+		validated.Direction,
+		validated.PostingAmount,
+		validated.AccountID,
+		validated.ValueDate,
 		correlationID,
 	)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid posting data: %v", err)
 	}
 
-	// Validate account service domain enum value
-	if _, ok := commonv1.AccountServiceDomain_name[int32(req.AccountServiceDomain)]; !ok {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid account_service_domain: %d", req.AccountServiceDomain)
-	}
-
 	// Set account service domain from request (caller-provided, e.g., from saga scripts)
-	posting.AccountServiceDomain = fromProtoAccountServiceDomain(req.AccountServiceDomain)
+	posting.AccountServiceDomain = fromProtoAccountServiceDomain(validated.AccountServiceDomain)
 
 	// Persist posting
 	if err := s.repository.SavePosting(ctx, posting); err != nil {
@@ -219,19 +191,7 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 
 	// Publish LedgerPostingCapturedEvent for inter-service coordination
 	// Event publishing is best-effort - errors are logged but don't fail the operation
-	event := &eventsv1.LedgerPostingCapturedEvent{
-		PostingId:        posting.ID.String(),
-		BookingLogId:     posting.FinancialBookingLogID.String(),
-		PostingDirection: toProtoPostingDirection(posting.Direction),
-		PostingAmount:    toProtoMoney(posting.Amount),
-		AccountId:        posting.AccountID,
-		ValueDate:        timestamppb.New(posting.ValueDate),
-		Status:           toProtoTransactionStatus(posting.Status),
-		CorrelationId:    correlationID,
-		CausationId:      correlationID, // Request caused this event
-		Timestamp:        timestamppb.Now(),
-		Version:          1, // Initial version for newly created posting
-	}
+	event := buildPostingCapturedEvent(posting, correlationID)
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		slog.Error("failed to publish LedgerPostingCapturedEvent",
 			"error", err,
@@ -250,32 +210,7 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		if req.IdempotencyKey.TtlSeconds > 0 {
 			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
 		}
-
-		// Serialize response using protobuf for idempotent storage
-		responseData, marshalErr := proto.Marshal(response)
-		if marshalErr != nil {
-			// Log serialization error but don't fail the operation - response was successful
-			slog.Error("failed to serialize response for idempotency cache",
-				"error", marshalErr,
-				"idempotency_key", req.IdempotencyKey.Key,
-				"operation", "capture-posting")
-		} else {
-			result := idempotency.Result{
-				Key:         idempotencyKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         ttl,
-			}
-
-			// Store result in idempotency cache (best-effort, failures are logged but don't fail request)
-			if storeErr := s.idempotency.StoreResult(ctx, result); storeErr != nil {
-				slog.Error("failed to store idempotency result",
-					"error", storeErr,
-					"idempotency_key", req.IdempotencyKey.Key,
-					"operation", "capture-posting")
-			}
-		}
+		s.storeIdempotencyResult(ctx, idempotencyKey, ttl, response, "capture-posting")
 	}
 
 	return response, nil
@@ -474,41 +409,8 @@ func (s *FinancialAccountingService) executeUpdateLedgerPosting(
 		postingResult = posting.PostingResult // Preserve existing if not provided
 	}
 
-	switch newStatus {
-	case domain.TransactionStatusPosted:
-		if err := posting.Post(postingResult); err != nil {
-			if errors.Is(err, domain.ErrAlreadyPosted) {
-				return nil, status.Error(codes.FailedPrecondition, "posting already posted")
-			}
-			return nil, status.Errorf(codes.InvalidArgument, "cannot post: %v", err)
-		}
-	case domain.TransactionStatusFailed:
-		if err := posting.Fail(postingResult); err != nil {
-			if errors.Is(err, domain.ErrCannotFailPosted) {
-				return nil, status.Error(codes.FailedPrecondition, "cannot fail a posted transaction")
-			}
-			return nil, status.Errorf(codes.InvalidArgument, "cannot fail: %v", err)
-		}
-	case domain.TransactionStatusPending:
-		// Allow transition back to pending (for retry scenarios)
-		posting.Status = newStatus
-		if postingResult != "" {
-			posting.PostingResult = postingResult
-		}
-	case domain.TransactionStatusCancelled:
-		// Allow cancellation
-		posting.Status = newStatus
-		if postingResult != "" {
-			posting.PostingResult = postingResult
-		}
-	case domain.TransactionStatusReversed:
-		// Allow reversal
-		posting.Status = newStatus
-		if postingResult != "" {
-			posting.PostingResult = postingResult
-		}
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "unsupported status: %v", newStatus)
+	if err := applyPostingStatusTransition(posting, newStatus, postingResult); err != nil {
+		return nil, err
 	}
 
 	// Persist updated posting
@@ -521,20 +423,7 @@ func (s *FinancialAccountingService) executeUpdateLedgerPosting(
 
 	// Publish LedgerPostingAmendedEvent for inter-service coordination
 	// Event publishing is best-effort - errors are logged but don't fail the operation
-	// Note: UpdateLedgerPosting changes status, not amount. Both previous_amount and new_amount
-	// will be the same value since amount doesn't change in status transitions.
-	event := &eventsv1.LedgerPostingAmendedEvent{
-		PostingId:      posting.ID.String(),
-		BookingLogId:   posting.FinancialBookingLogID.String(),
-		PreviousAmount: toProtoMoney(previousAmount),
-		NewAmount:      toProtoMoney(posting.Amount),
-		Reason:         fmt.Sprintf("Status updated from %v to %v", previousStatus, newStatus),
-		AmendedBy:      "system", // Status transitions are system-driven
-		CorrelationId:  correlationID,
-		CausationId:    correlationID, // Request caused this event
-		Timestamp:      timestamppb.Now(),
-		Version:        1, // Increment version for optimistic locking
-	}
+	event := buildPostingAmendedEvent(posting, previousAmount, previousStatus, newStatus, correlationID)
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		slog.Error("failed to publish LedgerPostingAmendedEvent",
 			"error", err,
