@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -159,6 +160,10 @@ type DemoUser struct {
 
 // loadDemoUsers reads demo user configuration from environment variables.
 // Returns an empty slice if required variables are not set.
+//
+// DEMO_OPERATOR_TENANT supports comma-separated tenant IDs to create
+// the same operator identity across multiple tenants (e.g., "volterra_energy,payg_energy").
+// Each tenant gets its own namespaced identity with the same email and password.
 func loadDemoUsers() []DemoUser {
 	email := os.Getenv("DEMO_OPERATOR_EMAIL")
 	password := os.Getenv("DEMO_OPERATOR_PASSWORD")
@@ -171,12 +176,21 @@ func loadDemoUsers() []DemoUser {
 		tenantID = "volterra"
 	}
 
-	return []DemoUser{{
-		Email:    email,
-		Password: password,
-		TenantID: tenantID,
-		Role:     string(domain.RoleOperator),
-	}}
+	tenants := strings.Split(tenantID, ",")
+	users := make([]DemoUser, 0, len(tenants))
+	for _, tid := range tenants {
+		tid = strings.TrimSpace(tid)
+		if tid == "" {
+			continue
+		}
+		users = append(users, DemoUser{
+			Email:    email,
+			Password: password,
+			TenantID: tid,
+			Role:     string(domain.RoleOperator),
+		})
+	}
+	return users
 }
 
 // SeedDemoUsers creates demo user identities from environment variables.
@@ -185,7 +199,7 @@ func loadDemoUsers() []DemoUser {
 // Environment variables:
 //   - DEMO_OPERATOR_EMAIL: Email address for the demo operator
 //   - DEMO_OPERATOR_PASSWORD: Password for the demo operator
-//   - DEMO_OPERATOR_TENANT: Tenant ID (default: "volterra")
+//   - DEMO_OPERATOR_TENANT: Tenant ID or comma-separated list (e.g., "volterra_energy,payg_energy")
 func SeedDemoUsers(ctx context.Context, repo domain.Repository) error {
 	if repo == nil {
 		return ErrNilRepository
