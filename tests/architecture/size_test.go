@@ -24,9 +24,7 @@ const (
 // knownOversizedFiles tracks files that currently exceed the size limit.
 // Each entry must be removed when the file is split to comply.
 // Do NOT add new entries — split large files instead.
-var knownOversizedFiles = map[string]bool{
-	"services/identity/service/server.go": true,
-}
+var knownOversizedFiles = map[string]bool{}
 
 // TestFileSize validates that no non-test, non-generated Go file exceeds maxFileLines.
 // Known violations are tracked in knownOversizedFiles — the test fails only on NEW violations.

@@ -274,66 +274,64 @@ func (v *lintVisitor) walkStmt(stmt syntax.Stmt) {
 	switch s := stmt.(type) {
 	case *syntax.ExprStmt:
 		v.walkExpr(s.X)
-
 	case *syntax.AssignStmt:
-		// Track Decimal variable assignments
-		if ident, ok := s.LHS.(*syntax.Ident); ok {
-			if v.isDecimalExpr(s.RHS) {
-				v.decimalVars[ident.Name] = true
-			}
-			// Track counter patterns: i = i + 1 or i = 0
-			if v.isCounterAssignment(ident.Name, s.RHS) {
-				v.counterVars[ident.Name] = true
-			}
-		}
-		v.walkExpr(s.LHS)
-		v.walkExpr(s.RHS)
-
+		v.walkAssignStmt(s)
 	case *syntax.DefStmt:
-		for _, stmt := range s.Body {
-			v.walkStmt(stmt)
-		}
-
+		v.walkStmtList(s.Body)
 	case *syntax.IfStmt:
-		v.ifDepth++
-		if v.ifDepth > 3 {
-			v.addIssue(LintIssueTypeNestedConditional, int(s.If.Line),
-				fmt.Sprintf("Nested conditionals exceed 3 levels (found %d)", v.ifDepth),
-				"Refactor to flatten conditionals or extract to helper functions")
-		}
-
-		v.walkExpr(s.Cond)
-		for _, stmt := range s.True {
-			v.walkStmt(stmt)
-		}
-		for _, stmt := range s.False {
-			v.walkStmt(stmt)
-		}
-		v.ifDepth--
-
+		v.walkIfStmt(s)
 	case *syntax.ForStmt:
-		// Track loop variable as counter
-		if ident, ok := s.Vars.(*syntax.Ident); ok {
-			v.counterVars[ident.Name] = true
-		}
-		v.inLoopInit = true
-		v.walkExpr(s.X)
-		v.inLoopInit = false
-		for _, stmt := range s.Body {
-			v.walkStmt(stmt)
-		}
-
+		v.walkForStmt(s)
 	case *syntax.WhileStmt:
 		v.walkExpr(s.Cond)
-		for _, stmt := range s.Body {
-			v.walkStmt(stmt)
-		}
-
+		v.walkStmtList(s.Body)
 	case *syntax.ReturnStmt:
 		if s.Result != nil {
 			v.walkExpr(s.Result)
 		}
 	}
+}
+
+func (v *lintVisitor) walkStmtList(stmts []syntax.Stmt) {
+	for _, stmt := range stmts {
+		v.walkStmt(stmt)
+	}
+}
+
+func (v *lintVisitor) walkAssignStmt(s *syntax.AssignStmt) {
+	if ident, ok := s.LHS.(*syntax.Ident); ok {
+		if v.isDecimalExpr(s.RHS) {
+			v.decimalVars[ident.Name] = true
+		}
+		if v.isCounterAssignment(ident.Name, s.RHS) {
+			v.counterVars[ident.Name] = true
+		}
+	}
+	v.walkExpr(s.LHS)
+	v.walkExpr(s.RHS)
+}
+
+func (v *lintVisitor) walkIfStmt(s *syntax.IfStmt) {
+	v.ifDepth++
+	if v.ifDepth > 3 {
+		v.addIssue(LintIssueTypeNestedConditional, int(s.If.Line),
+			fmt.Sprintf("Nested conditionals exceed 3 levels (found %d)", v.ifDepth),
+			"Refactor to flatten conditionals or extract to helper functions")
+	}
+	v.walkExpr(s.Cond)
+	v.walkStmtList(s.True)
+	v.walkStmtList(s.False)
+	v.ifDepth--
+}
+
+func (v *lintVisitor) walkForStmt(s *syntax.ForStmt) {
+	if ident, ok := s.Vars.(*syntax.Ident); ok {
+		v.counterVars[ident.Name] = true
+	}
+	v.inLoopInit = true
+	v.walkExpr(s.X)
+	v.inLoopInit = false
+	v.walkStmtList(s.Body)
 }
 
 // walkExpr walks an expression node.
@@ -345,81 +343,75 @@ func (v *lintVisitor) walkExpr(expr syntax.Expr) {
 	switch e := expr.(type) {
 	case *syntax.CallExpr:
 		v.checkCallExpr(e)
-
 		v.walkExpr(e.Fn)
 		for _, arg := range e.Args {
 			v.walkExpr(arg)
 		}
-
 	case *syntax.BinaryExpr:
 		v.checkBinaryExpr(e)
-
 		v.walkExpr(e.X)
 		v.walkExpr(e.Y)
-
 	case *syntax.UnaryExpr:
 		v.walkExpr(e.X)
-
 	case *syntax.CondExpr:
 		v.walkExpr(e.Cond)
 		v.walkExpr(e.True)
 		v.walkExpr(e.False)
-
 	case *syntax.IndexExpr:
 		v.walkExpr(e.X)
 		v.walkExpr(e.Y)
-
 	case *syntax.SliceExpr:
 		v.walkExpr(e.X)
 		v.walkExpr(e.Lo)
 		v.walkExpr(e.Hi)
 		v.walkExpr(e.Step)
-
 	case *syntax.ListExpr:
-		for _, elem := range e.List {
-			v.walkExpr(elem)
-		}
-
+		v.walkExprList(e.List)
 	case *syntax.DictExpr:
-		for _, entry := range e.List {
-			if dictEntry, ok := entry.(*syntax.DictEntry); ok {
-				v.walkExpr(dictEntry.Key)
-				v.walkExpr(dictEntry.Value)
-			}
-		}
-
+		v.walkDictExpr(e)
 	case *syntax.TupleExpr:
-		for _, elem := range e.List {
-			v.walkExpr(elem)
-		}
-
+		v.walkExprList(e.List)
 	case *syntax.Comprehension:
-		for _, clause := range e.Clauses {
-			if forClause, ok := clause.(*syntax.ForClause); ok {
-				// Track comprehension variable as counter
-				if ident, ok := forClause.Vars.(*syntax.Ident); ok {
-					v.counterVars[ident.Name] = true
-				}
-				v.walkExpr(forClause.X)
-			}
-			if ifClause, ok := clause.(*syntax.IfClause); ok {
-				v.walkExpr(ifClause.Cond)
-			}
-		}
-		v.walkExpr(e.Body)
-
+		v.walkComprehension(e)
 	case *syntax.LambdaExpr:
 		v.walkExpr(e.Body)
-
 	case *syntax.DotExpr:
 		v.walkExpr(e.X)
-
 	case *syntax.ParenExpr:
 		v.walkExpr(e.X)
-
 	case *syntax.Literal:
 		v.checkLiteral(e)
 	}
+}
+
+func (v *lintVisitor) walkExprList(exprs []syntax.Expr) {
+	for _, elem := range exprs {
+		v.walkExpr(elem)
+	}
+}
+
+func (v *lintVisitor) walkDictExpr(e *syntax.DictExpr) {
+	for _, entry := range e.List {
+		if dictEntry, ok := entry.(*syntax.DictEntry); ok {
+			v.walkExpr(dictEntry.Key)
+			v.walkExpr(dictEntry.Value)
+		}
+	}
+}
+
+func (v *lintVisitor) walkComprehension(e *syntax.Comprehension) {
+	for _, clause := range e.Clauses {
+		if forClause, ok := clause.(*syntax.ForClause); ok {
+			if ident, ok := forClause.Vars.(*syntax.Ident); ok {
+				v.counterVars[ident.Name] = true
+			}
+			v.walkExpr(forClause.X)
+		}
+		if ifClause, ok := clause.(*syntax.IfClause); ok {
+			v.walkExpr(ifClause.Cond)
+		}
+	}
+	v.walkExpr(e.Body)
 }
 
 // checkCallExpr checks function calls for lint issues.

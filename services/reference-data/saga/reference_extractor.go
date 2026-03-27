@@ -62,211 +62,234 @@ func (e *referenceExtractor) walkExpr(expr syntax.Expr) {
 
 	switch ex := expr.(type) {
 	case *syntax.CallExpr:
-		// Check for specific function calls
-		if ident, ok := ex.Fn.(*syntax.Ident); ok {
-			switch ident.Name {
-			case "resolve_instrument":
-				// Extract instrument code from first argument
-				if len(ex.Args) > 0 {
-					if lit, ok := ex.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
-						// Remove quotes from string literal
-						code := strings.Trim(lit.Raw, `"'`)
-						e.references = append(e.references, Reference{
-							Type:       ReferenceTypeInstrument,
-							Key:        code,
-							LineNumber: int(ident.NamePos.Line),
-						})
-					}
-				}
-
-			case "resolve_account":
-				// Extract account reference from first argument
-				if len(ex.Args) > 0 {
-					if lit, ok := ex.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
-						code := strings.Trim(lit.Raw, `"'`)
-						e.references = append(e.references, Reference{
-							Type:       ReferenceTypeAccount,
-							Key:        code,
-							LineNumber: int(ident.NamePos.Line),
-						})
-					}
-				}
-
-			case "invoke_saga":
-				// Extract saga name from first argument (positional or keyword "saga_name")
-				var sagaName string
-				lineNum := int(ident.NamePos.Line)
-
-				// Check positional arguments first
-				if len(ex.Args) > 0 {
-					if lit, ok := ex.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
-						sagaName = strings.Trim(lit.Raw, `"'`)
-					}
-				}
-
-				// Fall back to keyword argument saga_name=
-				if sagaName == "" {
-					for _, kwarg := range ex.Args {
-						if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
-							if nameIdent, ok := binExpr.X.(*syntax.Ident); ok && nameIdent.Name == "saga_name" {
-								if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
-									sagaName = strings.Trim(lit.Raw, `"'`)
-								}
-							}
-						}
-					}
-				}
-
-				if sagaName != "" {
-					e.references = append(e.references, Reference{
-						Type:       ReferenceTypeSaga,
-						Key:        sagaName,
-						LineNumber: lineNum,
-					})
-				}
-
-			case "step":
-				// Extract step handler and params from keyword arguments
-				var handler string
-				var lineNum int
-				paramNames := make(map[string]bool)
-				paramsKnown := true // Assume known unless we encounter non-literal params
-
-				for _, kwarg := range ex.Args {
-					if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
-						if nameIdent, ok := binExpr.X.(*syntax.Ident); ok {
-							switch nameIdent.Name {
-							case "action":
-								if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
-									handler = strings.Trim(lit.Raw, `"'`)
-									lineNum = int(ident.NamePos.Line)
-								}
-							case "params":
-								// Extract param names from the params dict
-								if dictExpr, ok := binExpr.Y.(*syntax.DictExpr); ok {
-									for _, entry := range dictExpr.List {
-										if dictEntry, ok := entry.(*syntax.DictEntry); ok {
-											keyLit, ok := dictEntry.Key.(*syntax.Literal)
-											if !ok || keyLit.Token != syntax.STRING {
-												// Non-literal key (e.g., variable) - can't extract
-												paramsKnown = false
-												continue
-											}
-											paramName := strings.Trim(keyLit.Raw, `"'`)
-											paramNames[paramName] = true
-										}
-									}
-								} else {
-									// params is not a literal dict (e.g., a variable)
-									paramsKnown = false
-								}
-							}
-						}
-					}
-				}
-
-				if handler != "" {
-					e.references = append(e.references, Reference{
-						Type:        ReferenceTypeStepHandler,
-						Key:         handler,
-						LineNumber:  lineNum,
-						Params:      paramNames,
-						ParamsKnown: paramsKnown,
-					})
-				}
-			}
-		}
-
-		// Walk function expression and arguments
-		e.walkExpr(ex.Fn)
-		for _, arg := range ex.Args {
-			e.walkExpr(arg)
-		}
-
+		e.walkCallExpr(ex)
 	case *syntax.IndexExpr:
-		// Check for attribute access pattern: ctx.position.attributes["key"]
-		// or instrument.attributes["key"]
-		e.walkExpr(ex.X)
-		e.walkExpr(ex.Y)
-
-		// Try to extract attribute reference
-		if e.isAttributeAccess(ex) {
-			if lit, ok := ex.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
-				attrKey := strings.Trim(lit.Raw, `"'`)
-				// Try to extract instrument code from the expression
-				instrumentCode := e.extractInstrumentCode(ex.X)
-				// Compose a collision-safe key: include instrument code when known
-				// so that USD.attributes["status"] and EUR.attributes["status"]
-				// produce distinct reference keys.
-				refKey := attrKey
-				if instrumentCode != "" {
-					refKey = instrumentCode + ":" + attrKey
-				}
-				e.references = append(e.references, Reference{
-					Type:           ReferenceTypeAttribute,
-					Key:            refKey,
-					AttributeKey:   attrKey,
-					InstrumentCode: instrumentCode,
-					LineNumber:     int(lit.TokenPos.Line),
-				})
-			}
-		}
-
+		e.walkIndexExpr(ex)
 	case *syntax.BinaryExpr:
 		e.walkExpr(ex.X)
 		e.walkExpr(ex.Y)
-
 	case *syntax.UnaryExpr:
 		e.walkExpr(ex.X)
-
 	case *syntax.CondExpr:
 		e.walkExpr(ex.Cond)
 		e.walkExpr(ex.True)
 		e.walkExpr(ex.False)
-
 	case *syntax.SliceExpr:
 		e.walkExpr(ex.X)
 		e.walkExpr(ex.Lo)
 		e.walkExpr(ex.Hi)
 		e.walkExpr(ex.Step)
-
 	case *syntax.ListExpr:
-		for _, elem := range ex.List {
-			e.walkExpr(elem)
-		}
-
+		e.walkExprList(ex.List)
 	case *syntax.DictExpr:
-		for _, entry := range ex.List {
-			if dictEntry, ok := entry.(*syntax.DictEntry); ok {
-				e.walkExpr(dictEntry.Key)
-				e.walkExpr(dictEntry.Value)
-			}
-		}
-
+		e.walkDictExpr(ex)
 	case *syntax.TupleExpr:
-		for _, elem := range ex.List {
-			e.walkExpr(elem)
-		}
-
+		e.walkExprList(ex.List)
 	case *syntax.Comprehension:
-		for _, clause := range ex.Clauses {
-			if forClause, ok := clause.(*syntax.ForClause); ok {
-				e.walkExpr(forClause.X)
-			}
-			if ifClause, ok := clause.(*syntax.IfClause); ok {
-				e.walkExpr(ifClause.Cond)
-			}
-		}
-		e.walkExpr(ex.Body)
-
+		e.walkComprehension(ex)
 	case *syntax.LambdaExpr:
 		e.walkExpr(ex.Body)
-
 	case *syntax.DotExpr:
 		e.walkExpr(ex.X)
-
 	case *syntax.ParenExpr:
 		e.walkExpr(ex.X)
+	}
+}
+
+func (e *referenceExtractor) walkExprList(exprs []syntax.Expr) {
+	for _, elem := range exprs {
+		e.walkExpr(elem)
+	}
+}
+
+func (e *referenceExtractor) walkDictExpr(ex *syntax.DictExpr) {
+	for _, entry := range ex.List {
+		if dictEntry, ok := entry.(*syntax.DictEntry); ok {
+			e.walkExpr(dictEntry.Key)
+			e.walkExpr(dictEntry.Value)
+		}
+	}
+}
+
+func (e *referenceExtractor) walkComprehension(ex *syntax.Comprehension) {
+	for _, clause := range ex.Clauses {
+		if forClause, ok := clause.(*syntax.ForClause); ok {
+			e.walkExpr(forClause.X)
+		}
+		if ifClause, ok := clause.(*syntax.IfClause); ok {
+			e.walkExpr(ifClause.Cond)
+		}
+	}
+	e.walkExpr(ex.Body)
+}
+
+func (e *referenceExtractor) walkCallExpr(ex *syntax.CallExpr) {
+	if ident, ok := ex.Fn.(*syntax.Ident); ok {
+		switch ident.Name {
+		case "resolve_instrument":
+			e.extractResolveInstrument(ex, ident)
+		case "resolve_account":
+			e.extractResolveAccount(ex, ident)
+		case "invoke_saga":
+			e.extractInvokeSaga(ex, ident)
+		case "step":
+			e.extractStep(ex, ident)
+		}
+	}
+	e.walkExpr(ex.Fn)
+	for _, arg := range ex.Args {
+		e.walkExpr(arg)
+	}
+}
+
+func (e *referenceExtractor) extractResolveInstrument(ex *syntax.CallExpr, ident *syntax.Ident) {
+	code := extractStringArg(ex, "reference")
+	if code != "" {
+		e.references = append(e.references, Reference{
+			Type:       ReferenceTypeInstrument,
+			Key:        code,
+			LineNumber: int(ident.NamePos.Line),
+		})
+	}
+}
+
+func (e *referenceExtractor) extractResolveAccount(ex *syntax.CallExpr, ident *syntax.Ident) {
+	code := extractStringArg(ex, "reference")
+	if code != "" {
+		e.references = append(e.references, Reference{
+			Type:       ReferenceTypeAccount,
+			Key:        code,
+			LineNumber: int(ident.NamePos.Line),
+		})
+	}
+}
+
+// extractStringArg extracts a string value from either the first positional argument
+// or a named keyword argument in a call expression.
+func extractStringArg(call *syntax.CallExpr, kwargName string) string {
+	// Check first positional argument
+	if len(call.Args) > 0 {
+		if lit, ok := call.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
+			return strings.Trim(lit.Raw, `"'`)
+		}
+	}
+	// Check keyword arguments
+	for _, arg := range call.Args {
+		if binExpr, ok := arg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
+			if nameIdent, ok := binExpr.X.(*syntax.Ident); ok && nameIdent.Name == kwargName {
+				if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
+					return strings.Trim(lit.Raw, `"'`)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func (e *referenceExtractor) extractInvokeSaga(ex *syntax.CallExpr, ident *syntax.Ident) {
+	var sagaName string
+	lineNum := int(ident.NamePos.Line)
+
+	if len(ex.Args) > 0 {
+		if lit, ok := ex.Args[0].(*syntax.Literal); ok && lit.Token == syntax.STRING {
+			sagaName = strings.Trim(lit.Raw, `"'`)
+		}
+	}
+
+	if sagaName == "" {
+		for _, kwarg := range ex.Args {
+			if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
+				if nameIdent, ok := binExpr.X.(*syntax.Ident); ok && nameIdent.Name == "saga_name" {
+					if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
+						sagaName = strings.Trim(lit.Raw, `"'`)
+					}
+				}
+			}
+		}
+	}
+
+	if sagaName != "" {
+		e.references = append(e.references, Reference{
+			Type:       ReferenceTypeSaga,
+			Key:        sagaName,
+			LineNumber: lineNum,
+		})
+	}
+}
+
+func (e *referenceExtractor) extractStep(ex *syntax.CallExpr, ident *syntax.Ident) {
+	var handler string
+	var lineNum int
+	paramNames := make(map[string]bool)
+	paramsKnown := true
+
+	for _, kwarg := range ex.Args {
+		if binExpr, ok := kwarg.(*syntax.BinaryExpr); ok && binExpr.Op == syntax.EQ {
+			if nameIdent, ok := binExpr.X.(*syntax.Ident); ok {
+				switch nameIdent.Name {
+				case "action", "handler":
+					if lit, ok := binExpr.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
+						handler = strings.Trim(lit.Raw, `"'`)
+						lineNum = int(ident.NamePos.Line)
+					}
+				case "params":
+					paramsKnown = e.extractStepParams(binExpr.Y, paramNames)
+				}
+			}
+		}
+	}
+
+	if handler != "" {
+		e.references = append(e.references, Reference{
+			Type:        ReferenceTypeStepHandler,
+			Key:         handler,
+			LineNumber:  lineNum,
+			Params:      paramNames,
+			ParamsKnown: paramsKnown,
+		})
+	}
+}
+
+func (e *referenceExtractor) extractStepParams(expr syntax.Expr, paramNames map[string]bool) bool {
+	dictExpr, ok := expr.(*syntax.DictExpr)
+	if !ok {
+		return false
+	}
+	paramsKnown := true
+	for _, entry := range dictExpr.List {
+		if dictEntry, ok := entry.(*syntax.DictEntry); ok {
+			keyLit, ok := dictEntry.Key.(*syntax.Literal)
+			if !ok || keyLit.Token != syntax.STRING {
+				paramsKnown = false
+				continue
+			}
+			paramName := strings.Trim(keyLit.Raw, `"'`)
+			paramNames[paramName] = true
+		}
+	}
+	return paramsKnown
+}
+
+func (e *referenceExtractor) walkIndexExpr(ex *syntax.IndexExpr) {
+	e.walkExpr(ex.X)
+	e.walkExpr(ex.Y)
+
+	if e.isAttributeAccess(ex) {
+		if lit, ok := ex.Y.(*syntax.Literal); ok && lit.Token == syntax.STRING {
+			attrKey := strings.Trim(lit.Raw, `"'`)
+			instrumentCode := e.extractInstrumentCode(ex.X)
+			refKey := attrKey
+			if instrumentCode != "" {
+				refKey = instrumentCode + ":" + attrKey
+			}
+			e.references = append(e.references, Reference{
+				Type:           ReferenceTypeAttribute,
+				Key:            refKey,
+				AttributeKey:   attrKey,
+				InstrumentCode: instrumentCode,
+				LineNumber:     int(lit.TokenPos.Line),
+			})
+		}
 	}
 }
 

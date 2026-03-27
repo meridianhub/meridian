@@ -50,8 +50,7 @@ func (r *Registry) LoadFromYAML(data []byte) error {
 		return fmt.Errorf("resolve proto types: %w", err)
 	}
 
-	// Build temporary maps and validate before mutating the registry,
-	// so a duplicate-alias error doesn't leave partial state.
+	// Build temporary maps for the new schema's handlers and deprecated aliases.
 	tempHandlers := make(map[string]*HandlerDef, len(schema.Handlers))
 	tempDeprecated := make(map[string]*DeprecatedMapping)
 
@@ -62,14 +61,8 @@ func (r *Registry) LoadFromYAML(data []byte) error {
 			if conv.FromName == "" {
 				continue
 			}
-			// Check against both existing registry state and new batch
+			// Check for duplicates within the new batch
 			if existing, exists := tempDeprecated[conv.FromName]; exists {
-				return fmt.Errorf(
-					"%w: duplicate deprecated alias %q maps to both %s and %s",
-					ErrInvalidConversionRule, conv.FromName, existing.CurrentName, name,
-				)
-			}
-			if existing, exists := r.deprecatedNames[conv.FromName]; exists {
 				return fmt.Errorf(
 					"%w: duplicate deprecated alias %q maps to both %s and %s",
 					ErrInvalidConversionRule, conv.FromName, existing.CurrentName, name,
@@ -82,9 +75,18 @@ func (r *Registry) LoadFromYAML(data []byte) error {
 		}
 	}
 
-	// Validation passed - merge atomically under the lock.
+	// Validate against existing registry state and merge atomically under the lock.
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	for oldName, mapping := range tempDeprecated {
+		if existing, exists := r.deprecatedNames[oldName]; exists {
+			return fmt.Errorf(
+				"%w: duplicate deprecated alias %q maps to both %s and %s",
+				ErrInvalidConversionRule, oldName, existing.CurrentName, mapping.CurrentName,
+			)
+		}
+	}
 
 	r.schemas = append(r.schemas, schema)
 	for name, handler := range tempHandlers {
@@ -221,6 +223,7 @@ func (r *Registry) ToSchema() *Schema {
 func NewRegistryFromSchema(s *Schema) *Registry {
 	r := NewRegistry()
 	if s != nil {
+		r.schemas = append(r.schemas, s)
 		for name, def := range s.Handlers {
 			r.handlers[name] = def
 			// Rebuild deprecated name mappings from conversion rules

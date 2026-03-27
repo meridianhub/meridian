@@ -120,79 +120,81 @@ func (d *CircularDetector) extractFromExpr(expr syntax.Expr) []string {
 
 	switch e := expr.(type) {
 	case *syntax.CallExpr:
-		// Check if this is an invoke_saga call
 		if ident, ok := e.Fn.(*syntax.Ident); ok && ident.Name == "invoke_saga" {
 			if sagaName := d.extractSagaNameArg(e); sagaName != "" {
 				refs = append(refs, sagaName)
 			}
 		}
-		// Also check nested expressions
 		refs = append(refs, d.extractFromExpr(e.Fn)...)
-		for _, arg := range e.Args {
-			refs = append(refs, d.extractFromExpr(arg)...)
-		}
-
+		refs = d.extractFromExprList(refs, e.Args)
 	case *syntax.BinaryExpr:
 		refs = append(refs, d.extractFromExpr(e.X)...)
 		refs = append(refs, d.extractFromExpr(e.Y)...)
-
 	case *syntax.UnaryExpr:
 		refs = append(refs, d.extractFromExpr(e.X)...)
-
 	case *syntax.ListExpr:
-		for _, elem := range e.List {
-			refs = append(refs, d.extractFromExpr(elem)...)
-		}
-
+		refs = d.extractFromExprList(refs, e.List)
 	case *syntax.DictExpr:
-		for _, entry := range e.List {
-			if dictEntry, ok := entry.(*syntax.DictEntry); ok {
-				refs = append(refs, d.extractFromExpr(dictEntry.Key)...)
-				refs = append(refs, d.extractFromExpr(dictEntry.Value)...)
-			}
-		}
-
+		refs = d.extractFromDictExpr(refs, e)
 	case *syntax.TupleExpr:
-		for _, elem := range e.List {
-			refs = append(refs, d.extractFromExpr(elem)...)
-		}
-
+		refs = d.extractFromExprList(refs, e.List)
 	case *syntax.ParenExpr:
 		refs = append(refs, d.extractFromExpr(e.X)...)
-
 	case *syntax.CondExpr:
 		refs = append(refs, d.extractFromExpr(e.Cond)...)
 		refs = append(refs, d.extractFromExpr(e.True)...)
 		refs = append(refs, d.extractFromExpr(e.False)...)
-
 	case *syntax.IndexExpr:
 		refs = append(refs, d.extractFromExpr(e.X)...)
 		refs = append(refs, d.extractFromExpr(e.Y)...)
-
 	case *syntax.SliceExpr:
-		refs = append(refs, d.extractFromExpr(e.X)...)
-		refs = append(refs, d.extractFromExpr(e.Lo)...)
-		refs = append(refs, d.extractFromExpr(e.Hi)...)
-		refs = append(refs, d.extractFromExpr(e.Step)...)
-
+		refs = d.extractFromSliceExpr(refs, e)
 	case *syntax.DotExpr:
 		refs = append(refs, d.extractFromExpr(e.X)...)
-
 	case *syntax.Comprehension:
-		refs = append(refs, d.extractFromExpr(e.Body)...)
-		for _, clause := range e.Clauses {
-			if forClause, ok := clause.(*syntax.ForClause); ok {
-				refs = append(refs, d.extractFromExpr(forClause.X)...)
-			}
-			if ifClause, ok := clause.(*syntax.IfClause); ok {
-				refs = append(refs, d.extractFromExpr(ifClause.Cond)...)
-			}
-		}
-
+		refs = d.extractFromComprehension(refs, e)
 	case *syntax.LambdaExpr:
 		refs = append(refs, d.extractFromExpr(e.Body)...)
 	}
 
+	return refs
+}
+
+func (d *CircularDetector) extractFromExprList(refs []string, exprs []syntax.Expr) []string {
+	for _, elem := range exprs {
+		refs = append(refs, d.extractFromExpr(elem)...)
+	}
+	return refs
+}
+
+func (d *CircularDetector) extractFromDictExpr(refs []string, e *syntax.DictExpr) []string {
+	for _, entry := range e.List {
+		if dictEntry, ok := entry.(*syntax.DictEntry); ok {
+			refs = append(refs, d.extractFromExpr(dictEntry.Key)...)
+			refs = append(refs, d.extractFromExpr(dictEntry.Value)...)
+		}
+	}
+	return refs
+}
+
+func (d *CircularDetector) extractFromSliceExpr(refs []string, e *syntax.SliceExpr) []string {
+	refs = append(refs, d.extractFromExpr(e.X)...)
+	refs = append(refs, d.extractFromExpr(e.Lo)...)
+	refs = append(refs, d.extractFromExpr(e.Hi)...)
+	refs = append(refs, d.extractFromExpr(e.Step)...)
+	return refs
+}
+
+func (d *CircularDetector) extractFromComprehension(refs []string, e *syntax.Comprehension) []string {
+	refs = append(refs, d.extractFromExpr(e.Body)...)
+	for _, clause := range e.Clauses {
+		if forClause, ok := clause.(*syntax.ForClause); ok {
+			refs = append(refs, d.extractFromExpr(forClause.X)...)
+		}
+		if ifClause, ok := clause.(*syntax.IfClause); ok {
+			refs = append(refs, d.extractFromExpr(ifClause.Cond)...)
+		}
+	}
 	return refs
 }
 
