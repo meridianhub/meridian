@@ -78,8 +78,7 @@ func TestRegisterCurrentAccountHandlers_StubHandlersReturnNotImplemented(t *test
 		"current_account.create_lien",
 		"current_account.execute_lien",
 		"current_account.terminate_lien",
-		// Platform-wide stubs
-		"notification.send",
+		// Platform-wide stubs (notification.send is tested separately with real handler)
 		"payment_order.create_lien",
 		"reconciliation.initiate_run",
 	}

@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/meridianhub/meridian/services/tenant/domain"
@@ -105,6 +106,19 @@ type TenantResolverMiddleware struct {
 	baseDomain   string
 	logger       *slog.Logger
 	localDevMode bool
+	// displayNameCache stores slug -> cachedDisplayName. Each entry binds
+	// the display name to the tenant ID it was fetched with, so a stale
+	// slug->ID mapping on a peer instance never pairs the wrong display
+	// name with a corrected ID. Entries have no independent TTL; they
+	// refresh when the slug cache entry expires and triggers a DB re-query.
+	displayNameCache sync.Map
+}
+
+// cachedDisplayName pairs a display name with the tenant ID it belongs to,
+// so cache reads can detect ID mismatches from a corrected slug cache.
+type cachedDisplayName struct {
+	tenantID    tenant.TenantID
+	displayName string
 }
 
 // NewTenantResolverMiddleware creates a new tenant resolver middleware.
@@ -221,7 +235,7 @@ func (m *TenantResolverMiddleware) HandlerOptionalTenant(next http.Handler) http
 		}
 
 		ctx := r.Context()
-		tenantID, err := m.resolveTenant(ctx, slug)
+		resolved, err := m.resolveTenant(ctx, slug)
 		if err != nil {
 			m.logger.Debug("optional tenant resolution failed, proceeding without tenant",
 				slog.String("slug", slug),
@@ -233,12 +247,15 @@ func (m *TenantResolverMiddleware) HandlerOptionalTenant(next http.Handler) http
 
 		m.logger.Debug("optional tenant resolved successfully",
 			slog.String("tenant_slug", slug),
-			slog.String("tenant_id", tenantID.String()),
+			slog.String("tenant_id", resolved.ID.String()),
 		)
 
-		r.Header.Set(tenant.TenantIDKey, string(tenantID))
-		ctx = tenant.WithTenant(ctx, tenantID)
+		r.Header.Set(tenant.TenantIDKey, string(resolved.ID))
+		ctx = tenant.WithTenant(ctx, resolved.ID)
 		ctx = tenant.WithSlug(ctx, slug)
+		if resolved.DisplayName != "" {
+			ctx = tenant.WithDisplayName(ctx, resolved.DisplayName)
+		}
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
@@ -265,10 +282,10 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 			return // error already written by extractSlugFromRequest
 		}
 
-		// Resolve tenant ID (cache-first with DB fallback)
+		// Resolve tenant (cache-first with DB fallback)
 		ctx := r.Context()
 		startTime := time.Now()
-		tenantID, err := m.resolveTenant(ctx, slug)
+		resolved, err := m.resolveTenant(ctx, slug)
 		resolutionTimeMs := time.Since(startTime).Milliseconds()
 
 		if err != nil {
@@ -278,16 +295,19 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 
 		m.logger.Debug("tenant resolved successfully",
 			slog.String("tenant_slug", slug),
-			slog.String("tenant_id", tenantID.String()),
+			slog.String("tenant_id", resolved.ID.String()),
 			slog.Int64("resolution_time_ms", resolutionTimeMs),
 		)
 
 		// Step 5: Inject tenant ID into request header
-		r.Header.Set(tenant.TenantIDKey, string(tenantID))
+		r.Header.Set(tenant.TenantIDKey, string(resolved.ID))
 
-		// Step 6: Add tenant ID and slug to context
-		ctx = tenant.WithTenant(ctx, tenantID)
+		// Step 6: Add tenant ID, slug, and display name to context
+		ctx = tenant.WithTenant(ctx, resolved.ID)
 		ctx = tenant.WithSlug(ctx, slug)
+		if resolved.DisplayName != "" {
+			ctx = tenant.WithDisplayName(ctx, resolved.DisplayName)
+		}
 
 		// Step 7: Update request with new context
 		r = r.WithContext(ctx)
@@ -375,20 +395,26 @@ func (m *TenantResolverMiddleware) extractSlug(hostHeader string) string {
 	return slug
 }
 
+// resolvedTenant holds the result of tenant resolution.
+type resolvedTenant struct {
+	ID          tenant.TenantID
+	DisplayName string
+}
+
 // resolveTenant performs cache-first tenant resolution with database fallback.
 //
 // Resolution flow:
 // 1. Check slug cache for tenant ID (fast path)
-// 2. On cache read failure, log warning and fall through to database lookup
+// 2. On cache hit, look up display name from the in-memory display name cache
 // 3. On cache miss, query database for tenant by slug
-// 4. Populate cache with DB result (best-effort, errors logged but not returned)
-// 5. Return tenant ID
+// 4. Populate both caches with DB result (best-effort)
+// 5. Return tenant ID and display name
 //
 // Returns ErrTenantNotFound if tenant doesn't exist in database.
 // Returns wrapped errors for database errors.
-func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug string) (tenant.TenantID, error) {
+func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug string) (resolvedTenant, error) {
 	if slug == "" {
-		return "", ErrTenantNotFound // fast-fail for empty slug
+		return resolvedTenant{}, ErrTenantNotFound // fast-fail for empty slug
 	}
 
 	// Step 1: Try cache first (best-effort)
@@ -401,8 +427,7 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 			slog.String("error", err.Error()),
 		)
 	} else if !tenantID.IsEmpty() {
-		// Cache hit - return immediately
-		return tenantID, nil
+		return m.resolveDisplayName(ctx, slug, tenantID)
 	}
 
 	// Step 2: Cache miss or error - query database
@@ -410,12 +435,12 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 	if err != nil {
 		// Check for domain-layer not-found error and wrap it in gateway error
 		if errors.Is(err, domain.ErrNotFound) {
-			return "", ErrTenantNotFound
+			return resolvedTenant{}, ErrTenantNotFound
 		}
-		return "", fmt.Errorf("failed to get tenant from database: %w", err)
+		return resolvedTenant{}, fmt.Errorf("failed to get tenant from database: %w", err)
 	}
 
-	// Step 3: Populate cache (best-effort)
+	// Step 3: Populate caches (best-effort)
 	if cacheErr := m.slugCache.Set(ctx, slug, tenantEntity.ID); cacheErr != nil {
 		// Log cache write failures but don't fail the request
 		m.logger.Warn("failed to populate slug cache",
@@ -424,7 +449,46 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 			slog.String("error", cacheErr.Error()),
 		)
 	}
+	m.displayNameCache.Store(slug, cachedDisplayName{
+		tenantID:    tenantEntity.ID,
+		displayName: tenantEntity.DisplayName,
+	})
 
-	// Step 4: Return tenant ID from database
-	return tenantEntity.ID, nil
+	// Step 4: Return resolved tenant from database
+	return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName}, nil
+}
+
+// resolveDisplayName handles the slug cache hit path: checks the local display
+// name cache (keyed by slug+tenantID to prevent mismatches), backfills from DB
+// on miss, and refreshes stale slug cache entries.
+func (m *TenantResolverMiddleware) resolveDisplayName(ctx context.Context, slug string, tenantID tenant.TenantID) (resolvedTenant, error) {
+	// Check local display name cache. Each entry binds the display name to
+	// the tenant ID it was fetched with, so a corrected slug->ID mapping on
+	// a peer instance never pairs the wrong display name with the new ID.
+	if cached, ok := m.displayNameCache.Load(slug); ok {
+		cdn, _ := cached.(cachedDisplayName)
+		if cdn.tenantID == tenantID {
+			return resolvedTenant{ID: tenantID, DisplayName: cdn.displayName}, nil
+		}
+		// ID mismatch - stale entry, fall through to DB lookup.
+	}
+	// Display name cache miss or stale - backfill from DB.
+	tenantEntity, dbErr := m.tenantRepo.GetBySlug(ctx, slug)
+	if dbErr == nil {
+		m.displayNameCache.Store(slug, cachedDisplayName{
+			tenantID:    tenantEntity.ID,
+			displayName: tenantEntity.DisplayName,
+		})
+		// Refresh slug cache if DB returns a different tenant ID.
+		if tenantEntity.ID != tenantID {
+			_ = m.slugCache.Set(ctx, slug, tenantEntity.ID)
+		}
+		return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName}, nil
+	}
+	// Slug deleted - treat as authoritative even with a cached ID.
+	if errors.Is(dbErr, domain.ErrNotFound) {
+		return resolvedTenant{}, ErrTenantNotFound
+	}
+	// Transient DB error - return cached ID without display name.
+	return resolvedTenant{ID: tenantID}, nil
 }

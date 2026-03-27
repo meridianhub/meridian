@@ -39,6 +39,8 @@ type Server struct {
 	authHandler           *AuthHandler
 	ssoHandler            *SSOHandler
 	registrationHandler   *RegistrationHandler
+	tenantInfoHandler     *TenantInfoHandler
+	resendWebhookHandler  *ResendWebhookHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -139,6 +141,21 @@ func NewServer(config *Config, logger *slog.Logger, tenantResolver *platformgate
 	return s
 }
 
+// registerTenantInfoRoute registers the public tenant info endpoint if configured.
+// Rate limiting wraps the entire chain so abusive traffic is rejected before
+// tenant resolution performs cache/DB lookups.
+func (s *Server) registerTenantInfoRoute() {
+	if s.tenantInfoHandler == nil {
+		return
+	}
+	tenantInfoH := http.Handler(s.tenantInfoHandler.HandleTenantInfo())
+	if s.tenantResolver != nil {
+		tenantInfoH = s.tenantResolver.Handler(tenantInfoH)
+	}
+	tenantInfoH = s.tenantInfoHandler.RateLimitHandler(tenantInfoH)
+	s.mux.Handle("GET /api/tenant-info", tenantInfoH)
+}
+
 // registerRoutes sets up the HTTP routes for the gateway.
 //
 // CRITICAL: Health endpoints (/health, /ready) are registered directly on the main mux
@@ -209,6 +226,15 @@ func (s *Server) registerRoutes() {
 	if s.registrationHandler != nil {
 		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
 		s.mux.Handle("GET /api/v1/slugs/{slug}/available", http.HandlerFunc(s.registrationHandler.HandleSlugAvailable))
+	}
+
+	// Public tenant info endpoint - tenant resolution but NO auth middleware (pre-auth).
+	// GET /api/tenant-info: returns slug and display name for the login page.
+	s.registerTenantInfoRoute()
+
+	// Resend delivery status webhook - NO middleware (Svix signature IS the auth).
+	if s.resendWebhookHandler != nil {
+		s.mux.Handle("POST /api/v1/webhooks/resend", s.resendWebhookHandler)
 	}
 
 	// API routes - with auth and tenant middleware chain.
@@ -518,6 +544,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Stop registration rate limiter background goroutine.
 	if s.registrationHandler != nil && s.registrationHandler.rateLimiter != nil {
 		s.registrationHandler.rateLimiter.Stop()
+	}
+
+	// Stop tenant info handler background cleanup goroutine.
+	if s.tenantInfoHandler != nil {
+		s.tenantInfoHandler.Stop()
 	}
 
 	s.logger.Info("HTTP server stopped")

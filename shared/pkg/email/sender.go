@@ -15,14 +15,15 @@ type Sender interface {
 
 // Message represents a fully rendered email ready for delivery.
 type Message struct {
-	To          []string
-	From        string
-	Subject     string
-	HTMLBody    string
-	TextBody    string
-	ReplyTo     string
-	Headers     map[string]string
-	Attachments []Attachment
+	To             []string
+	From           string
+	Subject        string
+	HTMLBody       string
+	TextBody       string
+	ReplyTo        string
+	Headers        map[string]string
+	Attachments    []Attachment
+	IdempotencyKey string
 }
 
 // Attachment represents a file attached to an email.
@@ -76,10 +77,11 @@ type AuditStatus string
 
 // Audit log delivery statuses.
 const (
-	AuditStatusSent      AuditStatus = "SENT"
-	AuditStatusDelivered AuditStatus = "DELIVERED"
-	AuditStatusBounced   AuditStatus = "BOUNCED"
-	AuditStatusFailed    AuditStatus = "FAILED"
+	AuditStatusSent       AuditStatus = "SENT"
+	AuditStatusDelivered  AuditStatus = "DELIVERED"
+	AuditStatusBounced    AuditStatus = "BOUNCED"
+	AuditStatusFailed     AuditStatus = "FAILED"
+	AuditStatusComplained AuditStatus = "COMPLAINED"
 )
 
 // AuditEntry represents a record in the email audit log.

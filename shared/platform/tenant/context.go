@@ -11,6 +11,9 @@ const tenantContextKey contextKey = TenantIDKey
 // slugContextKey is the context key for the tenant slug.
 const slugContextKey contextKey = TenantSlugKey
 
+// displayNameContextKey is the context key for the tenant display name.
+const displayNameContextKey contextKey = TenantDisplayNameKey
+
 // WithTenant returns a new context with the tenant ID attached.
 func WithTenant(ctx context.Context, tenantID TenantID) context.Context {
 	return context.WithValue(ctx, tenantContextKey, tenantID)
@@ -19,6 +22,21 @@ func WithTenant(ctx context.Context, tenantID TenantID) context.Context {
 // WithSlug returns a new context with the tenant slug attached.
 func WithSlug(ctx context.Context, slug string) context.Context {
 	return context.WithValue(ctx, slugContextKey, slug)
+}
+
+// WithDisplayName returns a new context with the tenant display name attached.
+func WithDisplayName(ctx context.Context, displayName string) context.Context {
+	return context.WithValue(ctx, displayNameContextKey, displayName)
+}
+
+// DisplayNameFromContext extracts the tenant display name from the context.
+// Returns the display name and true if present, or empty string and false if not.
+func DisplayNameFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	s, ok := ctx.Value(displayNameContextKey).(string)
+	return s, ok
 }
 
 // SlugFromContext extracts the tenant slug from the context.
@@ -93,6 +111,12 @@ func PropagateToBackground(parent context.Context) context.Context {
 	asyncCtx := context.Background()
 	if tenantID, ok := FromContext(parent); ok {
 		asyncCtx = WithTenant(asyncCtx, tenantID)
+	}
+	if slug, ok := SlugFromContext(parent); ok {
+		asyncCtx = WithSlug(asyncCtx, slug)
+	}
+	if displayName, ok := DisplayNameFromContext(parent); ok {
+		asyncCtx = WithDisplayName(asyncCtx, displayName)
 	}
 	return asyncCtx
 }
