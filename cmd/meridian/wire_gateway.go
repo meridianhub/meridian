@@ -2,18 +2,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
+	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	identityconnector "github.com/meridianhub/meridian/services/identity/connector"
 	identitydex "github.com/meridianhub/meridian/services/identity/dex"
-	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/env"
-
-	"fmt"
 
 	"gorm.io/gorm"
 )

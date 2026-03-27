@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -22,6 +23,7 @@ import (
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 
+	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	auditservice "github.com/meridianhub/meridian/services/audit-worker/service"
 	controlplaneservice "github.com/meridianhub/meridian/services/control-plane/service"
 	currentaccountpersistence "github.com/meridianhub/meridian/services/current-account/adapters/persistence"
@@ -48,10 +50,6 @@ import (
 	positionkeepingservice "github.com/meridianhub/meridian/services/position-keeping/service"
 	reconciliationpersistence "github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
 	reconciliationservice "github.com/meridianhub/meridian/services/reconciliation/service"
-	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
-	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
-	tenantservice "github.com/meridianhub/meridian/services/tenant/service"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	refcache "github.com/meridianhub/meridian/services/reference-data/cache"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
@@ -60,6 +58,9 @@ import (
 	refnode "github.com/meridianhub/meridian/services/reference-data/node"
 	refregistry "github.com/meridianhub/meridian/services/reference-data/registry"
 	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
+	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
+	tenantservice "github.com/meridianhub/meridian/services/tenant/service"
 
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -70,10 +71,8 @@ import (
 	"gorm.io/gorm"
 
 	faclient "github.com/meridianhub/meridian/services/financial-accounting/client"
-	pkclient "github.com/meridianhub/meridian/services/position-keeping/client"
 	partyclient "github.com/meridianhub/meridian/services/party/client"
-
-	"os"
+	pkclient "github.com/meridianhub/meridian/services/position-keeping/client"
 )
 
 // ─── Tier 0 Wiring ──────────────────────────────────────────────────────────

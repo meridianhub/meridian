@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"time"
 
+	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
+	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
 	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	refhandler "github.com/meridianhub/meridian/services/reference-data/handler"
 	refregistry "github.com/meridianhub/meridian/services/reference-data/registry"
-	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
-	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
 	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
 	tenantworker "github.com/meridianhub/meridian/services/tenant/worker"
@@ -22,8 +22,8 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 
-	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
 	financialaccountingservice "github.com/meridianhub/meridian/services/financial-accounting/service"
+	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
