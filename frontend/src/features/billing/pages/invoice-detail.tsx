@@ -100,7 +100,7 @@ export function InvoiceDetailPage() {
   const queryKey = tenantKeys.invoice(tenantSlug ?? '', id ?? '')
 
   function handleActionSuccess() {
-    void queryClient.invalidateQueries({ queryKey })
+    void queryClient.invalidateQueries({ queryKey, exact: true })
   }
 
   if (isLoading) {
