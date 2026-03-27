@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"gorm.io/gorm"
 )
@@ -20,7 +22,45 @@ var (
 	ErrBillingRunDuplicate   = errors.New("billing run already exists for this tenant and period")
 	ErrInvoiceNotFound       = errors.New("invoice not found")
 	ErrInvoiceNumberConflict = errors.New("invoice with this number already exists")
+	ErrInvalidBillingCursor  = errors.New("invalid billing pagination cursor")
 )
+
+// BillingRunFilter specifies criteria for listing billing runs.
+type BillingRunFilter struct {
+	Statuses []string // Filter by billing run statuses; empty means all.
+}
+
+// InvoiceFilter specifies criteria for listing invoices.
+type InvoiceFilter struct {
+	Statuses     []string // Filter by invoice statuses; empty means all.
+	PartyID      string   // Filter by party ID; empty means all.
+	BillingRunID string   // Filter by billing run ID; empty means all.
+}
+
+// BillingRunPage holds a page of billing run results.
+type BillingRunPage struct {
+	BillingRuns []*domain.BillingRun
+	NextCursor  string
+	TotalCount  int64
+}
+
+// InvoicePage holds a page of invoice results.
+type InvoicePage struct {
+	Invoices   []*domain.Invoice
+	NextCursor string
+	TotalCount int64
+}
+
+// EmailAuditEntry represents an email audit record linked to an invoice.
+// Delivery status fields (SentAt, DeliveredAt, BounceReason) live on the
+// AuditLogEntity and are not yet surfaced here - this maps from the outbox only.
+type EmailAuditEntry struct {
+	IdempotencyKey string
+	TemplateName   string
+	ToAddresses    []string
+	Status         string
+	CreatedAt      time.Time
+}
 
 // BillingRepository defines the contract for billing persistence.
 type BillingRepository interface {
@@ -32,6 +72,15 @@ type BillingRepository interface {
 	FindInvoiceByID(ctx context.Context, id uuid.UUID) (*domain.Invoice, error)
 	FindInvoicesByBillingRunID(ctx context.Context, billingRunID uuid.UUID) ([]*domain.Invoice, error)
 	UpdateInvoice(ctx context.Context, inv *domain.Invoice) error
+
+	// List methods with cursor-based pagination.
+	ListBillingRuns(ctx context.Context, filter BillingRunFilter, pageSize int, pageToken string) (*BillingRunPage, error)
+	ListInvoices(ctx context.Context, filter InvoiceFilter, pageSize int, pageToken string) (*InvoicePage, error)
+	CountInvoicesByBillingRun(ctx context.Context, billingRunID uuid.UUID) (int64, error)
+	SumInvoiceTotalsByBillingRun(ctx context.Context, billingRunID uuid.UUID) (int64, error)
+
+	// Email audit log queries.
+	ListEmailsByInvoice(ctx context.Context, invoiceID uuid.UUID) ([]*EmailAuditEntry, error)
 }
 
 // BillingRepositoryImpl provides persistence operations for billing entities.
@@ -295,4 +344,252 @@ func invoiceToDomain(entity *InvoiceEntity) (*domain.Invoice, error) {
 		PaymentOrderID: entity.PaymentOrderID,
 		CreatedAt:      entity.CreatedAt,
 	}, nil
+}
+
+// encodeBillingCursor encodes a (created_at, id) composite cursor as a base64 page token.
+func encodeBillingCursor(createdAt time.Time, id uuid.UUID) string {
+	data := createdAt.Format(time.RFC3339Nano) + "|" + id.String()
+	return base64.URLEncoding.EncodeToString([]byte(data))
+}
+
+// decodeBillingCursor decodes a base64 page token into (created_at, id).
+func decodeBillingCursor(token string) (time.Time, uuid.UUID, error) {
+	if token == "" {
+		return time.Time{}, uuid.Nil, nil
+	}
+
+	data, err := base64.URLEncoding.DecodeString(token)
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrInvalidBillingCursor
+	}
+
+	parts := strings.SplitN(string(data), "|", 2)
+	if len(parts) != 2 {
+		return time.Time{}, uuid.Nil, ErrInvalidBillingCursor
+	}
+
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrInvalidBillingCursor
+	}
+
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrInvalidBillingCursor
+	}
+
+	return createdAt, id, nil
+}
+
+// ListBillingRuns returns a paginated list of billing runs with optional status filtering.
+func (r *BillingRepositoryImpl) ListBillingRuns(ctx context.Context, filter BillingRunFilter, pageSize int, pageToken string) (*BillingRunPage, error) {
+	cursorTime, cursorID, err := decodeBillingCursor(pageToken)
+	if err != nil {
+		return nil, err
+	}
+
+	var page *BillingRunPage
+	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		applyFilter := func(q *gorm.DB) *gorm.DB {
+			if len(filter.Statuses) > 0 {
+				q = q.Where("status IN ?", filter.Statuses)
+			}
+			return q
+		}
+
+		totalCount, countErr := countWithFilter(tx, &BillingRunEntity{}, applyFilter)
+		if countErr != nil {
+			return countErr
+		}
+		if totalCount == 0 {
+			page = &BillingRunPage{BillingRuns: []*domain.BillingRun{}, TotalCount: 0}
+			return nil
+		}
+
+		rowQuery := applyCursor(applyFilter(tx.Model(&BillingRunEntity{})), cursorTime, cursorID)
+		var entities []BillingRunEntity
+		if findErr := rowQuery.Order("created_at DESC, id DESC").Limit(pageSize + 1).Find(&entities).Error; findErr != nil {
+			return findErr
+		}
+
+		hasMore := len(entities) > pageSize
+		if hasMore {
+			entities = entities[:pageSize]
+		}
+
+		runs := make([]*domain.BillingRun, 0, len(entities))
+		for i := range entities {
+			runs = append(runs, billingRunToDomain(&entities[i]))
+		}
+
+		var nextCursor string
+		if hasMore && len(entities) > 0 {
+			last := entities[len(entities)-1]
+			nextCursor = encodeBillingCursor(last.CreatedAt, last.ID)
+		}
+		page = &BillingRunPage{
+			BillingRuns: runs,
+			NextCursor:  nextCursor,
+			TotalCount:  totalCount,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+// ListInvoices returns a paginated list of invoices with optional filtering.
+func (r *BillingRepositoryImpl) ListInvoices(ctx context.Context, filter InvoiceFilter, pageSize int, pageToken string) (*InvoicePage, error) {
+	cursorTime, cursorID, err := decodeBillingCursor(pageToken)
+	if err != nil {
+		return nil, err
+	}
+
+	var page *InvoicePage
+	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		applyFilter := func(q *gorm.DB) *gorm.DB { return applyInvoiceFilter(q, filter) }
+
+		totalCount, countErr := countWithFilter(tx, &InvoiceEntity{}, applyFilter)
+		if countErr != nil {
+			return countErr
+		}
+		if totalCount == 0 {
+			page = &InvoicePage{Invoices: []*domain.Invoice{}, TotalCount: 0}
+			return nil
+		}
+
+		rowQuery := applyCursor(applyFilter(tx.Model(&InvoiceEntity{})), cursorTime, cursorID)
+		var entities []InvoiceEntity
+		if findErr := rowQuery.Order("created_at DESC, id DESC").Limit(pageSize + 1).Find(&entities).Error; findErr != nil {
+			return findErr
+		}
+
+		hasMore := len(entities) > pageSize
+		if hasMore {
+			entities = entities[:pageSize]
+		}
+
+		invoices := make([]*domain.Invoice, 0, len(entities))
+		for i := range entities {
+			inv, domainErr := invoiceToDomain(&entities[i])
+			if domainErr != nil {
+				return domainErr
+			}
+			invoices = append(invoices, inv)
+		}
+
+		var nextCursor string
+		if hasMore && len(entities) > 0 {
+			last := entities[len(entities)-1]
+			nextCursor = encodeBillingCursor(last.CreatedAt, last.ID)
+		}
+		page = &InvoicePage{
+			Invoices:   invoices,
+			NextCursor: nextCursor,
+			TotalCount: totalCount,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+func applyInvoiceFilter(query *gorm.DB, filter InvoiceFilter) *gorm.DB {
+	if len(filter.Statuses) > 0 {
+		query = query.Where("status IN ?", filter.Statuses)
+	}
+	if filter.PartyID != "" {
+		query = query.Where("party_id = ?", filter.PartyID)
+	}
+	if filter.BillingRunID != "" {
+		query = query.Where("billing_run_id = ?", filter.BillingRunID)
+	}
+	return query
+}
+
+// countWithFilter counts rows with an applied filter, returning 0 on empty sets.
+func countWithFilter(tx *gorm.DB, model any, applyFilter func(*gorm.DB) *gorm.DB) (int64, error) {
+	var count int64
+	if err := applyFilter(tx.Model(model)).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// applyCursor adds cursor-based pagination conditions to the query.
+func applyCursor(query *gorm.DB, cursorTime time.Time, cursorID uuid.UUID) *gorm.DB {
+	if !cursorTime.IsZero() {
+		query = query.Where(
+			"(created_at < ?) OR (created_at = ? AND id < ?)",
+			cursorTime, cursorTime, cursorID,
+		)
+	}
+	return query
+}
+
+// CountInvoicesByBillingRun returns the number of invoices for a billing run.
+func (r *BillingRepositoryImpl) CountInvoicesByBillingRun(ctx context.Context, billingRunID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Model(&InvoiceEntity{}).Where("billing_run_id = ?", billingRunID).Count(&count).Error
+	})
+	return count, err
+}
+
+// SumInvoiceTotalsByBillingRun returns the total subtotal_cents for all invoices in a billing run.
+func (r *BillingRepositoryImpl) SumInvoiceTotalsByBillingRun(ctx context.Context, billingRunID uuid.UUID) (int64, error) {
+	var sum int64
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var result struct{ Total *int64 }
+		if selectErr := tx.Model(&InvoiceEntity{}).
+			Select("COALESCE(SUM(subtotal_cents), 0) as total").
+			Where("billing_run_id = ?", billingRunID).
+			Scan(&result).Error; selectErr != nil {
+			return selectErr
+		}
+		if result.Total != nil {
+			sum = *result.Total
+		}
+		return nil
+	})
+	return sum, err
+}
+
+// ListEmailsByInvoice returns email audit entries for the given invoice.
+// It finds outbox entries whose idempotency_key starts with "invoice-{invoiceID}"
+// to build the email audit trail.
+func (r *BillingRepositoryImpl) ListEmailsByInvoice(ctx context.Context, invoiceID uuid.UUID) ([]*EmailAuditEntry, error) {
+	pattern := "invoice-" + invoiceID.String() + "%"
+	var entries []*EmailAuditEntry
+
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var outboxEntities []email.OutboxEntity
+		if findErr := tx.Where("idempotency_key LIKE ?", pattern).
+			Order("created_at DESC").
+			Find(&outboxEntities).Error; findErr != nil {
+			return findErr
+		}
+
+		entries = make([]*EmailAuditEntry, 0, len(outboxEntities))
+		for i := range outboxEntities {
+			e := &outboxEntities[i]
+			entry := &EmailAuditEntry{
+				IdempotencyKey: e.IdempotencyKey,
+				TemplateName:   e.TemplateName,
+				ToAddresses:    []string(e.ToAddresses),
+				Status:         e.Status,
+				CreatedAt:      e.CreatedAt,
+			}
+			entries = append(entries, entry)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
