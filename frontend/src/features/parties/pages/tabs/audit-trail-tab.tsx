@@ -6,5 +6,5 @@ interface AuditTrailTabProps {
 }
 
 export function AuditTrailTab({ partyId }: AuditTrailTabProps) {
-  return <AuditTrail entityType="PARTY" entityId={partyId} />
+  return <AuditTrail entityType="party" entityId={partyId} />
 }

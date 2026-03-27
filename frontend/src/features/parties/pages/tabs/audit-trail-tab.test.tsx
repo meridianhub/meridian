@@ -11,11 +11,11 @@ vi.mock('@/shared/audit-trail', () => ({
 import { AuditTrailTab } from './audit-trail-tab'
 
 describe('AuditTrailTab', () => {
-  it('renders AuditTrail with entityType PARTY', () => {
+  it('renders AuditTrail with entityType party', () => {
     const { getByTestId } = render(<AuditTrailTab partyId="party-001" />)
     const auditTrail = getByTestId('mock-audit-trail')
     expect(auditTrail).toBeInTheDocument()
-    expect(auditTrail).toHaveAttribute('data-entity-type', 'PARTY')
+    expect(auditTrail).toHaveAttribute('data-entity-type', 'party')
   })
 
   it('passes partyId as entityId to AuditTrail', () => {
