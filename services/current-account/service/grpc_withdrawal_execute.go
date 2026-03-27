@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
@@ -42,64 +41,11 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		caobservability.RecordOperationDuration("execute_withdrawal", operationStatus, time.Since(start))
 	}()
 
-	// Determine which account to use - either from withdrawal_id lookup or direct account_id
-	var accountID string
-	var reqAmount *commonpb.MoneyAmount
-	var pendingWithdrawal *domain.Withdrawal
-
-	if req.WithdrawalId != "" {
-		// Look up pending withdrawal by reference
-		var err error
-		pendingWithdrawal, err = s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
-		if err != nil {
-			if errors.Is(err, persistence.ErrWithdrawalNotFound) {
-				operationStatus = opStatusWithdrawalNotFound
-				return nil, status.Errorf(codes.NotFound, "withdrawal not found: %s", req.WithdrawalId)
-			}
-			operationStatus = opStatusRetrieveFailed
-			s.logger.Error("failed to retrieve withdrawal",
-				"withdrawal_id", req.WithdrawalId,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
-		}
-
-		// Verify withdrawal is in pending status
-		if !pendingWithdrawal.IsPending() {
-			operationStatus = "withdrawal_not_pending"
-			return nil, status.Errorf(codes.FailedPrecondition,
-				"withdrawal %s is not pending (status: %s)", req.WithdrawalId, pendingWithdrawal.Status)
-		}
-
-		// Get account by UUID to retrieve the business account ID
-		account, err := s.repo.FindByUUID(ctx, pendingWithdrawal.AccountID)
-		if err != nil {
-			if errors.Is(err, persistence.ErrAccountNotFound) {
-				operationStatus = opStatusAccountNotFound
-				return nil, status.Errorf(codes.NotFound, "account not found for withdrawal: %s", req.WithdrawalId)
-			}
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-		}
-
-		accountID = account.AccountID()
-		// Convert domain Money to proto MoneyAmount
-		reqAmount = toMoneyAmount(pendingWithdrawal.Amount)
-
-		s.logger.Info("executing pending withdrawal",
-			"withdrawal_id", req.WithdrawalId,
-			"account_id", accountID)
-	} else {
-		// Direct withdrawal mode
-		if req.AccountId == "" {
-			operationStatus = opStatusMissingAccountID
-			return nil, status.Error(codes.InvalidArgument, "account_id is required for direct withdrawal")
-		}
-		if req.Amount == nil || req.Amount.Amount == nil {
-			operationStatus = opStatusMissingAmount
-			return nil, status.Error(codes.InvalidArgument, "amount is required for direct withdrawal")
-		}
-		accountID = req.AccountId
-		reqAmount = req.Amount
+	// Resolve withdrawal source - either pending withdrawal lookup or direct params
+	accountID, reqAmount, pendingWithdrawal, opStatus, err := s.resolveWithdrawalSource(ctx, req)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	// Get idempotency key if provided
@@ -200,35 +146,14 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		return nil, status.Errorf(codes.FailedPrecondition, "cannot withdraw from closed account: %s", accountID)
 	}
 
-	// Validate currency matches account currency
-	if reqAmount.Amount.CurrencyCode != account.Balance().InstrumentCode() {
-		operationStatus = opStatusCurrencyMismatch
-		return nil, status.Errorf(codes.InvalidArgument,
-			"currency mismatch: expected %s, got %s",
-			account.Balance().InstrumentCode(), reqAmount.Amount.CurrencyCode)
+	// Validate and convert amount
+	amount, opStatus, amountErr := validateWithdrawalAmount(reqAmount, account)
+	if amountErr != nil {
+		operationStatus = opStatus
+		return nil, amountErr
 	}
 
-	// Convert amount from proto (MoneyAmount wraps google.type.Money) using the account's instrument.
-	// The account's instrument determines dimension and precision; the proto CurrencyCode is already
-	// validated against account.Balance().InstrumentCode() above.
-	amount, err := protoMoneyToAmount(reqAmount, account)
-	if err != nil {
-		operationStatus = operationStatusInvalidCurrency
-		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
-	}
-
-	// Validate amount is positive
-	amountCents, err := amount.ToMinorUnits()
-	if err != nil {
-		operationStatus = opStatusAmountOverflow
-		return nil, status.Errorf(codes.InvalidArgument,
-			"withdrawal amount overflow: %v", err)
-	}
-	if amountCents <= 0 {
-		operationStatus = opStatusInvalidAmount
-		return nil, status.Errorf(codes.InvalidArgument,
-			"withdrawal amount must be positive, got %d minor units", amountCents)
-	}
+	amountCents, _ := amount.ToMinorUnits()
 
 	// Generate transaction ID (full UUID required by position-keeping service)
 	transactionID := uuid.New().String()

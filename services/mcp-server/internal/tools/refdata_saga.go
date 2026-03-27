@@ -1,0 +1,482 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+
+	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
+	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
+	mcperrors "github.com/meridianhub/meridian/services/mcp-server/internal/errors"
+)
+
+// buildSagasListTool creates the meridian_sagas_list tool.
+func buildSagasListTool(client SagaRegistryClient) Tool {
+	return Tool{
+		Name:        "meridian_sagas_list",
+		Description: "Lists saga workflow definitions registered for the tenant. Supports optional status filter (ACTIVE, DRAFT, DEPRECATED) and system saga inclusion.",
+		Category:    CategoryRead,
+		InputSchema: map[string]interface{}{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]interface{}{
+				"status_filter": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by status: ACTIVE, DRAFT, or DEPRECATED. Omit to return all.",
+					"enum":        []interface{}{statusActive, statusDraft, statusDeprecated},
+				},
+				"exclude_system": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, excludes system sagas from the response.",
+				},
+				"page_size": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of results to return (1-100).",
+					"minimum":     1,
+					"maximum":     100,
+				},
+			},
+		},
+		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+			if client == nil {
+				return formatError("saga_registry client not configured"), nil
+			}
+
+			var p struct {
+				StatusFilter  string `json:"status_filter"`
+				ExcludeSystem bool   `json:"exclude_system"`
+				PageSize      int32  `json:"page_size"`
+			}
+			unmarshalErr := json.Unmarshal(params, &p)
+			if unmarshalErr != nil {
+				return formatError("invalid parameters: " + unmarshalErr.Error()), nil //nolint:nilerr // tool errors are returned in the result, not as Go errors
+			}
+
+			req := &sagav1.ListSagasRequest{
+				ExcludeSystem: p.ExcludeSystem,
+				PageSize:      p.PageSize,
+			}
+			if p.StatusFilter != "" {
+				req.StatusFilter = parseSagaStatus(p.StatusFilter)
+			}
+
+			resp, err := client.ListSagas(ctx, req)
+			if err != nil {
+				fe := mcperrors.FormatGRPCError(err)
+				return fe, nil
+			}
+
+			sagas := make([]map[string]interface{}, 0, len(resp.GetSagas()))
+			for _, s := range resp.GetSagas() {
+				sagas = append(sagas, summarizeSaga(s))
+			}
+
+			return map[string]interface{}{
+				"sagas":           sagas,
+				"count":           len(sagas),
+				"next_page_token": resp.GetNextPageToken(),
+			}, nil
+		},
+	}
+}
+
+// buildSagaDescribeTool creates the meridian_saga_describe tool.
+func buildSagaDescribeTool(client SagaRegistryClient) Tool {
+	return Tool{
+		Name:        "meridian_saga_describe",
+		Description: "Returns full details for a specific saga definition including its Starlark script. Lookup by saga ID (UUID) or by name with optional version.",
+		Category:    CategoryRead,
+		InputSchema: map[string]interface{}{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]interface{}{
+				"id": map[string]interface{}{
+					"type":        "string",
+					"description": "Saga UUID. If provided, name and version are ignored.",
+				},
+				"name": map[string]interface{}{
+					"type":        "string",
+					"description": "Saga name (e.g., current_account_withdrawal). Used when id is not provided.",
+				},
+				"version": map[string]interface{}{
+					"type":        "integer",
+					"description": "Specific version. If 0 or omitted with name, returns the active version.",
+					"minimum":     0,
+				},
+			},
+		},
+		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+			if client == nil {
+				return formatError("saga_registry client not configured"), nil
+			}
+
+			var p struct {
+				ID      string `json:"id"`
+				Name    string `json:"name"`
+				Version int32  `json:"version"`
+			}
+			unmarshalErr := json.Unmarshal(params, &p)
+			if unmarshalErr != nil {
+				return formatError("invalid parameters: " + unmarshalErr.Error()), nil //nolint:nilerr // tool errors are returned in the result, not as Go errors
+			}
+			if p.ID == "" && p.Name == "" {
+				return formatError("either id or name is required"), nil
+			}
+
+			req := &sagav1.GetSagaRequest{}
+			if p.ID != "" {
+				req.Id = p.ID
+			} else {
+				req.Name = p.Name
+				req.Version = p.Version
+			}
+
+			resp, err := client.GetSaga(ctx, req)
+			if err != nil {
+				fe := mcperrors.FormatGRPCError(err)
+				return fe, nil
+			}
+
+			return detailSaga(resp.GetSaga()), nil
+		},
+	}
+}
+
+// buildHandlersDescribeTool creates the meridian_handlers_describe tool.
+// It reads handler definitions from the manifest's saga definitions and account type policies.
+func buildHandlersDescribeTool(client ManifestHistoryClient) Tool {
+	return Tool{
+		Name:        "meridian_handlers_describe",
+		Description: "Returns the tenant's available saga triggers and account type policies from the current manifest. Shows which handlers are wired to API endpoints, webhooks, scheduled jobs, and domain events.",
+		Category:    CategoryRead,
+		InputSchema: map[string]interface{}{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]interface{}{
+				"trigger_prefix": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter saga triggers by prefix: api, webhook, scheduled, or event. Omit to return all.",
+					"enum":        []interface{}{"api", "webhook", "scheduled", "event"},
+				},
+			},
+		},
+		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+			if client == nil {
+				return formatError("manifest_history client not configured"), nil
+			}
+
+			var p struct {
+				TriggerPrefix string `json:"trigger_prefix"`
+			}
+			unmarshalErr := json.Unmarshal(params, &p)
+			if unmarshalErr != nil {
+				return formatError("invalid parameters: " + unmarshalErr.Error()), nil //nolint:nilerr // tool errors are returned in the result, not as Go errors
+			}
+
+			resp, err := client.GetCurrentManifest(ctx, &controlplanev1.GetCurrentManifestRequest{})
+			if err != nil {
+				fe := mcperrors.FormatGRPCError(err)
+				return fe, nil
+			}
+
+			if resp.GetVersion() == nil || resp.GetVersion().GetManifest() == nil {
+				return map[string]interface{}{
+					"status":  "no_manifest",
+					"message": "no manifest has been applied for this tenant",
+				}, nil
+			}
+
+			m := resp.GetVersion().GetManifest()
+			triggers := extractSagaTriggers(m.GetSagas(), p.TriggerPrefix)
+			policies := extractAccountTypePolicies(m.GetAccountTypes())
+
+			return map[string]interface{}{
+				"saga_triggers":         triggers,
+				"saga_trigger_count":    len(triggers),
+				"account_type_policies": policies,
+				"policy_count":          len(policies),
+			}, nil
+		},
+	}
+}
+
+// triggerEntry describes a saga trigger mapping.
+type triggerEntry struct {
+	SagaName    string `json:"saga_name"`
+	TriggerType string `json:"trigger_type"`
+	TriggerPath string `json:"trigger_path"`
+}
+
+// policyEntry describes CEL policies attached to an account type.
+type policyEntry struct {
+	AccountTypeCode string `json:"account_type_code"`
+	Validation      string `json:"validation,omitempty"`
+	Bucketing       string `json:"bucketing,omitempty"`
+}
+
+// extractSagaTriggers converts manifest saga definitions into trigger entries.
+// If prefix is non-empty, only triggers with that prefix (e.g., "api:") are returned.
+func extractSagaTriggers(sagas []*controlplanev1.SagaDefinition, prefix string) []triggerEntry {
+	result := make([]triggerEntry, 0, len(sagas))
+	for _, saga := range sagas {
+		if prefix != "" && !strings.HasPrefix(saga.GetTrigger(), prefix+":") {
+			continue
+		}
+		parts := strings.SplitN(saga.GetTrigger(), ":", 2)
+		triggerType := saga.GetTrigger()
+		triggerPath := ""
+		if len(parts) == 2 {
+			triggerType = parts[0]
+			triggerPath = parts[1]
+		}
+		result = append(result, triggerEntry{
+			SagaName:    saga.GetName(),
+			TriggerType: triggerType,
+			TriggerPath: triggerPath,
+		})
+	}
+	return result
+}
+
+// extractAccountTypePolicies converts manifest account type definitions into policy entries.
+// Account types without CEL policies are excluded.
+func extractAccountTypePolicies(accountTypes []*controlplanev1.AccountTypeDefinition) []policyEntry {
+	result := make([]policyEntry, 0, len(accountTypes))
+	for _, at := range accountTypes {
+		if at.GetPolicies() == nil {
+			continue
+		}
+		if at.GetPolicies().GetValidation() == "" && at.GetPolicies().GetBucketing() == "" {
+			continue
+		}
+		result = append(result, policyEntry{
+			AccountTypeCode: at.GetCode(),
+			Validation:      at.GetPolicies().GetValidation(),
+			Bucketing:       at.GetPolicies().GetBucketing(),
+		})
+	}
+	return result
+}
+
+// buildMarketDataQueryTool creates the meridian_market_data_query tool.
+func buildMarketDataQueryTool(client MarketInformationClient) Tool {
+	return Tool{
+		Name:        "meridian_market_data_query",
+		Description: "Lists market data sets or queries observations for a specific dataset. Use dataset_code to query observations for a specific set.",
+		Category:    CategoryRead,
+		InputSchema: map[string]interface{}{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]interface{}{
+				"dataset_code": map[string]interface{}{
+					"type":        "string",
+					"description": "Dataset code to retrieve observations for (e.g., USD_EUR_FX). Omit to list all datasets.",
+				},
+				"status_filter": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter datasets by status: ACTIVE, DRAFT, or DEPRECATED. Only used when dataset_code is omitted.",
+					"enum":        []interface{}{statusActive, statusDraft, statusDeprecated},
+				},
+				"page_size": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of results to return (1-100).",
+					"minimum":     1,
+					"maximum":     100,
+				},
+			},
+		},
+		Handler: func(ctx context.Context, params json.RawMessage) (interface{}, error) {
+			if client == nil {
+				return formatError("market_information client not configured"), nil
+			}
+
+			var p struct {
+				DatasetCode  string `json:"dataset_code"`
+				StatusFilter string `json:"status_filter"`
+				PageSize     int32  `json:"page_size"`
+			}
+			unmarshalErr := json.Unmarshal(params, &p)
+			if unmarshalErr != nil {
+				return formatError("invalid parameters: " + unmarshalErr.Error()), nil //nolint:nilerr // tool errors are returned in the result, not as Go errors
+			}
+
+			if p.DatasetCode != "" {
+				return queryObservations(ctx, client, p.DatasetCode, p.PageSize)
+			}
+			return queryDatasets(ctx, client, p.StatusFilter, p.PageSize)
+		},
+	}
+}
+
+// queryObservations lists observations for a specific dataset code.
+func queryObservations(ctx context.Context, client MarketInformationClient, datasetCode string, pageSize int32) (interface{}, error) {
+	req := &marketinformationv1.ListObservationsRequest{
+		DatasetCode: datasetCode,
+		PageSize:    pageSize,
+	}
+	resp, err := client.ListObservations(ctx, req)
+	if err != nil {
+		fe := mcperrors.FormatGRPCError(err)
+		return fe, nil
+	}
+
+	observations := make([]map[string]interface{}, 0, len(resp.GetObservations()))
+	for _, obs := range resp.GetObservations() {
+		observations = append(observations, summarizeObservation(obs))
+	}
+
+	return map[string]interface{}{
+		"dataset_code":    datasetCode,
+		"observations":    observations,
+		"count":           len(observations),
+		"next_page_token": resp.GetNextPageToken(),
+	}, nil
+}
+
+// queryDatasets lists all datasets with an optional status filter.
+func queryDatasets(ctx context.Context, client MarketInformationClient, statusFilter string, pageSize int32) (interface{}, error) {
+	req := &marketinformationv1.ListDataSetsRequest{
+		PageSize: pageSize,
+	}
+	if statusFilter != "" {
+		req.StatusFilter = parseDataSetStatus(statusFilter)
+	}
+
+	resp, err := client.ListDataSets(ctx, req)
+	if err != nil {
+		fe := mcperrors.FormatGRPCError(err)
+		return fe, nil
+	}
+
+	datasets := make([]map[string]interface{}, 0, len(resp.GetDatasets()))
+	for _, ds := range resp.GetDatasets() {
+		datasets = append(datasets, summarizeDataSet(ds))
+	}
+
+	return map[string]interface{}{
+		"datasets":        datasets,
+		"count":           len(datasets),
+		"next_page_token": resp.GetNextPageToken(),
+	}, nil
+}
+
+// summarizeSaga returns a concise map for saga listing.
+func summarizeSaga(s *sagav1.SagaDefinition) map[string]interface{} {
+	if s == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"id":           s.GetId(),
+		"name":         s.GetName(),
+		"version":      s.GetVersion(),
+		"status":       s.GetStatus().String(),
+		"is_system":    s.GetIsSystem(),
+		"display_name": s.GetDisplayName(),
+		"description":  s.GetDescription(),
+	}
+}
+
+// detailSaga returns a full map of all saga fields.
+func detailSaga(s *sagav1.SagaDefinition) map[string]interface{} {
+	if s == nil {
+		return nil
+	}
+	result := map[string]interface{}{
+		"id":                       s.GetId(),
+		"name":                     s.GetName(),
+		"version":                  s.GetVersion(),
+		"status":                   s.GetStatus().String(),
+		"is_system":                s.GetIsSystem(),
+		"display_name":             s.GetDisplayName(),
+		"description":              s.GetDescription(),
+		"script":                   s.GetScript(),
+		"preconditions_expression": s.GetPreconditionsExpression(),
+	}
+	if s.GetSuccessorId() != "" {
+		result["successor_id"] = s.GetSuccessorId()
+	}
+	if s.GetCreatedAt() != nil {
+		result["created_at"] = s.GetCreatedAt().AsTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+	if s.GetUpdatedAt() != nil {
+		result["updated_at"] = s.GetUpdatedAt().AsTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+	if s.GetActivatedAt() != nil {
+		result["activated_at"] = s.GetActivatedAt().AsTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+	if s.GetDeprecatedAt() != nil {
+		result["deprecated_at"] = s.GetDeprecatedAt().AsTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+	return result
+}
+
+// summarizeDataSet returns a concise map for dataset listing.
+func summarizeDataSet(ds *marketinformationv1.DataSetDefinition) map[string]interface{} {
+	if ds == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"id":           ds.GetId(),
+		"code":         ds.GetCode(),
+		"version":      ds.GetVersion(),
+		"category":     ds.GetCategory().String(),
+		"unit":         ds.GetUnit(),
+		"status":       ds.GetStatus().String(),
+		"display_name": ds.GetDisplayName(),
+		"description":  ds.GetDescription(),
+	}
+}
+
+// summarizeObservation returns a concise map for observation listing.
+func summarizeObservation(obs *marketinformationv1.MarketPriceObservation) map[string]interface{} {
+	if obs == nil {
+		return nil
+	}
+	result := map[string]interface{}{
+		"id":              obs.GetId(),
+		"dataset_code":    obs.GetDatasetCode(),
+		"dataset_version": obs.GetDatasetVersion(),
+		"resolution_key":  obs.GetResolutionKeyValue(),
+		"value":           obs.GetValue(),
+		"quality":         obs.GetQuality().String(),
+	}
+	if obs.GetObservedAt() != nil {
+		result["observed_at"] = obs.GetObservedAt().AsTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+	if obs.GetValidFrom() != nil {
+		result["valid_from"] = obs.GetValidFrom().AsTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+	if obs.GetValidTo() != nil {
+		result["valid_to"] = obs.GetValidTo().AsTime().Format("2006-01-02T15:04:05Z07:00")
+	}
+	return result
+}
+
+// parseSagaStatus converts a string to a sagav1.SagaStatus.
+func parseSagaStatus(s string) sagav1.SagaStatus {
+	switch strings.ToUpper(s) {
+	case statusActive:
+		return sagav1.SagaStatus_SAGA_STATUS_ACTIVE
+	case statusDraft:
+		return sagav1.SagaStatus_SAGA_STATUS_DRAFT
+	case statusDeprecated:
+		return sagav1.SagaStatus_SAGA_STATUS_DEPRECATED
+	default:
+		return sagav1.SagaStatus_SAGA_STATUS_UNSPECIFIED
+	}
+}
+
+// parseDataSetStatus converts a string to a marketinformationv1.DataSetStatus.
+func parseDataSetStatus(s string) marketinformationv1.DataSetStatus {
+	switch strings.ToUpper(s) {
+	case statusActive:
+		return marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE
+	case statusDraft:
+		return marketinformationv1.DataSetStatus_DATA_SET_STATUS_DRAFT
+	case statusDeprecated:
+		return marketinformationv1.DataSetStatus_DATA_SET_STATUS_DEPRECATED
+	default:
+		return marketinformationv1.DataSetStatus_DATA_SET_STATUS_UNSPECIFIED
+	}
+}
