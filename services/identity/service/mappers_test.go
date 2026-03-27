@@ -39,6 +39,16 @@ func TestIdentityToProto_PendingInviteStatus(t *testing.T) {
 	assert.Equal(t, pb.IdentityStatus_IDENTITY_STATUS_PENDING_INVITE, proto.Status)
 }
 
+func TestIdentityToProto_PendingVerificationStatus(t *testing.T) {
+	identity, err := domain.NewSelfRegisteredIdentity(mapperTestTID, "self@example.com", true)
+	require.NoError(t, err)
+
+	proto := identityToProto(identity)
+
+	require.NotNil(t, proto)
+	assert.Equal(t, pb.IdentityStatus_IDENTITY_STATUS_PENDING_VERIFICATION, proto.Status)
+}
+
 func TestIdentityToProto_TimestampsPopulated(t *testing.T) {
 	before := time.Now().Truncate(time.Second)
 	identity, err := domain.NewIdentity(mapperTestTID, "ts@example.com")

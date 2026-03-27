@@ -129,6 +129,11 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 			"tenant_id", tenantID,
 			"identity_id", identity.ID())
 		return Identity{}, false, nil
+	case domain.IdentityStatusPendingVerification:
+		c.logger.InfoContext(ctx, "connector: login rejected — email not yet verified",
+			"tenant_id", tenantID,
+			"identity_id", identity.ID())
+		return Identity{}, false, domain.ErrEmailNotVerified
 	case domain.IdentityStatusActive:
 		// valid — proceed to password verification
 	default:

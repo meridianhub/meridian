@@ -13,10 +13,11 @@ type IdentityStatus string
 
 // Identity status constants
 const (
-	IdentityStatusPendingInvite IdentityStatus = "PENDING_INVITE"
-	IdentityStatusActive        IdentityStatus = "ACTIVE"
-	IdentityStatusSuspended     IdentityStatus = "SUSPENDED"
-	IdentityStatusLocked        IdentityStatus = "LOCKED"
+	IdentityStatusPendingInvite        IdentityStatus = "PENDING_INVITE"
+	IdentityStatusPendingVerification  IdentityStatus = "PENDING_VERIFICATION"
+	IdentityStatusActive               IdentityStatus = "ACTIVE"
+	IdentityStatusSuspended            IdentityStatus = "SUSPENDED"
+	IdentityStatusLocked               IdentityStatus = "LOCKED"
 )
 
 // maxFailedAttempts is the number of consecutive failed login attempts before lockout.
@@ -62,6 +63,34 @@ func NewIdentity(tenantID tenant.TenantID, email string) (*Identity, error) {
 		tenantID:  tenantID,
 		email:     email,
 		status:    IdentityStatusPendingInvite,
+		createdAt: now,
+		updatedAt: now,
+		version:   1,
+	}, nil
+}
+
+// NewSelfRegisteredIdentity creates a new identity for a self-registration flow.
+// When verificationRequired is true the identity starts in PENDING_VERIFICATION status;
+// otherwise it starts in ACTIVE status (e.g. when email is already trusted).
+func NewSelfRegisteredIdentity(tenantID tenant.TenantID, email string, verificationRequired bool) (*Identity, error) {
+	if tenantID.IsEmpty() {
+		return nil, ErrTenantIDRequired
+	}
+	if !emailRegex.MatchString(email) {
+		return nil, ErrInvalidEmail
+	}
+
+	status := IdentityStatusActive
+	if verificationRequired {
+		status = IdentityStatusPendingVerification
+	}
+
+	now := time.Now()
+	return &Identity{
+		id:        uuid.New(),
+		tenantID:  tenantID,
+		email:     email,
+		status:    status,
 		createdAt: now,
 		updatedAt: now,
 		version:   1,
@@ -237,6 +266,18 @@ func (i *Identity) Unlock() error {
 	return nil
 }
 
+// Verify transitions the identity from PENDING_VERIFICATION to ACTIVE.
+// Returns ErrNotPendingVerification if the identity is not in PENDING_VERIFICATION status.
+func (i *Identity) Verify() error {
+	if i.status != IdentityStatusPendingVerification {
+		return ErrNotPendingVerification
+	}
+	i.status = IdentityStatusActive
+	i.updatedAt = time.Now()
+	i.version++
+	return nil
+}
+
 // RecordLoginAttempt records a login attempt result. On success it resets the
 // failed attempts counter. On failure it increments the counter and locks the
 // account when the threshold is reached.
@@ -246,7 +287,7 @@ func (i *Identity) RecordLoginAttempt(success bool) error {
 	switch i.status {
 	case IdentityStatusLocked:
 		return ErrAccountLocked
-	case IdentityStatusPendingInvite, IdentityStatusSuspended:
+	case IdentityStatusPendingInvite, IdentityStatusPendingVerification, IdentityStatusSuspended:
 		return ErrInvalidStatusTransition
 	case IdentityStatusActive:
 		// valid — proceed below
