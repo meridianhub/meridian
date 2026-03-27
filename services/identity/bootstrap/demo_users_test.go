@@ -117,7 +117,7 @@ func (f *fakeRepo) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UU
 	return 0, nil
 }
 
-func (f *fakeRepo) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+func (f *fakeRepo) MarkPasswordResetTokensConsumedForIdentity(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 

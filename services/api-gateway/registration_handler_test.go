@@ -114,7 +114,7 @@ func (s *stubIdentityRepo) CountPasswordResetTokensInWindow(_ context.Context, _
 	return 0, nil
 }
 
-func (s *stubIdentityRepo) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+func (s *stubIdentityRepo) MarkPasswordResetTokensConsumedForIdentity(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 

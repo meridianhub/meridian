@@ -229,7 +229,7 @@ func TestRepository_CountPasswordResetTokensInWindow_ExcludesConsumed(t *testing
 	assert.Equal(t, 1, count)
 }
 
-func TestRepository_InvalidatePasswordResetTokensForIdentity(t *testing.T) {
+func TestRepository_MarkPasswordResetTokensConsumedForIdentity(t *testing.T) {
 	db, ctx, cleanup := setupTokenRepoTestDB(t)
 	defer cleanup()
 	repo := NewRepository(db)
@@ -244,7 +244,7 @@ func TestRepository_InvalidatePasswordResetTokensForIdentity(t *testing.T) {
 		hashes = append(hashes, prt.TokenHash())
 	}
 
-	err := repo.InvalidatePasswordResetTokensForIdentity(ctx, identity.ID())
+	err := repo.MarkPasswordResetTokensConsumedForIdentity(ctx, identity.ID())
 	require.NoError(t, err)
 
 	for _, hash := range hashes {
@@ -258,7 +258,7 @@ func TestRepository_InvalidatePasswordResetTokensForIdentity(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
-func TestRepository_InvalidatePasswordResetTokensForIdentity_DoesNotAffectOther(t *testing.T) {
+func TestRepository_MarkPasswordResetTokensConsumedForIdentity_DoesNotAffectOther(t *testing.T) {
 	db, ctx, cleanup := setupTokenRepoTestDB(t)
 	defer cleanup()
 	repo := NewRepository(db)
@@ -275,7 +275,7 @@ func TestRepository_InvalidatePasswordResetTokensForIdentity_DoesNotAffectOther(
 	err = repo.SavePasswordResetToken(ctx, prt2)
 	require.NoError(t, err)
 
-	err = repo.InvalidatePasswordResetTokensForIdentity(ctx, identity1.ID())
+	err = repo.MarkPasswordResetTokensConsumedForIdentity(ctx, identity1.ID())
 	require.NoError(t, err)
 
 	found1, err := repo.FindPasswordResetTokenByHash(ctx, prt1.TokenHash())

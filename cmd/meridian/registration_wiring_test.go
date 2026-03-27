@@ -284,6 +284,6 @@ func (n *noopIdentityRepo) CountPasswordResetTokensInWindow(_ context.Context, _
 	return 0, fmt.Errorf("not implemented")
 }
 
-func (n *noopIdentityRepo) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+func (n *noopIdentityRepo) MarkPasswordResetTokensConsumedForIdentity(_ context.Context, _ uuid.UUID) error {
 	return fmt.Errorf("not implemented")
 }

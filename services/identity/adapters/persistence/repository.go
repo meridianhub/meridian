@@ -455,9 +455,9 @@ func (r *Repository) CountPasswordResetTokensInWindow(ctx context.Context, ident
 	return count, err
 }
 
-// InvalidatePasswordResetTokensForIdentity marks all unconsumed password reset tokens
+// MarkPasswordResetTokensConsumedForIdentity marks all unconsumed password reset tokens
 // for the given identity as consumed.
-func (r *Repository) InvalidatePasswordResetTokensForIdentity(ctx context.Context, identityID uuid.UUID) error {
+func (r *Repository) MarkPasswordResetTokensConsumedForIdentity(ctx context.Context, identityID uuid.UUID) error {
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		now := time.Now()
 		return tx.Model(&PasswordResetTokenEntity{}).

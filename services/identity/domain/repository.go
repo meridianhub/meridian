@@ -84,7 +84,7 @@ type Repository interface {
 	// for the given identity within the specified time window. Used for rate limiting.
 	CountPasswordResetTokensInWindow(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
 
-	// InvalidatePasswordResetTokensForIdentity marks all unconsumed password reset tokens
+	// MarkPasswordResetTokensConsumedForIdentity marks all unconsumed password reset tokens
 	// for the given identity as consumed. Used when a password is successfully reset.
-	InvalidatePasswordResetTokensForIdentity(ctx context.Context, identityID uuid.UUID) error
+	MarkPasswordResetTokensConsumedForIdentity(ctx context.Context, identityID uuid.UUID) error
 }

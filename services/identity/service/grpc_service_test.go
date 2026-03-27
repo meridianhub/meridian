@@ -185,7 +185,7 @@ func (m *mockRepository) CountPasswordResetTokensInWindow(_ context.Context, _ u
 	return 0, nil
 }
 
-func (m *mockRepository) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+func (m *mockRepository) MarkPasswordResetTokensConsumedForIdentity(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
