@@ -228,6 +228,9 @@ jobs:
           username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            # Skip manifest on incremental deploys - activate_instrument is not
+            # yet idempotent so re-applying fails on already-ACTIVE instruments.
+            # Fresh databases are handled by reset-demo.sh.
             docker exec meridian-meridian-1 /seed-dev \
               --gateway-url=http://localhost:8090 \
               --grpc-addr=localhost:50051 \
@@ -235,7 +238,7 @@ jobs:
               --tenant-slug=volterra \
               --display-name='Volterra Energy' \
               --subdomain=volterra.demo.meridianhub.cloud \
-              --manifest=/app/examples/manifests/energy.json \
+              --skip-manifest \
               --with-fixtures
 
       - name: Verify deployment health
