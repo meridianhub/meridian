@@ -17,6 +17,7 @@ paths = [
   '''\.github/.*\.md''',      # GitHub documentation
   '''examples/.*''',          # Example code
   '''testdata/.*''',          # Test data
+  '''.*atlas\.sum''',         # Atlas migration checksums (cryptographic hashes, not secrets)
 ]
 
 # Regexes to ignore - example placeholders and documentation patterns
