@@ -136,6 +136,10 @@ func (s *Service) RevokeRole(ctx context.Context, req *pb.RevokeRoleRequest) (*p
 
 // ListRoleAssignments lists the role assignments for an identity.
 func (s *Service) ListRoleAssignments(ctx context.Context, req *pb.ListRoleAssignmentsRequest) (*pb.ListRoleAssignmentsResponse, error) {
+	if _, ok := auth.GetUserIDFromContext(ctx); !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "missing authentication context")
+	}
+
 	identityID, err := uuid.Parse(req.GetIdentityId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid identity ID: %v", err)
