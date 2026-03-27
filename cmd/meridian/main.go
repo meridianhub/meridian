@@ -288,8 +288,19 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 
 	// Wire self-service registration handler (public endpoint, no auth required).
 	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
-	if regOpt := wireRegistration(conns.gormDB("identity"), conns.gormDB("tenant"), loopback.rawConn, baseDomain, logger); regOpt != nil {
+	emailOutboxRepo := email.NewPostgresOutboxRepository(conns.gormDB("payment-order"))
+	if regOpt := wireRegistration(conns.gormDB("identity"), conns.gormDB("tenant"), loopback.rawConn, baseDomain, emailOutboxRepo, logger); regOpt != nil {
 		extraGWOpts = append(extraGWOpts, regOpt)
+	}
+
+	// Wire email verification handler (public endpoint, token auth).
+	if verifyOpt := wireVerification(conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); verifyOpt != nil {
+		extraGWOpts = append(extraGWOpts, verifyOpt)
+	}
+
+	// Wire password reset handler (public endpoint, token auth).
+	if resetOpt := wirePasswordReset(conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); resetOpt != nil {
+		extraGWOpts = append(extraGWOpts, resetOpt)
 	}
 
 	// Wire Resend webhook handler (public endpoint, Svix signature auth).

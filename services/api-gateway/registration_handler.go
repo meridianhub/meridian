@@ -14,6 +14,7 @@ import (
 	identitydomain "github.com/meridianhub/meridian/services/identity/domain"
 	tenantdomain "github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -56,22 +57,26 @@ type SlugChecker interface {
 // POST /api/v1/register - creates a tenant and an initial admin identity.
 // GET /api/v1/slugs/{slug}/available - checks slug availability.
 type RegistrationHandler struct {
-	tenantCreator TenantCreator
-	slugChecker   SlugChecker
-	identityRepo  identitydomain.Repository
-	rateLimiter   *RegistrationRateLimiter
-	baseDomain    string
-	logger        *slog.Logger
+	tenantCreator             TenantCreator
+	slugChecker               SlugChecker
+	identityRepo              identitydomain.Repository
+	outboxRepo                email.OutboxRepository
+	rateLimiter               *RegistrationRateLimiter
+	baseDomain                string
+	emailVerificationRequired bool
+	logger                    *slog.Logger
 }
 
 // RegistrationHandlerConfig holds dependencies for creating a RegistrationHandler.
 type RegistrationHandlerConfig struct {
-	TenantCreator TenantCreator
-	SlugChecker   SlugChecker
-	IdentityRepo  identitydomain.Repository
-	RateLimiter   *RegistrationRateLimiter
-	BaseDomain    string
-	Logger        *slog.Logger
+	TenantCreator              TenantCreator
+	SlugChecker                SlugChecker
+	IdentityRepo               identitydomain.Repository
+	OutboxRepo                 email.OutboxRepository
+	RateLimiter                *RegistrationRateLimiter
+	BaseDomain                 string
+	EmailVerificationRequired  bool
+	Logger                     *slog.Logger
 }
 
 // NewRegistrationHandler creates a handler for self-service tenant registration.
@@ -90,12 +95,14 @@ func NewRegistrationHandler(cfg RegistrationHandlerConfig) (*RegistrationHandler
 		rl = NewRegistrationRateLimiter(20)
 	}
 	return &RegistrationHandler{
-		tenantCreator: cfg.TenantCreator,
-		slugChecker:   cfg.SlugChecker,
-		identityRepo:  cfg.IdentityRepo,
-		rateLimiter:   rl,
-		baseDomain:    cfg.BaseDomain,
-		logger:        cfg.Logger,
+		tenantCreator:             cfg.TenantCreator,
+		slugChecker:               cfg.SlugChecker,
+		identityRepo:              cfg.IdentityRepo,
+		outboxRepo:                cfg.OutboxRepo,
+		rateLimiter:               rl,
+		baseDomain:                cfg.BaseDomain,
+		emailVerificationRequired: cfg.EmailVerificationRequired,
+		logger:                    cfg.Logger,
 	}, nil
 }
 
@@ -109,8 +116,9 @@ type registrationRequest struct {
 
 // registrationResponse is the JSON body returned on successful registration.
 type registrationResponse struct {
-	TenantID string `json:"tenant_id"`
-	LoginURL string `json:"login_url"`
+	TenantID             string `json:"tenant_id"`
+	LoginURL             string `json:"login_url"`
+	VerificationRequired bool   `json:"verification_required"`
 }
 
 // HandleRegister handles POST /api/v1/register.
@@ -196,13 +204,14 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 		return http.StatusInternalServerError, nil, errTenantCreationFailed
 	}
 
-	if err := h.provisionAdminIdentity(ctx, createdTenantID, req.Email, req.Password); err != nil {
+	regErr := h.provisionAdminIdentity(ctx, createdTenantID, req.Email, req.Password)
+	if regErr != nil {
 		// Compensate: delete orphaned tenant to allow the user to retry.
 		if delErr := h.tenantCreator.DeleteTenant(ctx, createdTenantID); delErr != nil {
 			h.logger.ErrorContext(ctx, "registration: failed to compensate (delete tenant)",
 				"tenant_id", createdTenantID, "error", delErr)
 		}
-		return err.status, nil, err
+		return regErr.status, nil, regErr
 	}
 
 	loginURL := fmt.Sprintf("https://%s.%s/login", req.Slug, h.baseDomain)
@@ -211,8 +220,9 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 	}
 
 	return http.StatusCreated, &registrationResponse{
-		TenantID: createdTenantID,
-		LoginURL: loginURL,
+		TenantID:             createdTenantID,
+		LoginURL:             loginURL,
+		VerificationRequired: h.emailVerificationRequired,
 	}, nil
 }
 
@@ -240,7 +250,12 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
-	identity, err := identitydomain.NewIdentity(tid, email)
+	var identity *identitydomain.Identity
+	if h.emailVerificationRequired {
+		identity, err = identitydomain.NewSelfRegisteredIdentity(tid, email, true)
+	} else {
+		identity, err = identitydomain.NewIdentity(tid, email)
+	}
 	if err != nil {
 		return newRegistrationError(http.StatusBadRequest, fmt.Errorf("%w: %w", errIdentityCreationFailed, err))
 	}
@@ -256,9 +271,11 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
 
-	if err := identity.Activate(); err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to activate identity", "error", err)
-		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
+	if !h.emailVerificationRequired {
+		if err := identity.Activate(); err != nil {
+			h.logger.ErrorContext(ctx, "registration: failed to activate identity", "error", err)
+			return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
+		}
 	}
 
 	now := time.Now()
@@ -284,7 +301,52 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
 
+	// Queue verification email when verification is required.
+	if h.emailVerificationRequired && h.outboxRepo != nil {
+		h.queueRegistrationVerificationEmail(tenantCtx, tenantIDStr, identity)
+	}
+
 	return nil
+}
+
+// queueRegistrationVerificationEmail creates a verification token and queues the email.
+func (h *RegistrationHandler) queueRegistrationVerificationEmail(ctx context.Context, tenantIDStr string, identity *identitydomain.Identity) {
+	vtoken, plaintext, err := identitydomain.NewVerificationToken(tenantIDStr, identity.ID())
+	if err != nil {
+		h.logger.ErrorContext(ctx, "registration: failed to create verification token", "error", err)
+		return
+	}
+
+	if err := h.identityRepo.SaveVerificationToken(ctx, vtoken); err != nil {
+		h.logger.ErrorContext(ctx, "registration: failed to save verification token", "error", err)
+		return
+	}
+
+	verificationLink := fmt.Sprintf("https://%s/verify-email?token=%s", h.baseDomain, plaintext)
+	if h.baseDomain == "" {
+		verificationLink = "/verify-email?token=" + plaintext
+	}
+
+	entry := &email.OutboxEntry{
+		ID:             uuid.New(),
+		TenantID:       tenantIDStr,
+		IdempotencyKey: "verify-email-" + identity.ID().String(),
+		ToAddresses:    []string{identity.Email()},
+		FromAddress:    "noreply@meridianhub.cloud",
+		Subject:        "Verify your email address",
+		TemplateName:   "verify-email",
+		TemplateData: map[string]any{
+			"VerificationLink": verificationLink,
+		},
+		Status:        email.StatusPending,
+		MaxAttempts:   5,
+		NextAttemptAt: time.Now(),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	if err := h.outboxRepo.Enqueue(ctx, entry); err != nil {
+		h.logger.ErrorContext(ctx, "registration: failed to enqueue verification email", "error", err)
+	}
 }
 
 // HandleSlugAvailable handles GET /api/v1/slugs/{slug}/available.

@@ -39,6 +39,8 @@ type Server struct {
 	authHandler           *AuthHandler
 	ssoHandler            *SSOHandler
 	registrationHandler   *RegistrationHandler
+	verificationHandler   *VerificationHandler
+	passwordResetHandler  *PasswordResetHandler
 	tenantInfoHandler     *TenantInfoHandler
 	resendWebhookHandler  *ResendWebhookHandler
 }
@@ -226,6 +228,18 @@ func (s *Server) registerRoutes() {
 	if s.registrationHandler != nil {
 		s.mux.Handle("POST /api/v1/register", http.HandlerFunc(s.registrationHandler.HandleRegister))
 		s.mux.Handle("GET /api/v1/slugs/{slug}/available", http.HandlerFunc(s.registrationHandler.HandleSlugAvailable))
+	}
+
+	// Email verification endpoints - NO middleware (public, token-authenticated).
+	if s.verificationHandler != nil {
+		s.mux.Handle("POST /api/v1/verify-email", http.HandlerFunc(s.verificationHandler.HandleVerifyEmail))
+		s.mux.Handle("POST /api/v1/resend-verification", http.HandlerFunc(s.verificationHandler.HandleResendVerification))
+	}
+
+	// Password reset endpoints - NO middleware (public, token-authenticated).
+	if s.passwordResetHandler != nil {
+		s.mux.Handle("POST /api/v1/forgot-password", http.HandlerFunc(s.passwordResetHandler.HandleForgotPassword))
+		s.mux.Handle("POST /api/v1/reset-password", http.HandlerFunc(s.passwordResetHandler.HandleResetPassword))
 	}
 
 	// Public tenant info endpoint - tenant resolution but NO auth middleware (pre-auth).

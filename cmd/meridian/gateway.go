@@ -262,25 +262,71 @@ func wireResendWebhook(paymentOrderDB *gorm.DB, logger *slog.Logger) gateway.Ser
 
 // wireRegistration creates the self-service registration handler and returns
 // a ServerOption to install it. Returns nil on error (graceful degradation).
-func wireRegistration(identityDB, tenantDB *gorm.DB, rawConn *grpc.ClientConn, baseDomain string, logger *slog.Logger) gateway.ServerOption {
+func wireRegistration(identityDB, tenantDB *gorm.DB, rawConn *grpc.ClientConn, baseDomain string, outboxRepo email.OutboxRepository, logger *slog.Logger) gateway.ServerOption {
 	identityRepo := identitypersistence.NewRepository(identityDB)
 	tenantClient := tenantv1.NewTenantServiceClient(rawConn)
 
 	creator := &loopbackTenantCreator{client: tenantClient, baseDomain: baseDomain, logger: logger}
 	slugChecker := &loopbackSlugChecker{repo: tenantpersistence.NewRepository(tenantDB)}
 
+	emailVerificationRequired := env.GetEnvAsBool("EMAIL_VERIFICATION_REQUIRED", false)
+
 	handler, err := gateway.NewRegistrationHandler(gateway.RegistrationHandlerConfig{
-		TenantCreator: creator,
-		SlugChecker:   slugChecker,
-		IdentityRepo:  identityRepo,
-		BaseDomain:    baseDomain,
-		Logger:        logger,
+		TenantCreator:             creator,
+		SlugChecker:               slugChecker,
+		IdentityRepo:              identityRepo,
+		OutboxRepo:                outboxRepo,
+		BaseDomain:                baseDomain,
+		EmailVerificationRequired: emailVerificationRequired,
+		Logger:                    logger,
 	})
 	if err != nil {
 		logger.Warn("self-service registration disabled", "error", err)
 		return nil
 	}
 
-	logger.Info("self-service registration handler initialized", "base_domain", baseDomain)
+	logger.Info("self-service registration handler initialized",
+		"base_domain", baseDomain,
+		"email_verification_required", emailVerificationRequired)
 	return gateway.WithRegistrationHandler(handler)
+}
+
+// wireVerification creates the email verification handler and returns
+// a ServerOption to install it. Returns nil on error (graceful degradation).
+func wireVerification(identityDB *gorm.DB, outboxRepo email.OutboxRepository, baseDomain string, logger *slog.Logger) gateway.ServerOption {
+	identityRepo := identitypersistence.NewRepository(identityDB)
+
+	handler, err := gateway.NewVerificationHandler(gateway.VerificationHandlerConfig{
+		IdentityRepo: identityRepo,
+		OutboxRepo:   outboxRepo,
+		BaseDomain:   baseDomain,
+		Logger:       logger,
+	})
+	if err != nil {
+		logger.Warn("email verification handler disabled", "error", err)
+		return nil
+	}
+
+	logger.Info("email verification handler initialized")
+	return gateway.WithVerificationHandler(handler)
+}
+
+// wirePasswordReset creates the password reset handler and returns
+// a ServerOption to install it. Returns nil on error (graceful degradation).
+func wirePasswordReset(identityDB *gorm.DB, outboxRepo email.OutboxRepository, baseDomain string, logger *slog.Logger) gateway.ServerOption {
+	identityRepo := identitypersistence.NewRepository(identityDB)
+
+	handler, err := gateway.NewPasswordResetHandler(gateway.PasswordResetHandlerConfig{
+		IdentityRepo: identityRepo,
+		OutboxRepo:   outboxRepo,
+		BaseDomain:   baseDomain,
+		Logger:       logger,
+	})
+	if err != nil {
+		logger.Warn("password reset handler disabled", "error", err)
+		return nil
+	}
+
+	logger.Info("password reset handler initialized")
+	return gateway.WithPasswordResetHandler(handler)
 }
