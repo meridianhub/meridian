@@ -102,7 +102,12 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 
 	// Pre-validate amount presence before account fetch to fail fast on malformed requests
 	useInput := req.Input != nil
-	if !useInput {
+	if useInput {
+		if req.Input.Amount == "" || req.Input.InstrumentCode == "" {
+			operationStatus = opStatusInvalidAmount
+			return nil, status.Error(codes.InvalidArgument, "input.amount and input.instrument_code are required when input is provided")
+		}
+	} else {
 		if req.Amount == nil || req.Amount.Amount == nil {
 			operationStatus = opStatusMissingAmount
 			return nil, status.Error(codes.InvalidArgument, "amount is required (provide amount or input)")
