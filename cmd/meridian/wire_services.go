@@ -645,7 +645,6 @@ func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
 	return nil
 }
 
-
 // wireEmbeddedDex creates the embedded Dex OIDC server and returns a gateway
 // ServerOption that mounts its HTTP handler at /dex/*. When DEX_ISSUER is not
 // set, returns a no-op option (Dex is opt-in).

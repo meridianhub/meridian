@@ -1922,7 +1922,7 @@ func TestRoleAssignmentToProto_WithRevocation(t *testing.T) {
 // --- mockOutbox ---
 
 type mockOutbox struct {
-	entries  []*email.OutboxEntry
+	entries    []*email.OutboxEntry
 	enqueueErr error
 }
 
