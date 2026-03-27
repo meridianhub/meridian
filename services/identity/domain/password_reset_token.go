@@ -65,10 +65,10 @@ func (prt *PasswordResetToken) Consume() error {
 	if prt.consumedAt != nil {
 		return ErrPasswordResetTokenAlreadyConsumed
 	}
-	if !time.Now().Before(prt.expiresAt) {
+	now := time.Now()
+	if !now.Before(prt.expiresAt) {
 		return ErrPasswordResetTokenExpired
 	}
-	now := time.Now()
 	prt.consumedAt = &now
 	return nil
 }

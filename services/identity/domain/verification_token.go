@@ -65,10 +65,10 @@ func (vt *VerificationToken) Consume() error {
 	if vt.consumedAt != nil {
 		return ErrVerificationTokenAlreadyConsumed
 	}
-	if !time.Now().Before(vt.expiresAt) {
+	now := time.Now()
+	if !now.Before(vt.expiresAt) {
 		return ErrVerificationTokenExpired
 	}
-	now := time.Now()
 	vt.consumedAt = &now
 	return nil
 }

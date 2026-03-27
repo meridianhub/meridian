@@ -397,7 +397,7 @@ func (r *Repository) CountVerificationTokensInWindow(ctx context.Context, identi
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var c int64
 		result := tx.Model(&EmailVerificationTokenEntity{}).
-			Where("identity_id = ? AND consumed_at IS NULL AND created_at > ?", identityID, time.Now().Add(-window)).
+			Where("identity_id = ? AND consumed_at IS NULL AND created_at >= ?", identityID, time.Now().Add(-window)).
 			Count(&c)
 		if result.Error != nil {
 			return result.Error
@@ -444,7 +444,7 @@ func (r *Repository) CountPasswordResetTokensInWindow(ctx context.Context, ident
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
 		var c int64
 		result := tx.Model(&PasswordResetTokenEntity{}).
-			Where("identity_id = ? AND consumed_at IS NULL AND created_at > ?", identityID, time.Now().Add(-window)).
+			Where("identity_id = ? AND consumed_at IS NULL AND created_at >= ?", identityID, time.Now().Add(-window)).
 			Count(&c)
 		if result.Error != nil {
 			return result.Error
