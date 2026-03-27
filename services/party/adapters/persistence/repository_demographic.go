@@ -23,6 +23,10 @@ func (r *Repository) SaveDemographic(ctx context.Context, partyID uuid.UUID, soc
 		socioEcon := &socioEconStr
 		empHistory := &empHistoryStr
 
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return result.Error
+		}
+
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			// Create new
 			entity := &PartyDemographicEntity{

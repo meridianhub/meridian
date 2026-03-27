@@ -27,6 +27,10 @@ func (r *Repository) SaveBankRelation(ctx context.Context, partyID uuid.UUID, ac
 			branch = &assignedBranch
 		}
 
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return result.Error
+		}
+
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			// Create new
 			entity := &PartyBankRelationEntity{
