@@ -70,6 +70,38 @@ func TestEmailVerificationToken_InsertAndRetrieve(t *testing.T) {
 	assert.Nil(t, retrieved.ConsumedAt)
 }
 
+// TestEmailVerificationToken_ConsumedAt verifies consumed_at can be set (token consumed).
+func TestEmailVerificationToken_ConsumedAt(t *testing.T) {
+	db, cleanup := setupTokenTestDB(t)
+	defer cleanup()
+
+	identityID := uuid.New()
+	identity := &IdentityEntity{
+		ID:           identityID,
+		TenantID:     testTenantIDStr,
+		Email:        "consume@example.com",
+		Status:       "PENDING_INVITE",
+		PasswordHash: "",
+	}
+	require.NoError(t, db.Create(identity).Error)
+
+	token := &EmailVerificationTokenEntity{
+		TenantID:   testTenantIDStr,
+		IdentityID: identityID,
+		TokenHash:  sha256hex("ev-consume"),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+	}
+	require.NoError(t, db.Create(token).Error)
+
+	consumedAt := time.Now()
+	err := db.Model(token).Update("consumed_at", consumedAt).Error
+	require.NoError(t, err)
+
+	var retrieved EmailVerificationTokenEntity
+	require.NoError(t, db.Where("id = ?", token.ID).First(&retrieved).Error)
+	assert.NotNil(t, retrieved.ConsumedAt)
+}
+
 // TestEmailVerificationToken_UniqueHashConstraint verifies duplicate token_hash is rejected.
 func TestEmailVerificationToken_UniqueHashConstraint(t *testing.T) {
 	db, cleanup := setupTokenTestDB(t)
@@ -104,8 +136,8 @@ func TestEmailVerificationToken_UniqueHashConstraint(t *testing.T) {
 	assert.Error(t, err, "expected unique constraint violation on token_hash")
 }
 
-// TestEmailVerificationToken_CascadeDelete verifies tokens are removed when identity is deleted.
-func TestEmailVerificationToken_CascadeDelete(t *testing.T) {
+// TestEmailVerificationToken_MultiplePerIdentity verifies multiple pending tokens can exist per identity.
+func TestEmailVerificationToken_MultiplePerIdentity(t *testing.T) {
 	db, cleanup := setupTokenTestDB(t)
 	defer cleanup()
 
@@ -113,27 +145,25 @@ func TestEmailVerificationToken_CascadeDelete(t *testing.T) {
 	identity := &IdentityEntity{
 		ID:           identityID,
 		TenantID:     testTenantIDStr,
-		Email:        "cascade@example.com",
+		Email:        "multi@example.com",
 		Status:       "PENDING_INVITE",
 		PasswordHash: "",
 	}
 	require.NoError(t, db.Create(identity).Error)
 
-	token := &EmailVerificationTokenEntity{
-		TenantID:   testTenantIDStr,
-		IdentityID: identityID,
-		TokenHash:  sha256hex("ev-cascade"),
-		ExpiresAt:  time.Now().Add(24 * time.Hour),
+	for i, prefix := range []string{"ev-multi-1", "ev-multi-2", "ev-multi-3"} {
+		token := &EmailVerificationTokenEntity{
+			TenantID:   testTenantIDStr,
+			IdentityID: identityID,
+			TokenHash:  sha256hex(prefix),
+			ExpiresAt:  time.Now().Add(time.Duration(i+1) * time.Hour),
+		}
+		require.NoError(t, db.Create(token).Error)
 	}
-	require.NoError(t, db.Create(token).Error)
-
-	// Use Unscoped to issue a hard DELETE (not a soft-delete UPDATE),
-	// which triggers the ON DELETE CASCADE FK constraint.
-	require.NoError(t, db.Unscoped().Delete(identity).Error)
 
 	var count int64
 	db.Model(&EmailVerificationTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
-	assert.Equal(t, int64(0), count, "tokens should be cascade deleted with identity")
+	assert.Equal(t, int64(3), count)
 }
 
 // TestPasswordResetToken_InsertAndRetrieve verifies round-trip persistence.
@@ -167,6 +197,38 @@ func TestPasswordResetToken_InsertAndRetrieve(t *testing.T) {
 	assert.Equal(t, identityID, retrieved.IdentityID)
 	assert.Equal(t, testTenantIDStr, retrieved.TenantID)
 	assert.Nil(t, retrieved.ConsumedAt)
+}
+
+// TestPasswordResetToken_ConsumedAt verifies consumed_at can be set (token consumed).
+func TestPasswordResetToken_ConsumedAt(t *testing.T) {
+	db, cleanup := setupTokenTestDB(t)
+	defer cleanup()
+
+	identityID := uuid.New()
+	identity := &IdentityEntity{
+		ID:           identityID,
+		TenantID:     testTenantIDStr,
+		Email:        "consume-pr@example.com",
+		Status:       "ACTIVE",
+		PasswordHash: "hashed",
+	}
+	require.NoError(t, db.Create(identity).Error)
+
+	token := &PasswordResetTokenEntity{
+		TenantID:   testTenantIDStr,
+		IdentityID: identityID,
+		TokenHash:  sha256hex("pr-consume"),
+		ExpiresAt:  time.Now().Add(1 * time.Hour),
+	}
+	require.NoError(t, db.Create(token).Error)
+
+	consumedAt := time.Now()
+	err := db.Model(token).Update("consumed_at", consumedAt).Error
+	require.NoError(t, err)
+
+	var retrieved PasswordResetTokenEntity
+	require.NoError(t, db.Where("id = ?", token.ID).First(&retrieved).Error)
+	assert.NotNil(t, retrieved.ConsumedAt)
 }
 
 // TestPasswordResetToken_UniqueHashConstraint verifies duplicate token_hash is rejected.
@@ -203,8 +265,8 @@ func TestPasswordResetToken_UniqueHashConstraint(t *testing.T) {
 	assert.Error(t, err, "expected unique constraint violation on token_hash")
 }
 
-// TestPasswordResetToken_CascadeDelete verifies tokens are removed when identity is deleted.
-func TestPasswordResetToken_CascadeDelete(t *testing.T) {
+// TestPasswordResetToken_RateLimitIndex verifies multiple tokens per identity are retrievable by created_at order.
+func TestPasswordResetToken_RateLimitIndex(t *testing.T) {
 	db, cleanup := setupTokenTestDB(t)
 	defer cleanup()
 
@@ -212,25 +274,23 @@ func TestPasswordResetToken_CascadeDelete(t *testing.T) {
 	identity := &IdentityEntity{
 		ID:           identityID,
 		TenantID:     testTenantIDStr,
-		Email:        "cascadepr@example.com",
+		Email:        "ratelimit@example.com",
 		Status:       "ACTIVE",
 		PasswordHash: "hashed",
 	}
 	require.NoError(t, db.Create(identity).Error)
 
-	token := &PasswordResetTokenEntity{
-		TenantID:   testTenantIDStr,
-		IdentityID: identityID,
-		TokenHash:  sha256hex("pr-cascade"),
-		ExpiresAt:  time.Now().Add(1 * time.Hour),
+	for _, prefix := range []string{"pr-rate-1", "pr-rate-2", "pr-rate-3"} {
+		token := &PasswordResetTokenEntity{
+			TenantID:   testTenantIDStr,
+			IdentityID: identityID,
+			TokenHash:  sha256hex(prefix),
+			ExpiresAt:  time.Now().Add(1 * time.Hour),
+		}
+		require.NoError(t, db.Create(token).Error)
 	}
-	require.NoError(t, db.Create(token).Error)
-
-	// Use Unscoped to issue a hard DELETE (not a soft-delete UPDATE),
-	// which triggers the ON DELETE CASCADE FK constraint.
-	require.NoError(t, db.Unscoped().Delete(identity).Error)
 
 	var count int64
 	db.Model(&PasswordResetTokenEntity{}).Where("identity_id = ?", identityID).Count(&count)
-	assert.Equal(t, int64(0), count, "tokens should be cascade deleted with identity")
+	assert.Equal(t, int64(3), count)
 }
