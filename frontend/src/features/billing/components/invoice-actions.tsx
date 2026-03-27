@@ -116,6 +116,14 @@ function ActionDialog({
 }: ActionDialogProps) {
   const [error, setError] = React.useState<string | undefined>()
 
+  const handleOpenChange = React.useCallback(
+    (nextOpen: boolean) => {
+      if (mutation.isPending) return
+      onOpenChange(nextOpen)
+    },
+    [mutation.isPending, onOpenChange],
+  )
+
   React.useEffect(() => {
     if (!open && !mutation.isPending) {
       setError(undefined)
@@ -135,7 +143,7 @@ function ActionDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -152,7 +160,11 @@ function ActionDialog({
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            variant="outline"
+            onClick={() => handleOpenChange(false)}
+            disabled={mutation.isPending}
+          >
             Cancel
           </Button>
           <Button
