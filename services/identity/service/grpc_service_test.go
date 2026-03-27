@@ -161,6 +161,34 @@ func (m *mockRepository) FindInvitationByTokenHash(_ context.Context, tokenHash 
 	return inv, nil
 }
 
+func (m *mockRepository) SaveVerificationToken(_ context.Context, _ *domain.VerificationToken) error {
+	return nil
+}
+
+func (m *mockRepository) FindVerificationTokenByHash(_ context.Context, _ string) (*domain.VerificationToken, error) {
+	return nil, domain.ErrVerificationTokenNotFound
+}
+
+func (m *mockRepository) CountVerificationTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRepository) SavePasswordResetToken(_ context.Context, _ *domain.PasswordResetToken) error {
+	return nil
+}
+
+func (m *mockRepository) FindPasswordResetTokenByHash(_ context.Context, _ string) (*domain.PasswordResetToken, error) {
+	return nil, domain.ErrPasswordResetTokenNotFound
+}
+
+func (m *mockRepository) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRepository) MarkPasswordResetTokensConsumedForIdentity(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 // addIdentity is a test helper to insert an identity directly into the mock.
 func (m *mockRepository) addIdentity(identity *domain.Identity) {
 	m.identities[identity.ID()] = identity

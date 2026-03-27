@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/domain"
@@ -357,6 +358,111 @@ func (r *Repository) SaveRoleAssignments(ctx context.Context, assignments []*dom
 			}
 		}
 		return nil
+	})
+}
+
+// SaveVerificationToken persists a new verification token.
+func (r *Repository) SaveVerificationToken(ctx context.Context, token *domain.VerificationToken) error {
+	entity := toVerificationTokenEntity(token)
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Create(entity).Error
+	})
+}
+
+// FindVerificationTokenByHash retrieves a verification token by its SHA256 hash.
+func (r *Repository) FindVerificationTokenByHash(ctx context.Context, hash string) (*domain.VerificationToken, error) {
+	var token *domain.VerificationToken
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var entity EmailVerificationTokenEntity
+		result := tx.Where("token_hash = ?", hash).First(&entity)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return domain.ErrVerificationTokenNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		token = toVerificationTokenDomain(&entity)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+// CountVerificationTokensInWindow counts unconsumed verification tokens created for
+// the given identity within the specified time window.
+func (r *Repository) CountVerificationTokensInWindow(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error) {
+	var count int
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var c int64
+		result := tx.Model(&EmailVerificationTokenEntity{}).
+			Where("identity_id = ? AND consumed_at IS NULL AND created_at >= ?", identityID, time.Now().Add(-window)).
+			Count(&c)
+		if result.Error != nil {
+			return result.Error
+		}
+		count = int(c)
+		return nil
+	})
+	return count, err
+}
+
+// SavePasswordResetToken persists a new password reset token.
+func (r *Repository) SavePasswordResetToken(ctx context.Context, token *domain.PasswordResetToken) error {
+	entity := toPasswordResetTokenEntity(token)
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Create(entity).Error
+	})
+}
+
+// FindPasswordResetTokenByHash retrieves a password reset token by its SHA256 hash.
+func (r *Repository) FindPasswordResetTokenByHash(ctx context.Context, hash string) (*domain.PasswordResetToken, error) {
+	var token *domain.PasswordResetToken
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var entity PasswordResetTokenEntity
+		result := tx.Where("token_hash = ?", hash).First(&entity)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return domain.ErrPasswordResetTokenNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		token = toPasswordResetTokenDomain(&entity)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+// CountPasswordResetTokensInWindow counts unconsumed password reset tokens created for
+// the given identity within the specified time window.
+func (r *Repository) CountPasswordResetTokensInWindow(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error) {
+	var count int
+	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var c int64
+		result := tx.Model(&PasswordResetTokenEntity{}).
+			Where("identity_id = ? AND consumed_at IS NULL AND created_at >= ?", identityID, time.Now().Add(-window)).
+			Count(&c)
+		if result.Error != nil {
+			return result.Error
+		}
+		count = int(c)
+		return nil
+	})
+	return count, err
+}
+
+// MarkPasswordResetTokensConsumedForIdentity marks all unconsumed password reset tokens
+// for the given identity as consumed.
+func (r *Repository) MarkPasswordResetTokensConsumedForIdentity(ctx context.Context, identityID uuid.UUID) error {
+	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		now := time.Now()
+		return tx.Model(&PasswordResetTokenEntity{}).
+			Where("identity_id = ? AND consumed_at IS NULL", identityID).
+			Update("consumed_at", now).Error
 	})
 }
 

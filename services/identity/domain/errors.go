@@ -22,4 +22,14 @@ var (
 	ErrTenantIDRequired            = errors.New("tenant ID is required")
 	ErrNotPendingVerification      = errors.New("identity is not in PENDING_VERIFICATION status")
 	ErrEmailNotVerified            = errors.New("email address has not been verified")
+
+	// Verification token errors
+	ErrVerificationTokenNotFound        = errors.New("verification token not found")
+	ErrVerificationTokenExpired         = errors.New("verification token has expired")
+	ErrVerificationTokenAlreadyConsumed = errors.New("verification token has already been consumed")
+
+	// Password reset token errors
+	ErrPasswordResetTokenNotFound        = errors.New("password reset token not found")
+	ErrPasswordResetTokenExpired         = errors.New("password reset token has expired")
+	ErrPasswordResetTokenAlreadyConsumed = errors.New("password reset token has already been consumed")
 )
