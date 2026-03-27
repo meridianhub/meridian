@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/domain"
@@ -90,6 +91,34 @@ func (f *fakeRepo) SaveInvitation(_ context.Context, _ *domain.Invitation) error
 
 func (f *fakeRepo) FindInvitationByTokenHash(_ context.Context, _ string) (*domain.Invitation, error) {
 	return nil, errors.New("not found")
+}
+
+func (f *fakeRepo) SaveVerificationToken(_ context.Context, _ *domain.VerificationToken) error {
+	return nil
+}
+
+func (f *fakeRepo) FindVerificationTokenByHash(_ context.Context, _ string) (*domain.VerificationToken, error) {
+	return nil, domain.ErrVerificationTokenNotFound
+}
+
+func (f *fakeRepo) CountVerificationTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeRepo) SavePasswordResetToken(_ context.Context, _ *domain.PasswordResetToken) error {
+	return nil
+}
+
+func (f *fakeRepo) FindPasswordResetTokenByHash(_ context.Context, _ string) (*domain.PasswordResetToken, error) {
+	return nil, domain.ErrPasswordResetTokenNotFound
+}
+
+func (f *fakeRepo) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeRepo) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+	return nil
 }
 
 // --- Tests for DemoUser and loadDemoUsers ---

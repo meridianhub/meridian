@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -56,4 +57,34 @@ type Repository interface {
 	// FindInvitationByTokenHash retrieves an invitation by the SHA256 hash of its token.
 	// Returns ErrInvitationNotFound if no matching invitation exists.
 	FindInvitationByTokenHash(ctx context.Context, tokenHash string) (*Invitation, error)
+
+	// Verification token operations
+
+	// SaveVerificationToken persists a new verification token.
+	SaveVerificationToken(ctx context.Context, token *VerificationToken) error
+
+	// FindVerificationTokenByHash retrieves a verification token by its SHA256 hash.
+	// Returns ErrVerificationTokenNotFound if no matching token exists.
+	FindVerificationTokenByHash(ctx context.Context, hash string) (*VerificationToken, error)
+
+	// CountVerificationTokensInWindow counts unconsumed verification tokens created
+	// for the given identity within the specified time window. Used for rate limiting.
+	CountVerificationTokensInWindow(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
+
+	// Password reset token operations
+
+	// SavePasswordResetToken persists a new password reset token.
+	SavePasswordResetToken(ctx context.Context, token *PasswordResetToken) error
+
+	// FindPasswordResetTokenByHash retrieves a password reset token by its SHA256 hash.
+	// Returns ErrPasswordResetTokenNotFound if no matching token exists.
+	FindPasswordResetTokenByHash(ctx context.Context, hash string) (*PasswordResetToken, error)
+
+	// CountPasswordResetTokensInWindow counts unconsumed password reset tokens created
+	// for the given identity within the specified time window. Used for rate limiting.
+	CountPasswordResetTokensInWindow(ctx context.Context, identityID uuid.UUID, window time.Duration) (int, error)
+
+	// InvalidatePasswordResetTokensForIdentity marks all unconsumed password reset tokens
+	// for the given identity as consumed. Used when a password is successfully reset.
+	InvalidatePasswordResetTokensForIdentity(ctx context.Context, identityID uuid.UUID) error
 }

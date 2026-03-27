@@ -88,6 +88,34 @@ func (m *mockRepo) FindInvitationByTokenHash(_ context.Context, _ string) (*doma
 	return nil, errors.New("not implemented")
 }
 
+func (m *mockRepo) SaveVerificationToken(_ context.Context, _ *domain.VerificationToken) error {
+	return nil
+}
+
+func (m *mockRepo) FindVerificationTokenByHash(_ context.Context, _ string) (*domain.VerificationToken, error) {
+	return nil, domain.ErrVerificationTokenNotFound
+}
+
+func (m *mockRepo) CountVerificationTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRepo) SavePasswordResetToken(_ context.Context, _ *domain.PasswordResetToken) error {
+	return nil
+}
+
+func (m *mockRepo) FindPasswordResetTokenByHash(_ context.Context, _ string) (*domain.PasswordResetToken, error) {
+	return nil, domain.ErrPasswordResetTokenNotFound
+}
+
+func (m *mockRepo) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRepo) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 // --- Helpers ---
 
 const testPassword = "ValidPassword1!"

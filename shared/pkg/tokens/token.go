@@ -16,8 +16,9 @@ var ErrInvalidLength = errors.New("token length must be positive")
 
 // Token length constants for different use cases.
 const (
-	InvitationTokenLength    = 32
-	PasswordResetTokenLength = 32
+	InvitationTokenLength         = 32
+	PasswordResetTokenLength      = 32
+	EmailVerificationTokenLength  = 32
 )
 
 // GenerateToken generates a cryptographically secure random token of the given byte length.
