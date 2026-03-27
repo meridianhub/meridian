@@ -140,7 +140,7 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 	}
 
 	// Build pagination response
-	// Note: TotalCount is set to 0 as counting all matching records would be expensive.
+	// TotalCount is -1 (unknown) as counting all matching records would be expensive.
 	// Clients should paginate using NextPageToken until no more results are returned.
 	paginationResp := &commonv1.PaginationResponse{
 		TotalCount: -1, // Unknown - would require separate COUNT query
