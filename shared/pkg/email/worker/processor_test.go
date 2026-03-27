@@ -175,17 +175,20 @@ func TestProcessBatch_HappyPath(t *testing.T) {
 	assert.Equal(t, float64(1), getMetricValue(t, reg, "meridian_email_outbox_send_duration_seconds"))
 }
 
-func TestProcessBatch_TemplateRenderFailure(t *testing.T) {
+func TestProcessBatch_TemplateRenderFailure_DeadLettersImmediately(t *testing.T) {
 	ctx := context.Background()
+	m, reg := newTestMetrics(t)
 
 	renderer := &mockRenderer{err: errors.New("bad template")}
 	sender := &mockSender{}
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, NewEmailMetrics(m), nil)
 
 	entry := newTestEntry("invoice")
+	entry.Attempts = 0
+	entry.MaxAttempts = 5
 	instr := &OutboxInstruction{Entry: entry}
 
 	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
@@ -193,6 +196,10 @@ func TestProcessBatch_TemplateRenderFailure(t *testing.T) {
 	assert.Equal(t, 0, sender.calls, "sender should not be called on render failure")
 	assert.Equal(t, 1, outbox.markFailedCalls, "should mark as failed")
 	assert.Contains(t, outbox.lastFailedMsg, "template render failed")
+
+	// Template render failures are deterministic - should dead-letter immediately.
+	assert.Equal(t, float64(1), getMetricValue(t, reg, "meridian_email_outbox_dead_letter_total"),
+		"render failure should dead-letter immediately, not retry")
 }
 
 func TestProcessBatch_SendFailure_WithRetry(t *testing.T) {
@@ -410,9 +417,15 @@ func TestProcessBatch_SendErrorMetricsRecorded(t *testing.T) {
 	var foundError bool
 	for _, f := range families {
 		if f.GetName() == "meridian_email_outbox_send_errors_total" {
-			for _, m := range f.GetMetric() {
+			for _, metric := range f.GetMetric() {
 				foundError = true
-				assert.Equal(t, float64(1), m.Counter.GetValue())
+				assert.Equal(t, float64(1), metric.Counter.GetValue())
+				labels := make(map[string]string)
+				for _, lp := range metric.GetLabel() {
+					labels[lp.GetName()] = lp.GetValue()
+				}
+				assert.Equal(t, "invoice", labels["template"])
+				assert.Equal(t, "send_failed", labels["error_type"])
 			}
 		}
 	}

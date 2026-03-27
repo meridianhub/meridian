@@ -83,9 +83,12 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		}
 	}
 
-	// Render the template.
+	// Render the template. Render errors are deterministic (same template+data will
+	// always fail), so we set attempts to max to dead-letter immediately rather than
+	// burning through retries.
 	htmlBody, textBody, err := p.renderer.Render(entry.TemplateName, entry.TemplateData)
 	if err != nil {
+		entry.Attempts = entry.MaxAttempts - 1 // next MarkFailed will dead-letter
 		return p.handleSendFailure(ctx, entry, fmt.Sprintf("template render failed: %v", err))
 	}
 
