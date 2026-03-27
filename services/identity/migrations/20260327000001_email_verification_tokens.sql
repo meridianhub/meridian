@@ -1,7 +1,7 @@
 -- Email verification tokens for self-registration flow
 CREATE TABLE "email_verification_token" (
   "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-  "tenant_id" VARCHAR(255) NOT NULL,
+  "tenant_id" VARCHAR(50) NOT NULL,
   "identity_id" uuid NOT NULL,
   "token_hash" VARCHAR(64) NOT NULL,
   "expires_at" TIMESTAMPTZ NOT NULL,
