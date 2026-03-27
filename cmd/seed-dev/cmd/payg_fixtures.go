@@ -381,11 +381,11 @@ func seedWholesalePrices(ctx context.Context, conn *grpc.ClientConn) error {
 
 // Block tariff rates (ex-VAT for billing, since prepayment balance is net-of-VAT).
 const (
-	elecFirstRate = 0.49381 // 51.85p / 1.05 = 49.381p ex-VAT
-	elecSaverRate = 0.24771 // 26.010p / 1.05 = 24.771p ex-VAT
-	gasFirstRate  = 0.22243 // 23.355p / 1.05 = 22.243p ex-VAT
-	gasSaverRate  = 0.05915 // 6.211p / 1.05 = 5.915p ex-VAT
-	blockThreshold = 2.0    // kWh daily block threshold
+	elecFirstRate  = 0.49381 // 51.85p / 1.05 = 49.381p ex-VAT
+	elecSaverRate  = 0.24771 // 26.010p / 1.05 = 24.771p ex-VAT
+	gasFirstRate   = 0.22243 // 23.355p / 1.05 = 22.243p ex-VAT
+	gasSaverRate   = 0.05915 // 6.211p / 1.05 = 5.915p ex-VAT
+	blockThreshold = 2.0     // kWh daily block threshold
 )
 
 // blockTariffCharge calculates the GBP charge for a given kWh consumption
