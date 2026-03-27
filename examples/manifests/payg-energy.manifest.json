@@ -116,7 +116,7 @@
         "KWH_GAS"
       ],
       "policies": {
-        "validation": "amount > 0",
+        "validation": "amount >= 0",
         "bucketing": "instrument_code + ':' + attributes.settlement_period + ':' + attributes.mpxn"
       }
     },
