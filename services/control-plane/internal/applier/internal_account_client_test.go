@@ -10,7 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -21,9 +23,14 @@ var _ InternalAccountService = (*InternalAccountClient)(nil)
 
 type fakeInternalAccountServer struct {
 	internalaccountv1.UnimplementedInternalAccountServiceServer
+	initiateFn func(context.Context, *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error)
+	retrieveFn func(context.Context, *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error)
 }
 
-func (f *fakeInternalAccountServer) InitiateInternalAccount(_ context.Context, req *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
+func (f *fakeInternalAccountServer) InitiateInternalAccount(ctx context.Context, req *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
+	if f.initiateFn != nil {
+		return f.initiateFn(ctx, req)
+	}
 	return &internalaccountv1.InitiateInternalAccountResponse{
 		AccountId: "ia-uuid-1",
 		Facility: &internalaccountv1.InternalAccountFacility{
@@ -33,14 +40,27 @@ func (f *fakeInternalAccountServer) InitiateInternalAccount(_ context.Context, r
 	}, nil
 }
 
+func (f *fakeInternalAccountServer) RetrieveInternalAccount(ctx context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+	if f.retrieveFn != nil {
+		return f.retrieveFn(ctx, req)
+	}
+	return &internalaccountv1.RetrieveInternalAccountResponse{
+		Facility: &internalaccountv1.InternalAccountFacility{
+			AccountId:     "existing-ia-uuid",
+			AccountCode:   req.AccountId, // The service accepts code as account_id
+			AccountStatus: internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+		},
+	}, nil
+}
+
 // ─── Test setup ────────────────────────────────────────────────────────────
 
-func newInternalAccountTestServer(t *testing.T) *grpc.ClientConn {
+func newInternalAccountTestServerWith(t *testing.T, fakeSrv *fakeInternalAccountServer) *grpc.ClientConn {
 	t.Helper()
 
 	lis := bufconn.Listen(1024 * 1024)
 	srv := grpc.NewServer()
-	internalaccountv1.RegisterInternalAccountServiceServer(srv, &fakeInternalAccountServer{})
+	internalaccountv1.RegisterInternalAccountServiceServer(srv, fakeSrv)
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.GracefulStop)
@@ -53,6 +73,10 @@ func newInternalAccountTestServer(t *testing.T) *grpc.ClientConn {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	return conn
+}
+
+func newInternalAccountTestServer(t *testing.T) *grpc.ClientConn {
+	return newInternalAccountTestServerWith(t, &fakeInternalAccountServer{})
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -90,4 +114,63 @@ func TestInternalAccountClient_InitiateAccount_MinimalParams(t *testing.T) {
 	m := result.(map[string]any)
 	assert.Equal(t, "ia-uuid-1", m["account_id"])
 	assert.Equal(t, "MINIMAL", m["account_code"])
+}
+
+// ─── Idempotency tests ──────────────────────────────────────────────────────
+
+func TestInternalAccountClient_InitiateAccount_AlreadyExists_TreatedAsSuccess(t *testing.T) {
+	srv := &fakeInternalAccountServer{
+		initiateFn: func(_ context.Context, _ *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "account code already exists: CLEARING_GBP")
+		},
+	}
+	conn := newInternalAccountTestServerWith(t, srv)
+	client := NewInternalAccountClient(conn)
+
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	result, err := client.InitiateAccount(ctx, map[string]any{
+		"account_code": "CLEARING_GBP",
+	})
+	require.NoError(t, err, "AlreadyExists should be treated as idempotent success")
+	m := result.(map[string]any)
+	assert.Equal(t, "existing-ia-uuid", m["account_id"])
+	assert.Equal(t, "CLEARING_GBP", m["account_code"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestInternalAccountClient_InitiateAccount_AlreadyExists_LookupFails(t *testing.T) {
+	srv := &fakeInternalAccountServer{
+		initiateFn: func(_ context.Context, _ *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "account code already exists")
+		},
+		retrieveFn: func(_ context.Context, _ *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+			return nil, status.Error(codes.NotFound, "account not found")
+		},
+	}
+	conn := newInternalAccountTestServerWith(t, srv)
+	client := NewInternalAccountClient(conn)
+
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	_, err := client.InitiateAccount(ctx, map[string]any{
+		"account_code": "MISSING",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup failed")
+}
+
+func TestInternalAccountClient_InitiateAccount_OtherError_Propagated(t *testing.T) {
+	srv := &fakeInternalAccountServer{
+		initiateFn: func(_ context.Context, _ *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
+			return nil, status.Error(codes.Internal, "database unavailable")
+		},
+	}
+	conn := newInternalAccountTestServerWith(t, srv)
+	client := NewInternalAccountClient(conn)
+
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	_, err := client.InitiateAccount(ctx, map[string]any{
+		"account_code": "WILL_FAIL",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database unavailable")
 }
