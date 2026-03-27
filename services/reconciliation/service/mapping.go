@@ -282,6 +282,52 @@ func toProtoVarianceDetail(v *domain.Variance) *reconciliationv1.VarianceDetail 
 	return detail
 }
 
+// toProtoAssertionDetail converts a domain BalanceAssertion to proto.
+func toProtoAssertionDetail(a *domain.BalanceAssertion) *reconciliationv1.BalanceAssertionDetail {
+	if a == nil {
+		return nil
+	}
+
+	detail := &reconciliationv1.BalanceAssertionDetail{
+		AssertionId:     a.AssertionID.String(),
+		AccountId:       a.AccountID,
+		InstrumentCode:  a.InstrumentCode,
+		Expression:      a.Expression,
+		ExpectedBalance: a.ExpectedBalance.String(),
+		ActualBalance:   a.ActualBalance.String(),
+		Status:          toProtoAssertionStatus(a.Status),
+		FailureReason:   a.FailureReason,
+		OverrideReason:  a.OverrideReason,
+		CreatedAt:       timestamppb.New(a.CreatedAt),
+	}
+
+	if a.RunID != nil {
+		detail.RunId = a.RunID.String()
+	}
+
+	if !a.AssertedAt.IsZero() {
+		detail.AssertedAt = timestamppb.New(a.AssertedAt)
+	}
+
+	return detail
+}
+
+// toProtoAssertionStatus converts domain AssertionStatus to proto enum.
+func toProtoAssertionStatus(s domain.AssertionStatus) reconciliationv1.AssertionStatus {
+	switch s {
+	case domain.AssertionStatusPending:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_PENDING
+	case domain.AssertionStatusPassed:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_PASSED
+	case domain.AssertionStatusFailed:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_FAILED
+	case domain.AssertionStatusOverride:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_OVERRIDE
+	default:
+		return reconciliationv1.AssertionStatus_ASSERTION_STATUS_UNSPECIFIED
+	}
+}
+
 // encodeCursor encodes an offset as a base64 page token.
 func encodeCursor(offset int) string {
 	return base64.StdEncoding.EncodeToString([]byte(strconv.Itoa(offset)))
