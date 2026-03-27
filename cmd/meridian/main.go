@@ -297,6 +297,11 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		extraGWOpts = append(extraGWOpts, webhookOpt)
 	}
 
+	// Wire admin identity management handler (requires admin role).
+	if adminOpt := wireAdminHandler(conns.gormDB("identity"), logger); adminOpt != nil {
+		extraGWOpts = append(extraGWOpts, adminOpt)
+	}
+
 	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...)
 	if err != nil {
 		return fmt.Errorf("gateway init: %w", err)
