@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Welcome to {{.TenantName}}</title>
+<style>
+  body { margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, sans-serif; }
+  .wrapper { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 4px; overflow: hidden; }
+  .header { background-color: #0f172a; padding: 24px 32px; }
+  .header h1 { margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.05em; }
+  .header p { margin: 4px 0 0; color: #94a3b8; font-size: 14px; }
+  .body { padding: 32px; }
+  .body p { color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px; }
+  .cta { text-align: center; margin: 32px 0; }
+  .cta a { display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none;
+            padding: 14px 32px; border-radius: 4px; font-size: 15px; font-weight: 600; }
+  .secondary-link { text-align: center; margin: 0 0 24px; }
+  .secondary-link a { color: #2563eb; font-size: 14px; }
+  .footer { background-color: #f8fafc; padding: 24px 32px; text-align: center; }
+  .footer p { margin: 0; color: #94a3b8; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <h1>{{.TenantName}}</h1>
+    <p>Welcome</p>
+  </div>
+  <div class="body">
+    <p>Your email address has been verified and your account is now active.</p>
+    <p>You are ready to get started with {{.TenantName}}.</p>
+    <div class="cta">
+      <a href="{{.LoginURL}}">Sign In</a>
+    </div>
+    <div class="secondary-link">
+      <a href="{{.GettingStartedURL}}">View Getting Started Guide</a>
+    </div>
+  </div>
+  <div class="footer">
+    <p>&copy; Meridian &mdash; The Operating System for the Real-World Economy</p>
+  </div>
+</div>
+</body>
+</html>

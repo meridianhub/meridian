@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your account has been locked</title>
+<style>
+  body { margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, sans-serif; }
+  .wrapper { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 4px; overflow: hidden; }
+  .header { background-color: #7f1d1d; padding: 24px 32px; }
+  .header h1 { margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.05em; }
+  .header p { margin: 4px 0 0; color: rgba(255,255,255,0.7); font-size: 14px; }
+  .alert-bar { background-color: #fee2e2; padding: 16px 32px; text-align: center; }
+  .alert-bar p { margin: 0; color: #991b1b; font-size: 16px; font-weight: 700; }
+  .body { padding: 32px; }
+  .body p { color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px; }
+  .detail-box { background-color: #fff7ed; border: 1px solid #fed7aa; border-radius: 4px;
+                padding: 20px 24px; margin: 24px 0; }
+  .detail-box p { margin: 6px 0; font-size: 14px; color: #78350f; }
+  .detail-box strong { color: #431407; }
+  .footer { background-color: #f8fafc; padding: 24px 32px; text-align: center; }
+  .footer p { margin: 0; color: #94a3b8; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <h1>{{.TenantName}}</h1>
+    <p>Security Notice</p>
+  </div>
+  <div class="alert-bar">
+    <p>Your account has been locked</p>
+  </div>
+  <div class="body">
+    <p>Your account has been locked due to 5 consecutive failed sign-in attempts.</p>
+    <div class="detail-box">
+      <p><strong>Locked at:</strong> {{.LockoutTime}}</p>
+    </div>
+    <p>If this was you, please contact our support team to unlock your account:</p>
+    <p><a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a></p>
+    <p>If this was not you, your account may be under attack. Contact support immediately at <a href="mailto:{{.SupportEmail}}">{{.SupportEmail}}</a> so we can help secure your account.</p>
+  </div>
+  <div class="footer">
+    <p>&copy; Meridian &mdash; The Operating System for the Real-World Economy</p>
+  </div>
+</div>
+</body>
+</html>
