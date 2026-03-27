@@ -195,8 +195,13 @@ func (s *BillingService) ResendInvoiceEmail(ctx context.Context, req *billingpb.
 		return nil, status.Error(codes.FailedPrecondition, "cannot resend email for voided invoice")
 	}
 
-	idempKey := req.GetIdempotencyKey().GetKey()
-	if idempKey == "" {
+	// Always namespace under the invoice prefix so VoidInvoice's cancel pattern
+	// and ListInvoiceEmails can find all emails for this invoice.
+	callerKey := req.GetIdempotencyKey().GetKey()
+	var idempKey string
+	if callerKey != "" {
+		idempKey = fmt.Sprintf("invoice-%s-%s", invoiceID, callerKey)
+	} else {
 		idempKey = fmt.Sprintf("invoice-%s-resend-%s", invoiceID, uuid.New().String())
 	}
 
