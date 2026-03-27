@@ -36,10 +36,6 @@ var knownOversizedFiles = map[string]bool{
 	"services/party/adapters/persistence/repository.go":                     true,
 	"services/position-keeping/adapters/persistence/position_repository.go": true,
 	"services/reconciliation/service/server.go":                             true,
-	"services/reference-data/handler/account_type_handler.go":               true,
-	"services/reference-data/registry/postgres_registry.go":                 true,
-	"services/reference-data/saga/grpc_handler.go":                          true,
-	"services/reference-data/saga/postgres_registry.go":                     true,
 	"shared/pkg/saga/schema/schema.go":                                      true,
 }
 
