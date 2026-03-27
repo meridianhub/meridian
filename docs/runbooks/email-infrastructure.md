@@ -110,7 +110,9 @@ WHERE id = '<uuid>';
 
 ### Circuit breaker open
 
-The email processor includes a circuit breaker that opens after repeated send failures. When open, all sends are skipped until the half-open timeout expires.
+The email processor includes a circuit breaker that opens after repeated
+send failures. When open, all sends are skipped until the half-open
+timeout expires.
 
 Monitor via Prometheus metric:
 `meridian_email_outbox_circuit_breaker_state` (0=closed, 1=half-open, 2=open).
