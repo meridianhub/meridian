@@ -6,6 +6,8 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // InternalAccountClient wraps the internal-account gRPC client to implement
@@ -38,6 +40,14 @@ func (c *InternalAccountClient) InitiateAccount(ctx *saga.StarlarkContext, param
 	callCtx := prepareCallContext(ctx)
 	resp, err := c.client.InitiateInternalAccount(callCtx, req)
 	if err != nil {
+		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios
+		// where the account was already created by a previous apply.
+		if status.Code(err) == codes.AlreadyExists {
+			return map[string]any{
+				"account_code": req.AccountCode,
+				"status":       "ACCOUNT_STATUS_ACTIVE",
+			}, nil
+		}
 		return nil, fmt.Errorf("initiate internal account: %w", err)
 	}
 

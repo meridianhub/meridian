@@ -10,7 +10,9 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // prepareCallContext enriches the gRPC call context with saga metadata:
@@ -236,6 +238,11 @@ func (c *ReferenceDataClient) RegisterSagaDefinition(ctx *saga.StarlarkContext, 
 	callCtx := prepareCallContext(ctx)
 	draftResp, err := c.sagas.CreateSagaDraft(callCtx, draftReq)
 	if err != nil {
+		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios.
+		// Look up the existing active saga by name to return its details.
+		if status.Code(err) == codes.AlreadyExists {
+			return c.handleSagaAlreadyExists(callCtx, draftReq.Name)
+		}
 		return nil, fmt.Errorf("create saga draft: %w", err)
 	}
 
@@ -254,6 +261,28 @@ func (c *ReferenceDataClient) RegisterSagaDefinition(ctx *saga.StarlarkContext, 
 		"saga_name": activeSaga.GetName(),
 		"saga_id":   activeSaga.GetId(),
 		"status":    activeSaga.GetStatus().String(),
+	}, nil
+}
+
+// handleSagaAlreadyExists resolves the existing active saga by name so that
+// downstream saga steps receive the saga_id. Falls back to a best-effort
+// result without saga_id if the lookup fails.
+func (c *ReferenceDataClient) handleSagaAlreadyExists(ctx context.Context, name string) (any, error) {
+	resp, err := c.sagas.GetActiveSaga(ctx, &sagav1.GetActiveSagaRequest{
+		Name: name,
+	})
+	if err == nil {
+		s := resp.GetSaga()
+		return map[string]any{
+			"saga_name": s.GetName(),
+			"saga_id":   s.GetId(),
+			"status":    s.GetStatus().String(),
+		}, nil
+	}
+	// Best-effort fallback when lookup fails
+	return map[string]any{
+		"saga_name": name,
+		"status":    "ACTIVE",
 	}, nil
 }
 

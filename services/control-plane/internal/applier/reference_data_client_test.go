@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -96,9 +98,14 @@ func (f *fakeAccountTypeServer) DeprecateAccountType(_ context.Context, req *ref
 
 type fakeSagaRegistryServer struct {
 	sagav1.UnimplementedSagaRegistryServiceServer
+	createDraftFn  func(context.Context, *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error)
+	getActiveFn    func(context.Context, *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error)
 }
 
-func (f *fakeSagaRegistryServer) CreateSagaDraft(_ context.Context, req *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
+func (f *fakeSagaRegistryServer) CreateSagaDraft(ctx context.Context, req *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
+	if f.createDraftFn != nil {
+		return f.createDraftFn(ctx, req)
+	}
 	return &sagav1.CreateSagaDraftResponse{
 		Saga: &sagav1.SagaDefinition{
 			Id:     "saga-uuid-1",
@@ -118,16 +125,33 @@ func (f *fakeSagaRegistryServer) ActivateSaga(_ context.Context, req *sagav1.Act
 	}, nil
 }
 
+func (f *fakeSagaRegistryServer) GetActiveSaga(ctx context.Context, req *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+	if f.getActiveFn != nil {
+		return f.getActiveFn(ctx, req)
+	}
+	return &sagav1.GetActiveSagaResponse{
+		Saga: &sagav1.SagaDefinition{
+			Id:     "existing-saga-uuid",
+			Name:   req.Name,
+			Status: sagav1.SagaStatus_SAGA_STATUS_ACTIVE,
+		},
+	}, nil
+}
+
 // ─── Test setup ────────────────────────────────────────────────────────────
 
 func newRefDataTestServer(t *testing.T) *grpc.ClientConn {
+	return newRefDataTestServerWith(t, &fakeSagaRegistryServer{})
+}
+
+func newRefDataTestServerWith(t *testing.T, sagaSrv *fakeSagaRegistryServer) *grpc.ClientConn {
 	t.Helper()
 
 	lis := bufconn.Listen(1024 * 1024)
 	srv := grpc.NewServer()
 	referencedatav1.RegisterReferenceDataServiceServer(srv, &fakeReferenceDataServer{})
 	referencedatav1.RegisterAccountTypeRegistryServiceServer(srv, &fakeAccountTypeServer{})
-	sagav1.RegisterSagaRegistryServiceServer(srv, &fakeSagaRegistryServer{})
+	sagav1.RegisterSagaRegistryServiceServer(srv, sagaSrv)
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.GracefulStop)
@@ -313,4 +337,43 @@ func TestParseNormalBalance(t *testing.T) {
 			assert.Equal(t, tt.expected, parseNormalBalance(tt.input))
 		})
 	}
+}
+
+// ─── Idempotency tests ──────────────────────────────────────────────────────
+
+func TestReferenceDataClient_RegisterSagaDefinition_AlreadyExists_TreatedAsSuccess(t *testing.T) {
+	sagaSrv := &fakeSagaRegistryServer{
+		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "saga already exists: test-saga")
+		},
+	}
+	conn := newRefDataTestServerWith(t, sagaSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterSagaDefinition(testStarlarkCtx(), map[string]any{
+		"saga_name":    "test-saga",
+		"display_name": "Test Saga",
+		"script":       "def execute(): pass",
+	})
+	require.NoError(t, err, "AlreadyExists should be treated as idempotent success")
+	m := result.(map[string]any)
+	assert.Equal(t, "existing-saga-uuid", m["saga_id"])
+	assert.Equal(t, "test-saga", m["saga_name"])
+	assert.Contains(t, m["status"].(string), "ACTIVE")
+}
+
+func TestReferenceDataClient_RegisterSagaDefinition_OtherError_Propagated(t *testing.T) {
+	sagaSrv := &fakeSagaRegistryServer{
+		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
+			return nil, status.Error(codes.Internal, "database unavailable")
+		},
+	}
+	conn := newRefDataTestServerWith(t, sagaSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	_, err := client.RegisterSagaDefinition(testStarlarkCtx(), map[string]any{
+		"saga_name": "test-saga",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create saga draft")
 }
