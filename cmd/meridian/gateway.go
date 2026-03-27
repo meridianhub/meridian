@@ -260,6 +260,19 @@ func wireResendWebhook(paymentOrderDB *gorm.DB, logger *slog.Logger) gateway.Ser
 	return gateway.WithResendWebhookHandler(handler)
 }
 
+// wireAdminHandler creates the admin identity management handler and returns
+// a ServerOption to install it. Returns nil on error (graceful degradation).
+func wireAdminHandler(identityDB *gorm.DB, logger *slog.Logger) gateway.ServerOption {
+	identityRepo := identitypersistence.NewRepository(identityDB)
+	handler, err := gateway.NewAdminHandler(identityRepo, logger)
+	if err != nil {
+		logger.Warn("admin handler disabled", "error", err)
+		return nil
+	}
+	logger.Info("admin handler initialized")
+	return gateway.WithAdminHandler(handler)
+}
+
 // wireRegistration creates the self-service registration handler and returns
 // a ServerOption to install it. Returns nil on error (graceful degradation).
 func wireRegistration(identityDB, tenantDB *gorm.DB, rawConn *grpc.ClientConn, baseDomain string, logger *slog.Logger) gateway.ServerOption {
