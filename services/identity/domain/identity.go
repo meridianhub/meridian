@@ -13,11 +13,11 @@ type IdentityStatus string
 
 // Identity status constants
 const (
-	IdentityStatusPendingInvite        IdentityStatus = "PENDING_INVITE"
-	IdentityStatusPendingVerification  IdentityStatus = "PENDING_VERIFICATION"
-	IdentityStatusActive               IdentityStatus = "ACTIVE"
-	IdentityStatusSuspended            IdentityStatus = "SUSPENDED"
-	IdentityStatusLocked               IdentityStatus = "LOCKED"
+	IdentityStatusPendingInvite       IdentityStatus = "PENDING_INVITE"
+	IdentityStatusPendingVerification IdentityStatus = "PENDING_VERIFICATION"
+	IdentityStatusActive              IdentityStatus = "ACTIVE"
+	IdentityStatusSuspended           IdentityStatus = "SUSPENDED"
+	IdentityStatusLocked              IdentityStatus = "LOCKED"
 )
 
 // maxFailedAttempts is the number of consecutive failed login attempts before lockout.
@@ -215,11 +215,10 @@ func (i *Identity) Activate() error {
 		i.updatedAt = time.Now()
 		i.version++
 		return nil
-	case IdentityStatusLocked:
-		return ErrInvalidStatusTransition
-	default:
+	case IdentityStatusLocked, IdentityStatusPendingVerification:
 		return ErrInvalidStatusTransition
 	}
+	return ErrInvalidStatusTransition
 }
 
 // Suspend transitions the identity to SUSPENDED status.
@@ -231,11 +230,10 @@ func (i *Identity) Suspend() error {
 		i.updatedAt = time.Now()
 		i.version++
 		return nil
-	case IdentityStatusPendingInvite, IdentityStatusSuspended, IdentityStatusLocked:
-		return ErrInvalidStatusTransition
-	default:
+	case IdentityStatusPendingInvite, IdentityStatusPendingVerification, IdentityStatusSuspended, IdentityStatusLocked:
 		return ErrInvalidStatusTransition
 	}
+	return ErrInvalidStatusTransition
 }
 
 // Lock transitions the identity to LOCKED status.
@@ -247,11 +245,10 @@ func (i *Identity) Lock() error {
 		i.updatedAt = time.Now()
 		i.version++
 		return nil
-	case IdentityStatusPendingInvite, IdentityStatusLocked:
-		return ErrInvalidStatusTransition
-	default:
+	case IdentityStatusPendingInvite, IdentityStatusPendingVerification, IdentityStatusLocked:
 		return ErrInvalidStatusTransition
 	}
+	return ErrInvalidStatusTransition
 }
 
 // Unlock transitions the identity from LOCKED back to ACTIVE.
@@ -291,8 +288,6 @@ func (i *Identity) RecordLoginAttempt(success bool) error {
 		return ErrInvalidStatusTransition
 	case IdentityStatusActive:
 		// valid — proceed below
-	default:
-		return ErrInvalidStatusTransition
 	}
 
 	if success {
