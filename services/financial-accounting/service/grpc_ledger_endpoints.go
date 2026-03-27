@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -10,7 +9,6 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
-	"github.com/meridianhub/meridian/shared/pkg/refdata"
 )
 
 // ListFinancialBookingLogs lists booking logs with optional filtering and pagination.
@@ -142,71 +140,10 @@ func (s *FinancialAccountingService) ListLedgerPostings(
 		return nil, status.Errorf(codes.InvalidArgument, "page_size must be between 1 and 1000")
 	}
 
-	// Build repository query parameters
-	params := persistence.ListPostingsParams{
-		PageSize:  int(pageSize),
-		PageToken: pageToken,
-	}
-
-	// Apply booking log ID filter if provided
-	if req.FinancialBookingLogId != "" {
-		bookingLogID, err := parseUUID(req.FinancialBookingLogId)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid financial_booking_log_id: %v", err)
-		}
-		params.BookingLogID = &bookingLogID
-	}
-
-	// Apply account ID filter - account_ids takes precedence over account_id
-	if len(req.AccountIds) > 0 {
-		if len(req.AccountIds) > 100 {
-			return nil, status.Error(codes.InvalidArgument, "account_ids must not exceed 100 items")
-		}
-		params.AccountIDs = req.AccountIds
-	} else if req.AccountId != "" {
-		params.AccountID = req.AccountId
-	}
-
-	// Apply posting direction filter if provided
-	if req.PostingDirection != commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED {
-		params.PostingDirection = fromProtoPostingDirection(req.PostingDirection).String()
-	}
-
-	// Apply value date range filters if provided
-	if req.ValueDateFrom != nil {
-		valueDateFrom := req.ValueDateFrom.AsTime()
-		params.ValueDateFrom = &valueDateFrom
-	}
-	if req.ValueDateTo != nil {
-		valueDateTo := req.ValueDateTo.AsTime()
-		params.ValueDateTo = &valueDateTo
-	}
-
-	// Validate date range if both dates provided
-	if req.ValueDateFrom != nil && req.ValueDateTo != nil {
-		from := req.ValueDateFrom.AsTime()
-		to := req.ValueDateTo.AsTime()
-		if from.After(to) {
-			return nil, status.Error(codes.InvalidArgument, "value_date_from must be before or equal to value_date_to")
-		}
-	}
-
-	// Apply instrument code filter if provided (field is named "currency" for backwards compatibility)
-	if req.Currency != "" {
-		if s.instrumentResolver != nil {
-			if _, err := s.instrumentResolver.Resolve(ctx, req.Currency); err != nil {
-				if errors.Is(err, refdata.ErrUnknownInstrument) {
-					return nil, status.Errorf(codes.InvalidArgument, "unknown instrument code: %s", req.Currency)
-				}
-				return nil, status.Errorf(codes.Unavailable, "instrument lookup failed for %s, please retry", req.Currency)
-			}
-		}
-		params.Currency = req.Currency
-	}
-
-	// Apply status filter if provided
-	if req.Status != commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
-		params.Status = fromProtoTransactionStatus(req.Status).String()
+	// Build and validate repository query parameters
+	params, err := s.buildListPostingsParams(ctx, req, int(pageSize), pageToken)
+	if err != nil {
+		return nil, err
 	}
 
 	// Execute repository query
