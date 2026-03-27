@@ -24,6 +24,7 @@ import {
   Boxes,
   ChevronDown,
   ChevronRight,
+  Receipt,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTenantFeatures } from '@/hooks/use-tenant-features'
@@ -102,6 +103,7 @@ const TENANT_NAV_GROUPS: NavGroup[] = [
       { label: 'Accounts', href: '/accounts', icon: Wallet, feature: 'accounts' },
       { label: 'Internal Accounts', href: '/internal-accounts', icon: Building, feature: 'internal-accounts' },
       { label: 'Payments', href: '/payments', icon: ArrowLeftRight, feature: 'payments' },
+      { label: 'Billing', href: '/billing', icon: Receipt, feature: 'billing' },
       { label: 'Transactions', href: '/transactions', icon: Activity },
       { label: 'Positions', href: '/positions', icon: TrendingUp, feature: 'positions' },
       { label: 'Ledger', href: '/ledger', icon: BookOpen, feature: 'ledger' },

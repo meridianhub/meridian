@@ -6,6 +6,7 @@ export const ALL_FEATURES = [
   "dashboard",
   "accounts",
   "payments",
+  "billing",
   "ledger",
   "positions",
   "reconciliation",

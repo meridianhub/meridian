@@ -72,6 +72,16 @@ const TransactionsPage = lazy(() =>
 const UsersListPage = lazy(() =>
   import('@/features/identity/pages/users-list-page').then((m) => ({ default: m.UsersListPage })),
 )
+const BillingRunsPage = lazy(() =>
+  import('@/features/billing/pages/index').then((m) => ({ default: m.BillingRunsPage })),
+)
+const InvoicesPage = lazy(() =>
+  import('@/features/billing/pages/invoices').then((m) => ({ default: m.InvoicesPage })),
+)
+const InvoiceDetailPage = lazy(() =>
+  import('@/features/billing/pages/invoice-detail').then((m) => ({ default: m.InvoiceDetailPage })),
+)
+
 const CookbookPage = lazy(() =>
   import('@/features/cookbook/pages/index').then((m) => ({ default: m.CookbookPage })),
 )
@@ -184,6 +194,9 @@ function AppShellLayout() {
         <Route path="/internal-accounts/:accountId" element={<FeatureGuard feature="internal-accounts">{guarded(<InternalAccountDetailPage />)}</FeatureGuard>} />
         <Route path="/payments" element={<FeatureGuard feature="payments"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PaymentsPage />)}</Suspense></FeatureGuard>} />
         <Route path="/payments/:paymentOrderId" element={<FeatureGuard feature="payments">{guarded(<PaymentDetailPage />)}</FeatureGuard>} />
+        <Route path="/billing" element={<FeatureGuard feature="billing"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<BillingRunsPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/billing/invoices" element={<FeatureGuard feature="billing"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<InvoicesPage />)}</Suspense></FeatureGuard>} />
+        <Route path="/billing/invoices/:invoiceId" element={<FeatureGuard feature="billing"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<InvoiceDetailPage />)}</Suspense></FeatureGuard>} />
         <Route path="/transactions" element={<Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<TransactionsPage />)}</Suspense>} />
         <Route path="/positions" element={<FeatureGuard feature="positions"><Suspense fallback={<div className="h-96 animate-pulse rounded bg-muted" />}>{guarded(<PositionsPage />)}</Suspense></FeatureGuard>} />
         <Route path="/positions/:logId" element={<FeatureGuard feature="positions">{guarded(<PositionDetailPage />)}</FeatureGuard>} />
