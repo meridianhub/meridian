@@ -121,10 +121,10 @@ func buildBookingLogControlledEvent(
 
 // controlTransactionResult holds the outputs from the control booking log transaction.
 type controlTransactionResult struct {
-	PreviousStatus  domain.TransactionStatus
-	NewStatus       domain.TransactionStatus
-	ControlledAt    time.Time
-	UpdatedBooking  *domain.FinancialBookingLog
+	PreviousStatus domain.TransactionStatus
+	NewStatus      domain.TransactionStatus
+	ControlledAt   time.Time
+	UpdatedBooking *domain.FinancialBookingLog
 }
 
 // reconstructBookingLogFromEntity creates a domain FinancialBookingLog from a persistence entity.

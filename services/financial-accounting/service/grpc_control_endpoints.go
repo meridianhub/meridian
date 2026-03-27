@@ -177,7 +177,6 @@ func (s *FinancialAccountingService) executeControlTransaction(
 		)
 		return s.publishControlEventsInTx(ctx, tx, controlEvent, bookingLogID, correlationID)
 	})
-
 	if err != nil {
 		return nil, err
 	}
