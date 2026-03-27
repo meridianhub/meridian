@@ -1,0 +1,624 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "name": "PAYG Energy Billing",
+    "industry": "energy",
+    "description": "Prepayment energy billing with no-standing-charge block tariff, emergency credit, debt recovery waterfall, and DCC smart meter integration. Two-tier pricing (First Rate / Saver Rate with daily 2kWh threshold), VAT recognition at top-up (HMRC Reg 86), and MHHS-ready half-hourly consumption settlement."
+  },
+  "instruments": [
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "type": "INSTRUMENT_TYPE_FIAT",
+      "dimensions": {
+        "unit": "GBP",
+        "precision": 2
+      }
+    },
+    {
+      "code": "KWH_ELEC",
+      "name": "Kilowatt Hour (Electricity)",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "kWh",
+        "precision": 3
+      }
+    },
+    {
+      "code": "KWH_GAS",
+      "name": "Kilowatt Hour (Gas)",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "kWh",
+        "precision": 3
+      }
+    }
+  ],
+  "accountTypes": [
+    {
+      "code": "PREPAYMENT_LIABILITY",
+      "name": "Customer Prepayment Liability",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.fuel_type"
+      }
+    },
+    {
+      "code": "EMERGENCY_CREDIT",
+      "name": "Emergency Credit Receivable",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "amount >= 0",
+        "bucketing": "attributes.fuel_type"
+      }
+    },
+    {
+      "code": "POWER_UP_RECEIVABLE",
+      "name": "POWER UP (ASC) Receivable",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "DEBT_RECOVERY",
+      "name": "Debt Recovery Receivable",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "amount >= 0",
+        "bucketing": ""
+      }
+    },
+    {
+      "code": "REVENUE_ENERGY",
+      "name": "Energy Revenue",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.fuel_type + ':' + attributes.rate_tier + ':' + attributes.settlement_period"
+      }
+    },
+    {
+      "code": "VAT_OUTPUT",
+      "name": "VAT Output Tax",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.tax_period"
+      }
+    },
+    {
+      "code": "CONSUMPTION_METERED",
+      "name": "Metered Consumption",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "KWH_ELEC",
+        "KWH_GAS"
+      ],
+      "policies": {
+        "validation": "amount >= 0",
+        "bucketing": "instrument_code + ':' + attributes.settlement_period + ':' + attributes.mpxn"
+      }
+    },
+    {
+      "code": "ENERGY_SUPPLY_POOL",
+      "name": "Energy Supply Pool",
+      "normalBalance": "NORMAL_BALANCE_CREDIT",
+      "allowedInstruments": [
+        "KWH_ELEC",
+        "KWH_GAS"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "instrument_code + ':' + attributes.settlement_period + ':' + attributes.gsp_group"
+      }
+    },
+    {
+      "code": "WHOLESALE_COST",
+      "name": "Wholesale Energy Cost",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.fuel_type + ':' + attributes.settlement_period"
+      }
+    },
+    {
+      "code": "WHD_OBLIGATION",
+      "name": "Warm Home Discount Obligation",
+      "normalBalance": "NORMAL_BALANCE_DEBIT",
+      "allowedInstruments": [
+        "GBP"
+      ],
+      "policies": {
+        "validation": "",
+        "bucketing": "attributes.scheme_year"
+      }
+    }
+  ],
+  "valuationRules": [
+    {
+      "fromInstrument": "KWH_ELEC",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "PAYG_ELEC_FIRST_RATE"
+    },
+    {
+      "fromInstrument": "KWH_ELEC",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "PAYG_ELEC_SAVER_RATE"
+    },
+    {
+      "fromInstrument": "KWH_GAS",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "PAYG_GAS_FIRST_RATE"
+    },
+    {
+      "fromInstrument": "KWH_GAS",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "PAYG_GAS_SAVER_RATE"
+    },
+    {
+      "fromInstrument": "KWH_ELEC",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "WHOLESALE_ELEC_GBP_KWH"
+    },
+    {
+      "fromInstrument": "KWH_GAS",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "WHOLESALE_GAS_GBP_KWH"
+    }
+  ],
+  "sagas": [
+    {
+      "name": "topup_waterfall",
+      "trigger": "scheduled:payg_topup",
+      "script": "output = {\"status\": \"STUB\"}"
+    },
+    {
+      "name": "consumption_block_tariff",
+      "trigger": "event:position-keeping.transaction-captured.v1",
+      "filter": "(event.instrument_code == 'KWH_ELEC' || event.instrument_code == 'KWH_GAS') && event.direction == 'DEBIT'",
+      "script": "output = {\"status\": \"STUB\"}"
+    },
+    {
+      "name": "emergency_credit_activate",
+      "trigger": "scheduled:payg_emergency_credit",
+      "script": "output = {\"status\": \"STUB\"}"
+    },
+    {
+      "name": "whd_credit_apply",
+      "trigger": "scheduled:payg_whd_credit",
+      "script": "output = {\"status\": \"STUB\"}"
+    }
+  ],
+  "seedData": {
+    "tariff_rates_oct_2025": {
+      "electricity": {
+        "first_rate_pence_per_kwh": "51.85",
+        "saver_rate_pence_per_kwh": "26.010",
+        "daily_threshold_kwh": "2.0",
+        "vat_rate": "0.05"
+      },
+      "gas": {
+        "first_rate_pence_per_kwh": "23.355",
+        "saver_rate_pence_per_kwh": "6.211",
+        "daily_threshold_kwh": "2.0",
+        "vat_rate": "0.05"
+      }
+    },
+    "emergency_credit": {
+      "electricity_limit_gbp": "15.00",
+      "gas_limit_gbp": "15.00",
+      "activation_threshold_gbp": "1.00"
+    },
+    "debt_recovery": {
+      "default_rate_pct": "25",
+      "transfer_rate_pct": "35",
+      "min_rate_pct": "20",
+      "max_rate_pct": "100"
+    },
+    "friendly_credit": {
+      "weekday_start": "14:00",
+      "weekday_end": "10:00",
+      "weekend": "all_day",
+      "bank_holidays": "all_day",
+      "loyalty_extension_years": 3,
+      "loyalty_extension": "all_day_monday"
+    },
+    "power_up_asc": {
+      "electricity_limit_gbp": "40.00",
+      "gas_limit_gbp": "60.00",
+      "cooldown_hours": 10
+    },
+    "warm_home_discount": {
+      "amount_gbp": "150.00",
+      "scheme_year": "2025-26"
+    },
+    "dcc_service_requests": {
+      "SRV_2_2": "Top Up Device",
+      "SRV_2_1": "Update Prepay Configuration",
+      "SRV_1_1_1": "Update Import Tariff (Block Tariff)",
+      "SRV_2_5": "Activate Emergency Credit",
+      "SRV_4_3": "Read Instantaneous Prepay Values"
+    }
+  },
+  "paymentRails": [],
+  "partyTypes": [],
+  "mappings": [],
+  "operationalGateway": {
+    "providerConnections": [],
+    "instructionRoutes": [],
+    "inboundRoutes": []
+  },
+  "marketData": {
+    "sources": [
+      {
+        "code": "RETAIL_TARIFF",
+        "name": "Retail Tariff Engine",
+        "description": "Quarterly tariff rates set to comply with Ofgem prepayment price cap. No-standing-charge two-tier block pricing.",
+        "trustLevel": 100
+      },
+      {
+        "code": "WHOLESALE_MARKET",
+        "name": "Wholesale Energy Market",
+        "description": "Day-ahead and intraday wholesale energy prices for hedging and P&L attribution",
+        "trustLevel": 90
+      }
+    ],
+    "datasets": [
+      {
+        "code": "PAYG_ELEC_FIRST_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Electricity First Rate (0-2 kWh/day)",
+        "description": "Block 1 electricity rate: applies to first 2 kWh consumed per day. Embeds standing charge recovery. Example: 51.85p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_ELEC_SAVER_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Electricity Saver Rate (above 2 kWh/day)",
+        "description": "Block 2 electricity rate: applies to all consumption above 2 kWh daily threshold. Example: 26.010p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_GAS_FIRST_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Gas First Rate (0-2 kWh/day)",
+        "description": "Block 1 gas rate: applies to first 2 kWh consumed per day. Example: 23.355p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_GAS_SAVER_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Gas Saver Rate (above 2 kWh/day)",
+        "description": "Block 2 gas rate: applies to all consumption above 2 kWh daily threshold. Example: 6.211p/kWh inc. 5% VAT.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "WHOLESALE_ELEC_GBP_KWH",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "WHOLESALE_MARKET",
+        "displayName": "Wholesale Electricity Price",
+        "description": "UK wholesale electricity spot price for hedging position and retail margin calculation",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "WHOLESALE_GAS_GBP_KWH",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP/kWh",
+        "sourceCode": "WHOLESALE_MARKET",
+        "displayName": "Wholesale Gas Price",
+        "description": "UK wholesale gas spot price for hedging position and retail margin calculation",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_ELEC_BLOCK_THRESHOLD",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Electricity Block Threshold",
+        "description": "Daily kWh threshold for First Rate / Saver Rate split. Currently 2 kWh (1 kWh for E7 daytime). Change this to war-game threshold adjustments.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_GAS_BLOCK_THRESHOLD",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "kWh",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Gas Block Threshold",
+        "description": "Daily kWh threshold for gas First Rate / Saver Rate split.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_VAT_RATE",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "rate",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "VAT Rate (Domestic Energy)",
+        "description": "VAT rate for domestic energy supply. Currently 5%. Publish new observation to model rate changes.",
+        "validationExpression": "value >= 0 && value <= 1",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_EC_LIMIT_ELEC",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Emergency Credit Limit (Electricity)",
+        "description": "Maximum emergency credit per electricity meter. Currently GBP 15.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_EC_LIMIT_GAS",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Emergency Credit Limit (Gas)",
+        "description": "Maximum emergency credit per gas meter. Currently GBP 15.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_WHD_AMOUNT",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "GBP",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Warm Home Discount Amount",
+        "description": "WHD credit amount per eligible household per scheme year. Currently GBP 150.",
+        "validationExpression": "value > 0",
+        "resolutionKeyExpression": "observed_at"
+      },
+      {
+        "code": "PAYG_DEBT_RECOVERY_DEFAULT",
+        "category": "DATA_CATEGORY_ENERGY_PRICE",
+        "unit": "percent",
+        "sourceCode": "RETAIL_TARIFF",
+        "displayName": "Default Debt Recovery Rate",
+        "description": "Percentage of top-up allocated to debt recovery. Currently 25%. Range: 20-100%.",
+        "validationExpression": "value >= 20 && value <= 100",
+        "resolutionKeyExpression": "observed_at"
+      }
+    ]
+  },
+  "organizations": [
+    {
+      "code": "ACME_ENERGY",
+      "name": "Acme Energy Ltd",
+      "legalName": "Acme Energy Ltd",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GETW",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "supplier",
+        "key_meter_supplier_id": "33",
+        "ppmip": "ITRI"
+      }
+    },
+    {
+      "code": "DCC",
+      "name": "Data Communications Company",
+      "partyType": "ORGANIZATION",
+      "externalReference": "DCC",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "data_communications",
+        "csp_south": "telefonica",
+        "csp_north": "arqiva"
+      }
+    },
+    {
+      "code": "PROCODE",
+      "name": "Procode Technology Group",
+      "partyType": "ORGANIZATION",
+      "attributes": {
+        "role": "dcc_adapter",
+        "product": "Intelligent Data Adapter (IDA)",
+        "meters_managed": "1000000+"
+      },
+      "externalReference": "PROCODE001",
+      "externalReferenceType": "NATIONAL_ID"
+    },
+    {
+      "code": "SEPD",
+      "name": "Southern Electric Power Distribution",
+      "legalName": "Southern Electric Power Distribution plc",
+      "partyType": "ORGANIZATION",
+      "externalReference": "SEPD",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "dno",
+        "licence_area": "southern"
+      }
+    },
+    {
+      "code": "GSP_SOUT",
+      "name": "Southern England",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPSOUT",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "gsp",
+        "region": "SOUT"
+      }
+    },
+    {
+      "code": "GSP_SEEB",
+      "name": "South East England",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPSEEB",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "gsp",
+        "region": "SEEB"
+      }
+    },
+    {
+      "code": "GSP_SWAE",
+      "name": "South Wales",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPSWAE",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "gsp",
+        "region": "SWAE"
+      }
+    },
+    {
+      "code": "GSP_WMID",
+      "name": "West Midlands",
+      "partyType": "ORGANIZATION",
+      "externalReference": "GSPWMID",
+      "externalReferenceType": "NATIONAL_ID",
+      "attributes": {
+        "role": "gsp",
+        "region": "WMID"
+      }
+    }
+  ],
+  "internalAccounts": [
+    {
+      "code": "SUPPLIER_VAT_OUTPUT",
+      "accountType": "VAT_OUTPUT",
+      "instrument": "GBP",
+      "ownerOrganization": "ACME_ENERGY",
+      "description": "VAT output tax liability - recognised at top-up per HMRC Regulation 86"
+    },
+    {
+      "code": "SUPPLIER_REVENUE_ELEC",
+      "accountType": "REVENUE_ENERGY",
+      "instrument": "GBP",
+      "ownerOrganization": "ACME_ENERGY",
+      "description": "Electricity revenue - recognised at consumption, split by First Rate and Saver Rate tiers"
+    },
+    {
+      "code": "SUPPLIER_REVENUE_GAS",
+      "accountType": "REVENUE_ENERGY",
+      "instrument": "GBP",
+      "ownerOrganization": "ACME_ENERGY",
+      "description": "Gas revenue - recognised at consumption, split by First Rate and Saver Rate tiers"
+    },
+    {
+      "code": "SUPPLIER_WHOLESALE_ELEC",
+      "accountType": "WHOLESALE_COST",
+      "instrument": "GBP",
+      "ownerOrganization": "ACME_ENERGY",
+      "description": "Wholesale electricity cost position - for hedging P&L and margin attribution"
+    },
+    {
+      "code": "SUPPLIER_WHOLESALE_GAS",
+      "accountType": "WHOLESALE_COST",
+      "instrument": "GBP",
+      "ownerOrganization": "ACME_ENERGY",
+      "description": "Wholesale gas cost position - for hedging P&L and margin attribution"
+    },
+    {
+      "code": "SUPPLIER_WHD",
+      "accountType": "WHD_OBLIGATION",
+      "instrument": "GBP",
+      "ownerOrganization": "ACME_ENERGY",
+      "description": "Warm Home Discount scheme obligation cost, socialised across customer base"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_SOUT",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_SOUT",
+      "description": "Electricity supply pool for Southern England GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_SEEB",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_SEEB",
+      "description": "Electricity supply pool for South East England GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS_SOUT",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "GSP_SOUT",
+      "description": "Gas supply pool for SOUT GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS_SEEB",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "GSP_SEEB",
+      "description": "Gas supply pool for SEEB GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_SWAE",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_SWAE",
+      "description": "Electricity supply pool for SWAE GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS_SWAE",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "GSP_SWAE",
+      "description": "Gas supply pool for SWAE GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_ELEC_WMID",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_ELEC",
+      "ownerOrganization": "GSP_WMID",
+      "description": "Electricity supply pool for WMID GSP group"
+    },
+    {
+      "code": "SUPPLY_POOL_GAS_WMID",
+      "accountType": "ENERGY_SUPPLY_POOL",
+      "instrument": "KWH_GAS",
+      "ownerOrganization": "GSP_WMID",
+      "description": "Gas supply pool for WMID GSP group"
+    }
+  ]
+}

@@ -24,6 +24,8 @@ var _ ReferenceDataService = (*ReferenceDataClient)(nil)
 
 type fakeReferenceDataServer struct {
 	referencedatav1.UnimplementedReferenceDataServiceServer
+	activateInstrumentFn  func(context.Context, *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error)
+	retrieveInstrumentFn  func(context.Context, *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error)
 }
 
 func (f *fakeReferenceDataServer) RegisterInstrument(_ context.Context, req *referencedatav1.RegisterInstrumentRequest) (*referencedatav1.RegisterInstrumentResponse, error) {
@@ -37,8 +39,25 @@ func (f *fakeReferenceDataServer) RegisterInstrument(_ context.Context, req *ref
 	}, nil
 }
 
-func (f *fakeReferenceDataServer) ActivateInstrument(_ context.Context, req *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error) {
+func (f *fakeReferenceDataServer) ActivateInstrument(ctx context.Context, req *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error) {
+	if f.activateInstrumentFn != nil {
+		return f.activateInstrumentFn(ctx, req)
+	}
 	return &referencedatav1.ActivateInstrumentResponse{
+		Instrument: &referencedatav1.InstrumentDefinition{
+			Id:      "inst-uuid-1",
+			Code:    req.Code,
+			Version: req.Version,
+			Status:  referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+		},
+	}, nil
+}
+
+func (f *fakeReferenceDataServer) RetrieveInstrument(ctx context.Context, req *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error) {
+	if f.retrieveInstrumentFn != nil {
+		return f.retrieveInstrumentFn(ctx, req)
+	}
+	return &referencedatav1.RetrieveInstrumentResponse{
 		Instrument: &referencedatav1.InstrumentDefinition{
 			Id:      "inst-uuid-1",
 			Code:    req.Code,
@@ -142,6 +161,28 @@ func (f *fakeSagaRegistryServer) GetActiveSaga(ctx context.Context, req *sagav1.
 
 func newRefDataTestServer(t *testing.T) *grpc.ClientConn {
 	return newRefDataTestServerWith(t, &fakeSagaRegistryServer{})
+}
+
+func newRefDataTestServerWithRefData(t *testing.T, refDataSrv *fakeReferenceDataServer) *grpc.ClientConn {
+	t.Helper()
+
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	referencedatav1.RegisterReferenceDataServiceServer(srv, refDataSrv)
+	referencedatav1.RegisterAccountTypeRegistryServiceServer(srv, &fakeAccountTypeServer{})
+	sagav1.RegisterSagaRegistryServiceServer(srv, &fakeSagaRegistryServer{})
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.GracefulStop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return conn
 }
 
 func newRefDataTestServerWith(t *testing.T, sagaSrv *fakeSagaRegistryServer) *grpc.ClientConn {
@@ -395,4 +436,58 @@ func TestReferenceDataClient_RegisterSagaDefinition_OtherError_Propagated(t *tes
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create saga draft")
+}
+
+func TestReferenceDataClient_ActivateInstrument_AlreadyActive_TreatedAsSuccess(t *testing.T) {
+	refDataSrv := &fakeReferenceDataServer{
+		activateInstrumentFn: func(_ context.Context, _ *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error) {
+			return nil, status.Error(codes.FailedPrecondition, "instrument must be in DRAFT status: GBP")
+		},
+		retrieveInstrumentFn: func(_ context.Context, req *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error) {
+			return &referencedatav1.RetrieveInstrumentResponse{
+				Instrument: &referencedatav1.InstrumentDefinition{
+					Id:      "inst-uuid-1",
+					Code:    req.Code,
+					Version: req.Version,
+					Status:  referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+	}
+	conn := newRefDataTestServerWithRefData(t, refDataSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.ActivateInstrument(testStarlarkCtx(), map[string]any{
+		"instrument_code": "GBP",
+	})
+	require.NoError(t, err, "FailedPrecondition with already-ACTIVE instrument should be treated as idempotent success")
+	m := result.(map[string]any)
+	assert.Equal(t, "GBP", m["instrument_code"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_ActivateInstrument_NotActive_ErrorPropagated(t *testing.T) {
+	refDataSrv := &fakeReferenceDataServer{
+		activateInstrumentFn: func(_ context.Context, _ *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error) {
+			return nil, status.Error(codes.FailedPrecondition, "instrument must be in DRAFT status: GBP")
+		},
+		retrieveInstrumentFn: func(_ context.Context, req *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error) {
+			return &referencedatav1.RetrieveInstrumentResponse{
+				Instrument: &referencedatav1.InstrumentDefinition{
+					Id:      "inst-uuid-1",
+					Code:    req.Code,
+					Version: req.Version,
+					Status:  referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_DEPRECATED,
+				},
+			}, nil
+		},
+	}
+	conn := newRefDataTestServerWithRefData(t, refDataSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	_, err := client.ActivateInstrument(testStarlarkCtx(), map[string]any{
+		"instrument_code": "GBP",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "activate instrument")
 }

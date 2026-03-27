@@ -106,6 +106,21 @@ func (c *ReferenceDataClient) ActivateInstrument(ctx *saga.StarlarkContext, para
 	callCtx := prepareCallContext(ctx)
 	resp, err := c.instruments.ActivateInstrument(callCtx, req)
 	if err != nil {
+		// Idempotency: if the instrument is already ACTIVE, treat as success.
+		if status.Code(err) == codes.FailedPrecondition {
+			existing, lookupErr := c.instruments.RetrieveInstrument(callCtx, &referencedatav1.RetrieveInstrumentRequest{
+				Code:    req.Code,
+				Version: req.Version,
+			})
+			if lookupErr == nil && existing.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
+				inst := existing.GetInstrument()
+				return map[string]any{
+					"instrument_code": inst.GetCode(),
+					"version":         inst.GetVersion(),
+					"status":          inst.GetStatus().String(),
+				}, nil
+			}
+		}
 		return nil, fmt.Errorf("activate instrument: %w", err)
 	}
 

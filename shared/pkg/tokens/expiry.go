@@ -4,8 +4,9 @@ import "time"
 
 // TTL constants for different token types.
 const (
-	InvitationTokenTTL    = 72 * time.Hour
-	PasswordResetTokenTTL = 1 * time.Hour
+	InvitationTokenTTL        = 72 * time.Hour
+	PasswordResetTokenTTL     = 1 * time.Hour
+	EmailVerificationTokenTTL = 24 * time.Hour
 )
 
 // TokenWithExpiry pairs a stored token hash with its expiry time.

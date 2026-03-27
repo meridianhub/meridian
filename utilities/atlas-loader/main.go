@@ -71,6 +71,8 @@ func main() {
 			&identitypersistence.IdentityEntity{},
 			&identitypersistence.RoleAssignmentEntity{},
 			&identitypersistence.InvitationEntity{},
+			&identitypersistence.EmailVerificationTokenEntity{},
+			&identitypersistence.PasswordResetTokenEntity{},
 		}
 	case schemaParty:
 		// Party service for customer/organization identity management
