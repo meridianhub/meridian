@@ -65,9 +65,15 @@ interface ManifestOperationalGateway {
   [key: string]: unknown
 }
 
-interface ManifestMarketData {
+interface ManifestMarketDataItem {
   code: string
   name: string
+  [key: string]: unknown
+}
+
+interface ManifestMarketDataConfig {
+  sources?: ManifestMarketDataItem[]
+  datasets?: ManifestMarketDataItem[]
   [key: string]: unknown
 }
 
@@ -93,7 +99,7 @@ interface ManifestInput {
   partyTypes?: ManifestPartyType[]
   mappings?: ManifestMapping[]
   operationalGateway?: ManifestOperationalGateway
-  marketData?: ManifestMarketData[]
+  marketData?: ManifestMarketDataConfig
   organizations?: ManifestOrganization[]
   internalAccounts?: ManifestInternalAccount[]
 }
@@ -179,7 +185,11 @@ export function buildManifestGraph(manifest: Manifest): ManifestGraph {
   const partyTypes = m.partyTypes ?? []
   const mappings = m.mappings ?? []
   const operationalGateway = m.operationalGateway
-  const marketDataItems = m.marketData ?? []
+  const marketDataConfig = m.marketData
+  const marketDataItems = [
+    ...(marketDataConfig?.sources ?? []),
+    ...(marketDataConfig?.datasets ?? []),
+  ]
   const organizations = m.organizations ?? []
   const internalAccounts = m.internalAccounts ?? []
 
