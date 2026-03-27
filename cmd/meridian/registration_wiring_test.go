@@ -259,3 +259,31 @@ func (n *noopIdentityRepo) SaveInvitation(_ context.Context, _ *identitydomain.I
 func (n *noopIdentityRepo) FindInvitationByTokenHash(_ context.Context, _ string) (*identitydomain.Invitation, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
+func (n *noopIdentityRepo) SaveVerificationToken(_ context.Context, _ *identitydomain.VerificationToken) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (n *noopIdentityRepo) FindVerificationTokenByHash(_ context.Context, _ string) (*identitydomain.VerificationToken, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (n *noopIdentityRepo) CountVerificationTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+
+func (n *noopIdentityRepo) SavePasswordResetToken(_ context.Context, _ *identitydomain.PasswordResetToken) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (n *noopIdentityRepo) FindPasswordResetTokenByHash(_ context.Context, _ string) (*identitydomain.PasswordResetToken, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (n *noopIdentityRepo) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+
+func (n *noopIdentityRepo) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+	return fmt.Errorf("not implemented")
+}

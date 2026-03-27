@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	identitydomain "github.com/meridianhub/meridian/services/identity/domain"
@@ -87,6 +88,34 @@ func (s *stubIdentityRepo) SaveInvitation(_ context.Context, _ *identitydomain.I
 
 func (s *stubIdentityRepo) FindInvitationByTokenHash(_ context.Context, _ string) (*identitydomain.Invitation, error) {
 	return nil, identitydomain.ErrInvitationNotFound
+}
+
+func (s *stubIdentityRepo) SaveVerificationToken(_ context.Context, _ *identitydomain.VerificationToken) error {
+	return nil
+}
+
+func (s *stubIdentityRepo) FindVerificationTokenByHash(_ context.Context, _ string) (*identitydomain.VerificationToken, error) {
+	return nil, identitydomain.ErrVerificationTokenNotFound
+}
+
+func (s *stubIdentityRepo) CountVerificationTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (s *stubIdentityRepo) SavePasswordResetToken(_ context.Context, _ *identitydomain.PasswordResetToken) error {
+	return nil
+}
+
+func (s *stubIdentityRepo) FindPasswordResetTokenByHash(_ context.Context, _ string) (*identitydomain.PasswordResetToken, error) {
+	return nil, identitydomain.ErrPasswordResetTokenNotFound
+}
+
+func (s *stubIdentityRepo) CountPasswordResetTokensInWindow(_ context.Context, _ uuid.UUID, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (s *stubIdentityRepo) InvalidatePasswordResetTokensForIdentity(_ context.Context, _ uuid.UUID) error {
+	return nil
 }
 
 type stubSlugChecker struct {
