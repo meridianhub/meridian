@@ -120,6 +120,7 @@ message BillingRun {
   }];
 
   // tenant_id identifies the tenant this billing run belongs to.
+  // Included explicitly for cross-tenant admin views in the billing dashboard.
   string tenant_id = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 100
@@ -175,6 +176,7 @@ message InvoiceLineItem {
   }];
 
   // unit_price_cents is the price per unit in minor currency units.
+  // Currency is inherited from the parent Invoice.currency field.
   int64 unit_price_cents = 3;
 
   // total_cents is the total charge for this line item in minor currency units.
@@ -319,7 +321,12 @@ message InvoiceEmail {
 // ListBillingRunsRequest returns a paginated list of billing runs.
 message ListBillingRunsRequest {
   // status filters by billing run status. Empty means all statuses.
-  repeated BillingRunStatus status = 1;
+  repeated BillingRunStatus status = 1 [(buf.validate.field).repeated.items = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
 
   // pagination controls the page size and cursor.
   meridian.common.v1.Pagination pagination = 2;
@@ -352,7 +359,12 @@ message GetBillingRunResponse {
 // ListInvoicesRequest returns a paginated list of invoices with filtering.
 message ListInvoicesRequest {
   // status filters by invoice status. Empty means all statuses.
-  repeated InvoiceStatus status = 1;
+  repeated InvoiceStatus status = 1 [(buf.validate.field).repeated.items = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
 
   // party_id filters by the party (customer) ID.
   string party_id = 2 [(buf.validate.field).string = {
@@ -399,6 +411,9 @@ message ResendInvoiceEmailRequest {
     min_len: 1
     max_len: 100
   }];
+
+  // idempotency_key ensures exactly-once processing of email resend.
+  meridian.common.v1.IdempotencyKey idempotency_key = 2 [(buf.validate.field).required = true];
 }
 
 // ResendInvoiceEmailResponse confirms the email has been queued.
@@ -414,6 +429,9 @@ message MarkInvoicePaidRequest {
     min_len: 1
     max_len: 100
   }];
+
+  // idempotency_key ensures exactly-once processing of payment marking.
+  meridian.common.v1.IdempotencyKey idempotency_key = 2 [(buf.validate.field).required = true];
 }
 
 // MarkInvoicePaidResponse returns the updated invoice.
@@ -429,6 +447,9 @@ message VoidInvoiceRequest {
     min_len: 1
     max_len: 100
   }];
+
+  // idempotency_key ensures exactly-once processing of void operation.
+  meridian.common.v1.IdempotencyKey idempotency_key = 2 [(buf.validate.field).required = true];
 }
 
 // VoidInvoiceResponse returns the voided invoice.
