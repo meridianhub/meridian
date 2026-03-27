@@ -192,4 +192,3 @@ func NewPositionKeepingService(
 
 	return svc, nil
 }
-
