@@ -158,7 +158,7 @@ func mapControlDomainError(err error, bookingLogID uuid.UUID) error {
 	case errors.Is(err, domain.ErrCannotTerminateTerminal):
 		return status.Error(codes.FailedPrecondition, "cannot terminate booking log already in terminal state")
 	default:
-		return status.Errorf(codes.Internal, "failed to apply control operation: %v", err)
+		return status.Error(codes.Internal, "failed to apply control operation")
 	}
 }
 
@@ -290,16 +290,25 @@ func applyPostingStatusTransition(posting *domain.LedgerPosting, newStatus domai
 			return status.Errorf(codes.InvalidArgument, "cannot fail: %v", err)
 		}
 	case domain.TransactionStatusPending:
+		if posting.Status == domain.TransactionStatusPosted {
+			return status.Error(codes.FailedPrecondition, "cannot revert a posted posting to pending")
+		}
 		posting.Status = newStatus
 		if postingResult != "" {
 			posting.PostingResult = postingResult
 		}
 	case domain.TransactionStatusCancelled:
+		if posting.Status == domain.TransactionStatusPosted {
+			return status.Error(codes.FailedPrecondition, "cannot cancel a posted posting")
+		}
 		posting.Status = newStatus
 		if postingResult != "" {
 			posting.PostingResult = postingResult
 		}
 	case domain.TransactionStatusReversed:
+		if posting.Status != domain.TransactionStatusPosted {
+			return status.Error(codes.FailedPrecondition, "can only reverse a posted posting")
+		}
 		posting.Status = newStatus
 		if postingResult != "" {
 			posting.PostingResult = postingResult

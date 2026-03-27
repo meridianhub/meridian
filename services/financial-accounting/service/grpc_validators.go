@@ -118,6 +118,8 @@ func validateControlRequest(req *financialaccountingv1.ControlFinancialBookingLo
 		domainAction = domain.ControlActionTerminate
 	case financialaccountingv1.ControlAction_CONTROL_ACTION_UNSPECIFIED:
 		return "", status.Error(codes.InvalidArgument, "control_action must be specified")
+	default:
+		return "", status.Errorf(codes.InvalidArgument, "invalid control_action: %d", req.ControlAction)
 	}
 
 	return domainAction, nil
