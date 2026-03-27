@@ -154,7 +154,6 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 		}
 
 		var attempts int
-		var lastErr error
 
 		err = sharedclients.Retry(ctx.Context, *retryConfig, func() error {
 			attempts++
@@ -165,7 +164,6 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 				LienId: lienID,
 			})
 			if execErr != nil {
-				lastErr = execErr
 				poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeFailed)
 				logger.Warn("lien execution attempt failed",
 					"attempt", attempts,
@@ -175,18 +173,6 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 			}
 			return nil
 		})
-
-		executionStatus := map[string]any{
-			"success":  err == nil,
-			"attempts": attempts,
-		}
-		if err != nil {
-			if lastErr != nil {
-				executionStatus["error"] = lastErr.Error()
-			} else {
-				executionStatus["error"] = err.Error()
-			}
-		}
 
 		if err != nil {
 			// Record retry exhaustion metric - indicates payment may require manual reconciliation
@@ -198,9 +184,7 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 				"total_attempts", attempts,
 				"error", err,
 			)
-			return map[string]any{
-				"execution_status": executionStatus,
-			}, wrapHandlerError(handlerName, fmt.Errorf("lien execution failed after %d attempts: %w", attempts, err))
+			return nil, wrapHandlerError(handlerName, fmt.Errorf("lien execution failed after %d attempts: %w", attempts, err))
 		}
 
 		poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeSuccess)
@@ -211,7 +195,10 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 		)
 
 		return map[string]any{
-			"execution_status": executionStatus,
+			"execution_status": map[string]any{
+				"success":  true,
+				"attempts": attempts,
+			},
 		}, nil
 	}
 }
