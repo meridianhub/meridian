@@ -133,14 +133,17 @@ func (h *VerificationHandler) executeVerifyEmail(ctx context.Context, rawToken s
 		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
-	if err := h.identityRepo.SaveVerificationToken(tenantCtx, vtoken); err != nil {
-		h.logger.ErrorContext(ctx, "verification: failed to save consumed token", "error", err)
-		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
-	}
-
+	// Save identity first so the token remains valid for retry if this fails.
 	if err := h.identityRepo.Save(tenantCtx, identity); err != nil {
 		h.logger.ErrorContext(ctx, "verification: failed to save verified identity", "error", err)
 		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
+	}
+
+	// Mark token consumed after identity is persisted (safe to retry on failure).
+	if err := h.identityRepo.SaveVerificationToken(tenantCtx, vtoken); err != nil {
+		h.logger.ErrorContext(ctx, "verification: failed to save consumed token", "error", err)
+		// Non-fatal: identity is already verified. Worst case: token is reusable
+		// but Verify() will return ErrNotPendingVerification on reuse.
 	}
 
 	h.queueWelcomeEmail(tenantCtx, identity)
@@ -209,7 +212,9 @@ func (h *VerificationHandler) HandleResendVerification(w http.ResponseWriter, r 
 		return
 	}
 	if count >= maxVerificationTokensPerHour {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many verification requests, please try again later"})
+		// Timing-safe: return 200 even when rate limited to avoid leaking email existence.
+		h.logger.WarnContext(ctx, "verification: resend rate limited", "identity_id", identity.ID())
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 

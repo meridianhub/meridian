@@ -112,6 +112,7 @@ func (h *PasswordResetHandler) HandleForgotPassword(w http.ResponseWriter, r *ht
 	}
 
 	// Rate limit: max 3 tokens per hour per identity.
+	// Timing-safe: return 200 even when rate limited to avoid leaking email existence.
 	count, err := h.identityRepo.CountPasswordResetTokensInWindow(tenantCtx, identity.ID(), time.Hour)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to count tokens in window", "error", err)
@@ -119,7 +120,8 @@ func (h *PasswordResetHandler) HandleForgotPassword(w http.ResponseWriter, r *ht
 		return
 	}
 	if count >= maxPasswordResetTokensPerHour {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many password reset requests, please try again later"})
+		h.logger.WarnContext(ctx, "password-reset: rate limited", "identity_id", identity.ID())
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
@@ -213,14 +215,17 @@ func (h *PasswordResetHandler) executeResetPassword(ctx context.Context, rawToke
 		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
 	}
 
-	if err := h.identityRepo.SavePasswordResetToken(tenantCtx, ptoken); err != nil {
-		h.logger.ErrorContext(ctx, "password-reset: failed to save consumed token", "error", err)
-		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
-	}
-
+	// Save identity (password) first so the token remains valid for retry if this fails.
 	if err := h.identityRepo.Save(tenantCtx, identity); err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to save identity", "error", err)
 		return http.StatusInternalServerError, map[string]string{"error": "internal server error"}
+	}
+
+	// Mark token consumed after password is persisted (safe to retry on failure).
+	if err := h.identityRepo.SavePasswordResetToken(tenantCtx, ptoken); err != nil {
+		h.logger.ErrorContext(ctx, "password-reset: failed to save consumed token", "error", err)
+		// Non-fatal: password is already changed. Worst case: token is reusable
+		// but SetPassword is idempotent (same hash).
 	}
 
 	// Invalidate all other reset tokens for this identity (non-fatal).

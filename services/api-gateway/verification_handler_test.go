@@ -352,7 +352,8 @@ func TestResendVerification_RateLimited(t *testing.T) {
 		"email":     "user@test.com",
 		"tenant_id": "test_tenant",
 	})
-	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	// Timing-safe: returns 200 even when rate limited to avoid email enumeration.
+	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Empty(t, or.entries)
 }
 
