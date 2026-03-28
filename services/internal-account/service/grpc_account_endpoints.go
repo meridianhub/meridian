@@ -2,24 +2,19 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
-	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/internal-account/domain"
 	ibaobservability "github.com/meridianhub/meridian/services/internal-account/observability"
-	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	vf "github.com/meridianhub/meridian/shared/pkg/valuationfeature"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -34,172 +29,27 @@ func (s *Service) InitiateInternalAccount(ctx context.Context, req *pb.InitiateI
 		ibaobservability.RecordOperationDuration("initiate_internal_account", operationStatus, time.Since(start))
 	}()
 
-	// 1. Determine product_type_code (required for new accounts).
+	// 1. Resolve product type, validate eligibility, and validate attributes.
 	productTypeCode := req.ProductTypeCode
-
-	var accountType domain.AccountType
-	var clearingPurpose domain.ClearingPurpose
-	var dimension string
-	var productTypeVersion int
-	var productTypeDef *accounttype.Definition
-
-	// 2. Product type resolution via cache (if cache is configured and code is available)
-	if s.accountTypeCache != nil && productTypeCode != "" {
-		tenantID, ok := tenant.FromContext(ctx)
-		if !ok {
-			operationStatus = operationStatusFailed
-			return nil, status.Error(codes.InvalidArgument, "tenant context required")
-		}
-
-		cached, err := s.accountTypeCache.GetOrLoad(ctx, tenantID, productTypeCode)
-		if err != nil {
-			operationStatus = operationStatusFailed
-			s.logger.Warn("product type resolution failed",
-				"product_type_code", productTypeCode,
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "product type not found: %s", productTypeCode)
-		}
-
-		if cached.Definition == nil {
-			operationStatus = operationStatusFailed
-			return nil, status.Errorf(codes.Internal, "product type %s has no definition", productTypeCode)
-		}
-
-		def := cached.Definition
-
-		// 3. BehaviorClass gating: must NOT be CUSTOMER
-		if !internalBehaviorClasses[def.BehaviorClass] {
-			operationStatus = operationStatusFailed
-			return nil, status.Errorf(codes.InvalidArgument,
-				"product type %s has behavior class %s which is not an internal account type",
-				productTypeCode, def.BehaviorClass)
-		}
-
-		// 4. EligibilityCEL evaluation (skip if empty or "true")
-		if cached.EligibilityProgram != nil && def.EligibilityCEL != "" && def.EligibilityCEL != "true" {
-			// For internal accounts, eligibility checks evaluate without a party.
-			// The CEL environment receives account-level context only.
-			activation := map[string]interface{}{
-				"instrument_code": req.InstrumentCode,
-				"account_code":    req.AccountCode,
-			}
-			out, _, evalErr := cached.EligibilityProgram.Eval(activation)
-			if evalErr != nil {
-				operationStatus = operationStatusFailed
-				return nil, status.Errorf(codes.Internal, "eligibility evaluation failed: %v", evalErr)
-			}
-			eligible, isBool := out.Value().(bool)
-			if !isBool || !eligible {
-				operationStatus = operationStatusFailed
-				return nil, status.Errorf(codes.FailedPrecondition,
-					"account not eligible per product type %s eligibility rules", productTypeCode)
-			}
-		}
-
-		// 5. Attribute validation against AttributeSchema (if defined)
-		if cached.CompiledSchema != nil {
-			attrsMap := map[string]interface{}{}
-			if req.Attributes != nil {
-				attrsMap = req.Attributes.AsMap()
-			}
-			attrsJSON, err := json.Marshal(attrsMap)
-			if err != nil {
-				operationStatus = operationStatusFailed
-				return nil, status.Errorf(codes.InvalidArgument, "invalid attributes: %v", err)
-			}
-			var attrs interface{}
-			if err := json.Unmarshal(attrsJSON, &attrs); err != nil {
-				operationStatus = operationStatusFailed
-				return nil, status.Errorf(codes.InvalidArgument, "invalid attributes JSON: %v", err)
-			}
-			if err := cached.CompiledSchema.Validate(attrs); err != nil {
-				operationStatus = operationStatusFailed
-				return nil, status.Errorf(codes.InvalidArgument, "attributes validation failed: %v", err)
-			}
-		}
-
-		// Derive account type from BehaviorClass via mapping
-		accountType = behaviorClassToAccountType[def.BehaviorClass]
-		productTypeVersion = def.Version
-		productTypeDef = def
-
-		// Derive dimension from instrument via Reference Data (if available)
-	} else if s.accountTypeCache == nil && req.ProductTypeCode != "" {
-		// product_type_code was explicitly provided but cache is not configured
+	accountType, productTypeVersion, productTypeDef, err := s.resolveProductType(ctx, req)
+	if err != nil {
 		operationStatus = operationStatusFailed
-		return nil, status.Error(codes.FailedPrecondition,
-			"product type resolution not available; configure account type cache")
-	} else if productTypeCode == "" {
-		// product_type_code is required - the deprecated account_type enum has been removed
-		operationStatus = opStatusInvalidAccountType
-		return nil, status.Error(codes.InvalidArgument,
-			"product_type_code is required; the deprecated account_type enum has been removed")
+		return nil, err
 	}
 
 	// Convert clearing purpose from proto to domain
-	var err error
+	var clearingPurpose domain.ClearingPurpose
 	clearingPurpose, err = protoToClearingPurpose(req.ClearingPurpose)
 	if err != nil {
 		operationStatus = operationStatusFailed
 		return nil, status.Errorf(codes.InvalidArgument, "invalid clearing purpose: %v", err)
 	}
 
-	// Validate instrument exists and is ACTIVE via Reference Data service (if client is configured)
-	if s.referenceDataClient != nil {
-		validationStart := time.Now()
-		refDataCtx, refDataCancel := context.WithTimeout(ctx, 5*time.Second)
-		defer refDataCancel()
-
-		refDataResp, err := s.referenceDataClient.RetrieveInstrument(refDataCtx, &referencedatav1.RetrieveInstrumentRequest{
-			Code: req.InstrumentCode,
-		})
-		if err != nil {
-			validationDuration := time.Since(validationStart)
-			errCode := status.Code(err)
-			s.logger.Warn("instrument validation failed",
-				"instrument_code", req.InstrumentCode,
-				"error", err)
-
-			if errCode == codes.NotFound {
-				operationStatus = opStatusInstrumentNotFound
-				ibaobservability.RecordInstrumentValidation("not_found", validationDuration)
-				return nil, status.Errorf(codes.InvalidArgument, "instrument not found: %s", req.InstrumentCode)
-			}
-			if errCode == codes.DeadlineExceeded || errCode == codes.Canceled {
-				operationStatus = opStatusInstrumentValidationErr
-				ibaobservability.RecordInstrumentValidation("timeout", validationDuration)
-				return nil, status.Errorf(codes.DeadlineExceeded, "instrument validation timed out for: %s", req.InstrumentCode)
-			}
-			operationStatus = opStatusInstrumentValidationErr
-			ibaobservability.RecordInstrumentValidation("error", validationDuration)
-			return nil, status.Errorf(codes.Internal, "failed to validate instrument: %v", err)
-		}
-
-		// Guard against nil instrument in response (defensive programming)
-		if refDataResp.Instrument == nil {
-			validationDuration := time.Since(validationStart)
-			operationStatus = opStatusInstrumentValidationErr
-			s.logger.Error("reference data service returned nil instrument",
-				"instrument_code", req.InstrumentCode)
-			ibaobservability.RecordInstrumentValidation("error", validationDuration)
-			return nil, status.Errorf(codes.Internal, "reference data service returned invalid response for instrument: %s", req.InstrumentCode)
-		}
-
-		// Validate instrument status is ACTIVE
-		if refDataResp.Instrument.Status != referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
-			validationDuration := time.Since(validationStart)
-			operationStatus = opStatusInstrumentNotActive
-			s.logger.Warn("instrument not active",
-				"instrument_code", req.InstrumentCode,
-				"status", refDataResp.Instrument.Status.String())
-			ibaobservability.RecordInstrumentValidation("not_active", validationDuration)
-			return nil, status.Errorf(codes.InvalidArgument, "instrument %s is not active (status: %s)",
-				req.InstrumentCode, refDataResp.Instrument.Status.String())
-		}
-
-		// Extract dimension from validated instrument (strip DIMENSION_ prefix for domain consistency)
-		dimension = strings.TrimPrefix(refDataResp.Instrument.Dimension.String(), "DIMENSION_")
-		ibaobservability.RecordInstrumentValidation("success", time.Since(validationStart))
+	// 2. Validate instrument exists and is ACTIVE via Reference Data service.
+	dimension, opStatus, err := s.validateInstrument(ctx, req.InstrumentCode)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	// Generate account ID using full UUID for uniqueness

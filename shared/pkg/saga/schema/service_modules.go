@@ -267,125 +267,116 @@ func buildServiceStruct(name string, node *handlerTree, registry *saga.HandlerRe
 // It handles parameter validation against the schema and type conversion.
 func wrapHandler(fullName string, handler saga.Handler, handlerDef *HandlerDef) *starlark.Builtin {
 	return starlark.NewBuiltin(fullName, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-		// Handle positional args (should be empty for handlers) - check first for fast fail
 		if len(args) > 0 {
 			return nil, fmt.Errorf("%w: handler %s", ErrPositionalArgsNotAllowed, fullName)
 		}
 
-		// Get StarlarkContext from thread-local storage
 		ctx := getStarlarkContext(thread)
 		if ctx == nil {
 			return nil, ErrMissingStarlarkContext
 		}
 
-		// Authorization check: enforce RBAC when handler declares a ResourceType
 		if err := authorizeHandlerInvocation(ctx, handlerDef, fullName); err != nil {
 			return nil, err
 		}
 
-		// Convert kwargs to Go map
 		params, err := convertKwargsToParams(kwargs)
 		if err != nil {
 			return nil, err
 		}
 
-		// Coerce all parameters to their schema-defined types
 		if err := CoerceParams(params, handlerDef); err != nil {
 			return nil, fmt.Errorf("handler %s: %w", fullName, err)
 		}
-
-		// Validate parameters against schema
 		if err := handlerDef.ValidateParams(params); err != nil {
 			return nil, fmt.Errorf("handler %s: %w", fullName, err)
 		}
 
-		// Generate idempotency key for this step
 		ctx.IdempotencyKey = ctx.NextIdempotencyKey()
 
-		// Call the handler
 		result, err := handler(ctx, params)
-
-		// Always track step results (for both success and failure cases)
-		// Get stepResults slice from thread-local storage
-		if stepResultsVal := thread.Local("saga.StepResults"); stepResultsVal != nil {
-			if stepResults, ok := stepResultsVal.(*[]saga.StepResult); ok {
-				// Build step result
-				stepResult := saga.StepResult{
-					StepName: fullName,
-					Success:  err == nil,
-					Output:   result,
-				}
-
-				if err != nil {
-					stepResult.Error = err.Error()
-				} else if handlerDef.Compensate != "" {
-					// If successful and has compensation handler, capture compensation metadata
-					stepResult.CompensateHandler = handlerDef.Compensate
-
-					// Derive compensation params from BOTH forward step output AND input
-					compensateParams := make(map[string]any)
-
-					// 1. Copy ALL fields from output (not just _id fields)
-					//    Compensation handlers need output fields like version, status, etc.
-					if output, ok := result.(map[string]interface{}); ok {
-						for key, value := range output {
-							compensateParams[key] = value
-						}
-					}
-
-					// 2. Copy commonly-needed input fields to compensation params
-					//    Compensation handlers often need context from the forward step input
-					inputFieldsForCompensation := []string{
-						"transaction_id", "account_id", "position_id", "direction",
-						"amount", "instrument_code", "currency", "booking_log_id", "posting_id", "posting_type",
-					}
-					for _, field := range inputFieldsForCompensation {
-						if value, ok := params[field]; ok {
-							compensateParams[field] = value
-						}
-					}
-
-					// 3. Handle field aliases: position_id and account_id are often interchangeable
-					//    If position_id exists but account_id doesn't, copy it as account_id
-					if posID, ok := compensateParams["position_id"]; ok {
-						if _, hasAcctID := compensateParams["account_id"]; !hasAcctID {
-							compensateParams["account_id"] = posID
-						}
-					}
-					// And vice versa
-					if acctID, ok := compensateParams["account_id"]; ok {
-						if _, hasPosID := compensateParams["position_id"]; !hasPosID {
-							compensateParams["position_id"] = acctID
-						}
-					}
-
-					// 4. Invert direction for financial posting compensations
-					//    Compensation postings must use the opposite direction to reverse the original
-					if handlerDef.Compensate == "financial_accounting.compensate_posting" {
-						if direction, ok := compensateParams["direction"].(string); ok {
-							switch direction {
-							case "DEBIT":
-								compensateParams["direction"] = "CREDIT"
-							case "CREDIT":
-								compensateParams["direction"] = "DEBIT"
-							}
-						}
-					}
-
-					stepResult.CompensateParams = compensateParams
-				}
-
-				*stepResults = append(*stepResults, stepResult)
-			}
-		}
+		trackStepResult(thread, fullName, result, err, params, handlerDef)
 
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert result to Starlark value
 		return goToStarlarkResult(fullName, result)
 	})
+}
+
+// trackStepResult records the step result (success or failure) for saga compensation tracking.
+func trackStepResult(thread *starlark.Thread, fullName string, result any, err error, params map[string]any, handlerDef *HandlerDef) {
+	stepResultsVal := thread.Local("saga.StepResults")
+	if stepResultsVal == nil {
+		return
+	}
+	stepResults, ok := stepResultsVal.(*[]saga.StepResult)
+	if !ok {
+		return
+	}
+
+	stepResult := saga.StepResult{
+		StepName: fullName,
+		Success:  err == nil,
+		Output:   result,
+	}
+
+	if err != nil {
+		stepResult.Error = err.Error()
+	} else if handlerDef.Compensate != "" {
+		stepResult.CompensateHandler = handlerDef.Compensate
+		stepResult.CompensateParams = buildCompensateParams(result, params, handlerDef.Compensate)
+	}
+
+	*stepResults = append(*stepResults, stepResult)
+}
+
+// buildCompensateParams derives compensation parameters from the forward step's output and input.
+func buildCompensateParams(result any, params map[string]any, compensateHandler string) map[string]any {
+	compensateParams := make(map[string]any)
+
+	// Copy ALL fields from output (compensation handlers need version, status, etc.)
+	if output, ok := result.(map[string]interface{}); ok {
+		for key, value := range output {
+			compensateParams[key] = value
+		}
+	}
+
+	// Copy commonly-needed input fields for compensation context
+	for _, field := range []string{
+		"transaction_id", "account_id", "position_id", "direction",
+		"amount", "instrument_code", "currency", "booking_log_id", "posting_id", "posting_type",
+	} {
+		if value, ok := params[field]; ok {
+			compensateParams[field] = value
+		}
+	}
+
+	// Handle field aliases: position_id and account_id are often interchangeable
+	if posID, ok := compensateParams["position_id"]; ok {
+		if _, hasAcctID := compensateParams["account_id"]; !hasAcctID {
+			compensateParams["account_id"] = posID
+		}
+	}
+	if acctID, ok := compensateParams["account_id"]; ok {
+		if _, hasPosID := compensateParams["position_id"]; !hasPosID {
+			compensateParams["position_id"] = acctID
+		}
+	}
+
+	// Invert direction for financial posting compensations
+	if compensateHandler == "financial_accounting.compensate_posting" {
+		if direction, ok := compensateParams["direction"].(string); ok {
+			switch direction {
+			case "DEBIT":
+				compensateParams["direction"] = "CREDIT"
+			case "CREDIT":
+				compensateParams["direction"] = "DEBIT"
+			}
+		}
+	}
+
+	return compensateParams
 }
 
 // authorizeHandlerInvocation checks RBAC authorization before handler invocation.

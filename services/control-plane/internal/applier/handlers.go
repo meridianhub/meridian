@@ -34,11 +34,44 @@ var ErrPartyNotConfigured = errors.New("party service not configured")
 //
 // Each handler is registered with metadata for compensation support.
 func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
-	handlers := map[string]struct {
-		handler  saga.Handler
-		metadata saga.HandlerMetadata
-	}{
-		// Reference Data - Instrument registration
+	registrators := []func(*saga.HandlerRegistry, *HandlerDependencies) error{
+		registerReferenceDataHandlers,
+		registerInternalAccountHandlers,
+		registerOperationalGatewayHandlers,
+		registerMarketInformationHandlers,
+		registerPartyHandlers,
+	}
+	for _, reg := range registrators {
+		if err := reg(registry, deps); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type handlerEntry struct {
+	handler  saga.Handler
+	metadata saga.HandlerMetadata
+}
+
+func registerAll(registry *saga.HandlerRegistry, handlers map[string]handlerEntry) error {
+	for name, h := range handlers {
+		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
+			return fmt.Errorf("failed to register %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func registerReferenceDataHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
+	if err := registerReferenceDataCoreHandlers(registry, deps); err != nil {
+		return err
+	}
+	return registerReferenceDataCompensationHandlers(registry, deps)
+}
+
+func registerReferenceDataCoreHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
+	return registerAll(registry, map[string]handlerEntry{
 		"reference_data.register_instrument": {
 			handler: registerInstrumentHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -52,12 +85,11 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:             1,
 			},
 		},
-		// Reference Data - Instrument activation (DRAFT → ACTIVE)
 		"reference_data.activate_instrument": {
 			handler: activateInstrumentHandler(deps),
 			metadata: saga.HandlerMetadata{
 				Category:             saga.HandlerCategorySettlement,
-				Description:          "Activate an instrument definition (DRAFT → ACTIVE)",
+				Description:          "Activate an instrument definition (DRAFT -> ACTIVE)",
 				CompensationStrategy: "none",
 				ProducesInstruments:  []string{},
 				ProtoRequestType:     (*referencedatav1.ActivateInstrumentRequest)(nil),
@@ -65,7 +97,6 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Reference Data - Account type registration (idempotent: CreateDraft + Activate)
 		"reference_data.register_account_type": {
 			handler: registerAccountTypeHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -79,7 +110,6 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:             1,
 			},
 		},
-		// Reference Data - Valuation rule registration
 		"reference_data.register_valuation_rule": {
 			handler: registerValuationRuleHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -90,7 +120,6 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Reference Data - Saga definition registration
 		"reference_data.register_saga_definition": {
 			handler: registerSagaDefinitionHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -101,20 +130,11 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Internal Account - Account initiation
-		"internal_account.initiate": {
-			handler: initiateAccountHandler(deps),
-			metadata: saga.HandlerMetadata{
-				Category:             saga.HandlerCategorySettlement,
-				Description:          "Initiate a new internal account",
-				CompensationStrategy: "none",
-				ProducesInstruments:  []string{},
-				ProtoRequestType:     (*internalaccountv1.InitiateInternalAccountRequest)(nil),
-				ProtoResponseType:    (*internalaccountv1.InitiateInternalAccountResponse)(nil),
-				Version:              1,
-			},
-		},
-		// Compensation handlers
+	})
+}
+
+func registerReferenceDataCompensationHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
+	return registerAll(registry, map[string]handlerEntry{
 		"reference_data.delete_instrument": {
 			handler: deleteInstrumentHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -135,7 +155,28 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Operational Gateway - Provider Connection Management
+	})
+}
+
+func registerInternalAccountHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
+	return registerAll(registry, map[string]handlerEntry{
+		"internal_account.initiate": {
+			handler: initiateAccountHandler(deps),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Initiate a new internal account",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*internalaccountv1.InitiateInternalAccountRequest)(nil),
+				ProtoResponseType:    (*internalaccountv1.InitiateInternalAccountResponse)(nil),
+				Version:              1,
+			},
+		},
+	})
+}
+
+func registerOperationalGatewayHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
+	return registerAll(registry, map[string]handlerEntry{
 		"operational_gateway.upsert_connection": {
 			handler: upsertConnectionHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -148,7 +189,6 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Operational Gateway - Instruction Route Management
 		"operational_gateway.upsert_route": {
 			handler: upsertRouteHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -161,7 +201,11 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Market Information - Data source registration
+	})
+}
+
+func registerMarketInformationHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
+	return registerAll(registry, map[string]handlerEntry{
 		"market_information.register_data_source": {
 			handler: registerDataSourceHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -174,7 +218,6 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Market Information - Data set registration (creates in DRAFT status)
 		"market_information.register_data_set": {
 			handler: registerDataSetHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -187,12 +230,11 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Market Information - Data set activation (DRAFT → ACTIVE)
 		"market_information.activate_data_set": {
 			handler: activateDataSetHandler(deps),
 			metadata: saga.HandlerMetadata{
 				Category:             saga.HandlerCategorySettlement,
-				Description:          "Activate a market data set definition (DRAFT → ACTIVE)",
+				Description:          "Activate a market data set definition (DRAFT -> ACTIVE)",
 				CompensationStrategy: "none",
 				ProducesInstruments:  []string{},
 				ProtoRequestType:     (*marketinformationv1.ActivateDataSetRequest)(nil),
@@ -200,7 +242,11 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Party - Organization registration
+	})
+}
+
+func registerPartyHandlers(registry *saga.HandlerRegistry, deps *HandlerDependencies) error {
+	return registerAll(registry, map[string]handlerEntry{
 		"party.register_organization": {
 			handler: registerOrganizationHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -213,7 +259,6 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-		// Party - Organization lifecycle control (deactivation via TERMINATE)
 		"party.control_organization": {
 			handler: controlOrganizationHandler(deps),
 			metadata: saga.HandlerMetadata{
@@ -226,14 +271,7 @@ func RegisterManifestHandlers(registry *saga.HandlerRegistry, deps *HandlerDepen
 				Version:              1,
 			},
 		},
-	}
-
-	for name, h := range handlers {
-		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
-			return fmt.Errorf("failed to register %s: %w", name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // HandlerDependencies holds the service clients needed by manifest handlers.
