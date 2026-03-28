@@ -189,8 +189,8 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 		switch status.State {
 		case StateActive:
 			// Check if new services were added to the config since last provisioning.
-			// If so, re-provision to apply migrations for the new services.
-			if len(status.Services) >= len(p.config.Services) {
+			// Compare by service name set to handle reordering.
+			if !p.hasNewServices(status) {
 				return nil, errAlreadyProvisioned // Idempotent: already provisioned
 			}
 			// New services added - fall through to re-provision
@@ -217,19 +217,10 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 		status.State = StateInProgress
 		status.UpdatedAt = now
 		status.ErrorMessage = ""
-		// Reconcile services list if config has more services than stored status.
-		// This happens when a new service is added to DefaultConfig() after tenants
-		// were already provisioned. Append entries for the new services.
-		if len(status.Services) < len(p.config.Services) {
-			schemaName := tenantID.SchemaName()
-			for i := len(status.Services); i < len(p.config.Services); i++ {
-				status.Services = append(status.Services, ServiceSchemaStatus{
-					ServiceName: p.config.Services[i].Name,
-					SchemaName:  schemaName,
-					State:       ServiceStatePending,
-				})
-			}
-		}
+		// Reconcile services list with current config. Appends entries for any
+		// services in DefaultConfig() that aren't in the stored status, matched
+		// by service name rather than index position.
+		p.reconcileServiceStatuses(status, tenantID)
 	}
 
 	if err := p.saveProvisioningStatus(ctx, status); err != nil {
@@ -252,6 +243,13 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			logger.Warn("provisioning timeout", "service", svc.Name)
 			p.markProvisioningFailed(ctx, status, fmt.Sprintf("timeout during %s migrations", svc.Name))
 			return ErrProvisioningTimeout
+		}
+
+		// Skip services that are already successfully provisioned (e.g., during
+		// re-provisioning to add a new service to an active tenant).
+		if i < len(status.Services) && status.Services[i].State == ServiceStateMigrated {
+			logger.Debug("service already provisioned, skipping", "service", svc.Name)
+			continue
 		}
 
 		// Get the database connection for this service
@@ -612,6 +610,39 @@ func (p *PostgresProvisioner) GetCircuitBreakerStates() []CircuitBreakerState {
 // Returns nil if the service has never been accessed (no circuit breaker exists).
 func (p *PostgresProvisioner) GetCircuitBreakerState(serviceName string) *CircuitBreakerState {
 	return p.circuitBreakers.GetCircuitBreakerState(serviceName)
+}
+
+// hasNewServices returns true if the config contains services not yet in the stored status.
+func (p *PostgresProvisioner) hasNewServices(status *ProvisioningStatus) bool {
+	existing := make(map[string]bool, len(status.Services))
+	for _, svc := range status.Services {
+		existing[svc.ServiceName] = true
+	}
+	for _, svc := range p.config.Services {
+		if !existing[svc.Name] {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileServiceStatuses appends ServiceSchemaStatus entries for any config
+// services not already present in the stored status, matched by service name.
+func (p *PostgresProvisioner) reconcileServiceStatuses(status *ProvisioningStatus, tenantID tenant.TenantID) {
+	existing := make(map[string]bool, len(status.Services))
+	for _, svc := range status.Services {
+		existing[svc.ServiceName] = true
+	}
+	schemaName := tenantID.SchemaName()
+	for _, svc := range p.config.Services {
+		if !existing[svc.Name] {
+			status.Services = append(status.Services, ServiceSchemaStatus{
+				ServiceName: svc.Name,
+				SchemaName:  schemaName,
+				State:       ServiceStatePending,
+			})
+		}
+	}
 }
 
 // Ensure PostgresProvisioner implements SchemaProvisioner.
