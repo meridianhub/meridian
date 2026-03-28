@@ -57,6 +57,7 @@ var knownCrossServiceDomainImports = map[string]bool{
 	"services/event-router/internal/correlation/extractor.go":               true,
 	"services/financial-accounting/app/container.go":                        true,
 	"services/internal-account/service/grpc_account_endpoints.go":           true,
+	"services/internal-account/service/grpc_account_helpers.go":            true,
 	"services/internal-account/service/server.go":                           true,
 }
 
