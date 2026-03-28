@@ -13,6 +13,7 @@ import (
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/messaging"
 	"github.com/meridianhub/meridian/services/reconciliation/adapters/persistence"
+	"github.com/meridianhub/meridian/services/reconciliation/app"
 	"github.com/meridianhub/meridian/services/reconciliation/config"
 	"github.com/meridianhub/meridian/services/reconciliation/observability"
 	"github.com/meridianhub/meridian/services/reconciliation/service"
@@ -474,7 +475,8 @@ func TestWireScheduler_NilRedis_ReturnsNil(t *testing.T) {
 		},
 	}
 
-	scheduler := wireScheduler(context.Background(), cfg, nil, logger)
+	scheduler, cleanup := app.WireScheduler(context.Background(), cfg, nil, logger)
+	defer cleanup()
 	assert.Nil(t, scheduler, "scheduler should be nil when Redis client is nil")
 }
 
@@ -502,7 +504,8 @@ func TestWireScheduler_InvalidDatabaseURL_ReturnsNil(t *testing.T) {
 		},
 	}
 
-	scheduler := wireScheduler(context.Background(), cfg, redisClient, logger)
+	scheduler, wireCleanup := app.WireScheduler(context.Background(), cfg, redisClient, logger)
+	defer wireCleanup()
 	assert.Nil(t, scheduler, "scheduler should be nil when database URL is invalid")
 }
 
@@ -546,7 +549,8 @@ func TestWireScheduler_ValidConfig_ReturnsScheduler(t *testing.T) {
 		},
 	}
 
-	scheduler := wireScheduler(context.Background(), cfg, redisClient, logger)
+	scheduler, wireCleanup := app.WireScheduler(context.Background(), cfg, redisClient, logger)
+	defer wireCleanup()
 	assert.NotNil(t, scheduler, "scheduler should be created with valid config")
 
 	// Clean up - stop the scheduler before test ends
@@ -638,7 +642,7 @@ func TestBuildValuationComponents_NoRefDataURL(t *testing.T) {
 		},
 	}
 
-	engine, provider, conn := buildValuationComponents(cfg, logger)
+	engine, provider, conn := app.BuildValuationComponents(cfg, logger)
 	assert.NotNil(t, engine, "valuation engine should always be created")
 	assert.NotNil(t, provider, "reference data provider should always be created")
 	assert.Nil(t, conn, "connection should be nil when no URL configured")
@@ -652,7 +656,7 @@ func TestBuildValuationComponents_WithRefDataURL(t *testing.T) {
 		},
 	}
 
-	engine, provider, conn := buildValuationComponents(cfg, logger)
+	engine, provider, conn := app.BuildValuationComponents(cfg, logger)
 	assert.NotNil(t, engine, "valuation engine should always be created")
 	assert.NotNil(t, provider, "reference data provider should always be created")
 	assert.NotNil(t, conn, "connection should be created when URL is configured")

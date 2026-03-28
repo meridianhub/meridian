@@ -13,21 +13,14 @@ import (
 	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
-	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/services/tenant/app"
 	"github.com/meridianhub/meridian/services/tenant/service"
-	"github.com/meridianhub/meridian/services/tenant/worker"
-	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
-	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
-
-	// Service-owned client (standardized client package from party service)
-	partyclient "github.com/meridianhub/meridian/services/party/client"
 )
 
 // Build information set via ldflags during compilation.
@@ -36,9 +29,6 @@ var (
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
-
-// envValueTrue is the string value for enabled environment variables.
-const envValueTrue = "true"
 
 // Errors returned during configuration and startup.
 var (
@@ -112,165 +102,18 @@ func main() {
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
 
-	// Initialize OpenTelemetry tracer
-	tracer, err := bootstrap.NewTracer(ctx, bootstrap.TracerConfig{
-		ServiceName:    "tenant-service",
-		ServiceVersion: Version,
-		Logger:         logger,
-	})
+	// Initialize dependency container (tracer, database, provisioner, party client, Redis, worker, auth)
+	container, err := app.NewContainer(ctx, logger, Version)
 	if err != nil {
-		return fmt.Errorf("failed to initialize tracer: %w", err)
+		return fmt.Errorf("failed to initialize container: %w", err)
 	}
-	defer bootstrap.ShutdownTracer(tracer, logger)
-
-	// Initialize database connection
-	dbConfig := bootstrap.DefaultDatabaseConfig()
-	dbConfig.Logger = logger
-	db, err := bootstrap.NewDatabase(ctx, dbConfig)
-	if err != nil {
-		return fmt.Errorf("failed to initialize database: %w", err)
-	}
-
-	logger.Info("database connection established")
-
-	// Create repository
-	repo := persistence.NewRepository(db)
-
-	// Initialize schema provisioner (optional - skipped if SCHEMA_PROVISIONING_ENABLED is not "true")
-	var schemaProvisioner provisioner.SchemaProvisioner
-	provisioningEnabled := env.GetEnvOrDefault("SCHEMA_PROVISIONING_ENABLED", "false")
-	if provisioningEnabled == envValueTrue {
-		config := provisioner.DefaultConfig()
-
-		// Pass platform database connection (for tenant_provisioning table).
-		// The provisioner will also connect to each service's database for schema creation.
-		prov, err := provisioner.NewPostgresProvisioner(db, config)
-		if err != nil {
-			return fmt.Errorf("failed to create schema provisioner: %w", err)
-		}
-		schemaProvisioner = prov
-
-		// Clean up service database connections on shutdown
-		defer func() {
-			if err := prov.Close(); err != nil {
-				logger.Error("failed to close provisioner connections", "error", err)
-			}
-		}()
-
-		logger.Info("schema provisioner initialized",
-			"services", len(config.Services),
-			"provisioning_timeout", config.ProvisioningTimeout)
-	} else {
-		logger.Warn("schema provisioning not enabled - tenant creation will not provision schemas",
-			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable schema provisioning")
-	}
-
-	// Initialize Party client (optional - skipped if PARTY_SERVICE_ENABLED is not "true")
-	// Uses the service-owned party client package with adapter for tenant-specific interface
-	var partyClient service.PartyClient
-	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
-	partyEnabled := env.GetEnvOrDefault("PARTY_SERVICE_ENABLED", envValueTrue) == envValueTrue
-	if partyEnabled {
-		pc, cleanup, err := createPartyClient(ctx, namespace, logger, tracer)
-		if err != nil {
-			return fmt.Errorf("failed to create party client: %w", err)
-		}
-		partyClient = pc
-		defer cleanup()
-		logger.Info("party client initialized",
-			"service_name", partyclient.ServiceName,
-			"namespace", namespace,
-			"port", ports.Party)
-	} else {
-		logger.Warn("party client not configured - tenant creation will not register parties",
-			"hint", "set PARTY_SERVICE_ENABLED=true to enable party registration")
-	}
-
-	// Initialize Redis client and slug cache (optional).
-	// If Redis is not available at startup, slug caching is disabled until next restart.
-	// The slug cache is a performance optimization; the service operates correctly without it.
-	var slugCache *service.SlugCache
-	redisEnabled := env.GetEnvOrDefault("REDIS_ENABLED", envValueTrue) == envValueTrue
-	if redisEnabled {
-		redisConfig := bootstrap.DefaultRedisConfig()
-		redisConfig.Logger = logger
-		redisClient, err := bootstrap.NewRedisClient(ctx, redisConfig)
-		if err != nil {
-			logger.Warn("Redis not available at startup, slug caching disabled",
-				"error", err,
-				"hint", "slug caching will be available after service restart when Redis is reachable")
-		} else {
-			defer func() {
-				if err := redisClient.Close(); err != nil {
-					logger.Error("failed to close Redis client", "error", err)
-				}
-			}()
-			slugCache = service.NewSlugCache(redisClient)
-			logger.Info("slug cache initialized with Redis backend")
-		}
-	} else {
-		logger.Warn("Redis not enabled - slug caching disabled",
-			"hint", "set REDIS_ENABLED=true to enable slug caching")
-	}
-
-	// Create gRPC service
-	tenantService := service.NewService(repo, schemaProvisioner, partyClient, slugCache, logger)
-
-	// Create cached registry for validation middleware
-	cachedRegistry := service.NewCachedRegistry(repo, service.CachedRegistryConfig{
-		RefreshInterval: 60 * time.Second,
-		Logger:          logger,
-	})
-	cachedRegistry.Start(ctx)
-
-	logger.Info("cached tenant registry started",
-		"refresh_interval", "60s")
-
-	// Initialize provisioning worker (only if schema provisioning is enabled)
-	var provisioningWorker *worker.ProvisioningWorker
-	if provisioningEnabled == envValueTrue && schemaProvisioner != nil {
-		config, err := loadWorkerConfig()
-		if err != nil {
-			return bootstrap.Permanent(fmt.Errorf("failed to load worker configuration: %w", err))
-		}
-
-		provisioningWorker, err = worker.NewProvisioningWorker(
-			repo,
-			schemaProvisioner,
-			worker.Config{
-				PollInterval:   config.PollInterval,
-				MaxRetries:     config.MaxRetries,
-				RetryBaseDelay: config.RetryBaseDelay,
-				RetryMaxDelay:  config.RetryMaxDelay,
-				MaxConcurrent:  config.MaxConcurrent,
-			},
-			logger,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create provisioning worker: %w", err)
-		}
-
-		// Start worker in background goroutine
-		go provisioningWorker.Start(ctx)
-
-		logger.Info("provisioning worker started")
-	} else {
-		logger.Info("provisioning worker disabled",
-			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
-	}
-
-	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
-	authConfig := bootstrap.DefaultAuthConfig(logger)
-	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
-	if err != nil {
-		return fmt.Errorf("failed to initialize auth: %w", err)
-	}
+	defer container.Close()
 
 	// Create gRPC server with interceptor chain
 	// Order is handled by bootstrap: tracing -> platform auth -> platform admin -> recovery
 	// Note: WithPlatformAdmin() adds PlatformAdminInterceptor for platform-layer services
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
-		WithAuthInterceptor(authInterceptor).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
+		WithAuthInterceptor(container.AuthInterceptor).
 		WithPlatformAdmin().
 		Build()
 	if err != nil {
@@ -278,11 +121,11 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Register services
-	pb.RegisterTenantServiceServer(grpcServer, tenantService)
+	pb.RegisterTenantServiceServer(grpcServer, container.TenantService)
 
 	// Register health check service
 	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
-		Repository:  repo,
+		Repository:  container.Repo,
 		Logger:      logger,
 		ServiceName: "tenant",
 		Timeout:     defaults.DefaultHealthCheckTimeout,
@@ -313,25 +156,10 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Wait for shutdown signal and orchestrate graceful shutdown
+	// Wait for shutdown signal and orchestrate graceful shutdown.
+	// container.Close() (deferred above) handles all resource cleanup:
+	// provisioning worker, provisioner connections, party client, Redis, database, tracer.
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
-
-	// Add cleanup functions in reverse order of initialization (LIFO)
-	// Stop provisioning worker first
-	if provisioningWorker != nil {
-		orchestrator.AddCleanup(func() error {
-			logger.Info("stopping provisioning worker...")
-			provisioningWorker.Stop()
-			logger.Info("provisioning worker stopped")
-			return nil
-		})
-	}
-
-	// Close database connection
-	orchestrator.AddCleanup(func() error {
-		bootstrap.CloseDatabase(db, logger)
-		return nil
-	})
 
 	return orchestrator.Wait(serverErrors)
 }
@@ -389,62 +217,4 @@ func getConfigSource(key string) string {
 		return "env"
 	}
 	return "default"
-}
-
-// createPartyClient creates the Party gRPC client with resilience patterns.
-// Uses the service-owned client package from services/party/client for standardized
-// client creation with built-in tracing and resilience patterns.
-// Returns a PartyClient interface adapter wrapping the underlying party client.
-func createPartyClient(ctx context.Context, namespace string, logger *slog.Logger, tracer *observability.Tracer) (service.PartyClient, func(), error) {
-	logger.Info("connecting to party service",
-		"service", partyclient.ServiceName,
-		"namespace", namespace,
-		"port", ports.Party)
-
-	// Configure resilience settings from environment
-	resilientConfig := &sharedclients.ResilientClientConfig{
-		// Circuit breaker settings
-		CircuitBreakerName:     "party",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
-		MaxRequests:            env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
-		FailureThreshold:       env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
-
-		// Retry settings
-		MaxRetries:          env.GetEnvAsInt("PARTY_MAX_RETRIES", 3),
-		InitialInterval:     env.GetEnvAsDuration("PARTY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         env.GetEnvAsDuration("PARTY_RETRY_MAX_INTERVAL", 5*time.Second),
-		Multiplier:          env.GetEnvAsFloat("PARTY_RETRY_MULTIPLIER", 2.0),
-		RandomizationFactor: env.GetEnvAsFloat("PARTY_RETRY_RANDOMIZATION", 0.5),
-
-		Logger: logger,
-	}
-
-	logger.Info("party client configured with resilience patterns",
-		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
-		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
-		"max_retries", resilientConfig.MaxRetries,
-	)
-
-	// Use the service-owned client package with DNS-based load balancing
-	pc, cleanup, err := partyclient.New(ctx, partyclient.Config{
-		ServiceName: partyclient.ServiceName,
-		Namespace:   namespace,
-		Port:        ports.Party,
-		Timeout:     env.GetEnvAsDuration("PARTY_TIMEOUT", partyclient.DefaultTimeout),
-		Tracer:      tracer,
-		Resilience:  resilientConfig,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create party client: %w", err)
-	}
-
-	// Wrap with adapter to implement tenant-specific PartyClient interface
-	adapter := service.NewPartyClientAdapter(pc, cleanup)
-
-	return adapter, func() {
-		if err := adapter.Close(); err != nil {
-			logger.Error("failed to close party client", "error", err)
-		}
-	}, nil
 }

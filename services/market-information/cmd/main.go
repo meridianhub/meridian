@@ -14,17 +14,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/services/market-information/adapters/external/ecb"
-	"github.com/meridianhub/meridian/services/market-information/adapters/persistence"
-	"github.com/meridianhub/meridian/services/market-information/config"
+	"github.com/meridianhub/meridian/services/market-information/app"
 	"github.com/meridianhub/meridian/services/market-information/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
-	"github.com/meridianhub/meridian/shared/platform/events"
-	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -66,122 +62,30 @@ func main() {
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
 
-	// Load service configuration
-	cfg := config.LoadConfig()
-
-	// Initialize OpenTelemetry tracer
-	tracer, err := bootstrap.NewTracer(ctx, bootstrap.TracerConfig{
-		ServiceName:    "market-information-service",
-		ServiceVersion: Version,
-		Logger:         logger,
-	})
+	// Initialize dependency container
+	container, err := app.NewContainer(ctx, logger, Version)
 	if err != nil {
-		return fmt.Errorf("failed to initialize tracer: %w", err)
+		return err
 	}
-	defer bootstrap.ShutdownTracer(tracer, logger)
-
-	// Initialize database connection using pgxpool
-	dbURL := env.GetEnvOrDefault("DATABASE_URL", "postgres://meridian_user@localhost:26257/meridian?sslmode=disable")
-	dbPool, err := pgxpool.New(ctx, dbURL)
-	if err != nil {
-		return fmt.Errorf("failed to create database connection pool: %w", err)
-	}
-	defer dbPool.Close()
-
-	// Verify database connectivity
-	if err := dbPool.Ping(ctx); err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
-	}
-	logger.Info("database connection established", "url", dbURL)
-
-	// Initialize GORM database connection for outbox pattern.
-	// The existing pgxpool connection is retained for domain persistence operations.
-	gormDBConfig := bootstrap.DefaultDatabaseConfig()
-	gormDBConfig.DSN = dbURL
-	gormDBConfig.Logger = logger
-	gormDB, err := bootstrap.NewDatabase(ctx, gormDBConfig)
-	if err != nil {
-		return fmt.Errorf("failed to initialize GORM database for outbox: %w", err)
-	}
-	defer bootstrap.CloseDatabase(gormDB, logger)
-
-	// Initialize outbox publisher and worker for transactional event publishing
-	outboxRepo := events.NewPostgresOutboxRepository(gormDB)
-	outboxPublisher := events.NewOutboxPublisher("market-information")
-
-	var outboxWorker *events.Worker
-	var kafkaProducer *kafka.ProtoProducer
-	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
-	if bootstrapServers != "" {
-		producer, kafkaErr := kafka.NewProtoProducer(kafka.ProducerConfig{
-			BootstrapServers: bootstrapServers,
-			ClientID:         "market-information-outbox-worker",
-			Acks:             "all",
-			Retries:          3,
-			Compression:      "snappy",
-		})
-		if kafkaErr != nil {
-			logger.Warn("failed to create Kafka producer for outbox worker",
-				"error", kafkaErr)
-		} else {
-			kafkaProducer = producer
-			defer kafkaProducer.Close()
-			workerConfig := events.DefaultWorkerConfig("market-information")
-			outboxWorker = events.NewWorker(outboxRepo, kafkaProducer, workerConfig, logger)
-			outboxWorker.Start(ctx)
-			defer outboxWorker.Stop()
-			logger.Info("outbox worker started",
-				"bootstrap_servers", bootstrapServers)
-		}
-	} else {
-		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set")
-	}
-
-	// Create outbox-based event publisher (replaces KafkaObservationPublisher)
-	outboxEventPublisher := service.NewOutboxEventPublisher(gormDB, outboxPublisher)
-
-	// Create repositories for persistence
-	masterTenantID := env.GetEnvOrDefault("MASTER_TENANT_ID", "meridian_master")
-	repos := persistence.NewRepositories(dbPool, masterTenantID)
-	logger.Info("repositories initialized", "master_tenant_id", masterTenantID)
-
-	// Create Market Information service server
-	marketInformationServer, err := service.NewServer(
-		repos.DataSet,
-		repos.Observation,
-		repos.Source,
-		service.WithEventPublisher(outboxEventPublisher),
-		service.WithLogger(logger.With("component", "market_information_server")),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create market information server: %w", err)
-	}
-	logger.Info("market information server created")
-
-	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
-	authConfig := bootstrap.DefaultAuthConfig(logger)
-	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
-	if err != nil {
-		return fmt.Errorf("failed to initialize auth: %w", err)
-	}
+	defer container.Close()
 
 	// Create gRPC server with interceptor chain
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
-		WithAuthInterceptor(authInterceptor).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
+		WithAuthInterceptor(container.AuthInterceptor).
 		Build()
 	if err != nil {
 		return fmt.Errorf("failed to build grpc server: %w", err)
 	}
 
 	// Register Market Information service
-	marketinformationv1.RegisterMarketInformationServiceServer(grpcServer, marketInformationServer)
+	marketinformationv1.RegisterMarketInformationServiceServer(grpcServer, container.MarketInformationServer)
 
 	// Register health check service
 	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
 		Logger:        logger,
 		ServiceName:   "market-information",
 		CheckTimeout:  defaults.DefaultHealthCheckTimeout,
-		ServiceConfig: cfg,
+		ServiceConfig: container.Config,
 	})
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
 
@@ -276,10 +180,9 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Outbox worker and Kafka producer are cleaned up via defer.
-
 	// Initialize ECB adapter worker (if enabled)
 	// Note: The ECB worker calls RecordObservation on the Server to ingest FX rates.
+	cfg := container.Config
 	if cfg.ECB.Enabled {
 		ecbClient := ecb.NewClient(ecb.Config{
 			Endpoint: cfg.ECB.Endpoint,
@@ -288,7 +191,7 @@ func run(logger *slog.Logger) error {
 
 		ecbWorker := ecb.NewWorker(
 			ecbClient,
-			marketInformationServer, // Server implements MarketInformationClient interface
+			container.MarketInformationServer, // Server implements MarketInformationClient interface
 			ecb.WorkerConfig{
 				DatasetCode:   cfg.ECB.DatasetCode,
 				SourceCode:    cfg.ECB.SourceCode,
@@ -324,8 +227,7 @@ func run(logger *slog.Logger) error {
 		return nil
 	})
 
-	// Note: Database pool cleanup is handled via defer dbPool.Close() above
-	// This ensures the pool is closed even if orchestrator.Wait returns early
+	// Note: Database pool and infrastructure cleanup is handled via container.Close() defer
 
 	return orchestrator.Wait(serverErrors)
 }
