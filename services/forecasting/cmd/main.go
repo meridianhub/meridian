@@ -163,7 +163,7 @@ func initDatabasePool(ctx context.Context, logger *slog.Logger) (*pgxpool.Pool, 
 		dbPool.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-	logger.Info("database connection established", "url", dbURL)
+	logger.Info("database connection established")
 	return dbPool, nil
 }
 
