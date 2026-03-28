@@ -155,131 +155,162 @@ func (r *CausationTreeRepository) GetCausationTree(ctx context.Context, rootSaga
 	return r.buildTreeFromRows(rows, rootSagaID)
 }
 
+// parentRelation tracks the parent saga and step index for a child saga.
+type parentRelation struct {
+	parentID        uuid.UUID
+	parentStepIndex int
+}
+
+// treeBuilder accumulates state while scanning causation tree rows.
+type treeBuilder struct {
+	sagaNodes       map[uuid.UUID]*CausationTreeNode
+	seenSteps       map[uuid.UUID]map[int]bool
+	parentRelations map[uuid.UUID]parentRelation
+	rowCount        int
+}
+
+func newTreeBuilder() *treeBuilder {
+	return &treeBuilder{
+		sagaNodes:       make(map[uuid.UUID]*CausationTreeNode),
+		seenSteps:       make(map[uuid.UUID]map[int]bool),
+		parentRelations: make(map[uuid.UUID]parentRelation),
+	}
+}
+
 // buildTreeFromRows constructs the nested tree structure from the flat query result set.
 func (r *CausationTreeRepository) buildTreeFromRows(rows *sql.Rows, rootSagaID uuid.UUID) (*CausationTreeNode, error) {
-	// Map to store all saga nodes by their ID
-	sagaNodes := make(map[uuid.UUID]*CausationTreeNode)
-	// Map to track step indices we've seen for each saga (to avoid duplicates)
-	seenSteps := make(map[uuid.UUID]map[int]bool)
-	// Track parent relationships for building the tree
-	parentRelations := make(map[uuid.UUID]struct {
-		parentID        uuid.UUID
-		parentStepIndex int
-	})
+	tb := newTreeBuilder()
 
-	rowCount := 0
 	for rows.Next() {
-		rowCount++
+		tb.rowCount++
 		var row causationTreeRow
 
 		if err := rows.Scan(
-			&row.SagaID,
-			&row.SagaName,
-			&row.Status,
-			&row.KnowledgeAt,
-			&row.ParentSagaID,
-			&row.ParentStepIndex,
-			&row.Depth,
-			&row.ErrorMessage,
-			&row.ErrorCategory,
-			&row.FailedStepIdx,
-			&row.StepIndex,
-			&row.StepName,
-			&row.StepStatus,
-			&row.StepError,
-			&row.StepErrorCat,
-			&row.StepCreatedAt,
+			&row.SagaID, &row.SagaName, &row.Status, &row.KnowledgeAt,
+			&row.ParentSagaID, &row.ParentStepIndex, &row.Depth,
+			&row.ErrorMessage, &row.ErrorCategory, &row.FailedStepIdx,
+			&row.StepIndex, &row.StepName, &row.StepStatus,
+			&row.StepError, &row.StepErrorCat, &row.StepCreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan causation tree row: %w", err)
 		}
 
-		// Get or create the saga node
-		node, exists := sagaNodes[row.SagaID]
-		if !exists {
-			node = &CausationTreeNode{
-				SagaID: row.SagaID,
-				Status: row.Status,
-				Steps:  []StepNode{},
-			}
-			if row.SagaName.Valid {
-				node.SagaName = row.SagaName.String
-			}
-			if row.KnowledgeAt.Valid {
-				t := row.KnowledgeAt.Time
-				node.KnowledgeAt = &t
-			}
-			// Add failed step info if present
-			if row.FailedStepIdx.Valid {
-				node.FailedStep = &FailedStep{
-					Index: int(row.FailedStepIdx.Int32),
-				}
-				if row.ErrorMessage.Valid {
-					node.FailedStep.Error = row.ErrorMessage.String
-				}
-				if row.ErrorCategory.Valid {
-					node.FailedStep.ErrorCategory = row.ErrorCategory.String
-				}
-			}
-			sagaNodes[row.SagaID] = node
-			seenSteps[row.SagaID] = make(map[int]bool)
-		}
-
-		// Track parent relationship
-		if row.ParentSagaID != nil && row.ParentStepIndex.Valid {
-			parentRelations[row.SagaID] = struct {
-				parentID        uuid.UUID
-				parentStepIndex int
-			}{
-				parentID:        *row.ParentSagaID,
-				parentStepIndex: int(row.ParentStepIndex.Int32),
-			}
-		}
-
-		// Add step result if present and not already added
-		if row.StepIndex.Valid {
-			stepIdx := int(row.StepIndex.Int32)
-			if !seenSteps[row.SagaID][stepIdx] {
-				seenSteps[row.SagaID][stepIdx] = true
-				step := StepNode{
-					Index:      stepIdx,
-					ChildSagas: []*CausationTreeNode{},
-				}
-				if row.StepName.Valid {
-					step.Name = row.StepName.String
-				}
-				if row.StepStatus.Valid {
-					step.Status = row.StepStatus.String
-				}
-				if row.StepCreatedAt.Valid {
-					t := row.StepCreatedAt.Time
-					step.ExecutedAt = &t
-				}
-				if row.StepError.Valid {
-					step.Error = &row.StepError.String
-				}
-				node.Steps = append(node.Steps, step)
-			}
-		}
+		tb.addRow(&row)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating causation tree rows: %w", err)
 	}
 
-	// If no rows found, the saga doesn't exist
-	if rowCount == 0 {
+	if tb.rowCount == 0 {
 		return nil, ErrSagaNotFound
 	}
 
-	// Build the tree by attaching child sagas to their parent steps
-	for childID, parent := range parentRelations {
-		childNode := sagaNodes[childID]
-		parentNode := sagaNodes[parent.parentID]
+	tb.attachChildSagas()
+
+	rootNode := tb.sagaNodes[rootSagaID]
+	if rootNode == nil {
+		return nil, ErrSagaNotFound
+	}
+
+	return rootNode, nil
+}
+
+// addRow processes a single scanned row, creating or updating the saga node
+// and recording parent relationships and step results.
+func (tb *treeBuilder) addRow(row *causationTreeRow) {
+	node := tb.getOrCreateNode(row)
+
+	// Track parent relationship
+	if row.ParentSagaID != nil && row.ParentStepIndex.Valid {
+		tb.parentRelations[row.SagaID] = parentRelation{
+			parentID:        *row.ParentSagaID,
+			parentStepIndex: int(row.ParentStepIndex.Int32),
+		}
+	}
+
+	// Add step result if present and not already added
+	if row.StepIndex.Valid {
+		tb.addStepIfNew(node, row)
+	}
+}
+
+// getOrCreateNode retrieves an existing saga node or creates a new one from the row.
+func (tb *treeBuilder) getOrCreateNode(row *causationTreeRow) *CausationTreeNode {
+	node, exists := tb.sagaNodes[row.SagaID]
+	if exists {
+		return node
+	}
+
+	node = &CausationTreeNode{
+		SagaID: row.SagaID,
+		Status: row.Status,
+		Steps:  []StepNode{},
+	}
+	if row.SagaName.Valid {
+		node.SagaName = row.SagaName.String
+	}
+	if row.KnowledgeAt.Valid {
+		t := row.KnowledgeAt.Time
+		node.KnowledgeAt = &t
+	}
+	if row.FailedStepIdx.Valid {
+		node.FailedStep = buildFailedStep(row)
+	}
+	tb.sagaNodes[row.SagaID] = node
+	tb.seenSteps[row.SagaID] = make(map[int]bool)
+	return node
+}
+
+// buildFailedStep constructs a FailedStep from a row's error fields.
+func buildFailedStep(row *causationTreeRow) *FailedStep {
+	fs := &FailedStep{Index: int(row.FailedStepIdx.Int32)}
+	if row.ErrorMessage.Valid {
+		fs.Error = row.ErrorMessage.String
+	}
+	if row.ErrorCategory.Valid {
+		fs.ErrorCategory = row.ErrorCategory.String
+	}
+	return fs
+}
+
+// addStepIfNew adds a step to the node if it hasn't been seen before.
+func (tb *treeBuilder) addStepIfNew(node *CausationTreeNode, row *causationTreeRow) {
+	stepIdx := int(row.StepIndex.Int32)
+	if tb.seenSteps[row.SagaID][stepIdx] {
+		return
+	}
+	tb.seenSteps[row.SagaID][stepIdx] = true
+
+	step := StepNode{
+		Index:      stepIdx,
+		ChildSagas: []*CausationTreeNode{},
+	}
+	if row.StepName.Valid {
+		step.Name = row.StepName.String
+	}
+	if row.StepStatus.Valid {
+		step.Status = row.StepStatus.String
+	}
+	if row.StepCreatedAt.Valid {
+		t := row.StepCreatedAt.Time
+		step.ExecutedAt = &t
+	}
+	if row.StepError.Valid {
+		step.Error = &row.StepError.String
+	}
+	node.Steps = append(node.Steps, step)
+}
+
+// attachChildSagas builds the tree by attaching child sagas to their parent steps.
+func (tb *treeBuilder) attachChildSagas() {
+	for childID, parent := range tb.parentRelations {
+		childNode := tb.sagaNodes[childID]
+		parentNode := tb.sagaNodes[parent.parentID]
 		if parentNode == nil || childNode == nil {
 			continue
 		}
 
-		// Find or create the parent step
 		found := false
 		for i := range parentNode.Steps {
 			if parentNode.Steps[i].Index == parent.parentStepIndex {
@@ -288,7 +319,6 @@ func (r *CausationTreeRepository) buildTreeFromRows(rows *sql.Rows, rootSagaID u
 				break
 			}
 		}
-		// If parent step doesn't exist in results (no step result yet), create a placeholder
 		if !found {
 			parentNode.Steps = append(parentNode.Steps, StepNode{
 				Index:      parent.parentStepIndex,
@@ -296,14 +326,6 @@ func (r *CausationTreeRepository) buildTreeFromRows(rows *sql.Rows, rootSagaID u
 			})
 		}
 	}
-
-	// Return the root node
-	rootNode := sagaNodes[rootSagaID]
-	if rootNode == nil {
-		return nil, ErrSagaNotFound
-	}
-
-	return rootNode, nil
 }
 
 // GetTreeDepth returns the maximum depth of a causation tree.

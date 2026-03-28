@@ -214,11 +214,35 @@ func (s *SlackNotifier) buildPayload(alert Alert, alertID string) slackPayload {
 	emoji := severityEmoji(alert.Severity)
 	headerText := fmt.Sprintf("%s *%s*", emoji, alert.Title)
 
-	// Build the message details
+	details := buildAlertDetails(alert, s.serviceName, alertID)
+
+	blocks := []slackBlock{
+		{Type: "section", Text: &slackTextObj{Type: "mrkdwn", Text: headerText}},
+		{Type: "section", Text: &slackTextObj{Type: "mrkdwn", Text: details}},
+	}
+
+	// Add metadata section if there are fields
+	if metadataFields := buildMetadataFields(alert.Metadata); len(metadataFields) > 0 {
+		blocks = append(blocks, slackBlock{Type: "section", Fields: metadataFields})
+	}
+
+	// Add divider at the end
+	blocks = append(blocks, slackBlock{Type: "divider"})
+
+	fallbackText := fmt.Sprintf("%s %s - Tenant: %s", emoji, alert.Title, alert.TenantID)
+
+	return slackPayload{
+		Text:   fallbackText,
+		Blocks: blocks,
+	}
+}
+
+// buildAlertDetails formats the alert detail section with tenant, service, timestamp, and error.
+func buildAlertDetails(alert Alert, serviceName string, alertID string) string {
 	details := fmt.Sprintf(
 		"*Tenant ID:* `%s`\n*Service:* %s\n*Timestamp:* %s\n*Alert ID:* `%s`",
 		alert.TenantID,
-		s.serviceName,
+		serviceName,
 		alert.Timestamp.Format(time.RFC3339),
 		alertID,
 	)
@@ -227,63 +251,31 @@ func (s *SlackNotifier) buildPayload(alert Alert, alertID string) slackPayload {
 		details += fmt.Sprintf("\n\n*Error:*\n```%s```", alert.Message)
 	}
 
-	// Add metadata fields if present, sorted by key for deterministic ordering
-	var metadataFields []slackTextObj
-	if len(alert.Metadata) > 0 {
-		keys := make([]string, 0, len(alert.Metadata))
-		for key := range alert.Metadata {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
+	return details
+}
 
-		for _, key := range keys {
-			value := alert.Metadata[key]
-			if value != "" {
-				metadataFields = append(metadataFields, slackTextObj{
-					Type: "mrkdwn",
-					Text: fmt.Sprintf("*%s:* %s", key, value),
-				})
-			}
-		}
+// buildMetadataFields converts alert metadata into Slack field objects, sorted by key.
+func buildMetadataFields(metadata map[string]string) []slackTextObj {
+	if len(metadata) == 0 {
+		return nil
 	}
 
-	blocks := []slackBlock{
-		{
-			Type: "section",
-			Text: &slackTextObj{
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var fields []slackTextObj
+	for _, key := range keys {
+		if value := metadata[key]; value != "" {
+			fields = append(fields, slackTextObj{
 				Type: "mrkdwn",
-				Text: headerText,
-			},
-		},
-		{
-			Type: "section",
-			Text: &slackTextObj{
-				Type: "mrkdwn",
-				Text: details,
-			},
-		},
+				Text: fmt.Sprintf("*%s:* %s", key, value),
+			})
+		}
 	}
-
-	// Add metadata section if there are fields
-	if len(metadataFields) > 0 {
-		blocks = append(blocks, slackBlock{
-			Type:   "section",
-			Fields: metadataFields,
-		})
-	}
-
-	// Add divider at the end
-	blocks = append(blocks, slackBlock{
-		Type: "divider",
-	})
-
-	// Fallback text for notifications
-	fallbackText := fmt.Sprintf("%s %s - Tenant: %s", emoji, alert.Title, alert.TenantID)
-
-	return slackPayload{
-		Text:   fallbackText,
-		Blocks: blocks,
-	}
+	return fields
 }
 
 // formatProvisioningFailureMessage formats a tenant provisioning failure for Slack.

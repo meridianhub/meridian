@@ -113,66 +113,75 @@ func NewConfigFromEnv() (Config, error) {
 
 	switch mode {
 	case AuthModeJWKS:
-		config.JWKSURL = os.Getenv("JWKS_URL")
-		if config.JWKSURL == "" {
-			return Config{}, ErrMissingJWKSURL
+		if err := applyJWKSConfigFromEnv(&config); err != nil {
+			return Config{}, err
 		}
-
-		// Parse cache TTL with default
-		cacheTTL := os.Getenv("JWKS_CACHE_TTL")
-		if cacheTTL != "" {
-			ttl, err := time.ParseDuration(cacheTTL)
-			if err != nil {
-				return Config{}, fmt.Errorf("invalid JWKS_CACHE_TTL: %w", err)
-			}
-			config.JWKSCacheTTL = ttl
-		} else {
-			config.JWKSCacheTTL = 24 * time.Hour
-		}
-
-		// Parse refresh TTL (optional)
-		refreshTTL := os.Getenv("JWKS_REFRESH_TTL")
-		if refreshTTL != "" {
-			ttl, err := time.ParseDuration(refreshTTL)
-			if err != nil {
-				return Config{}, fmt.Errorf("invalid JWKS_REFRESH_TTL: %w", err)
-			}
-			config.JWKSRefreshTTL = ttl
-		}
-
 	case AuthModeOAuth:
-		config.OAuthClientID = os.Getenv("OAUTH_CLIENT_ID")
-		config.OAuthClientSecret = os.Getenv("OAUTH_CLIENT_SECRET")
-		config.OAuthTokenURL = os.Getenv("OAUTH_TOKEN_URL")
-
-		if config.OAuthClientID == "" {
-			return Config{}, ErrMissingOAuthClientID
+		if err := applyOAuthConfigFromEnv(&config); err != nil {
+			return Config{}, err
 		}
-		if config.OAuthClientSecret == "" {
-			return Config{}, ErrMissingOAuthClientSecret
-		}
-		if config.OAuthTokenURL == "" {
-			return Config{}, ErrMissingOAuthTokenURL
-		}
-
-		// Parse scopes (comma-separated)
-		scopes := os.Getenv("OAUTH_SCOPES")
-		if scopes != "" {
-			// Simple split by comma
-			config.OAuthScopes = splitScopes(scopes)
-		}
-
-		// Optional introspection URL
-		config.OAuthIntrospectionURL = os.Getenv("OAUTH_INTROSPECTION_URL")
-
 	case AuthModeDisabled:
 		// No configuration needed
-
 	default:
 		return Config{}, fmt.Errorf("%w: got %q", ErrInvalidAuthMode, mode)
 	}
 
 	return config, nil
+}
+
+// applyJWKSConfigFromEnv populates JWKS-specific fields from environment variables.
+func applyJWKSConfigFromEnv(config *Config) error {
+	config.JWKSURL = os.Getenv("JWKS_URL")
+	if config.JWKSURL == "" {
+		return ErrMissingJWKSURL
+	}
+
+	cacheTTL := os.Getenv("JWKS_CACHE_TTL")
+	if cacheTTL != "" {
+		ttl, err := time.ParseDuration(cacheTTL)
+		if err != nil {
+			return fmt.Errorf("invalid JWKS_CACHE_TTL: %w", err)
+		}
+		config.JWKSCacheTTL = ttl
+	} else {
+		config.JWKSCacheTTL = 24 * time.Hour
+	}
+
+	refreshTTL := os.Getenv("JWKS_REFRESH_TTL")
+	if refreshTTL != "" {
+		ttl, err := time.ParseDuration(refreshTTL)
+		if err != nil {
+			return fmt.Errorf("invalid JWKS_REFRESH_TTL: %w", err)
+		}
+		config.JWKSRefreshTTL = ttl
+	}
+
+	return nil
+}
+
+// applyOAuthConfigFromEnv populates OAuth-specific fields from environment variables.
+func applyOAuthConfigFromEnv(config *Config) error {
+	config.OAuthClientID = os.Getenv("OAUTH_CLIENT_ID")
+	config.OAuthClientSecret = os.Getenv("OAUTH_CLIENT_SECRET")
+	config.OAuthTokenURL = os.Getenv("OAUTH_TOKEN_URL")
+
+	if config.OAuthClientID == "" {
+		return ErrMissingOAuthClientID
+	}
+	if config.OAuthClientSecret == "" {
+		return ErrMissingOAuthClientSecret
+	}
+	if config.OAuthTokenURL == "" {
+		return ErrMissingOAuthTokenURL
+	}
+
+	scopes := os.Getenv("OAUTH_SCOPES")
+	if scopes != "" {
+		config.OAuthScopes = splitScopes(scopes)
+	}
+
+	config.OAuthIntrospectionURL = os.Getenv("OAUTH_INTROSPECTION_URL")
+	return nil
 }
 
 // DefaultConfig returns default authentication configuration for local development.

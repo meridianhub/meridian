@@ -321,80 +321,23 @@ func NewServiceWithExistingClients(
 		return nil, ErrRepositoryNil
 	}
 
-	// Apply default logger if not provided
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
-	// Load saga scripts from reference-data canonical source
-	depositScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "deposit", "v1.0.0.star"))
+	// Initialize saga infrastructure (scripts, registry, runtime, runner)
+	sagaRunner, depositScript, withdrawalScript, err := buildSagaRunner(logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load deposit saga script: %w", err)
-	}
-	withdrawalScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "withdrawal", "v1.0.0.star"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load withdrawal saga script: %w", err)
+		return nil, err
 	}
 
-	// Create saga handler registry
-	handlerRegistry := saga.NewHandlerRegistry()
-	if err := RegisterCurrentAccountHandlers(handlerRegistry); err != nil {
-		return nil, fmt.Errorf("failed to register saga handlers: %w", err)
-	}
-
-	// Build service modules for Starlark (schema derived from proto metadata on handlers)
-	serviceModules, err := schema.BuildServiceModules(handlerRegistry)
+	// Create orchestrators
+	depositOrchestrator, withdrawalOrchestrator, err := buildOrchestrators(
+		logger, repo, posKeepingClient, finAcctClient, accountConfig,
+		accountResolver, fungibilityValidator, sagaRunner, depositScript, withdrawalScript,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build service modules: %w", err)
-	}
-
-	// Create Starlark saga runtime
-	runtime, err := saga.NewRuntime(logger)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create saga runtime: %w", err)
-	}
-
-	// Create Starlark saga runner
-	sagaRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
-		Runtime:        runtime,
-		Registry:       handlerRegistry,
-		ServiceModules: serviceModules,
-		Logger:         logger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create saga runner: %w", err)
-	}
-
-	// Create deposit orchestrator
-	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
-		Logger:               logger,
-		Repo:                 repo,
-		PosKeepingClient:     posKeepingClient,
-		FinAcctClient:        finAcctClient,
-		AccountConfig:        accountConfig,
-		AccountResolver:      accountResolver,
-		FungibilityValidator: fungibilityValidator,
-		SagaRunner:           sagaRunner,
-		DepositScript:        depositScript,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
-	}
-
-	// Create withdrawal orchestrator
-	withdrawalOrchestrator, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
-		Logger:               logger,
-		Repo:                 repo,
-		PosKeepingClient:     posKeepingClient,
-		FinAcctClient:        finAcctClient,
-		AccountConfig:        accountConfig,
-		AccountResolver:      accountResolver,
-		FungibilityValidator: fungibilityValidator,
-		SagaRunner:           sagaRunner,
-		WithdrawalScript:     withdrawalScript,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
+		return nil, err
 	}
 
 	svc := &Service{
@@ -420,6 +363,90 @@ func NewServiceWithExistingClients(
 		}
 	}
 	return svc, nil
+}
+
+// buildSagaRunner initializes the saga infrastructure: loads scripts, registers handlers, and creates the runner.
+func buildSagaRunner(logger *slog.Logger) (*saga.StarlarkSagaRunner, string, string, error) {
+	depositScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "deposit", "v1.0.0.star"))
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to load deposit saga script: %w", err)
+	}
+	withdrawalScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "withdrawal", "v1.0.0.star"))
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to load withdrawal saga script: %w", err)
+	}
+
+	handlerRegistry := saga.NewHandlerRegistry()
+	if err := RegisterCurrentAccountHandlers(handlerRegistry); err != nil {
+		return nil, "", "", fmt.Errorf("failed to register saga handlers: %w", err)
+	}
+
+	serviceModules, err := schema.BuildServiceModules(handlerRegistry)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to build service modules: %w", err)
+	}
+
+	runtime, err := saga.NewRuntime(logger)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to create saga runtime: %w", err)
+	}
+
+	sagaRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       handlerRegistry,
+		ServiceModules: serviceModules,
+		Logger:         logger,
+	})
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to create saga runner: %w", err)
+	}
+
+	return sagaRunner, depositScript, withdrawalScript, nil
+}
+
+// buildOrchestrators creates the deposit and withdrawal orchestrators.
+func buildOrchestrators(
+	logger *slog.Logger,
+	repo *persistence.Repository,
+	posKeepingClient PositionKeepingClient,
+	finAcctClient FinancialAccountingClient,
+	accountConfig *config.AccountConfig,
+	accountResolver *AccountResolver,
+	fungibilityValidator *FungibilityValidator,
+	sagaRunner *saga.StarlarkSagaRunner,
+	depositScript, withdrawalScript string,
+) (*DepositOrchestrator, *WithdrawalOrchestrator, error) {
+	depositOrchestrator, err := NewDepositOrchestrator(DepositOrchestratorConfig{
+		Logger:               logger,
+		Repo:                 repo,
+		PosKeepingClient:     posKeepingClient,
+		FinAcctClient:        finAcctClient,
+		AccountConfig:        accountConfig,
+		AccountResolver:      accountResolver,
+		FungibilityValidator: fungibilityValidator,
+		SagaRunner:           sagaRunner,
+		DepositScript:        depositScript,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create deposit orchestrator: %w", err)
+	}
+
+	withdrawalOrchestrator, err := NewWithdrawalOrchestrator(WithdrawalOrchestratorConfig{
+		Logger:               logger,
+		Repo:                 repo,
+		PosKeepingClient:     posKeepingClient,
+		FinAcctClient:        finAcctClient,
+		AccountConfig:        accountConfig,
+		AccountResolver:      accountResolver,
+		FungibilityValidator: fungibilityValidator,
+		SagaRunner:           sagaRunner,
+		WithdrawalScript:     withdrawalScript,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create withdrawal orchestrator: %w", err)
+	}
+
+	return depositOrchestrator, withdrawalOrchestrator, nil
 }
 
 // loadSagaAsset loads a saga asset (script or schema) from a configurable base directory.

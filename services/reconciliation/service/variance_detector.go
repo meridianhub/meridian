@@ -140,72 +140,67 @@ func (vd *VarianceDetector) compareSnapshots(
 	current []*domain.SettlementSnapshot,
 	previous []*domain.SettlementSnapshot,
 ) []*domain.Variance {
+	if len(previous) == 0 {
+		return vd.compareInitialRun(runID, current)
+	}
+	return vd.compareAgainstPrevious(runID, current, previous)
+}
+
+// compareInitialRun detects variances for D+1 runs by comparing expected vs actual
+// within each snapshot.
+func (vd *VarianceDetector) compareInitialRun(runID uuid.UUID, current []*domain.SettlementSnapshot) []*domain.Variance {
+	var variances []*domain.Variance
+	for _, snap := range current {
+		if snap.HasVariance() {
+			reason := classifyVarianceReason(snap, nil)
+			v, err := domain.NewVariance(
+				runID,
+				snap.SnapshotID,
+				snap.AccountID,
+				snap.InstrumentCode,
+				snap.ExpectedBalance,
+				snap.ActualBalance,
+				reason,
+			)
+			if err != nil {
+				slog.Warn("failed to create variance from snapshot",
+					"snapshot_id", snap.SnapshotID,
+					"error", err,
+				)
+				continue
+			}
+			variances = append(variances, v)
+		}
+	}
+	return variances
+}
+
+// compareAgainstPrevious detects variances by comparing current snapshots against
+// the previous run's snapshots, including missing entries in both directions.
+func (vd *VarianceDetector) compareAgainstPrevious(
+	runID uuid.UUID,
+	current []*domain.SettlementSnapshot,
+	previous []*domain.SettlementSnapshot,
+) []*domain.Variance {
 	var variances []*domain.Variance
 
-	if len(previous) == 0 {
-		// D+1 run: compare expected vs actual within each snapshot
-		for _, snap := range current {
-			if snap.HasVariance() {
-				reason := classifyVarianceReason(snap, nil)
-				v, err := domain.NewVariance(
-					runID,
-					snap.SnapshotID,
-					snap.AccountID,
-					snap.InstrumentCode,
-					snap.ExpectedBalance,
-					snap.ActualBalance,
-					reason,
-				)
-				if err != nil {
-					slog.Warn("failed to create variance from snapshot",
-						"snapshot_id", snap.SnapshotID,
-						"error", err,
-					)
-					continue
-				}
-				variances = append(variances, v)
-			}
-		}
-		return variances
-	}
-
-	// Build a lookup map from previous snapshots
 	prevMap := make(map[string]*domain.SettlementSnapshot, len(previous))
 	for _, snap := range previous {
 		key := snapshotKey(snap.AccountID, snap.InstrumentCode, snap.SourceSystem)
 		prevMap[key] = snap
 	}
 
-	// Compare current against previous
 	for _, snap := range current {
 		key := snapshotKey(snap.AccountID, snap.InstrumentCode, snap.SourceSystem)
 		prevSnap, found := prevMap[key]
 
 		if !found {
-			// New entry not in previous run
-			if !snap.ActualBalance.IsZero() {
-				v, err := domain.NewVariance(
-					runID,
-					snap.SnapshotID,
-					snap.AccountID,
-					snap.InstrumentCode,
-					decimal.Zero,
-					snap.ActualBalance,
-					domain.VarianceReasonMissingEntry,
-				)
-				if err != nil {
-					slog.Warn("failed to create variance for new entry",
-						"snapshot_id", snap.SnapshotID,
-						"error", err,
-					)
-				} else {
-					variances = append(variances, v)
-				}
+			if v := buildMissingEntryVariance(runID, snap.SnapshotID, snap.AccountID, snap.InstrumentCode, decimal.Zero, snap.ActualBalance); v != nil {
+				variances = append(variances, v)
 			}
 			continue
 		}
 
-		// Compare settled amounts between runs
 		delta := snap.ActualBalance.Sub(prevSnap.ActualBalance)
 		if !delta.IsZero() {
 			reason := classifyVarianceReason(snap, prevSnap)
@@ -228,34 +223,42 @@ func (vd *VarianceDetector) compareSnapshots(
 			}
 		}
 
-		// Remove from map to track missing entries
 		delete(prevMap, key)
 	}
 
 	// Entries in previous but not in current are missing
 	for _, prevSnap := range prevMap {
-		if !prevSnap.ActualBalance.IsZero() {
-			v, err := domain.NewVariance(
-				runID,
-				prevSnap.SnapshotID,
-				prevSnap.AccountID,
-				prevSnap.InstrumentCode,
-				prevSnap.ActualBalance,
-				decimal.Zero,
-				domain.VarianceReasonMissingEntry,
-			)
-			if err != nil {
-				slog.Warn("failed to create variance for missing entry",
-					"snapshot_id", prevSnap.SnapshotID,
-					"error", err,
-				)
-			} else {
-				variances = append(variances, v)
-			}
+		if v := buildMissingEntryVariance(runID, prevSnap.SnapshotID, prevSnap.AccountID, prevSnap.InstrumentCode, prevSnap.ActualBalance, decimal.Zero); v != nil {
+			variances = append(variances, v)
 		}
 	}
 
 	return variances
+}
+
+// buildMissingEntryVariance creates a variance for a missing entry, returning nil
+// if the balance is zero or creation fails.
+func buildMissingEntryVariance(runID, snapshotID uuid.UUID, accountID, instrumentCode string, expected, actual decimal.Decimal) *domain.Variance {
+	if actual.IsZero() && expected.IsZero() {
+		return nil
+	}
+	v, err := domain.NewVariance(
+		runID,
+		snapshotID,
+		accountID,
+		instrumentCode,
+		expected,
+		actual,
+		domain.VarianceReasonMissingEntry,
+	)
+	if err != nil {
+		slog.Warn("failed to create variance for missing entry",
+			"snapshot_id", snapshotID,
+			"error", err,
+		)
+		return nil
+	}
+	return v
 }
 
 // classifyVarianceReason determines the reason for a variance based on snapshot data.

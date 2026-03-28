@@ -9,8 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // PgxOutboxRepository implements OutboxRepository using PostgreSQL via pgx.
@@ -131,18 +129,35 @@ func (r *PgxOutboxRepository) FetchUnprocessed(ctx context.Context, serviceName 
 // FetchAndLockForProcessing atomically fetches pending entries and marks them as processing
 // using SELECT FOR UPDATE SKIP LOCKED. This prevents race conditions in multi-worker deployments.
 func (r *PgxOutboxRepository) FetchAndLockForProcessing(ctx context.Context, serviceName string, limit int) ([]EventOutbox, error) {
-	var entries []EventOutbox
-
-	// Use a transaction with FOR UPDATE SKIP LOCKED to atomically:
-	// 1. Select pending entries (skipping any already locked by other workers)
-	// 2. Update their status to 'processing'
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit returns ErrTxClosed, safe to ignore
 
-	// Raw SQL with FOR UPDATE SKIP LOCKED for proper locking
+	entries, ids, err := selectLockedEntries(ctx, tx, serviceName, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(entries) == 0 {
+		return entries, nil
+	}
+
+	updateQuery := `UPDATE event_outbox SET status = $1 WHERE id = ANY($2)`
+	if _, err = tx.Exec(ctx, updateQuery, StatusProcessing, ids); err != nil {
+		return nil, fmt.Errorf("failed to mark entries as processing: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return entries, nil
+}
+
+// selectLockedEntries selects pending outbox entries with FOR UPDATE SKIP LOCKED and scans them.
+func selectLockedEntries(ctx context.Context, tx pgx.Tx, serviceName string, limit int) ([]EventOutbox, []uuid.UUID, error) {
 	selectQuery := `
 		SELECT id, event_type, aggregate_id, aggregate_type, event_payload,
 			correlation_id, causation_id, status, topic, partition_key,
@@ -155,65 +170,60 @@ func (r *PgxOutboxRepository) FetchAndLockForProcessing(ctx context.Context, ser
 
 	rows, err := tx.Query(ctx, selectQuery, StatusPending, serviceName, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch entries: %w", err)
+		return nil, nil, fmt.Errorf("failed to fetch entries: %w", err)
 	}
 	defer rows.Close()
 
+	var entries []EventOutbox
 	var ids []uuid.UUID
 	for rows.Next() {
-		var entry EventOutbox
-		var correlationID, causationID, partitionKey, lastError *string
-		var processedAt *time.Time
-
-		scanErr := rows.Scan(
-			&entry.ID, &entry.EventType, &entry.AggregateID, &entry.AggregateType, &entry.EventPayload,
-			&correlationID, &causationID, &entry.Status, &entry.Topic, &partitionKey,
-			&entry.CreatedAt, &processedAt, &entry.RetryCount, &lastError, &entry.ServiceName, &entry.TenantID,
-		)
+		entry, scanErr := scanOutboxRow(rows)
 		if scanErr != nil {
-			return nil, fmt.Errorf("failed to scan outbox entry: %w", scanErr)
+			return nil, nil, scanErr
 		}
-
-		if correlationID != nil {
-			entry.CorrelationID = *correlationID
-		}
-		if causationID != nil {
-			entry.CausationID = *causationID
-		}
-		if partitionKey != nil {
-			entry.PartitionKey = *partitionKey
-		}
-		if lastError != nil {
-			entry.LastError = lastError
-		}
-		if processedAt != nil {
-			entry.ProcessedAt = processedAt
-		}
-
 		entries = append(entries, entry)
 		ids = append(ids, entry.ID)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating outbox entries: %w", err)
+		return nil, nil, fmt.Errorf("error iterating outbox entries: %w", err)
 	}
 
-	if len(entries) == 0 {
-		return entries, nil
-	}
+	return entries, ids, nil
+}
 
-	// Update status to processing
-	updateQuery := `UPDATE event_outbox SET status = $1 WHERE id = ANY($2)`
-	_, err = tx.Exec(ctx, updateQuery, StatusProcessing, ids)
+// scanOutboxRow scans a single outbox row from pgx.Rows into an EventOutbox.
+func scanOutboxRow(rows pgx.Rows) (EventOutbox, error) {
+	var entry EventOutbox
+	var correlationID, causationID, partitionKey, lastError *string
+	var processedAt *time.Time
+
+	err := rows.Scan(
+		&entry.ID, &entry.EventType, &entry.AggregateID, &entry.AggregateType, &entry.EventPayload,
+		&correlationID, &causationID, &entry.Status, &entry.Topic, &partitionKey,
+		&entry.CreatedAt, &processedAt, &entry.RetryCount, &lastError, &entry.ServiceName, &entry.TenantID,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to mark entries as processing: %w", err)
+		return EventOutbox{}, fmt.Errorf("failed to scan outbox entry: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	if correlationID != nil {
+		entry.CorrelationID = *correlationID
+	}
+	if causationID != nil {
+		entry.CausationID = *causationID
+	}
+	if partitionKey != nil {
+		entry.PartitionKey = *partitionKey
+	}
+	if lastError != nil {
+		entry.LastError = lastError
+	}
+	if processedAt != nil {
+		entry.ProcessedAt = processedAt
 	}
 
-	return entries, nil
+	return entry, nil
 }
 
 // MarkProcessing atomically updates entries to 'processing' status.
@@ -342,6 +352,22 @@ func (p *PgxOutboxPublisher) Publish(
 	event proto.Message,
 	config PublishConfig,
 ) error {
+	if err := validatePgxPublishInputs(tx, event, config); err != nil {
+		return err
+	}
+
+	payload, err := proto.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to serialize event: %w", err)
+	}
+
+	entry := buildOutboxEntry(ctx, config, payload, p.serviceName)
+
+	return insertOutboxEntryPgx(ctx, tx, entry)
+}
+
+// validatePgxPublishInputs checks required publish parameters for pgx transactions.
+func validatePgxPublishInputs(tx pgx.Tx, event proto.Message, config PublishConfig) error {
 	if tx == nil {
 		return ErrNilTransaction
 	}
@@ -360,40 +386,11 @@ func (p *PgxOutboxPublisher) Publish(
 	if config.AggregateType == "" {
 		return ErrEmptyAggregateType
 	}
+	return nil
+}
 
-	// Serialize the protobuf event
-	payload, err := proto.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to serialize event: %w", err)
-	}
-
-	// Use AggregateID as partition key if not specified
-	partitionKey := config.PartitionKey
-	if partitionKey == "" {
-		partitionKey = config.AggregateID
-	}
-
-	// Extract tenant ID from context
-	var tenantID string
-	if tid, ok := tenant.FromContext(ctx); ok {
-		tenantID = string(tid)
-	}
-
-	// Create outbox entry
-	entry := NewEventOutbox(
-		config.EventType,
-		config.AggregateID,
-		config.AggregateType,
-		payload,
-		config.Topic,
-		p.serviceName,
-		config.CorrelationID,
-		tenantID,
-	)
-	entry.CausationID = config.CausationID
-	entry.PartitionKey = partitionKey
-
-	// Insert using raw SQL with the pgx transaction
+// insertOutboxEntryPgx inserts an outbox entry using a pgx transaction.
+func insertOutboxEntryPgx(ctx context.Context, tx pgx.Tx, entry *EventOutbox) error {
 	query := `
 		INSERT INTO event_outbox (
 			id, event_type, aggregate_id, aggregate_type, event_payload,
@@ -405,7 +402,7 @@ func (p *PgxOutboxPublisher) Publish(
 			$11, $12, $13, $14
 		)`
 
-	_, err = tx.Exec(ctx, query,
+	_, err := tx.Exec(ctx, query,
 		entry.ID, entry.EventType, entry.AggregateID, entry.AggregateType, entry.EventPayload,
 		nullableString(entry.CorrelationID), nullableString(entry.CausationID),
 		entry.Status, entry.Topic, nullableString(entry.PartitionKey),

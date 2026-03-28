@@ -68,62 +68,14 @@ func (r *MeasurementRepository) Create(ctx context.Context, measurement *domain.
 		return err
 	}
 
-	// First, we need to find the database ID (primary key) for the financial_position_log_id (which is log_id in domain)
-	// The measurement table references financial_position_log.id, not log_id
-	var dbPositionLogID uuid.UUID
-	err = tx.QueryRow(ctx,
-		"SELECT id FROM financial_position_log WHERE log_id = $1 AND deleted_at IS NULL",
-		measurement.FinancialPositionLogID,
-	).Scan(&dbPositionLogID)
+	// Find the database ID (primary key) for the financial_position_log_id
+	dbPositionLogID, err := r.lookupDBPositionLogID(ctx, tx, measurement.FinancialPositionLogID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.ErrNotFound
-		}
-		return fmt.Errorf("failed to find financial position log: %w", err)
+		return err
 	}
 
-	// Marshal metadata to JSON
-	var metadataJSON []byte
-	if measurement.Metadata != nil {
-		metadataJSON, err = json.Marshal(measurement.Metadata)
-		if err != nil {
-			return fmt.Errorf("failed to marshal metadata: %w", err)
-		}
-	}
-
-	userID := audit.GetUserFromContext(ctx)
-
-	query := `
-		INSERT INTO measurement (
-			id, created_at, created_by, updated_at, updated_by,
-			financial_position_log_id, measurement_type, value, unit, timestamp, metadata, bucket_id
-		) VALUES (
-			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11, $12
-		)`
-
-	// Convert empty bucket_id to NULL for database storage
-	var bucketID *string
-	if measurement.BucketID != "" {
-		bucketID = &measurement.BucketID
-	}
-
-	_, err = tx.Exec(ctx, query,
-		measurement.ID, measurement.CreatedAt, userID, measurement.UpdatedAt, userID,
-		dbPositionLogID, measurement.MeasurementType.String(), measurement.Value,
-		measurement.Unit, measurement.Timestamp, metadataJSON, bucketID,
-	)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
-			switch pgErr.Code {
-			case "23505": // unique_violation
-				return domain.ErrConflict
-			case "23503": // foreign_key_violation
-				return domain.ErrNotFound
-			}
-		}
-		return fmt.Errorf("failed to insert measurement: %w", err)
+	if err := r.CreateWithTx(ctx, tx, measurement, dbPositionLogID); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -131,6 +83,22 @@ func (r *MeasurementRepository) Create(ctx context.Context, measurement *domain.
 	}
 
 	return nil
+}
+
+// lookupDBPositionLogID finds the database primary key for a given domain log_id within a transaction.
+func (r *MeasurementRepository) lookupDBPositionLogID(ctx context.Context, tx pgx.Tx, logID uuid.UUID) (uuid.UUID, error) {
+	var dbID uuid.UUID
+	err := tx.QueryRow(ctx,
+		"SELECT id FROM financial_position_log WHERE log_id = $1 AND deleted_at IS NULL",
+		logID,
+	).Scan(&dbID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, domain.ErrNotFound
+		}
+		return uuid.Nil, fmt.Errorf("failed to find financial position log: %w", err)
+	}
+	return dbID, nil
 }
 
 // FindByID retrieves a Measurement by its ID.
@@ -148,7 +116,6 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 		return nil, err
 	}
 
-	// Join with financial_position_log to get the log_id (domain ID) from the db ID
 	query := `
 		SELECT m.id, fpl.log_id, m.measurement_type, m.value, m.unit, m.timestamp, m.metadata, m.bucket_id,
 			m.created_at, m.created_by, m.updated_at, m.updated_by
@@ -156,12 +123,29 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 		JOIN financial_position_log fpl ON m.financial_position_log_id = fpl.id
 		WHERE m.id = $1 AND m.deleted_at IS NULL`
 
+	measurement, err := r.scanMeasurementRow(tx.QueryRow(ctx, query, id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to query measurement: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return measurement, nil
+}
+
+// scanMeasurementRow scans a single measurement row and applies post-scan parsing.
+func (r *MeasurementRepository) scanMeasurementRow(row pgx.Row) (*domain.Measurement, error) {
 	var measurement domain.Measurement
 	var measurementType string
 	var metadataJSON sql.NullString
 	var bucketID sql.NullString
 
-	err = tx.QueryRow(ctx, query, id).Scan(
+	err := row.Scan(
 		&measurement.ID,
 		&measurement.FinancialPositionLogID,
 		&measurementType,
@@ -176,10 +160,7 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 		&measurement.UpdatedBy,
 	)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrNotFound
-		}
-		return nil, fmt.Errorf("failed to query measurement: %w", err)
+		return nil, err
 	}
 
 	measurement.MeasurementType = domain.ParseMeasurementType(measurementType)
@@ -192,10 +173,6 @@ func (r *MeasurementRepository) FindByID(ctx context.Context, id uuid.UUID) (*do
 
 	if bucketID.Valid {
 		measurement.BucketID = bucketID.String
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return &measurement, nil
@@ -242,52 +219,31 @@ func (r *MeasurementRepository) FindByPositionLogID(ctx context.Context, positio
 	}
 	defer rows.Close()
 
-	var measurements []*domain.Measurement
-	for rows.Next() {
-		var measurement domain.Measurement
-		var measurementType string
-		var metadataJSON sql.NullString
-		var bucketID sql.NullString
-
-		err := rows.Scan(
-			&measurement.ID,
-			&measurement.FinancialPositionLogID,
-			&measurementType,
-			&measurement.Value,
-			&measurement.Unit,
-			&measurement.Timestamp,
-			&metadataJSON,
-			&bucketID,
-			&measurement.CreatedAt,
-			&measurement.CreatedBy,
-			&measurement.UpdatedAt,
-			&measurement.UpdatedBy,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan measurement: %w", err)
-		}
-
-		measurement.MeasurementType = domain.ParseMeasurementType(measurementType)
-
-		if metadataJSON.Valid && metadataJSON.String != "" {
-			if err := json.Unmarshal([]byte(metadataJSON.String), &measurement.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-			}
-		}
-
-		if bucketID.Valid {
-			measurement.BucketID = bucketID.String
-		}
-
-		measurements = append(measurements, &measurement)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating measurements: %w", err)
+	measurements, err := r.scanMeasurementRows(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return measurements, nil
+}
+
+// scanMeasurementRows scans multiple measurement rows from a query result.
+func (r *MeasurementRepository) scanMeasurementRows(rows pgx.Rows) ([]*domain.Measurement, error) {
+	var measurements []*domain.Measurement
+	for rows.Next() {
+		measurement, err := r.scanMeasurementRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan measurement: %w", err)
+		}
+		measurements = append(measurements, measurement)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating measurements: %w", err)
 	}
 
 	return measurements, nil

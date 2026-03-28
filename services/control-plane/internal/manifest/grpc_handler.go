@@ -311,11 +311,32 @@ func (h *HistoryHandler) RollbackManifest(
 		return nil, status.Error(codes.Internal, "failed to unmarshal target manifest")
 	}
 
-	// Generate diff between current and target for preview.
+	// Generate diff and check for early returns (no-change, dry-run).
+	diffResp, earlyResp, err := h.buildRollbackDiffAndCheck(ctx, logger, req, targetEntity)
+	if err != nil {
+		return nil, err
+	}
+	if earlyResp != nil {
+		return earlyResp, nil
+	}
+
+	// Apply the target manifest through the standard pipeline.
+	return h.executeRollbackApply(ctx, logger, req, targetManifest, targetEntity, appliedBy, diffResp)
+}
+
+// buildRollbackDiffAndCheck generates the diff between current and target versions
+// and returns early responses for no-change and dry-run cases.
+// Returns (diffResp, earlyResponse, error). earlyResponse is non-nil when no apply is needed.
+func (h *HistoryHandler) buildRollbackDiffAndCheck(
+	ctx context.Context,
+	logger *slog.Logger,
+	req *controlplanev1.RollbackManifestRequest,
+	targetEntity *VersionEntity,
+) (*controlplanev1.DiffManifestVersionsResponse, *controlplanev1.RollbackManifestResponse, error) {
 	currentSeq, err := h.history.repo.GetCurrentSequenceNumber(ctx)
 	if err != nil {
 		logger.Error("failed to get current sequence number", "error", err)
-		return nil, status.Error(codes.Internal, "failed to get current sequence number")
+		return nil, nil, status.Error(codes.Internal, "failed to get current sequence number")
 	}
 
 	var diffResp *controlplanev1.DiffManifestVersionsResponse
@@ -335,7 +356,7 @@ func (h *HistoryHandler) RollbackManifest(
 
 	// If no changes, report NO_CHANGE.
 	if currentSeq == req.GetTargetSequenceNumber() {
-		return &controlplanev1.RollbackManifestResponse{
+		return diffResp, &controlplanev1.RollbackManifestResponse{
 			Diff:    diffResp,
 			Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_NO_CHANGE,
 			Message: "target version is already the current version",
@@ -345,14 +366,26 @@ func (h *HistoryHandler) RollbackManifest(
 	// Dry run: return diff without applying.
 	if req.GetDryRun() {
 		logger.Info("dry run rollback preview")
-		return &controlplanev1.RollbackManifestResponse{
+		return diffResp, &controlplanev1.RollbackManifestResponse{
 			Diff:    diffResp,
 			Status:  controlplanev1.RollbackStatus_ROLLBACK_STATUS_DRY_RUN,
 			Message: fmt.Sprintf("dry run: would rollback to sequence %d (version %s)", req.GetTargetSequenceNumber(), targetEntity.Version),
 		}, nil
 	}
 
-	// Apply the target manifest through the standard pipeline.
+	return diffResp, nil, nil
+}
+
+// executeRollbackApply applies the target manifest through the standard pipeline and returns the result.
+func (h *HistoryHandler) executeRollbackApply(
+	ctx context.Context,
+	logger *slog.Logger,
+	req *controlplanev1.RollbackManifestRequest,
+	targetManifest *controlplanev1.Manifest,
+	targetEntity *VersionEntity,
+	appliedBy string,
+	diffResp *controlplanev1.DiffManifestVersionsResponse,
+) (*controlplanev1.RollbackManifestResponse, error) {
 	logger.Info("applying rollback manifest")
 	applyResp, err := h.applier.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
 		Manifest:  targetManifest,

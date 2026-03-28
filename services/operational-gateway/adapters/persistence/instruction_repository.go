@@ -161,8 +161,18 @@ func (r *InstructionRepository) FetchDispatchable(ctx context.Context, params po
 	// rows may be skipped. READ COMMITTED matches PostgreSQL semantics and is the
 	// recommended isolation level for queue-like claim patterns.
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Step 1: Lock candidate IDs. RETRYING rows are only eligible when next_retry_at has passed.
-		lockSQL := `
+		return r.claimDispatchable(tx, asOf, limit, &entities)
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+
+	return r.entitiesToInstructions(ctx, entities)
+}
+
+// claimDispatchable locks candidate instructions and marks them DISPATCHING within a transaction.
+func (r *InstructionRepository) claimDispatchable(tx *gorm.DB, asOf time.Time, limit int, entities *[]InstructionEntity) error {
+	lockSQL := `
             SELECT id FROM instructions
             WHERE (
                 (status = 'PENDING' AND (scheduled_at IS NULL OR scheduled_at <= ?))
@@ -173,38 +183,33 @@ func (r *InstructionRepository) FetchDispatchable(ctx context.Context, params po
             LIMIT ?
             FOR UPDATE SKIP LOCKED`
 
-		var ids []uuid.UUID
-		if err := tx.Raw(lockSQL, asOf, asOf, limit).Scan(&ids).Error; err != nil {
-			return err
-		}
-		if len(ids) == 0 {
-			return nil
-		}
-
-		// Step 2: Mark locked rows as DISPATCHING within the same transaction.
-		// This prevents any other worker from picking them up even after the tx commits.
-		if err := tx.Model(&InstructionEntity{}).
-			Where("id IN ?", ids).
-			Updates(map[string]interface{}{
-				"status":        string(domain.InstructionStatusDispatching),
-				"attempt_count": gorm.Expr("attempt_count + 1"),
-				"dispatched_at": asOf,
-				"updated_at":    asOf,
-				"version":       gorm.Expr("version + 1"),
-			}).Error; err != nil {
-			return err
-		}
-
-		// Step 3: Read the updated rows back within the same tx so callers see DISPATCHING state.
-		// Preserve the priority DESC, scheduled_at ASC ordering from step 1.
-		return tx.Where("id IN ?", ids).
-			Order("priority DESC, scheduled_at ASC NULLS FIRST").
-			Find(&entities).Error
-	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return nil, err
+	var ids []uuid.UUID
+	if err := tx.Raw(lockSQL, asOf, asOf, limit).Scan(&ids).Error; err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
 	}
 
+	if err := tx.Model(&InstructionEntity{}).
+		Where("id IN ?", ids).
+		Updates(map[string]interface{}{
+			"status":        string(domain.InstructionStatusDispatching),
+			"attempt_count": gorm.Expr("attempt_count + 1"),
+			"dispatched_at": asOf,
+			"updated_at":    asOf,
+			"version":       gorm.Expr("version + 1"),
+		}).Error; err != nil {
+		return err
+	}
+
+	return tx.Where("id IN ?", ids).
+		Order("priority DESC, scheduled_at ASC NULLS FIRST").
+		Find(entities).Error
+}
+
+// entitiesToInstructions converts a slice of entities to domain instructions, loading attempts.
+func (r *InstructionRepository) entitiesToInstructions(ctx context.Context, entities []InstructionEntity) ([]*domain.Instruction, error) {
 	if len(entities) == 0 {
 		return nil, nil
 	}

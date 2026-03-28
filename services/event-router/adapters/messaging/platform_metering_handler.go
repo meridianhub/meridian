@@ -118,6 +118,26 @@ func (h *PlatformMeteringHandler) handleAuditEvent(ctx context.Context, channel 
 		return nil
 	}
 
+	if err := h.recordMeasurement(ctx, event, measurement); err != nil {
+		return err
+	}
+
+	duration := time.Since(startTime).Seconds()
+	domain.RecordEventProcessingDuration(event.SchemaName, duration)
+
+	h.logger.InfoContext(ctx, "successfully recorded utilization measurement",
+		"event_id", event.EventId,
+		"account_id", measurement.AccountID,
+		"asset_code", measurement.AssetCode,
+		"service", event.SchemaName,
+		"quantity", measurement.Quantity,
+		"mds_enabled", h.mdPublisher != nil)
+
+	return nil
+}
+
+// recordMeasurement sends the measurement to Position Keeping and optionally to MDS.
+func (h *PlatformMeteringHandler) recordMeasurement(ctx context.Context, event *auditv1.AuditEvent, measurement *auditdomain.Measurement) error {
 	pkStart := time.Now()
 	if err := h.pkClient.RecordMeasurement(ctx, measurement); err != nil {
 		domain.RecordPositionKeepingAPIError("record_measurement_failed")
@@ -133,17 +153,6 @@ func (h *PlatformMeteringHandler) handleAuditEvent(ctx context.Context, channel 
 		h.publishToMDS(measurement)
 		domain.RecordDualOutputLatency("mds", time.Since(mdsStart).Seconds())
 	}
-
-	duration := time.Since(startTime).Seconds()
-	domain.RecordEventProcessingDuration(event.SchemaName, duration)
-
-	h.logger.InfoContext(ctx, "successfully recorded utilization measurement",
-		"event_id", event.EventId,
-		"account_id", measurement.AccountID,
-		"asset_code", measurement.AssetCode,
-		"service", event.SchemaName,
-		"quantity", measurement.Quantity,
-		"mds_enabled", h.mdPublisher != nil)
 
 	return nil
 }

@@ -78,19 +78,16 @@ func NewService(
 
 // ComputeForwardCurve executes a forecasting strategy and publishes results to MDS.
 func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.ComputeForwardCurveRequest) (*forecastingv1.ComputeForwardCurveResponse, error) {
-	// Parse strategy ID
 	strategyID, err := uuid.Parse(req.GetStrategyId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid strategy_id: %v", err)
 	}
 
-	// Extract tenant from context
 	tenantID, err := tenant.RequireFromContext(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "tenant context required")
 	}
 
-	// Step 1: Fetch strategy and validate ACTIVE status
 	strategy, err := s.repo.FindByID(ctx, strategyID)
 	if err != nil {
 		return nil, s.mapDomainError(err, strategyID)
@@ -101,7 +98,6 @@ func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.Co
 			"strategy %s is in %s status, must be ACTIVE", strategyID, strategy.Status())
 	}
 
-	// Determine execution time
 	now := time.Now().UTC()
 	if req.GetExecutionTime() != nil {
 		now = req.GetExecutionTime().AsTime()
@@ -115,28 +111,12 @@ func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.Co
 		"execution_time", now,
 	)
 
-	// Step 2-4: Execute Starlark strategy (runner handles observation fetching, ref data, and execution)
-	computeStart := time.Now()
-	input := starlark.StrategyInput{
-		Script:            strategy.StarlarkCode(),
-		InputDatasetCodes: strategy.InputDatasetCodes(),
-		OutputDatasetCode: strategy.OutputDatasetCode(),
-		HorizonHours:      strategy.HorizonHours(),
-		GranularityHours:  strategy.GranularityHours(),
-		Now:               now,
-	}
-	// Only set ResolutionKey and TenantID together (runner validates both-or-neither)
-	if strategy.ReferenceDataResolutionKey() != "" {
-		input.ResolutionKey = strategy.ReferenceDataResolutionKey()
-		input.TenantID = string(tenantID)
-	}
+	input := buildStrategyInput(strategy, now, tenantID)
 
+	computeStart := time.Now()
 	points, err := s.runner.ExecuteStrategy(ctx, input)
 	if err != nil {
-		s.logger.Error("starlark execution failed",
-			"strategy_id", strategyID,
-			"error", err,
-		)
+		s.logger.Error("starlark execution failed", "strategy_id", strategyID, "error", err)
 		return nil, status.Errorf(codes.Internal, "starlark execution failed: %v", err)
 	}
 	computeDuration := time.Since(computeStart)
@@ -147,24 +127,39 @@ func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.Co
 		"computation_ms", computeDuration.Milliseconds(),
 	)
 
-	// Step 5: Publish forecast points to MDS as ESTIMATE quality
-	publishStart := time.Now()
 	if err := s.publishToMDS(ctx, strategy, points, now); err != nil {
-		s.logger.Error("MDS publish failed",
-			"strategy_id", strategyID,
-			"error", err,
-		)
+		s.logger.Error("MDS publish failed", "strategy_id", strategyID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to publish forecast points to MDS: %v", err)
 	}
-	publishDuration := time.Since(publishStart)
 
-	s.logger.Info("forecast points published to MDS",
-		"strategy_id", strategyID,
-		"point_count", len(points),
-		"publish_ms", publishDuration.Milliseconds(),
-	)
+	return buildForwardCurveResponse(strategy, strategyID, points, now, computeDuration), nil
+}
 
-	// Build response
+// buildStrategyInput constructs the StrategyInput from the strategy domain object and execution context.
+func buildStrategyInput(strategy domain.ForecastingStrategy, now time.Time, tenantID tenant.TenantID) starlark.StrategyInput {
+	input := starlark.StrategyInput{
+		Script:            strategy.StarlarkCode(),
+		InputDatasetCodes: strategy.InputDatasetCodes(),
+		OutputDatasetCode: strategy.OutputDatasetCode(),
+		HorizonHours:      strategy.HorizonHours(),
+		GranularityHours:  strategy.GranularityHours(),
+		Now:               now,
+	}
+	if strategy.ReferenceDataResolutionKey() != "" {
+		input.ResolutionKey = strategy.ReferenceDataResolutionKey()
+		input.TenantID = string(tenantID)
+	}
+	return input
+}
+
+// buildForwardCurveResponse constructs the gRPC response from execution results.
+func buildForwardCurveResponse(
+	strategy domain.ForecastingStrategy,
+	strategyID uuid.UUID,
+	points []starlark.ForecastPoint,
+	now time.Time,
+	computeDuration time.Duration,
+) *forecastingv1.ComputeForwardCurveResponse {
 	horizon := time.Duration(strategy.HorizonHours()) * time.Hour
 	granularity := time.Duration(strategy.GranularityHours()) * time.Hour
 
@@ -187,7 +182,7 @@ func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.Co
 		ExecutionTime:       timestamppb.New(now),
 		ComputationDuration: durationpb.New(computeDuration),
 		ForecastPoints:      protoPoints,
-	}, nil
+	}
 }
 
 // publishToMDS publishes forecast points to the Market Data Service as ESTIMATE quality observations.

@@ -78,31 +78,10 @@ func (s *Service) CreateValuationFeature(ctx context.Context, req *pb.CreateValu
 			nativeInstrument, req.OutputInstrument)
 	}
 
-	methodID, err := uuid.Parse(req.ValuationMethodId)
+	feature, opStatus, err := buildNewValuationFeature(account.ID(), req, createdBy)
 	if err != nil {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Errorf(codes.InvalidArgument, "invalid valuation_method_id: %v", err)
-	}
-
-	var parameters map[string]interface{}
-	if req.Parameters != "" {
-		if err := json.Unmarshal([]byte(req.Parameters), &parameters); err != nil {
-			operationStatus = opStatusInvalidRequest
-			return nil, status.Errorf(codes.InvalidArgument, "invalid parameters JSON: %v", err)
-		}
-	}
-
-	feature, err := domain.NewValuationFeature(
-		account.ID(),
-		req.InstrumentCode,
-		methodID,
-		int(req.ValuationMethodVersion),
-		parameters,
-		createdBy,
-	)
-	if err != nil {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Errorf(codes.InvalidArgument, "failed to create valuation feature: %v", err)
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	if err := feature.Activate(createdBy); err != nil {
@@ -122,6 +101,35 @@ func (s *Service) CreateValuationFeature(ctx context.Context, req *pb.CreateValu
 	return &pb.CreateValuationFeatureResponse{
 		Feature: s.domainToProtoValuationFeature(feature),
 	}, nil
+}
+
+// buildNewValuationFeature parses and validates a CreateValuationFeatureRequest, returning a new domain feature.
+func buildNewValuationFeature(accountUUID uuid.UUID, req *pb.CreateValuationFeatureRequest, createdBy string) (*domain.ValuationFeature, string, error) {
+	methodID, err := uuid.Parse(req.ValuationMethodId)
+	if err != nil {
+		return nil, opStatusInvalidRequest, status.Errorf(codes.InvalidArgument, "invalid valuation_method_id: %v", err)
+	}
+
+	var parameters map[string]interface{}
+	if req.Parameters != "" {
+		if err := json.Unmarshal([]byte(req.Parameters), &parameters); err != nil {
+			return nil, opStatusInvalidRequest, status.Errorf(codes.InvalidArgument, "invalid parameters JSON: %v", err)
+		}
+	}
+
+	feature, err := domain.NewValuationFeature(
+		accountUUID,
+		req.InstrumentCode,
+		methodID,
+		int(req.ValuationMethodVersion),
+		parameters,
+		createdBy,
+	)
+	if err != nil {
+		return nil, opStatusInvalidRequest, status.Errorf(codes.InvalidArgument, "failed to create valuation feature: %v", err)
+	}
+
+	return feature, "", nil
 }
 
 // UpdateValuationFeature performs lifecycle transitions on a valuation feature.

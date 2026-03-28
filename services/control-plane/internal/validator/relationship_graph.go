@@ -124,7 +124,17 @@ func ExtractRelationshipGraph(
 ) *RelationshipGraph {
 	g := &RelationshipGraph{}
 
-	// Add instrument nodes
+	extractInstrumentNodes(g, manifest)
+	extractAccountTypeNodesAndEdges(g, manifest)
+	extractValuationRuleEdges(g, manifest)
+	extractSagaNodesAndEdges(g, manifest, callLogs)
+	extractInboundRouteEdges(g, manifest)
+
+	return g
+}
+
+// extractInstrumentNodes adds instrument nodes to the graph.
+func extractInstrumentNodes(g *RelationshipGraph, manifest *controlplanev1.Manifest) {
 	for _, inst := range manifest.GetInstruments() {
 		g.Nodes = append(g.Nodes, GraphNode{
 			ID:   "instrument:" + inst.GetCode(),
@@ -136,8 +146,10 @@ func ExtractRelationshipGraph(
 			},
 		})
 	}
+}
 
-	// Add account type nodes and denominated_in edges
+// extractAccountTypeNodesAndEdges adds account type nodes and denominated_in edges.
+func extractAccountTypeNodesAndEdges(g *RelationshipGraph, manifest *controlplanev1.Manifest) {
 	for _, acct := range manifest.GetAccountTypes() {
 		g.Nodes = append(g.Nodes, GraphNode{
 			ID:   "account_type:" + acct.GetCode(),
@@ -157,8 +169,10 @@ func ExtractRelationshipGraph(
 			})
 		}
 	}
+}
 
-	// Add valuation rule edges (converts)
+// extractValuationRuleEdges adds converts edges for valuation rules.
+func extractValuationRuleEdges(g *RelationshipGraph, manifest *controlplanev1.Manifest) {
 	for _, rule := range manifest.GetValuationRules() {
 		g.Edges = append(g.Edges, GraphEdge{
 			Source:       "instrument:" + rule.GetFromInstrument(),
@@ -166,11 +180,12 @@ func ExtractRelationshipGraph(
 			Relationship: RelConverts,
 		})
 	}
+}
 
-	// Track handler nodes across all sagas to avoid duplicates
+// extractSagaNodesAndEdges adds saga nodes, trigger edges, and handler call edges.
+func extractSagaNodesAndEdges(g *RelationshipGraph, manifest *controlplanev1.Manifest, callLogs map[string][]schema.HandlerCallInfo) {
 	handlersSeen := make(map[string]bool)
 
-	// Add saga nodes and trigger edges
 	for i, saga := range manifest.GetSagas() {
 		sagaID := "saga:" + saga.GetName()
 		g.Nodes = append(g.Nodes, GraphNode{
@@ -182,7 +197,6 @@ func ExtractRelationshipGraph(
 			},
 		})
 
-		// triggers_on edge
 		g.Edges = append(g.Edges, GraphEdge{
 			Source:       sagaID,
 			Target:       saga.GetTrigger(),
@@ -190,28 +204,28 @@ func ExtractRelationshipGraph(
 			Location:     fmt.Sprintf("sagas[%d].trigger", i),
 		})
 
-		// Extract handler call relationships from call logs
 		if calls, ok := callLogs[saga.GetName()]; ok {
 			extractHandlerCallEdges(g, sagaID, calls, fmt.Sprintf("sagas[%d].script", i), handlersSeen)
 		}
 	}
+}
 
-	// Add inbound_route -> saga edges so that sagas referenced by inbound routes
-	// are detected as having dependents during destructive change analysis.
-	if gw := manifest.GetOperationalGateway(); gw != nil {
-		for i, route := range gw.GetInboundRoutes() {
-			if sagaName := route.GetHandlerSaga(); sagaName != "" {
-				g.Edges = append(g.Edges, GraphEdge{
-					Source:       fmt.Sprintf("inbound_route:%s", route.GetExternalType()),
-					Target:       "saga:" + sagaName,
-					Relationship: RelTriggersOn,
-					Location:     fmt.Sprintf("operational_gateway.inbound_routes[%d].handler_saga", i),
-				})
-			}
+// extractInboundRouteEdges adds inbound_route -> saga edges for destructive change analysis.
+func extractInboundRouteEdges(g *RelationshipGraph, manifest *controlplanev1.Manifest) {
+	gw := manifest.GetOperationalGateway()
+	if gw == nil {
+		return
+	}
+	for i, route := range gw.GetInboundRoutes() {
+		if sagaName := route.GetHandlerSaga(); sagaName != "" {
+			g.Edges = append(g.Edges, GraphEdge{
+				Source:       fmt.Sprintf("inbound_route:%s", route.GetExternalType()),
+				Target:       "saga:" + sagaName,
+				Relationship: RelTriggersOn,
+				Location:     fmt.Sprintf("operational_gateway.inbound_routes[%d].handler_saga", i),
+			})
 		}
 	}
-
-	return g
 }
 
 // edgeKey identifies a unique edge for deduplication.

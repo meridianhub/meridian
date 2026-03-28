@@ -80,36 +80,17 @@ func (s *HistoryService) StoreManifestVersion(
 		return nil, ErrEmptyAppliedBy
 	}
 
-	// Serialize manifest to JSON
-	marshaler := protojson.MarshalOptions{
-		UseProtoNames: true,
-	}
-	jsonBytes, err := marshaler.Marshal(manifest)
+	jsonBytes, err := marshalManifestJSON(manifest)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal manifest to JSON: %w", err)
+		return nil, err
 	}
 
-	// Generate diff summary against previous applied version
-	var diffSummary *string
-	if status == ApplyStatusApplied {
-		summary, diffErr := s.generateDiffSummary(ctx, manifest)
-		if diffErr != nil && !errors.Is(diffErr, ErrVersionNotFound) {
-			return nil, fmt.Errorf("failed to generate diff summary: %w", diffErr)
-		}
-		if summary != "" {
-			diffSummary = &summary
-		}
+	diffSummary, err := s.maybeDiffSummary(ctx, manifest, status)
+	if err != nil {
+		return nil, err
 	}
 
-	// Serialize relationship graph if provided.
-	// Serialization failure is non-blocking: the graph is informational.
-	var graphJSON *string
-	if graph != nil {
-		if graphBytes, graphErr := json.Marshal(graph); graphErr == nil {
-			s := string(graphBytes)
-			graphJSON = &s
-		}
-	}
+	graphJSON := marshalGraphJSON(graph)
 
 	now := time.Now().UTC()
 	entity := &VersionEntity{
@@ -151,30 +132,17 @@ func (s *HistoryService) StoreManifestVersionWithPhaseStatus(
 		return nil, ErrEmptyAppliedBy
 	}
 
-	marshaler := protojson.MarshalOptions{UseProtoNames: true}
-	jsonBytes, err := marshaler.Marshal(mf)
+	jsonBytes, err := marshalManifestJSON(mf)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal manifest to JSON: %w", err)
+		return nil, err
 	}
 
-	var diffSummary *string
-	if applyStatus == ApplyStatusApplied {
-		summary, diffErr := s.generateDiffSummary(ctx, mf)
-		if diffErr != nil && !errors.Is(diffErr, ErrVersionNotFound) {
-			return nil, fmt.Errorf("failed to generate diff summary: %w", diffErr)
-		}
-		if summary != "" {
-			diffSummary = &summary
-		}
+	diffSummary, err := s.maybeDiffSummary(ctx, mf, applyStatus)
+	if err != nil {
+		return nil, err
 	}
 
-	var graphJSON *string
-	if graph != nil {
-		if graphBytes, graphErr := json.Marshal(graph); graphErr == nil {
-			s := string(graphBytes)
-			graphJSON = &s
-		}
-	}
+	graphJSON := marshalGraphJSON(graph)
 
 	now := time.Now().UTC()
 	entity := &VersionEntity{
@@ -225,6 +193,46 @@ func (s *HistoryService) ListManifestVersions(ctx context.Context, limit, offset
 		offset = 0
 	}
 	return s.repo.List(ctx, limit, offset)
+}
+
+// marshalManifestJSON serializes a manifest to JSON using proto names.
+func marshalManifestJSON(mf *controlplanev1.Manifest) ([]byte, error) {
+	marshaler := protojson.MarshalOptions{UseProtoNames: true}
+	jsonBytes, err := marshaler.Marshal(mf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal manifest to JSON: %w", err)
+	}
+	return jsonBytes, nil
+}
+
+// maybeDiffSummary generates a diff summary against the previous applied version
+// when status is ApplyStatusApplied. Returns nil otherwise.
+func (s *HistoryService) maybeDiffSummary(ctx context.Context, mf *controlplanev1.Manifest, status ApplyStatus) (*string, error) {
+	if status != ApplyStatusApplied {
+		return nil, nil //nolint:nilnil // nil summary is valid when status is not "applied"
+	}
+	summary, diffErr := s.generateDiffSummary(ctx, mf)
+	if diffErr != nil && !errors.Is(diffErr, ErrVersionNotFound) {
+		return nil, fmt.Errorf("failed to generate diff summary: %w", diffErr)
+	}
+	if summary != "" {
+		return &summary, nil
+	}
+	return nil, nil //nolint:nilnil // nil summary is valid when no diff is available
+}
+
+// marshalGraphJSON serializes a relationship graph to JSON.
+// Returns nil on nil input or serialization failure (the graph is informational).
+func marshalGraphJSON(graph *validator.RelationshipGraph) *string {
+	if graph == nil {
+		return nil
+	}
+	graphBytes, err := json.Marshal(graph)
+	if err != nil {
+		return nil
+	}
+	s := string(graphBytes)
+	return &s
 }
 
 // CompareVersions generates a human-readable diff between two manifest versions.

@@ -96,6 +96,34 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	}
 
 	// Use a transaction with pessimistic locking to prevent race conditions.
+	lien, account, availableBalance, txErr := s.executeInitiateLienTx(ctx, req, lienAmount, bucketID, prefetchedBalanceCents, useValuation, valuationResult)
+
+	if txErr != nil {
+		operationStatus, err = mapInitiateLienTxError(txErr, req.AccountId)
+		return nil, err
+	}
+
+	s.logger.Info("lien created",
+		"lien_id", lien.ID.String(),
+		"account_id", account.AccountID(),
+		"amount_cents", safeMinorUnits(lienAmount),
+		"has_valuation", lien.HasValuation(),
+		"payment_order_ref", req.PaymentOrderReference)
+
+	return s.buildInitiateLienResponse(account, lien, lienAmount, availableBalance, useValuation, valuationResult), nil
+}
+
+// executeInitiateLienTx runs the lien creation in a pessimistic-locking transaction.
+// Returns the created lien, account, available balance, and any transaction error.
+func (s *Service) executeInitiateLienTx(
+	ctx context.Context,
+	req *pb.InitiateLienRequest,
+	lienAmount domain.Amount,
+	bucketID string,
+	prefetchedBalanceCents int64,
+	useValuation bool,
+	valuationResult *valuateInternalResult,
+) (*domain.Lien, *domain.CurrentAccount, int64, error) {
 	var lien *domain.Lien
 	var account *domain.CurrentAccount
 	var availableBalance int64
@@ -104,7 +132,6 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		txRepo := s.repo.WithTx(tx)
 		txLienRepo := s.lienRepo.WithTx(tx)
 
-		var txErr error
 		accountResult, txErr := txRepo.FindByIDForUpdate(ctx, req.AccountId)
 		if txErr != nil {
 			return txErr
@@ -122,6 +149,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 		// Calculate available balance
 		var activeLiensTotal int64
+		var err error
 		if bucketID != "" {
 			activeLiensTotal, err = txLienRepo.SumActiveAmountByAccountIDAndBucket(ctx, account.ID(), bucketID)
 		} else {
@@ -142,21 +170,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		}
 
 		// Create lien domain object
-		if useValuation {
-			// Multi-asset: create valued lien with price lock
-			reservedQty := &domain.InstrumentAmount{
-				Amount:         decimal.RequireFromString(req.Input.Amount),
-				InstrumentCode: req.Input.InstrumentCode,
-			}
-			valuedAmt := &domain.InstrumentAmount{
-				Amount:         valuationResult.OutputAmount,
-				InstrumentCode: valuationResult.OutputCode,
-			}
-			analysisJSONB, _ := protojson.Marshal(valuationResult.Analysis)
-			lien, err = domain.NewValuedLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil, reservedQty, valuedAmt, analysisJSONB)
-		} else {
-			lien, err = domain.NewLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil)
-		}
+		lien, err = s.buildLienDomainObject(account, lienAmount, bucketID, req, useValuation, valuationResult)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
@@ -168,19 +182,31 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return nil
 	})
 
-	if txErr != nil {
-		operationStatus, err = mapInitiateLienTxError(txErr, req.AccountId)
-		return nil, err
+	return lien, account, availableBalance, txErr
+}
+
+// buildLienDomainObject creates the appropriate lien (valued or standard) based on the valuation mode.
+func (s *Service) buildLienDomainObject(
+	account *domain.CurrentAccount,
+	lienAmount domain.Amount,
+	bucketID string,
+	req *pb.InitiateLienRequest,
+	useValuation bool,
+	valuationResult *valuateInternalResult,
+) (*domain.Lien, error) {
+	if useValuation {
+		reservedQty := &domain.InstrumentAmount{
+			Amount:         decimal.RequireFromString(req.Input.Amount),
+			InstrumentCode: req.Input.InstrumentCode,
+		}
+		valuedAmt := &domain.InstrumentAmount{
+			Amount:         valuationResult.OutputAmount,
+			InstrumentCode: valuationResult.OutputCode,
+		}
+		analysisJSONB, _ := protojson.Marshal(valuationResult.Analysis)
+		return domain.NewValuedLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil, reservedQty, valuedAmt, analysisJSONB)
 	}
-
-	s.logger.Info("lien created",
-		"lien_id", lien.ID.String(),
-		"account_id", account.AccountID(),
-		"amount_cents", safeMinorUnits(lienAmount),
-		"has_valuation", lien.HasValuation(),
-		"payment_order_ref", req.PaymentOrderReference)
-
-	return s.buildInitiateLienResponse(account, lien, lienAmount, availableBalance, useValuation, valuationResult), nil
+	return domain.NewLien(account.ID(), lienAmount, bucketID, req.PaymentOrderReference, nil)
 }
 
 // ExecuteLien converts a reservation to an actual debit atomically with Redis idempotency
@@ -431,25 +457,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	if lien.Status == domain.LienStatusTerminated {
 		s.logger.Info("lien already terminated (idempotent)",
 			"lien_id", lien.ID.String())
-
-		// Calculate available balance - errors logged but don't fail idempotent response
-		account, acctErr := s.repo.FindByUUID(ctx, lien.AccountID)
-		if acctErr != nil {
-			s.logger.Error("failed to find account for idempotent response", "error", acctErr)
-			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
-		}
-		// Hydrate account with balance from Position Keeping.
-		account, acctErr = s.hydrateAccountWithBalance(ctx, account)
-		if acctErr != nil {
-			s.logger.Error("failed to get account balance for idempotent response", "error", acctErr)
-			return &pb.TerminateLienResponse{Lien: toLienProto(lien)}, nil
-		}
-		// Calculate available balance scoped to the lien's bucket (if any)
-		availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
-		return &pb.TerminateLienResponse{
-			Lien:             toLienProto(lien),
-			AvailableBalance: toMoneyAmount(availableMoney),
-		}, nil
+		return s.buildTerminateLienIdempotentResponse(ctx, lien), nil
 	}
 
 	// Determine termination reason
@@ -511,22 +519,47 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	// The lien termination succeeded, so the reservation should transition to TERMINATED.
 	s.releaseReservation(ctx, lien.ID.String(), positionkeepingv1.ReservationStatus_RESERVATION_STATUS_TERMINATED)
 
-	// Calculate new available balance (funds released)
-	account, err := s.repo.FindByUUID(ctx, lien.AccountID)
+	// Build response with updated available balance
+	resp, err := s.buildTerminateLienResponse(ctx, lien)
 	if err != nil {
 		operationStatus = opStatusRetrieveAccountFailed
+		return nil, err
+	}
+	return resp, nil
+}
+
+// buildTerminateLienIdempotentResponse builds a best-effort response for an already-terminated lien.
+// Errors retrieving the balance are logged but do not fail the response.
+func (s *Service) buildTerminateLienIdempotentResponse(ctx context.Context, lien *domain.Lien) *pb.TerminateLienResponse {
+	account, acctErr := s.repo.FindByUUID(ctx, lien.AccountID)
+	if acctErr != nil {
+		s.logger.Error("failed to find account for idempotent response", "error", acctErr)
+		return &pb.TerminateLienResponse{Lien: toLienProto(lien)}
+	}
+	account, acctErr = s.hydrateAccountWithBalance(ctx, account)
+	if acctErr != nil {
+		s.logger.Error("failed to get account balance for idempotent response", "error", acctErr)
+		return &pb.TerminateLienResponse{Lien: toLienProto(lien)}
+	}
+	availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
+	return &pb.TerminateLienResponse{
+		Lien:             toLienProto(lien),
+		AvailableBalance: toMoneyAmount(availableMoney),
+	}
+}
+
+// buildTerminateLienResponse retrieves the account balance and builds the termination response.
+func (s *Service) buildTerminateLienResponse(ctx context.Context, lien *domain.Lien) (*pb.TerminateLienResponse, error) {
+	account, err := s.repo.FindByUUID(ctx, lien.AccountID)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	// Hydrate account with balance from Position Keeping.
-	// Balance is no longer persisted - it comes from Position Keeping service.
 	account, err = s.hydrateAccountWithBalance(ctx, account)
 	if err != nil {
-		operationStatus = opStatusRetrieveAccountFailed
 		return nil, status.Errorf(codes.Internal, "failed to get account balance: %v", err)
 	}
 
-	// Calculate available balance scoped to the lien's bucket (if any)
 	availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
 	return &pb.TerminateLienResponse{
 		Lien:             toLienProto(lien),

@@ -192,24 +192,42 @@ func (tc *TestContainer) RevokeTenantEntitlement(ctx context.Context, tenantID t
 
 // loadSchemaInSchema creates tables within a specific schema for multi-tenant testing.
 func loadSchemaInSchema(ctx context.Context, pool *pgxpool.Pool, schemaName string) error {
-	// Acquire a single connection for all operations to ensure search_path persists.
-	// Using pool.Exec can get different connections from the pool, causing SET search_path
-	// to not apply to subsequent operations.
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to acquire connection: %w", err)
 	}
 	defer conn.Release()
 
-	// Set search path to tenant schema (use pgx.Identifier for proper quoting)
 	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
 	_, err = conn.Exec(ctx, "SET search_path TO "+quotedSchema)
 	if err != nil {
 		return fmt.Errorf("failed to set search_path: %w", err)
 	}
 
-	// Create tables (same as public schema)
-	_, err = conn.Exec(ctx, `
+	if err := createSchemaDataSourceTable(ctx, conn); err != nil {
+		return err
+	}
+	if err := createSchemaDatasetDefinitionTable(ctx, conn); err != nil {
+		return err
+	}
+	if err := createSchemaObservationTable(ctx, conn); err != nil {
+		return err
+	}
+	if err := createSchemaIndexes(ctx, conn); err != nil {
+		return err
+	}
+
+	_, err = conn.Exec(ctx, "SET search_path TO public")
+	if err != nil {
+		return fmt.Errorf("failed to reset search_path: %w", err)
+	}
+
+	return nil
+}
+
+// createSchemaDataSourceTable creates the data_source table in the current search_path.
+func createSchemaDataSourceTable(ctx context.Context, conn *pgxpool.Conn) error {
+	_, err := conn.Exec(ctx, `
 		CREATE TABLE data_source (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			code character varying(50) NOT NULL,
@@ -230,8 +248,12 @@ func loadSchemaInSchema(ctx context.Context, pool *pgxpool.Pool, schemaName stri
 	if err != nil {
 		return fmt.Errorf("failed to create data_source table: %w", err)
 	}
+	return nil
+}
 
-	_, err = conn.Exec(ctx, `
+// createSchemaDatasetDefinitionTable creates the dataset_definition table in the current search_path.
+func createSchemaDatasetDefinitionTable(ctx context.Context, conn *pgxpool.Conn) error {
+	_, err := conn.Exec(ctx, `
 		CREATE TABLE dataset_definition (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			code character varying(50) NOT NULL,
@@ -262,8 +284,12 @@ func loadSchemaInSchema(ctx context.Context, pool *pgxpool.Pool, schemaName stri
 	if err != nil {
 		return fmt.Errorf("failed to create dataset_definition table: %w", err)
 	}
+	return nil
+}
 
-	_, err = conn.Exec(ctx, `
+// createSchemaObservationTable creates the market_price_observation table in the current search_path.
+func createSchemaObservationTable(ctx context.Context, conn *pgxpool.Conn) error {
+	_, err := conn.Exec(ctx, `
 		CREATE TABLE market_price_observation (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			dataset_definition_id uuid NOT NULL,
@@ -294,9 +320,12 @@ func loadSchemaInSchema(ctx context.Context, pool *pgxpool.Pool, schemaName stri
 	if err != nil {
 		return fmt.Errorf("failed to create market_price_observation table: %w", err)
 	}
+	return nil
+}
 
-	// Create indexes
-	_, err = conn.Exec(ctx, `
+// createSchemaIndexes creates indexes for the tenant schema tables.
+func createSchemaIndexes(ctx context.Context, conn *pgxpool.Conn) error {
+	_, err := conn.Exec(ctx, `
 		CREATE INDEX idx_dataset_definition_code_active ON dataset_definition (code) WHERE status = 'ACTIVE';
 		CREATE INDEX idx_observation_resolution_bitemporal
 			ON market_price_observation (resolution_key, quality DESC, observed_at DESC, created_at DESC)
@@ -306,12 +335,5 @@ func loadSchemaInSchema(ctx context.Context, pool *pgxpool.Pool, schemaName stri
 	if err != nil {
 		return fmt.Errorf("failed to create indexes: %w", err)
 	}
-
-	// Reset search path
-	_, err = conn.Exec(ctx, "SET search_path TO public")
-	if err != nil {
-		return fmt.Errorf("failed to reset search_path: %w", err)
-	}
-
 	return nil
 }

@@ -26,96 +26,144 @@ const defaultResolutionKey = "default"
 // Returns INVALID_ARGUMENT if validation fails.
 // Returns NOT_FOUND if data set or source doesn't exist.
 func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservationRequest) (*pb.RecordObservationResponse, error) {
-	// 1. Load active dataset definition by code
-	dataset, err := s.dataSetRepo.FindByCode(ctx, req.DatasetCode)
+	// 1. Load and verify dataset and source
+	dataset, source, err := s.loadAndVerifyDatasetAndSource(ctx, req.DatasetCode, req.SourceCode)
 	if err != nil {
-		return nil, s.mapObservationDomainError(err, "RecordObservation", req.DatasetCode)
+		return nil, err
 	}
 
-	// Verify dataset is active
+	// 2. Validate required timestamps BEFORE any usage (guard against nil dereference)
+	if err := validateRecordTimestamps(req); err != nil {
+		return nil, err
+	}
+
+	// 3. Compute resolution key and validate observation
+	observationContext := ToContextMap(req.Attributes)
+	resolutionKey, err := s.computeAndValidateObservation(dataset, req, observationContext, source)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Build and persist the domain observation
+	observation, err := s.buildAndPersistObservation(ctx, req, dataset, source, resolutionKey, observationContext)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Info("observation recorded",
+		"observation_id", observation.ID().String(),
+		"dataset_code", req.DatasetCode,
+		"resolution_key", resolutionKey,
+		"quality", observation.QualityLevel().String())
+
+	// 5. Publish event (best-effort)
+	s.publishObservationEvent(ctx, observation)
+
+	// 6. Return proto response
+	return &pb.RecordObservationResponse{
+		Observation: domainObservationToProto(observation, req.Attributes, dataset.Version()),
+	}, nil
+}
+
+// loadAndVerifyDatasetAndSource loads the dataset and source by code,
+// verifying both are in an active state suitable for recording observations.
+func (s *Server) loadAndVerifyDatasetAndSource(ctx context.Context, datasetCode, sourceCode string) (domain.DataSetDefinition, domain.DataSource, error) {
+	dataset, err := s.dataSetRepo.FindByCode(ctx, datasetCode)
+	if err != nil {
+		return domain.DataSetDefinition{}, domain.DataSource{}, s.mapObservationDomainError(err, "RecordObservation", datasetCode)
+	}
 	if dataset.Status() != domain.DataSetStatusActive {
 		s.logger.Warn("dataset is not active",
-			"dataset_code", req.DatasetCode,
+			"dataset_code", datasetCode,
 			"status", dataset.Status().String())
-		return nil, status.Errorf(codes.FailedPrecondition, "dataset %s is not active (status: %s)", req.DatasetCode, dataset.Status().String())
+		return domain.DataSetDefinition{}, domain.DataSource{}, status.Errorf(codes.FailedPrecondition, "dataset %s is not active (status: %s)", datasetCode, dataset.Status().String())
 	}
 
-	// 2. Load the data source
-	source, err := s.sourceRepo.FindByCode(ctx, req.SourceCode)
+	source, err := s.sourceRepo.FindByCode(ctx, sourceCode)
 	if err != nil {
-		return nil, s.mapObservationDomainError(err, "RecordObservation", req.SourceCode)
+		return domain.DataSetDefinition{}, domain.DataSource{}, s.mapObservationDomainError(err, "RecordObservation", sourceCode)
 	}
-
-	// Verify source is active
 	if !source.IsActive() {
 		s.logger.Warn("data source is not active",
-			"source_code", req.SourceCode)
-		return nil, status.Errorf(codes.FailedPrecondition, "data source %s is not active", req.SourceCode)
+			"source_code", sourceCode)
+		return domain.DataSetDefinition{}, domain.DataSource{}, status.Errorf(codes.FailedPrecondition, "data source %s is not active", sourceCode)
 	}
 
-	// 3. Validate required timestamps BEFORE any usage (guard against nil dereference)
-	// This must happen before validateObservation which calls AsTime() on these fields.
+	return dataset, source, nil
+}
+
+// validateRecordTimestamps validates that required timestamps are present on the request.
+func validateRecordTimestamps(req *pb.RecordObservationRequest) error {
 	if req.ObservedAt == nil {
-		s.logger.Warn("observed_at timestamp is required",
-			"dataset_code", req.DatasetCode)
-		return nil, status.Errorf(codes.InvalidArgument, "observed_at timestamp is required")
+		return status.Errorf(codes.InvalidArgument, "observed_at timestamp is required")
 	}
 	if req.ValidFrom == nil {
-		s.logger.Warn("valid_from timestamp is required",
-			"dataset_code", req.DatasetCode)
-		return nil, status.Errorf(codes.InvalidArgument, "valid_from timestamp is required")
+		return status.Errorf(codes.InvalidArgument, "valid_from timestamp is required")
 	}
+	return nil
+}
 
-	// 4. Convert observation context to CEL map
-	observationContext := ToContextMap(req.Attributes)
-
-	// 5. Compute resolution key via CEL evaluation (if celValidator is available)
+// computeAndValidateObservation computes the resolution key via CEL and validates
+// the observation against the dataset's validation expression.
+func (s *Server) computeAndValidateObservation(
+	dataset domain.DataSetDefinition,
+	req *pb.RecordObservationRequest,
+	observationContext map[string]string,
+	source domain.DataSource,
+) (string, error) {
 	resolutionKey, err := s.computeResolutionKey(dataset, observationContext)
 	if err != nil {
 		s.logger.Warn("resolution key computation failed",
 			"dataset_code", req.DatasetCode,
 			"error", err)
-		return nil, status.Errorf(codes.InvalidArgument, "failed to compute resolution key: %v", err)
+		return "", status.Errorf(codes.InvalidArgument, "failed to compute resolution key: %v", err)
 	}
 
-	// 6. Evaluate validation expression (reject if false)
 	if err := s.validateObservation(dataset, req, observationContext, source.ID().String()); err != nil {
 		s.logger.Warn("observation validation failed",
 			"dataset_code", req.DatasetCode,
 			"value", req.Value,
 			"error", err)
-		return nil, err // Already formatted as gRPC status error
+		return "", err
 	}
 
-	// 7. Parse the decimal value
+	return resolutionKey, nil
+}
+
+// buildAndPersistObservation parses the request value, creates the domain observation,
+// and persists it to the repository.
+func (s *Server) buildAndPersistObservation(
+	ctx context.Context,
+	req *pb.RecordObservationRequest,
+	dataset domain.DataSetDefinition,
+	source domain.DataSource,
+	resolutionKey string,
+	observationContext map[string]string,
+) (domain.MarketPriceObservation, error) {
 	value, err := decimal.NewFromString(req.Value)
 	if err != nil {
 		s.logger.Warn("invalid decimal value",
 			"value", req.Value,
 			"error", err)
-		return nil, status.Errorf(codes.InvalidArgument, "invalid decimal value: %s", req.Value)
+		return domain.MarketPriceObservation{}, status.Errorf(codes.InvalidArgument, "invalid decimal value: %s", req.Value)
 	}
 
-	// 8. Convert proto QualityLevel to domain QualityLevel
 	qualityLevel := protoQualityLevelToDomain(req.Quality)
-
-	// 9. Determine valid_to (use provided or default to 100 years in future)
-	validTo := time.Now().Add(100 * 365 * 24 * time.Hour) // Default: far future
+	validTo := time.Now().Add(100 * 365 * 24 * time.Hour)
 	if req.ValidTo != nil {
 		validTo = req.ValidTo.AsTime()
 	}
 
-	// 10. Create the domain observation (timestamps already validated in step 3)
 	observation, err := domain.NewMarketPriceObservation(
 		req.DatasetCode,
 		source.ID(),
 		resolutionKey,
 		value,
-		dataset.Name(), // Use dataset name as unit
+		dataset.Name(),
 		req.ObservedAt.AsTime(),
 		req.ValidFrom.AsTime(),
 		validTo,
-		uuid.New(), // CausationID - generate new for this request
+		uuid.New(),
 		qualityLevel,
 		source.TrustLevel(),
 		domain.NewObservationContext(observationContext),
@@ -124,48 +172,40 @@ func (s *Server) RecordObservation(ctx context.Context, req *pb.RecordObservatio
 		s.logger.Warn("failed to create observation",
 			"dataset_code", req.DatasetCode,
 			"error", err)
-		return nil, s.mapObservationDomainError(err, "RecordObservation", req.DatasetCode)
+		return domain.MarketPriceObservation{}, s.mapObservationDomainError(err, "RecordObservation", req.DatasetCode)
 	}
 
-	// 11. Persist the observation
 	if err := s.observationRepo.Record(ctx, observation); err != nil {
 		s.logger.Error("failed to record observation",
 			"dataset_code", req.DatasetCode,
 			"error", err)
-		return nil, s.mapObservationDomainError(err, "RecordObservation", req.DatasetCode)
+		return domain.MarketPriceObservation{}, s.mapObservationDomainError(err, "RecordObservation", req.DatasetCode)
 	}
 
-	s.logger.Info("observation recorded",
-		"observation_id", observation.ID().String(),
-		"dataset_code", req.DatasetCode,
-		"resolution_key", resolutionKey,
-		"quality", qualityLevel.String())
+	return observation, nil
+}
 
-	// 12. Publish ObservationRecorded event to Kafka ONLY if quality is ACTUAL or VERIFIED (not ESTIMATE)
-	if s.eventPublisher != nil && shouldPublishObservationEvent(qualityLevel) {
-		// Use the specialized publisher if available, otherwise use generic publisher
-		if obsPublisher, ok := s.eventPublisher.(ObservationEventPublisher); ok {
-			if err := obsPublisher.PublishObservationRecorded(ctx, observation); err != nil {
-				// Log but don't fail the request - observation is already persisted
-				s.logger.Error("failed to publish observation event",
-					"observation_id", observation.ID().String(),
-					"error", err)
-			}
-		} else {
-			// Fallback to generic publisher
-			event := mapObservationToProtoEvent(observation)
-			if err := s.eventPublisher.Publish(ctx, event); err != nil {
-				s.logger.Error("failed to publish observation event",
-					"observation_id", observation.ID().String(),
-					"error", err)
-			}
+// publishObservationEvent publishes an observation event to Kafka (best-effort).
+// Only publishes for ACTUAL or VERIFIED quality levels.
+func (s *Server) publishObservationEvent(ctx context.Context, observation domain.MarketPriceObservation) {
+	if s.eventPublisher == nil || !shouldPublishObservationEvent(observation.QualityLevel()) {
+		return
+	}
+
+	if obsPublisher, ok := s.eventPublisher.(ObservationEventPublisher); ok {
+		if err := obsPublisher.PublishObservationRecorded(ctx, observation); err != nil {
+			s.logger.Error("failed to publish observation event",
+				"observation_id", observation.ID().String(),
+				"error", err)
+		}
+	} else {
+		event := mapObservationToProtoEvent(observation)
+		if err := s.eventPublisher.Publish(ctx, event); err != nil {
+			s.logger.Error("failed to publish observation event",
+				"observation_id", observation.ID().String(),
+				"error", err)
 		}
 	}
-
-	// 13. Return proto response
-	return &pb.RecordObservationResponse{
-		Observation: domainObservationToProto(observation, req.Attributes, dataset.Version()),
-	}, nil
 }
 
 // computeResolutionKey evaluates the resolution key CEL expression.

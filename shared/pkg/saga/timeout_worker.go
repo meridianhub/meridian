@@ -94,85 +94,94 @@ func (w *TimeoutWorker) Start(ctx context.Context) error {
 }
 
 // processExpiredSuspensions finds and fails sagas that have exceeded their suspend timeout.
+// expiredSaga holds the result of the timeout query.
+type expiredSaga struct {
+	ID             uuid.UUID `gorm:"column:id"`
+	CorrelationID  uuid.UUID `gorm:"column:correlation_id"`
+	IdempotencyKey string    `gorm:"column:idempotency_key"`
+}
+
 func (w *TimeoutWorker) processExpiredSuspensions(ctx context.Context) error {
 	now := time.Now()
-
-	// expiredSaga holds the result of the timeout query
-	type expiredSaga struct {
-		ID             uuid.UUID `gorm:"column:id"`
-		CorrelationID  uuid.UUID `gorm:"column:correlation_id"`
-		IdempotencyKey string    `gorm:"column:idempotency_key"`
-	}
 
 	var expired []expiredSaga
 
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Step 1: Find expired suspensions with row-level locking.
-		// CockroachDB requires FOR UPDATE at the top level of a SELECT (not in
-		// CTEs or subqueries). SKIP LOCKED is omitted because CockroachDB's
-		// serializable isolation silently returns empty results when it's used.
-		// Serializable isolation provides equivalent concurrency safety.
-		if err := tx.Raw(`
-			SELECT id, correlation_id, suspend_data->>'idempotency_key' as idempotency_key
-			FROM saga_instances
-			WHERE status = ?
-			  AND (suspend_data->>'timeout_at')::timestamptz < ?
-			ORDER BY id
-			FOR UPDATE
-			LIMIT ?
-		`,
-			SagaStatusWaitingForEvent,
-			now,
-			w.config.BatchSize,
-		).Scan(&expired).Error; err != nil {
-			return fmt.Errorf("failed to find expired suspensions: %w", err)
+		if err := w.findExpiredSuspensions(tx, now, &expired); err != nil {
+			return err
 		}
-
 		if len(expired) == 0 {
 			return nil
 		}
-
-		// Step 2: Transition expired sagas to FAILED.
-		// Capture idempotency_key in step 1 before clearing suspend_data here.
-		ids := make([]uuid.UUID, len(expired))
-		for i, s := range expired {
-			ids[i] = s.ID
-		}
-		if err := tx.Model(&SagaInstance{}).
-			Where("id IN ?", ids).
-			Updates(map[string]interface{}{
-				"status":         SagaStatusFailed,
-				"error_message":  "Suspend timeout exceeded - external event not received within deadline",
-				"error_category": string(ErrorCategoryFatal),
-				"updated_at":     now,
-				"suspend_reason": nil,
-				"suspend_data":   nil,
-			}).Error; err != nil {
-			return fmt.Errorf("failed to update expired sagas: %w", err)
-		}
-
-		// Step 3: Update the corresponding step results to FAILED.
-		for _, saga := range expired {
-			stepUpdate := tx.Model(&SagaStepResult{}).
-				Where("saga_instance_id = ? AND status = ?", saga.ID, StepStatusSuspended).
-				Updates(map[string]interface{}{
-					"status":         StepStatusFailed,
-					"error":          "Timeout waiting for external event",
-					"error_category": string(ErrorCategoryFatal),
-					"updated_at":     now,
-				})
-			if stepUpdate.Error != nil {
-				return fmt.Errorf("failed to update step result for saga %s: %w", saga.ID, stepUpdate.Error)
-			}
-		}
-
-		return nil
+		return w.failExpiredSagas(tx, expired, now)
 	})
 	if err != nil {
 		return err
 	}
 
-	// Log and record metrics for each timed-out saga
+	w.logExpiredSuspensions(expired)
+	return nil
+}
+
+// findExpiredSuspensions queries for sagas whose suspend timeout has elapsed, locking them for update.
+func (w *TimeoutWorker) findExpiredSuspensions(tx *gorm.DB, now time.Time, dest interface{}) error {
+	// CockroachDB requires FOR UPDATE at the top level of a SELECT.
+	// SKIP LOCKED is omitted because CockroachDB's serializable isolation
+	// silently returns empty results when it's used.
+	return tx.Raw(`
+		SELECT id, correlation_id, suspend_data->>'idempotency_key' as idempotency_key
+		FROM saga_instances
+		WHERE status = ?
+		  AND (suspend_data->>'timeout_at')::timestamptz < ?
+		ORDER BY id
+		FOR UPDATE
+		LIMIT ?
+	`,
+		SagaStatusWaitingForEvent,
+		now,
+		w.config.BatchSize,
+	).Scan(dest).Error
+}
+
+// failExpiredSagas transitions expired sagas and their step results to FAILED status.
+func (w *TimeoutWorker) failExpiredSagas(tx *gorm.DB, expired []expiredSaga, now time.Time) error {
+	ids := make([]uuid.UUID, len(expired))
+	for i, s := range expired {
+		ids[i] = s.ID
+	}
+
+	if err := tx.Model(&SagaInstance{}).
+		Where("id IN ?", ids).
+		Updates(map[string]interface{}{
+			"status":         SagaStatusFailed,
+			"error_message":  "Suspend timeout exceeded - external event not received within deadline",
+			"error_category": string(ErrorCategoryFatal),
+			"updated_at":     now,
+			"suspend_reason": nil,
+			"suspend_data":   nil,
+		}).Error; err != nil {
+		return fmt.Errorf("failed to update expired sagas: %w", err)
+	}
+
+	for _, saga := range expired {
+		stepUpdate := tx.Model(&SagaStepResult{}).
+			Where("saga_instance_id = ? AND status = ?", saga.ID, StepStatusSuspended).
+			Updates(map[string]interface{}{
+				"status":         StepStatusFailed,
+				"error":          "Timeout waiting for external event",
+				"error_category": string(ErrorCategoryFatal),
+				"updated_at":     now,
+			})
+		if stepUpdate.Error != nil {
+			return fmt.Errorf("failed to update step result for saga %s: %w", saga.ID, stepUpdate.Error)
+		}
+	}
+
+	return nil
+}
+
+// logExpiredSuspensions records metrics and logs for each timed-out saga.
+func (w *TimeoutWorker) logExpiredSuspensions(expired []expiredSaga) {
 	for _, saga := range expired {
 		w.logger.Warn("saga suspension timed out",
 			"saga_id", saga.ID,
@@ -187,8 +196,6 @@ func (w *TimeoutWorker) processExpiredSuspensions(ctx context.Context) error {
 			"count", len(expired),
 		)
 	}
-
-	return nil
 }
 
 // ProcessExpiredSuspensions is exposed for testing - allows manual trigger of timeout processing.

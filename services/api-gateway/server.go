@@ -255,43 +255,48 @@ func (s *Server) registerRoutes() {
 	s.registerAdminRoutes()
 
 	// API routes - with auth and tenant middleware chain.
-	// Prefer the Vanguard transcoder when configured; fall back to the legacy
-	// prefix-based reverse proxy when Backends are provided; otherwise use a
-	// fallback that returns 503 Service Unavailable (misconfiguration/degraded).
-	//
-	// For the transcoder path, metadataPropagationMiddleware wraps the handler to
-	// strip spoofed incoming identity headers and inject authenticated identity
-	// as lowercase gRPC metadata headers (x-user-id, x-tenant-id, x-auth-method,
-	// x-auth-roles). Vanguard forwards these headers to the gRPC backend where
-	// they are read as incoming metadata by the existing interceptor chain
-	// (TenantExtractionInterceptor reads x-tenant-id).
-	var apiHandler http.Handler
+	apiHandler := s.buildAPIHandler()
+	s.registerDexRoutes()
+	s.mux.Handle("/", s.wrapWithAuthChain(apiHandler))
+	s.registerEventStreamRoute()
+}
+
+// buildAPIHandler selects the appropriate API handler:
+// Vanguard transcoder > legacy proxy > fallback 503.
+//
+// For the transcoder path, metadataPropagationMiddleware wraps the handler to
+// strip spoofed incoming identity headers and inject authenticated identity
+// as lowercase gRPC metadata headers (x-user-id, x-tenant-id, x-auth-method,
+// x-auth-roles). Vanguard forwards these headers to the gRPC backend where
+// they are read as incoming metadata by the existing interceptor chain
+// (TenantExtractionInterceptor reads x-tenant-id).
+func (s *Server) buildAPIHandler() http.Handler {
 	switch {
 	case s.transcoderHandler != nil:
-		apiHandler = metadataPropagationMiddleware(s.transcoderHandler)
+		return metadataPropagationMiddleware(s.transcoderHandler)
 	case len(s.config.Backends) > 0:
-		apiHandler = NewProxyHandler(s.config.Backends)
+		return NewProxyHandler(s.config.Backends)
 	default:
-		apiHandler = http.HandlerFunc(s.handleAPI)
+		return http.HandlerFunc(s.handleAPI)
 	}
+}
 
-	// Dex endpoints (/dex/*) go through tenant resolution only (no auth or tenant-authz).
-	// This allows the MeridianConnector to resolve the tenant from the subdomain for
-	// credential lookups while Dex manages its own authentication flows.
+// registerDexRoutes registers Dex OIDC endpoints with tenant resolution only
+// (no auth or tenant-authz). This allows the MeridianConnector to resolve the
+// tenant from the subdomain for credential lookups while Dex manages its own
+// authentication flows.
+func (s *Server) registerDexRoutes() {
 	if s.dexHandler != nil {
 		dexHandler := s.wrapWithTenantOnly(s.dexHandler)
 		s.mux.Handle("/dex/", dexHandler)
 	}
+}
 
-	// Build middleware chain: auth → tenant → tenant_authz → transcoder/proxy
-	s.mux.Handle("/", s.wrapWithAuthChain(apiHandler))
-
-	// WebSocket event stream endpoint - with auth and tenant middleware chain.
-	// Claims are bridged from the gateway auth context to the eventstream context
-	// so that the eventstream.Handler can authorize channel subscriptions.
-	//
-	// rawEventStreamHandler takes precedence (used in tests). Production code uses
-	// eventStreamHandler which gets wrapped with the claims bridge.
+// registerEventStreamRoute registers the WebSocket event stream endpoint with
+// the full auth middleware chain. Claims are bridged from the gateway auth
+// context to the eventstream context so that the Handler can authorize
+// channel subscriptions.
+func (s *Server) registerEventStreamRoute() {
 	if s.rawEventStreamHandler != nil {
 		wsHandler := s.wrapWithAuthChain(s.rawEventStreamHandler)
 		s.mux.Handle("GET /ws/events", wsHandler)

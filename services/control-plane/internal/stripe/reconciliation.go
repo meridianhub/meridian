@@ -103,7 +103,6 @@ func NewReconciliationService(stripeSource ChargeSource, ledgerSource LedgerEntr
 // RunDailyReconciliation compares Stripe charges with ledger entries for the given date.
 // It produces a report identifying variances and missing entries.
 func (s *ReconciliationService) RunDailyReconciliation(ctx context.Context, date time.Time) (*ReconciliationReport, error) {
-	// Define the day boundaries (midnight to midnight UTC)
 	from := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	to := from.Add(24 * time.Hour)
 
@@ -111,63 +110,27 @@ func (s *ReconciliationService) RunDailyReconciliation(ctx context.Context, date
 		"date", from.Format("2006-01-02"),
 	)
 
-	// Fetch Stripe charges for the day
 	charges, err := s.stripeSource.ListCharges(ctx, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch stripe charges: %w", err)
 	}
 
-	// Build charge lookup by ID
-	chargeMap := make(map[string]*ChargeRecord, len(charges))
-	chargeIDs := make([]string, 0, len(charges))
-	var stripeTotalCents int64
-	for i := range charges {
-		chargeMap[charges[i].ChargeID] = &charges[i]
-		chargeIDs = append(chargeIDs, charges[i].ChargeID)
-		stripeTotalCents += charges[i].AmountCents
+	chargeMap, chargeIDs, stripeTotalCents := buildChargeIndex(charges)
+
+	ledgerMap, ledgerEntryCount, ledgerTotalCents, err := s.fetchAndIndexLedgerEntries(ctx, chargeIDs)
+	if err != nil {
+		return nil, err
 	}
 
-	// Fetch matching ledger entries by external reference ID (charge ID)
-	var ledgerEntries []LedgerRecord
-	if len(chargeIDs) > 0 {
-		ledgerEntries, err = s.ledgerSource.ListEntriesByExternalRef(ctx, chargeIDs)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch ledger entries: %w", err)
-		}
-	}
+	missingInLedger, missingInStripe := findMissingEntries(chargeIDs, chargeMap, ledgerMap)
 
-	// Build ledger lookup by external reference
-	ledgerMap := make(map[string]*LedgerRecord, len(ledgerEntries))
-	var ledgerTotalCents int64
-	for i := range ledgerEntries {
-		ledgerMap[ledgerEntries[i].ExternalReferenceID] = &ledgerEntries[i]
-		ledgerTotalCents += ledgerEntries[i].AmountCents
-	}
-
-	// Find charges missing in ledger
-	var missingInLedger []string
-	for _, chargeID := range chargeIDs {
-		if _, found := ledgerMap[chargeID]; !found {
-			missingInLedger = append(missingInLedger, chargeID)
-		}
-	}
-
-	// Find ledger entries missing in Stripe
-	var missingInStripe []string
-	for refID := range ledgerMap {
-		if _, found := chargeMap[refID]; !found {
-			missingInStripe = append(missingInStripe, refID)
-		}
-	}
-
-	// Calculate variance and check thresholds
 	varianceCents := abs(stripeTotalCents - ledgerTotalCents)
 	exceedsThreshold, alertMessage := checkVarianceThresholds(varianceCents, stripeTotalCents)
 
 	report := &ReconciliationReport{
 		Date:                     from,
 		StripeChargeCount:        len(charges),
-		LedgerEntryCount:         len(ledgerEntries),
+		LedgerEntryCount:         ledgerEntryCount,
 		StripeTotalCents:         stripeTotalCents,
 		LedgerTotalCents:         ledgerTotalCents,
 		VarianceCents:            varianceCents,
@@ -180,6 +143,55 @@ func (s *ReconciliationService) RunDailyReconciliation(ctx context.Context, date
 	s.logReconciliationResult(from, report)
 
 	return report, nil
+}
+
+// buildChargeIndex builds a lookup map, ordered ID list, and total from charges.
+func buildChargeIndex(charges []ChargeRecord) (map[string]*ChargeRecord, []string, int64) {
+	chargeMap := make(map[string]*ChargeRecord, len(charges))
+	chargeIDs := make([]string, 0, len(charges))
+	var totalCents int64
+	for i := range charges {
+		chargeMap[charges[i].ChargeID] = &charges[i]
+		chargeIDs = append(chargeIDs, charges[i].ChargeID)
+		totalCents += charges[i].AmountCents
+	}
+	return chargeMap, chargeIDs, totalCents
+}
+
+// fetchAndIndexLedgerEntries fetches ledger entries matching chargeIDs and builds a lookup map.
+// Returns the map, raw entry count (pre-deduplication), total cents, and any error.
+func (s *ReconciliationService) fetchAndIndexLedgerEntries(ctx context.Context, chargeIDs []string) (map[string]*LedgerRecord, int, int64, error) {
+	if len(chargeIDs) == 0 {
+		return make(map[string]*LedgerRecord), 0, 0, nil
+	}
+	ledgerEntries, err := s.ledgerSource.ListEntriesByExternalRef(ctx, chargeIDs)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to fetch ledger entries: %w", err)
+	}
+	ledgerMap := make(map[string]*LedgerRecord, len(ledgerEntries))
+	var totalCents int64
+	for i := range ledgerEntries {
+		ledgerMap[ledgerEntries[i].ExternalReferenceID] = &ledgerEntries[i]
+		totalCents += ledgerEntries[i].AmountCents
+	}
+	return ledgerMap, len(ledgerEntries), totalCents, nil
+}
+
+// findMissingEntries identifies charges missing in ledger and ledger entries missing in Stripe.
+func findMissingEntries(chargeIDs []string, chargeMap map[string]*ChargeRecord, ledgerMap map[string]*LedgerRecord) ([]string, []string) {
+	var missingInLedger []string
+	for _, chargeID := range chargeIDs {
+		if _, found := ledgerMap[chargeID]; !found {
+			missingInLedger = append(missingInLedger, chargeID)
+		}
+	}
+	var missingInStripe []string
+	for refID := range ledgerMap {
+		if _, found := chargeMap[refID]; !found {
+			missingInStripe = append(missingInStripe, refID)
+		}
+	}
+	return missingInLedger, missingInStripe
 }
 
 // checkVarianceThresholds evaluates whether the variance exceeds absolute or

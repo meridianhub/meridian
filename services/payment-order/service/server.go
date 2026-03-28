@@ -310,59 +310,15 @@ func NewService(repo persistence.Repository, idempotencyService idempotency.Serv
 // NewServiceWithConfig creates a new payment order service with full configuration.
 // Validates all required dependencies and applies defaults where appropriate.
 func NewServiceWithConfig(cfg Config) (*Service, error) {
-	// Validate required dependencies
-	if cfg.Repository == nil {
-		return nil, ErrRepositoryNil
-	}
-	if cfg.CurrentAccountClient == nil {
-		return nil, ErrCurrentAccountClientNil
-	}
-	if cfg.FinancialAccountingClient == nil {
-		return nil, ErrFinancialAccountingClientNil
-	}
-	if cfg.PaymentGateway == nil {
-		return nil, ErrPaymentGatewayNil
-	}
-	if cfg.GatewayAccountConfig == nil {
-		return nil, ErrGatewayAccountConfigNil
-	}
-	if cfg.IdempotencyService == nil {
-		return nil, ErrIdempotencyServiceNil
-	}
-	// KafkaPublisher is optional - nil is handled gracefully by publishEvent
-	// InternalAccountClient is optional but required if internal clearing is enabled
-	if cfg.InternalClearingEnabled && cfg.InternalAccountClient == nil {
-		return nil, ErrInternalAccountClientNil
+	if err := validateServiceConfig(cfg); err != nil {
+		return nil, err
 	}
 
-	// Apply default logger if not provided
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
-	// Apply defaults for optional config values
-	sagaTimeout := cfg.SagaTimeout
-	if sagaTimeout == 0 {
-		sagaTimeout = DefaultSagaTimeout
-	}
-
-	defaultPageSize := cfg.DefaultPageSize
-	if defaultPageSize == 0 {
-		defaultPageSize = DefaultPageSize
-	}
-
-	maxPageSize := cfg.MaxPageSize
-	if maxPageSize == 0 {
-		maxPageSize = DefaultMaxPageSize
-	}
-
-	maxIdempotencyKeyLength := cfg.MaxIdempotencyKeyLength
-	if maxIdempotencyKeyLength == 0 {
-		maxIdempotencyKeyLength = DefaultMaxIdempotencyKeyLength
-	}
-
-	// Create the payment orchestrator with all dependencies
 	orchestrator, err := NewPaymentOrchestrator(PaymentOrchestratorConfig{
 		Logger:                    logger,
 		Repo:                      cfg.Repository,
@@ -387,20 +343,62 @@ func NewServiceWithConfig(cfg Config) (*Service, error) {
 		repo:                      cfg.Repository,
 		currentAccountClient:      cfg.CurrentAccountClient,
 		financialAccountingClient: cfg.FinancialAccountingClient,
-		internalAccountClient:     cfg.InternalAccountClient, // Optional - may be nil
-		referenceDataClient:       cfg.ReferenceDataClient,   // Optional - may be nil
+		internalAccountClient:     cfg.InternalAccountClient,
+		referenceDataClient:       cfg.ReferenceDataClient,
 		paymentGateway:            cfg.PaymentGateway,
 		gatewayAccountConfig:      cfg.GatewayAccountConfig,
 		kafkaPublisher:            cfg.KafkaPublisher,
 		idempotencyService:        cfg.IdempotencyService,
 		logger:                    logger,
 		tracer:                    cfg.Tracer,
-		sagaTimeout:               sagaTimeout,
-		defaultPageSize:           defaultPageSize,
-		maxPageSize:               maxPageSize,
-		maxIdempotencyKeyLength:   maxIdempotencyKeyLength,
-		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig, // nil means use default
+		sagaTimeout:               durationOrDefault(cfg.SagaTimeout, DefaultSagaTimeout),
+		defaultPageSize:           intOrDefault(cfg.DefaultPageSize, DefaultPageSize),
+		maxPageSize:               intOrDefault(cfg.MaxPageSize, DefaultMaxPageSize),
+		maxIdempotencyKeyLength:   intOrDefault(cfg.MaxIdempotencyKeyLength, DefaultMaxIdempotencyKeyLength),
+		lienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
 		orchestrator:              orchestrator,
 		internalClearingEnabled:   cfg.InternalClearingEnabled,
 	}, nil
+}
+
+// validateServiceConfig validates required dependencies for the service.
+func validateServiceConfig(cfg Config) error {
+	if cfg.Repository == nil {
+		return ErrRepositoryNil
+	}
+	if cfg.CurrentAccountClient == nil {
+		return ErrCurrentAccountClientNil
+	}
+	if cfg.FinancialAccountingClient == nil {
+		return ErrFinancialAccountingClientNil
+	}
+	if cfg.PaymentGateway == nil {
+		return ErrPaymentGatewayNil
+	}
+	if cfg.GatewayAccountConfig == nil {
+		return ErrGatewayAccountConfigNil
+	}
+	if cfg.IdempotencyService == nil {
+		return ErrIdempotencyServiceNil
+	}
+	if cfg.InternalClearingEnabled && cfg.InternalAccountClient == nil {
+		return ErrInternalAccountClientNil
+	}
+	return nil
+}
+
+// intOrDefault returns value if non-zero, otherwise returns defaultVal.
+func intOrDefault(value, defaultVal int) int {
+	if value == 0 {
+		return defaultVal
+	}
+	return value
+}
+
+// durationOrDefault returns value if non-zero, otherwise returns defaultVal.
+func durationOrDefault(value, defaultVal time.Duration) time.Duration {
+	if value == 0 {
+		return defaultVal
+	}
+	return value
 }

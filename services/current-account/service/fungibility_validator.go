@@ -85,30 +85,13 @@ func (v *FungibilityValidator) ValidateDoubleEntry(
 	debitAttrs map[string]string,
 	creditAttrs map[string]string,
 ) error {
-	// Retrieve instrument with pre-compiled CEL program
-	instrument, err := v.getter.GetInstrument(ctx, instrumentCode, instrumentVersion)
+	// Retrieve instrument and resolve evaluator
+	evaluator, err := v.resolveEvaluator(ctx, instrumentCode, instrumentVersion)
 	if err != nil {
-		if errors.Is(err, registry.ErrNotFound) {
-			return fmt.Errorf("%w: %s v%d", ErrInstrumentNotFound, instrumentCode, instrumentVersion)
-		}
-		return fmt.Errorf("failed to retrieve instrument %s: %w", instrumentCode, err)
+		return err
 	}
-
-	// If no fungibility key expression, instrument is fully fungible
-	if instrument.Definition.FungibilityKeyExpression == "" {
-		return nil
-	}
-
-	// Determine which evaluator to use
-	var evaluator FungibilityKeyEvaluator
-	if v.evaluator != nil {
-		// Use injected evaluator (for testing)
-		evaluator = v.evaluator
-	} else if instrument.BucketKeyProgram != nil {
-		// Use the instrument's pre-compiled CEL program (production path)
-		evaluator = &celProgramAdapter{program: instrument.BucketKeyProgram}
-	} else {
-		// No program available - treat as fully fungible
+	if evaluator == nil {
+		// Fully fungible - no validation needed
 		return nil
 	}
 
@@ -120,19 +103,46 @@ func (v *FungibilityValidator) ValidateDoubleEntry(
 		creditAttrs = make(map[string]string)
 	}
 
-	// Evaluate fungibility key for debit posting
+	// Evaluate and compare fungibility keys
+	return compareFungibilityKeys(evaluator, debitAttrs, creditAttrs, instrumentCode)
+}
+
+// resolveEvaluator retrieves the instrument and determines the appropriate fungibility key evaluator.
+// Returns nil evaluator (not an error) when the instrument is fully fungible.
+func (v *FungibilityValidator) resolveEvaluator(ctx context.Context, instrumentCode string, instrumentVersion int) (FungibilityKeyEvaluator, error) {
+	instrument, err := v.getter.GetInstrument(ctx, instrumentCode, instrumentVersion)
+	if err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			return nil, fmt.Errorf("%w: %s v%d", ErrInstrumentNotFound, instrumentCode, instrumentVersion)
+		}
+		return nil, fmt.Errorf("failed to retrieve instrument %s: %w", instrumentCode, err)
+	}
+
+	if instrument.Definition.FungibilityKeyExpression == "" {
+		return nil, nil //nolint:nilnil // nil evaluator means fully fungible instrument
+	}
+
+	if v.evaluator != nil {
+		return v.evaluator, nil
+	}
+	if instrument.BucketKeyProgram != nil {
+		return &celProgramAdapter{program: instrument.BucketKeyProgram}, nil
+	}
+	return nil, nil //nolint:nilnil // nil evaluator means no compiled program available
+}
+
+// compareFungibilityKeys evaluates the fungibility key for both debit and credit and compares them.
+func compareFungibilityKeys(evaluator FungibilityKeyEvaluator, debitAttrs, creditAttrs map[string]string, instrumentCode string) error {
 	debitKey, err := evaluateFungibilityKey(evaluator, debitAttrs)
 	if err != nil {
 		return fmt.Errorf("%w: debit attributes: %w", ErrFungibilityKeyEvaluation, err)
 	}
 
-	// Evaluate fungibility key for credit posting
 	creditKey, err := evaluateFungibilityKey(evaluator, creditAttrs)
 	if err != nil {
 		return fmt.Errorf("%w: credit attributes: %w", ErrFungibilityKeyEvaluation, err)
 	}
 
-	// Compare keys - they must match for the transaction to be valid
 	if debitKey != creditKey {
 		return fmt.Errorf("%w: debit key %q does not match credit key %q (instrument=%s)",
 			ErrFungibilityMismatch,

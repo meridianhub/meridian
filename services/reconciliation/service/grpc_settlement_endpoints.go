@@ -24,71 +24,80 @@ func (s *AccountReconciliationService) InitiateAccountReconciliation(
 		return nil, status.Error(codes.FailedPrecondition, "settlement run repository not configured")
 	}
 
-	accountID := req.GetAccountId()
-	if accountID == "" {
-		return nil, status.Error(codes.InvalidArgument, "account_id is required")
+	if err := validateInitiateRequest(req); err != nil {
+		return nil, err
 	}
 
-	scope := req.GetScope()
-	if scope == reconciliationv1.ReconciliationScope_RECONCILIATION_SCOPE_UNSPECIFIED {
-		return nil, status.Error(codes.InvalidArgument, "scope must not be UNSPECIFIED")
-	}
+	periodStart := req.GetPeriodStart().AsTime()
+	periodEnd := req.GetPeriodEnd().AsTime()
+	domainScope := toDomainReconciliationScope(req.GetScope())
+	domainType := toDomainSettlementType(req.GetSettlementType())
 
-	settlementType := req.GetSettlementType()
-	if settlementType == reconciliationv1.SettlementType_SETTLEMENT_TYPE_UNSPECIFIED {
-		return nil, status.Error(codes.InvalidArgument, "settlement_type must not be UNSPECIFIED")
-	}
-
-	periodStartPb := req.GetPeriodStart()
-	if periodStartPb == nil {
-		return nil, status.Error(codes.InvalidArgument, "period_start is required")
-	}
-	if err := periodStartPb.CheckValid(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, "period_start is invalid")
-	}
-	periodStart := periodStartPb.AsTime()
-
-	periodEndPb := req.GetPeriodEnd()
-	if periodEndPb == nil {
-		return nil, status.Error(codes.InvalidArgument, "period_end is required")
-	}
-	if err := periodEndPb.CheckValid(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, "period_end is invalid")
-	}
-	periodEnd := periodEndPb.AsTime()
-
-	if !periodStart.Before(periodEnd) {
-		return nil, status.Error(codes.InvalidArgument, "period_end must be after period_start")
-	}
-
-	initiatedBy := req.GetInitiatedBy()
-	if initiatedBy == "" {
-		return nil, status.Error(codes.InvalidArgument, "initiated_by is required")
-	}
-
-	domainScope := toDomainReconciliationScope(scope)
-	domainType := toDomainSettlementType(settlementType)
-
-	run, err := domain.NewSettlementRun(accountID, domainScope, domainType, periodStart, periodEnd, initiatedBy)
+	run, err := domain.NewSettlementRun(req.GetAccountId(), domainScope, domainType, periodStart, periodEnd, req.GetInitiatedBy())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid settlement run: %v", err)
 	}
 
+	if err := s.persistNewRun(ctx, run, req.GetAccountId(), domainScope); err != nil {
+		return nil, err
+	}
+
+	return &reconciliationv1.InitiateAccountReconciliationResponse{
+		Run: toProtoRunSummary(run),
+	}, nil
+}
+
+// validateInitiateRequest validates all required fields on an InitiateAccountReconciliationRequest.
+func validateInitiateRequest(req *reconciliationv1.InitiateAccountReconciliationRequest) error {
+	if req.GetAccountId() == "" {
+		return status.Error(codes.InvalidArgument, "account_id is required")
+	}
+	if req.GetScope() == reconciliationv1.ReconciliationScope_RECONCILIATION_SCOPE_UNSPECIFIED {
+		return status.Error(codes.InvalidArgument, "scope must not be UNSPECIFIED")
+	}
+	if req.GetSettlementType() == reconciliationv1.SettlementType_SETTLEMENT_TYPE_UNSPECIFIED {
+		return status.Error(codes.InvalidArgument, "settlement_type must not be UNSPECIFIED")
+	}
+	periodStartPb := req.GetPeriodStart()
+	if periodStartPb == nil {
+		return status.Error(codes.InvalidArgument, "period_start is required")
+	}
+	if err := periodStartPb.CheckValid(); err != nil {
+		return status.Error(codes.InvalidArgument, "period_start is invalid")
+	}
+	periodEndPb := req.GetPeriodEnd()
+	if periodEndPb == nil {
+		return status.Error(codes.InvalidArgument, "period_end is required")
+	}
+	if err := periodEndPb.CheckValid(); err != nil {
+		return status.Error(codes.InvalidArgument, "period_end is invalid")
+	}
+	if !periodStartPb.AsTime().Before(periodEndPb.AsTime()) {
+		return status.Error(codes.InvalidArgument, "period_end must be after period_start")
+	}
+	if req.GetInitiatedBy() == "" {
+		return status.Error(codes.InvalidArgument, "initiated_by is required")
+	}
+	return nil
+}
+
+// persistNewRun creates a settlement run in the repository, mapping errors to gRPC status codes.
+func (s *AccountReconciliationService) persistNewRun(ctx context.Context, run *domain.SettlementRun, accountID string, domainScope domain.ReconciliationScope) error {
 	if err := s.runRepo.Create(ctx, run); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
-			return nil, status.Error(codes.AlreadyExists, "settlement run already exists")
+			return status.Error(codes.AlreadyExists, "settlement run already exists")
 		}
 		if errors.Is(err, context.Canceled) {
-			return nil, status.Error(codes.Canceled, "request canceled")
+			return status.Error(codes.Canceled, "request canceled")
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(codes.DeadlineExceeded, "deadline exceeded")
+			return status.Error(codes.DeadlineExceeded, "deadline exceeded")
 		}
 		s.logger.Error("failed to create settlement run",
 			slog.String("account_id", accountID),
 			slog.String("error", err.Error()),
 		)
-		return nil, status.Error(codes.Internal, "failed to create settlement run")
+		return status.Error(codes.Internal, "failed to create settlement run")
 	}
 
 	s.logger.Info("settlement run created",
@@ -96,10 +105,7 @@ func (s *AccountReconciliationService) InitiateAccountReconciliation(
 		slog.String("account_id", accountID),
 		slog.String("scope", string(domainScope)),
 	)
-
-	return &reconciliationv1.InitiateAccountReconciliationResponse{
-		Run: toProtoRunSummary(run),
-	}, nil
+	return nil
 }
 
 // RetrieveAccountReconciliation retrieves a settlement run summary.
@@ -144,33 +150,12 @@ func (s *AccountReconciliationService) ListAccountReconciliations(
 		return nil, status.Error(codes.Unimplemented, "ListAccountReconciliations not yet implemented")
 	}
 
-	pageSize := int(req.GetPageSize())
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
-	}
-
-	offset, err := decodeCursor(req.GetPageToken())
+	pageSize, offset, err := parsePagination(req.GetPageSize(), req.GetPageToken())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+		return nil, err
 	}
 
-	filter := domain.RunFilter{
-		Limit:  pageSize + 1,
-		Offset: offset,
-	}
-
-	if req.GetAccountId() != "" {
-		accountID := req.GetAccountId()
-		filter.AccountID = &accountID
-	}
-
-	if req.GetStatus() != reconciliationv1.RunStatus_RUN_STATUS_UNSPECIFIED {
-		domainStatus := toDomainRunStatus(req.GetStatus())
-		filter.Status = &domainStatus
-	}
+	filter := buildRunFilter(req, pageSize, offset)
 
 	runs, err := s.runRepo.List(ctx, filter)
 	if err != nil {
@@ -198,6 +183,44 @@ func (s *AccountReconciliationService) ListAccountReconciliations(
 	}, nil
 }
 
+// parsePagination extracts and clamps page size, and decodes the cursor offset.
+func parsePagination(rawPageSize int32, pageToken string) (int, int, error) {
+	pageSize := int(rawPageSize)
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	offset, err := decodeCursor(pageToken)
+	if err != nil {
+		return 0, 0, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+	}
+
+	return pageSize, offset, nil
+}
+
+// buildRunFilter creates a RunFilter from the list request parameters.
+func buildRunFilter(req *reconciliationv1.ListAccountReconciliationsRequest, pageSize, offset int) domain.RunFilter {
+	filter := domain.RunFilter{
+		Limit:  pageSize + 1,
+		Offset: offset,
+	}
+
+	if req.GetAccountId() != "" {
+		accountID := req.GetAccountId()
+		filter.AccountID = &accountID
+	}
+
+	if req.GetStatus() != reconciliationv1.RunStatus_RUN_STATUS_UNSPECIFIED {
+		domainStatus := toDomainRunStatus(req.GetStatus())
+		filter.Status = &domainStatus
+	}
+
+	return filter
+}
+
 // ListReconciliationResults returns paginated variance details for a run.
 func (s *AccountReconciliationService) ListReconciliationResults(
 	ctx context.Context,
@@ -207,27 +230,17 @@ func (s *AccountReconciliationService) ListReconciliationResults(
 		return nil, status.Error(codes.Unimplemented, "ListReconciliationResults not yet implemented")
 	}
 
-	runIDStr := req.GetRunId()
-	if runIDStr == "" {
-		return nil, status.Error(codes.InvalidArgument, "run_id is required")
-	}
-
-	runID, err := uuid.Parse(runIDStr)
-	if err != nil {
+	runID, err := uuid.Parse(req.GetRunId())
+	if err != nil || req.GetRunId() == "" {
+		if req.GetRunId() == "" {
+			return nil, status.Error(codes.InvalidArgument, "run_id is required")
+		}
 		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
 	}
 
-	pageSize := int(req.GetPageSize())
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
-	}
-
-	offset, err := decodeCursor(req.GetPageToken())
+	pageSize, offset, err := parsePagination(req.GetPageSize(), req.GetPageToken())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+		return nil, err
 	}
 
 	filter := domain.VarianceFilter{

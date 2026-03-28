@@ -152,6 +152,18 @@ func (m *MappingMiddleware) handleMappingRequest(w http.ResponseWriter, r *http.
 	next.ServeHTTP(rec, r)
 	downstreamElapsed := time.Since(downstreamStart)
 
+	return m.transformAndWriteResponse(w, rec, mappingDef, name, tenantID, downstreamElapsed)
+}
+
+// transformAndWriteResponse applies outbound transformation to the downstream response
+// and writes the result. Non-2xx and empty responses pass through untransformed.
+func (m *MappingMiddleware) transformAndWriteResponse(
+	w http.ResponseWriter,
+	rec *responseRecorder,
+	mappingDef *mappingv1.MappingDefinition,
+	name, tenantID string,
+	downstreamElapsed time.Duration,
+) error {
 	// Pass non-2xx responses through untransformed.
 	if rec.code < 200 || rec.code >= 300 {
 		return writeSanitizedResponse(w, rec.code, rec.headers, rec.buf.Bytes())

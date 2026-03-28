@@ -119,17 +119,34 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		cancel: cancel,
 	}
 
-	// Create producer for DLQ
+	dlqProducer, err := buildDLQProducer(config)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	c.dlqProducer = dlqProducer
+
+	consumer, err := buildKafkaConsumer(config, dlqProducer, c.handleMessage)
+	if err != nil {
+		dlqProducer.Close()
+		cancel()
+		return nil, err
+	}
+	c.consumer = consumer
+
+	return c, nil
+}
+
+// buildDLQProducer creates a DLQ producer for the audit consumer.
+func buildDLQProducer(config ConsumerConfig) (*kafka.DLQProducer, error) {
 	producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
 		BootstrapServers: config.BootstrapServers,
 		ClientID:         config.ClientID + "-dlq",
 	})
 	if err != nil {
-		cancel()
 		return nil, fmt.Errorf("failed to create DLQ producer: %w", err)
 	}
 
-	// Create DLQ producer wrapper
 	dlqConfig := kafka.DLQConfig{
 		DLQTopicSuffix:    config.DLQTopicSuffix,
 		MaxRetries:        int32(config.MaxRetries),
@@ -140,12 +157,14 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	dlqProducer, err := kafka.NewDLQProducer(producer, dlqConfig)
 	if err != nil {
 		producer.Close()
-		cancel()
 		return nil, fmt.Errorf("failed to create DLQ producer: %w", err)
 	}
-	c.dlqProducer = dlqProducer
 
-	// Create the Kafka consumer with DLQ support
+	return dlqProducer, nil
+}
+
+// buildKafkaConsumer creates the underlying Kafka consumer with DLQ support.
+func buildKafkaConsumer(config ConsumerConfig, dlqProducer *kafka.DLQProducer, handler func(context.Context, []byte, proto.Message) error) (*kafka.ProtoConsumer, error) {
 	consumer, err := kafka.NewProtoConsumer(
 		kafka.ConsumerConfig{
 			BootstrapServers: config.BootstrapServers,
@@ -163,16 +182,12 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 			},
 		},
 		func() proto.Message { return &auditv1.AuditEvent{} },
-		c.handleMessage,
+		handler,
 	)
 	if err != nil {
-		dlqProducer.Close()
-		cancel()
 		return nil, fmt.Errorf("failed to create Kafka consumer: %w", err)
 	}
-	c.consumer = consumer
-
-	return c, nil
+	return consumer, nil
 }
 
 // Start begins consuming audit events from Kafka.
@@ -237,7 +252,6 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		return fmt.Errorf("%w: %T", ErrUnexpectedMessageType, msg)
 	}
 
-	// Convert protobuf operation to string
 	operation := protoToOperation(event.Operation)
 	if operation == "" {
 		return fmt.Errorf("%w: %v", ErrInvalidOperation, event.Operation)
@@ -248,7 +262,43 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		schema = "unknown"
 	}
 
-	// Handle potentially nil timestamp
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if event.SchemaName != "" && !isValidSchemaName(event.SchemaName) {
+		RecordKafkaConsumed(schema, operation, "failure")
+		return fmt.Errorf("%w: %s", ErrInvalidSchemaName, event.SchemaName)
+	}
+
+	auditLog := buildAuditLogFromEvent(event, operation)
+
+	err := c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if event.SchemaName != "" {
+			if err := tx.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(event.SchemaName))).Error; err != nil {
+				return fmt.Errorf("failed to set search_path: %w", err)
+			}
+		}
+		return tx.Create(&auditLog).Error
+	})
+	if err != nil {
+		RecordKafkaConsumed(schema, operation, "failure")
+		RecordKafkaConsumeDuration(time.Since(startTime).Seconds())
+		return fmt.Errorf("failed to insert audit log: %w", err)
+	}
+
+	RecordKafkaConsumed(schema, operation, "success")
+	RecordKafkaConsumeDuration(time.Since(startTime).Seconds())
+	RecordEntryAge(time.Since(auditLog.CreatedAt).Seconds())
+
+	log.Printf("DEBUG: Processed audit event: table=%s operation=%s record=%s",
+		event.TableName, operation, event.RecordId)
+
+	return nil
+}
+
+// buildAuditLogFromEvent converts a protobuf AuditEvent into an AuditLog database record.
+func buildAuditLogFromEvent(event *auditv1.AuditEvent, operation string) AuditLog {
 	var createdAt time.Time
 	if event.Timestamp != nil {
 		createdAt = event.Timestamp.AsTime()
@@ -256,7 +306,6 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		createdAt = time.Now()
 	}
 
-	// Create audit log entry
 	auditLog := AuditLog{
 		ID:        uuid.New(),
 		Table:     event.TableName,
@@ -280,46 +329,7 @@ func (c *Consumer) handleMessage(ctx context.Context, _ []byte, msg proto.Messag
 		auditLog.UserAgent = &event.UserAgent
 	}
 
-	// Check for context cancellation before expensive DB operation
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	// Validate schema name before transaction if provided
-	if event.SchemaName != "" && !isValidSchemaName(event.SchemaName) {
-		RecordKafkaConsumed(schema, operation, "failure")
-		return fmt.Errorf("%w: %s", ErrInvalidSchemaName, event.SchemaName)
-	}
-
-	// Write to audit_log within a transaction to ensure SET LOCAL takes effect
-	err := c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if event.SchemaName != "" {
-			// Set search_path using quoted identifier for defense-in-depth
-			// SET LOCAL only applies within a transaction
-			if err := tx.Exec(fmt.Sprintf("SET LOCAL search_path TO %s", quoteIdentifier(event.SchemaName))).Error; err != nil {
-				return fmt.Errorf("failed to set search_path: %w", err)
-			}
-		}
-		return tx.Create(&auditLog).Error
-	})
-	if err != nil {
-		RecordKafkaConsumed(schema, operation, "failure")
-		RecordKafkaConsumeDuration(time.Since(startTime).Seconds())
-		return fmt.Errorf("failed to insert audit log: %w", err)
-	}
-
-	// Record successful consumption
-	RecordKafkaConsumed(schema, operation, "success")
-	RecordKafkaConsumeDuration(time.Since(startTime).Seconds())
-
-	// Record event age (time from creation to processing)
-	eventAge := time.Since(createdAt).Seconds()
-	RecordEntryAge(eventAge)
-
-	log.Printf("DEBUG: Processed audit event: table=%s operation=%s record=%s",
-		event.TableName, operation, event.RecordId)
-
-	return nil
+	return auditLog
 }
 
 // protoToOperation converts a protobuf AuditOperation to a string.

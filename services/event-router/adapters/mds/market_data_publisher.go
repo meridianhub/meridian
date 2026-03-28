@@ -394,40 +394,12 @@ func (p *MarketDataPublisher) flush() {
 			"duration_seconds", duration,
 		)
 		mdsPublishErrorsTotal.WithLabelValues(classifyError(err)).Inc()
-		// Re-queue windows to avoid data loss
 		p.buffer.Restore(windows)
 		mdsBufferSize.Set(float64(p.buffer.Size()))
 		return
 	}
 
-	// Handle partial failures: the RPC supports partial success where
-	// individual observations may fail while others succeed.
-	successCount := len(observations)
-	resp, _ := respAny.(*marketinformationv1.RecordObservationBatchResponse)
-	if resp != nil && len(resp.Results) > 0 {
-		var failed []*UtilizationWindow
-		successCount = 0
-		for _, r := range resp.Results {
-			if r.Success {
-				successCount++
-				continue
-			}
-			idx := int(r.Index)
-			if idx >= 0 && idx < len(windows) {
-				failed = append(failed, windows[idx])
-				p.logger.Warn("observation failed in batch",
-					"index", idx,
-					"resolution_key", windows[idx].ResolutionKey,
-					"error", r.ErrorMessage,
-				)
-			}
-		}
-		if len(failed) > 0 {
-			mdsPublishErrorsTotal.WithLabelValues("partial_failure").Inc()
-			p.buffer.Restore(failed)
-			mdsBufferSize.Set(float64(p.buffer.Size()))
-		}
-	}
+	successCount := p.handlePartialFailures(respAny, windows, observations)
 
 	mdsObservationsPublishedTotal.Add(float64(successCount))
 	p.logger.Info("published observations to MDS",
@@ -435,6 +407,45 @@ func (p *MarketDataPublisher) flush() {
 		"total_in_batch", len(observations),
 		"duration_seconds", duration,
 	)
+}
+
+// handlePartialFailures inspects the batch response for per-observation failures,
+// restoring failed windows to the buffer. Returns the number of successful observations.
+func (p *MarketDataPublisher) handlePartialFailures(
+	respAny any,
+	windows []*UtilizationWindow,
+	observations []*marketinformationv1.BatchObservationEntry,
+) int {
+	successCount := len(observations)
+	resp, _ := respAny.(*marketinformationv1.RecordObservationBatchResponse)
+	if resp == nil || len(resp.Results) == 0 {
+		return successCount
+	}
+
+	var failed []*UtilizationWindow
+	successCount = 0
+	for _, r := range resp.Results {
+		if r.Success {
+			successCount++
+			continue
+		}
+		idx := int(r.Index)
+		if idx >= 0 && idx < len(windows) {
+			failed = append(failed, windows[idx])
+			p.logger.Warn("observation failed in batch",
+				"index", idx,
+				"resolution_key", windows[idx].ResolutionKey,
+				"error", r.ErrorMessage,
+			)
+		}
+	}
+	if len(failed) > 0 {
+		mdsPublishErrorsTotal.WithLabelValues("partial_failure").Inc()
+		p.buffer.Restore(failed)
+		mdsBufferSize.Set(float64(p.buffer.Size()))
+	}
+
+	return successCount
 }
 
 // buildObservation converts an aggregated UtilizationWindow into a batch observation entry.

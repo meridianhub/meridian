@@ -172,72 +172,12 @@ func (r *ObservationRepository) Query(ctx context.Context, query domain.Observat
 	var nextPageToken string
 
 	err = r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		// First, resolve dataset definition ID from code
 		dataSetDefID, err := r.resolveDataSetDefinitionID(ctx, tx, query.DataSetCode)
 		if err != nil {
 			return err
 		}
 
-		sqlQuery := `
-			SELECT o.id, o.dataset_definition_id, o.data_source_id, o.resolution_key,
-				o.observed_at, o.valid_from, o.valid_to, o.created_at,
-				o.quality, o.numeric_value, o.text_value,
-				o.superseded_by, o.causation_id,
-				d.code as dataset_code,
-				s.trust_level
-			FROM market_price_observation o
-			JOIN dataset_definition d ON o.dataset_definition_id = d.id
-			JOIN data_source s ON o.data_source_id = s.id
-			WHERE o.dataset_definition_id = $1`
-
-		args := []interface{}{dataSetDefID}
-		argPos := 2
-
-		// Filter by resolution key
-		if query.ResolutionKey != nil {
-			sqlQuery += fmt.Sprintf(" AND o.resolution_key = $%d", argPos)
-			args = append(args, *query.ResolutionKey)
-			argPos++
-		}
-
-		// Filter by observed time range
-		if query.ObservedAfter != nil {
-			sqlQuery += fmt.Sprintf(" AND o.observed_at > $%d", argPos)
-			args = append(args, *query.ObservedAfter)
-			argPos++
-		}
-		if query.ObservedBefore != nil {
-			sqlQuery += fmt.Sprintf(" AND o.observed_at < $%d", argPos)
-			args = append(args, *query.ObservedBefore)
-			argPos++
-		}
-
-		// Filter by quality level
-		if query.QualityLevel != nil {
-			sqlQuery += fmt.Sprintf(" AND o.quality = $%d", argPos)
-			args = append(args, query.QualityLevel.Int())
-			argPos++
-		}
-
-		// Filter superseded observations
-		if !query.IncludeSuperseded {
-			sqlQuery += " AND o.superseded_by IS NULL"
-		}
-
-		// Apply cursor pagination if not first page
-		if !cursorTime.IsZero() {
-			sqlQuery += fmt.Sprintf(" AND (date_trunc('second', o.created_at) < $%d OR (date_trunc('second', o.created_at) = $%d AND o.id < $%d))",
-				argPos, argPos+1, argPos+2)
-			args = append(args, cursorTime, cursorTime, cursorID)
-			argPos += 3
-		}
-
-		// Order by created_at DESC, id DESC for consistent cursor pagination
-		sqlQuery += " ORDER BY date_trunc('second', o.created_at) DESC, o.id DESC"
-
-		// Fetch one extra to detect if there's a next page
-		sqlQuery += fmt.Sprintf(" LIMIT $%d", argPos)
-		args = append(args, pageSize+1)
+		sqlQuery, args := buildObservationFilterQuery(dataSetDefID, query, cursorTime, cursorID, pageSize)
 
 		rows, err := tx.Query(ctx, sqlQuery, args...)
 		if err != nil {
@@ -245,42 +185,12 @@ func (r *ObservationRepository) Query(ctx context.Context, query domain.Observat
 		}
 		defer rows.Close()
 
-		type obsWithCreatedAt struct {
-			obs       domain.MarketPriceObservation
-			createdAt time.Time
-			id        uuid.UUID
-		}
-		var observations []obsWithCreatedAt
-
-		for rows.Next() {
-			obs, err := r.scanObservationFromRows(rows)
-			if err != nil {
-				return err
-			}
-			observations = append(observations, obsWithCreatedAt{
-				obs:       obs,
-				createdAt: obs.CreatedAt(),
-				id:        obs.ID(),
-			})
+		observations, err := r.scanObservationRows(rows)
+		if err != nil {
+			return err
 		}
 
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("error iterating observations: %w", err)
-		}
-
-		// Check for more results
-		hasMore := len(observations) > pageSize
-		if hasMore {
-			observations = observations[:pageSize]
-			last := observations[len(observations)-1]
-			nextPageToken = formatCursorToken(last.createdAt, last.id)
-		}
-
-		// Extract observations
-		for _, o := range observations {
-			results = append(results, o.obs)
-		}
-
+		results, nextPageToken = paginateObservations(observations, pageSize)
 		return nil
 	})
 	if err != nil {
@@ -288,6 +198,115 @@ func (r *ObservationRepository) Query(ctx context.Context, query domain.Observat
 	}
 
 	return results, nextPageToken, nil
+}
+
+// observationWithMeta pairs an observation with metadata needed for cursor pagination.
+type observationWithMeta struct {
+	obs       domain.MarketPriceObservation
+	createdAt time.Time
+	id        uuid.UUID
+}
+
+// buildObservationFilterQuery constructs the SQL query and args for observation filtering,
+// applying resolution key, time range, quality, superseded, and cursor filters.
+func buildObservationFilterQuery(
+	dataSetDefID uuid.UUID,
+	query domain.ObservationQuery,
+	cursorTime time.Time,
+	cursorID uuid.UUID,
+	pageSize int,
+) (string, []interface{}) {
+	sqlQuery := `
+		SELECT o.id, o.dataset_definition_id, o.data_source_id, o.resolution_key,
+			o.observed_at, o.valid_from, o.valid_to, o.created_at,
+			o.quality, o.numeric_value, o.text_value,
+			o.superseded_by, o.causation_id,
+			d.code as dataset_code,
+			s.trust_level
+		FROM market_price_observation o
+		JOIN dataset_definition d ON o.dataset_definition_id = d.id
+		JOIN data_source s ON o.data_source_id = s.id
+		WHERE o.dataset_definition_id = $1`
+
+	args := []interface{}{dataSetDefID}
+	argPos := 2
+
+	if query.ResolutionKey != nil {
+		sqlQuery += fmt.Sprintf(" AND o.resolution_key = $%d", argPos)
+		args = append(args, *query.ResolutionKey)
+		argPos++
+	}
+
+	if query.ObservedAfter != nil {
+		sqlQuery += fmt.Sprintf(" AND o.observed_at > $%d", argPos)
+		args = append(args, *query.ObservedAfter)
+		argPos++
+	}
+	if query.ObservedBefore != nil {
+		sqlQuery += fmt.Sprintf(" AND o.observed_at < $%d", argPos)
+		args = append(args, *query.ObservedBefore)
+		argPos++
+	}
+
+	if query.QualityLevel != nil {
+		sqlQuery += fmt.Sprintf(" AND o.quality = $%d", argPos)
+		args = append(args, query.QualityLevel.Int())
+		argPos++
+	}
+
+	if !query.IncludeSuperseded {
+		sqlQuery += " AND o.superseded_by IS NULL"
+	}
+
+	if !cursorTime.IsZero() {
+		sqlQuery += fmt.Sprintf(" AND (date_trunc('second', o.created_at) < $%d OR (date_trunc('second', o.created_at) = $%d AND o.id < $%d))",
+			argPos, argPos+1, argPos+2)
+		args = append(args, cursorTime, cursorTime, cursorID)
+		argPos += 3
+	}
+
+	sqlQuery += " ORDER BY date_trunc('second', o.created_at) DESC, o.id DESC"
+	sqlQuery += fmt.Sprintf(" LIMIT $%d", argPos)
+	args = append(args, pageSize+1)
+
+	return sqlQuery, args
+}
+
+// scanObservationRows scans all rows into observationWithMeta slices.
+func (r *ObservationRepository) scanObservationRows(rows pgx.Rows) ([]observationWithMeta, error) {
+	var observations []observationWithMeta
+	for rows.Next() {
+		obs, err := r.scanObservationFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observationWithMeta{
+			obs:       obs,
+			createdAt: obs.CreatedAt(),
+			id:        obs.ID(),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating observations: %w", err)
+	}
+	return observations, nil
+}
+
+// paginateObservations trims results to pageSize and generates a next page token if needed.
+func paginateObservations(observations []observationWithMeta, pageSize int) ([]domain.MarketPriceObservation, string) {
+	var nextPageToken string
+	hasMore := len(observations) > pageSize
+	if hasMore {
+		observations = observations[:pageSize]
+		last := observations[len(observations)-1]
+		nextPageToken = formatCursorToken(last.createdAt, last.id)
+	}
+
+	results := make([]domain.MarketPriceObservation, 0, len(observations))
+	for _, o := range observations {
+		results = append(results, o.obs)
+	}
+	return results, nextPageToken
 }
 
 // GetLatest retrieves the most recent non-superseded observation

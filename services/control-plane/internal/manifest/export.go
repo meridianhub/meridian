@@ -129,10 +129,8 @@ type ExportResult struct {
 // includeSections filters which sections to include (empty means all).
 // manifestVersion specifies which stored manifest to use for fallback data.
 func (s *ExportService) Export(ctx context.Context, includeSections []string, manifestVersion string) (*ExportResult, error) {
-	// Determine which sections to include.
 	sections := parseSections(includeSections)
 
-	// Load fallback manifest from history.
 	fallback, fallbackVersion, err := s.loadFallbackManifest(ctx, manifestVersion)
 	if err != nil {
 		return nil, fmt.Errorf("load fallback manifest: %w", err)
@@ -144,7 +142,21 @@ func (s *ExportService) Export(ctx context.Context, includeSections []string, ma
 		SectionSources: make(map[string]string),
 	}
 
-	// Always include version and metadata from fallback.
+	initExportMetadata(result, fallback)
+	s.collectAllSections(ctx, sections, result, fallback, fallbackVersion)
+
+	checksum, err := manifestChecksum(result.Manifest)
+	if err != nil {
+		return nil, fmt.Errorf("compute checksum: %w", err)
+	}
+	result.Checksum = checksum
+
+	return result, nil
+}
+
+// initExportMetadata sets the version and metadata on the export result from the
+// fallback manifest, or uses defaults if no fallback is available.
+func initExportMetadata(result *ExportResult, fallback *controlplanev1.Manifest) {
 	if fallback != nil {
 		result.Manifest.Version = fallback.Version
 		result.Manifest.Metadata = fallback.Metadata
@@ -155,8 +167,10 @@ func (s *ExportService) Export(ctx context.Context, includeSections []string, ma
 			Description: "Manifest reconstructed from live service state",
 		}
 	}
+}
 
-	// Collect each section.
+// collectAllSections dispatches collection for each enabled section.
+func (s *ExportService) collectAllSections(ctx context.Context, sections map[SectionName]bool, result *ExportResult, fallback *controlplanev1.Manifest, fallbackVersion string) {
 	if sections[SectionInstruments] {
 		s.collectInstruments(ctx, result, fallback, fallbackVersion)
 	}
@@ -190,15 +204,6 @@ func (s *ExportService) Export(ctx context.Context, includeSections []string, ma
 	if sections[SectionPaymentRails] {
 		s.collectPaymentRails(result, fallback, fallbackVersion)
 	}
-
-	// Compute checksum.
-	checksum, err := manifestChecksum(result.Manifest)
-	if err != nil {
-		return nil, fmt.Errorf("compute checksum: %w", err)
-	}
-	result.Checksum = checksum
-
-	return result, nil
 }
 
 // parseSections converts include_sections strings to a set of SectionNames.

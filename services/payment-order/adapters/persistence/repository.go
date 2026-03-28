@@ -249,7 +249,6 @@ func (r *PaymentOrderRepository) FindByDebtorAccountID(ctx context.Context, acco
 func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Context, accountID string, limit int, cursor Cursor) (*PaginatedResult, error) {
 	var paginatedResult *PaginatedResult
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// Get total count (for UI purposes - this is still useful for showing "X of Y" in pagination)
 		var totalCount int64
 		countResult := tx.Model(&PaymentOrderEntity{}).
 			Where("debtor_account_id = ?", accountID).
@@ -259,7 +258,6 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Con
 			return countResult.Error
 		}
 
-		// Return early if no results
 		if totalCount == 0 {
 			paginatedResult = &PaginatedResult{
 				PaymentOrders: []*domain.PaymentOrder{},
@@ -270,60 +268,26 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Con
 			return nil
 		}
 
-		// Build query with cursor-based pagination
-		// Request one extra to determine if there are more results
-		query := tx.Where("debtor_account_id = ?", accountID)
-
-		// Apply cursor condition if provided (not first page)
-		if !cursor.CreatedAt.IsZero() {
-			// Use composite cursor: (created_at < cursor_time) OR (created_at = cursor_time AND id < cursor_id)
-			// This handles ties when multiple records have the same created_at
-			query = query.Where(
-				"(created_at < ?) OR (created_at = ? AND id < ?)",
-				cursor.CreatedAt, cursor.CreatedAt, cursor.ID,
-			)
+		entities, err := queryCursorPage(tx, accountID, limit, cursor)
+		if err != nil {
+			return err
 		}
 
-		var entities []PaymentOrderEntity
-		result := query.
-			Order("created_at DESC, id DESC").
-			Limit(limit + 1). // Fetch one extra to check for more
-			Find(&entities)
-
-		if result.Error != nil {
-			return result.Error
-		}
-
-		// Determine if there are more results
 		hasMore := len(entities) > limit
 		if hasMore {
-			entities = entities[:limit] // Trim to requested limit
+			entities = entities[:limit]
 		}
 
-		paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
-		for i := range entities {
-			po, domainErr := toDomain(&entities[i])
-			if domainErr != nil {
-				return domainErr
-			}
-			paymentOrders = append(paymentOrders, po)
-		}
-
-		// Build next cursor from the last item if there are more results
-		var nextCursor string
-		if hasMore && len(paymentOrders) > 0 {
-			lastPO := paymentOrders[len(paymentOrders)-1]
-			nextCursor = EncodeCursor(Cursor{
-				CreatedAt: lastPO.CreatedAt,
-				ID:        lastPO.ID,
-			})
+		paymentOrders, err := mapEntitiesToDomain(entities)
+		if err != nil {
+			return err
 		}
 
 		paginatedResult = &PaginatedResult{
 			PaymentOrders: paymentOrders,
 			TotalCount:    totalCount,
 			HasMore:       hasMore,
-			NextCursor:    nextCursor,
+			NextCursor:    buildNextCursor(paymentOrders, hasMore),
 		}
 		return nil
 	})
@@ -331,6 +295,51 @@ func (r *PaymentOrderRepository) FindByDebtorAccountIDWithCursor(ctx context.Con
 		return nil, err
 	}
 	return paginatedResult, nil
+}
+
+// queryCursorPage executes the cursor-based pagination query, fetching limit+1 rows to detect more results.
+func queryCursorPage(tx *gorm.DB, accountID string, limit int, cursor Cursor) ([]PaymentOrderEntity, error) {
+	query := tx.Where("debtor_account_id = ?", accountID)
+
+	if !cursor.CreatedAt.IsZero() {
+		query = query.Where(
+			"(created_at < ?) OR (created_at = ? AND id < ?)",
+			cursor.CreatedAt, cursor.CreatedAt, cursor.ID,
+		)
+	}
+
+	var entities []PaymentOrderEntity
+	result := query.
+		Order("created_at DESC, id DESC").
+		Limit(limit + 1).
+		Find(&entities)
+
+	return entities, result.Error
+}
+
+// mapEntitiesToDomain converts a slice of PaymentOrderEntity to domain models.
+func mapEntitiesToDomain(entities []PaymentOrderEntity) ([]*domain.PaymentOrder, error) {
+	paymentOrders := make([]*domain.PaymentOrder, 0, len(entities))
+	for i := range entities {
+		po, err := toDomain(&entities[i])
+		if err != nil {
+			return nil, err
+		}
+		paymentOrders = append(paymentOrders, po)
+	}
+	return paymentOrders, nil
+}
+
+// buildNextCursor encodes a cursor from the last payment order if there are more results.
+func buildNextCursor(paymentOrders []*domain.PaymentOrder, hasMore bool) string {
+	if !hasMore || len(paymentOrders) == 0 {
+		return ""
+	}
+	lastPO := paymentOrders[len(paymentOrders)-1]
+	return EncodeCursor(Cursor{
+		CreatedAt: lastPO.CreatedAt,
+		ID:        lastPO.ID,
+	})
 }
 
 // Update updates an existing payment order with optimistic locking.

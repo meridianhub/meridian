@@ -12,7 +12,20 @@ func (v *ManifestValidator) validateDuplicates(
 	manifest *controlplanev1.Manifest,
 	result *ValidationResult,
 ) {
-	// Check duplicate instrument codes
+	v.validateInstrumentDuplicates(manifest, result)
+	v.validateAccountTypeDuplicates(manifest, result)
+	v.validateSagaDuplicates(manifest, result)
+	v.validateMappingDuplicates(manifest, result)
+
+	// Check duplicate operational_gateway connection_ids and instruction_types
+	v.validateOperationalGatewayDuplicates(manifest, result)
+
+	// Check duplicate market data and organization codes
+	v.validateMarketDataAndOrgDuplicates(manifest, result)
+}
+
+// validateInstrumentDuplicates checks for duplicate instrument codes.
+func (v *ManifestValidator) validateInstrumentDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	instrumentCodes := make(map[string]int)
 	for i, inst := range manifest.GetInstruments() {
 		if prev, exists := instrumentCodes[inst.GetCode()]; exists {
@@ -28,8 +41,10 @@ func (v *ManifestValidator) validateDuplicates(
 			instrumentCodes[inst.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate account type codes
+// validateAccountTypeDuplicates checks for duplicate account type codes.
+func (v *ManifestValidator) validateAccountTypeDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	accountTypeCodes := make(map[string]int)
 	for i, acct := range manifest.GetAccountTypes() {
 		if prev, exists := accountTypeCodes[acct.GetCode()]; exists {
@@ -45,8 +60,10 @@ func (v *ManifestValidator) validateDuplicates(
 			accountTypeCodes[acct.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate saga names and event trigger filter requirements
+// validateSagaDuplicates checks for duplicate saga names and missing event filters.
+func (v *ManifestValidator) validateSagaDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	sagaNames := make(map[string]int)
 	for i, saga := range manifest.GetSagas() {
 		if prev, exists := sagaNames[saga.GetName()]; exists {
@@ -74,8 +91,10 @@ func (v *ManifestValidator) validateDuplicates(
 			})
 		}
 	}
+}
 
-	// Check duplicate mapping (name, version) pairs
+// validateMappingDuplicates checks for duplicate mapping (name, version) pairs.
+func (v *ManifestValidator) validateMappingDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	type mappingKey struct {
 		name    string
 		version int32
@@ -96,12 +115,6 @@ func (v *ManifestValidator) validateDuplicates(
 			mappingKeys[key] = i
 		}
 	}
-
-	// Check duplicate operational_gateway connection_ids and instruction_types
-	v.validateOperationalGatewayDuplicates(manifest, result)
-
-	// Check duplicate market data and organization codes
-	v.validateMarketDataAndOrgDuplicates(manifest, result)
 }
 
 // validateMarketDataAndOrgDuplicates checks for duplicate codes in market data and organization sections.
@@ -109,7 +122,14 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 	manifest *controlplanev1.Manifest,
 	result *ValidationResult,
 ) {
-	// Check duplicate market data source codes
+	validateMarketDataSourceDuplicates(manifest, result)
+	validateMarketDataSetDuplicates(manifest, result)
+	validateOrganizationDuplicates(manifest, result)
+	validateInternalAccountDuplicates(manifest, result)
+}
+
+// validateMarketDataSourceDuplicates checks for duplicate market data source codes.
+func validateMarketDataSourceDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	mdSourceCodes := make(map[string]int)
 	for i, src := range manifest.GetMarketData().GetSources() {
 		if prev, exists := mdSourceCodes[src.GetCode()]; exists {
@@ -125,8 +145,10 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 			mdSourceCodes[src.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate market data set codes
+// validateMarketDataSetDuplicates checks for duplicate market data set codes.
+func validateMarketDataSetDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	mdSetCodes := make(map[string]int)
 	for i, ds := range manifest.GetMarketData().GetDatasets() {
 		if prev, exists := mdSetCodes[ds.GetCode()]; exists {
@@ -142,8 +164,10 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 			mdSetCodes[ds.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate organization codes
+// validateOrganizationDuplicates checks for duplicate organization codes.
+func validateOrganizationDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	orgCodes := make(map[string]int)
 	for i, org := range manifest.GetOrganizations() {
 		if prev, exists := orgCodes[org.GetCode()]; exists {
@@ -159,8 +183,10 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 			orgCodes[org.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate internal account codes
+// validateInternalAccountDuplicates checks for duplicate internal account codes.
+func validateInternalAccountDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	iaCodes := make(map[string]int)
 	for i, ia := range manifest.GetInternalAccounts() {
 		if prev, exists := iaCodes[ia.GetCode()]; exists {
@@ -230,6 +256,28 @@ func (v *ManifestValidator) validateCrossReferences(
 	}
 	codeList := mapKeys(instrumentCodes)
 
+	v.validateInstrumentCrossRefs(manifest, instrumentCodes, codeList, result)
+
+	// Validate operational_gateway cross-references
+	v.validateOperationalGatewayCrossRefs(manifest, result)
+
+	// Validate market data set source_code references valid market data source
+	v.validateMarketDataSourceCrossRefs(manifest, result)
+
+	// Validate organization party_type references
+	v.validateOrganizationCrossRefs(manifest, result)
+
+	// Validate internal account cross-references
+	v.validateInternalAccountCrossRefs(manifest, result)
+}
+
+// validateInstrumentCrossRefs checks that account types and valuation rules reference valid instruments.
+func (v *ManifestValidator) validateInstrumentCrossRefs(
+	manifest *controlplanev1.Manifest,
+	instrumentCodes map[string]bool,
+	codeList []string,
+	result *ValidationResult,
+) {
 	for i, acctType := range manifest.GetAccountTypes() {
 		for j, instrCode := range acctType.GetAllowedInstruments() {
 			checkInstrumentRef(
@@ -258,11 +306,13 @@ func (v *ManifestValidator) validateCrossReferences(
 			fmt.Sprintf("%s->%s", rule.GetFromInstrument(), rule.GetToInstrument()),
 		)
 	}
+}
 
-	// Validate operational_gateway cross-references
-	v.validateOperationalGatewayCrossRefs(manifest, result)
-
-	// Validate market data set source_code references valid market data source
+// validateMarketDataSourceCrossRefs checks that market data datasets reference valid source codes.
+func (v *ManifestValidator) validateMarketDataSourceCrossRefs(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) {
 	mdSourceCodes := make(map[string]bool)
 	for _, src := range manifest.GetMarketData().GetSources() {
 		mdSourceCodes[src.GetCode()] = true
@@ -286,12 +336,6 @@ func (v *ManifestValidator) validateCrossReferences(
 			addError(result, ve)
 		}
 	}
-
-	// Validate organization party_type references
-	v.validateOrganizationCrossRefs(manifest, result)
-
-	// Validate internal account cross-references
-	v.validateInternalAccountCrossRefs(manifest, result)
 }
 
 // validateOrganizationCrossRefs validates that organizations reference valid party types.

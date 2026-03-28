@@ -319,46 +319,10 @@ func toPostingEntity(posting *domain.LedgerPosting) (LedgerPostingEntity, error)
 // the appropriate Money type. For backward compatibility, missing dimension/version/precision
 // fields default to currency values (dimension="CURRENCY", version=1, precision=2).
 func toPostingDomain(entity *LedgerPostingEntity) *domain.LedgerPosting {
-	// Handle backward compatibility for existing rows
-	dimensionType := entity.DimensionType
-	if dimensionType == "" {
-		dimensionType = domain.DimensionCurrency
-	}
-
-	instrumentVersion := entity.InstrumentVersion
-	if instrumentVersion == 0 {
-		instrumentVersion = 1
-	}
-
-	instrumentPrecision := entity.InstrumentPrecision
-	if instrumentPrecision == 0 && dimensionType == domain.DimensionCurrency {
-		// Default precision for currencies is 2 (cents)
-		instrumentPrecision = 2
-	}
-
-	// Reconstruct instrument from stored fields
-	// Note: NewInstrument validates inputs; for data from DB we trust it's valid
-	instrument, err := domain.NewInstrument(
-		entity.Currency,     // Code (e.g., "USD", "KWH")
-		instrumentVersion,   // Version
-		dimensionType,       // Dimension ("CURRENCY", "ENERGY", etc.)
-		instrumentPrecision, // Precision
-	)
-	if err != nil {
-		// Fallback: create minimal instrument for backward compatibility
-		// This should rarely happen for valid data, but handles edge cases
-		instrument = domain.Instrument{
-			Code:      entity.Currency,
-			Version:   instrumentVersion,
-			Dimension: dimensionType,
-			Precision: instrumentPrecision,
-		}
-	}
+	instrument, precision := reconstructInstrument(entity)
 
 	// Convert minor units back to decimal based on precision
-	amount := decimalFromMinorUnits(entity.AmountMinorUnits, instrumentPrecision)
-
-	// Create Money quantity
+	amount := decimalFromMinorUnits(entity.AmountMinorUnits, precision)
 	money := domain.NewMoney(amount, instrument)
 
 	// Extract attributes from JSONB
@@ -381,6 +345,43 @@ func toPostingDomain(entity *LedgerPostingEntity) *domain.LedgerPosting {
 		CreatedAt:             entity.CreatedAt,
 		Attributes:            attributes,
 	}
+}
+
+// reconstructInstrument rebuilds a domain.Instrument from stored entity fields with backward compatibility.
+// Returns the instrument and its precision (needed for minor-unit conversion).
+func reconstructInstrument(entity *LedgerPostingEntity) (domain.Instrument, int) {
+	dimensionType := entity.DimensionType
+	if dimensionType == "" {
+		dimensionType = domain.DimensionCurrency
+	}
+
+	instrumentVersion := entity.InstrumentVersion
+	if instrumentVersion == 0 {
+		instrumentVersion = 1
+	}
+
+	instrumentPrecision := entity.InstrumentPrecision
+	if instrumentPrecision == 0 && dimensionType == domain.DimensionCurrency {
+		instrumentPrecision = 2
+	}
+
+	instrument, err := domain.NewInstrument(
+		entity.Currency,
+		instrumentVersion,
+		dimensionType,
+		instrumentPrecision,
+	)
+	if err != nil {
+		// Fallback for backward compatibility
+		instrument = domain.Instrument{
+			Code:      entity.Currency,
+			Version:   instrumentVersion,
+			Dimension: dimensionType,
+			Precision: instrumentPrecision,
+		}
+	}
+
+	return instrument, instrumentPrecision
 }
 
 // GetBookingLog retrieves a booking log by ID.
@@ -497,16 +498,8 @@ type ListBookingLogsResult struct {
 // consistent results even when data changes between requests. The page token format
 // is "timestamp_uuid" representing the last item from the previous page.
 func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBookingLogsParams) (*ListBookingLogsResult, error) {
-	// Set default page size if not specified
-	pageSize := params.PageSize
-	if pageSize == 0 {
-		pageSize = DefaultPageSize
-	}
-	if pageSize > MaxPageSize {
-		pageSize = MaxPageSize
-	}
+	pageSize := clampPageSize(params.PageSize)
 
-	// Parse cursor token upfront to fail fast on invalid tokens
 	cursorTime, cursorID, err := parseCursorToken(params.PageToken)
 	if err != nil {
 		return nil, err
@@ -514,70 +507,79 @@ func (r *LedgerRepository) ListBookingLogs(ctx context.Context, params ListBooki
 
 	var result *ListBookingLogsResult
 	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// Build base query
 		query := tx.Model(&FinancialBookingLogEntity{})
+		query = applyBookingLogFilters(query, params)
 
-		// Apply status filter if provided
-		if params.StatusFilter != "" {
-			query = query.Where("status = ?", params.StatusFilter)
-		}
-
-		// Apply business unit filter if provided
-		if params.BusinessUnitFilter != "" {
-			query = query.Where("business_unit_reference = ?", params.BusinessUnitFilter)
-		}
-
-		// Get total count (before cursor filtering for accurate total)
 		var totalCount int64
 		if err := query.Count(&totalCount).Error; err != nil {
 			return err
 		}
 
-		// Apply cursor-based pagination
 		query = applyCursorPagination(query, cursorTime, cursorID)
 
-		// Fetch results with limit
-		// Order by truncated timestamp to match cursor comparison
 		var entities []FinancialBookingLogEntity
 		err := query.
 			Order("date_trunc('second', created_at) DESC, id DESC").
-			Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
+			Limit(pageSize + 1).
 			Find(&entities).Error
 		if err != nil {
 			return err
 		}
 
-		// Determine if there's a next page
-		hasMore := len(entities) > pageSize
-		if hasMore {
-			entities = entities[:pageSize]
-		}
-
-		// Convert to domain models
-		bookingLogs := make([]*domain.FinancialBookingLog, len(entities))
-		for i, entity := range entities {
-			bookingLogs[i] = toBookingLogDomain(&entity)
-		}
-
-		// Generate next page token if there are more results
-		var nextPageToken string
-		if hasMore && len(entities) > 0 {
-			lastEntity := entities[len(entities)-1]
-			// Token format: timestamp_id
-			nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
-		}
-
-		result = &ListBookingLogsResult{
-			BookingLogs:   bookingLogs,
-			NextPageToken: nextPageToken,
-			TotalCount:    totalCount,
-		}
+		result = buildBookingLogResult(entities, pageSize, totalCount)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+// applyBookingLogFilters applies optional status and business unit filters to the query.
+func applyBookingLogFilters(query *gorm.DB, params ListBookingLogsParams) *gorm.DB {
+	if params.StatusFilter != "" {
+		query = query.Where("status = ?", params.StatusFilter)
+	}
+	if params.BusinessUnitFilter != "" {
+		query = query.Where("business_unit_reference = ?", params.BusinessUnitFilter)
+	}
+	return query
+}
+
+// buildBookingLogResult converts entities to domain models and generates the next page token.
+func buildBookingLogResult(entities []FinancialBookingLogEntity, pageSize int, totalCount int64) *ListBookingLogsResult {
+	hasMore := len(entities) > pageSize
+	if hasMore {
+		entities = entities[:pageSize]
+	}
+
+	bookingLogs := make([]*domain.FinancialBookingLog, len(entities))
+	for i, entity := range entities {
+		bookingLogs[i] = toBookingLogDomain(&entity)
+	}
+
+	var nextPageToken string
+	if hasMore && len(entities) > 0 {
+		last := entities[len(entities)-1]
+		nextPageToken = fmt.Sprintf("%d_%s", last.CreatedAt.Unix(), last.ID)
+	}
+
+	return &ListBookingLogsResult{
+		BookingLogs:   bookingLogs,
+		NextPageToken: nextPageToken,
+		TotalCount:    totalCount,
+	}
+}
+
+// clampPageSize applies default and max bounds to the requested page size.
+func clampPageSize(pageSize int) int {
+	if pageSize == 0 {
+		return DefaultPageSize
+	}
+	if pageSize > MaxPageSize {
+		return MaxPageSize
+	}
+	return pageSize
 }
 
 // toBookingLogDomain converts database entity to domain model.
@@ -648,16 +650,8 @@ type ListPostingsResult struct {
 // consistent results even when data changes between requests. The page token format
 // is "timestamp_uuid" representing the last item from the previous page.
 func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostingsParams) (*ListPostingsResult, error) {
-	// Set default page size if not specified
-	pageSize := params.PageSize
-	if pageSize == 0 {
-		pageSize = DefaultPageSize
-	}
-	if pageSize > MaxPageSize {
-		pageSize = MaxPageSize
-	}
+	pageSize := clampPageSize(params.PageSize)
 
-	// Parse cursor token upfront to fail fast on invalid tokens
 	cursorTime, cursorID, err := parseCursorToken(params.PageToken)
 	if err != nil {
 		return nil, err
@@ -665,95 +659,85 @@ func (r *LedgerRepository) ListPostings(ctx context.Context, params ListPostings
 
 	var result *ListPostingsResult
 	err = r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// Build base query
 		query := tx.Model(&LedgerPostingEntity{})
+		query = applyPostingFilters(query, params)
 
-		// Apply booking log filter if provided
-		if params.BookingLogID != nil {
-			query = query.Where("financial_booking_log_id = ?", *params.BookingLogID)
-		}
-
-		// Apply account ID filter - AccountIDs takes precedence over AccountID
-		if len(params.AccountIDs) > 0 {
-			query = query.Where("account_id IN ?", params.AccountIDs)
-		} else if params.AccountID != "" {
-			query = query.Where("account_id = ?", params.AccountID)
-		}
-
-		// Apply posting direction filter if provided
-		if params.PostingDirection != "" {
-			query = query.Where("posting_direction = ?", params.PostingDirection)
-		}
-
-		// Apply value date range filters if provided
-		if params.ValueDateFrom != nil {
-			query = query.Where("value_date >= ?", *params.ValueDateFrom)
-		}
-		if params.ValueDateTo != nil {
-			query = query.Where("value_date <= ?", *params.ValueDateTo)
-		}
-
-		// Apply currency filter if provided
-		if params.Currency != "" {
-			query = query.Where("currency = ?", params.Currency)
-		}
-
-		// Apply status filter if provided
-		if params.Status != "" {
-			query = query.Where("status = ?", params.Status)
-		}
-
-		// Get total count (before cursor filtering for accurate total)
 		var totalCount int64
 		if err := query.Count(&totalCount).Error; err != nil {
 			return err
 		}
 
-		// Apply cursor-based pagination
 		query = applyCursorPagination(query, cursorTime, cursorID)
 
-		// Fetch results with limit
-		// Order by truncated timestamp to match cursor comparison
 		var entities []LedgerPostingEntity
 		err := query.
 			Order("date_trunc('second', created_at) DESC, id DESC").
-			Limit(pageSize + 1). // Fetch one extra to determine if there's a next page
+			Limit(pageSize + 1).
 			Find(&entities).Error
 		if err != nil {
 			return err
 		}
 
-		// Determine if there's a next page
-		hasMore := len(entities) > pageSize
-		if hasMore {
-			entities = entities[:pageSize]
-		}
-
-		// Convert to domain models
-		postings := make([]*domain.LedgerPosting, len(entities))
-		for i, entity := range entities {
-			postings[i] = toPostingDomain(&entity)
-		}
-
-		// Generate next page token if there are more results
-		var nextPageToken string
-		if hasMore && len(entities) > 0 {
-			lastEntity := entities[len(entities)-1]
-			// Token format: timestamp_id
-			nextPageToken = fmt.Sprintf("%d_%s", lastEntity.CreatedAt.Unix(), lastEntity.ID)
-		}
-
-		result = &ListPostingsResult{
-			Postings:      postings,
-			NextPageToken: nextPageToken,
-			TotalCount:    totalCount,
-		}
+		result = buildPostingResult(entities, pageSize, totalCount)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+// applyPostingFilters applies all optional filters to a posting query.
+func applyPostingFilters(query *gorm.DB, params ListPostingsParams) *gorm.DB {
+	if params.BookingLogID != nil {
+		query = query.Where("financial_booking_log_id = ?", *params.BookingLogID)
+	}
+	if len(params.AccountIDs) > 0 {
+		query = query.Where("account_id IN ?", params.AccountIDs)
+	} else if params.AccountID != "" {
+		query = query.Where("account_id = ?", params.AccountID)
+	}
+	if params.PostingDirection != "" {
+		query = query.Where("posting_direction = ?", params.PostingDirection)
+	}
+	if params.ValueDateFrom != nil {
+		query = query.Where("value_date >= ?", *params.ValueDateFrom)
+	}
+	if params.ValueDateTo != nil {
+		query = query.Where("value_date <= ?", *params.ValueDateTo)
+	}
+	if params.Currency != "" {
+		query = query.Where("currency = ?", params.Currency)
+	}
+	if params.Status != "" {
+		query = query.Where("status = ?", params.Status)
+	}
+	return query
+}
+
+// buildPostingResult converts entities to domain models and generates the next page token.
+func buildPostingResult(entities []LedgerPostingEntity, pageSize int, totalCount int64) *ListPostingsResult {
+	hasMore := len(entities) > pageSize
+	if hasMore {
+		entities = entities[:pageSize]
+	}
+
+	postings := make([]*domain.LedgerPosting, len(entities))
+	for i, entity := range entities {
+		postings[i] = toPostingDomain(&entity)
+	}
+
+	var nextPageToken string
+	if hasMore && len(entities) > 0 {
+		last := entities[len(entities)-1]
+		nextPageToken = fmt.Sprintf("%d_%s", last.CreatedAt.Unix(), last.ID)
+	}
+
+	return &ListPostingsResult{
+		Postings:      postings,
+		NextPageToken: nextPageToken,
+		TotalCount:    totalCount,
+	}
 }
 
 // WithTransaction executes a function within a database transaction with tenant scoping.

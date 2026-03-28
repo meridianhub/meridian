@@ -171,23 +171,13 @@ func NewForecastRunner(cfg ForecastRunnerConfig) (*ForecastRunner, error) {
 
 // ExecuteStrategy runs a forecasting strategy and returns the forecast points.
 func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInput) ([]ForecastPoint, error) {
-	if input.Script == "" {
-		return nil, ErrScriptRequired
-	}
-	if err := sandbox.ValidateScript(input.Script, sandboxCfg); err != nil {
-		return nil, fmt.Errorf("%w: size %d exceeds maximum %d bytes", ErrScriptTooLarge, len(input.Script), sandboxCfg.MaxScriptSize)
+	if err := validateStrategyInput(input); err != nil {
+		return nil, err
 	}
 
 	now := input.Now
 	if now.IsZero() {
 		now = time.Now()
-	}
-
-	if input.HorizonHours <= 0 {
-		return nil, fmt.Errorf("%w: horizon_hours must be > 0", ErrInvalidInput)
-	}
-	if input.GranularityHours <= 0 {
-		return nil, fmt.Errorf("%w: granularity_hours must be > 0", ErrInvalidInput)
 	}
 
 	horizon := time.Duration(input.HorizonHours) * time.Hour
@@ -200,13 +190,54 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 		"granularity_hours", input.GranularityHours,
 	)
 
-	// Step 1: Fetch historical observations from MDS
+	forecastCtx, err := r.buildForecastContext(ctx, input, now, horizon, granularity)
+	if err != nil {
+		return nil, err
+	}
+
+	points, err := r.executeScript(ctx, input.Script, forecastCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateForecastPoints(points, now, horizon, granularity); err != nil {
+		return nil, err
+	}
+
+	r.logger.Info("forecast strategy execution completed", "point_count", len(points))
+
+	return points, nil
+}
+
+// validateStrategyInput checks required fields and constraints on the strategy input.
+func validateStrategyInput(input StrategyInput) error {
+	if input.Script == "" {
+		return ErrScriptRequired
+	}
+	if err := sandbox.ValidateScript(input.Script, sandboxCfg); err != nil {
+		return fmt.Errorf("%w: size %d exceeds maximum %d bytes", ErrScriptTooLarge, len(input.Script), sandboxCfg.MaxScriptSize)
+	}
+	if input.HorizonHours <= 0 {
+		return fmt.Errorf("%w: horizon_hours must be > 0", ErrInvalidInput)
+	}
+	if input.GranularityHours <= 0 {
+		return fmt.Errorf("%w: granularity_hours must be > 0", ErrInvalidInput)
+	}
+	return nil
+}
+
+// buildForecastContext fetches observations and reference data, returning the assembled ForecastContext.
+func (r *ForecastRunner) buildForecastContext(
+	ctx context.Context,
+	input StrategyInput,
+	now time.Time,
+	horizon, granularity time.Duration,
+) (*ForecastContext, error) {
 	observations, err := r.fetchObservations(ctx, input.InputDatasetCodes, now)
 	if err != nil {
 		return nil, fmt.Errorf("fetch observations: %w", err)
 	}
 
-	// Step 2: Fetch reference data node if resolution key specified
 	var refData *ReferenceData
 	if (input.ResolutionKey == "") != (input.TenantID == "") {
 		return nil, fmt.Errorf("%w: resolution_key and tenant_id must both be set or both be empty", ErrInvalidInput)
@@ -218,31 +249,13 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 		}
 	}
 
-	// Step 3: Build ForecastContext
-	forecastCtx := &ForecastContext{
+	return &ForecastContext{
 		Observations:  observations,
 		ReferenceData: refData,
 		Horizon:       horizon,
 		Granularity:   granularity,
 		Now:           now,
-	}
-
-	// Step 4-5: Execute Starlark script
-	points, err := r.executeScript(ctx, input.Script, forecastCtx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 6: Validate returned forecast points
-	if err := validateForecastPoints(points, now, horizon, granularity); err != nil {
-		return nil, err
-	}
-
-	r.logger.Info("forecast strategy execution completed",
-		"point_count", len(points),
-	)
-
-	return points, nil
+	}, nil
 }
 
 // fetchObservations retrieves historical observations from MDS for all input datasets.
@@ -262,18 +275,36 @@ func (r *ForecastRunner) fetchObservations(ctx context.Context, datasetCodes []s
 
 // executeScript runs the Starlark script in a sandboxed environment.
 func (r *ForecastRunner) executeScript(ctx context.Context, script string, forecastCtx *ForecastContext) ([]ForecastPoint, error) {
-	// Apply timeout
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
-	// Build Starlark context value
 	ctxValue := forecastContextToStarlark(forecastCtx)
 
-	// Build predeclared environment with forecasting builtins
 	predeclared := newForecastBuiltins(r.logger)
 	predeclared["Decimal"] = saga.DecimalBuiltin()
 
-	// Create thread with cancellation support
+	thread := r.newSandboxedThread(ctx)
+
+	// Phase 1: Execute top-level script to define globals
+	globals, err := r.execWithTimeout(ctx, thread, func() (starlarklib.StringDict, error) {
+		return starlarklib.ExecFileOptions(&syntax.FileOptions{}, thread, "forecast.star", script, predeclared)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Look up compute_forecast function
+	fn, err := resolveEntryPoint(globals)
+	if err != nil {
+		return nil, err
+	}
+
+	// Phase 2: Call compute_forecast(ctx) and convert results
+	return r.callAndConvert(ctx, thread, fn, ctxValue)
+}
+
+// newSandboxedThread creates a hardened Starlark thread with cancellation support.
+func (r *ForecastRunner) newSandboxedThread(ctx context.Context) *starlarklib.Thread {
 	thread := &starlarklib.Thread{
 		Name: "forecast",
 		Print: func(_ *starlarklib.Thread, msg string) {
@@ -282,19 +313,22 @@ func (r *ForecastRunner) executeScript(ctx context.Context, script string, forec
 	}
 	thread.SetLocal("ctx", ctx)
 	sandbox.HardenThread(thread, sandboxCfg)
+	return thread
+}
 
-	// Execute script in a goroutine for timeout support
+// execWithTimeout runs a Starlark exec in a goroutine with context cancellation support.
+func (r *ForecastRunner) execWithTimeout(
+	ctx context.Context,
+	thread *starlarklib.Thread,
+	fn func() (starlarklib.StringDict, error),
+) (starlarklib.StringDict, error) {
 	done := make(chan struct{})
+	var result starlarklib.StringDict
 	var execErr error
-	var globals starlarklib.StringDict
 
 	go func() {
 		defer close(done)
-		var err error
-		globals, err = starlarklib.ExecFileOptions(&syntax.FileOptions{}, thread, "forecast.star", script, predeclared)
-		if err != nil {
-			execErr = err
-		}
+		result, execErr = fn()
 	}()
 
 	select {
@@ -302,56 +336,62 @@ func (r *ForecastRunner) executeScript(ctx context.Context, script string, forec
 		if execErr != nil {
 			return nil, wrapStarlarkError(execErr)
 		}
+		return result, nil
 	case <-ctx.Done():
 		thread.Cancel("execution cancelled")
 		<-done
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: exceeded %v", saga.ErrTimeout, r.timeout)
-		}
-		return nil, fmt.Errorf("%w: %w", saga.ErrCancelled, ctx.Err())
+		return nil, r.contextError(ctx)
 	}
+}
 
-	// Look up compute_forecast function
-	computeFn, ok := globals["compute_forecast"]
-	if !ok {
-		return nil, ErrEntryPointMissing
-	}
-
-	fn, ok := computeFn.(*starlarklib.Function)
-	if !ok {
-		return nil, ErrEntryPointMissing
-	}
-
-	// Call compute_forecast(ctx)
-	callDone := make(chan struct{})
+// callAndConvert calls compute_forecast(ctx) with timeout and converts the result to ForecastPoints.
+func (r *ForecastRunner) callAndConvert(
+	ctx context.Context,
+	thread *starlarklib.Thread,
+	fn *starlarklib.Function,
+	ctxValue starlarklib.Value,
+) ([]ForecastPoint, error) {
+	done := make(chan struct{})
 	var callErr error
 	var resultVal starlarklib.Value
 
 	go func() {
-		defer close(callDone)
-		var err error
-		resultVal, err = starlarklib.Call(thread, fn, starlarklib.Tuple{ctxValue}, nil)
-		if err != nil {
-			callErr = err
-		}
+		defer close(done)
+		resultVal, callErr = starlarklib.Call(thread, fn, starlarklib.Tuple{ctxValue}, nil)
 	}()
 
 	select {
-	case <-callDone:
+	case <-done:
 		if callErr != nil {
 			return nil, wrapStarlarkError(callErr)
 		}
+		return starlarkToForecastPoints(resultVal)
 	case <-ctx.Done():
 		thread.Cancel("execution cancelled")
-		<-callDone
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: exceeded %v", saga.ErrTimeout, r.timeout)
-		}
-		return nil, fmt.Errorf("%w: %w", saga.ErrCancelled, ctx.Err())
+		<-done
+		return nil, r.contextError(ctx)
 	}
+}
 
-	// Convert Starlark result to []ForecastPoint
-	return starlarkToForecastPoints(resultVal)
+// resolveEntryPoint looks up and validates the compute_forecast function in globals.
+func resolveEntryPoint(globals starlarklib.StringDict) (*starlarklib.Function, error) {
+	computeFn, ok := globals["compute_forecast"]
+	if !ok {
+		return nil, ErrEntryPointMissing
+	}
+	fn, ok := computeFn.(*starlarklib.Function)
+	if !ok {
+		return nil, ErrEntryPointMissing
+	}
+	return fn, nil
+}
+
+// contextError maps a context error to the appropriate saga error.
+func (r *ForecastRunner) contextError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w: exceeded %v", saga.ErrTimeout, r.timeout)
+	}
+	return fmt.Errorf("%w: %w", saga.ErrCancelled, ctx.Err())
 }
 
 // validateForecastPoints checks that forecast points are within horizon, monotonic,

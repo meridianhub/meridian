@@ -137,22 +137,8 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 	}
 
 	// Validate fungibility before starting the saga.
-	// For double-entry withdrawals: DEBIT from customer account, CREDIT to clearing account
-	// Both sides use the same attributes since this is a single outgoing withdrawal.
-	if o.fungibilityValidator != nil {
-		instrumentCode := amount.InstrumentCode()
-		if err := o.fungibilityValidator.ValidateDoubleEntry(ctx, instrumentCode, 1, attributes, attributes); err != nil {
-			sagaStatus = operationStatusFailed
-			o.logger.Error("fungibility validation failed",
-				"account_id", account.AccountID(),
-				"transaction_id", transactionID,
-				"instrument", instrumentCode,
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "fungibility validation failed: %v", err)
-		}
-		o.logger.Debug("fungibility validation passed",
-			"account_id", account.AccountID(),
-			"instrument", instrumentCode)
+	if err := o.validateWithdrawalFungibility(ctx, account, amount, transactionID, attributes, &sagaStatus); err != nil {
+		return nil, err
 	}
 
 	// Resolve clearing account ID (dynamic resolver preferred, fallback to static config)
@@ -169,22 +155,8 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 		ctx = observability.WithCorrelationID(ctx, correlationID)
 	}
 
-	// Prepare saga input
-	input := saga.RunnerInput{
-		SagaExecutionID: uuid.New(),
-		CorrelationID:   correlationUUID,
-		Input: map[string]interface{}{
-			"account_id":          account.AccountID(),
-			"external_identifier": account.ExternalIdentifier(),
-			"amount":              amount.Amount().String(), // Decimal as string
-			"instrument_code":     account.InstrumentCode(),
-			"transaction_id":      transactionID,
-			"clearing_account_id": withdrawalClearingAccountID,
-			"attributes":          attributes,
-		},
-	}
-
-	// Inject handler dependencies into context
+	// Prepare saga input and context
+	input := buildWithdrawalSagaInput(correlationUUID, account, amount, transactionID, withdrawalClearingAccountID, attributes)
 	ctx = context.WithValue(ctx, ContextKeyHandlerDeps, &CurrentAccountHandlerDeps{
 		Logger:           o.logger,
 		PosKeepingClient: o.posKeepingClient,
@@ -193,11 +165,53 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 	})
 	ctx = context.WithValue(ctx, ContextKeyAccount, account)
 
-	// Resolve saga script: use ProductTypeSagaResolver when configured and account has a product type,
-	// otherwise fall back to the static default withdrawal script.
+	// Resolve and execute saga
+	return o.resolveAndExecuteWithdrawalSaga(ctx, account, transactionID, correlationID, input, &sagaStatus)
+}
+
+// validateWithdrawalFungibility validates fungibility before starting the saga.
+func (o *WithdrawalOrchestrator) validateWithdrawalFungibility(ctx context.Context, account domain.CurrentAccount, amount domain.Amount, transactionID string, attributes map[string]string, sagaStatus *string) error {
+	if o.fungibilityValidator == nil {
+		return nil
+	}
+	instrumentCode := amount.InstrumentCode()
+	if err := o.fungibilityValidator.ValidateDoubleEntry(ctx, instrumentCode, 1, attributes, attributes); err != nil {
+		*sagaStatus = operationStatusFailed
+		o.logger.Error("fungibility validation failed",
+			"account_id", account.AccountID(),
+			"transaction_id", transactionID,
+			"instrument", instrumentCode,
+			"error", err)
+		return status.Errorf(codes.InvalidArgument, "fungibility validation failed: %v", err)
+	}
+	o.logger.Debug("fungibility validation passed",
+		"account_id", account.AccountID(),
+		"instrument", instrumentCode)
+	return nil
+}
+
+// buildWithdrawalSagaInput constructs the saga runner input for a withdrawal operation.
+func buildWithdrawalSagaInput(correlationUUID uuid.UUID, account domain.CurrentAccount, amount domain.Amount, transactionID, clearingAccountID string, attributes map[string]string) saga.RunnerInput {
+	return saga.RunnerInput{
+		SagaExecutionID: uuid.New(),
+		CorrelationID:   correlationUUID,
+		Input: map[string]interface{}{
+			"account_id":          account.AccountID(),
+			"external_identifier": account.ExternalIdentifier(),
+			"amount":              amount.Amount().String(),
+			"instrument_code":     account.InstrumentCode(),
+			"transaction_id":      transactionID,
+			"clearing_account_id": clearingAccountID,
+			"attributes":          attributes,
+		},
+	}
+}
+
+// resolveAndExecuteWithdrawalSaga resolves the saga script, executes the saga, and returns the response.
+func (o *WithdrawalOrchestrator) resolveAndExecuteWithdrawalSaga(ctx context.Context, account domain.CurrentAccount, transactionID, correlationID string, input saga.RunnerInput, sagaStatus *string) (*pb.ExecuteWithdrawalResponse, error) {
 	withdrawalScript, err := o.resolveWithdrawalScript(ctx, account)
 	if err != nil {
-		sagaStatus = operationStatusFailed
+		*sagaStatus = operationStatusFailed
 		o.logger.Error("failed to resolve withdrawal saga",
 			"account_id", account.AccountID(),
 			"product_type_code", account.ProductTypeCode(),
@@ -205,7 +219,6 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 		return nil, status.Errorf(codes.NotFound, "withdrawal saga not found for product type: %v", err)
 	}
 
-	// Execute saga via StarlarkSagaRunner
 	o.logger.Info("executing withdrawal saga via Starlark",
 		"account_id", account.AccountID(),
 		"transaction_id", transactionID,
@@ -215,7 +228,7 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 
 	output, err := o.sagaRunner.ExecuteSaga(ctx, "current_account_withdrawal", withdrawalScript, input)
 	if err != nil {
-		sagaStatus = operationStatusFailed
+		*sagaStatus = operationStatusFailed
 		o.logger.Error("withdrawal saga failed",
 			"account_id", account.AccountID(),
 			"transaction_id", transactionID,
@@ -223,18 +236,14 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 		return nil, status.Errorf(codes.Internal, "withdrawal saga failed: %v", err)
 	}
 
-	// Handle saga result
 	if !output.Success {
-		sagaStatus = operationStatusFailed
+		*sagaStatus = operationStatusFailed
 		caobservability.RecordSagaFailure("withdrawal", "saga_execution")
-
 		o.logger.Error("withdrawal saga failed",
 			"account_id", account.AccountID(),
 			"transaction_id", transactionID,
 			"error", output.Error)
-
-		return nil, status.Errorf(codes.Internal,
-			"withdrawal transaction failed: %s", output.Error)
+		return nil, status.Errorf(codes.Internal, "withdrawal transaction failed: %s", output.Error)
 	}
 
 	o.logger.Info("withdrawal saga completed successfully",
@@ -243,7 +252,6 @@ func (o *WithdrawalOrchestrator) Orchestrate(ctx context.Context, account domain
 		"correlation_id", correlationID,
 		"saga_execution_id", input.SagaExecutionID)
 
-	// Return successful response
 	return &pb.ExecuteWithdrawalResponse{
 		AccountId:        account.AccountID(),
 		TransactionId:    transactionID,

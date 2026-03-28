@@ -92,14 +92,8 @@ type ConsumerConfig struct {
 // - Database connection is nil
 // - Kafka consumer creation fails
 func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
-	if config.BootstrapServers == "" {
-		return nil, ErrEmptyBootstrapServers
-	}
-	if config.Topic == "" {
-		return nil, ErrEmptyTopic
-	}
-	if config.DB == nil {
-		return nil, ErrNilDatabase
+	if err := validateConsumerConfig(config); err != nil {
+		return nil, err
 	}
 
 	// Apply defaults
@@ -119,40 +113,27 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		db: config.DB,
 	}
 
-	// Create producer for DLQ
-	producer, err := platformkafka.NewProtoProducer(platformkafka.ProducerConfig{
-		BootstrapServers: config.BootstrapServers,
-		ClientID:         config.ClientID + "-dlq",
-	})
+	dlqProducer, dlqConfig, err := buildDLQComponents(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create DLQ producer: %w", err)
-	}
-
-	// Create DLQ configuration (used by both DLQProducer and ProtoConsumer)
-	// Safe conversion: validated above
-	maxRetries32 := int32(config.MaxRetries)
-	dlqConfig := platformkafka.DLQConfig{
-		DLQTopicSuffix:    ".dlq",
-		MaxRetries:        maxRetries32,
-		RetryBackoffMs:    1000,
-		BackoffMultiplier: 2.0,
-		ConsumerGroupID:   config.GroupID,
-	}
-
-	// Create DLQ producer wrapper
-	dlqProducer, err := platformkafka.NewDLQProducer(producer, dlqConfig)
-	if err != nil {
-		producer.Close()
-		return nil, fmt.Errorf("failed to create DLQ producer: %w", err)
+		return nil, err
 	}
 	c.dlqProducer = dlqProducer
 
-	// Message factory creates new AuditEvent instances for deserialization
+	consumer, err := buildProtoConsumer(config, dlqProducer, dlqConfig, c)
+	if err != nil {
+		return nil, err
+	}
+	c.consumer = consumer
+
+	return c, nil
+}
+
+// buildProtoConsumer creates the Kafka proto consumer with DLQ support and audit event handler.
+func buildProtoConsumer(config ConsumerConfig, dlqProducer *platformkafka.DLQProducer, dlqConfig platformkafka.DLQConfig, c *AuditConsumer) (*platformkafka.ProtoConsumer, error) {
 	msgFactory := func() proto.Message {
 		return &auditv1.AuditEvent{}
 	}
 
-	// Handler processes each audit event
 	handler := func(ctx context.Context, _ []byte, msg proto.Message) error {
 		event, ok := msg.(*auditv1.AuditEvent)
 		if !ok {
@@ -161,7 +142,6 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		return c.handleAuditEvent(ctx, event)
 	}
 
-	// Create the Kafka consumer with DLQ support
 	consumer, err := platformkafka.NewProtoConsumer(
 		platformkafka.ConsumerConfig{
 			BootstrapServers: config.BootstrapServers,
@@ -180,9 +160,51 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		dlqProducer.Close()
 		return nil, fmt.Errorf("failed to create Kafka consumer: %w", err)
 	}
-	c.consumer = consumer
 
-	return c, nil
+	return consumer, nil
+}
+
+// validateConsumerConfig checks required fields on the consumer configuration.
+func validateConsumerConfig(config ConsumerConfig) error {
+	if config.BootstrapServers == "" {
+		return ErrEmptyBootstrapServers
+	}
+	if config.Topic == "" {
+		return ErrEmptyTopic
+	}
+	if config.DB == nil {
+		return ErrNilDatabase
+	}
+	return nil
+}
+
+// buildDLQComponents creates the DLQ producer and its configuration.
+func buildDLQComponents(config ConsumerConfig) (*platformkafka.DLQProducer, platformkafka.DLQConfig, error) {
+	producer, err := platformkafka.NewProtoProducer(platformkafka.ProducerConfig{
+		BootstrapServers: config.BootstrapServers,
+		ClientID:         config.ClientID + "-dlq",
+	})
+	if err != nil {
+		return nil, platformkafka.DLQConfig{}, fmt.Errorf("failed to create DLQ producer: %w", err)
+	}
+
+	// Safe conversion: validated by caller
+	maxRetries32 := int32(config.MaxRetries)
+	dlqConfig := platformkafka.DLQConfig{
+		DLQTopicSuffix:    ".dlq",
+		MaxRetries:        maxRetries32,
+		RetryBackoffMs:    1000,
+		BackoffMultiplier: 2.0,
+		ConsumerGroupID:   config.GroupID,
+	}
+
+	dlqProducer, err := platformkafka.NewDLQProducer(producer, dlqConfig)
+	if err != nil {
+		producer.Close()
+		return nil, platformkafka.DLQConfig{}, fmt.Errorf("failed to create DLQ producer: %w", err)
+	}
+
+	return dlqProducer, dlqConfig, nil
 }
 
 // handleAuditEvent processes a single audit event and writes it to the audit_log table.
@@ -204,33 +226,7 @@ func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Aud
 		return fmt.Errorf("%w: %v", ErrInvalidOperation, event.Operation)
 	}
 
-	// Handle potentially nil timestamp
-	var createdAt time.Time
-	if event.Timestamp != nil {
-		createdAt = event.Timestamp.AsTime()
-	} else {
-		createdAt = time.Now()
-	}
-
-	// Build audit log entry
-	auditLog := map[string]interface{}{
-		"event_id":        event.EventId,
-		"table_name":      event.TableName,
-		"operation":       operation,
-		"record_id":       event.RecordId,
-		"old_values":      event.OldValues,
-		"new_values":      event.NewValues,
-		"created_at":      createdAt,
-		"tenant_id":       string(tenantID),
-		"schema_name":     event.SchemaName,
-		"changed_by":      event.ChangedBy,
-		"transaction_id":  event.TransactionId,
-		"client_ip":       event.ClientIp,
-		"user_agent":      event.UserAgent,
-		"correlation_id":  event.CorrelationId,
-		"causation_id":    event.CausationId,
-		"idempotency_key": event.IdempotencyKey,
-	}
+	auditLog := buildAuditLogEntry(event, operation, tenantID)
 
 	// Check for context cancellation before expensive DB operation
 	if err := ctx.Err(); err != nil {
@@ -263,6 +259,35 @@ func (c *AuditConsumer) handleAuditEvent(ctx context.Context, event *auditv1.Aud
 		"duration", duration)
 
 	return nil
+}
+
+// buildAuditLogEntry constructs the audit log entry map from the event, operation, and tenant.
+func buildAuditLogEntry(event *auditv1.AuditEvent, operation string, tenantID tenant.TenantID) map[string]interface{} {
+	var createdAt time.Time
+	if event.Timestamp != nil {
+		createdAt = event.Timestamp.AsTime()
+	} else {
+		createdAt = time.Now()
+	}
+
+	return map[string]interface{}{
+		"event_id":        event.EventId,
+		"table_name":      event.TableName,
+		"operation":       operation,
+		"record_id":       event.RecordId,
+		"old_values":      event.OldValues,
+		"new_values":      event.NewValues,
+		"created_at":      createdAt,
+		"tenant_id":       string(tenantID),
+		"schema_name":     event.SchemaName,
+		"changed_by":      event.ChangedBy,
+		"transaction_id":  event.TransactionId,
+		"client_ip":       event.ClientIp,
+		"user_agent":      event.UserAgent,
+		"correlation_id":  event.CorrelationId,
+		"causation_id":    event.CausationId,
+		"idempotency_key": event.IdempotencyKey,
+	}
 }
 
 // Start begins consuming audit events from the configured topic.

@@ -159,57 +159,9 @@ func New(opts ...Option) (*ManifestValidator, error) {
 		return nil, fmt.Errorf("failed to create proto validator: %w", err)
 	}
 
-	// CEL environment for account type validation policies.
-	// These expressions operate on balance state.
-	// Use DynType for numeric fields to allow both int and double literals
-	// (e.g., "amount > 0" and "amount > 0.0" both work).
-	celEnv, err := cel.NewEnv(
-		cel.Variable("quantity", cel.DynType),
-		cel.Variable("instrument", cel.StringType),
-		cel.Variable("bucket_id", cel.StringType),
-		cel.Variable("as_of", cel.TimestampType),
-		cel.Variable("amount", cel.DynType),
-	)
+	celEnvs, err := buildCELEnvironments()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create CEL environment: %w", err)
-	}
-
-	// CEL environment for bucketing expressions.
-	bucketCelEnv, err := cel.NewEnv(
-		cel.Variable("instrument_code", cel.StringType),
-		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create bucket CEL environment: %w", err)
-	}
-
-	// CEL environment for party type validation/eligibility expressions.
-	// These expressions operate on party attributes.
-	partyTypeCelEnv, err := cel.NewEnv(
-		cel.Variable("attributes", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable("party_type", cel.StringType),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create party type CEL environment: %w", err)
-	}
-
-	// CEL environment for mapping validation/transformation expressions.
-	// These expressions operate on arbitrary payload fields.
-	mappingCelEnv, err := cel.NewEnv(
-		cel.Variable("payload", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable("value", cel.DynType),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create mapping CEL environment: %w", err)
-	}
-
-	// CEL environment for event trigger filter expressions.
-	// Filters operate on a dynamic event map representing the domain event payload.
-	eventFilterEnv, err := cel.NewEnv(
-		cel.Variable("event", cel.MapType(cel.StringType, cel.DynType)),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create event filter CEL environment: %w", err)
+		return nil, err
 	}
 
 	// Build channel registry from the canonical topic list.
@@ -221,11 +173,11 @@ func New(opts ...Option) (*ManifestValidator, error) {
 
 	mv := &ManifestValidator{
 		protoValidator:  pv,
-		celEnv:          celEnv,
-		bucketCelEnv:    bucketCelEnv,
-		partyTypeCelEnv: partyTypeCelEnv,
-		mappingCelEnv:   mappingCelEnv,
-		eventFilterEnv:  eventFilterEnv,
+		celEnv:          celEnvs.balance,
+		bucketCelEnv:    celEnvs.bucket,
+		partyTypeCelEnv: celEnvs.partyType,
+		mappingCelEnv:   celEnvs.mapping,
+		eventFilterEnv:  celEnvs.eventFilter,
 		channelRegistry: channelRegistry,
 		schemaRegistry:  schema.NewRegistry(),
 	}
@@ -247,6 +199,70 @@ func New(opts ...Option) (*ManifestValidator, error) {
 	}
 
 	return mv, nil
+}
+
+// celEnvironments groups all CEL environments used by the validator.
+type celEnvironments struct {
+	balance     *cel.Env
+	bucket      *cel.Env
+	partyType   *cel.Env
+	mapping     *cel.Env
+	eventFilter *cel.Env
+}
+
+// buildCELEnvironments creates all CEL environments used for manifest validation.
+func buildCELEnvironments() (*celEnvironments, error) {
+	// CEL environment for account type validation policies.
+	// Use DynType for numeric fields to allow both int and double literals.
+	balanceEnv, err := cel.NewEnv(
+		cel.Variable("quantity", cel.DynType),
+		cel.Variable("instrument", cel.StringType),
+		cel.Variable("bucket_id", cel.StringType),
+		cel.Variable("as_of", cel.TimestampType),
+		cel.Variable("amount", cel.DynType),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CEL environment: %w", err)
+	}
+
+	bucketEnv, err := cel.NewEnv(
+		cel.Variable("instrument_code", cel.StringType),
+		cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bucket CEL environment: %w", err)
+	}
+
+	partyTypeEnv, err := cel.NewEnv(
+		cel.Variable("attributes", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("party_type", cel.StringType),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create party type CEL environment: %w", err)
+	}
+
+	mappingEnv, err := cel.NewEnv(
+		cel.Variable("payload", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("value", cel.DynType),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create mapping CEL environment: %w", err)
+	}
+
+	eventFilterEnv, err := cel.NewEnv(
+		cel.Variable("event", cel.MapType(cel.StringType, cel.DynType)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create event filter CEL environment: %w", err)
+	}
+
+	return &celEnvironments{
+		balance:     balanceEnv,
+		bucket:      bucketEnv,
+		partyType:   partyTypeEnv,
+		mapping:     mappingEnv,
+		eventFilter: eventFilterEnv,
+	}, nil
 }
 
 // ValidateOption configures validation behavior.
@@ -287,65 +303,11 @@ func (v *ManifestValidator) Validate(
 	}
 	result := &ValidationResult{Valid: true}
 
-	// 1. Structural validation (protobuf constraints)
-	v.validateStructural(manifest, result)
+	// Phase 1: Structural and content validation
+	callLogs := v.validateManifestContent(manifest, result)
 
-	// 2. Duplicate code detection
-	v.validateDuplicates(manifest, result)
-
-	// 3. CEL expression validation
-	v.validateCELExpressions(manifest, result)
-
-	// 4. Starlark script compilation
-	callLogs := v.validateStarlarkScripts(manifest, result)
-
-	// 5. Cross-reference validation
-	v.validateCrossReferences(manifest, result)
-
-	// 6. Payment rails validation
-	v.validatePaymentRails(manifest, result)
-
-	// 7. Party types validation
-	v.validatePartyTypes(manifest, result)
-
-	// 8. Mappings validation
-	v.validateMappings(manifest, result)
-
-	// 9. Event trigger channel and filter validation
-	v.validateEventTriggers(manifest, result)
-
-	// 10. Webhook trigger validation against provider connections
-	v.validateWebhookTriggers(manifest, result)
-
-	// 11. Scheduled trigger name uniqueness
-	v.validateScheduledTriggers(manifest, result)
-
-	// 12. API trigger validation against OpenAPI spec
-	v.validateAPITriggers(manifest, result)
-
-	// 13. Operational gateway orphan detection
-	v.validateOperationalGatewayOrphans(manifest, result)
-
-	// 14. Semantic validations
-	v.validateSettlementCompleteness(manifest, result)
-	v.validateSagaHandlerCompleteness(manifest, result)
-	v.validateValuationRuleCycles(manifest, result)
-	v.validateInstrumentAccountTypeConsistency(manifest, result)
-	v.validateOrphanedInstruments(manifest, result)
-
-	// 15. Immutability checks (skipped when validating for a new tenant)
-	if previousManifest != nil && !cfg.skipImmutabilityChecks {
-		v.validateImmutability(manifest, previousManifest, result)
-	}
-
-	// 16. Destructive change detection (skipped when validating for a new tenant)
-	// Use the previous manifest's call logs for graph construction so that
-	// dependencies that existed in the previous version are correctly detected,
-	// even if a saga was modified or removed in the current manifest.
-	if previousManifest != nil && !cfg.skipImmutabilityChecks {
-		previousCallLogs := v.validateStarlarkScripts(previousManifest, &ValidationResult{})
-		v.validateDestructiveChanges(manifest, previousManifest, previousCallLogs, cfg, result)
-	}
+	// Phase 2: Lifecycle checks (immutability, destructive changes)
+	v.validateLifecycleConstraints(manifest, previousManifest, cfg, result)
 
 	// Set valid flag based on error count
 	result.Valid = len(result.Errors) == 0
@@ -356,6 +318,52 @@ func (v *ManifestValidator) Validate(
 	}
 
 	return result
+}
+
+// validateManifestContent runs all structural, expression, and cross-reference validations.
+func (v *ManifestValidator) validateManifestContent(
+	manifest *controlplanev1.Manifest,
+	result *ValidationResult,
+) map[string][]schema.HandlerCallInfo {
+	v.validateStructural(manifest, result)
+	v.validateDuplicates(manifest, result)
+	v.validateCELExpressions(manifest, result)
+	callLogs := v.validateStarlarkScripts(manifest, result)
+	v.validateCrossReferences(manifest, result)
+	v.validatePaymentRails(manifest, result)
+	v.validatePartyTypes(manifest, result)
+	v.validateMappings(manifest, result)
+	v.validateEventTriggers(manifest, result)
+	v.validateWebhookTriggers(manifest, result)
+	v.validateScheduledTriggers(manifest, result)
+	v.validateAPITriggers(manifest, result)
+	v.validateOperationalGatewayOrphans(manifest, result)
+	v.validateSettlementCompleteness(manifest, result)
+	v.validateSagaHandlerCompleteness(manifest, result)
+	v.validateValuationRuleCycles(manifest, result)
+	v.validateInstrumentAccountTypeConsistency(manifest, result)
+	v.validateOrphanedInstruments(manifest, result)
+	return callLogs
+}
+
+// validateLifecycleConstraints checks immutability and destructive changes against a previous manifest.
+func (v *ManifestValidator) validateLifecycleConstraints(
+	manifest *controlplanev1.Manifest,
+	previousManifest *controlplanev1.Manifest,
+	cfg *validateConfig,
+	result *ValidationResult,
+) {
+	if previousManifest == nil || cfg.skipImmutabilityChecks {
+		return
+	}
+
+	v.validateImmutability(manifest, previousManifest, result)
+
+	// Use the previous manifest's call logs for graph construction so that
+	// dependencies that existed in the previous version are correctly detected,
+	// even if a saga was modified or removed in the current manifest.
+	previousCallLogs := v.validateStarlarkScripts(previousManifest, &ValidationResult{})
+	v.validateDestructiveChanges(manifest, previousManifest, previousCallLogs, cfg, result)
 }
 
 // validateStructural uses protovalidate to check protobuf constraints.

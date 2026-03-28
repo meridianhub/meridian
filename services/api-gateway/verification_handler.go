@@ -182,58 +182,52 @@ func (h *VerificationHandler) HandleResendVerification(w http.ResponseWriter, r 
 		return
 	}
 
-	ctx := r.Context()
+	h.issueResendVerificationToken(r.Context(), req)
 
+	// Timing-safe: always return 200 regardless of outcome.
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// issueResendVerificationToken performs the timing-safe verification resend flow.
+// All error paths are silent (logged but not exposed) to prevent email enumeration.
+func (h *VerificationHandler) issueResendVerificationToken(ctx context.Context, req resendVerificationRequest) {
 	tid, err := tenant.NewTenantID(req.TenantID)
 	if err != nil {
-		// Timing-safe: return 200 even for invalid tenant.
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
-	// Timing-safe: always return 200. Do not reveal whether the email exists.
 	identity, err := h.identityRepo.FindByEmail(tenantCtx, req.Email)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	if identity.Status() != identitydomain.IdentityStatusPendingVerification {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
-	// Rate limit: max 3 tokens per hour per identity.
 	count, err := h.identityRepo.CountVerificationTokensInWindow(tenantCtx, identity.ID(), time.Hour)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "verification: failed to count tokens in window", "error", err)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	if count >= maxVerificationTokensPerHour {
-		// Timing-safe: return 200 even when rate limited to avoid leaking email existence.
 		h.logger.WarnContext(ctx, "verification: resend rate limited", "identity_id", identity.ID())
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	vtoken, plaintext, err := identitydomain.NewVerificationToken(req.TenantID, identity.ID())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "verification: failed to create token", "error", err)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	if err := h.identityRepo.SaveVerificationToken(tenantCtx, vtoken); err != nil {
 		h.logger.ErrorContext(ctx, "verification: failed to save token", "error", err)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	h.queueVerificationEmail(tenantCtx, identity.Email(), req.TenantID, plaintext)
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // queueVerificationEmail enqueues a verification email via the outbox.

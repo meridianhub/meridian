@@ -83,45 +83,10 @@ func (s *Server) RetrieveObservation(ctx context.Context, req *pb.RetrieveObserv
 // ListObservations returns observations matching the filter criteria with cursor-based pagination.
 // Supports filtering by data set, time ranges, quality level, and pagination.
 func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsRequest) (*pb.ListObservationsResponse, error) {
-	// Apply pagination defaults
-	pageSize := int(req.PageSize)
-	if pageSize < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "page_size cannot be negative")
-	}
-	if pageSize == 0 {
-		pageSize = 100 // Default
-	}
-	if pageSize > 1000 {
-		pageSize = 1000 // Max from proto validation
-	}
-
-	// Build query from request filters
-	query := domain.ObservationQuery{
-		DataSetCode:       req.DatasetCode,
-		IncludeSuperseded: req.IncludeSuperseded,
-		Limit:             pageSize,
-		PageToken:         req.PageToken,
-	}
-
-	// Apply resolution key filter
-	if req.ResolutionKeyValue != "" {
-		query.ResolutionKey = &req.ResolutionKeyValue
-	}
-
-	// Apply time range filters
-	if req.ObservedFrom != nil {
-		t := req.ObservedFrom.AsTime()
-		query.ObservedAfter = &t
-	}
-	if req.ObservedTo != nil {
-		t := req.ObservedTo.AsTime()
-		query.ObservedBefore = &t
-	}
-
-	// Apply quality filter
-	if req.QualityFilter != pb.QualityLevel_QUALITY_LEVEL_UNSPECIFIED {
-		qualityLevel := protoQualityLevelToDomain(req.QualityFilter)
-		query.QualityLevel = &qualityLevel
+	// Build query from request
+	query, err := buildObservationQuery(req)
+	if err != nil {
+		return nil, err
 	}
 
 	// Execute query
@@ -141,7 +106,6 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 	// Get total count for pagination info
 	totalCount, err := s.observationRepo.CountByDataset(ctx, req.DatasetCode, req.IncludeSuperseded)
 	if err != nil {
-		// Log warning but don't fail the request - 0 means unknown per proto spec
 		s.logger.Warn("failed to get observation count",
 			"dataset_code", req.DatasetCode,
 			"error", err)
@@ -168,4 +132,46 @@ func (s *Server) ListObservations(ctx context.Context, req *pb.ListObservationsR
 		NextPageToken: nextPageToken,
 		TotalCount:    int32(totalCount),
 	}, nil
+}
+
+// buildObservationQuery converts a ListObservationsRequest into a domain ObservationQuery,
+// applying pagination defaults and mapping proto filters to domain types.
+func buildObservationQuery(req *pb.ListObservationsRequest) (domain.ObservationQuery, error) {
+	pageSize := int(req.PageSize)
+	if pageSize < 0 {
+		return domain.ObservationQuery{}, status.Errorf(codes.InvalidArgument, "page_size cannot be negative")
+	}
+	if pageSize == 0 {
+		pageSize = 100
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	query := domain.ObservationQuery{
+		DataSetCode:       req.DatasetCode,
+		IncludeSuperseded: req.IncludeSuperseded,
+		Limit:             pageSize,
+		PageToken:         req.PageToken,
+	}
+
+	if req.ResolutionKeyValue != "" {
+		query.ResolutionKey = &req.ResolutionKeyValue
+	}
+
+	if req.ObservedFrom != nil {
+		t := req.ObservedFrom.AsTime()
+		query.ObservedAfter = &t
+	}
+	if req.ObservedTo != nil {
+		t := req.ObservedTo.AsTime()
+		query.ObservedBefore = &t
+	}
+
+	if req.QualityFilter != pb.QualityLevel_QUALITY_LEVEL_UNSPECIFIED {
+		qualityLevel := protoQualityLevelToDomain(req.QualityFilter)
+		query.QualityLevel = &qualityLevel
+	}
+
+	return query, nil
 }

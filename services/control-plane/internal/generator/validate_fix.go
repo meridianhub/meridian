@@ -157,9 +157,12 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 		return manifestYAML
 	}
 
-	// Find and replace deprecated handler calls within Starlark script blocks.
-	// YAML multi-line strings appear after "script: |" or "script: |-" markers.
-	// We process the full YAML text line-by-line, isolating script blocks.
+	return rewriteScriptBlocks(manifestYAML, deprecatedHandlers)
+}
+
+// rewriteScriptBlocks processes YAML text line-by-line, isolating script blocks
+// and applying deprecated handler fixes to each one.
+func rewriteScriptBlocks(manifestYAML string, deprecatedHandlers map[string]deprecatedHandlerInfo) string {
 	lines := strings.Split(manifestYAML, "\n")
 	result := make([]string, 0, len(lines))
 	inScript := false
@@ -168,7 +171,6 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 
 	for _, line := range lines {
 		if !inScript {
-			// Detect "script: |" or "script: |-" at any indentation level
 			trimmed := strings.TrimLeft(line, " \t")
 			if strings.HasPrefix(trimmed, "script: |") {
 				indent := len(line) - len(trimmed)
@@ -182,7 +184,6 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 			continue
 		}
 
-		// Inside a script block: collect lines until de-indented
 		if line == "" {
 			scriptLines = append(scriptLines, line)
 			continue
@@ -190,11 +191,7 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 
 		currentIndent := len(line) - len(strings.TrimLeft(line, " \t"))
 		if currentIndent <= scriptIndent && strings.TrimSpace(line) != "" {
-			// End of script block - apply fixes to the accumulated script lines
-			script := strings.Join(scriptLines, "\n")
-			fixed := applyDeprecatedHandlerFixes(script, deprecatedHandlers)
-			fixedLines := strings.Split(fixed, "\n")
-			result = append(result, fixedLines...)
+			result = append(result, flushScriptBlock(scriptLines, deprecatedHandlers)...)
 			inScript = false
 			scriptLines = nil
 			result = append(result, line)
@@ -204,15 +201,19 @@ func applyMutatingPhase(manifestYAML string, registry *schema.Registry) string {
 		scriptLines = append(scriptLines, line)
 	}
 
-	// Flush remaining script lines if YAML ended while inside a script block
 	if inScript && len(scriptLines) > 0 {
-		script := strings.Join(scriptLines, "\n")
-		fixed := applyDeprecatedHandlerFixes(script, deprecatedHandlers)
-		fixedLines := strings.Split(fixed, "\n")
-		result = append(result, fixedLines...)
+		result = append(result, flushScriptBlock(scriptLines, deprecatedHandlers)...)
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// flushScriptBlock applies deprecated handler fixes to accumulated script lines
+// and returns the fixed lines.
+func flushScriptBlock(scriptLines []string, deprecatedHandlers map[string]deprecatedHandlerInfo) []string {
+	script := strings.Join(scriptLines, "\n")
+	fixed := applyDeprecatedHandlerFixes(script, deprecatedHandlers)
+	return strings.Split(fixed, "\n")
 }
 
 // deprecatedHandlerInfo holds conversion info for a deprecated handler.

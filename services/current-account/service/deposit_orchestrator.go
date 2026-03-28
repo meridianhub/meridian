@@ -138,41 +138,14 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	}
 
 	// Validate fungibility before starting the saga.
-	// For double-entry deposits: DEBIT from clearing account, CREDIT to customer account
-	// Both sides use the same attributes since this is a single incoming deposit.
-	if o.fungibilityValidator != nil {
-		instrumentCode := amount.InstrumentCode()
-		if err := o.fungibilityValidator.ValidateDoubleEntry(ctx, instrumentCode, 1, attributes, attributes); err != nil {
-			sagaStatus = operationStatusFailed
-			o.logger.Error("fungibility validation failed",
-				"account_id", account.AccountID(),
-				"transaction_id", transactionID,
-				"instrument", instrumentCode,
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "fungibility validation failed: %v", err)
-		}
-		o.logger.Debug("fungibility validation passed",
-			"account_id", account.AccountID(),
-			"instrument", instrumentCode)
+	if err := o.validateDepositFungibility(ctx, account, amount, transactionID, attributes, &sagaStatus); err != nil {
+		return nil, err
 	}
 
 	// Resolve clearing account ID: explicit override > dynamic resolver > static config
-	var clearingAccountID string
-	if clearingAccountIDOverride != "" {
-		// Validate override is a well-formed account identifier (UUID format).
-		// The saga will further validate the account exists in Financial Accounting.
-		if _, parseErr := uuid.Parse(clearingAccountIDOverride); parseErr != nil {
-			sagaStatus = operationStatusFailed
-			return nil, status.Errorf(codes.InvalidArgument,
-				"clearing_account_id override is not a valid UUID: %s", clearingAccountIDOverride)
-		}
-		clearingAccountID = clearingAccountIDOverride
-		o.logger.Warn("clearing account override applied",
-			"clearing_account_id", clearingAccountID,
-			"account_id", account.AccountID(),
-			"instrument", amount.InstrumentCode())
-	} else {
-		clearingAccountID = o.resolveClearingAccountID(ctx, amount.InstrumentCode())
+	clearingAccountID, err := o.resolveDepositClearingAccountWithOverride(ctx, clearingAccountIDOverride, account, amount, &sagaStatus)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse correlation ID safely - fallback to generated ID if invalid
@@ -186,22 +159,8 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 		ctx = observability.WithCorrelationID(ctx, correlationID)
 	}
 
-	// Prepare saga input
-	input := saga.RunnerInput{
-		SagaExecutionID: uuid.New(),
-		CorrelationID:   correlationUUID,
-		Input: map[string]interface{}{
-			"account_id":          account.AccountID(),
-			"external_identifier": account.ExternalIdentifier(),
-			"amount":              amount.Amount().String(), // Decimal as string
-			"instrument_code":     account.InstrumentCode(),
-			"transaction_id":      transactionID,
-			"clearing_account_id": clearingAccountID,
-			"attributes":          attributes,
-		},
-	}
-
-	// Inject handler dependencies into context
+	// Prepare saga input and context
+	input := buildDepositSagaInput(correlationUUID, account, amount, transactionID, clearingAccountID, attributes)
 	ctx = context.WithValue(ctx, ContextKeyHandlerDeps, &CurrentAccountHandlerDeps{
 		Logger:           o.logger,
 		PosKeepingClient: o.posKeepingClient,
@@ -210,11 +169,70 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 	})
 	ctx = context.WithValue(ctx, ContextKeyAccount, account)
 
-	// Resolve saga script: use ProductTypeSagaResolver when configured and account has a product type,
-	// otherwise fall back to the static default deposit script.
+	// Resolve and execute saga
+	return o.resolveAndExecuteDepositSaga(ctx, account, transactionID, correlationID, input, &sagaStatus)
+}
+
+// validateDepositFungibility validates fungibility before starting the saga.
+func (o *DepositOrchestrator) validateDepositFungibility(ctx context.Context, account domain.CurrentAccount, amount domain.Amount, transactionID string, attributes map[string]string, sagaStatus *string) error {
+	if o.fungibilityValidator == nil {
+		return nil
+	}
+	instrumentCode := amount.InstrumentCode()
+	if err := o.fungibilityValidator.ValidateDoubleEntry(ctx, instrumentCode, 1, attributes, attributes); err != nil {
+		*sagaStatus = operationStatusFailed
+		o.logger.Error("fungibility validation failed",
+			"account_id", account.AccountID(),
+			"transaction_id", transactionID,
+			"instrument", instrumentCode,
+			"error", err)
+		return status.Errorf(codes.InvalidArgument, "fungibility validation failed: %v", err)
+	}
+	o.logger.Debug("fungibility validation passed",
+		"account_id", account.AccountID(),
+		"instrument", instrumentCode)
+	return nil
+}
+
+// resolveDepositClearingAccountWithOverride resolves the clearing account, supporting an explicit override.
+func (o *DepositOrchestrator) resolveDepositClearingAccountWithOverride(ctx context.Context, override string, account domain.CurrentAccount, amount domain.Amount, sagaStatus *string) (string, error) {
+	if override != "" {
+		if _, parseErr := uuid.Parse(override); parseErr != nil {
+			*sagaStatus = operationStatusFailed
+			return "", status.Errorf(codes.InvalidArgument,
+				"clearing_account_id override is not a valid UUID: %s", override)
+		}
+		o.logger.Warn("clearing account override applied",
+			"clearing_account_id", override,
+			"account_id", account.AccountID(),
+			"instrument", amount.InstrumentCode())
+		return override, nil
+	}
+	return o.resolveClearingAccountID(ctx, amount.InstrumentCode()), nil
+}
+
+// buildDepositSagaInput constructs the saga runner input for a deposit operation.
+func buildDepositSagaInput(correlationUUID uuid.UUID, account domain.CurrentAccount, amount domain.Amount, transactionID, clearingAccountID string, attributes map[string]string) saga.RunnerInput {
+	return saga.RunnerInput{
+		SagaExecutionID: uuid.New(),
+		CorrelationID:   correlationUUID,
+		Input: map[string]interface{}{
+			"account_id":          account.AccountID(),
+			"external_identifier": account.ExternalIdentifier(),
+			"amount":              amount.Amount().String(),
+			"instrument_code":     account.InstrumentCode(),
+			"transaction_id":      transactionID,
+			"clearing_account_id": clearingAccountID,
+			"attributes":          attributes,
+		},
+	}
+}
+
+// resolveAndExecuteDepositSaga resolves the saga script, executes the saga, and returns the response.
+func (o *DepositOrchestrator) resolveAndExecuteDepositSaga(ctx context.Context, account domain.CurrentAccount, transactionID, correlationID string, input saga.RunnerInput, sagaStatus *string) (*pb.ExecuteDepositResponse, error) {
 	depositScript, err := o.resolveDepositScript(ctx, account)
 	if err != nil {
-		sagaStatus = operationStatusFailed
+		*sagaStatus = operationStatusFailed
 		o.logger.Error("failed to resolve deposit saga",
 			"account_id", account.AccountID(),
 			"product_type_code", account.ProductTypeCode(),
@@ -222,7 +240,6 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 		return nil, status.Errorf(codes.NotFound, "deposit saga not found for product type: %v", err)
 	}
 
-	// Execute saga via StarlarkSagaRunner
 	o.logger.Info("executing deposit saga via Starlark",
 		"account_id", account.AccountID(),
 		"transaction_id", transactionID,
@@ -232,7 +249,7 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 
 	output, err := o.sagaRunner.ExecuteSaga(ctx, "current_account_deposit", depositScript, input)
 	if err != nil {
-		sagaStatus = operationStatusFailed
+		*sagaStatus = operationStatusFailed
 		o.logger.Error("deposit saga failed",
 			"account_id", account.AccountID(),
 			"transaction_id", transactionID,
@@ -240,18 +257,14 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 		return nil, status.Errorf(codes.Internal, "deposit saga failed: %v", err)
 	}
 
-	// Handle saga result
 	if !output.Success {
-		sagaStatus = operationStatusFailed
+		*sagaStatus = operationStatusFailed
 		caobservability.RecordSagaFailure("deposit", "saga_execution")
-
 		o.logger.Error("deposit saga failed",
 			"account_id", account.AccountID(),
 			"transaction_id", transactionID,
 			"error", output.Error)
-
-		return nil, status.Errorf(codes.Internal,
-			"deposit transaction failed: %s", output.Error)
+		return nil, status.Errorf(codes.Internal, "deposit transaction failed: %s", output.Error)
 	}
 
 	o.logger.Info("deposit saga completed successfully",
@@ -260,7 +273,6 @@ func (o *DepositOrchestrator) Orchestrate(ctx context.Context, account domain.Cu
 		"correlation_id", correlationID,
 		"saga_execution_id", input.SagaExecutionID)
 
-	// Return successful response
 	return &pb.ExecuteDepositResponse{
 		AccountId:        account.AccountID(),
 		TransactionId:    transactionID,

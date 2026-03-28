@@ -89,27 +89,10 @@ func NewBalanceAssertor(
 // On PK client failure, it returns BOTH a result (with FAILED assertion) and an error.
 // This allows callers to access the persisted assertion even when PK is unreachable.
 func (ba *BalanceAssertor) ExecuteBalanceAssertion(ctx context.Context, req AssertBalanceRequest) (*AssertBalanceResult, error) {
-	// Validate scope
-	if !req.Scope.IsValid() {
-		req.Scope = domain.AssertionScopePositionLedger
+	if err := ba.validateAssertionRequest(&req); err != nil {
+		return nil, err
 	}
 
-	// NOSTRO_VOSTRO is not yet implemented
-	if req.Scope == domain.AssertionScopeNostroVostro {
-		return nil, domain.ErrUnimplemented
-	}
-
-	// Authorization: CROSS_ACCOUNT requires SYSTEM or AUDITOR role
-	if req.Scope == domain.AssertionScopeCrossAccount {
-		if req.CallerRole != CallerRoleSystem && req.CallerRole != CallerRoleAuditor {
-			ba.logger.Warn("unauthorized cross-account assertion attempt",
-				"caller_role", req.CallerRole,
-				"instrument_code", req.InstrumentCode)
-			return nil, domain.ErrUnauthorized
-		}
-	}
-
-	// Create the assertion domain entity
 	assertion, err := domain.NewBalanceAssertion(
 		req.RunID,
 		req.AccountID,
@@ -121,107 +104,144 @@ func (ba *BalanceAssertor) ExecuteBalanceAssertion(ctx context.Context, req Asse
 		return nil, fmt.Errorf("creating balance assertion: %w", err)
 	}
 
-	// Persist the pending assertion
 	if err := ba.assertionRepo.Create(ctx, assertion); err != nil {
 		return nil, fmt.Errorf("persisting assertion: %w", err)
 	}
 
-	// Query Position Keeping for aggregated debits/credits
 	summary, err := ba.pkClient.GetPositionSummary(ctx, req.AccountID, req.InstrumentCode)
 	if err != nil {
-		failReason := fmt.Sprintf("failed to query position keeping: %v", err)
-		if failErr := assertion.Fail(decimal.Zero, failReason); failErr != nil {
-			ba.logger.Error("failed to mark assertion as failed", "error", failErr)
-		}
-		_ = ba.assertionRepo.Update(ctx, assertion)
-		observability.BalanceAssertionTotal.WithLabelValues("FAILED", req.Scope.String()).Inc()
-		return &AssertBalanceResult{Assertion: assertion}, fmt.Errorf("querying position keeping: %w", err)
+		return ba.handlePKFailure(ctx, assertion, req.Scope, err)
 	}
 
-	// Calculate imbalance: total_debits - total_credits.
-	// The assertion validates ledger equilibrium (debits == credits), not a user-supplied
-	// expected balance. ExpectedBalance is stored for audit trail context only.
 	imbalanceAmount := summary.TotalDebits.Sub(summary.TotalCredits)
-	actualBalance := summary.TotalCredits.Sub(summary.TotalDebits) // net balance
+	actualBalance := summary.TotalCredits.Sub(summary.TotalDebits)
 
 	result := &AssertBalanceResult{}
 
 	if imbalanceAmount.IsZero() {
-		// BALANCED: debits == credits
-		if err := assertion.Pass(actualBalance); err != nil {
-			return nil, fmt.Errorf("marking assertion passed: %w", err)
+		if err := ba.handleBalanced(ctx, assertion, req, actualBalance); err != nil {
+			return nil, err
 		}
-
-		observability.BalanceImbalanceGauge.WithLabelValues(req.InstrumentCode).Set(0)
-		observability.BalanceAssertionTotal.WithLabelValues("PASSED", req.Scope.String()).Inc()
-
-		// Resolve any existing trend
-		ba.resolveTrend(ctx, req.InstrumentCode)
 	} else {
-		// IMBALANCED: P1/Critical severity - ledger integrity violation
-		failureReason := fmt.Sprintf(
-			"CRITICAL: Ledger imbalance detected for instrument %s: total_debits=%s, total_credits=%s, imbalance=%s",
-			req.InstrumentCode,
-			summary.TotalDebits.String(),
-			summary.TotalCredits.String(),
-			imbalanceAmount.String(),
-		)
-
-		if err := assertion.Fail(actualBalance, failureReason); err != nil {
-			return nil, fmt.Errorf("marking assertion failed: %w", err)
+		event, err := ba.handleImbalanced(ctx, assertion, req, summary, imbalanceAmount, actualBalance)
+		if err != nil {
+			return nil, err
 		}
-
-		// Set imbalance gauge (absolute value)
-		absImbalance, _ := imbalanceAmount.Abs().Float64()
-		observability.BalanceImbalanceGauge.WithLabelValues(req.InstrumentCode).Set(absImbalance)
-		observability.BalanceAssertionTotal.WithLabelValues("FAILED", req.Scope.String()).Inc()
-
-		// Track trend and check persistence
-		trend := ba.updateTrend(ctx, req.InstrumentCode, imbalanceAmount, assertion.AssertionID)
-
-		// Gather FA diagnostics if available
-		ba.enrichWithDiagnostics(ctx, assertion, req.AccountID, req.InstrumentCode)
-
-		// Publish critical imbalance event
-		event := domain.NewBalanceImbalanceDetectedEvent(
-			assertion.AssertionID,
-			req.InstrumentCode,
-			summary.TotalDebits,
-			summary.TotalCredits,
-			imbalanceAmount,
-			req.Scope,
-			trend != nil && trend.IsPersistent(),
-			ba.getTrendDays(trend),
-		)
-
-		if ba.publisher != nil {
-			if pubErr := ba.publisher.PublishBalanceImbalanceDetected(ctx, event); pubErr != nil {
-				ba.logger.Error("failed to publish imbalance event",
-					"error", pubErr,
-					"assertion_id", assertion.AssertionID,
-					"instrument_code", req.InstrumentCode)
-			}
-		}
-
 		result.Event = event
-
-		ba.logger.Error("CRITICAL: Balance imbalance detected",
-			"assertion_id", assertion.AssertionID,
-			"instrument_code", req.InstrumentCode,
-			"total_debits", summary.TotalDebits.String(),
-			"total_credits", summary.TotalCredits.String(),
-			"imbalance", imbalanceAmount.String(),
-			"is_persistent", trend != nil && trend.IsPersistent(),
-			"severity", "P1_CRITICAL")
 	}
 
-	// Update the assertion with result
 	if err := ba.assertionRepo.Update(ctx, assertion); err != nil {
 		return nil, fmt.Errorf("updating assertion result: %w", err)
 	}
 
 	result.Assertion = assertion
 	return result, nil
+}
+
+// validateAssertionRequest validates scope and authorization for a balance assertion request.
+func (ba *BalanceAssertor) validateAssertionRequest(req *AssertBalanceRequest) error {
+	if !req.Scope.IsValid() {
+		req.Scope = domain.AssertionScopePositionLedger
+	}
+
+	if req.Scope == domain.AssertionScopeNostroVostro {
+		return domain.ErrUnimplemented
+	}
+
+	if req.Scope == domain.AssertionScopeCrossAccount {
+		if req.CallerRole != CallerRoleSystem && req.CallerRole != CallerRoleAuditor {
+			ba.logger.Warn("unauthorized cross-account assertion attempt",
+				"caller_role", req.CallerRole,
+				"instrument_code", req.InstrumentCode)
+			return domain.ErrUnauthorized
+		}
+	}
+
+	return nil
+}
+
+// handlePKFailure records a FAILED assertion when Position Keeping is unreachable.
+func (ba *BalanceAssertor) handlePKFailure(ctx context.Context, assertion *domain.BalanceAssertion, scope domain.AssertionScope, pkErr error) (*AssertBalanceResult, error) {
+	failReason := fmt.Sprintf("failed to query position keeping: %v", pkErr)
+	if failErr := assertion.Fail(decimal.Zero, failReason); failErr != nil {
+		ba.logger.Error("failed to mark assertion as failed", "error", failErr)
+	}
+	_ = ba.assertionRepo.Update(ctx, assertion)
+	observability.BalanceAssertionTotal.WithLabelValues("FAILED", scope.String()).Inc()
+	return &AssertBalanceResult{Assertion: assertion}, fmt.Errorf("querying position keeping: %w", pkErr)
+}
+
+// handleBalanced records a PASSED assertion when debits equal credits.
+func (ba *BalanceAssertor) handleBalanced(ctx context.Context, assertion *domain.BalanceAssertion, req AssertBalanceRequest, actualBalance decimal.Decimal) error {
+	if err := assertion.Pass(actualBalance); err != nil {
+		return fmt.Errorf("marking assertion passed: %w", err)
+	}
+
+	observability.BalanceImbalanceGauge.WithLabelValues(req.InstrumentCode).Set(0)
+	observability.BalanceAssertionTotal.WithLabelValues("PASSED", req.Scope.String()).Inc()
+
+	ba.resolveTrend(ctx, req.InstrumentCode)
+	return nil
+}
+
+// handleImbalanced records a FAILED assertion and publishes an imbalance event.
+func (ba *BalanceAssertor) handleImbalanced(
+	ctx context.Context,
+	assertion *domain.BalanceAssertion,
+	req AssertBalanceRequest,
+	summary *PositionSummary,
+	imbalanceAmount, actualBalance decimal.Decimal,
+) (*domain.BalanceImbalanceDetectedEvent, error) {
+	failureReason := fmt.Sprintf(
+		"CRITICAL: Ledger imbalance detected for instrument %s: total_debits=%s, total_credits=%s, imbalance=%s",
+		req.InstrumentCode,
+		summary.TotalDebits.String(),
+		summary.TotalCredits.String(),
+		imbalanceAmount.String(),
+	)
+
+	if err := assertion.Fail(actualBalance, failureReason); err != nil {
+		return nil, fmt.Errorf("marking assertion failed: %w", err)
+	}
+
+	absImbalance, _ := imbalanceAmount.Abs().Float64()
+	observability.BalanceImbalanceGauge.WithLabelValues(req.InstrumentCode).Set(absImbalance)
+	observability.BalanceAssertionTotal.WithLabelValues("FAILED", req.Scope.String()).Inc()
+
+	trend := ba.updateTrend(ctx, req.InstrumentCode, imbalanceAmount, assertion.AssertionID)
+
+	ba.enrichWithDiagnostics(ctx, assertion, req.AccountID, req.InstrumentCode)
+
+	event := domain.NewBalanceImbalanceDetectedEvent(
+		assertion.AssertionID,
+		req.InstrumentCode,
+		summary.TotalDebits,
+		summary.TotalCredits,
+		imbalanceAmount,
+		req.Scope,
+		trend != nil && trend.IsPersistent(),
+		ba.getTrendDays(trend),
+	)
+
+	if ba.publisher != nil {
+		if pubErr := ba.publisher.PublishBalanceImbalanceDetected(ctx, event); pubErr != nil {
+			ba.logger.Error("failed to publish imbalance event",
+				"error", pubErr,
+				"assertion_id", assertion.AssertionID,
+				"instrument_code", req.InstrumentCode)
+		}
+	}
+
+	ba.logger.Error("CRITICAL: Balance imbalance detected",
+		"assertion_id", assertion.AssertionID,
+		"instrument_code", req.InstrumentCode,
+		"total_debits", summary.TotalDebits.String(),
+		"total_credits", summary.TotalCredits.String(),
+		"imbalance", imbalanceAmount.String(),
+		"is_persistent", trend != nil && trend.IsPersistent(),
+		"severity", "P1_CRITICAL")
+
+	return event, nil
 }
 
 // updateTrend updates or creates an imbalance trend for the instrument code.

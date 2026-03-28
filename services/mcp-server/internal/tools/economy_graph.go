@@ -266,10 +266,28 @@ func computeImpact(nodeID string, edges []graphEdge) map[string]interface{} {
 func extractManifestGraph(m *controlplanev1.Manifest) ([]graphNode, []graphEdge) {
 	nodeCapacity := len(m.GetInstruments()) + len(m.GetAccountTypes()) + len(m.GetSagas())
 	nodes := make([]graphNode, 0, nodeCapacity)
-	edges := make([]graphEdge, 0, nodeCapacity) // rough estimate
+	edges := make([]graphEdge, 0, nodeCapacity)
 
-	// Instruments
-	for _, inst := range m.GetInstruments() {
+	instNodes := buildInstrumentNodes(m.GetInstruments())
+	nodes = append(nodes, instNodes...)
+
+	acctNodes, acctEdges := buildAccountTypeNodesAndEdges(m.GetAccountTypes())
+	nodes = append(nodes, acctNodes...)
+	edges = append(edges, acctEdges...)
+
+	edges = append(edges, buildValuationEdges(m.GetValuationRules())...)
+
+	sagaNodes, sagaEdges := buildSagaNodesAndEdges(m.GetSagas())
+	nodes = append(nodes, sagaNodes...)
+	edges = append(edges, sagaEdges...)
+
+	return nodes, edges
+}
+
+// buildInstrumentNodes creates graph nodes for manifest instruments.
+func buildInstrumentNodes(instruments []*controlplanev1.InstrumentDefinition) []graphNode {
+	nodes := make([]graphNode, 0, len(instruments))
+	for _, inst := range instruments {
 		nodes = append(nodes, graphNode{
 			ID:   "instrument:" + inst.GetCode(),
 			Type: "instrument",
@@ -280,9 +298,14 @@ func extractManifestGraph(m *controlplanev1.Manifest) ([]graphNode, []graphEdge)
 			},
 		})
 	}
+	return nodes
+}
 
-	// Account types + denominated_in edges
-	for _, acct := range m.GetAccountTypes() {
+// buildAccountTypeNodesAndEdges creates graph nodes and denominated_in edges for account types.
+func buildAccountTypeNodesAndEdges(accountTypes []*controlplanev1.AccountTypeDefinition) ([]graphNode, []graphEdge) {
+	nodes := make([]graphNode, 0, len(accountTypes))
+	var edges []graphEdge
+	for _, acct := range accountTypes {
 		nodes = append(nodes, graphNode{
 			ID:   "account_type:" + acct.GetCode(),
 			Type: "account_type",
@@ -300,18 +323,27 @@ func extractManifestGraph(m *controlplanev1.Manifest) ([]graphNode, []graphEdge)
 			})
 		}
 	}
+	return nodes, edges
+}
 
-	// Valuation rules (converts edges)
-	for _, rule := range m.GetValuationRules() {
+// buildValuationEdges creates converts edges for valuation rules.
+func buildValuationEdges(rules []*controlplanev1.ValuationRule) []graphEdge {
+	edges := make([]graphEdge, 0, len(rules))
+	for _, rule := range rules {
 		edges = append(edges, graphEdge{
 			Source:       "instrument:" + rule.GetFromInstrument(),
 			Target:       "instrument:" + rule.GetToInstrument(),
 			Relationship: "converts",
 		})
 	}
+	return edges
+}
 
-	// Sagas + triggers_on edges
-	for i, saga := range m.GetSagas() {
+// buildSagaNodesAndEdges creates graph nodes and triggers_on edges for sagas.
+func buildSagaNodesAndEdges(sagas []*controlplanev1.SagaDefinition) ([]graphNode, []graphEdge) {
+	nodes := make([]graphNode, 0, len(sagas))
+	edges := make([]graphEdge, 0, len(sagas))
+	for i, saga := range sagas {
 		sagaID := "saga:" + saga.GetName()
 		nodes = append(nodes, graphNode{
 			ID:   sagaID,
@@ -328,7 +360,6 @@ func extractManifestGraph(m *controlplanev1.Manifest) ([]graphNode, []graphEdge)
 			Location:     fmt.Sprintf("sagas[%d].trigger", i),
 		})
 	}
-
 	return nodes, edges
 }
 

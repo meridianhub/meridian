@@ -216,32 +216,8 @@ func (c *Container) initPartyClient(ctx context.Context) error {
 		"namespace", namespace,
 		"port", ports.Party)
 
-	// Configure resilience settings from environment
-	resilientConfig := &sharedclients.ResilientClientConfig{
-		// Circuit breaker settings
-		CircuitBreakerName:     "party",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
-		CircuitBreakerInterval: env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
-		MaxRequests:            env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
-		FailureThreshold:       env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+	resilientConfig := c.buildPartyResilienceConfig()
 
-		// Retry settings
-		MaxRetries:          env.GetEnvAsInt("PARTY_MAX_RETRIES", 3),
-		InitialInterval:     env.GetEnvAsDuration("PARTY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
-		MaxInterval:         env.GetEnvAsDuration("PARTY_RETRY_MAX_INTERVAL", 5*time.Second),
-		Multiplier:          env.GetEnvAsFloat("PARTY_RETRY_MULTIPLIER", 2.0),
-		RandomizationFactor: env.GetEnvAsFloat("PARTY_RETRY_RANDOMIZATION", 0.5),
-
-		Logger: c.Logger,
-	}
-
-	c.Logger.Info("party client configured with resilience patterns",
-		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
-		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
-		"max_retries", resilientConfig.MaxRetries,
-	)
-
-	// Use the service-owned client package with DNS-based load balancing
 	pc, cleanup, err := partyclient.New(ctx, partyclient.Config{
 		ServiceName: partyclient.ServiceName,
 		Namespace:   namespace,
@@ -270,6 +246,36 @@ func (c *Container) initPartyClient(ctx context.Context) error {
 		"port", ports.Party)
 
 	return nil
+}
+
+// buildPartyResilienceConfig constructs the circuit breaker and retry configuration
+// for the Party gRPC client from environment variables.
+func (c *Container) buildPartyResilienceConfig() *sharedclients.ResilientClientConfig {
+	cfg := &sharedclients.ResilientClientConfig{
+		// Circuit breaker settings
+		CircuitBreakerName:     "party",
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_TIMEOUT", 30*time.Second),
+		CircuitBreakerInterval: env.GetEnvAsDuration("PARTY_CIRCUIT_BREAKER_INTERVAL", 60*time.Second),
+		MaxRequests:            env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       env.GetEnvAsUint32("PARTY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+
+		// Retry settings
+		MaxRetries:          env.GetEnvAsInt("PARTY_MAX_RETRIES", 3),
+		InitialInterval:     env.GetEnvAsDuration("PARTY_RETRY_INITIAL_INTERVAL", 100*time.Millisecond),
+		MaxInterval:         env.GetEnvAsDuration("PARTY_RETRY_MAX_INTERVAL", 5*time.Second),
+		Multiplier:          env.GetEnvAsFloat("PARTY_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor: env.GetEnvAsFloat("PARTY_RETRY_RANDOMIZATION", 0.5),
+
+		Logger: c.Logger,
+	}
+
+	c.Logger.Info("party client configured with resilience patterns",
+		"circuit_breaker_timeout", cfg.CircuitBreakerTimeout,
+		"circuit_breaker_failure_threshold", cfg.FailureThreshold,
+		"max_retries", cfg.MaxRetries,
+	)
+
+	return cfg
 }
 
 // initRedis initializes the Redis client and slug cache.

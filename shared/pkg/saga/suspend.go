@@ -141,35 +141,61 @@ func (s *SuspendService) SuspendSaga(
 	stepName string,
 	req *SuspendRequest,
 ) (*SuspendResult, error) {
-	// Validate inputs
-	if instance == nil {
-		return nil, fmt.Errorf("%w: saga instance is required", ErrSuspendSagaNotFound)
-	}
-	if req == nil {
-		return nil, fmt.Errorf("%w: suspend request is required", ErrIdempotencyKeyRequired)
-	}
-	if req.IdempotencyKey == "" {
-		return nil, ErrIdempotencyKeyRequired
+	if err := validateSuspendInputs(instance, req); err != nil {
+		return nil, err
 	}
 
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = s.config.DefaultTimeout
-	}
-	if timeout > s.config.MaxTimeout {
-		timeout = s.config.MaxTimeout
-	}
-
+	timeout := clampTimeout(req.Timeout, s.config)
 	now := time.Now()
 	timeoutAt := now.Add(timeout)
 
-	// Generate idempotency key for the step result
-	stepIdempotencyKey := FormatIdempotencyKey(instance.ID, stepIndex)
+	stepResult := buildSuspendedStepResult(instance, stepIndex, stepName, req, now)
 
-	// Generate causation ID
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return s.commitSuspension(tx, stepResult, instance.ID, req, timeoutAt, now)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &SuspendResult{
+		SagaInstanceID: instance.ID,
+		IdempotencyKey: req.IdempotencyKey,
+		TimeoutAt:      timeoutAt,
+	}, nil
+}
+
+// validateSuspendInputs checks that instance and request are non-nil and that the idempotency key is present.
+func validateSuspendInputs(instance *SagaInstance, req *SuspendRequest) error {
+	if instance == nil {
+		return fmt.Errorf("%w: saga instance is required", ErrSuspendSagaNotFound)
+	}
+	if req == nil {
+		return fmt.Errorf("%w: suspend request is required", ErrIdempotencyKeyRequired)
+	}
+	if req.IdempotencyKey == "" {
+		return ErrIdempotencyKeyRequired
+	}
+	return nil
+}
+
+// clampTimeout applies default and maximum bounds to the requested timeout.
+func clampTimeout(requested time.Duration, cfg *SuspendConfig) time.Duration {
+	timeout := requested
+	if timeout <= 0 {
+		timeout = cfg.DefaultTimeout
+	}
+	if timeout > cfg.MaxTimeout {
+		timeout = cfg.MaxTimeout
+	}
+	return timeout
+}
+
+// buildSuspendedStepResult creates a SagaStepResult with SUSPENDED status and suspend request data.
+func buildSuspendedStepResult(instance *SagaInstance, stepIndex int, stepName string, req *SuspendRequest, now time.Time) *SagaStepResult {
+	stepIdempotencyKey := FormatIdempotencyKey(instance.ID, stepIndex)
 	causationID := GenerateCausationID(instance.ID, stepIndex)
 
-	// Prepare step result with SUSPENDED status
 	stepResult := &SagaStepResult{
 		ID:             uuid.New(),
 		SagaInstanceID: instance.ID,
@@ -182,7 +208,6 @@ func (s *SuspendService) SuspendSaga(
 		UpdatedAt:      now,
 	}
 
-	// Store suspend request data in step result, including the idempotency key for lookups
 	stepResult.Result = JSONB{
 		"idempotency_key": req.IdempotencyKey,
 	}
@@ -192,54 +217,40 @@ func (s *SuspendService) SuspendSaga(
 		}
 	}
 
-	// Execute in transaction
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. Save step result with SUSPENDED status
-		if err := tx.Create(stepResult).Error; err != nil {
-			// Check for duplicate idempotency key
-			if isDuplicateKeyError(err) {
-				return fmt.Errorf("%w: %s", ErrDuplicateIdempotencyKey, req.IdempotencyKey)
-			}
-			return fmt.Errorf("failed to save suspended step result: %w", err)
-		}
+	return stepResult
+}
 
-		// 2. Update saga instance:
-		//    - Status = WAITING_FOR_EVENT
-		//    - Set suspend fields
-		//    - CRITICAL: Release lease (claimed_by_pod = NULL)
-		updates := map[string]interface{}{
-			"status":         SagaStatusWaitingForEvent,
-			"suspend_reason": req.Reason,
-			"suspend_data":   JSONB{"idempotency_key": req.IdempotencyKey, "timeout_at": timeoutAt},
-			"updated_at":     now,
-			// CRITICAL: Release the lease so other sagas can be processed
-			"claimed_by_pod":   nil,
-			"claimed_at":       nil,
-			"lease_expires_at": nil,
+// commitSuspension saves the step result and updates the saga instance within a transaction.
+func (s *SuspendService) commitSuspension(tx *gorm.DB, stepResult *SagaStepResult, sagaID uuid.UUID, req *SuspendRequest, timeoutAt, now time.Time) error {
+	if err := tx.Create(stepResult).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return fmt.Errorf("%w: %s", ErrDuplicateIdempotencyKey, req.IdempotencyKey)
 		}
-
-		result := tx.Model(&SagaInstance{}).
-			Where("id = ?", instance.ID).
-			Updates(updates)
-
-		if result.Error != nil {
-			return fmt.Errorf("failed to update saga instance: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return ErrSuspendSagaNotFound
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to save suspended step result: %w", err)
 	}
 
-	return &SuspendResult{
-		SagaInstanceID: instance.ID,
-		IdempotencyKey: req.IdempotencyKey,
-		TimeoutAt:      timeoutAt,
-	}, nil
+	updates := map[string]interface{}{
+		"status":           SagaStatusWaitingForEvent,
+		"suspend_reason":   req.Reason,
+		"suspend_data":     JSONB{"idempotency_key": req.IdempotencyKey, "timeout_at": timeoutAt},
+		"updated_at":       now,
+		"claimed_by_pod":   nil,
+		"claimed_at":       nil,
+		"lease_expires_at": nil,
+	}
+
+	result := tx.Model(&SagaInstance{}).
+		Where("id = ?", sagaID).
+		Updates(updates)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to update saga instance: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrSuspendSagaNotFound
+	}
+
+	return nil
 }
 
 // CompleteSagaStep resumes a suspended saga with the result from an external event.
@@ -264,103 +275,28 @@ func (s *SuspendService) CompleteSagaStep(
 	now := time.Now()
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Strategy 1: Find saga by suspend idempotency key in suspend_data (still waiting)
-		var saga SagaInstance
-		query := tx.Where("suspend_data->>'idempotency_key' = ?", req.IdempotencyKey)
-		if req.SagaInstanceID != nil {
-			query = query.Where("id = ?", *req.SagaInstanceID)
-		}
-
-		// Use FOR UPDATE to lock the row
-		err := query.Clauses(clause.Locking{Strength: "UPDATE"}).First(&saga).Error
-
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Strategy 2: Check if this idempotency key was already processed
-			// Look for a step result that had this suspend idempotency key
-			// The step result's idempotency key format includes the saga ID, but we need to
-			// find which saga had this suspend key. We can look it up via the step result's
-			// data or find the saga by checking step results with matching suspend data.
-			//
-			// For idempotency, we need to find any saga where the step result had this key
-			// in its original suspension. We store the suspend key in the step result's
-			// Result field when suspended.
-
-			// Look for a step result that was previously suspended with this idempotency key
-			// We stored the suspend data in Result when suspending
-			var stepWithKey SagaStepResult
-			stepQuery := tx.Where("result->>'idempotency_key' = ? OR result->>'_suspend_key' = ?",
-				req.IdempotencyKey, req.IdempotencyKey)
-			// If SagaInstanceID provided, filter by it for consistency
-			if req.SagaInstanceID != nil {
-				stepQuery = stepQuery.Where("saga_instance_id = ?", *req.SagaInstanceID)
-			}
-			lookupErr := stepQuery.Order("created_at DESC").First(&stepWithKey).Error
-
-			if lookupErr == nil {
-				// Found a step that had this idempotency key - fetch the saga
-				if sagaErr := tx.First(&saga, "id = ?", stepWithKey.SagaInstanceID).Error; sagaErr != nil {
-					return fmt.Errorf("failed to find saga for step result: %w", sagaErr)
-				}
-				// This is an idempotent call - saga was already processed
-				response.SagaInstanceID = saga.ID
-				response.WasAlreadyCompleted = true
-				response.NewStatus = saga.Status
-				return nil
-			}
-
-			// No saga found at all
-			return fmt.Errorf("%w: no saga found with idempotency key %s", ErrSuspendSagaNotFound, req.IdempotencyKey)
-		}
+		saga, alreadyCompleted, err := s.findSagaByIdempotencyKey(tx, req)
 		if err != nil {
-			return fmt.Errorf("failed to find saga: %w", err)
+			return err
+		}
+		if alreadyCompleted {
+			response.SagaInstanceID = saga.ID
+			response.WasAlreadyCompleted = true
+			response.NewStatus = saga.Status
+			return nil
 		}
 
 		response.SagaInstanceID = saga.ID
 
 		// Check current status for idempotency
 		if saga.Status != SagaStatusWaitingForEvent {
-			// Already resumed - this is an idempotent no-op
 			response.WasAlreadyCompleted = true
 			response.NewStatus = saga.Status
 			return nil
 		}
 
-		// Find the suspended step result to update
-		var stepResult SagaStepResult
-		if err := tx.Where("saga_instance_id = ? AND status = ?", saga.ID, StepStatusSuspended).
-			Order("step_index DESC").
-			First(&stepResult).Error; err != nil {
-			return fmt.Errorf("failed to find suspended step result: %w", err)
-		}
-
-		// Update step result with callback data
-		// Store both the result and the original suspend key for idempotency lookups
-		resultData := toJSONB(req.Result)
-		if resultData == nil {
-			resultData = JSONB{}
-		}
-		resultData["_suspend_key"] = req.IdempotencyKey
-
-		stepUpdates := map[string]interface{}{
-			"status":     StepStatusCompleted,
-			"result":     resultData,
-			"updated_at": now,
-		}
-		if err := tx.Model(&stepResult).Updates(stepUpdates).Error; err != nil {
-			return fmt.Errorf("failed to update step result: %w", err)
-		}
-
-		// Update saga instance:
-		// - Status back to PENDING (will be claimed by next worker cycle)
-		// - Clear suspend fields
-		sagaUpdates := map[string]interface{}{
-			"status":         SagaStatusPending,
-			"suspend_reason": nil,
-			"suspend_data":   nil,
-			"updated_at":     now,
-		}
-		if err := tx.Model(&saga).Updates(sagaUpdates).Error; err != nil {
-			return fmt.Errorf("failed to update saga instance: %w", err)
+		if err := s.resumeSuspendedSaga(tx, saga, req, now); err != nil {
+			return err
 		}
 
 		response.NewStatus = SagaStatusPending
@@ -371,6 +307,81 @@ func (s *SuspendService) CompleteSagaStep(
 	}
 
 	return &response, nil
+}
+
+// findSagaByIdempotencyKey looks up a saga by suspend idempotency key. First tries to find
+// a saga still WAITING_FOR_EVENT, then falls back to checking step results for idempotent calls.
+// Returns (saga, alreadyCompleted, error).
+func (s *SuspendService) findSagaByIdempotencyKey(tx *gorm.DB, req *CompleteSagaStepRequest) (*SagaInstance, bool, error) {
+	// Strategy 1: Find saga by suspend idempotency key in suspend_data (still waiting)
+	var saga SagaInstance
+	query := tx.Where("suspend_data->>'idempotency_key' = ?", req.IdempotencyKey)
+	if req.SagaInstanceID != nil {
+		query = query.Where("id = ?", *req.SagaInstanceID)
+	}
+
+	err := query.Clauses(clause.Locking{Strength: "UPDATE"}).First(&saga).Error
+
+	if err == nil {
+		return &saga, false, nil
+	}
+
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, fmt.Errorf("failed to find saga: %w", err)
+	}
+
+	// Strategy 2: Check if this idempotency key was already processed via step results
+	var stepWithKey SagaStepResult
+	stepQuery := tx.Where("result->>'idempotency_key' = ? OR result->>'_suspend_key' = ?",
+		req.IdempotencyKey, req.IdempotencyKey)
+	if req.SagaInstanceID != nil {
+		stepQuery = stepQuery.Where("saga_instance_id = ?", *req.SagaInstanceID)
+	}
+	lookupErr := stepQuery.Order("created_at DESC").First(&stepWithKey).Error
+
+	if lookupErr == nil {
+		if sagaErr := tx.First(&saga, "id = ?", stepWithKey.SagaInstanceID).Error; sagaErr != nil {
+			return nil, false, fmt.Errorf("failed to find saga for step result: %w", sagaErr)
+		}
+		return &saga, true, nil
+	}
+
+	return nil, false, fmt.Errorf("%w: no saga found with idempotency key %s", ErrSuspendSagaNotFound, req.IdempotencyKey)
+}
+
+// resumeSuspendedSaga updates the step result and saga instance to resume from suspension.
+func (s *SuspendService) resumeSuspendedSaga(tx *gorm.DB, saga *SagaInstance, req *CompleteSagaStepRequest, now time.Time) error {
+	var stepResult SagaStepResult
+	if err := tx.Where("saga_instance_id = ? AND status = ?", saga.ID, StepStatusSuspended).
+		Order("step_index DESC").
+		First(&stepResult).Error; err != nil {
+		return fmt.Errorf("failed to find suspended step result: %w", err)
+	}
+
+	resultData := toJSONB(req.Result)
+	if resultData == nil {
+		resultData = JSONB{}
+	}
+	resultData["_suspend_key"] = req.IdempotencyKey
+
+	if err := tx.Model(&stepResult).Updates(map[string]interface{}{
+		"status":     StepStatusCompleted,
+		"result":     resultData,
+		"updated_at": now,
+	}).Error; err != nil {
+		return fmt.Errorf("failed to update step result: %w", err)
+	}
+
+	if err := tx.Model(saga).Updates(map[string]interface{}{
+		"status":         SagaStatusPending,
+		"suspend_reason": nil,
+		"suspend_data":   nil,
+		"updated_at":     now,
+	}).Error; err != nil {
+		return fmt.Errorf("failed to update saga instance: %w", err)
+	}
+
+	return nil
 }
 
 // FindSuspendedByIdempotencyKey finds a saga that's suspended with the given idempotency key.

@@ -316,28 +316,39 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 
 	logger.Info("starting manifest application")
 
-	// Create tracking job
+	// Create tracking job and resolve saga script.
+	job, script, err := e.prepareApplyJob(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	// Execute the saga and process the result.
+	return e.executeSagaAndFinalize(ctx, input, job, script, logger)
+}
+
+// prepareApplyJob creates the tracking job and resolves the saga script.
+func (e *ManifestExecutor) prepareApplyJob(ctx context.Context, input *ApplyManifestInput) (*ApplyJob, string, error) {
 	versionInt := parseManifestVersion(input.ManifestVersion)
 	job, err := e.jobRepo.Create(ctx, versionInt)
 	if err != nil {
-		return nil, fmt.Errorf("create apply job: %w", err)
+		return nil, "", fmt.Errorf("create apply job: %w", err)
 	}
 
-	// Resolve the saga script (platform default fallback per ADR-0028)
 	script, err := e.resolveSagaScript(ctx)
 	if err != nil {
 		_ = e.jobRepo.MarkFailed(ctx, job.ID, err.Error())
-		return nil, fmt.Errorf("resolve saga script: %w", err)
+		return nil, "", fmt.Errorf("resolve saga script: %w", err)
 	}
 
-	// Build saga input
-	sagaInput := e.buildSagaInput(input)
+	return job, script, nil
+}
 
-	// Generate execution IDs
+// executeSagaAndFinalize runs the saga, handles failure/success, and updates the job status.
+func (e *ManifestExecutor) executeSagaAndFinalize(ctx context.Context, input *ApplyManifestInput, job *ApplyJob, script string, logger *slog.Logger) (*ApplyManifestResult, error) {
+	sagaInput := e.buildSagaInput(input)
 	executionID := uuid.New()
 	correlationID := uuid.New()
 
-	// Mark job as applying
 	if err := e.jobRepo.MarkApplying(ctx, job.ID, executionID); err != nil {
 		return nil, fmt.Errorf("mark job applying: %w", err)
 	}
@@ -347,8 +358,6 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 		"correlation_id", correlationID,
 	)
 
-	// Execute the saga with tenant-scoped party context.
-	// The control plane is a SYSTEM actor applying a manifest for a specific tenant.
 	runnerInput := saga.RunnerInput{
 		SagaExecutionID: executionID,
 		CorrelationID:   correlationID,
@@ -366,7 +375,6 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 		return nil, fmt.Errorf("execute saga: %w", err)
 	}
 
-	// Check saga result
 	if !output.Success {
 		_ = e.jobRepo.MarkFailed(ctx, job.ID, output.Error)
 		return &ApplyManifestResult{
@@ -379,7 +387,6 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 		}, fmt.Errorf("%w: %s", ErrSagaFailed, output.Error)
 	}
 
-	// Mark job as applied - propagate error so callers know about inconsistent state
 	if err := e.jobRepo.MarkApplied(ctx, job.ID); err != nil {
 		logger.Error("failed to mark job applied", "error", err)
 		return nil, fmt.Errorf("saga succeeded but job tracking failed: %w", err)

@@ -13,6 +13,7 @@ import (
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -67,25 +68,11 @@ func (s *OperationalGatewayService) ListInstructions(
 		return nil, err
 	}
 
-	// Parse pagination.
-	pageSize := defaultPageSize
-	offset := 0
-	if req.GetPagination() != nil {
-		if req.GetPagination().GetPageSize() > 0 {
-			pageSize = int(req.GetPagination().GetPageSize())
-			if pageSize > maxPageSize {
-				pageSize = maxPageSize
-			}
-		}
-		if req.GetPagination().GetPageToken() != "" {
-			offset, err = decodeOffsetToken(req.GetPagination().GetPageToken())
-			if err != nil {
-				return nil, status.Error(codes.InvalidArgument, "invalid page_token")
-			}
-		}
+	pageSize, offset, err := parsePagination(req.GetPagination())
+	if err != nil {
+		return nil, err
 	}
 
-	// Build list params.
 	params := ports.ListInstructionsParams{
 		TenantID:             tenantIDToUUID(tid),
 		InstructionType:      req.GetInstructionType(),
@@ -94,42 +81,11 @@ func (s *OperationalGatewayService) ListInstructions(
 		Offset:               offset,
 	}
 
-	// Parse status filters.
-	for _, s := range req.GetStatus() {
-		if s == opgatewayv1.InstructionStatus_INSTRUCTION_STATUS_UNSPECIFIED {
-			continue
-		}
-		domainStatus := protoToDomainStatus(s)
-		if domainStatus == "" {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid status filter: %v", s)
-		}
-		params.Statuses = append(params.Statuses, domainStatus)
+	if err := applyStatusFilters(&params, req.GetStatus()); err != nil {
+		return nil, err
 	}
-
-	// Parse date range.
-	if req.GetDateRange() != nil {
-		var startDate, endDate time.Time
-		if req.GetDateRange().GetStartDate() != "" {
-			t, parseErr := parseDate(req.GetDateRange().GetStartDate())
-			if parseErr != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid date_range.start_date: %v", parseErr)
-			}
-			startDate = t
-			params.CreatedAfter = t
-		}
-		if req.GetDateRange().GetEndDate() != "" {
-			t, parseErr := parseDate(req.GetDateRange().GetEndDate())
-			if parseErr != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid date_range.end_date: %v", parseErr)
-			}
-			// Include records created through the end of the specified day.
-			endDate = t.Add(24*time.Hour - time.Nanosecond)
-			params.CreatedBefore = endDate
-		}
-		// Reject inverted ranges eagerly to avoid contradictory queries.
-		if !startDate.IsZero() && !endDate.IsZero() && startDate.After(endDate) {
-			return nil, status.Error(codes.InvalidArgument, "date_range.start_date must not be after date_range.end_date")
-		}
+	if err := applyDateRange(&params, req.GetDateRange()); err != nil {
+		return nil, err
 	}
 
 	instructions, total, err := s.instructionRepo.ListByTenant(ctx, params)
@@ -143,7 +99,6 @@ func (s *OperationalGatewayService) ListInstructions(
 		protoInstructions = append(protoInstructions, instructionToProto(inst))
 	}
 
-	// Build next page token if there are more results.
 	nextOffset := offset + len(instructions)
 	var nextPageToken string
 	if int64(nextOffset) < total {
@@ -159,6 +114,73 @@ func (s *OperationalGatewayService) ListInstructions(
 	}, nil
 }
 
+// parsePagination extracts page size and offset from a pagination request.
+func parsePagination(pag *commonpb.Pagination) (int, int, error) {
+	pageSize := defaultPageSize
+	offset := 0
+	if pag == nil {
+		return pageSize, offset, nil
+	}
+	if pag.GetPageSize() > 0 {
+		pageSize = int(pag.GetPageSize())
+		if pageSize > maxPageSize {
+			pageSize = maxPageSize
+		}
+	}
+	if pag.GetPageToken() != "" {
+		var err error
+		offset, err = decodeOffsetToken(pag.GetPageToken())
+		if err != nil {
+			return 0, 0, status.Error(codes.InvalidArgument, "invalid page_token")
+		}
+	}
+	return pageSize, offset, nil
+}
+
+// applyStatusFilters parses proto status values and appends domain statuses to the params.
+func applyStatusFilters(params *ports.ListInstructionsParams, statuses []opgatewayv1.InstructionStatus) error {
+	for _, s := range statuses {
+		if s == opgatewayv1.InstructionStatus_INSTRUCTION_STATUS_UNSPECIFIED {
+			continue
+		}
+		domainStatus := protoToDomainStatus(s)
+		if domainStatus == "" {
+			return status.Errorf(codes.InvalidArgument, "invalid status filter: %v", s)
+		}
+		params.Statuses = append(params.Statuses, domainStatus)
+	}
+	return nil
+}
+
+// applyDateRange parses and validates the date range filter, updating the params.
+func applyDateRange(params *ports.ListInstructionsParams, dateRange *commonpb.DateRange) error {
+	if dateRange == nil {
+		return nil
+	}
+
+	var startDate, endDate time.Time
+	if dateRange.GetStartDate() != "" {
+		t, parseErr := parseDate(dateRange.GetStartDate())
+		if parseErr != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid date_range.start_date: %v", parseErr)
+		}
+		startDate = t
+		params.CreatedAfter = t
+	}
+	if dateRange.GetEndDate() != "" {
+		t, parseErr := parseDate(dateRange.GetEndDate())
+		if parseErr != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid date_range.end_date: %v", parseErr)
+		}
+		endDate = t.Add(24*time.Hour - time.Nanosecond)
+		params.CreatedBefore = endDate
+	}
+	if !startDate.IsZero() && !endDate.IsZero() && startDate.After(endDate) {
+		return status.Error(codes.InvalidArgument, "date_range.start_date must not be after date_range.end_date")
+	}
+	return nil
+}
+
 // ProcessCallback handles an inbound callback from a provider, acknowledging an instruction.
 func (s *OperationalGatewayService) ProcessCallback(
 	ctx context.Context,
@@ -169,17 +191,60 @@ func (s *OperationalGatewayService) ProcessCallback(
 		return nil, err
 	}
 
-	if req.GetIdempotencyKey() == nil || req.GetIdempotencyKey().GetKey() == "" {
-		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
-	}
-	if req.GetCallback() == nil {
-		return nil, status.Error(codes.InvalidArgument, "callback is required")
+	if err := validateCallbackRequest(req); err != nil {
+		return nil, err
 	}
 
-	// Resolve the instruction by ID or provider_reference.
-	// provider_reference lookup requires a repository method not yet implemented; return
-	// Unimplemented until that capability is added in a future iteration.
+	instruction, err := s.resolveCallbackInstruction(ctx, tid, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Idempotency: if already acknowledged, return the current state without re-applying.
+	if instruction.Status == domain.InstructionStatusAcknowledged {
+		return &opgatewayv1.ProcessCallbackResponse{
+			Instruction: instructionToProto(instruction),
+		}, nil
+	}
+
+	// Transition to ACKNOWLEDGED from DELIVERED.
+	if err := instruction.MarkAcknowledged(); err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "instruction cannot be acknowledged in status %s", instruction.Status)
+	}
+
+	if err := s.instructionRepo.Save(ctx, instruction, req.GetIdempotencyKey().GetKey()); err != nil {
+		if errors.Is(err, ports.ErrInstructionConflict) {
+			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
+		}
+		if errors.Is(err, ports.ErrDuplicateIdempotency) {
+			return &opgatewayv1.ProcessCallbackResponse{
+				Instruction: instructionToProto(instruction),
+			}, nil
+		}
+		s.logger.Error("failed to save acknowledged instruction", "error", err)
+		return nil, status.Error(codes.Internal, "failed to save instruction")
+	}
+
+	return &opgatewayv1.ProcessCallbackResponse{
+		Instruction: instructionToProto(instruction),
+	}, nil
+}
+
+// validateCallbackRequest validates required fields on the callback request.
+func validateCallbackRequest(req *opgatewayv1.ProcessCallbackRequest) error {
+	if req.GetIdempotencyKey() == nil || req.GetIdempotencyKey().GetKey() == "" {
+		return status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
+	if req.GetCallback() == nil {
+		return status.Error(codes.InvalidArgument, "callback is required")
+	}
+	return nil
+}
+
+// resolveCallbackInstruction resolves and validates the instruction referenced by the callback.
+func (s *OperationalGatewayService) resolveCallbackInstruction(ctx context.Context, tid tenant.TenantID, req *opgatewayv1.ProcessCallbackRequest) (*domain.Instruction, error) {
 	var id uuid.UUID
+	var err error
 	if req.GetInstructionId() != "" {
 		id, err = uuid.Parse(req.GetInstructionId())
 		if err != nil {
@@ -200,40 +265,11 @@ func (s *OperationalGatewayService) ProcessCallback(
 		return nil, status.Error(codes.Internal, "failed to retrieve instruction")
 	}
 
-	// Verify tenant ownership.
 	if instruction.TenantID.String() != tenantIDToUUID(tid) {
 		return nil, status.Errorf(codes.NotFound, "instruction not found: %s", req.GetInstructionId())
 	}
 
-	// Idempotency: if already acknowledged, return the current state without re-applying.
-	if instruction.Status == domain.InstructionStatusAcknowledged {
-		return &opgatewayv1.ProcessCallbackResponse{
-			Instruction: instructionToProto(instruction),
-		}, nil
-	}
-
-	// Transition to ACKNOWLEDGED from DELIVERED.
-	if err := instruction.MarkAcknowledged(); err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "instruction cannot be acknowledged in status %s", instruction.Status)
-	}
-
-	if err := s.instructionRepo.Save(ctx, instruction, req.GetIdempotencyKey().GetKey()); err != nil {
-		if errors.Is(err, ports.ErrInstructionConflict) {
-			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
-		}
-		if errors.Is(err, ports.ErrDuplicateIdempotency) {
-			// Idempotent: return the current state.
-			return &opgatewayv1.ProcessCallbackResponse{
-				Instruction: instructionToProto(instruction),
-			}, nil
-		}
-		s.logger.Error("failed to save acknowledged instruction", "error", err)
-		return nil, status.Error(codes.Internal, "failed to save instruction")
-	}
-
-	return &opgatewayv1.ProcessCallbackResponse{
-		Instruction: instructionToProto(instruction),
-	}, nil
+	return instruction, nil
 }
 
 // encodeOffsetToken encodes a numeric offset as an opaque page token.

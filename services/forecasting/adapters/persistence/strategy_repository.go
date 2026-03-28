@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -180,19 +181,43 @@ func (r *StrategyRepository) FindByTenantAndName(ctx context.Context, tenantID s
 
 // ListByTenant returns strategies for a tenant matching the filter criteria.
 func (r *StrategyRepository) ListByTenant(ctx context.Context, tenantID string, filters domain.StrategyFilters) ([]domain.ForecastingStrategy, string, error) {
-	pageSize := filters.Limit
-	if pageSize <= 0 {
-		pageSize = DefaultPageSize
-	}
-	if pageSize > MaxPageSize {
-		pageSize = MaxPageSize
-	}
+	pageSize := clampPageSize(filters.Limit)
 
 	cursorTime, cursorID, err := parseCursorToken(filters.PageToken)
 	if err != nil {
 		return nil, "", domain.ErrInvalidPageToken
 	}
 
+	query, args := buildListQuery(tenantID, filters, cursorTime, cursorID, pageSize)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to list strategies: %w", err)
+	}
+	defer rows.Close()
+
+	entities, err := r.scanAllStrategies(rows)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return paginateResults(entities, pageSize)
+}
+
+// clampPageSize applies default and maximum bounds to the requested page size.
+func clampPageSize(limit int) int {
+	if limit <= 0 {
+		return DefaultPageSize
+	}
+	if limit > MaxPageSize {
+		return MaxPageSize
+	}
+	return limit
+}
+
+// buildListQuery constructs the SQL query and arguments for listing strategies
+// with optional status and cursor filters.
+func buildListQuery(tenantID string, filters domain.StrategyFilters, cursorTime time.Time, cursorID uuid.UUID, pageSize int) (string, []interface{}) {
 	baseQuery := `
 		SELECT id, tenant_id, name, description, starlark_code,
 			horizon_hours, granularity_hours, schedule,
@@ -222,25 +247,28 @@ func (r *StrategyRepository) ListByTenant(ctx context.Context, tenantID string, 
 	baseQuery += fmt.Sprintf(" LIMIT $%d", argPos)
 	args = append(args, pageSize+1)
 
-	rows, err := r.pool.Query(ctx, baseQuery, args...)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to list strategies: %w", err)
-	}
-	defer rows.Close()
+	return baseQuery, args
+}
 
+// scanAllStrategies reads all strategy rows from the query result.
+func (r *StrategyRepository) scanAllStrategies(rows pgx.Rows) ([]ForecastingStrategyEntity, error) {
 	var entities []ForecastingStrategyEntity
 	for rows.Next() {
 		entity, err := r.scanStrategyFromRows(rows)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		entities = append(entities, entity)
 	}
-
 	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("error iterating strategies: %w", err)
+		return nil, fmt.Errorf("error iterating strategies: %w", err)
 	}
+	return entities, nil
+}
 
+// paginateResults applies cursor pagination to the entity results, returning
+// domain objects and a next-page token (empty string if no more pages).
+func paginateResults(entities []ForecastingStrategyEntity, pageSize int) ([]domain.ForecastingStrategy, string, error) {
 	var nextPageToken string
 	hasMore := len(entities) > pageSize
 	if hasMore {

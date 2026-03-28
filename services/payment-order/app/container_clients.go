@@ -153,18 +153,38 @@ func (c *Container) createInternalAccountClient(namespace string) (service.Inter
 // Provider selection and API key validation are handled by ServiceConfig.Validate,
 // so this function assumes the config is already validated.
 func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, func(), error) {
-	var baseGateway gateway.PaymentGateway
+	baseGateway, cleanup, err := createBaseGateway(svcConfig, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resilientConfig := buildGatewayResilienceConfig(logger)
+
+	logger.Info("payment gateway configured with resilience patterns",
+		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
+		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
+		"rate_limit", resilientConfig.RateLimit,
+		"rate_limit_burst", resilientConfig.RateLimitBurst,
+		"max_retries", resilientConfig.MaxRetries,
+	)
+
+	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig), cleanup, nil
+}
+
+// createBaseGateway creates the provider-specific base gateway implementation.
+func createBaseGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, func(), error) {
 	cleanup := func() {}
 
 	switch svcConfig.PaymentGatewayProvider {
 	case gateway.ProviderStripe:
 		client := stripego.NewClient(svcConfig.StripeAPIKey)
-		baseGateway = stripegateway.NewGatewayAdapter(
+		gw := stripegateway.NewGatewayAdapter(
 			client.V1PaymentIntents,
 			stripegateway.GatewayAdapterConfig{},
 			logger,
 		)
 		logger.Info("using stripe payment gateway")
+		return gw, cleanup, nil
 
 	case gateway.ProviderFinancialGateway:
 		fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
@@ -173,25 +193,28 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create financial-gateway gRPC client: %w", err)
 		}
-		cleanup = fgCleanup
-		baseGateway = gateway.NewFinancialGatewayClient(fgClient, logger)
+		gw := gateway.NewFinancialGatewayClient(fgClient, logger)
 		logger.Info("using financial-gateway payment gateway", "addr", svcConfig.FinancialGatewayAddr)
+		return gw, fgCleanup, nil
 
 	case gateway.ProviderMock:
 		logger.Warn("using mock payment gateway")
-		baseGateway = gateway.New(gateway.Config{
+		gw := gateway.New(gateway.Config{
 			UseMock: true,
 			MockConfig: gateway.MockGatewayConfig{
 				DeterministicFailures: true,
 			},
 		})
+		return gw, cleanup, nil
 
 	default:
 		return nil, nil, fmt.Errorf("%w: %q (valid: %q, %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderFinancialGateway, gateway.ProviderMock)
 	}
+}
 
-	// Configure resilience settings from environment
-	resilientConfig := gateway.ResilientGatewayConfig{
+// buildGatewayResilienceConfig creates the resilience configuration from environment variables.
+func buildGatewayResilienceConfig(logger *slog.Logger) gateway.ResilientGatewayConfig {
+	return gateway.ResilientGatewayConfig{
 		CircuitBreakerName:     "payment-gateway",
 		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultCircuitBreakerOpenTimeout),
 		CircuitBreakerInterval: env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerInterval),
@@ -206,16 +229,6 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 		RandomizationFactor:    env.GetEnvAsFloat("GATEWAY_RETRY_RANDOMIZATION", 0.5),
 		Logger:                 logger,
 	}
-
-	logger.Info("payment gateway configured with resilience patterns",
-		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
-		"circuit_breaker_failure_threshold", resilientConfig.FailureThreshold,
-		"rate_limit", resilientConfig.RateLimit,
-		"rate_limit_burst", resilientConfig.RateLimitBurst,
-		"max_retries", resilientConfig.MaxRetries,
-	)
-
-	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig), cleanup, nil
 }
 
 // createRedisClient creates and validates a Redis client connection.

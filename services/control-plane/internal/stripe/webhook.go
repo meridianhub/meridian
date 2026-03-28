@@ -32,6 +32,8 @@ var (
 	ErrPayloadTooLarge    = errors.New("request body exceeds maximum size")
 	ErrPublishFailed      = errors.New("failed to publish payment event")
 	ErrMissingChargeID    = errors.New("missing charge ID on succeeded payment intent")
+	errMissingTenantID    = errors.New("missing tenant_id in metadata")
+	errMissingPartyID     = errors.New("missing party_id in metadata")
 )
 
 // StripeSignatureHeader is the HTTP header containing the Stripe webhook signature.
@@ -188,29 +190,14 @@ func (h *WebhookHandler) handlePaymentIntentSucceeded(ctx context.Context, w htt
 		return
 	}
 
-	tenantID, ok := pi.Metadata["tenant_id"]
-	if !ok || tenantID == "" {
-		h.logger.Error("missing tenant_id in payment intent metadata", "payment_intent_id", pi.ID)
-		h.writeErrorResponse(w, http.StatusBadRequest, "missing tenant_id in metadata")
-		return
-	}
-
-	partyID, ok := pi.Metadata["party_id"]
-	if !ok || partyID == "" {
-		h.logger.Error("missing party_id in payment intent metadata", "payment_intent_id", pi.ID)
-		h.writeErrorResponse(w, http.StatusBadRequest, "missing party_id in metadata")
-		return
-	}
-
-	// Extract charge ID from the latest charge - required for reconciliation
-	chargeID := extractChargeID(&pi)
-	if chargeID == "" {
-		h.logger.Error("missing charge ID on succeeded payment intent",
-			"payment_intent_id", pi.ID,
-			"event_id", event.ID,
-		)
-		// Return 500 to trigger Stripe retry - charge may populate on re-delivery
-		h.writeErrorResponse(w, http.StatusInternalServerError, ErrMissingChargeID.Error())
+	tenantID, partyID, chargeID, err := validatePaymentIntentMetadata(&pi)
+	if err != nil {
+		h.logger.Error(err.Error(), "payment_intent_id", pi.ID, "event_id", event.ID)
+		statusCode := http.StatusBadRequest
+		if errors.Is(err, ErrMissingChargeID) {
+			statusCode = http.StatusInternalServerError
+		}
+		h.writeErrorResponse(w, statusCode, err.Error())
 		return
 	}
 
@@ -234,7 +221,6 @@ func (h *WebhookHandler) handlePaymentIntentSucceeded(ctx context.Context, w htt
 			"event_id", event.ID,
 			"payment_intent_id", pi.ID,
 		)
-		// Return 500 to trigger Stripe retry
 		h.writeErrorResponse(w, http.StatusInternalServerError, ErrPublishFailed.Error())
 		return
 	}
@@ -248,6 +234,27 @@ func (h *WebhookHandler) handlePaymentIntentSucceeded(ctx context.Context, w htt
 	)
 
 	h.writeSuccessResponse(w, "payment event published")
+}
+
+// validatePaymentIntentMetadata extracts and validates required metadata fields
+// from a succeeded payment intent.
+func validatePaymentIntentMetadata(pi *stripe.PaymentIntent) (tenantID, partyID, chargeID string, err error) {
+	tenantID = pi.Metadata["tenant_id"]
+	if tenantID == "" {
+		return "", "", "", errMissingTenantID
+	}
+
+	partyID = pi.Metadata["party_id"]
+	if partyID == "" {
+		return "", "", "", errMissingPartyID
+	}
+
+	chargeID = extractChargeID(pi)
+	if chargeID == "" {
+		return "", "", "", ErrMissingChargeID
+	}
+
+	return tenantID, partyID, chargeID, nil
 }
 
 // handlePaymentIntentFailed logs the failure. No saga is triggered for failures.
@@ -282,19 +289,7 @@ func (h *WebhookHandler) handleChargeRefunded(ctx context.Context, w http.Respon
 		return
 	}
 
-	// Refund metadata comes from the original PaymentIntent
-	var tenantID, partyID string
-	if charge.PaymentIntent != nil && charge.PaymentIntent.Metadata != nil {
-		tenantID = charge.PaymentIntent.Metadata["tenant_id"]
-		partyID = charge.PaymentIntent.Metadata["party_id"]
-	}
-	// Fall back to charge metadata
-	if tenantID == "" && charge.Metadata != nil {
-		tenantID = charge.Metadata["tenant_id"]
-	}
-	if partyID == "" && charge.Metadata != nil {
-		partyID = charge.Metadata["party_id"]
-	}
+	tenantID, partyID := extractRefundMetadata(&charge)
 
 	if tenantID == "" {
 		h.logger.Warn("missing tenant_id for refund, acknowledging without processing",
@@ -315,23 +310,7 @@ func (h *WebhookHandler) handleChargeRefunded(ctx context.Context, w http.Respon
 		return
 	}
 
-	paymentEvent := &PaymentEvent{
-		EventID:         uuid.New().String(),
-		StripeEventID:   event.ID,
-		EventType:       string(event.Type),
-		TenantID:        tenantID,
-		PartyID:         partyID,
-		AmountCents:     charge.AmountRefunded,
-		Currency:        strings.ToUpper(string(charge.Currency)),
-		ChargeID:        charge.ID,
-		PaymentIntentID: "",
-		Timestamp:       time.Unix(event.Created, 0),
-		IdempotencyKey:  generateIdempotencyKey(event.ID, string(event.Type)),
-	}
-
-	if charge.PaymentIntent != nil {
-		paymentEvent.PaymentIntentID = charge.PaymentIntent.ID
-	}
+	paymentEvent := buildRefundEvent(event, &charge, tenantID, partyID)
 
 	if err := h.publisher.PublishPaymentEvent(ctx, paymentEvent); err != nil {
 		h.logger.Error("failed to publish refund event",
@@ -350,6 +329,42 @@ func (h *WebhookHandler) handleChargeRefunded(ctx context.Context, w http.Respon
 	)
 
 	h.writeSuccessResponse(w, "refund event published")
+}
+
+// extractRefundMetadata extracts tenant_id and party_id from a refund charge,
+// checking the PaymentIntent metadata first, then falling back to charge metadata.
+func extractRefundMetadata(charge *stripe.Charge) (tenantID, partyID string) {
+	if charge.PaymentIntent != nil && charge.PaymentIntent.Metadata != nil {
+		tenantID = charge.PaymentIntent.Metadata["tenant_id"]
+		partyID = charge.PaymentIntent.Metadata["party_id"]
+	}
+	if tenantID == "" && charge.Metadata != nil {
+		tenantID = charge.Metadata["tenant_id"]
+	}
+	if partyID == "" && charge.Metadata != nil {
+		partyID = charge.Metadata["party_id"]
+	}
+	return tenantID, partyID
+}
+
+// buildRefundEvent constructs a PaymentEvent from a charge refund event.
+func buildRefundEvent(event *stripe.Event, charge *stripe.Charge, tenantID, partyID string) *PaymentEvent {
+	paymentEvent := &PaymentEvent{
+		EventID:        uuid.New().String(),
+		StripeEventID:  event.ID,
+		EventType:      string(event.Type),
+		TenantID:       tenantID,
+		PartyID:        partyID,
+		AmountCents:    charge.AmountRefunded,
+		Currency:       strings.ToUpper(string(charge.Currency)),
+		ChargeID:       charge.ID,
+		Timestamp:      time.Unix(event.Created, 0),
+		IdempotencyKey: generateIdempotencyKey(event.ID, string(event.Type)),
+	}
+	if charge.PaymentIntent != nil {
+		paymentEvent.PaymentIntentID = charge.PaymentIntent.ID
+	}
+	return paymentEvent
 }
 
 // extractChargeID extracts the latest charge ID from a PaymentIntent.

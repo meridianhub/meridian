@@ -140,13 +140,28 @@ func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.Se
 		}
 	}()
 
+	totalCaptured, err := sc.fetchAndInsertPages(ctx, gCtx, g, run)
+	if err != nil {
+		return err
+	}
+
+	slog.InfoContext(ctx, "all snapshots captured",
+		"run_id", run.RunID,
+		"total_snapshots", totalCaptured,
+	)
+	return nil
+}
+
+// fetchAndInsertPages paginates through PK positions, transforms them to snapshots,
+// and schedules batch inserts on the errgroup.
+func (sc *SnapshotCapturer) fetchAndInsertPages(ctx, gCtx context.Context, g *errgroup.Group, run *domain.SettlementRun) (int, error) {
 	pageToken := ""
 	totalCaptured := 0
 
 	for page := 0; page < maxPages; page++ {
 		positionPage, err := sc.provider.FetchPositions(gCtx, run.AccountID, defaultPageSize, pageToken)
 		if err != nil {
-			return fmt.Errorf("failed to fetch positions (page %d): %w", page, err)
+			return totalCaptured, fmt.Errorf("failed to fetch positions (page %d): %w", page, err)
 		}
 
 		if len(positionPage.Records) == 0 {
@@ -155,23 +170,10 @@ func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.Se
 
 		snapshots, err := sc.transformToSnapshots(run, positionPage.Records)
 		if err != nil {
-			return fmt.Errorf("failed to transform positions to snapshots (page %d): %w", page, err)
+			return totalCaptured, fmt.Errorf("failed to transform positions to snapshots (page %d): %w", page, err)
 		}
 
-		// Batch insert concurrently with bounded parallelism.
-		// Copy snapshots slice to capture in closure.
-		for i := 0; i < len(snapshots); i += snapshotBatchSize {
-			end := i + snapshotBatchSize
-			if end > len(snapshots) {
-				end = len(snapshots)
-			}
-			batch := snapshots[i:end]
-
-			g.Go(func() error {
-				return sc.snapRepo.CreateBatch(gCtx, batch)
-			})
-		}
-
+		sc.scheduleBatchInserts(gCtx, g, snapshots)
 		totalCaptured += len(snapshots)
 
 		slog.DebugContext(ctx, "captured snapshot page",
@@ -187,11 +189,21 @@ func (sc *SnapshotCapturer) capturePositions(ctx context.Context, run *domain.Se
 		}
 	}
 
-	slog.InfoContext(ctx, "all snapshots captured",
-		"run_id", run.RunID,
-		"total_snapshots", totalCaptured,
-	)
-	return nil
+	return totalCaptured, nil
+}
+
+// scheduleBatchInserts splits snapshots into batches and schedules concurrent inserts.
+func (sc *SnapshotCapturer) scheduleBatchInserts(gCtx context.Context, g *errgroup.Group, snapshots []*domain.SettlementSnapshot) {
+	for i := 0; i < len(snapshots); i += snapshotBatchSize {
+		end := i + snapshotBatchSize
+		if end > len(snapshots) {
+			end = len(snapshots)
+		}
+		batch := snapshots[i:end]
+		g.Go(func() error {
+			return sc.snapRepo.CreateBatch(gCtx, batch)
+		})
+	}
 }
 
 // transformToSnapshots converts PK position records into SettlementSnapshot domain objects.

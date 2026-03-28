@@ -87,18 +87,11 @@ func SetupTestDB(t *testing.T, opts ...Option) (*gorm.DB, context.Context, func(
 		opt(cfg)
 	}
 
-	// Start PostgreSQL container with GORM connection
 	db, cleanup := SetupPostgres(t, nil, WithLogLevel(cfg.logLevel))
 
 	// Pin to a single connection so session-level SET search_path persists
-	// across all subsequent Exec/AutoMigrate calls.
 	if cfg.tenantID != "" {
-		sqlDB, err := db.DB()
-		if err != nil {
-			cleanup()
-			t.Fatalf("testdb: failed to get underlying sql.DB: %v", err)
-		}
-		sqlDB.SetMaxOpenConns(1)
+		pinToSingleConn(t, db, cleanup)
 	}
 
 	// AutoMigrate models in public schema first (provides fallback for cross-tenant queries)
@@ -109,52 +102,67 @@ func SetupTestDB(t *testing.T, opts ...Option) (*gorm.DB, context.Context, func(
 		}
 	}
 
-	// Create audit tables in public schema if requested
 	if cfg.auditTables {
 		CreateAuditTables(t, db)
 	}
 
-	// Set up tenant schema if requested
 	ctx := context.Background()
 	if cfg.tenantID != "" {
-		tid := tenant.TenantID(cfg.tenantID)
-		schemaName := tid.SchemaName()
-
-		err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
-		if err != nil {
-			cleanup()
-			t.Fatalf("testdb: failed to create tenant schema %s: %v", schemaName, err)
-		}
-
-		// Use a transaction to pin the connection for SET search_path +
-		// AutoMigrate so they are guaranteed to execute on the same session.
-		// SET search_path is session-level, so it persists after COMMIT.
-		err = db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error; err != nil {
-				return fmt.Errorf("set search_path to %s: %w", schemaName, err)
-			}
-
-			// AutoMigrate models in tenant schema too
-			if len(cfg.models) > 0 {
-				if err := tx.AutoMigrate(cfg.models...); err != nil {
-					return fmt.Errorf("auto-migrate models in tenant schema: %w", err)
-				}
-			}
-
-			// Create audit tables in tenant schema if requested
-			if cfg.auditTables {
-				CreateAuditTables(t, tx)
-			}
-
-			return nil
-		})
-		if err != nil {
-			cleanup()
-			t.Fatalf("testdb: failed to set up tenant schema %s: %v", schemaName, err)
-		}
-
-		ctx = tenant.WithTenant(ctx, tid)
+		ctx = setupTenantSchema(t, db, cfg, cleanup)
 	}
 
 	return db, ctx, cleanup
+}
+
+// pinToSingleConn restricts the connection pool to one connection so session-level
+// SET search_path persists across all subsequent Exec/AutoMigrate calls.
+func pinToSingleConn(t *testing.T, db *gorm.DB, cleanup func()) {
+	t.Helper()
+	sqlDB, err := db.DB()
+	if err != nil {
+		cleanup()
+		t.Fatalf("testdb: failed to get underlying sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+}
+
+// setupTenantSchema creates a tenant schema, migrates models into it, and returns
+// a context with the tenant ID injected.
+func setupTenantSchema(t *testing.T, db *gorm.DB, cfg *setupConfig, cleanup func()) context.Context {
+	t.Helper()
+
+	tid := tenant.TenantID(cfg.tenantID)
+	schemaName := tid.SchemaName()
+
+	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
+	if err != nil {
+		cleanup()
+		t.Fatalf("testdb: failed to create tenant schema %s: %v", schemaName, err)
+	}
+
+	// Use a transaction to pin the connection for SET search_path +
+	// AutoMigrate so they are guaranteed to execute on the same session.
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error; err != nil {
+			return fmt.Errorf("set search_path to %s: %w", schemaName, err)
+		}
+
+		if len(cfg.models) > 0 {
+			if err := tx.AutoMigrate(cfg.models...); err != nil {
+				return fmt.Errorf("auto-migrate models in tenant schema: %w", err)
+			}
+		}
+
+		if cfg.auditTables {
+			CreateAuditTables(t, tx)
+		}
+
+		return nil
+	})
+	if err != nil {
+		cleanup()
+		t.Fatalf("testdb: failed to set up tenant schema %s: %v", schemaName, err)
+	}
+
+	return tenant.WithTenant(context.Background(), tid)
 }

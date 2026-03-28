@@ -223,50 +223,54 @@ func connectionToProto(c *domain.ProviderConnection) *opgatewayv1.ProviderConnec
 		p.LastHealthCheckAt = timestamppb.New(*c.LastHealthCheckAt)
 	}
 
-	// Map auth config.
-	switch auth := c.AuthConfig.(type) {
+	mapAuthConfigToProto(p, c.AuthConfig)
+
+	return p
+}
+
+// mapAuthConfigToProto sets the auth config oneof field on the proto ProviderConnection.
+func mapAuthConfigToProto(p *opgatewayv1.ProviderConnection, auth domain.AuthConfig) {
+	switch a := auth.(type) {
 	case *domain.APIKeyAuth:
 		p.AuthConfig = &opgatewayv1.ProviderConnection_ApiKey{
 			ApiKey: &opgatewayv1.ApiKeyAuth{
-				HeaderName: auth.HeaderName,
-				SecretRef:  auth.SecretRef,
+				HeaderName: a.HeaderName,
+				SecretRef:  a.SecretRef,
 			},
 		}
 	case *domain.BasicAuth:
 		p.AuthConfig = &opgatewayv1.ProviderConnection_Basic{
 			Basic: &opgatewayv1.BasicAuth{
-				Username:          auth.Username,
-				PasswordSecretRef: auth.PasswordRef,
+				Username:          a.Username,
+				PasswordSecretRef: a.PasswordRef,
 			},
 		}
 	case *domain.OAuth2Auth:
 		p.AuthConfig = &opgatewayv1.ProviderConnection_Oauth2{
 			Oauth2: &opgatewayv1.OAuth2Auth{
-				TokenUrl:        auth.TokenURL,
-				ClientId:        auth.ClientID,
-				ClientSecretRef: auth.ClientSecretRef,
-				Scopes:          auth.Scopes,
+				TokenUrl:        a.TokenURL,
+				ClientId:        a.ClientID,
+				ClientSecretRef: a.ClientSecretRef,
+				Scopes:          a.Scopes,
 			},
 		}
 	case *domain.HMACAuth:
 		p.AuthConfig = &opgatewayv1.ProviderConnection_Hmac{
 			Hmac: &opgatewayv1.HMACAuth{
-				Algorithm:       auth.Algorithm,
-				SecretRef:       auth.SecretRef,
-				SignatureHeader: auth.SignatureHeader,
+				Algorithm:       a.Algorithm,
+				SecretRef:       a.SecretRef,
+				SignatureHeader: a.SignatureHeader,
 			},
 		}
 	case *domain.MTLSAuth:
 		p.AuthConfig = &opgatewayv1.ProviderConnection_Mtls{
 			Mtls: &opgatewayv1.MTLSAuth{
-				ClientCertSecretRef: auth.ClientCertRef,
-				ClientKeySecretRef:  auth.ClientKeyRef,
-				CaCertSecretRef:     auth.CACertRef,
+				ClientCertSecretRef: a.ClientCertRef,
+				ClientKeySecretRef:  a.ClientKeyRef,
+				CaCertSecretRef:     a.CACertRef,
 			},
 		}
 	}
-
-	return p
 }
 
 // protoToDomainAuthConfig converts a proto auth config oneof to a domain AuthConfig.

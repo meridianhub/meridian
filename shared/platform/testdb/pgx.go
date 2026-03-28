@@ -116,42 +116,11 @@ func NewTestPool(t *testing.T, opts ...PoolOption) *pgxpool.Pool {
 func applyMigrationsWithPgx(t *testing.T, pool *pgxpool.Pool, service string) {
 	t.Helper()
 
-	// Find migrations directory - try multiple paths for test execution contexts
-	var migrationsDir string
-	possiblePaths := []string{
-		filepath.Join("services", service, "migrations"),
-		filepath.Join("..", "..", "services", service, "migrations"),
-		filepath.Join("..", "..", "..", "services", service, "migrations"),
-		filepath.Join("..", "..", "..", "..", "services", service, "migrations"),
-		filepath.Join("..", "..", "..", "..", "..", "services", service, "migrations"),
-	}
-
-	for _, path := range possiblePaths {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			migrationsDir = path
-			break
-		}
-	}
-
-	if migrationsDir == "" {
-		t.Fatalf("Could not find migrations directory for service %s", service)
-	}
-
-	// Read migration files in order
-	entries, err := os.ReadDir(migrationsDir)
-	if err != nil {
-		t.Fatalf("Failed to read migrations directory: %v", err)
-	}
+	migrationsDir := findMigrationsDir(t, service)
+	entries := readMigrationFiles(t, migrationsDir)
 
 	ctx := context.Background()
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if filepath.Ext(entry.Name()) != ".sql" {
-			continue
-		}
-
 		path := filepath.Join(migrationsDir, entry.Name())
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -164,6 +133,48 @@ func applyMigrationsWithPgx(t *testing.T, pool *pgxpool.Pool, service string) {
 			t.Fatalf("Failed to apply migration %s: %v", entry.Name(), err)
 		}
 	}
+}
+
+// findMigrationsDir locates the migrations directory for a service,
+// searching multiple relative paths to handle different test execution contexts.
+func findMigrationsDir(t *testing.T, service string) string {
+	t.Helper()
+
+	possiblePaths := []string{
+		filepath.Join("services", service, "migrations"),
+		filepath.Join("..", "..", "services", service, "migrations"),
+		filepath.Join("..", "..", "..", "services", service, "migrations"),
+		filepath.Join("..", "..", "..", "..", "services", service, "migrations"),
+		filepath.Join("..", "..", "..", "..", "..", "services", service, "migrations"),
+	}
+
+	for _, path := range possiblePaths {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return path
+		}
+	}
+
+	t.Fatalf("Could not find migrations directory for service %s", service)
+	return "" // unreachable
+}
+
+// readMigrationFiles reads and filters SQL migration entries from a directory.
+func readMigrationFiles(t *testing.T, migrationsDir string) []os.DirEntry {
+	t.Helper()
+
+	allEntries, err := os.ReadDir(migrationsDir)
+	if err != nil {
+		t.Fatalf("Failed to read migrations directory: %v", err)
+	}
+
+	var sqlEntries []os.DirEntry
+	for _, entry := range allEntries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".sql" {
+			continue
+		}
+		sqlEntries = append(sqlEntries, entry)
+	}
+	return sqlEntries
 }
 
 // SetupTenantSchemaForPgx creates a tenant schema and applies migrations.
@@ -208,36 +219,11 @@ func SetupTenantSchemaForPgx(t *testing.T, pool *pgxpool.Pool, tenantID string, 
 func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, schemaName string) {
 	t.Helper()
 
-	// Find migrations directory
-	var migrationsDir string
-	possiblePaths := []string{
-		filepath.Join("services", service, "migrations"),
-		filepath.Join("..", "..", "services", service, "migrations"),
-		filepath.Join("..", "..", "..", "services", service, "migrations"),
-		filepath.Join("..", "..", "..", "..", "services", service, "migrations"),
-		filepath.Join("..", "..", "..", "..", "..", "services", service, "migrations"),
-	}
-
-	for _, path := range possiblePaths {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			migrationsDir = path
-			break
-		}
-	}
-
-	if migrationsDir == "" {
-		t.Fatalf("Could not find migrations directory for service %s", service)
-	}
-
-	// Read migration files in order
-	entries, err := os.ReadDir(migrationsDir)
-	if err != nil {
-		t.Fatalf("Failed to read migrations directory: %v", err)
-	}
+	migrationsDir := findMigrationsDir(t, service)
+	entries := readMigrationFiles(t, migrationsDir)
 
 	ctx := context.Background()
 
-	// Start a transaction and set search_path
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("Failed to begin transaction: %v", err)
@@ -252,13 +238,6 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if filepath.Ext(entry.Name()) != ".sql" {
-			continue
-		}
-
 		path := filepath.Join(migrationsDir, entry.Name())
 		content, err := os.ReadFile(path)
 		if err != nil {

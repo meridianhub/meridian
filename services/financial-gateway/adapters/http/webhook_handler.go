@@ -120,7 +120,7 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 
 	defer func() { _ = r.Body.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, StripeWebhookMaxBodySize+1))
+	body, err := readWebhookBody(r)
 	if err != nil {
 		h.logger.Error("failed to read stripe webhook body", "error", err)
 		h.writeError(w, http.StatusBadRequest, "invalid request body")
@@ -131,65 +131,21 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Extract tenant ID from the URL path segment {tenantID}.
-	// The route must be registered as: POST /webhooks/stripe/{tenantID}
-	rawTenantID := r.PathValue("tenantID")
-	if rawTenantID == "" {
-		h.logger.Warn("missing tenant ID in stripe webhook URL path")
+	tenantID, ctx, err := h.extractTenantFromPath(ctx, r)
+	if err != nil {
 		h.writeError(w, http.StatusBadRequest, ErrMissingTenantContext.Error())
 		return
 	}
-	tenantID := tenant.TenantID(rawTenantID)
-	ctx = tenant.WithTenant(ctx, tenantID)
 
-	client, err := h.clientFactory.NewClient(ctx)
+	parsed, err := h.validateAndParseWebhook(ctx, r, body, tenantID, w)
 	if err != nil {
-		h.logger.Error("failed to get stripe client for tenant",
-			"tenant_id", tenantID.String(),
-			"error", err,
-		)
-		h.writeError(w, http.StatusInternalServerError, "failed to resolve tenant configuration")
-		return
-	}
-
-	if client.WebhookEndpointSecret == "" {
-		h.logger.Error("no webhook secret for tenant", "tenant_id", tenantID.String())
-		h.writeError(w, http.StatusInternalServerError, "no webhook secret configured for tenant")
-		return
-	}
-
-	adapter, err := stripeadapter.NewWebhookAdapter(client.WebhookEndpointSecret)
-	if err != nil {
-		h.logger.Error("failed to create stripe webhook adapter", "error", err)
-		h.writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
-	parsed, err := adapter.ParseWebhook(r, body)
-	if err != nil {
-		switch {
-		case errors.Is(err, stripeadapter.ErrWebhookInvalidSignature):
-			h.logger.Warn("invalid stripe webhook signature", "tenant_id", tenantID.String())
-			h.writeError(w, http.StatusUnauthorized, "invalid webhook signature")
-		case errors.Is(err, stripeadapter.ErrWebhookMissingSignature):
-			h.logger.Warn("missing stripe webhook signature")
-			h.writeError(w, http.StatusUnauthorized, "missing Stripe-Signature header")
-		case errors.Is(err, stripeadapter.ErrWebhookUnsupportedEvent):
-			h.logger.Debug("unsupported stripe event type", "tenant_id", tenantID.String())
-			h.writeSuccess(w, "event type not handled")
-		default:
-			h.logger.Error("failed to parse stripe webhook", "error", err, "tenant_id", tenantID.String())
-			h.writeError(w, http.StatusBadRequest, "failed to parse webhook")
-		}
-		return
+		return // response already written by validateAndParseWebhook
 	}
 
 	domainEvent, topic, err := h.mapToDomainEvent(parsed)
 	if err != nil {
 		var noMapping errNoMapping
 		if errors.As(err, &noMapping) {
-			// Events with no domain event mapping (e.g., REFUNDED, DISPUTED) are
-			// acknowledged to prevent Stripe retries. Full handling is out of scope here.
 			h.writeSuccess(w, "event acknowledged")
 			return
 		}
@@ -202,18 +158,100 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Require payment_order_id to be present in Stripe metadata.
-	// Events without it cannot be routed to a payment order — publishing
-	// would fail with ErrEmptyAggregateID and trigger infinite Stripe retries.
 	if parsed.PaymentOrderID == "" {
-		h.logger.Warn("stripe webhook missing payment_order_id in metadata — event acknowledged without processing",
+		h.logger.Warn("stripe webhook missing payment_order_id in metadata - event acknowledged without processing",
 			"event_id", parsed.EventID,
 			"gateway_reference_id", parsed.GatewayReferenceID,
 			"tenant_id", tenantID.String(),
 		)
-		h.writeSuccess(w, "event acknowledged — no payment_order_id in metadata")
+		h.writeSuccess(w, "event acknowledged - no payment_order_id in metadata")
 		return
 	}
 
+	h.publishDomainEvent(ctx, w, parsed, domainEvent, topic, tenantID)
+}
+
+// readWebhookBody reads the request body up to the maximum allowed size.
+func readWebhookBody(r *http.Request) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r.Body, StripeWebhookMaxBodySize+1))
+}
+
+// extractTenantFromPath extracts the tenant ID from the URL path and injects it into context.
+func (h *WebhookHandler) extractTenantFromPath(ctx context.Context, r *http.Request) (tenant.TenantID, context.Context, error) {
+	rawTenantID := r.PathValue("tenantID")
+	if rawTenantID == "" {
+		h.logger.Warn("missing tenant ID in stripe webhook URL path")
+		return "", ctx, ErrMissingTenantContext
+	}
+	tenantID := tenant.TenantID(rawTenantID)
+	return tenantID, tenant.WithTenant(ctx, tenantID), nil
+}
+
+// validateAndParseWebhook resolves the tenant's Stripe client, validates the signature,
+// and parses the webhook. On error, it writes the HTTP response and returns a non-nil error.
+func (h *WebhookHandler) validateAndParseWebhook(
+	ctx context.Context,
+	r *http.Request,
+	body []byte,
+	tenantID tenant.TenantID,
+	w http.ResponseWriter,
+) (stripeadapter.ParsedWebhookEvent, error) {
+	client, err := h.clientFactory.NewClient(ctx)
+	if err != nil {
+		h.logger.Error("failed to get stripe client for tenant", "tenant_id", tenantID.String(), "error", err)
+		h.writeError(w, http.StatusInternalServerError, "failed to resolve tenant configuration")
+		return stripeadapter.ParsedWebhookEvent{}, err
+	}
+
+	if client.WebhookEndpointSecret == "" {
+		h.logger.Error("no webhook secret for tenant", "tenant_id", tenantID.String())
+		h.writeError(w, http.StatusInternalServerError, "no webhook secret configured for tenant")
+		return stripeadapter.ParsedWebhookEvent{}, ErrMissingTenantContext
+	}
+
+	adapter, err := stripeadapter.NewWebhookAdapter(client.WebhookEndpointSecret)
+	if err != nil {
+		h.logger.Error("failed to create stripe webhook adapter", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internal error")
+		return stripeadapter.ParsedWebhookEvent{}, err
+	}
+
+	parsed, err := adapter.ParseWebhook(r, body)
+	if err != nil {
+		h.handleParseError(w, err, tenantID)
+		return stripeadapter.ParsedWebhookEvent{}, err
+	}
+
+	return parsed, nil
+}
+
+// handleParseError writes the appropriate HTTP response for a webhook parsing error.
+func (h *WebhookHandler) handleParseError(w http.ResponseWriter, err error, tenantID tenant.TenantID) {
+	switch {
+	case errors.Is(err, stripeadapter.ErrWebhookInvalidSignature):
+		h.logger.Warn("invalid stripe webhook signature", "tenant_id", tenantID.String())
+		h.writeError(w, http.StatusUnauthorized, "invalid webhook signature")
+	case errors.Is(err, stripeadapter.ErrWebhookMissingSignature):
+		h.logger.Warn("missing stripe webhook signature")
+		h.writeError(w, http.StatusUnauthorized, "missing Stripe-Signature header")
+	case errors.Is(err, stripeadapter.ErrWebhookUnsupportedEvent):
+		h.logger.Debug("unsupported stripe event type", "tenant_id", tenantID.String())
+		h.writeSuccess(w, "event type not handled")
+	default:
+		h.logger.Error("failed to parse stripe webhook", "error", err, "tenant_id", tenantID.String())
+		h.writeError(w, http.StatusBadRequest, "failed to parse webhook")
+	}
+}
+
+// publishDomainEvent publishes the mapped domain event to the transactional outbox.
+func (h *WebhookHandler) publishDomainEvent(
+	ctx context.Context,
+	w http.ResponseWriter,
+	parsed stripeadapter.ParsedWebhookEvent,
+	domainEvent proto.Message,
+	topic string,
+	tenantID tenant.TenantID,
+) {
 	h.logger.Info("publishing stripe webhook domain event",
 		"event_id", parsed.EventID,
 		"gateway_reference_id", parsed.GatewayReferenceID,
@@ -246,67 +284,13 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 func (h *WebhookHandler) mapToDomainEvent(parsed stripeadapter.ParsedWebhookEvent) (proto.Message, string, error) {
 	switch parsed.Status {
 	case "SETTLED":
-		evt := &financialgatewayeventsv1.PaymentCapturedEvent{
-			EventId:             uuid.New().String(),
-			Version:             1,
-			PaymentOrderId:      parsed.PaymentOrderID,
-			ProviderReferenceId: parsed.GatewayReferenceID,
-			ProviderEventId:     parsed.EventID,
-			CausationId:         parsed.EventID,
-			AmountMinorUnits:    parsed.AmountMinorUnits,
-			Currency:            parsed.Currency,
-		}
-		if !parsed.Timestamp.IsZero() {
-			evt.CapturedAt = timestamppb.New(parsed.Timestamp)
-		}
-		return evt, topics.FinancialGatewayPaymentCapturedV1, nil
-
+		return buildCapturedEvent(parsed), topics.FinancialGatewayPaymentCapturedV1, nil
 	case "REJECTED":
-		evt := &financialgatewayeventsv1.PaymentFailedEvent{
-			EventId:             uuid.New().String(),
-			Version:             1,
-			PaymentOrderId:      parsed.PaymentOrderID,
-			ProviderReferenceId: parsed.GatewayReferenceID,
-			FailureReason:       parsed.Message,
-			ProviderEventId:     parsed.EventID,
-			CausationId:         parsed.EventID,
-		}
-		if !parsed.Timestamp.IsZero() {
-			evt.FailedAt = timestamppb.New(parsed.Timestamp)
-		}
-		return evt, topics.FinancialGatewayPaymentFailedV1, nil
-
+		return buildFailedEvent(parsed), topics.FinancialGatewayPaymentFailedV1, nil
 	case "REFUNDED":
-		evt := &financialgatewayeventsv1.PaymentRefundedEvent{
-			EventId:                  uuid.New().String(),
-			Version:                  1,
-			PaymentOrderId:           parsed.PaymentOrderID,
-			ProviderReferenceId:      parsed.GatewayReferenceID,
-			ProviderEventId:          parsed.EventID,
-			CausationId:              parsed.EventID,
-			AmountRefundedMinorUnits: parsed.AmountMinorUnits,
-			Currency:                 parsed.Currency,
-		}
-		if !parsed.Timestamp.IsZero() {
-			evt.RefundedAt = timestamppb.New(parsed.Timestamp)
-		}
-		return evt, topics.FinancialGatewayPaymentRefundedV1, nil
-
+		return buildRefundedEvent(parsed), topics.FinancialGatewayPaymentRefundedV1, nil
 	case "DISPUTED":
-		evt := &financialgatewayeventsv1.PaymentDisputedEvent{
-			EventId:             uuid.New().String(),
-			Version:             1,
-			PaymentOrderId:      parsed.PaymentOrderID,
-			ProviderReferenceId: parsed.GatewayReferenceID,
-			ProviderEventId:     parsed.EventID,
-			CausationId:         parsed.EventID,
-			DisputeReason:       parsed.Message,
-		}
-		if !parsed.Timestamp.IsZero() {
-			evt.DisputedAt = timestamppb.New(parsed.Timestamp)
-		}
-		return evt, topics.FinancialGatewayPaymentDisputedV1, nil
-
+		return buildDisputedEvent(parsed), topics.FinancialGatewayPaymentDisputedV1, nil
 	default:
 		h.logger.Debug("stripe event acknowledged without domain event mapping",
 			"status", parsed.Status,
@@ -314,6 +298,76 @@ func (h *WebhookHandler) mapToDomainEvent(parsed stripeadapter.ParsedWebhookEven
 		)
 		return nil, "", errNoMapping{status: parsed.Status}
 	}
+}
+
+// buildCapturedEvent creates a PaymentCapturedEvent from a parsed webhook event.
+func buildCapturedEvent(parsed stripeadapter.ParsedWebhookEvent) *financialgatewayeventsv1.PaymentCapturedEvent {
+	evt := &financialgatewayeventsv1.PaymentCapturedEvent{
+		EventId:             uuid.New().String(),
+		Version:             1,
+		PaymentOrderId:      parsed.PaymentOrderID,
+		ProviderReferenceId: parsed.GatewayReferenceID,
+		ProviderEventId:     parsed.EventID,
+		CausationId:         parsed.EventID,
+		AmountMinorUnits:    parsed.AmountMinorUnits,
+		Currency:            parsed.Currency,
+	}
+	if !parsed.Timestamp.IsZero() {
+		evt.CapturedAt = timestamppb.New(parsed.Timestamp)
+	}
+	return evt
+}
+
+// buildFailedEvent creates a PaymentFailedEvent from a parsed webhook event.
+func buildFailedEvent(parsed stripeadapter.ParsedWebhookEvent) *financialgatewayeventsv1.PaymentFailedEvent {
+	evt := &financialgatewayeventsv1.PaymentFailedEvent{
+		EventId:             uuid.New().String(),
+		Version:             1,
+		PaymentOrderId:      parsed.PaymentOrderID,
+		ProviderReferenceId: parsed.GatewayReferenceID,
+		FailureReason:       parsed.Message,
+		ProviderEventId:     parsed.EventID,
+		CausationId:         parsed.EventID,
+	}
+	if !parsed.Timestamp.IsZero() {
+		evt.FailedAt = timestamppb.New(parsed.Timestamp)
+	}
+	return evt
+}
+
+// buildRefundedEvent creates a PaymentRefundedEvent from a parsed webhook event.
+func buildRefundedEvent(parsed stripeadapter.ParsedWebhookEvent) *financialgatewayeventsv1.PaymentRefundedEvent {
+	evt := &financialgatewayeventsv1.PaymentRefundedEvent{
+		EventId:                  uuid.New().String(),
+		Version:                  1,
+		PaymentOrderId:           parsed.PaymentOrderID,
+		ProviderReferenceId:      parsed.GatewayReferenceID,
+		ProviderEventId:          parsed.EventID,
+		CausationId:              parsed.EventID,
+		AmountRefundedMinorUnits: parsed.AmountMinorUnits,
+		Currency:                 parsed.Currency,
+	}
+	if !parsed.Timestamp.IsZero() {
+		evt.RefundedAt = timestamppb.New(parsed.Timestamp)
+	}
+	return evt
+}
+
+// buildDisputedEvent creates a PaymentDisputedEvent from a parsed webhook event.
+func buildDisputedEvent(parsed stripeadapter.ParsedWebhookEvent) *financialgatewayeventsv1.PaymentDisputedEvent {
+	evt := &financialgatewayeventsv1.PaymentDisputedEvent{
+		EventId:             uuid.New().String(),
+		Version:             1,
+		PaymentOrderId:      parsed.PaymentOrderID,
+		ProviderReferenceId: parsed.GatewayReferenceID,
+		ProviderEventId:     parsed.EventID,
+		CausationId:         parsed.EventID,
+		DisputeReason:       parsed.Message,
+	}
+	if !parsed.Timestamp.IsZero() {
+		evt.DisputedAt = timestamppb.New(parsed.Timestamp)
+	}
+	return evt
 }
 
 // errNoMapping is returned when a Stripe event status has no domain event mapping.

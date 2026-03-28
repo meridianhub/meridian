@@ -178,7 +178,6 @@ func NewPaymentOrder(t *testing.T, opts ...PaymentOrderOption) *domain.PaymentOr
 func NewPaymentOrderInStatus(t *testing.T, status domain.PaymentOrderStatus, opts ...PaymentOrderOption) *domain.PaymentOrder {
 	t.Helper()
 
-	// Defaults that vary by status
 	cfg := &paymentOrderConfig{
 		debtorAccountID:   "TEST-DEBTOR-001",
 		creditorReference: "GB82WEST12345698765432",
@@ -193,18 +192,15 @@ func NewPaymentOrderInStatus(t *testing.T, status domain.PaymentOrderStatus, opt
 		errorCode:         "TEST_ERROR",
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	// Create money
 	amount, err := domain.NewMoney(cfg.currency, cfg.amountCents)
 	if err != nil {
 		t.Fatalf("Failed to create money: %v", err)
 	}
 
-	// Build payment order struct directly for non-initial states
 	now := time.Now()
 	po := &domain.PaymentOrder{
 		ID:                uuid.New(),
@@ -219,15 +215,20 @@ func NewPaymentOrderInStatus(t *testing.T, status domain.PaymentOrderStatus, opt
 		UpdatedAt:         now,
 	}
 
-	// Override ID if specified
 	if cfg.id != uuid.Nil {
 		po.ID = cfg.id
 	}
 
-	// Set status-specific fields
+	applyStatusFields(po, status, cfg, now)
+
+	return po
+}
+
+// applyStatusFields sets status-specific fields on the payment order.
+func applyStatusFields(po *domain.PaymentOrder, status domain.PaymentOrderStatus, cfg *paymentOrderConfig, now time.Time) {
 	switch status {
 	case domain.PaymentOrderStatusInitiated:
-		// No additional fields needed for INITIATED status
+		// No additional fields needed
 
 	case domain.PaymentOrderStatusReserved:
 		po.LienID = cfg.lienID
@@ -251,7 +252,6 @@ func NewPaymentOrderInStatus(t *testing.T, status domain.PaymentOrderStatus, opt
 		po.FailureReason = cfg.failureReason
 		po.ErrorCode = cfg.errorCode
 		po.FailedAt = &now
-		// Optionally set lien if failed after reservation
 		if cfg.lienID != "" {
 			po.LienID = cfg.lienID
 			po.ReservedAt = &now
@@ -260,7 +260,6 @@ func NewPaymentOrderInStatus(t *testing.T, status domain.PaymentOrderStatus, opt
 	case domain.PaymentOrderStatusCancelled:
 		po.FailureReason = cfg.failureReason
 		po.CancelledAt = &now
-		// Optionally set lien if cancelled after reservation
 		if cfg.lienID != "" {
 			po.LienID = cfg.lienID
 			po.ReservedAt = &now
@@ -276,8 +275,6 @@ func NewPaymentOrderInStatus(t *testing.T, status domain.PaymentOrderStatus, opt
 		po.CompletedAt = &now
 		po.ReversedAt = &now
 	}
-
-	return po
 }
 
 // NewMoney creates a Money instance with the specified amount in cents and currency.

@@ -96,57 +96,12 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 
 	bookingLogID := uuid.New()
 
-	// Convert cents to decimal
-	amount := decimalFromCents(event.AmountCents)
-
-	// Parse currency and convert to instrument
-	currency, err := domain.ParseCurrency(event.Currency)
+	// Build debit and credit postings
+	debitPosting, creditPosting, err := s.buildDepositPostings(ctx, bookingLogID, event)
 	if err != nil {
 		timer.ObserveError(observability.ErrorCategoryValidation)
 		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
-		return fmt.Errorf("invalid currency: %w", err)
-	}
-
-	instrument, err := domain.CurrencyToInstrument(currency)
-	if err != nil {
-		timer.ObserveError(observability.ErrorCategoryValidation)
-		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
-		return fmt.Errorf("failed to create instrument: %w", err)
-	}
-
-	money := domain.NewMoney(amount, instrument)
-
-	// Create debit posting (customer account)
-	debitPosting, err := domain.NewLedgerPosting(
-		bookingLogID,
-		domain.PostingDirectionDebit,
-		money,
-		event.AccountID,
-		event.ValueDate,
-		event.CorrelationID,
-	)
-	if err != nil {
-		timer.ObserveError(observability.ErrorCategoryValidation)
-		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
-		return fmt.Errorf("failed to create debit posting: %w", err)
-	}
-
-	// Resolve clearing account for the credit posting
-	clearingAccountID := s.resolveClearingAccountForDeposit(ctx, instrument.Code)
-
-	// Create credit posting (clearing/bank cash account)
-	creditPosting, err := domain.NewLedgerPosting(
-		bookingLogID,
-		domain.PostingDirectionCredit,
-		money,
-		clearingAccountID,
-		event.ValueDate,
-		event.CorrelationID,
-	)
-	if err != nil {
-		timer.ObserveError(observability.ErrorCategoryValidation)
-		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
-		return fmt.Errorf("failed to create credit posting: %w", err)
+		return err
 	}
 
 	// Post both entries
@@ -171,13 +126,67 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 
 	// Record successful metrics
 	timer.ObserveSuccess()
+	recordDepositSuccessMetrics(event)
+
+	return nil
+}
+
+// buildDepositPostings creates the debit and credit postings for a deposit event.
+func (s *PostingService) buildDepositPostings(
+	ctx context.Context,
+	bookingLogID uuid.UUID,
+	event DepositEvent,
+) (*domain.LedgerPosting, *domain.LedgerPosting, error) {
+	amount := decimalFromCents(event.AmountCents)
+
+	currency, err := domain.ParseCurrency(event.Currency)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid currency: %w", err)
+	}
+
+	instrument, err := domain.CurrencyToInstrument(currency)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create instrument: %w", err)
+	}
+
+	money := domain.NewMoney(amount, instrument)
+
+	debitPosting, err := domain.NewLedgerPosting(
+		bookingLogID,
+		domain.PostingDirectionDebit,
+		money,
+		event.AccountID,
+		event.ValueDate,
+		event.CorrelationID,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create debit posting: %w", err)
+	}
+
+	clearingAccountID := s.resolveClearingAccountForDeposit(ctx, instrument.Code)
+
+	creditPosting, err := domain.NewLedgerPosting(
+		bookingLogID,
+		domain.PostingDirectionCredit,
+		money,
+		clearingAccountID,
+		event.ValueDate,
+		event.CorrelationID,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create credit posting: %w", err)
+	}
+
+	return debitPosting, creditPosting, nil
+}
+
+// recordDepositSuccessMetrics records all metrics for a successful deposit processing.
+func recordDepositSuccessMetrics(event DepositEvent) {
 	observability.RecordDepositProcessed(event.Currency, observability.StatusSuccess)
 	observability.RecordPosting(observability.DirectionDebit, event.Currency)
 	observability.RecordPosting(observability.DirectionCredit, event.Currency)
 	observability.RecordPostingAmount(observability.DirectionDebit, event.Currency, event.AmountCents)
 	observability.RecordPostingAmount(observability.DirectionCredit, event.Currency, event.AmountCents)
-
-	return nil
 }
 
 // GetPostingsByBookingLog retrieves all postings for a booking log

@@ -147,54 +147,17 @@ func (a *PaymentIntentAdapter) DispatchPayment(ctx context.Context, req *financi
 		tenantID = tid.String()
 	}
 
-	amountMinor := req.GetAmountUnits()
 	currencyLower := strings.ToLower(req.GetInstrumentCode())
 
-	params := &stripego.PaymentIntentCreateParams{
-		Amount:        stripego.Int64(amountMinor),
-		Currency:      stripego.String(currencyLower),
-		Customer:      stripego.String(req.GetDebtorAccountId()),
-		PaymentMethod: stripego.String(req.GetReference()),
-		Confirm:       stripego.Bool(true),
-		OffSession:    stripego.Bool(true),
-		Metadata: map[string]string{
-			"payment_order_id": req.GetPaymentOrderId(),
-			"tenant_id":        tenantID,
-		},
+	params, platformFeeAmount, err := a.buildPaymentIntentParams(req, accountID, tenantID, currencyLower)
+	if err != nil {
+		return DispatchResult{}, err
 	}
-
-	// Merge request metadata into Stripe metadata, protecting reserved keys
-	for k, v := range req.GetMetadata() {
-		if k == "payment_order_id" || k == "tenant_id" {
-			continue
-		}
-		params.Metadata[k] = v
-	}
-
-	// Calculate and set platform fee if configured
-	var platformFeeAmount int64
-	if a.config.PlatformFee != nil && !a.config.PlatformFee.IsZero() {
-		var err error
-		platformFeeAmount, err = a.config.PlatformFee.CalculateFee(amountMinor)
-		if err != nil {
-			return DispatchResult{}, fmt.Errorf("platform fee calculation failed: %w", err)
-		}
-		if platformFeeAmount > 0 {
-			params.ApplicationFeeAmount = stripego.Int64(platformFeeAmount)
-		}
-	}
-
-	// Set idempotency key from the proto request
-	idempotencyKey := IdempotencyKey(req.GetPaymentOrderId(), "payment_intent")
-	params.IdempotencyKey = stripego.String(idempotencyKey)
-
-	// Set Connected Account header
-	params.SetStripeAccount(accountID)
 
 	a.logger.Debug("creating stripe payment intent",
 		"payment_order_id", req.GetPaymentOrderId(),
 		"tenant_id", tenantID,
-		"amount", amountMinor,
+		"amount", req.GetAmountUnits(),
 		"currency", currencyLower,
 		"connected_account", accountID,
 	)
@@ -226,6 +189,54 @@ func (a *PaymentIntentAdapter) DispatchPayment(ctx context.Context, req *financi
 		Message:           string(pi.Status),
 		PlatformFeeAmount: platformFeeAmount,
 	}, nil
+}
+
+// buildPaymentIntentParams constructs the Stripe PaymentIntent creation parameters
+// including metadata merging and platform fee calculation.
+func (a *PaymentIntentAdapter) buildPaymentIntentParams(
+	req *financialgatewayv1.DispatchPaymentRequest,
+	accountID, tenantID, currencyLower string,
+) (*stripego.PaymentIntentCreateParams, int64, error) {
+	amountMinor := req.GetAmountUnits()
+
+	params := &stripego.PaymentIntentCreateParams{
+		Amount:        stripego.Int64(amountMinor),
+		Currency:      stripego.String(currencyLower),
+		Customer:      stripego.String(req.GetDebtorAccountId()),
+		PaymentMethod: stripego.String(req.GetReference()),
+		Confirm:       stripego.Bool(true),
+		OffSession:    stripego.Bool(true),
+		Metadata: map[string]string{
+			"payment_order_id": req.GetPaymentOrderId(),
+			"tenant_id":        tenantID,
+		},
+	}
+
+	// Merge request metadata, protecting reserved keys
+	for k, v := range req.GetMetadata() {
+		if k == "payment_order_id" || k == "tenant_id" {
+			continue
+		}
+		params.Metadata[k] = v
+	}
+
+	// Calculate and set platform fee if configured
+	var platformFeeAmount int64
+	if a.config.PlatformFee != nil && !a.config.PlatformFee.IsZero() {
+		var err error
+		platformFeeAmount, err = a.config.PlatformFee.CalculateFee(amountMinor)
+		if err != nil {
+			return nil, 0, fmt.Errorf("platform fee calculation failed: %w", err)
+		}
+		if platformFeeAmount > 0 {
+			params.ApplicationFeeAmount = stripego.Int64(platformFeeAmount)
+		}
+	}
+
+	params.IdempotencyKey = stripego.String(IdempotencyKey(req.GetPaymentOrderId(), "payment_intent"))
+	params.SetStripeAccount(accountID)
+
+	return params, platformFeeAmount, nil
 }
 
 // handleError processes Stripe API errors and maps them to appropriate responses.
@@ -329,25 +340,7 @@ func (a *PaymentIntentAdapter) CancelPayment(ctx context.Context, paymentOrderID
 
 	pi, err := a.config.Canceller.Cancel(ctx, piID, params)
 	if err != nil {
-		var stripeErr *stripego.Error
-		if errors.As(err, &stripeErr) && stripeErr.Code == stripego.ErrorCodePaymentIntentUnexpectedState {
-			// Stripe returns payment_intent_unexpected_state when the PI
-			// is in a non-cancellable state. Check if it's already canceled
-			// (idempotent success) vs a truly non-cancellable state (e.g., succeeded).
-			if strings.Contains(stripeErr.Msg, "status of canceled") {
-				a.logger.Info("stripe payment intent already cancelled",
-					"payment_order_id", paymentOrderID,
-					"payment_intent_id", piID,
-				)
-				return CancelResult{
-					ProviderReference: piID,
-					Status:            financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED,
-				}, nil
-			}
-			// Non-cancellable state (e.g., succeeded) — return as invalid request
-			return CancelResult{}, fmt.Errorf("payment intent %s cannot be cancelled: %w", piID, ErrInvalidRequest)
-		}
-		return CancelResult{}, fmt.Errorf("stripe cancel failed: %w", err)
+		return a.handleCancelError(err, paymentOrderID, piID)
 	}
 
 	status := mapPaymentIntentStatus(pi.Status)
@@ -362,6 +355,27 @@ func (a *PaymentIntentAdapter) CancelPayment(ctx context.Context, paymentOrderID
 		ProviderReference: pi.ID,
 		Status:            status,
 	}, nil
+}
+
+// handleCancelError maps Stripe cancellation errors to appropriate results.
+// Already-cancelled intents are treated as idempotent success; non-cancellable states
+// (e.g., succeeded) are returned as invalid request errors.
+func (a *PaymentIntentAdapter) handleCancelError(err error, paymentOrderID, piID string) (CancelResult, error) {
+	var stripeErr *stripego.Error
+	if errors.As(err, &stripeErr) && stripeErr.Code == stripego.ErrorCodePaymentIntentUnexpectedState {
+		if strings.Contains(stripeErr.Msg, "status of canceled") {
+			a.logger.Info("stripe payment intent already cancelled",
+				"payment_order_id", paymentOrderID,
+				"payment_intent_id", piID,
+			)
+			return CancelResult{
+				ProviderReference: piID,
+				Status:            financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED,
+			}, nil
+		}
+		return CancelResult{}, fmt.Errorf("payment intent %s cannot be cancelled: %w", piID, ErrInvalidRequest)
+	}
+	return CancelResult{}, fmt.Errorf("stripe cancel failed: %w", err)
 }
 
 // mapPaymentIntentStatus maps a Stripe PaymentIntent status to a gateway DispatchStatus.

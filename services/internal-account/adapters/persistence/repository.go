@@ -92,74 +92,79 @@ func (r *Repository) Save(ctx context.Context, account domain.InternalAccount) e
 	entity := toEntity(ctx, account)
 
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// Check if exists by account_id (business identifier)
-		// Explicit deleted_at check for code clarity
 		var existing InternalAccountEntity
 		result := tx.Where("account_id = ? AND deleted_at IS NULL", entity.AccountID).First(&existing)
 
 		if result.Error == nil {
-			// Update existing with optimistic locking
-			entity.ID = existing.ID
-			entity.CreatedAt = existing.CreatedAt
-			entity.CreatedBy = existing.CreatedBy
-
-			// Version guard: domain contract says version is incremented before Save
-			// on updates. Version 0 indicates an invalid state for updates.
-			if entity.Version == 0 {
-				return ErrVersionConflict
-			}
-
-			// Optimistic locking contract: The domain model increments version on all
-			// mutations (Suspend, Activate, Close, UpdateCounterparty) before passing
-			// to Save. We check the original version (current - 1) to detect concurrent
-			// modifications. If another transaction has modified the record, the version
-			// won't match and we return ErrVersionConflict.
-			originalVersion := entity.Version - 1
-			updateResult := tx.Model(&InternalAccountEntity{}).
-				Where("account_id = ? AND version = ? AND deleted_at IS NULL", entity.AccountID, originalVersion).
-				Updates(map[string]interface{}{
-					"account_code":              entity.AccountCode,
-					"name":                      entity.Name,
-					"status":                    entity.Status,
-					"clearing_purpose":          entity.ClearingPurpose,
-					"product_type_code":         entity.ProductTypeCode,
-					"product_type_version":      entity.ProductTypeVersion,
-					"counterparty_id":           entity.CounterpartyID,
-					"counterparty_name":         entity.CounterpartyName,
-					"counterparty_external_ref": entity.CounterpartyExternalRef,
-					"attributes":                entity.Attributes,
-					"version":                   entity.Version,
-					"updated_at":                entity.UpdatedAt,
-					"updated_by":                entity.UpdatedBy,
-				})
-
-			if updateResult.Error != nil {
-				if isDuplicateKeyError(updateResult.Error) {
-					return ErrDuplicateCode
-				}
-				return updateResult.Error
-			}
-
-			if updateResult.RowsAffected == 0 {
-				return ErrVersionConflict
-			}
-
-			return nil
+			return updateExistingAccount(tx, entity, &existing)
 		}
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			// Create new
-			if err := tx.Create(&entity).Error; err != nil {
-				if isDuplicateKeyError(err) {
-					return ErrDuplicateCode
-				}
-				return err
-			}
-			return nil
+			return createNewAccount(tx, entity)
 		}
 
 		return result.Error
 	})
+}
+
+// updateExistingAccount applies an optimistic-locking update to an existing account.
+func updateExistingAccount(tx *gorm.DB, entity *InternalAccountEntity, existing *InternalAccountEntity) error {
+	entity.ID = existing.ID
+	entity.CreatedAt = existing.CreatedAt
+	entity.CreatedBy = existing.CreatedBy
+
+	// Version guard: domain contract says version is incremented before Save
+	// on updates. Version 0 indicates an invalid state for updates.
+	if entity.Version == 0 {
+		return ErrVersionConflict
+	}
+
+	// Optimistic locking contract: The domain model increments version on all
+	// mutations (Suspend, Activate, Close, UpdateCounterparty) before passing
+	// to Save. We check the original version (current - 1) to detect concurrent
+	// modifications.
+	originalVersion := entity.Version - 1
+	updateResult := tx.Model(&InternalAccountEntity{}).
+		Where("account_id = ? AND version = ? AND deleted_at IS NULL", entity.AccountID, originalVersion).
+		Updates(map[string]interface{}{
+			"account_code":              entity.AccountCode,
+			"name":                      entity.Name,
+			"status":                    entity.Status,
+			"clearing_purpose":          entity.ClearingPurpose,
+			"product_type_code":         entity.ProductTypeCode,
+			"product_type_version":      entity.ProductTypeVersion,
+			"counterparty_id":           entity.CounterpartyID,
+			"counterparty_name":         entity.CounterpartyName,
+			"counterparty_external_ref": entity.CounterpartyExternalRef,
+			"attributes":                entity.Attributes,
+			"version":                   entity.Version,
+			"updated_at":                entity.UpdatedAt,
+			"updated_by":                entity.UpdatedBy,
+		})
+
+	if updateResult.Error != nil {
+		if isDuplicateKeyError(updateResult.Error) {
+			return ErrDuplicateCode
+		}
+		return updateResult.Error
+	}
+
+	if updateResult.RowsAffected == 0 {
+		return ErrVersionConflict
+	}
+
+	return nil
+}
+
+// createNewAccount inserts a new account entity.
+func createNewAccount(tx *gorm.DB, entity *InternalAccountEntity) error {
+	if err := tx.Create(&entity).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return ErrDuplicateCode
+		}
+		return err
+	}
+	return nil
 }
 
 // SaveInTx persists a new or updated account within the provided transaction.

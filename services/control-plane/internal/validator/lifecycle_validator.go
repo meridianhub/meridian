@@ -154,10 +154,8 @@ func (v *ManifestValidator) validateDestructiveChanges(
 	cfg *validateConfig,
 	result *ValidationResult,
 ) {
-	// Build the relationship graph from the previous manifest to check dependencies.
 	prevGraph := ExtractRelationshipGraph(previous, callLogs)
 
-	// Build lookup sets for current manifest resources.
 	currentInstruments := make(map[string]bool)
 	for _, inst := range current.GetInstruments() {
 		currentInstruments[inst.GetCode()] = true
@@ -176,12 +174,16 @@ func (v *ManifestValidator) validateDestructiveChanges(
 		severity = SeverityWarning
 	}
 
-	// Check removed instruments. Use Impact (all connected edges) because instruments
-	// can be both targets (denominated_in from account types) and sources (converts in
-	// valuation rules).
+	validateRemovedInstruments(previous, currentInstruments, prevGraph, severity, result)
+	validateRemovedAccountTypes(previous, currentAccountTypes, prevGraph, severity, result)
+	validateRemovedSagas(previous, currentSagas, prevGraph, severity, result)
+}
+
+// validateRemovedInstruments checks for destructive instrument removals with dependencies.
+func validateRemovedInstruments(previous *controlplanev1.Manifest, current map[string]bool, prevGraph *RelationshipGraph, severity Severity, result *ValidationResult) {
 	for _, inst := range previous.GetInstruments() {
 		code := inst.GetCode()
-		if currentInstruments[code] {
+		if current[code] {
 			continue
 		}
 		nodeID := "instrument:" + code
@@ -195,15 +197,13 @@ func (v *ManifestValidator) validateDestructiveChanges(
 			})
 		}
 	}
+}
 
-	// Check removed account types.
-	// Note: In the current graph structure, account types are only sources (denominated_in
-	// edges to instruments), not targets. Saga-to-account-type dependencies are captured
-	// via dynamic edges when call logs are provided (e.g., from a saga execution engine).
-	// Without call logs, this check relies on graph edges populated externally.
+// validateRemovedAccountTypes checks for destructive account type removals with dependents.
+func validateRemovedAccountTypes(previous *controlplanev1.Manifest, current map[string]bool, prevGraph *RelationshipGraph, severity Severity, result *ValidationResult) {
 	for _, acct := range previous.GetAccountTypes() {
 		code := acct.GetCode()
-		if currentAccountTypes[code] {
+		if current[code] {
 			continue
 		}
 		nodeID := "account_type:" + code
@@ -217,11 +217,13 @@ func (v *ManifestValidator) validateDestructiveChanges(
 			})
 		}
 	}
+}
 
-	// Check removed sagas.
+// validateRemovedSagas checks for destructive saga removals with dependents.
+func validateRemovedSagas(previous *controlplanev1.Manifest, current map[string]bool, prevGraph *RelationshipGraph, severity Severity, result *ValidationResult) {
 	for _, saga := range previous.GetSagas() {
 		name := saga.GetName()
-		if currentSagas[name] {
+		if current[name] {
 			continue
 		}
 		nodeID := "saga:" + name

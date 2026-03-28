@@ -149,85 +149,78 @@ func NewCurrentAccountValidator(cfg CurrentAccountValidatorConfig) (*CurrentAcco
 // Returns nil if the account exists or if the service is unavailable (graceful degradation).
 // Returns codes.InvalidArgument if the account does not exist.
 func (v *CurrentAccountValidator) ValidateExists(ctx context.Context, accountID string) error {
-	// Check cache first (read lock)
-	v.mu.RLock()
-	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
-		v.mu.RUnlock()
-		v.logger.Debug("cache hit for account validation",
-			"account_id", accountID,
-			"exists", entry.exists)
-		if !entry.exists {
+	if cached, ok := v.checkCache(accountID); ok {
+		v.logger.Debug("cache hit for account validation", "account_id", accountID, "exists", cached)
+		if !cached {
 			return status.Errorf(codes.InvalidArgument, "account not found: %s", accountID)
 		}
 		return nil
 	}
-	v.mu.RUnlock()
 
-	// Use singleflight to coalesce concurrent requests for the same account.
-	// This prevents cache stampede when multiple goroutines validate the same account simultaneously.
-	start := time.Now()
-	result, err, shared := v.sfGroup.Do(accountID, func() (interface{}, error) {
-		// Double-check cache after acquiring the singleflight "lock"
-		// Another goroutine might have already populated the cache
-		v.mu.RLock()
-		if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
-			v.mu.RUnlock()
-			return entry.exists, nil
-		}
-		v.mu.RUnlock()
-
-		// Create a timeout context for the lookup to enable faster fallback
-		lookupCtx, cancel := clients.WithTimeout(ctx, v.lookupTimeout)
-		defer cancel()
-
-		// Query the Current Account service
-		exists, lookupErr := v.queryCurrentAccount(lookupCtx, accountID)
-		if lookupErr != nil {
-			// Graceful degradation: if service is unavailable, allow the operation
-			v.logger.Warn("current account service unavailable, skipping validation",
-				"account_id", accountID,
-				"error", lookupErr)
-			return true, nil // Return true to allow operation
-		}
-
-		// Cache the result (write lock)
-		v.mu.Lock()
-		v.cache[accountID] = validationCacheEntry{
-			exists:    exists,
-			expiresAt: time.Now().Add(v.cacheTTL),
-		}
-		v.mu.Unlock()
-
-		return exists, nil
-	})
-
+	exists, err := v.resolveWithSingleflight(ctx, accountID)
 	if err != nil {
-		// This shouldn't happen with our implementation, but handle it gracefully
-		v.logger.Error("unexpected error during account validation",
-			"account_id", accountID,
-			"error", err)
-		return nil // Graceful degradation
+		v.logger.Error("unexpected error during account validation", "account_id", accountID, "error", err)
+		return nil
 	}
-
-	exists, ok := result.(bool)
-	if !ok {
-		// This should never happen as we control the singleflight function return type
-		v.logger.Error("internal error: unexpected result type from singleflight",
-			"account_id", accountID)
-		return nil // Graceful degradation
-	}
-
-	v.logger.Debug("account validation completed",
-		"account_id", accountID,
-		"exists", exists,
-		"duration_ms", time.Since(start).Milliseconds(),
-		"shared", shared)
 
 	if !exists {
 		return status.Errorf(codes.InvalidArgument, "account not found: %s", accountID)
 	}
 
 	return nil
+}
+
+// checkCache checks the validation cache for a non-expired entry.
+func (v *CurrentAccountValidator) checkCache(accountID string) (bool, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
+		return entry.exists, true
+	}
+	return false, false
+}
+
+// resolveWithSingleflight uses singleflight to coalesce concurrent requests and query the service.
+func (v *CurrentAccountValidator) resolveWithSingleflight(ctx context.Context, accountID string) (bool, error) {
+	start := time.Now()
+	result, err, shared := v.sfGroup.Do(accountID, func() (interface{}, error) {
+		// Double-check cache after acquiring the singleflight "lock"
+		if cached, ok := v.checkCache(accountID); ok {
+			return cached, nil
+		}
+
+		lookupCtx, cancel := clients.WithTimeout(ctx, v.lookupTimeout)
+		defer cancel()
+
+		exists, lookupErr := v.queryCurrentAccount(lookupCtx, accountID)
+		if lookupErr != nil {
+			v.logger.Warn("current account service unavailable, skipping validation",
+				"account_id", accountID, "error", lookupErr)
+			return true, nil
+		}
+
+		v.mu.Lock()
+		v.cache[accountID] = validationCacheEntry{exists: exists, expiresAt: time.Now().Add(v.cacheTTL)}
+		v.mu.Unlock()
+
+		return exists, nil
+	})
+
+	if err != nil {
+		return false, err
+	}
+
+	exists, ok := result.(bool)
+	if !ok {
+		v.logger.Error("internal error: unexpected result type from singleflight", "account_id", accountID)
+		return true, nil // Graceful degradation
+	}
+
+	v.logger.Debug("account validation completed",
+		"account_id", accountID, "exists", exists,
+		"duration_ms", time.Since(start).Milliseconds(), "shared", shared)
+
+	return exists, nil
 }
 
 // queryCurrentAccount queries the Current Account service to check if an account exists.
@@ -356,81 +349,77 @@ func NewInternalAccountValidator(cfg InternalAccountValidatorConfig) (*InternalA
 // Returns nil if the account exists or if the service is unavailable (graceful degradation).
 // Returns codes.InvalidArgument if the account does not exist.
 func (v *InternalAccountValidator) ValidateExists(ctx context.Context, accountID string) error {
-	// Check cache first (read lock)
-	v.mu.RLock()
-	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
-		v.mu.RUnlock()
-		v.logger.Debug("cache hit for internal account validation",
-			"account_id", accountID,
-			"exists", entry.exists)
-		if !entry.exists {
+	if cached, ok := v.checkCache(accountID); ok {
+		v.logger.Debug("cache hit for internal account validation", "account_id", accountID, "exists", cached)
+		if !cached {
 			return status.Errorf(codes.InvalidArgument, "internal account not found: %s", accountID)
 		}
 		return nil
 	}
-	v.mu.RUnlock()
 
-	// Use singleflight to coalesce concurrent requests for the same account.
-	start := time.Now()
-	result, err, shared := v.sfGroup.Do(accountID, func() (interface{}, error) {
-		// Double-check cache after acquiring the singleflight "lock"
-		v.mu.RLock()
-		if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
-			v.mu.RUnlock()
-			return entry.exists, nil
-		}
-		v.mu.RUnlock()
-
-		// Create a timeout context for the lookup to enable faster fallback
-		lookupCtx, cancel := clients.WithTimeout(ctx, v.lookupTimeout)
-		defer cancel()
-
-		// Query the Internal Account service
-		exists, lookupErr := v.queryInternalAccount(lookupCtx, accountID)
-		if lookupErr != nil {
-			// Graceful degradation: if service is unavailable, allow the operation
-			v.logger.Warn("internal account service unavailable, skipping validation",
-				"account_id", accountID,
-				"error", lookupErr)
-			return true, nil // Return true to allow operation
-		}
-
-		// Cache the result (write lock)
-		v.mu.Lock()
-		v.cache[accountID] = validationCacheEntry{
-			exists:    exists,
-			expiresAt: time.Now().Add(v.cacheTTL),
-		}
-		v.mu.Unlock()
-
-		return exists, nil
-	})
-
+	exists, err := v.resolveWithSingleflight(ctx, accountID)
 	if err != nil {
-		v.logger.Error("unexpected error during internal account validation",
-			"account_id", accountID,
-			"error", err)
-		return nil // Graceful degradation
+		v.logger.Error("unexpected error during internal account validation", "account_id", accountID, "error", err)
+		return nil
 	}
-
-	exists, ok := result.(bool)
-	if !ok {
-		v.logger.Error("internal error: unexpected result type from singleflight",
-			"account_id", accountID)
-		return nil // Graceful degradation
-	}
-
-	v.logger.Debug("internal account validation completed",
-		"account_id", accountID,
-		"exists", exists,
-		"duration_ms", time.Since(start).Milliseconds(),
-		"shared", shared)
 
 	if !exists {
 		return status.Errorf(codes.InvalidArgument, "internal account not found: %s", accountID)
 	}
 
 	return nil
+}
+
+// checkCache checks the validation cache for a non-expired entry.
+func (v *InternalAccountValidator) checkCache(accountID string) (bool, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if entry, ok := v.cache[accountID]; ok && time.Now().Before(entry.expiresAt) {
+		return entry.exists, true
+	}
+	return false, false
+}
+
+// resolveWithSingleflight uses singleflight to coalesce concurrent requests and query the service.
+func (v *InternalAccountValidator) resolveWithSingleflight(ctx context.Context, accountID string) (bool, error) {
+	start := time.Now()
+	result, err, shared := v.sfGroup.Do(accountID, func() (interface{}, error) {
+		if cached, ok := v.checkCache(accountID); ok {
+			return cached, nil
+		}
+
+		lookupCtx, cancel := clients.WithTimeout(ctx, v.lookupTimeout)
+		defer cancel()
+
+		exists, lookupErr := v.queryInternalAccount(lookupCtx, accountID)
+		if lookupErr != nil {
+			v.logger.Warn("internal account service unavailable, skipping validation",
+				"account_id", accountID, "error", lookupErr)
+			return true, nil
+		}
+
+		v.mu.Lock()
+		v.cache[accountID] = validationCacheEntry{exists: exists, expiresAt: time.Now().Add(v.cacheTTL)}
+		v.mu.Unlock()
+
+		return exists, nil
+	})
+
+	if err != nil {
+		return false, err
+	}
+
+	exists, ok := result.(bool)
+	if !ok {
+		v.logger.Error("internal error: unexpected result type from singleflight", "account_id", accountID)
+		return true, nil
+	}
+
+	v.logger.Debug("internal account validation completed",
+		"account_id", accountID, "exists", exists,
+		"duration_ms", time.Since(start).Milliseconds(), "shared", shared)
+
+	return exists, nil
 }
 
 // queryInternalAccount queries the Internal Account service to check if an account exists.

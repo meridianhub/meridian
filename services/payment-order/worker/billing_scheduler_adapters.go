@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
@@ -90,8 +91,6 @@ func (e *BillingExecutor) Execute(ctx context.Context, schedule scheduler.Schedu
 
 	// Calculate billing period (previous complete month)
 	periodStart, periodEnd := calculateBillingPeriod(start)
-
-	// Generate deterministic idempotency key
 	idempotencyKey := domain.BillingRunIdempotencyKey(schedule.TenantID, periodStart, periodEnd)
 
 	e.logger.Info("executing billing run",
@@ -100,25 +99,45 @@ func (e *BillingExecutor) Execute(ctx context.Context, schedule scheduler.Schedu
 		"period_end", periodEnd,
 		"idempotency_key", idempotencyKey)
 
-	// Check Redis idempotency
+	run, err := e.createBillingRunIfNew(ctx, schedule.TenantID, periodStart, periodEnd, idempotencyKey)
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return nil // duplicate, already handled
+	}
+
+	if err := e.transitionToProcessing(ctx, run); err != nil {
+		return err
+	}
+
+	if err := e.processInvoices(ctx, run); err != nil {
+		return err
+	}
+
+	return e.completeBillingRun(ctx, run, start)
+}
+
+// createBillingRunIfNew checks idempotency and creates a new billing run.
+// Returns nil run if the billing run already exists (idempotent skip).
+func (e *BillingExecutor) createBillingRunIfNew(ctx context.Context, tenantID string, periodStart, periodEnd time.Time, idempotencyKey string) (*domain.BillingRun, error) {
 	duplicate, err := e.checkIdempotency(ctx, idempotencyKey)
 	if err != nil {
 		e.logger.Error("failed to check idempotency", "error", err)
 		e.metrics.RecordError("idempotency_check")
-		return fmt.Errorf("idempotency check: %w", err)
+		return nil, fmt.Errorf("idempotency check: %w", err)
 	}
 	if duplicate {
 		e.logger.Info("billing run already exists for this period, skipping",
 			"idempotency_key", idempotencyKey)
-		return nil
+		return nil, nil //nolint:nilnil // nil run signals idempotent skip
 	}
 
-	// Create billing run
-	run, err := domain.NewBillingRun(schedule.TenantID, periodStart, periodEnd)
+	run, err := domain.NewBillingRun(tenantID, periodStart, periodEnd)
 	if err != nil {
 		e.logger.Error("failed to create billing run", "error", err)
 		e.metrics.RecordError("create_billing_run")
-		return fmt.Errorf("create billing run: %w", err)
+		return nil, fmt.Errorf("create billing run: %w", err)
 	}
 
 	if err := e.repo.CreateBillingRun(ctx, run); err != nil {
@@ -126,17 +145,19 @@ func (e *BillingExecutor) Execute(ctx context.Context, schedule scheduler.Schedu
 			e.logger.Info("billing run already exists in database, skipping",
 				"idempotency_key", idempotencyKey)
 			e.markIdempotency(ctx, idempotencyKey)
-			return nil
+			return nil, nil //nolint:nilnil // nil run signals duplicate skip
 		}
 		e.logger.Error("failed to persist billing run", "error", err)
 		e.metrics.RecordError("persist_billing_run")
-		return fmt.Errorf("persist billing run: %w", err)
+		return nil, fmt.Errorf("persist billing run: %w", err)
 	}
 
-	// Mark in Redis for fast idempotency checks
 	e.markIdempotency(ctx, idempotencyKey)
+	return run, nil
+}
 
-	// Transition to processing
+// transitionToProcessing transitions the billing run to processing state.
+func (e *BillingExecutor) transitionToProcessing(ctx context.Context, run *domain.BillingRun) error {
 	if err := run.StartProcessing(); err != nil {
 		e.logger.Error("failed to start processing", "error", err)
 		return fmt.Errorf("start processing: %w", err)
@@ -145,15 +166,12 @@ func (e *BillingExecutor) Execute(ctx context.Context, schedule scheduler.Schedu
 		e.logger.Error("failed to update billing run to processing", "error", err)
 		return fmt.Errorf("update billing run: %w", err)
 	}
-
 	e.metrics.RecordBillingRun(string(domain.BillingRunStatusProcessing))
+	return nil
+}
 
-	// Generate invoices and initiate payments
-	if err := e.processInvoices(ctx, run); err != nil {
-		return err
-	}
-
-	// Mark complete
+// completeBillingRun marks the billing run as complete and records metrics.
+func (e *BillingExecutor) completeBillingRun(ctx context.Context, run *domain.BillingRun, start time.Time) error {
 	if err := run.Complete(); err != nil {
 		e.logger.Error("failed to complete billing run", "error", err)
 		return fmt.Errorf("complete billing run: %w", err)

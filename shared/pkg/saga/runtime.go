@@ -150,40 +150,9 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	defer cancel()
 
 	// Resolve party scope BEFORE executing user script (synthetic step -1)
-	var partyScope *PartyScope
-	if execInput.ExecutingPartyID != nil && r.partyScopeResolver != nil {
-		r.logger.Debug("resolving party scope",
-			"saga", name,
-			"executing_party_id", execInput.ExecutingPartyID,
-		)
-
-		var err error
-		partyScope, err = r.partyScopeResolver.Resolve(ctx, *execInput.ExecutingPartyID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve party scope (step -1): %w", err)
-		}
-
-		r.logger.Info("party scope resolved",
-			"saga", name,
-			"party_id", partyScope.PartyID,
-			"party_type", partyScope.PartyType,
-			"visible_parties_count", len(partyScope.VisibleParties),
-			"tenant_id", partyScope.TenantID,
-		)
-
-		// Perform visibility pre-flight validation (step -0.5)
-		// Extract party references from input and validate against scope
-		manifest := NewVisibilityManifestFromInput(execInput.Data)
-		if len(manifest.ReferencedParties) > 0 {
-			validator := NewVisibilityValidator()
-			if err := validator.ValidateOrError(partyScope, manifest); err != nil {
-				return nil, fmt.Errorf("visibility pre-flight check failed (step -0.5): %w", err)
-			}
-			r.logger.Debug("visibility pre-flight check passed",
-				"saga", name,
-				"referenced_parties_count", len(manifest.ReferencedParties),
-			)
-		}
+	partyScope, err := r.resolvePartyScope(ctx, name, &execInput)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build predeclared variables including input and party scope
@@ -194,56 +163,13 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 		predeclared[k] = v
 	}
 
-	// Create thread with context-based cancellation
-	thread := &starlark.Thread{
-		Name: name,
-		Print: func(_ *starlark.Thread, msg string) {
-			r.logger.Info("starlark print", "saga", name, "message", msg)
-		},
-	}
+	// Create and configure thread
+	thread := r.buildThread(ctx, name, &execInput)
 
-	// Store context in thread-local for cancellation checking
-	thread.SetLocal("ctx", ctx)
-
-	// Allow callers to set up thread-local storage (e.g., StarlarkContext for handlers)
-	if execInput.ThreadSetup != nil {
-		execInput.ThreadSetup(thread)
-	}
-
-	// Enforce CPU step limit to prevent tenant scripts from exhausting compute resources.
-	sandbox.HardenThread(thread, sandboxCfg)
-
-	// Set up cancellation checking
-	done := make(chan struct{})
-	var execErr error
-	var globals starlark.StringDict
-
-	// Execute in goroutine so we can handle context cancellation
-	go func() {
-		defer close(done)
-
-		var err error
-		//nolint:staticcheck // ExecFileOptions requires FileOptions which we don't need to customize
-		globals, err = starlark.ExecFile(thread, name+".star", script, predeclared)
-		if err != nil {
-			execErr = err
-		}
-	}()
-
-	// Wait for completion or context cancellation
-	select {
-	case <-done:
-		if execErr != nil {
-			return nil, r.wrapError(execErr)
-		}
-	case <-ctx.Done():
-		// Context cancelled or timed out
-		thread.Cancel("execution cancelled")
-		<-done // Wait for goroutine to finish
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: exceeded %v", ErrTimeout, r.timeout)
-		}
-		return nil, fmt.Errorf("%w: %w", ErrCancelled, ctx.Err())
+	// Execute script and wait for completion or cancellation
+	globals, execErr := r.executeAndWait(ctx, thread, name, script, predeclared)
+	if execErr != nil {
+		return nil, execErr
 	}
 
 	// Convert globals to result
@@ -257,6 +183,100 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	}
 
 	return result, nil
+}
+
+// resolvePartyScope resolves the party scope for a saga execution if ExecutingPartyID
+// is set and a PartyScopeResolver is configured. Returns nil if no resolution is needed.
+func (r *Runtime) resolvePartyScope(ctx context.Context, name string, execInput *ExecutionInput) (*PartyScope, error) {
+	if execInput.ExecutingPartyID == nil || r.partyScopeResolver == nil {
+		return nil, nil //nolint:nilnil // No party scope needed
+	}
+
+	r.logger.Debug("resolving party scope",
+		"saga", name,
+		"executing_party_id", execInput.ExecutingPartyID,
+	)
+
+	partyScope, err := r.partyScopeResolver.Resolve(ctx, *execInput.ExecutingPartyID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve party scope (step -1): %w", err)
+	}
+
+	r.logger.Info("party scope resolved",
+		"saga", name,
+		"party_id", partyScope.PartyID,
+		"party_type", partyScope.PartyType,
+		"visible_parties_count", len(partyScope.VisibleParties),
+		"tenant_id", partyScope.TenantID,
+	)
+
+	// Perform visibility pre-flight validation (step -0.5)
+	manifest := NewVisibilityManifestFromInput(execInput.Data)
+	if len(manifest.ReferencedParties) > 0 {
+		validator := NewVisibilityValidator()
+		if err := validator.ValidateOrError(partyScope, manifest); err != nil {
+			return nil, fmt.Errorf("visibility pre-flight check failed (step -0.5): %w", err)
+		}
+		r.logger.Debug("visibility pre-flight check passed",
+			"saga", name,
+			"referenced_parties_count", len(manifest.ReferencedParties),
+		)
+	}
+
+	return partyScope, nil
+}
+
+// buildThread creates and configures a Starlark thread with cancellation, sandbox, and caller setup.
+func (r *Runtime) buildThread(ctx context.Context, name string, execInput *ExecutionInput) *starlark.Thread {
+	thread := &starlark.Thread{
+		Name: name,
+		Print: func(_ *starlark.Thread, msg string) {
+			r.logger.Info("starlark print", "saga", name, "message", msg)
+		},
+	}
+
+	thread.SetLocal("ctx", ctx)
+
+	if execInput.ThreadSetup != nil {
+		execInput.ThreadSetup(thread)
+	}
+
+	sandbox.HardenThread(thread, sandboxCfg)
+
+	return thread
+}
+
+// executeAndWait runs the Starlark script in a goroutine and waits for completion or context cancellation.
+func (r *Runtime) executeAndWait(ctx context.Context, thread *starlark.Thread, name string, script string, predeclared starlark.StringDict) (starlark.StringDict, error) {
+	done := make(chan struct{})
+	var execErr error
+	var globals starlark.StringDict
+
+	go func() {
+		defer close(done)
+
+		var err error
+		//nolint:staticcheck // ExecFileOptions requires FileOptions which we don't need to customize
+		globals, err = starlark.ExecFile(thread, name+".star", script, predeclared)
+		if err != nil {
+			execErr = err
+		}
+	}()
+
+	select {
+	case <-done:
+		if execErr != nil {
+			return nil, r.wrapError(execErr)
+		}
+		return globals, nil
+	case <-ctx.Done():
+		thread.Cancel("execution cancelled")
+		<-done
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: exceeded %v", ErrTimeout, r.timeout)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrCancelled, ctx.Err())
+	}
 }
 
 // buildPredeclaredWithScope creates the predeclared environment with party scope support.

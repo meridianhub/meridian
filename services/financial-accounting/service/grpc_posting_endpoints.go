@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -121,54 +120,92 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 			RequestID: req.IdempotencyKey.Key,
 		}
 
-		result, err := s.idempotency.Check(ctx, idempotencyKey)
-		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
-					// Deserialize cached response from protobuf
-					var cachedResponse financialaccountingv1.CaptureLedgerPostingResponse
-					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
-						// Log deserialization error but fall back to generic AlreadyExists response
-						slog.Error("failed to deserialize cached idempotency response",
-							"error", unmarshalErr,
-							"idempotency_key", req.IdempotencyKey.Key,
-							"operation", "capture-posting")
-						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-					}
-					// Return cached response for idempotent behavior
-					return &cachedResponse, nil
-				}
-				// No cached data available - return generic AlreadyExists
-				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-			}
-			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
-		}
-
-		// Mark as pending to prevent concurrent processing
-		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+		cachedResp, err := s.checkCapturePostingIdempotency(ctx, idempotencyKey, req.IdempotencyKey.Key)
+		if cachedResp != nil || err != nil {
+			return cachedResp, err
 		}
 	}
 
-	// Parse booking log ID
-	bookingLogID, err := parseUUID(req.GetFinancialBookingLogId())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid financial_booking_log_id: %v", err)
-	}
-
-	// Validate request fields
-	validated, err := validateCapturePostingRequest(req)
+	// Build and persist the posting
+	posting, correlationID, err := s.buildAndPersistPosting(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract correlation ID from idempotency key (or use empty string)
+	// Publish LedgerPostingCapturedEvent (best-effort)
+	event := buildPostingCapturedEvent(posting, correlationID)
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		slog.Error("failed to publish LedgerPostingCapturedEvent",
+			"error", err,
+			"posting_id", posting.ID.String(),
+			"booking_log_id", posting.FinancialBookingLogID.String())
+	}
+
+	response := &financialaccountingv1.CaptureLedgerPostingResponse{
+		LedgerPosting: toProtoLedgerPosting(posting),
+	}
+
+	// Store result for idempotency (only if service configured and key provided)
+	if s.idempotency != nil && req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+		ttl := idempotencyTTLFromKey(req.IdempotencyKey.TtlSeconds)
+		s.storeIdempotencyResult(ctx, idempotencyKey, ttl, response, "capture-posting")
+	}
+
+	return response, nil
+}
+
+// checkCapturePostingIdempotency checks if a capture posting request was already processed.
+// Returns (cached response, nil) if found, (nil, nil) to proceed, or (nil, error) on failure.
+func (s *FinancialAccountingService) checkCapturePostingIdempotency(
+	ctx context.Context,
+	key idempotency.Key,
+	idempotencyKeyStr string,
+) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+	result, err := s.idempotency.Check(ctx, key)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
+				var cachedResponse financialaccountingv1.CaptureLedgerPostingResponse
+				if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
+					slog.Error("failed to deserialize cached idempotency response",
+						"error", unmarshalErr,
+						"idempotency_key", idempotencyKeyStr,
+						"operation", "capture-posting")
+					return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+				}
+				return &cachedResponse, nil
+			}
+			return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+		}
+		return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+	}
+
+	if err := s.idempotency.MarkPending(ctx, key, defaultIdempotencyTTL); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+	}
+	return nil, nil //nolint:nilnil // intentional: nil,nil signals "no cached result, proceed with operation"
+}
+
+// buildAndPersistPosting validates, creates, and persists a new ledger posting.
+func (s *FinancialAccountingService) buildAndPersistPosting(
+	ctx context.Context,
+	req *financialaccountingv1.CaptureLedgerPostingRequest,
+) (*domain.LedgerPosting, string, error) {
+	bookingLogID, err := parseUUID(req.GetFinancialBookingLogId())
+	if err != nil {
+		return nil, "", status.Errorf(codes.InvalidArgument, "invalid financial_booking_log_id: %v", err)
+	}
+
+	validated, err := validateCapturePostingRequest(req)
+	if err != nil {
+		return nil, "", err
+	}
+
 	correlationID := ""
 	if req.IdempotencyKey != nil {
 		correlationID = req.IdempotencyKey.Key
 	}
 
-	// Create domain entity with validation
 	posting, err := domain.NewLedgerPosting(
 		bookingLogID,
 		validated.Direction,
@@ -178,42 +215,16 @@ func (s *FinancialAccountingService) CaptureLedgerPosting(
 		correlationID,
 	)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid posting data: %v", err)
+		return nil, "", status.Errorf(codes.InvalidArgument, "invalid posting data: %v", err)
 	}
 
-	// Set account service domain from request (caller-provided, e.g., from saga scripts)
 	posting.AccountServiceDomain = fromProtoAccountServiceDomain(validated.AccountServiceDomain)
 
-	// Persist posting
 	if err := s.repository.SavePosting(ctx, posting); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save posting: %v", err)
+		return nil, "", status.Errorf(codes.Internal, "failed to save posting: %v", err)
 	}
 
-	// Publish LedgerPostingCapturedEvent for inter-service coordination
-	// Event publishing is best-effort - errors are logged but don't fail the operation
-	event := buildPostingCapturedEvent(posting, correlationID)
-	if err := s.eventPublisher.Publish(ctx, event); err != nil {
-		slog.Error("failed to publish LedgerPostingCapturedEvent",
-			"error", err,
-			"posting_id", posting.ID.String(),
-			"booking_log_id", posting.FinancialBookingLogID.String())
-	}
-
-	// Convert to proto response
-	response := &financialaccountingv1.CaptureLedgerPostingResponse{
-		LedgerPosting: toProtoLedgerPosting(posting),
-	}
-
-	// Store result for idempotency (only if service configured and key provided)
-	if s.idempotency != nil && req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
-		ttl := defaultIdempotencyTTL
-		if req.IdempotencyKey.TtlSeconds > 0 {
-			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
-		}
-		s.storeIdempotencyResult(ctx, idempotencyKey, ttl, response, "capture-posting")
-	}
-
-	return response, nil
+	return posting, correlationID, nil
 }
 
 // RetrieveLedgerPosting retrieves a specific ledger posting by ID.
@@ -297,70 +308,25 @@ func (s *FinancialAccountingService) UpdateLedgerPosting(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Determine TTL for idempotency key
-	ttl := defaultIdempotencyTTL
-	if req.IdempotencyKey.TtlSeconds > 0 {
-		ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
-	}
+	ttl := idempotencyTTLFromKey(req.IdempotencyKey.TtlSeconds)
 
 	// Use idempotency executor to wrap business logic with atomic PENDING cleanup.
-	// This ensures orphaned PENDING keys are cleaned up if the operation fails.
 	var response *financialaccountingv1.UpdateLedgerPostingResponse
 
 	execResult, err := s.idempotencyExecutor.Execute(ctx, idempotencyKey, ttl, func(ctx context.Context) ([]byte, error) {
-		// Execute business logic
 		resp, execErr := s.executeUpdateLedgerPosting(ctx, req)
 		if execErr != nil {
 			return nil, execErr
 		}
-
-		// Serialize response for idempotency cache
-		responseData, marshalErr := proto.Marshal(resp)
-		if marshalErr != nil {
-			slog.Error("failed to serialize response for idempotency cache",
-				"error", marshalErr,
-				"idempotency_key", req.IdempotencyKey.Key,
-				"operation", "update-posting")
-			// Still return success - the operation completed, just caching failed
-			responseData = nil
-		}
-
 		response = resp
-		return responseData, nil
+		return marshalForCache(resp, req.IdempotencyKey.Key, "update-posting"), nil
 	})
 	if err != nil {
-		// Handle specific idempotency errors
-		if errors.Is(err, idempotency.ErrOperationInProgress) {
-			return nil, status.Error(codes.Aborted, "operation already in progress")
-		}
-		// ExecutorErrors wrap idempotency layer errors - return as Internal
-		var execErr *idempotency.ExecutorError
-		if errors.As(err, &execErr) {
-			return nil, status.Errorf(codes.Internal, "idempotency error: %v", err)
-		}
-		// Business logic errors from the fn() callback pass through directly
-		// These are already gRPC status errors, so return as-is
-		return nil, err
+		return nil, mapIdempotencyExecutorError(err)
 	}
 
-	// Handle cached result
 	if execResult.FromCache {
-		if len(execResult.Data) > 0 {
-			var cachedResponse financialaccountingv1.UpdateLedgerPostingResponse
-			if unmarshalErr := proto.Unmarshal(execResult.Data, &cachedResponse); unmarshalErr != nil {
-				slog.Error("failed to deserialize cached idempotency response",
-					"error", unmarshalErr,
-					"idempotency_key", req.IdempotencyKey.Key,
-					"operation", "update-posting")
-				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-			}
-			slog.Info("returning cached idempotent response",
-				"idempotency_key", req.IdempotencyKey.Key,
-				"operation", "update-posting",
-				"posting_id", req.GetId())
-			return &cachedResponse, nil
-		}
-		return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+		return handleCachedUpdatePostingResponse(execResult.Data, req.IdempotencyKey.Key, req.GetId())
 	}
 
 	return response, nil
@@ -372,25 +338,40 @@ func (s *FinancialAccountingService) executeUpdateLedgerPosting(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateLedgerPostingRequest,
 ) (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
-	// Parse posting ID
 	postingID, err := parseUUID(req.GetId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid id: %v", err)
 	}
 
-	// Validate status
 	if req.Status == commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
 		return nil, status.Error(codes.InvalidArgument, "status must be specified")
 	}
 	newStatus := fromProtoTransactionStatus(req.Status)
 
-	// Extract correlation ID from idempotency key
 	correlationID := ""
 	if req.IdempotencyKey != nil {
 		correlationID = req.IdempotencyKey.Key
 	}
 
-	// Retrieve existing posting
+	// Retrieve, apply transition, persist, and publish
+	posting, err := s.applyAndPersistPostingUpdate(ctx, postingID, newStatus, req.PostingResult, correlationID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &financialaccountingv1.UpdateLedgerPostingResponse{
+		LedgerPosting: toProtoLedgerPosting(posting),
+	}, nil
+}
+
+// applyAndPersistPostingUpdate retrieves a posting, applies the status transition,
+// persists the update, and publishes the amended event.
+func (s *FinancialAccountingService) applyAndPersistPostingUpdate(
+	ctx context.Context,
+	postingID [16]byte,
+	newStatus domain.TransactionStatus,
+	postingResult, correlationID string,
+) (*domain.LedgerPosting, error) {
 	posting, err := s.repository.GetPosting(ctx, postingID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPostingNotFound) {
@@ -399,21 +380,16 @@ func (s *FinancialAccountingService) executeUpdateLedgerPosting(
 		return nil, status.Errorf(codes.Internal, "failed to retrieve posting: %v", err)
 	}
 
-	// Capture previous state BEFORE any modifications (for LedgerPostingAmendedEvent)
 	previousAmount := posting.Amount
 	previousStatus := posting.Status
 
-	// Validate and apply state transition using domain methods
-	postingResult := req.PostingResult
 	if postingResult == "" {
-		postingResult = posting.PostingResult // Preserve existing if not provided
+		postingResult = posting.PostingResult
 	}
-
 	if err := applyPostingStatusTransition(posting, newStatus, postingResult); err != nil {
 		return nil, err
 	}
 
-	// Persist updated posting
 	if err := s.repository.UpdatePosting(ctx, posting); err != nil {
 		if errors.Is(err, persistence.ErrPostingNotFound) {
 			return nil, status.Errorf(codes.NotFound, "ledger posting not found: %s", postingID)
@@ -421,8 +397,7 @@ func (s *FinancialAccountingService) executeUpdateLedgerPosting(
 		return nil, status.Errorf(codes.Internal, "failed to update posting: %v", err)
 	}
 
-	// Publish LedgerPostingAmendedEvent for inter-service coordination
-	// Event publishing is best-effort - errors are logged but don't fail the operation
+	// Publish LedgerPostingAmendedEvent (best-effort)
 	event := buildPostingAmendedEvent(posting, previousAmount, previousStatus, newStatus, correlationID)
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		slog.Error("failed to publish LedgerPostingAmendedEvent",
@@ -432,8 +407,5 @@ func (s *FinancialAccountingService) executeUpdateLedgerPosting(
 			"status", newStatus)
 	}
 
-	// Convert to proto response
-	return &financialaccountingv1.UpdateLedgerPostingResponse{
-		LedgerPosting: toProtoLedgerPosting(posting),
-	}, nil
+	return posting, nil
 }

@@ -314,7 +314,20 @@ func (c *Container) wireVarianceComponents() []service.Option {
 // lookups. Otherwise, it falls back to the identity conversion method with default materiality
 // thresholds.
 func (c *Container) buildValuationComponents() (valuation.Engine, service.ReferenceDataProvider) {
-	// Create valuation engine runtime components
+	adaptedEngine := c.buildValuationEngine()
+	refDataProvider := c.buildReferenceDataProvider()
+
+	c.Logger.Info("variance valuator configured",
+		"engine", "starlark+cel",
+		"method_resolver", "identity (fallback)",
+		"reference_data_url", c.Config.Services.ReferenceDataURL,
+	)
+
+	return adaptedEngine, refDataProvider
+}
+
+// buildValuationEngine creates the valuation engine with Starlark + CEL runtimes.
+func (c *Container) buildValuationEngine() *service.ValuationEngineAdapter {
 	policyRT, err := valuation.NewPolicyRuntime()
 	if err != nil {
 		c.Logger.Warn("failed to create CEL policy runtime, using identity method resolver", "error", err)
@@ -325,8 +338,6 @@ func (c *Container) buildValuationComponents() (valuation.Engine, service.Refere
 	})
 
 	cache := valuation.NewInMemoryCache(valuation.InMemoryCacheConfig{})
-
-	// Use identity method resolver as the base
 	methodResolver := valuation.NewIdentityMethodResolver()
 
 	engine := valuation.NewEngine(valuation.Config{
@@ -335,9 +346,12 @@ func (c *Container) buildValuationComponents() (valuation.Engine, service.Refere
 		Cache:           cache,
 	}, methodResolver)
 
-	adaptedEngine := service.NewValuationEngineAdapter(engine, c.Logger)
+	return service.NewValuationEngineAdapter(engine, c.Logger)
+}
 
-	// Build reference data provider with gRPC clients if available
+// buildReferenceDataProvider creates the reference data provider, optionally
+// backed by a gRPC client when the Reference Data URL is configured.
+func (c *Container) buildReferenceDataProvider() service.ReferenceDataProvider {
 	providerCfg := service.GRPCReferenceDataProviderConfig{
 		DefaultMethodID: uuid.MustParse(valuation.IdentityMethodID),
 		Logger:          c.Logger,
@@ -365,15 +379,7 @@ func (c *Container) buildValuationComponents() (valuation.Engine, service.Refere
 		c.Logger.Info("reference data gRPC not configured, using default valuation method and materiality threshold")
 	}
 
-	refDataProvider := service.NewGRPCReferenceDataProvider(providerCfg)
-
-	c.Logger.Info("variance valuator configured",
-		"engine", "starlark+cel",
-		"method_resolver", "identity (fallback)",
-		"reference_data_url", c.Config.Services.ReferenceDataURL,
-	)
-
-	return adaptedEngine, refDataProvider
+	return service.NewGRPCReferenceDataProvider(providerCfg)
 }
 
 // initService creates the AccountReconciliationService from options.
@@ -418,58 +424,24 @@ func (c *Container) initScheduler(ctx context.Context) {
 		return
 	}
 
-	// Create distributed lock
 	distLock := redislock.NewLock(c.RedisClient, redislock.Config{
 		KeyPrefix:  "meridian:reconciliation:scheduler",
 		LockTTL:    c.Config.Scheduler.LeaderLockTTL,
 		RenewEvery: c.Config.Scheduler.LeaderRenewInterval,
 	}, c.Logger)
 
-	// Create execution store (requires pgxpool for direct pgx queries)
-	pool, err := pgxpool.New(ctx, c.Config.Database.URL)
+	executionStore, err := c.buildExecutionStore(ctx)
 	if err != nil {
-		c.Logger.Warn("scheduler disabled: failed to create pgx pool for execution store",
-			"error", err)
-		return
-	}
-	c.cleanups = append(c.cleanups, func() {
-		pool.Close()
-	})
-
-	executionStore, err := scheduler.NewPgExecutionStore(pool) //nolint:contextcheck // NewPgExecutionStore creates its own context for schema validation
-	if err != nil {
-		c.Logger.Warn("scheduler disabled: execution store validation failed",
-			"error", err)
+		c.Logger.Warn("scheduler disabled: " + err.Error())
 		return
 	}
 
-	// Create Reference Data client (stub until proto available)
-	refDataClient := worker.NewStubReferenceDataClient(c.Logger)
-
-	// Create reconciliation self-client (loopback to this service)
-	reconConn, err := grpc.NewClient(
-		fmt.Sprintf("localhost:%s", c.Config.Server.Port),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	provider, executor, err := c.buildSchedulerWorkers()
 	if err != nil {
-		c.Logger.Warn("scheduler disabled: failed to create reconciliation self-client",
-			"error", err)
+		c.Logger.Warn("scheduler disabled: " + err.Error())
 		return
 	}
-	c.cleanups = append(c.cleanups, func() {
-		if err := reconConn.Close(); err != nil {
-			c.Logger.Error("failed to close reconciliation self-client connection", "error", err)
-		}
-	})
 
-	reconGrpcClient := reconciliationv1.NewAccountReconciliationServiceClient(reconConn)
-	reconClient := worker.NewGrpcReconciliationClient(reconGrpcClient)
-
-	// Create adapter types
-	provider := worker.NewSettlementScheduleProvider(refDataClient)
-	executor := worker.NewSettlementExecutor(reconClient, nil, c.Logger)
-
-	// Create shared cron scheduler
 	c.CronScheduler = scheduler.NewCronScheduler(
 		provider,
 		executor,
@@ -489,6 +461,49 @@ func (c *Container) initScheduler(ctx context.Context) {
 		"poll_interval", c.Config.Scheduler.PollInterval,
 		"leader_lock_ttl", c.Config.Scheduler.LeaderLockTTL,
 		"shutdown_timeout", c.Config.Scheduler.ShutdownTimeout)
+}
+
+// buildExecutionStore creates the pgx-backed execution store for the scheduler.
+func (c *Container) buildExecutionStore(ctx context.Context) (*scheduler.PgExecutionStore, error) {
+	pool, err := pgxpool.New(ctx, c.Config.Database.URL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pgx pool for execution store: %w", err)
+	}
+	c.cleanups = append(c.cleanups, func() {
+		pool.Close()
+	})
+
+	executionStore, err := scheduler.NewPgExecutionStore(pool) //nolint:contextcheck // NewPgExecutionStore creates its own context for schema validation
+	if err != nil {
+		return nil, fmt.Errorf("execution store validation failed: %w", err)
+	}
+
+	return executionStore, nil
+}
+
+// buildSchedulerWorkers creates the schedule provider and executor for the cron scheduler.
+func (c *Container) buildSchedulerWorkers() (scheduler.ScheduleProvider, scheduler.Executor, error) {
+	reconConn, err := grpc.NewClient(
+		fmt.Sprintf("localhost:%s", c.Config.Server.Port),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create reconciliation self-client: %w", err)
+	}
+	c.cleanups = append(c.cleanups, func() {
+		if err := reconConn.Close(); err != nil {
+			c.Logger.Error("failed to close reconciliation self-client connection", "error", err)
+		}
+	})
+
+	reconGrpcClient := reconciliationv1.NewAccountReconciliationServiceClient(reconConn)
+	reconClient := worker.NewGrpcReconciliationClient(reconGrpcClient)
+	refDataClient := worker.NewStubReferenceDataClient(c.Logger)
+
+	provider := worker.NewSettlementScheduleProvider(refDataClient)
+	executor := worker.NewSettlementExecutor(reconClient, nil, c.Logger)
+
+	return provider, executor, nil
 }
 
 // initAuth initializes the auth interceptor.

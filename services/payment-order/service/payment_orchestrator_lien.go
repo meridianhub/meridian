@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
+	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
@@ -122,8 +123,6 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 // Uses distributed locking to prevent concurrent updates across service instances, combined with
 // optimistic locking (version conflict retry) for additional safety.
 // Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
-//
-//nolint:contextcheck // Intentionally uses fresh context to outlive parent context
 func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	parentCtx context.Context,
 	paymentOrderID uuid.UUID,
@@ -132,141 +131,128 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	lastErr error,
 	logger *slog.Logger,
 ) {
-	// Use a fresh context to ensure status update isn't cancelled by parent timeout.
-	// This is intentional - the parent context may have timed out during retries,
-	// but we must still persist the final status for reconciliation purposes.
-	updateCtx := context.Background()
-	if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
-		updateCtx = tenant.WithTenant(updateCtx, tenantID)
-	}
-	updateCtx, cancel := context.WithTimeout(updateCtx, lienStatusUpdateTimeout)
+	updateCtx, cancel := buildFreshContext(parentCtx, lienStatusUpdateTimeout)
 	defer cancel()
 
-	// Acquire distributed lock if lock client is configured
-	// This prevents concurrent status updates across multiple service instances
-	var lock Lock
-	if o.lockClient != nil {
-		lockKey := fmt.Sprintf("lien:execution:%s", paymentOrderID.String())
-		lockStart := time.Now()
-
-		var lockErr error
-		lock, lockErr = o.lockClient.Obtain(updateCtx, lockKey, 30*time.Second)
-
-		// Record lock wait duration
-		poobservability.RecordLienExecutionLockWaitDuration(time.Since(lockStart).Seconds())
-
-		if IsLockNotObtained(lockErr) {
-			// Lock contention - another process is updating this payment order
-			logger.Warn("failed to acquire distributed lock for lien execution status update",
-				"payment_order_id", paymentOrderID,
-				"error", "lock already held by another process")
-			poobservability.RecordLienExecutionLockContention()
-			return
-		} else if lockErr != nil {
-			// Unexpected lock error - log and continue without lock (optimistic locking will protect us)
-			logger.Error("failed to obtain distributed lock for lien execution status update",
-				"payment_order_id", paymentOrderID,
-				"error", lockErr)
-			// Continue without lock - optimistic locking still provides safety
-		} else {
-			// Lock acquired successfully - ensure it's released
-			defer func() {
-				if releaseErr := lock.Release(updateCtx); releaseErr != nil {
-					logger.Error("failed to release distributed lock",
-						"payment_order_id", paymentOrderID,
-						"error", releaseErr)
-				}
-			}()
-		}
+	// Acquire distributed lock if configured
+	if !o.acquireLienLock(updateCtx, paymentOrderID, logger) {
+		return
 	}
 
+	errMsg := buildLienErrorMessage(retryErr, lastErr)
+
 	for updateAttempt := 1; updateAttempt <= lienStatusUpdateMaxRetries; updateAttempt++ {
-		// Apply exponential backoff for retries to reduce contention
 		if updateAttempt > 1 {
 			backoff := time.Duration(updateAttempt-1) * lienStatusUpdateBackoffBase
 			select {
 			case <-updateCtx.Done():
-				logger.Error("context cancelled during update retry backoff",
-					"update_attempt", updateAttempt)
+				logger.Error("context cancelled during update retry backoff", "update_attempt", updateAttempt)
 				return
 			case <-time.After(backoff):
 			}
 		}
 
-		// Fetch the current payment order (fresh version)
 		po, err := o.repo.FindByID(updateCtx, paymentOrderID)
 		if err != nil {
 			logger.Error("failed to fetch payment order for lien execution status update",
-				"error", err,
-				"update_attempt", updateAttempt)
+				"error", err, "update_attempt", updateAttempt)
 			return
 		}
 
-		// Update lien execution tracking fields
 		po.LienExecutionAttempts = totalLienAttempts
-
-		// Determine error message if failed
-		var errMsg string
-		if retryErr != nil {
-			// Prefer lastErr (the underlying error) over retryErr (the retry wrapper)
-			if lastErr != nil {
-				errMsg = lastErr.Error()
-			} else {
-				errMsg = retryErr.Error()
-			}
-		}
-
-		// Set status on domain object
 		if retryErr == nil {
 			po.SetLienExecutionSucceeded()
 		} else {
 			po.SetLienExecutionFailed(errMsg)
 		}
 
-		// Persist the updated status
 		updateErr := o.repo.Update(updateCtx, po)
 		if updateErr == nil {
-			// Record metrics only after successful persistence to avoid double-counting
-			// on version conflict retries
-			if retryErr == nil {
-				logger.Info("lien execution completed successfully",
-					"total_attempts", totalLienAttempts)
-				poobservability.RecordLienExecution("success")
-			} else {
-				logger.Error("lien execution failed after all retries",
-					"total_attempts", totalLienAttempts,
-					"error", errMsg)
-				poobservability.RecordLienExecution("failure")
-				poobservability.RecordExternalServiceError("current_account", "execute_lien")
-			}
-			logger.Info("payment order lien execution status updated",
-				"status", po.LienExecutionStatus,
-				"attempts", po.LienExecutionAttempts)
+			o.recordLienExecutionMetrics(retryErr, errMsg, totalLienAttempts, po, logger)
 			return
 		}
 
-		// Check if this is a version conflict (optimistic locking failure)
 		if isVersionConflict(updateErr) {
 			logger.Warn("version conflict updating lien execution status, retrying",
-				"update_attempt", updateAttempt,
-				"max_attempts", lienStatusUpdateMaxRetries)
+				"update_attempt", updateAttempt, "max_attempts", lienStatusUpdateMaxRetries)
 			continue
 		}
 
-		// Non-recoverable error
 		logger.Error("failed to update payment order lien execution status",
-			"error", updateErr,
-			"update_attempt", updateAttempt)
+			"error", updateErr, "update_attempt", updateAttempt)
 		return
 	}
 
-	// Log and record metric for exhausted retries - this will leave the payment order
-	// in PENDING state which will be caught by the reconciliation query using the
-	// idx_payment_orders_lien_execution partial index
 	logger.Error("failed to update lien execution status after max retries due to version conflicts",
-		"max_attempts", lienStatusUpdateMaxRetries,
-		"payment_order_id", paymentOrderID.String())
+		"max_attempts", lienStatusUpdateMaxRetries, "payment_order_id", paymentOrderID.String())
 	poobservability.RecordLienExecutionStatusUpdateExhausted()
+}
+
+// buildFreshContext creates a fresh background context with tenant propagation and timeout.
+// A fresh context is used so the operation can complete even if the parent context has been cancelled.
+func buildFreshContext(parentCtx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
+		ctx = tenant.WithTenant(ctx, tenantID)
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+// acquireLienLock acquires a distributed lock for lien status updates. Returns false if lock contention prevents proceeding.
+func (o *PaymentOrchestrator) acquireLienLock(ctx context.Context, paymentOrderID uuid.UUID, logger *slog.Logger) bool {
+	if o.lockClient == nil {
+		return true
+	}
+
+	lockKey := fmt.Sprintf("lien:execution:%s", paymentOrderID.String())
+	lockStart := time.Now()
+
+	lock, lockErr := o.lockClient.Obtain(ctx, lockKey, 30*time.Second)
+	poobservability.RecordLienExecutionLockWaitDuration(time.Since(lockStart).Seconds())
+
+	if IsLockNotObtained(lockErr) {
+		logger.Warn("failed to acquire distributed lock for lien execution status update",
+			"payment_order_id", paymentOrderID, "error", "lock already held by another process")
+		poobservability.RecordLienExecutionLockContention()
+		return false
+	} else if lockErr != nil {
+		logger.Error("failed to obtain distributed lock for lien execution status update",
+			"payment_order_id", paymentOrderID, "error", lockErr)
+		// Continue without lock - optimistic locking still provides safety
+	} else {
+		go func() {
+			<-ctx.Done()
+			if releaseErr := lock.Release(context.Background()); releaseErr != nil { //nolint:contextcheck // intentional background context for lock release
+				logger.Error("failed to release distributed lock", "payment_order_id", paymentOrderID, "error", releaseErr)
+			}
+		}()
+	}
+	return true
+}
+
+// buildLienErrorMessage constructs the error message for lien execution failure.
+func buildLienErrorMessage(retryErr, lastErr error) string {
+	if retryErr == nil {
+		return ""
+	}
+	if lastErr != nil {
+		return lastErr.Error()
+	}
+	return retryErr.Error()
+}
+
+// recordLienExecutionMetrics records metrics after successful lien status persistence.
+func (o *PaymentOrchestrator) recordLienExecutionMetrics(retryErr error, errMsg string, totalAttempts int, po *domain.PaymentOrder, logger *slog.Logger) {
+	if retryErr == nil {
+		logger.Info("lien execution completed successfully", "total_attempts", totalAttempts)
+		poobservability.RecordLienExecution("success")
+	} else {
+		logger.Error("lien execution failed after all retries", "total_attempts", totalAttempts, "error", errMsg)
+		poobservability.RecordLienExecution("failure")
+		poobservability.RecordExternalServiceError("current_account", "execute_lien")
+	}
+	logger.Info("payment order lien execution status updated",
+		"status", po.LienExecutionStatus, "attempts", po.LienExecutionAttempts)
 }
 
 // isVersionConflict checks if an error is a version conflict error

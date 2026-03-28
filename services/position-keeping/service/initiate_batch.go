@@ -41,16 +41,13 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogBatchRequest,
 ) (resp *positionkeepingv1.InitiateFinancialPositionLogBatchResponse, err error) {
-	// Create context with timeout for the entire batch operation
 	batchCtx, cancel := context.WithTimeout(ctx, BatchProcessingTimeout)
 	defer cancel()
 
-	// Validate request
 	if err := validateBatchRequest(req); err != nil {
 		return nil, err
 	}
 
-	// Check idempotency and acquire lock if key provided
 	idempotencyKey, cachedResponse, err := s.checkBatchIdempotencyAndAcquireLock(batchCtx, req)
 	if err != nil {
 		return nil, err
@@ -59,7 +56,6 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 		return cachedResponse, nil
 	}
 
-	// Clean up pending idempotency key on error
 	if idempotencyKey != nil {
 		defer func() {
 			if err != nil {
@@ -68,34 +64,65 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 		}()
 	}
 
-	// Generate batch ID if not provided
-	batchID := uuid.New()
-	if req.BatchId != "" {
-		batchID, err = uuid.Parse(req.BatchId)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid batch_id: %v", err)
-		}
+	batchID, err := parseBatchID(req.BatchId)
+	if err != nil {
+		return nil, err
 	}
 
-	// Process batch: validate and create domain logs in parallel
 	logs, results, err := s.processBatchRequests(batchCtx, req.Requests)
 	if err != nil {
 		return nil, err
 	}
 
-	// Count successes and failures
-	// Safe conversion: batch size validated to be <= MaxBatchSize (10,000)
-	totalCount := int32(len(req.Requests)) // #nosec G115
-	successCount := int32(0)
-	failureCount := int32(0)
+	totalCount, successCount, failureCount, successfulLogs, logIDs := tallyBatchResults(req.Requests, logs, results)
+
+	if failureCount > 0 {
+		return buildBatchResponse(results, batchID, totalCount, successCount, failureCount), nil
+	}
+
+	if err := s.repository.CreateBatch(batchCtx, successfulLogs); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to persist batch: %v", err)
+	}
+
+	if err := s.publishBulkEvent(batchCtx, batchID, successfulLogs, logIDs); err != nil {
+		return nil, err
+	}
+
+	if idempotencyKey != nil {
+		if err := s.storeBatchIdempotencyResult(batchCtx, *idempotencyKey, results, batchID, totalCount, successCount, failureCount); err != nil {
+			return nil, err
+		}
+	}
+
+	return buildBatchResponse(results, batchID, totalCount, successCount, failureCount), nil
+}
+
+// parseBatchID parses the batch ID string or generates a new one.
+func parseBatchID(batchIDStr string) (uuid.UUID, error) {
+	if batchIDStr == "" {
+		return uuid.New(), nil
+	}
+	batchID, err := uuid.Parse(batchIDStr)
+	if err != nil {
+		return uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid batch_id: %v", err)
+	}
+	return batchID, nil
+}
+
+// tallyBatchResults counts successes/failures and collects successful logs.
+func tallyBatchResults(
+	requests []*positionkeepingv1.BatchInitiateRequest,
+	logs []*domain.FinancialPositionLog,
+	results []*positionkeepingv1.BatchInitiateResult,
+) (int32, int32, int32, []*domain.FinancialPositionLog, []uuid.UUID) {
+	totalCount := int32(len(requests)) // #nosec G115
+	var successCount, failureCount int32
 	successfulLogs := make([]*domain.FinancialPositionLog, 0, len(logs))
 	logIDs := make([]uuid.UUID, 0, len(logs))
 
 	for i, result := range results {
 		if result.Success {
 			successCount++
-			// Defensive nil check: logs[i] should always be non-nil when result.Success is true,
-			// but we guard against potential race conditions or future code changes
 			if logs[i] != nil {
 				successfulLogs = append(successfulLogs, logs[i])
 				logIDs = append(logIDs, logs[i].LogID)
@@ -105,84 +132,70 @@ func (s *PositionKeepingService) InitiateFinancialPositionLogBatch(
 		}
 	}
 
-	// If there were validation failures, return early with detailed errors
-	if failureCount > 0 {
-		return &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
-			Results:      results,
-			BatchId:      batchID.String(),
-			TotalCount:   totalCount,
-			SuccessCount: successCount,
-			FailureCount: failureCount,
-		}, nil
-	}
+	return totalCount, successCount, failureCount, successfulLogs, logIDs
+}
 
-	// Persist all logs atomically using CreateBatch
-	if err := s.repository.CreateBatch(batchCtx, successfulLogs); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to persist batch: %v", err)
-	}
-
-	// Publish BulkTransactionCaptured event to outbox.
-	// NOTE: CreateBatch does not support outbox writes within its internal transaction.
-	// The event is written separately here; the outbox worker delivers it to Kafka.
-	// At-least-once delivery is guaranteed by the outbox pattern.
-	if len(successfulLogs) > 0 {
-		// Safe conversion: successfulLogs length <= MaxBatchSize (10,000)
-		transactionCount := int32(len(successfulLogs)) // #nosec G115
-		event := &domain.BulkTransactionCaptured{
-			BatchID:          batchID,
-			TransactionCount: transactionCount,
-			LogIDs:           logIDs,
-			Source:           domain.TransactionSourceImported,
-			CorrelationID:    fmt.Sprintf("batch-%s", batchID.String()),
-			Timestamp:        time.Now().UTC(),
-			Version:          1,
-		}
-		if err := s.eventPublisher.Publish(batchCtx, event); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to publish batch event: %v", err)
-		}
-	}
-
-	// Store idempotency result if key was provided
-	if idempotencyKey != nil {
-		// Serialize the complete response for caching (including full Log proto messages)
-		// Use protojson for proper proto message serialization
-		responseProto := &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
-			Results:      results,
-			BatchId:      batchID.String(),
-			TotalCount:   totalCount,
-			SuccessCount: successCount,
-			FailureCount: failureCount,
-		}
-
-		marshaler := protojson.MarshalOptions{
-			UseProtoNames:   true,
-			EmitUnpopulated: false,
-		}
-		resultData, err := marshaler.Marshal(responseProto)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
-		}
-
-		if err := s.idempotency.StoreResult(batchCtx, idempotency.Result{
-			Key:         *idempotencyKey,
-			Status:      idempotency.StatusCompleted,
-			Data:        resultData,
-			CompletedAt: time.Now(),
-			TTL:         24 * time.Hour,
-		}); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
-		}
-	}
-
-	// Build successful response
-	resp = &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
+// buildBatchResponse constructs the batch response proto.
+func buildBatchResponse(results []*positionkeepingv1.BatchInitiateResult, batchID uuid.UUID, totalCount, successCount, failureCount int32) *positionkeepingv1.InitiateFinancialPositionLogBatchResponse {
+	return &positionkeepingv1.InitiateFinancialPositionLogBatchResponse{
 		Results:      results,
 		BatchId:      batchID.String(),
 		TotalCount:   totalCount,
 		SuccessCount: successCount,
 		FailureCount: failureCount,
 	}
-	return resp, nil
+}
+
+// publishBulkEvent publishes a BulkTransactionCaptured event for the batch.
+func (s *PositionKeepingService) publishBulkEvent(ctx context.Context, batchID uuid.UUID, successfulLogs []*domain.FinancialPositionLog, logIDs []uuid.UUID) error {
+	if len(successfulLogs) == 0 {
+		return nil
+	}
+	transactionCount := int32(len(successfulLogs)) // #nosec G115
+	event := &domain.BulkTransactionCaptured{
+		BatchID:          batchID,
+		TransactionCount: transactionCount,
+		LogIDs:           logIDs,
+		Source:           domain.TransactionSourceImported,
+		CorrelationID:    fmt.Sprintf("batch-%s", batchID.String()),
+		Timestamp:        time.Now().UTC(),
+		Version:          1,
+	}
+	if err := s.eventPublisher.Publish(ctx, event); err != nil {
+		return status.Errorf(codes.Internal, "failed to publish batch event: %v", err)
+	}
+	return nil
+}
+
+// storeBatchIdempotencyResult serializes and stores the batch response for idempotency.
+func (s *PositionKeepingService) storeBatchIdempotencyResult(
+	ctx context.Context,
+	key idempotency.Key,
+	results []*positionkeepingv1.BatchInitiateResult,
+	batchID uuid.UUID,
+	totalCount, successCount, failureCount int32,
+) error {
+	responseProto := buildBatchResponse(results, batchID, totalCount, successCount, failureCount)
+
+	marshaler := protojson.MarshalOptions{
+		UseProtoNames:   true,
+		EmitUnpopulated: false,
+	}
+	resultData, err := marshaler.Marshal(responseProto)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
+	}
+
+	if err := s.idempotency.StoreResult(ctx, idempotency.Result{
+		Key:         key,
+		Status:      idempotency.StatusCompleted,
+		Data:        resultData,
+		CompletedAt: time.Now(),
+		TTL:         24 * time.Hour,
+	}); err != nil {
+		return status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
+	}
+	return nil
 }
 
 // validateBatchRequest validates the batch request

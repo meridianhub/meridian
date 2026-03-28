@@ -126,68 +126,24 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 		return nil, ErrOrchestratorRepoNil
 	}
 
-	// Auto-create AccountResolver if InternalAccountClient is provided but AccountResolver is nil
-	accountResolver := cfg.AccountResolver
-	if cfg.InternalAccountClient != nil && accountResolver == nil {
-		var err error
-		accountResolver, err = NewAccountResolver(AccountResolverConfig{
-			Client: cfg.InternalAccountClient,
-			Logger: cfg.Logger,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create account resolver: %w", err)
-		}
+	accountResolver, err := resolveOrCreateAccountResolver(cfg)
+	if err != nil {
+		return nil, err
 	}
 
-	// Create bucket evaluator for CEL expression caching across requests
 	bucketEvaluator, err := NewBucketEvaluator(cfg.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bucket evaluator: %w", err)
 	}
 
-	// Use external handler registry if provided (contains cross-service handlers),
-	// otherwise create a new empty one.
-	handlerRegistry := cfg.HandlerRegistry
-	if handlerRegistry == nil {
-		handlerRegistry = saga.NewHandlerRegistry()
-	}
-
-	// Register payment-order-specific handlers on the registry
-	handlerDeps := &PaymentOrderHandlerDeps{
-		CurrentAccountClient:      cfg.CurrentAccountClient,
-		PaymentGateway:            cfg.PaymentGateway,
-		FinancialAccountingClient: cfg.FinancialAccountingClient,
-		ReferenceDataClient:       cfg.ReferenceDataClient,
-		BucketEvaluator:           bucketEvaluator,
-		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
-		Logger:                    cfg.Logger,
-		Orchestrator:              nil, // Will be set after orchestrator creation
-	}
-
-	if err := RegisterPaymentOrderHandlers(handlerRegistry, handlerDeps); err != nil {
-		return nil, fmt.Errorf("failed to register payment order handlers: %w", err)
-	}
-
-	// Create Starlark runtime and runner
-	runtime, err := saga.NewRuntime(cfg.Logger)
+	handlerRegistry, handlerDeps, err := buildHandlerRegistry(cfg, bucketEvaluator)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create starlark runtime: %w", err)
+		return nil, err
 	}
 
-	// Build typed service modules from the handler registry for Starlark scripts
-	serviceModules, err := sagaschema.BuildServiceModules(handlerRegistry)
+	starlarkRunner, err := buildStarlarkRunner(cfg, handlerRegistry)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build service modules: %w", err)
-	}
-
-	starlarkRunner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
-		Runtime:        runtime,
-		Registry:       handlerRegistry,
-		ServiceModules: serviceModules,
-		Logger:         cfg.Logger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create starlark saga runner: %w", err)
+		return nil, err
 	}
 
 	orchestrator := &PaymentOrchestrator{
@@ -215,6 +171,75 @@ func NewPaymentOrchestrator(cfg PaymentOrchestratorConfig) (*PaymentOrchestrator
 	handlerDeps.Orchestrator = orchestrator
 
 	return orchestrator, nil
+}
+
+// resolveOrCreateAccountResolver returns the configured AccountResolver or auto-creates one
+// when InternalAccountClient is provided but AccountResolver is nil.
+func resolveOrCreateAccountResolver(cfg PaymentOrchestratorConfig) (*AccountResolver, error) {
+	if cfg.AccountResolver != nil {
+		return cfg.AccountResolver, nil
+	}
+	if cfg.InternalAccountClient == nil {
+		return nil, nil //nolint:nilnil // nil resolver is valid when no internal account client configured
+	}
+	resolver, err := NewAccountResolver(AccountResolverConfig{
+		Client: cfg.InternalAccountClient,
+		Logger: cfg.Logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create account resolver: %w", err)
+	}
+	return resolver, nil
+}
+
+// buildHandlerRegistry creates the handler registry and registers payment-order handlers.
+func buildHandlerRegistry(cfg PaymentOrchestratorConfig, bucketEvaluator *BucketEvaluator) (*saga.HandlerRegistry, *PaymentOrderHandlerDeps, error) {
+	handlerRegistry := cfg.HandlerRegistry
+	if handlerRegistry == nil {
+		handlerRegistry = saga.NewHandlerRegistry()
+	}
+
+	handlerDeps := &PaymentOrderHandlerDeps{
+		CurrentAccountClient:      cfg.CurrentAccountClient,
+		PaymentGateway:            cfg.PaymentGateway,
+		FinancialAccountingClient: cfg.FinancialAccountingClient,
+		ReferenceDataClient:       cfg.ReferenceDataClient,
+		BucketEvaluator:           bucketEvaluator,
+		LienExecutionRetryConfig:  cfg.LienExecutionRetryConfig,
+		Logger:                    cfg.Logger,
+		Orchestrator:              nil, // Will be set after orchestrator creation
+	}
+
+	if err := RegisterPaymentOrderHandlers(handlerRegistry, handlerDeps); err != nil {
+		return nil, nil, fmt.Errorf("failed to register payment order handlers: %w", err)
+	}
+
+	return handlerRegistry, handlerDeps, nil
+}
+
+// buildStarlarkRunner creates the Starlark runtime and saga runner.
+func buildStarlarkRunner(cfg PaymentOrchestratorConfig, handlerRegistry *saga.HandlerRegistry) (*saga.StarlarkSagaRunner, error) {
+	runtime, err := saga.NewRuntime(cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create starlark runtime: %w", err)
+	}
+
+	serviceModules, err := sagaschema.BuildServiceModules(handlerRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build service modules: %w", err)
+	}
+
+	runner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
+		Runtime:        runtime,
+		Registry:       handlerRegistry,
+		ServiceModules: serviceModules,
+		Logger:         cfg.Logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create starlark saga runner: %w", err)
+	}
+
+	return runner, nil
 }
 
 // publishEvent publishes a Kafka event if the publisher is configured.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -61,35 +60,11 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check idempotency
+	// Check idempotency with cached response support
 	if s.idempotency != nil {
-		result, err := s.idempotency.Check(ctx, idempotencyKey)
-		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
-					// Deserialize cached response from protobuf
-					var cachedResponse financialaccountingv1.ControlFinancialBookingLogResponse
-					if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
-						slog.Error("failed to deserialize cached idempotency response",
-							"error", unmarshalErr,
-							"idempotency_key", req.IdempotencyKey.Key,
-							"operation", "control-booking-log")
-						return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-					}
-					slog.Info("returning cached idempotent response",
-						"idempotency_key", req.IdempotencyKey.Key,
-						"operation", "control-booking-log",
-						"booking_log_id", req.GetId())
-					return &cachedResponse, nil
-				}
-				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-			}
-			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
-		}
-
-		// Mark as pending to prevent concurrent processing
-		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+		cachedResp, err := s.checkControlIdempotency(ctx, idempotencyKey, req.IdempotencyKey.Key, req.GetId())
+		if cachedResp != nil || err != nil {
+			return cachedResp, err
 		}
 	}
 
@@ -125,14 +100,47 @@ func (s *FinancialAccountingService) ControlFinancialBookingLog(
 
 	// Store idempotency result
 	if s.idempotency != nil {
-		ttl := defaultIdempotencyTTL
-		if req.IdempotencyKey.TtlSeconds > 0 {
-			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
-		}
+		ttl := idempotencyTTLFromKey(req.IdempotencyKey.TtlSeconds)
 		s.storeIdempotencyResult(ctx, idempotencyKey, ttl, response, "control-booking-log")
 	}
 
 	return response, nil
+}
+
+// checkControlIdempotency checks if a control operation was already processed
+// and returns the cached response if available.
+func (s *FinancialAccountingService) checkControlIdempotency(
+	ctx context.Context,
+	key idempotency.Key,
+	idempotencyKeyStr, entityID string,
+) (*financialaccountingv1.ControlFinancialBookingLogResponse, error) {
+	result, err := s.idempotency.Check(ctx, key)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			if result != nil && result.Status == idempotency.StatusCompleted && len(result.Data) > 0 {
+				var cachedResponse financialaccountingv1.ControlFinancialBookingLogResponse
+				if unmarshalErr := proto.Unmarshal(result.Data, &cachedResponse); unmarshalErr != nil {
+					slog.Error("failed to deserialize cached idempotency response",
+						"error", unmarshalErr,
+						"idempotency_key", idempotencyKeyStr,
+						"operation", "control-booking-log")
+					return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+				}
+				slog.Info("returning cached idempotent response",
+					"idempotency_key", idempotencyKeyStr,
+					"operation", "control-booking-log",
+					"booking_log_id", entityID)
+				return &cachedResponse, nil
+			}
+			return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+		}
+		return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+	}
+
+	if err := s.idempotency.MarkPending(ctx, key, defaultIdempotencyTTL); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+	}
+	return nil, nil //nolint:nilnil // intentional: nil,nil signals "no cached result, proceed with operation"
 }
 
 // executeControlTransaction executes the control action within a database transaction.

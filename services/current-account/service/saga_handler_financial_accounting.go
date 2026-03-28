@@ -7,6 +7,7 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -26,26 +27,8 @@ func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params m
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	accountID, err := requireString(params, "account_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	// Accept instrument_code (preferred) or currency (deprecated alias)
-	currency := optionalString(params, "instrument_code")
-	if currency == "" {
-		currency = optionalString(params, "currency")
-	}
-	if currency == "" {
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
-	}
-
-	transactionID, err := requireString(params, "transaction_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	transactionType, err := requireString(params, "transaction_type")
+	// Extract and validate parameters
+	accountID, currency, transactionID, transactionType, err := validateBookingLogParams(params)
 	if err != nil {
 		return nil, wrapHandlerError(handlerName, err)
 	}
@@ -90,6 +73,30 @@ func currentAccountFinAcctInitiateBookingLog(ctx *saga.StarlarkContext, params m
 	}, nil
 }
 
+// validateBookingLogParams extracts and validates parameters for initiate_booking_log.
+func validateBookingLogParams(params map[string]any) (string, string, string, string, error) {
+	accountID, err := requireString(params, "account_id")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	currency := optionalString(params, "instrument_code")
+	if currency == "" {
+		currency = optionalString(params, "currency")
+	}
+	if currency == "" {
+		return "", "", "", "", fmt.Errorf("%w: instrument_code", errMissingParameter)
+	}
+	transactionID, err := requireString(params, "transaction_id")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	transactionType, err := requireString(params, "transaction_type")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return accountID, currency, transactionID, transactionType, nil
+}
+
 // currentAccountFinAcctCapturePosting captures a ledger posting (debit or credit).
 //
 // Required params:
@@ -109,43 +116,100 @@ func currentAccountFinAcctCapturePosting(ctx *saga.StarlarkContext, params map[s
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
+	// Extract and validate posting parameters
+	posting, err := validatePostingParams(params)
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
+	}
+
+	if deps.FinAcctClient == nil {
+		return nil, wrapHandlerError(handlerName, errFinAcctClientNil)
+	}
+
+	deps.Logger.Info("executing financial_accounting.capture_posting",
+		"booking_log_id", posting.bookingLogID,
+		"account_id", posting.accountID,
+		"direction", posting.direction,
+		"posting_type", posting.postingType)
+
+	protoAmount := decimalToMoneyAmount(posting.amount, posting.currency)
+
+	resp, err := deps.FinAcctClient.CaptureLedgerPosting(ctx,
+		&financialaccountingv1.CaptureLedgerPostingRequest{
+			FinancialBookingLogId: posting.bookingLogID,
+			PostingDirection:      posting.pbDirection,
+			PostingAmount:         protoAmount.Amount,
+			AccountId:             posting.accountID,
+			ValueDate:             timestamppb.Now(),
+			IdempotencyKey: &commonpb.IdempotencyKey{
+				Key: fmt.Sprintf("%s-%s", posting.transactionID, posting.postingType),
+			},
+		},
+	)
+	if err != nil {
+		caobservability.RecordExternalServiceError("financial_accounting", "capture_"+posting.postingType+"_posting")
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("failed to capture %s posting: %w", posting.postingType, err))
+	}
+	if resp.LedgerPosting == nil {
+		caobservability.RecordExternalServiceError("financial_accounting", "capture_"+posting.postingType+"_posting")
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s posting for transaction %s", errNilPosting, posting.postingType, posting.transactionID))
+	}
+
+	deps.Logger.Info("financial_accounting.capture_posting completed",
+		"posting_id", resp.LedgerPosting.Id,
+		"posting_type", posting.postingType,
+		"transaction_id", posting.transactionID)
+
+	return map[string]any{
+		"posting_id": resp.LedgerPosting.Id,
+		"status":     "POSTED",
+	}, nil
+}
+
+// postingParams holds validated parameters for a ledger posting operation.
+type postingParams struct {
+	bookingLogID  string
+	accountID     string
+	amount        decimal.Decimal
+	currency      string
+	direction     string
+	pbDirection   commonpb.PostingDirection
+	transactionID string
+	postingType   string
+}
+
+// validatePostingParams extracts and validates common parameters for capture/compensate posting.
+func validatePostingParams(params map[string]any) (*postingParams, error) {
 	bookingLogID, err := requireString(params, "booking_log_id")
 	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+		return nil, err
 	}
-
 	accountID, err := requireString(params, "account_id")
 	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+		return nil, err
 	}
-
 	amount, err := requireDecimal(params, "amount")
 	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+		return nil, err
 	}
-
-	// Accept instrument_code (preferred) or currency (deprecated alias)
 	currency := optionalString(params, "instrument_code")
 	if currency == "" {
 		currency = optionalString(params, "currency")
 	}
 	if currency == "" {
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
+		return nil, fmt.Errorf("%w: instrument_code", errMissingParameter)
 	}
-
 	direction, err := requireString(params, "direction")
 	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+		return nil, err
 	}
-
 	transactionID, err := requireString(params, "transaction_id")
 	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+		return nil, err
 	}
-
 	postingType, err := requireString(params, "posting_type")
 	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
+		return nil, err
 	}
 
 	var pbDirection commonpb.PostingDirection
@@ -155,50 +219,18 @@ func currentAccountFinAcctCapturePosting(ctx *saga.StarlarkContext, params map[s
 	case directionCredit:
 		pbDirection = commonpb.PostingDirection_POSTING_DIRECTION_CREDIT
 	default:
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s", errInvalidDirection, direction))
+		return nil, fmt.Errorf("%w: %s", errInvalidDirection, direction)
 	}
 
-	if deps.FinAcctClient == nil {
-		return nil, wrapHandlerError(handlerName, errFinAcctClientNil)
-	}
-
-	deps.Logger.Info("executing financial_accounting.capture_posting",
-		"booking_log_id", bookingLogID,
-		"account_id", accountID,
-		"direction", direction,
-		"posting_type", postingType)
-
-	protoAmount := decimalToMoneyAmount(amount, currency)
-
-	resp, err := deps.FinAcctClient.CaptureLedgerPosting(ctx,
-		&financialaccountingv1.CaptureLedgerPostingRequest{
-			FinancialBookingLogId: bookingLogID,
-			PostingDirection:      pbDirection,
-			PostingAmount:         protoAmount.Amount,
-			AccountId:             accountID,
-			ValueDate:             timestamppb.Now(),
-			IdempotencyKey: &commonpb.IdempotencyKey{
-				Key: fmt.Sprintf("%s-%s", transactionID, postingType),
-			},
-		},
-	)
-	if err != nil {
-		caobservability.RecordExternalServiceError("financial_accounting", "capture_"+postingType+"_posting")
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("failed to capture %s posting: %w", postingType, err))
-	}
-	if resp.LedgerPosting == nil {
-		caobservability.RecordExternalServiceError("financial_accounting", "capture_"+postingType+"_posting")
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s posting for transaction %s", errNilPosting, postingType, transactionID))
-	}
-
-	deps.Logger.Info("financial_accounting.capture_posting completed",
-		"posting_id", resp.LedgerPosting.Id,
-		"posting_type", postingType,
-		"transaction_id", transactionID)
-
-	return map[string]any{
-		"posting_id": resp.LedgerPosting.Id,
-		"status":     "POSTED",
+	return &postingParams{
+		bookingLogID:  bookingLogID,
+		accountID:     accountID,
+		amount:        amount,
+		currency:      currency,
+		direction:     direction,
+		pbDirection:   pbDirection,
+		transactionID: transactionID,
+		postingType:   postingType,
 	}, nil
 }
 
@@ -286,53 +318,10 @@ func currentAccountFinAcctCompensatePosting(ctx *saga.StarlarkContext, params ma
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	bookingLogID, err := requireString(params, "booking_log_id")
+	// Reuse the same parameter validation as capture posting
+	posting, err := validatePostingParams(params)
 	if err != nil {
 		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	accountID, err := requireString(params, "account_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	amount, err := requireDecimal(params, "amount")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	// Accept instrument_code (preferred) or currency (deprecated alias)
-	currency := optionalString(params, "instrument_code")
-	if currency == "" {
-		currency = optionalString(params, "currency")
-	}
-	if currency == "" {
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
-	}
-
-	direction, err := requireString(params, "direction")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	transactionID, err := requireString(params, "transaction_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	postingType, err := requireString(params, "posting_type")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	var pbDirection commonpb.PostingDirection
-	switch direction {
-	case directionDebit:
-		pbDirection = commonpb.PostingDirection_POSTING_DIRECTION_DEBIT
-	case directionCredit:
-		pbDirection = commonpb.PostingDirection_POSTING_DIRECTION_CREDIT
-	default:
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s", errInvalidDirection, direction))
 	}
 
 	if deps.FinAcctClient == nil {
@@ -340,40 +329,40 @@ func currentAccountFinAcctCompensatePosting(ctx *saga.StarlarkContext, params ma
 	}
 
 	deps.Logger.Info("executing financial_accounting.compensate_posting",
-		"booking_log_id", bookingLogID,
-		"account_id", accountID,
-		"direction", direction,
-		"posting_type", postingType)
+		"booking_log_id", posting.bookingLogID,
+		"account_id", posting.accountID,
+		"direction", posting.direction,
+		"posting_type", posting.postingType)
 
-	protoAmount := decimalToMoneyAmount(amount, currency)
+	protoAmount := decimalToMoneyAmount(posting.amount, posting.currency)
 
 	_, err = deps.FinAcctClient.CaptureLedgerPosting(ctx,
 		&financialaccountingv1.CaptureLedgerPostingRequest{
-			FinancialBookingLogId: bookingLogID,
-			PostingDirection:      pbDirection,
+			FinancialBookingLogId: posting.bookingLogID,
+			PostingDirection:      posting.pbDirection,
 			PostingAmount:         protoAmount.Amount,
-			AccountId:             accountID,
+			AccountId:             posting.accountID,
 			ValueDate:             timestamppb.Now(),
 			IdempotencyKey: &commonpb.IdempotencyKey{
-				Key: fmt.Sprintf("COMP-%s-%s", transactionID, postingType),
+				Key: fmt.Sprintf("COMP-%s-%s", posting.transactionID, posting.postingType),
 			},
 		},
 	)
 	if err != nil {
 		// CRITICAL: Manual intervention required - ledger may be inconsistent
 		deps.Logger.Error("CRITICAL: failed to compensate posting - manual ledger reconciliation required",
-			"booking_log_id", bookingLogID,
-			"account_id", accountID,
-			"transaction_id", transactionID,
+			"booking_log_id", posting.bookingLogID,
+			"account_id", posting.accountID,
+			"transaction_id", posting.transactionID,
 			"error", err,
 			"runbook", "docs/runbooks/saga-failure-recovery.md")
-		caobservability.RecordInlineCompensationFailure("current_account", postingType)
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("failed to compensate %s posting: %w", postingType, err))
+		caobservability.RecordInlineCompensationFailure("current_account", posting.postingType)
+		return nil, wrapHandlerError(handlerName, fmt.Errorf("failed to compensate %s posting: %w", posting.postingType, err))
 	}
 
 	deps.Logger.Info("financial_accounting.compensate_posting completed",
-		"booking_log_id", bookingLogID,
-		"posting_type", postingType)
+		"booking_log_id", posting.bookingLogID,
+		"posting_type", posting.postingType)
 
 	return map[string]any{
 		"status": "COMPENSATED",

@@ -374,68 +374,41 @@ func DefaultConfig() *Config {
 	}
 
 	return &Config{
-		Services: []ServiceConfig{
-			{
-				Name:          "party",
-				MigrationPath: basePath + "/party",
-				DatabaseURL:   getServiceDatabaseURL("party"),
-			},
-			{
-				Name:          "current-account",
-				MigrationPath: basePath + "/current-account",
-				DatabaseURL:   getServiceDatabaseURL("current-account"),
-			},
-			{
-				Name:          "position-keeping",
-				MigrationPath: basePath + "/position-keeping",
-				DatabaseURL:   getServiceDatabaseURL("position-keeping"),
-			},
-			{
-				Name:          "financial-accounting",
-				MigrationPath: basePath + "/financial-accounting",
-				DatabaseURL:   getServiceDatabaseURL("financial-accounting"),
-			},
-			{
-				Name:          "payment-order",
-				MigrationPath: basePath + "/payment-order",
-				DatabaseURL:   getServiceDatabaseURL("payment-order"),
-			},
-			{
-				Name:          "market-information",
-				MigrationPath: basePath + "/market-information",
-				DatabaseURL:   getServiceDatabaseURL("market-information"),
-			},
-			{
-				Name:          "reference-data",
-				MigrationPath: basePath + "/reference-data",
-				DatabaseURL:   getServiceDatabaseURL("reference-data"),
-			},
-			// Services below require org_<tenant> schemas for tenant-scoped
-			// queries but have no provisioner-specific migrations.
-			{
-				Name:          "internal-account",
-				MigrationPath: basePath + "/internal-account",
-				DatabaseURL:   getServiceDatabaseURL("internal-account"),
-			},
-			{
-				Name:          "reconciliation",
-				MigrationPath: basePath + "/reconciliation",
-				DatabaseURL:   getServiceDatabaseURL("reconciliation"),
-			},
-			{
-				Name:          "identity",
-				MigrationPath: basePath + "/identity",
-				DatabaseURL:   getServiceDatabaseURL("identity"),
-			},
-			{
-				Name:          "control-plane",
-				MigrationPath: basePath + "/control-plane",
-				DatabaseURL:   getServiceDatabaseURL("control-plane"),
-			},
-		},
+		Services:            buildDefaultServiceConfigs(basePath),
 		ProvisioningTimeout: defaults.DefaultRPCTimeout,
 		DataRetentionPeriod: 7 * 365 * 24 * time.Hour, // 7 years
 	}
+}
+
+// defaultServiceNames lists all BIAN services that require schema provisioning.
+// Order matters: services are provisioned in the order listed.
+var defaultServiceNames = []string{
+	"party",
+	"current-account",
+	"position-keeping",
+	"financial-accounting",
+	"payment-order",
+	"market-information",
+	"reference-data",
+	// Services below require org_<tenant> schemas for tenant-scoped
+	// queries but have no provisioner-specific migrations.
+	"internal-account",
+	"reconciliation",
+	"identity",
+	"control-plane",
+}
+
+// buildDefaultServiceConfigs constructs ServiceConfig entries for all default services.
+func buildDefaultServiceConfigs(basePath string) []ServiceConfig {
+	configs := make([]ServiceConfig, 0, len(defaultServiceNames))
+	for _, name := range defaultServiceNames {
+		configs = append(configs, ServiceConfig{
+			Name:          name,
+			MigrationPath: basePath + "/" + name,
+			DatabaseURL:   getServiceDatabaseURL(name),
+		})
+	}
+	return configs
 }
 
 // getServiceDatabaseURL constructs database URL from environment variables.

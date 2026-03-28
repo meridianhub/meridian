@@ -192,13 +192,28 @@ type InspectOptions struct {
 //
 // Returns a slice of DLQ messages that match the filter criteria.
 func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]DLQMessage, error) {
-	// Get partition metadata for all DLQ topics
-	topicDetails, err := i.admin.ListTopics(ctx, i.config.DLQTopics...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list topics: %w", err)
+	if err := i.assignDLQPartitions(ctx); err != nil {
+		return nil, err
 	}
 
-	// Build partition assignments
+	timeout := options.Timeout
+	if timeout == 0 {
+		timeout = defaults.DefaultRPCTimeout
+	}
+
+	inspectCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return i.pollDLQMessages(inspectCtx, options)
+}
+
+// assignDLQPartitions fetches topic metadata and assigns all partitions for reading.
+func (i *DLQInspector) assignDLQPartitions(ctx context.Context) error {
+	topicDetails, err := i.admin.ListTopics(ctx, i.config.DLQTopics...)
+	if err != nil {
+		return fmt.Errorf("failed to list topics: %w", err)
+	}
+
 	partitions := make(map[string]map[int32]kgo.Offset)
 	for _, topic := range i.config.DLQTopics {
 		details, ok := topicDetails[topic]
@@ -211,80 +226,57 @@ func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]D
 		}
 	}
 
-	// Assign partitions directly (no consumer group)
 	i.client.AddConsumePartitions(partitions)
+	return nil
+}
 
-	// Set default timeout if not specified
-	timeout := options.Timeout
-	if timeout == 0 {
-		timeout = defaults.DefaultRPCTimeout
-	}
-
-	// Create timeout context
-	inspectCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
+// pollDLQMessages polls for DLQ messages until context expires, message limit is reached,
+// or consecutive empty polls indicate no more messages.
+func (i *DLQInspector) pollDLQMessages(ctx context.Context, options InspectOptions) ([]DLQMessage, error) {
 	results := make([]DLQMessage, 0)
 	consecutiveEmptyPolls := 0
-	maxConsecutiveEmptyPolls := 5 // Stop after 5 consecutive empty polls
+	maxConsecutiveEmptyPolls := 5
 
 	for {
-		// Check for context cancellation
 		select {
-		case <-inspectCtx.Done():
-			return results, fmt.Errorf("inspect context canceled: %w", inspectCtx.Err())
+		case <-ctx.Done():
+			return results, fmt.Errorf("inspect context canceled: %w", ctx.Err())
 		default:
 		}
 
-		// Check if we've hit the message limit
 		if options.MaxMessages > 0 && len(results) >= options.MaxMessages {
 			return results, nil
 		}
 
-		// Poll for records with short timeout
-		pollCtx, pollCancel := context.WithTimeout(inspectCtx, 100*time.Millisecond)
+		pollCtx, pollCancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		fetches := i.client.PollFetches(pollCtx)
 		pollCancel()
 
-		// Check for errors
-		if errs := fetches.Errors(); len(errs) > 0 {
-			for _, err := range errs {
-				if errors.Is(err.Err, context.DeadlineExceeded) || errors.Is(err.Err, context.Canceled) {
-					continue
-				}
-				return results, fmt.Errorf("error reading DLQ message: %w", err.Err)
-			}
+		if err := checkFetchErrors(fetches); err != nil {
+			return results, err
 		}
 
-		// Track empty polls
 		if fetches.Empty() {
 			consecutiveEmptyPolls++
 			if consecutiveEmptyPolls >= maxConsecutiveEmptyPolls {
-				// No more messages available
 				return results, nil
 			}
 			continue
 		}
 
-		// Reset counter on successful fetch
 		consecutiveEmptyPolls = 0
 
-		// Process each record
 		fetches.EachRecord(func(record *kgo.Record) {
-			// Check limit
 			if options.MaxMessages > 0 && len(results) >= options.MaxMessages {
 				return
 			}
 
-			// Parse DLQ metadata
 			metadata := parseDLQMetadata(record)
-
 			dlqMsg := DLQMessage{
 				Record:   record,
 				Metadata: metadata,
 			}
 
-			// Apply filter if specified
 			if options.Filter != nil && !options.Filter(dlqMsg) {
 				return
 			}
@@ -292,6 +284,19 @@ func (i *DLQInspector) Inspect(ctx context.Context, options InspectOptions) ([]D
 			results = append(results, dlqMsg)
 		})
 	}
+}
+
+// checkFetchErrors returns the first non-timeout fetch error, or nil.
+func checkFetchErrors(fetches kgo.Fetches) error {
+	if errs := fetches.Errors(); len(errs) > 0 {
+		for _, err := range errs {
+			if errors.Is(err.Err, context.DeadlineExceeded) || errors.Is(err.Err, context.Canceled) {
+				continue
+			}
+			return fmt.Errorf("error reading DLQ message: %w", err.Err)
+		}
+	}
+	return nil
 }
 
 // DLQStatistics contains aggregate statistics about DLQ messages.

@@ -92,80 +92,85 @@ func NewStarlarkRuntime(cfg StarlarkRuntimeConfig) StarlarkRuntime {
 //   - valued_amount: numeric value
 //   - instrument: string instrument code (e.g., "GBP", "USD")
 func (r *defaultStarlarkRuntime) Execute(ctx context.Context, script string, req *Request) (*Response, error) {
-	// Validate script size using unified sandbox config.
 	if err := sandbox.ValidateScript(script, sandboxCfg); err != nil {
 		return nil, fmt.Errorf("%w: %d bytes exceeds %d", ErrStarlarkScriptTooLarge, len(script), sandboxCfg.MaxScriptSize)
 	}
 
-	// Apply timeout
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
-	// Build context for script
-	scriptCtx := r.buildScriptContext(req)
+	thread, done := r.buildValuationThread(ctx)
+	defer close(done)
 
-	// Create Starlark thread
+	predeclared := r.buildValuationPredeclared(req)
+
+	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "valuation.star", script, predeclared)
+	if err != nil {
+		return nil, r.classifyExecError(ctx, err)
+	}
+
+	return r.buildValuationResponse(globals, thread, req)
+}
+
+// buildValuationThread creates a sandboxed Starlark thread with timeout enforcement.
+// Returns the thread and a done channel that should be closed when execution completes.
+func (r *defaultStarlarkRuntime) buildValuationThread(ctx context.Context) (*starlark.Thread, chan struct{}) {
 	thread := &starlark.Thread{
 		Name: "valuation",
 		Print: func(_ *starlark.Thread, _ string) {
 			// Silently discard print statements (security: no output channels)
 		},
 	}
-
-	// Store context for timeout checking
 	thread.SetLocal("ctx", ctx)
 
-	// Start goroutine to enforce timeout by calling thread.Cancel()
 	done := make(chan struct{})
-	defer close(done)
 	go func() {
 		select {
 		case <-ctx.Done():
 			thread.Cancel("execution timeout")
 		case <-done:
-			// Execution completed
 		}
 	}()
 
-	// Apply sandbox security constraints (step limits) from unified config.
 	sandbox.HardenThread(thread, sandboxCfg)
+	return thread, done
+}
 
-	// Build predeclared variables: builtins + script context
+// buildValuationPredeclared creates the predeclared variables (builtins + script context).
+func (r *defaultStarlarkRuntime) buildValuationPredeclared(req *Request) starlark.StringDict {
 	predeclared := make(starlark.StringDict, len(r.builtins)+1)
 	for name, val := range r.builtins {
 		predeclared[name] = val
 	}
-	predeclared["ctx"] = r.toStarlarkValue(scriptCtx)
+	predeclared["ctx"] = r.toStarlarkValue(r.buildScriptContext(req))
+	return predeclared
+}
 
-	// Parse and execute script using the non-deprecated API
-	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "valuation.star", script, predeclared)
-	if err != nil {
-		// Check if context cancelled (timeout)
-		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, fmt.Errorf("%w: execution exceeded %v", ErrStarlarkTimeout, r.timeout)
-			}
-			return nil, fmt.Errorf("%w: %w", ErrStarlarkExecution, ctx.Err())
-		default:
-			// Syntax or execution error - both are syntax errors in Starlark terminology
-			return nil, fmt.Errorf("%w: %w", ErrStarlarkSyntax, err)
+// classifyExecError wraps a Starlark execution error with the appropriate sentinel.
+func (r *defaultStarlarkRuntime) classifyExecError(ctx context.Context, err error) error {
+	select {
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("%w: execution exceeded %v", ErrStarlarkTimeout, r.timeout)
 		}
+		return fmt.Errorf("%w: %w", ErrStarlarkExecution, ctx.Err())
+	default:
+		return fmt.Errorf("%w: %w", ErrStarlarkSyntax, err)
 	}
+}
 
-	// Extract 'result' variable
+// buildValuationResponse extracts the result variable and path entries from completed execution.
+func (r *defaultStarlarkRuntime) buildValuationResponse(globals starlark.StringDict, thread *starlark.Thread, req *Request) (*Response, error) {
 	resultVal, ok := globals["result"]
 	if !ok {
 		return nil, fmt.Errorf("%w: script did not set 'result' global variable", ErrStarlarkMissingResult)
 	}
 
-	// Convert result to Response
 	resp, err := r.parseResult(resultVal, req)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract path entries recorded by record_path() and populate Analysis
 	if analysis := r.extractPathEntries(thread); analysis != nil {
 		resp.Analysis = analysis
 	}

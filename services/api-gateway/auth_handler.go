@@ -1,10 +1,13 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/meridianhub/meridian/services/identity/connector"
@@ -116,43 +119,10 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate credentials via the identity connector.
-	identity, valid, err := h.connector.Login(ctx, nil, req.Email, req.Password)
+	// Validate credentials and sign JWT.
+	tokenStr, identity, err := h.authenticateAndSign(ctx, tenantID, req)
 	if err != nil {
-		h.logger.ErrorContext(ctx, "auth: login error",
-			"tenant_id", tenantID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "authentication service error",
-		})
-		return
-	}
-	if !valid {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{
-			"error": "invalid email or password",
-		})
-		return
-	}
-
-	// Build claims and sign JWT.
-	claims := connector.BuildClaims(identity, tenantID)
-	// Include the tenant slug for frontend subdomain routing. The slug differs
-	// from the tenant ID (e.g. slug "volterra-energy" vs ID "volterra_energy").
-	if slug, ok := tenant.SlugFromContext(ctx); ok && slug != "" {
-		claims[tenant.TenantSlugKey] = slug
-	}
-	if displayName, ok := tenant.DisplayNameFromContext(ctx); ok && displayName != "" {
-		claims[tenant.TenantDisplayNameKey] = displayName
-	}
-	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "auth: failed to sign token",
-			"tenant_id", tenantID,
-			"identity_id", identity.UserID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to create session",
-		})
+		h.handleLoginError(ctx, w, tenantID, err)
 		return
 	}
 
@@ -164,6 +134,57 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		AccessToken: tokenStr,
 		TokenType:   "Bearer",
 		ExpiresIn:   int(h.tokenTTL.Seconds()),
+	})
+}
+
+// authenticateAndSign validates credentials and returns a signed JWT token.
+func (h *AuthHandler) authenticateAndSign(ctx context.Context, tenantID tenant.TenantID, req loginRequest) (string, connector.Identity, error) {
+	identity, valid, err := h.connector.Login(ctx, nil, req.Email, req.Password)
+	if err != nil {
+		return "", connector.Identity{}, fmt.Errorf("login: %w", err)
+	}
+	if !valid {
+		return "", connector.Identity{}, errInvalidCredentials
+	}
+
+	claims := connector.BuildClaims(identity, tenantID)
+	if slug, ok := tenant.SlugFromContext(ctx); ok && slug != "" {
+		claims[tenant.TenantSlugKey] = slug
+	}
+	if displayName, ok := tenant.DisplayNameFromContext(ctx); ok && displayName != "" {
+		claims[tenant.TenantDisplayNameKey] = displayName
+	}
+	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
+	if err != nil {
+		return "", identity, fmt.Errorf("sign: %w", err)
+	}
+
+	return tokenStr, identity, nil
+}
+
+// errInvalidCredentials is a sentinel for invalid email/password.
+var errInvalidCredentials = errors.New("invalid credentials")
+
+// handleLoginError maps authenticateAndSign errors to HTTP responses.
+func (h *AuthHandler) handleLoginError(ctx context.Context, w http.ResponseWriter, tenantID tenant.TenantID, err error) {
+	if errors.Is(err, errInvalidCredentials) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "invalid email or password",
+		})
+		return
+	}
+	if strings.HasPrefix(err.Error(), "sign:") {
+		h.logger.ErrorContext(ctx, "auth: failed to sign token",
+			"tenant_id", tenantID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to create session",
+		})
+		return
+	}
+	h.logger.ErrorContext(ctx, "auth: login error",
+		"tenant_id", tenantID, "error", err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{
+		"error": "authentication service error",
 	})
 }
 

@@ -144,14 +144,22 @@ func ValidateTransactionBalance(postings []*LedgerPosting) error {
 		return ErrEmptyPostings
 	}
 
-	// Group postings by instrument code.
-	// We use code (not code+version) because within a single transaction,
-	// all postings of the same currency should use the same version.
-	type instrumentBalance struct {
-		instrument Instrument
-		netBalance Money // debits are positive, credits are negative
+	balances, err := aggregatePostingBalances(postings)
+	if err != nil {
+		return err
 	}
 
+	return checkBalancesZero(balances)
+}
+
+// instrumentBalance tracks the net balance for a single instrument.
+type instrumentBalance struct {
+	instrument Instrument
+	netBalance Money // debits are positive, credits are negative
+}
+
+// aggregatePostingBalances groups postings by instrument code and calculates net balances.
+func aggregatePostingBalances(postings []*LedgerPosting) (map[string]*instrumentBalance, error) {
 	balances := make(map[string]*instrumentBalance)
 
 	for _, posting := range postings {
@@ -163,7 +171,6 @@ func ValidateTransactionBalance(postings []*LedgerPosting) error {
 		balance, exists := balances[code]
 
 		if !exists {
-			// First posting for this instrument - initialize with zero
 			zero := ZeroMoney(posting.Amount.Instrument)
 			balances[code] = &instrumentBalance{
 				instrument: posting.Amount.Instrument,
@@ -172,7 +179,6 @@ func ValidateTransactionBalance(postings []*LedgerPosting) error {
 			balance = balances[code]
 		}
 
-		// Add or subtract based on direction
 		var newBalance Money
 		var err error
 
@@ -183,14 +189,17 @@ func ValidateTransactionBalance(postings []*LedgerPosting) error {
 		}
 
 		if err != nil {
-			// This should only happen if instruments don't match (different versions)
-			return fmt.Errorf("failed to calculate balance for %s: %w", code, err)
+			return nil, fmt.Errorf("failed to calculate balance for %s: %w", code, err)
 		}
 
 		balance.netBalance = newBalance
 	}
 
-	// Check that all balances are zero
+	return balances, nil
+}
+
+// checkBalancesZero verifies all instrument balances are zero.
+func checkBalancesZero(balances map[string]*instrumentBalance) error {
 	for code, balance := range balances {
 		if !balance.netBalance.IsZero() {
 			direction := "debits exceed credits"
@@ -208,7 +217,6 @@ func ValidateTransactionBalance(postings []*LedgerPosting) error {
 				code)
 		}
 	}
-
 	return nil
 }
 

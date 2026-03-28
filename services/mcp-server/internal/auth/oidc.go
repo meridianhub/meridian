@@ -405,59 +405,19 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract tenant slug from request subdomain, falling back to default.
-	tenantSlug := extractSubdomain(r.Host, h.baseDomain)
-	if tenantSlug == "" && h.defaultTenantSlug != "" {
-		tenantSlug = h.defaultTenantSlug
-		h.logger.Debug("oidc: using default tenant slug", "slug", tenantSlug)
-	}
-	if tenantSlug == "" {
-		h.logger.Warn("oidc: no tenant subdomain and no default configured — fail closed")
-		http.Error(w, errTenantRequired.Error(), http.StatusBadRequest)
+	tenantSlug, err := h.resolveTenantSlug(r.Host)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Generate PKCE code verifier for the Dex exchange.
-	dexVerifier, err := generateRandomToken(oidcCodeVerifierBytes)
+	// Store OIDC flow state and redirect to Dex for authentication.
+	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug)
 	if err != nil {
-		h.logger.Error("oidc: failed to generate code verifier", "error", err)
+		h.logger.Error("oidc: failed to build Dex redirect", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	dexChallenge := computeS256Challenge(dexVerifier)
-
-	// Store state bridging MCP client request ↔ Dex OIDC flow.
-	stateKey, err := h.stateStore.Store(OIDCFlowState{
-		MCPCodeChallenge: challenge,
-		MCPClientID:      clientID,
-		MCPRedirectURI:   redirectURI,
-		MCPState:         q.Get("state"),
-		DexCodeVerifier:  dexVerifier,
-		TenantSlug:       tenantSlug,
-		IssuedAt:         time.Now(),
-	})
-	if err != nil {
-		h.logger.Error("oidc: failed to store state", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Redirect to Dex authorization endpoint via the external URL so the
-	// browser can reach Dex through the reverse proxy, even when the internal
-	// DexIssuerURL points to a Docker-internal hostname.
-	// When a base domain is configured, build a tenant-scoped Dex URL so the
-	// browser hits the correct tenant subdomain (e.g., acme.demo.meridianhub.cloud/dex/auth).
-	dexAuthURL := BuildTenantScopedDexURL(h.dexAuthBaseURL, tenantSlug, h.baseDomain) + "/auth"
-	params := url.Values{
-		"client_id":             {h.cfg.ClientID},
-		"redirect_uri":          {h.cfg.CallbackURL},
-		"response_type":         {"code"},
-		"scope":                 {"openid email profile"},
-		"state":                 {stateKey},
-		"code_challenge":        {dexChallenge},
-		"code_challenge_method": {"S256"},
-	}
-
-	redirectURL := dexAuthURL + "?" + params.Encode()
 
 	h.logger.Info("oidc: initiating Dex authorization",
 		"tenant", tenantSlug,
@@ -520,16 +480,10 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve tenant slug to UUID for JWT consistency with BFF-issued tokens.
-	tenantID := flowState.TenantSlug
-	if h.tenantResolver != nil && tenantID != "" {
-		resolved, resolveErr := h.tenantResolver.ResolveSlug(ctx, tenantID)
-		if resolveErr != nil {
-			h.logger.Error("oidc: tenant slug resolution failed",
-				"tenant_slug", tenantID, "error", resolveErr)
-			http.Error(w, errTenantResolutionFailed.Error(), http.StatusInternalServerError)
-			return
-		}
-		tenantID = resolved
+	tenantID, err := h.resolveTenantID(ctx, flowState.TenantSlug)
+	if err != nil {
+		http.Error(w, errTenantResolutionFailed.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// Defense-in-depth: validate redirect URI scheme before signing tokens.
@@ -540,26 +494,94 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sign Meridian JWT with tenant context.
+	// Issue MCP authorization code backed by a Meridian JWT.
+	redirectURL, err := h.issueCodeAndRedirect(email, tenantID, flowState)
+	if err != nil {
+		h.logger.Error("oidc: failed to issue auth code", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// resolveTenantSlug extracts the tenant slug from the request host subdomain, falling back to the default.
+func (h *OIDCHandler) resolveTenantSlug(host string) (string, error) {
+	tenantSlug := extractSubdomain(host, h.baseDomain)
+	if tenantSlug == "" && h.defaultTenantSlug != "" {
+		tenantSlug = h.defaultTenantSlug
+		h.logger.Debug("oidc: using default tenant slug", "slug", tenantSlug)
+	}
+	if tenantSlug == "" {
+		h.logger.Warn("oidc: no tenant subdomain and no default configured - fail closed")
+		return "", errTenantRequired
+	}
+	return tenantSlug, nil
+}
+
+// buildDexRedirect generates PKCE state, stores the OIDC flow state, and returns the Dex redirect URL.
+func (h *OIDCHandler) buildDexRedirect(challenge, clientID, redirectURI, mcpState, tenantSlug string) (string, error) {
+	dexVerifier, err := generateRandomToken(oidcCodeVerifierBytes)
+	if err != nil {
+		return "", fmt.Errorf("generate code verifier: %w", err)
+	}
+	dexChallenge := computeS256Challenge(dexVerifier)
+
+	stateKey, err := h.stateStore.Store(OIDCFlowState{
+		MCPCodeChallenge: challenge,
+		MCPClientID:      clientID,
+		MCPRedirectURI:   redirectURI,
+		MCPState:         mcpState,
+		DexCodeVerifier:  dexVerifier,
+		TenantSlug:       tenantSlug,
+		IssuedAt:         time.Now(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("store state: %w", err)
+	}
+
+	dexAuthURL := BuildTenantScopedDexURL(h.dexAuthBaseURL, tenantSlug, h.baseDomain) + "/auth"
+	params := url.Values{
+		"client_id":             {h.cfg.ClientID},
+		"redirect_uri":          {h.cfg.CallbackURL},
+		"response_type":         {"code"},
+		"scope":                 {"openid email profile"},
+		"state":                 {stateKey},
+		"code_challenge":        {dexChallenge},
+		"code_challenge_method": {"S256"},
+	}
+	return dexAuthURL + "?" + params.Encode(), nil
+}
+
+// resolveTenantID resolves a tenant slug to a tenant UUID via the tenant resolver.
+func (h *OIDCHandler) resolveTenantID(ctx context.Context, tenantSlug string) (string, error) {
+	tenantID := tenantSlug
+	if h.tenantResolver != nil && tenantID != "" {
+		resolved, resolveErr := h.tenantResolver.ResolveSlug(ctx, tenantID)
+		if resolveErr != nil {
+			h.logger.Error("oidc: tenant slug resolution failed",
+				"tenant_slug", tenantID, "error", resolveErr)
+			return "", resolveErr
+		}
+		tenantID = resolved
+	}
+	return tenantID, nil
+}
+
+// issueCodeAndRedirect signs a Meridian JWT, generates an MCP authorization code, stores it, and returns the redirect URL.
+func (h *OIDCHandler) issueCodeAndRedirect(email, tenantID string, flowState OIDCFlowState) (string, error) {
 	claims := map[string]interface{}{
-		"sub":         email, // Use email as subject until identity resolution is wired
+		"sub":         email,
 		"email":       email,
 		"x-tenant-id": tenantID,
 	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
-		h.logger.Error("oidc: failed to sign JWT",
-			"tenant", flowState.TenantSlug, "error", err)
-		http.Error(w, "failed to create session", http.StatusInternalServerError)
-		return
+		return "", fmt.Errorf("sign JWT: %w", err)
 	}
 
-	// Generate MCP authorization code and store it with the JWT.
 	mcpCode, err := generateCode()
 	if err != nil {
-		h.logger.Error("oidc: failed to generate auth code", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+		return "", fmt.Errorf("generate auth code: %w", err)
 	}
 
 	h.codeStore.StoreWithToken(mcpCode, CodeEntry{
@@ -572,14 +594,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("oidc: authentication successful",
 		"tenant", flowState.TenantSlug)
 
-	// Redirect to MCP client's redirect_uri with the authorization code.
-	redirectURL, err := buildAuthRedirect(flowState.MCPRedirectURI, mcpCode, flowState.MCPState)
-	if err != nil {
-		h.logger.Error("oidc: invalid redirect URI", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, redirectURL, http.StatusFound)
+	return buildAuthRedirect(flowState.MCPRedirectURI, mcpCode, flowState.MCPState)
 }
 
 // buildAuthRedirect constructs the redirect URL with authorization code and optional state.

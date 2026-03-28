@@ -18,24 +18,31 @@ import (
 // Returns domain.ErrConflict if a log with the same LogID already exists.
 // In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPositionLog) error {
-	if log == nil {
-		return ErrNilLog
-	}
+	return r.CreateWithOutbox(ctx, log, nil)
+}
 
-	tx, err := r.pool.Begin(ctx)
+// insertLogAndRelated inserts the main log row and all related entities within an existing transaction.
+func (r *PostgresRepository) insertLogAndRelated(ctx context.Context, tx pgx.Tx, log *domain.FinancialPositionLog) error {
+	dbID, err := r.insertLogRow(ctx, tx, log)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
-
-	// Set tenant scope if in multi-tenant mode
-	if err := r.setSearchPath(ctx, tx); err != nil {
 		return err
 	}
 
-	// Insert main financial_position_log
+	if err := r.insertTransactionLogEntries(ctx, tx, dbID, log.TransactionLogEntries); err != nil {
+		return err
+	}
+
+	if log.TransactionLineage != nil {
+		if err := r.insertTransactionLineage(ctx, tx, dbID, log.TransactionLineage); err != nil {
+			return err
+		}
+	}
+
+	return r.insertAuditTrailEntries(ctx, tx, dbID, log.AuditTrail)
+}
+
+// insertLogRow inserts the main financial_position_log row and returns the generated database ID.
+func (r *PostgresRepository) insertLogRow(ctx context.Context, tx pgx.Tx, log *domain.FinancialPositionLog) (uuid.UUID, error) {
 	userID := audit.GetUserFromContext(ctx)
 	logQuery := `
 		INSERT INTO financial_position_log (
@@ -53,7 +60,7 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 		) RETURNING id`
 
 	var dbID uuid.UUID
-	err = tx.QueryRow(ctx, logQuery,
+	err := tx.QueryRow(ctx, logQuery,
 		log.CreatedAt, userID, log.UpdatedAt, userID,
 		log.LogID, log.AccountID, log.AccountServiceDomain, log.Version,
 		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
@@ -65,33 +72,12 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
-			return domain.ErrConflict
+			return uuid.Nil, domain.ErrConflict
 		}
-		return fmt.Errorf("failed to insert financial position log: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to insert financial position log: %w", err)
 	}
 
-	// Insert transaction log entries
-	if err := r.insertTransactionLogEntries(ctx, tx, dbID, log.TransactionLogEntries); err != nil {
-		return err
-	}
-
-	// Insert transaction lineage (if present)
-	if log.TransactionLineage != nil {
-		if err := r.insertTransactionLineage(ctx, tx, dbID, log.TransactionLineage); err != nil {
-			return err
-		}
-	}
-
-	// Insert audit trail entries
-	if err := r.insertAuditTrailEntries(ctx, tx, dbID, log.AuditTrail); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
+	return dbID, nil
 }
 
 // Update updates an existing FinancialPositionLog aggregate.
@@ -100,60 +86,14 @@ func (r *PostgresRepository) Create(ctx context.Context, log *domain.FinancialPo
 // Returns domain.ErrOptimisticLock if the version has changed.
 // In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPositionLog) error {
-	if log == nil {
-		return ErrNilLog
-	}
+	return r.UpdateWithOutbox(ctx, log, nil)
+}
 
-	tx, err := r.pool.Begin(ctx)
+// updateLogAndRelated performs the core update: optimistic lock, replace entries/lineage, append audit.
+func (r *PostgresRepository) updateLogAndRelated(ctx context.Context, tx pgx.Tx, log *domain.FinancialPositionLog) error {
+	dbID, err := r.updateLogRow(ctx, tx, log)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
-
-	// Set tenant scope if in multi-tenant mode
-	if err := r.setSearchPath(ctx, tx); err != nil {
 		return err
-	}
-
-	// Get current database ID
-	var dbID uuid.UUID
-	err = tx.QueryRow(ctx, "SELECT id FROM financial_position_log WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.ErrNotFound
-		}
-		return fmt.Errorf("failed to find log for update: %w", err)
-	}
-
-	// Update with optimistic locking
-	// Note: The domain layer increments the version, so we check against the previous version
-	// (log.Version - 1) and set to the current version (log.Version)
-	previousVersion := log.Version - 1
-	userID := audit.GetUserFromContext(ctx)
-
-	updateQuery := `
-		UPDATE financial_position_log
-		SET updated_at = $1, updated_by = $2, version = $3,
-			current_status = $4, previous_status = $5, status_updated_at = $6,
-			status_reason = $7, failure_reason = $8, reconciliation_status = $9
-		WHERE id = $10 AND version = $11 AND deleted_at IS NULL`
-
-	result, err := tx.Exec(ctx, updateQuery,
-		log.UpdatedAt, userID, log.Version,
-		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
-		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
-		nullStringValue(log.StatusTracking.FailureReason),
-		log.StatusTracking.ReconciliationStatus.String(),
-		dbID, previousVersion,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update financial position log: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return domain.ErrOptimisticLock
 	}
 
 	// Delete and re-insert transaction log entries (simplest approach for aggregate updates)
@@ -178,28 +118,63 @@ func (r *PostgresRepository) Update(ctx context.Context, log *domain.FinancialPo
 		}
 	}
 
-	// Append-only audit trail: Only insert new audit entries not already persisted.
-	// This preserves audit immutability by never deleting or modifying existing entries.
+	return r.appendNewAuditEntries(ctx, tx, dbID, log.AuditTrail)
+}
+
+// updateLogRow performs the main log row update with optimistic locking.
+func (r *PostgresRepository) updateLogRow(ctx context.Context, tx pgx.Tx, log *domain.FinancialPositionLog) (uuid.UUID, error) {
+	var dbID uuid.UUID
+	err := tx.QueryRow(ctx, "SELECT id FROM financial_position_log WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, domain.ErrNotFound
+		}
+		return uuid.Nil, fmt.Errorf("failed to find log for update: %w", err)
+	}
+
+	previousVersion := log.Version - 1
+	userID := audit.GetUserFromContext(ctx)
+
+	updateQuery := `
+		UPDATE financial_position_log
+		SET updated_at = $1, updated_by = $2, version = $3,
+			current_status = $4, previous_status = $5, status_updated_at = $6,
+			status_reason = $7, failure_reason = $8, reconciliation_status = $9
+		WHERE id = $10 AND version = $11 AND deleted_at IS NULL`
+
+	result, err := tx.Exec(ctx, updateQuery,
+		log.UpdatedAt, userID, log.Version,
+		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
+		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
+		nullStringValue(log.StatusTracking.FailureReason),
+		log.StatusTracking.ReconciliationStatus.String(),
+		dbID, previousVersion,
+	)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to update financial position log: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return uuid.Nil, domain.ErrOptimisticLock
+	}
+
+	return dbID, nil
+}
+
+// appendNewAuditEntries inserts only audit entries not already persisted (append-only semantics).
+func (r *PostgresRepository) appendNewAuditEntries(ctx context.Context, tx pgx.Tx, dbID uuid.UUID, auditTrail []*domain.AuditTrailEntry) error {
 	existingAuditIDs, err := r.getExistingAuditIDs(ctx, tx, dbID)
 	if err != nil {
 		return err
 	}
 
-	// Filter for only new audit entries
-	newAuditEntries := lo.Filter(log.AuditTrail, func(entry *domain.AuditTrailEntry, _ int) bool {
+	newAuditEntries := lo.Filter(auditTrail, func(entry *domain.AuditTrailEntry, _ int) bool {
 		_, exists := existingAuditIDs[entry.AuditID]
 		return !exists
 	})
 
-	// Insert only new audit entries
 	if len(newAuditEntries) > 0 {
-		if err := r.insertAuditTrailEntries(ctx, tx, dbID, newAuditEntries); err != nil {
-			return err
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit update transaction: %w", err)
+		return r.insertAuditTrailEntries(ctx, tx, dbID, newAuditEntries)
 	}
 
 	return nil
@@ -224,51 +199,7 @@ func (r *PostgresRepository) CreateWithOutbox(ctx context.Context, log *domain.F
 		return err
 	}
 
-	userID := audit.GetUserFromContext(ctx)
-	logQuery := `
-		INSERT INTO financial_position_log (
-			id, created_at, created_by, updated_at, updated_by,
-			log_id, account_id, account_service_domain, version,
-			current_status, previous_status, status_updated_at, status_reason, failure_reason,
-			reconciliation_status,
-			opening_balance_amount, opening_balance_currency, opening_balance_recorded_at
-		) VALUES (
-			gen_random_uuid(), $1, $2, $3, $4,
-			$5, $6, $7, $8,
-			$9, $10, $11, $12, $13,
-			$14,
-			$15, $16, $17
-		) RETURNING id`
-
-	var dbID uuid.UUID
-	err = tx.QueryRow(ctx, logQuery,
-		log.CreatedAt, userID, log.UpdatedAt, userID,
-		log.LogID, log.AccountID, log.AccountServiceDomain, log.Version,
-		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
-		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
-		nullStringValue(log.StatusTracking.FailureReason),
-		log.StatusTracking.ReconciliationStatus.String(),
-		log.OpeningBalance.Amount, openingBalanceCurrencyCode(log.OpeningBalance), nullTime(log.OpeningBalanceRecordedAt),
-	).Scan(&dbID)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return domain.ErrConflict
-		}
-		return fmt.Errorf("failed to insert financial position log: %w", err)
-	}
-
-	if err := r.insertTransactionLogEntries(ctx, tx, dbID, log.TransactionLogEntries); err != nil {
-		return err
-	}
-
-	if log.TransactionLineage != nil {
-		if err := r.insertTransactionLineage(ctx, tx, dbID, log.TransactionLineage); err != nil {
-			return err
-		}
-	}
-
-	if err := r.insertAuditTrailEntries(ctx, tx, dbID, log.AuditTrail); err != nil {
+	if err := r.insertLogAndRelated(ctx, tx, log); err != nil {
 		return err
 	}
 
@@ -304,75 +235,8 @@ func (r *PostgresRepository) UpdateWithOutbox(ctx context.Context, log *domain.F
 		return err
 	}
 
-	var dbID uuid.UUID
-	err = tx.QueryRow(ctx, "SELECT id FROM financial_position_log WHERE log_id = $1 AND deleted_at IS NULL", log.LogID).Scan(&dbID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.ErrNotFound
-		}
-		return fmt.Errorf("failed to find log for update: %w", err)
-	}
-
-	previousVersion := log.Version - 1
-	userID := audit.GetUserFromContext(ctx)
-
-	updateQuery := `
-		UPDATE financial_position_log
-		SET updated_at = $1, updated_by = $2, version = $3,
-			current_status = $4, previous_status = $5, status_updated_at = $6,
-			status_reason = $7, failure_reason = $8, reconciliation_status = $9
-		WHERE id = $10 AND version = $11 AND deleted_at IS NULL`
-
-	result, err := tx.Exec(ctx, updateQuery,
-		log.UpdatedAt, userID, log.Version,
-		log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
-		log.StatusTracking.StatusUpdatedAt, log.StatusTracking.StatusReason,
-		nullStringValue(log.StatusTracking.FailureReason),
-		log.StatusTracking.ReconciliationStatus.String(),
-		dbID, previousVersion,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update financial position log: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return domain.ErrOptimisticLock
-	}
-
-	_, err = tx.Exec(ctx, "DELETE FROM transaction_log_entry WHERE financial_position_log_id = $1", dbID)
-	if err != nil {
-		return fmt.Errorf("failed to delete old transaction log entries: %w", err)
-	}
-
-	if err := r.insertTransactionLogEntries(ctx, tx, dbID, log.TransactionLogEntries); err != nil {
+	if err := r.updateLogAndRelated(ctx, tx, log); err != nil {
 		return err
-	}
-
-	_, err = tx.Exec(ctx, "DELETE FROM transaction_lineage WHERE financial_position_log_id = $1", dbID)
-	if err != nil {
-		return fmt.Errorf("failed to delete old transaction lineage: %w", err)
-	}
-
-	if log.TransactionLineage != nil {
-		if err := r.insertTransactionLineage(ctx, tx, dbID, log.TransactionLineage); err != nil {
-			return err
-		}
-	}
-
-	existingAuditIDs, err := r.getExistingAuditIDs(ctx, tx, dbID)
-	if err != nil {
-		return err
-	}
-
-	newAuditEntries := lo.Filter(log.AuditTrail, func(entry *domain.AuditTrailEntry, _ int) bool {
-		_, exists := existingAuditIDs[entry.AuditID]
-		return !exists
-	})
-
-	if len(newAuditEntries) > 0 {
-		if err := r.insertAuditTrailEntries(ctx, tx, dbID, newAuditEntries); err != nil {
-			return err
-		}
 	}
 
 	if postFn != nil {

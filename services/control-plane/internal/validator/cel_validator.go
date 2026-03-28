@@ -81,7 +81,6 @@ func (v *ManifestValidator) validateCELExpression(
 	resourceType string,
 	resourceID string,
 ) {
-	// Check length constraint
 	if len(expression) > 4096 {
 		addError(result, ValidationError{
 			Severity:     SeverityError,
@@ -101,28 +100,8 @@ func (v *ManifestValidator) validateCELExpression(
 
 	errMsg := issues.Err().Error()
 
-	// Check for undeclared reference errors to provide field suggestions
 	if strings.Contains(errMsg, "undeclared reference") {
-		// Extract the undeclared field name from the error
-		undeclaredField := extractUndeclaredReference(errMsg)
-		suggestion := ""
-		if undeclaredField != "" {
-			suggestion = findClosestMatch(undeclaredField, availableFields)
-			if suggestion != "" {
-				suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
-			}
-		}
-
-		addError(result, ValidationError{
-			Severity:        SeverityError,
-			Path:            path,
-			Code:            "CEL_UNDECLARED_REFERENCE",
-			Message:         errMsg,
-			Suggestion:      suggestion,
-			AvailableFields: availableFields,
-			ResourceType:    resourceType,
-			ResourceID:      resourceID,
-		})
+		addError(result, buildCELUndeclaredError(errMsg, path, availableFields, resourceType, resourceID))
 		return
 	}
 
@@ -134,6 +113,28 @@ func (v *ManifestValidator) validateCELExpression(
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 	})
+}
+
+// buildCELUndeclaredError creates a ValidationError for an undeclared reference
+// in a CEL expression, with a "Did you mean?" suggestion when possible.
+func buildCELUndeclaredError(errMsg, path string, availableFields []string, resourceType, resourceID string) ValidationError {
+	var suggestion string
+	undeclaredField := extractUndeclaredReference(errMsg)
+	if undeclaredField != "" {
+		if match := findClosestMatch(undeclaredField, availableFields); match != "" {
+			suggestion = fmt.Sprintf("Did you mean %q?", match)
+		}
+	}
+	return ValidationError{
+		Severity:        SeverityError,
+		Path:            path,
+		Code:            "CEL_UNDECLARED_REFERENCE",
+		Message:         errMsg,
+		Suggestion:      suggestion,
+		AvailableFields: availableFields,
+		ResourceType:    resourceType,
+		ResourceID:      resourceID,
+	}
 }
 
 // validateMappingCELExpression compiles a single CEL expression for mapping contexts.

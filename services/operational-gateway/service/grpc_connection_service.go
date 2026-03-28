@@ -98,22 +98,9 @@ func (s *ProviderConnectionService) ListConnections(
 		return nil, err
 	}
 
-	// Parse pagination.
-	pageSize := defaultPageSize
-	offset := 0
-	if req.Pagination != nil {
-		if req.Pagination.PageSize > 0 {
-			pageSize = int(req.Pagination.PageSize)
-			if pageSize > maxPageSize {
-				pageSize = maxPageSize
-			}
-		}
-		if req.Pagination.PageToken != "" {
-			offset, err = decodeOffsetToken(req.Pagination.PageToken)
-			if err != nil {
-				return nil, status.Error(codes.InvalidArgument, "invalid page_token")
-			}
-		}
+	pageSize, offset, err := parsePagination(req.Pagination)
+	if err != nil {
+		return nil, err
 	}
 
 	all, err := s.connectionRepo.ListByTenant(ctx, tenantIDToUUID(tid))
@@ -122,19 +109,7 @@ func (s *ProviderConnectionService) ListConnections(
 		return nil, status.Error(codes.Internal, "failed to list connections")
 	}
 
-	// Apply optional filters.
-	filtered := make([]*domain.ProviderConnection, 0, len(all))
-	for _, conn := range all {
-		if req.Protocol != opgatewayv1.Protocol_PROTOCOL_UNSPECIFIED &&
-			protoToDomainProtocol(req.Protocol) != conn.Protocol {
-			continue
-		}
-		if req.HealthStatus != opgatewayv1.HealthStatus_HEALTH_STATUS_UNSPECIFIED &&
-			domainToProtoHealthStatus(conn.HealthStatus) != req.HealthStatus {
-			continue
-		}
-		filtered = append(filtered, conn)
-	}
+	filtered := filterConnections(all, req)
 
 	// Apply pagination.
 	total := int64(len(filtered))
@@ -164,6 +139,23 @@ func (s *ProviderConnectionService) ListConnections(
 			TotalCount:    total,
 		},
 	}, nil
+}
+
+// filterConnections applies optional protocol and health status filters to a connection list.
+func filterConnections(all []*domain.ProviderConnection, req *opgatewayv1.ListConnectionsRequest) []*domain.ProviderConnection {
+	filtered := make([]*domain.ProviderConnection, 0, len(all))
+	for _, conn := range all {
+		if req.Protocol != opgatewayv1.Protocol_PROTOCOL_UNSPECIFIED &&
+			protoToDomainProtocol(req.Protocol) != conn.Protocol {
+			continue
+		}
+		if req.HealthStatus != opgatewayv1.HealthStatus_HEALTH_STATUS_UNSPECIFIED &&
+			domainToProtoHealthStatus(conn.HealthStatus) != req.HealthStatus {
+			continue
+		}
+		filtered = append(filtered, conn)
+	}
+	return filtered
 }
 
 // TestConnection performs a health check on a provider connection (Phase 2 placeholder).

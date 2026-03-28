@@ -42,48 +42,7 @@ func (p *PKPositionProvider) FetchPositions(ctx context.Context, accountID strin
 
 	records := make([]PositionRecord, 0, len(resp.GetLogs()))
 	for _, log := range resp.GetLogs() {
-		balance := decimal.Zero
-		instrumentCode := ""
-		for _, entry := range log.GetTransactionLogEntries() {
-			amount, err := moneyToDecimal(entry.GetAmount().GetAmount())
-			if err != nil {
-				slog.WarnContext(ctx, "skipping entry with invalid amount",
-					"log_id", log.GetLogId(),
-					"error", err,
-				)
-				continue
-			}
-
-			// Extract currency code from the first entry that has one.
-			if instrumentCode == "" {
-				if m := entry.GetAmount().GetAmount(); m != nil {
-					instrumentCode = m.GetCurrencyCode()
-				}
-			}
-
-			switch entry.GetDirection() {
-			case commonv1.PostingDirection_POSTING_DIRECTION_CREDIT:
-				balance = balance.Add(amount)
-			case commonv1.PostingDirection_POSTING_DIRECTION_DEBIT:
-				balance = balance.Sub(amount)
-			case commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED:
-				slog.WarnContext(ctx, "skipping entry with unspecified direction",
-					"log_id", log.GetLogId(),
-				)
-			}
-		}
-
-		if instrumentCode == "" {
-			instrumentCode = "UNKNOWN"
-		}
-
-		records = append(records, PositionRecord{
-			AccountID:      log.GetAccountId(),
-			InstrumentCode: instrumentCode,
-			Balance:        balance,
-			SourceSystem:   "position-keeping",
-			Attributes:     map[string]string{"log_id": log.GetLogId()},
-		})
+		records = append(records, mapLogToPositionRecord(ctx, log))
 	}
 
 	nextToken := ""
@@ -95,6 +54,53 @@ func (p *PKPositionProvider) FetchPositions(ctx context.Context, accountID strin
 		Records:       records,
 		NextPageToken: nextToken,
 	}, nil
+}
+
+// mapLogToPositionRecord converts a single PK position log to a PositionRecord,
+// aggregating entries into a net balance.
+func mapLogToPositionRecord(ctx context.Context, log *positionkeepingv1.FinancialPositionLog) PositionRecord {
+	balance := decimal.Zero
+	instrumentCode := ""
+
+	for _, entry := range log.GetTransactionLogEntries() {
+		amount, err := moneyToDecimal(entry.GetAmount().GetAmount())
+		if err != nil {
+			slog.WarnContext(ctx, "skipping entry with invalid amount",
+				"log_id", log.GetLogId(),
+				"error", err,
+			)
+			continue
+		}
+
+		if instrumentCode == "" {
+			if m := entry.GetAmount().GetAmount(); m != nil {
+				instrumentCode = m.GetCurrencyCode()
+			}
+		}
+
+		switch entry.GetDirection() {
+		case commonv1.PostingDirection_POSTING_DIRECTION_CREDIT:
+			balance = balance.Add(amount)
+		case commonv1.PostingDirection_POSTING_DIRECTION_DEBIT:
+			balance = balance.Sub(amount)
+		case commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED:
+			slog.WarnContext(ctx, "skipping entry with unspecified direction",
+				"log_id", log.GetLogId(),
+			)
+		}
+	}
+
+	if instrumentCode == "" {
+		instrumentCode = "UNKNOWN"
+	}
+
+	return PositionRecord{
+		AccountID:      log.GetAccountId(),
+		InstrumentCode: instrumentCode,
+		Balance:        balance,
+		SourceSystem:   "position-keeping",
+		Attributes:     map[string]string{"log_id": log.GetLogId()},
+	}
 }
 
 // moneyToDecimal converts a google.type.Money to a decimal.Decimal.

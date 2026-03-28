@@ -36,37 +36,11 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 		return nil, status.Error(codes.InvalidArgument, "amount is required")
 	}
 
-	// Retrieve account to validate
-	account, err := s.repo.FindByID(ctx, req.AccountId)
+	// Retrieve and validate account
+	account, opStatus, err := s.retrieveAndValidateWithdrawalAccount(ctx, req.AccountId)
 	if err != nil {
-		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-	}
-
-	// Hydrate account with balance from Position Keeping (balance no longer persisted locally)
-	account, err = s.hydrateAccountWithBalance(ctx, account)
-	if err != nil {
-		operationStatus = opStatusRetrieveFailed
-		s.logger.Error("failed to hydrate account balance from Position Keeping",
-			"account_id", req.AccountId,
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
-	}
-
-	var validationMessages []string
-
-	// Validate account status
-	if account.Status() == domain.AccountStatusFrozen {
-		operationStatus = opStatusAccountFrozen
-		return nil, status.Errorf(codes.FailedPrecondition, "cannot initiate withdrawal on frozen account: %s", req.AccountId)
-	}
-	if account.Status() == domain.AccountStatusClosed {
-		operationStatus = opStatusAccountClosed
-		return nil, status.Errorf(codes.FailedPrecondition, "cannot initiate withdrawal on closed account: %s", req.AccountId)
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	// Validate and convert amount
@@ -76,55 +50,103 @@ func (s *Service) InitiateWithdrawal(ctx context.Context, req *pb.InitiateWithdr
 		return nil, amountErr
 	}
 
-	amountMinor, _ := amount.ToMinorUnits()
+	// Build validation messages (balance warning)
+	validationMessages := buildWithdrawalBalanceWarnings(amount, account)
 
-	// Check available balance (warning only - balance could change before execution)
-	availMinor, _ := account.AvailableBalance().ToMinorUnits()
-	if amountMinor > availMinor {
-		validationMessages = append(validationMessages,
-			fmt.Sprintf("Warning: requested amount (%d minor units) exceeds current available balance (%d minor units)", amountMinor, availMinor))
-	}
-
-	// Use provided reference if available, otherwise generate one
+	// Create and persist withdrawal
 	reference := req.Reference
 	if reference == "" {
 		reference = fmt.Sprintf("WTH-%s", uuid.New().String()[:8])
 	}
 
-	// Create domain withdrawal
-	domainWithdrawal, err := domain.NewWithdrawal(account.ID(), amount, reference)
+	domainWithdrawal, opStatus, err := s.createAndPersistWithdrawal(ctx, account, amount, reference, req.AccountId)
 	if err != nil {
-		operationStatus = opStatusWithdrawalFailed
-		return nil, status.Errorf(codes.InvalidArgument, "failed to create withdrawal: %v", err)
+		operationStatus = opStatus
+		return nil, err
 	}
 
-	// Persist withdrawal to database (if repository is configured)
-	if s.withdrawalRepo != nil {
-		if err := s.withdrawalRepo.Create(ctx, domainWithdrawal); err != nil {
-			operationStatus = opStatusSaveFailed
-			s.logger.Error("failed to persist withdrawal",
-				"withdrawal_id", domainWithdrawal.ID,
-				"account_id", req.AccountId,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to persist withdrawal: %v", err)
-		}
-	}
-
+	amountMinor, _ := amount.ToMinorUnits()
 	s.logger.Info("withdrawal initiated",
 		"withdrawal_id", domainWithdrawal.ID,
 		"withdrawal_reference", reference,
 		"account_id", req.AccountId,
 		"amount_minor_units", amountMinor)
 
-	// Convert domain withdrawal to proto
 	withdrawal := toProtoWithdrawal(domainWithdrawal, req.AccountId)
-	withdrawal.Description = req.Description // Add description from request
+	withdrawal.Description = req.Description
 
 	return &pb.InitiateWithdrawalResponse{
 		Withdrawal:         withdrawal,
 		ValidationPassed:   len(validationMessages) == 0,
 		ValidationMessages: validationMessages,
 	}, nil
+}
+
+// retrieveAndValidateWithdrawalAccount retrieves the account, hydrates its balance, and validates its status.
+func (s *Service) retrieveAndValidateWithdrawalAccount(ctx context.Context, accountID string) (domain.CurrentAccount, string, error) {
+	account, err := s.repo.FindByID(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return account, opStatusAccountNotFound,
+				status.Errorf(codes.NotFound, "account not found: %s", accountID)
+		}
+		return account, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	account, err = s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		s.logger.Error("failed to hydrate account balance from Position Keeping",
+			"account_id", accountID,
+			"error", err)
+		return account, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+	}
+
+	if account.Status() == domain.AccountStatusFrozen {
+		return account, opStatusAccountFrozen,
+			status.Errorf(codes.FailedPrecondition, "cannot initiate withdrawal on frozen account: %s", accountID)
+	}
+	if account.Status() == domain.AccountStatusClosed {
+		return account, opStatusAccountClosed,
+			status.Errorf(codes.FailedPrecondition, "cannot initiate withdrawal on closed account: %s", accountID)
+	}
+
+	return account, "", nil
+}
+
+// buildWithdrawalBalanceWarnings checks if the amount exceeds available balance and returns warnings.
+func buildWithdrawalBalanceWarnings(amount domain.Amount, account domain.CurrentAccount) []string {
+	amountMinor, _ := amount.ToMinorUnits()
+	availMinor, _ := account.AvailableBalance().ToMinorUnits()
+	if amountMinor > availMinor {
+		return []string{
+			fmt.Sprintf("Warning: requested amount (%d minor units) exceeds current available balance (%d minor units)", amountMinor, availMinor),
+		}
+	}
+	return nil
+}
+
+// createAndPersistWithdrawal creates a domain withdrawal and persists it.
+func (s *Service) createAndPersistWithdrawal(ctx context.Context, account domain.CurrentAccount, amount domain.Amount, reference, accountID string) (*domain.Withdrawal, string, error) {
+	domainWithdrawal, err := domain.NewWithdrawal(account.ID(), amount, reference)
+	if err != nil {
+		return nil, opStatusWithdrawalFailed,
+			status.Errorf(codes.InvalidArgument, "failed to create withdrawal: %v", err)
+	}
+
+	if s.withdrawalRepo != nil {
+		if err := s.withdrawalRepo.Create(ctx, domainWithdrawal); err != nil {
+			s.logger.Error("failed to persist withdrawal",
+				"withdrawal_id", domainWithdrawal.ID,
+				"account_id", accountID,
+				"error", err)
+			return nil, opStatusSaveFailed,
+				status.Errorf(codes.Internal, "failed to persist withdrawal: %v", err)
+		}
+	}
+
+	return domainWithdrawal, "", nil
 }
 
 // UpdateWithdrawal modifies a pending withdrawal before execution.
@@ -143,56 +165,15 @@ func (s *Service) UpdateWithdrawal(ctx context.Context, req *pb.UpdateWithdrawal
 		return nil, status.Error(codes.InvalidArgument, "withdrawal_id is required")
 	}
 
-	// Lookup withdrawal by reference
-	withdrawal, err := s.withdrawalRepo.FindByReference(ctx, req.WithdrawalId)
+	// Retrieve and validate withdrawal and account
+	withdrawal, account, opStatus, err := s.retrievePendingWithdrawalWithAccount(ctx, req.WithdrawalId)
 	if err != nil {
-		if errors.Is(err, persistence.ErrWithdrawalNotFound) {
-			operationStatus = opStatusWithdrawalNotFound
-			return nil, status.Errorf(codes.NotFound, "withdrawal not found: %s", req.WithdrawalId)
-		}
-		operationStatus = opStatusRetrieveFailed
-		s.logger.Error("failed to retrieve withdrawal",
-			"withdrawal_id", req.WithdrawalId,
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
+		operationStatus = opStatus
+		return nil, err
 	}
 
-	// Only pending withdrawals can be updated
-	if !withdrawal.IsPending() {
-		operationStatus = "withdrawal_not_pending"
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"cannot update withdrawal %s: not in pending status (current: %s)",
-			req.WithdrawalId, withdrawal.Status)
-	}
-
-	// Get account to retrieve business account ID for response
-	account, err := s.repo.FindByUUID(ctx, withdrawal.AccountID)
-	if err != nil {
-		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found for withdrawal")
-		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-	}
-
-	var validationMessages []string
-
-	// Note: Field updates (amount, description, reference) are not yet implemented
-	// as the domain model treats these as immutable after creation.
-	// This would require domain model enhancements.
-	if req.Amount != nil {
-		validationMessages = append(validationMessages,
-			"Warning: amount updates are not yet supported; withdrawal amount unchanged")
-	}
-	if req.Description != "" {
-		validationMessages = append(validationMessages,
-			"Warning: description updates are not yet supported")
-	}
-	if req.Reference != "" && req.Reference != withdrawal.Reference {
-		validationMessages = append(validationMessages,
-			"Warning: reference updates are not yet supported")
-	}
+	// Build validation messages for unsupported updates
+	validationMessages := buildUpdateWithdrawalWarnings(req, withdrawal)
 
 	s.logger.Info("withdrawal update requested",
 		"withdrawal_id", req.WithdrawalId,
@@ -205,6 +186,58 @@ func (s *Service) UpdateWithdrawal(ctx context.Context, req *pb.UpdateWithdrawal
 		ValidationPassed:   len(validationMessages) == 0,
 		ValidationMessages: validationMessages,
 	}, nil
+}
+
+// retrievePendingWithdrawalWithAccount retrieves a withdrawal and its account, validating the withdrawal is pending.
+func (s *Service) retrievePendingWithdrawalWithAccount(ctx context.Context, withdrawalID string) (*domain.Withdrawal, domain.CurrentAccount, string, error) {
+	var zeroAccount domain.CurrentAccount
+
+	withdrawal, err := s.withdrawalRepo.FindByReference(ctx, withdrawalID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrWithdrawalNotFound) {
+			return nil, zeroAccount, opStatusWithdrawalNotFound,
+				status.Errorf(codes.NotFound, "withdrawal not found: %s", withdrawalID)
+		}
+		s.logger.Error("failed to retrieve withdrawal",
+			"withdrawal_id", withdrawalID,
+			"error", err)
+		return nil, zeroAccount, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve withdrawal: %v", err)
+	}
+
+	if !withdrawal.IsPending() {
+		return nil, zeroAccount, "withdrawal_not_pending",
+			status.Errorf(codes.FailedPrecondition,
+				"cannot update withdrawal %s: not in pending status (current: %s)",
+				withdrawalID, withdrawal.Status)
+	}
+
+	account, err := s.repo.FindByUUID(ctx, withdrawal.AccountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return nil, zeroAccount, opStatusAccountNotFound,
+				status.Errorf(codes.NotFound, "account not found for withdrawal")
+		}
+		return nil, zeroAccount, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	return withdrawal, account, "", nil
+}
+
+// buildUpdateWithdrawalWarnings generates warnings for unsupported field updates.
+func buildUpdateWithdrawalWarnings(req *pb.UpdateWithdrawalRequest, withdrawal *domain.Withdrawal) []string {
+	var msgs []string
+	if req.Amount != nil {
+		msgs = append(msgs, "Warning: amount updates are not yet supported; withdrawal amount unchanged")
+	}
+	if req.Description != "" {
+		msgs = append(msgs, "Warning: description updates are not yet supported")
+	}
+	if req.Reference != "" && req.Reference != withdrawal.Reference {
+		msgs = append(msgs, "Warning: reference updates are not yet supported")
+	}
+	return msgs
 }
 
 // RetrieveWithdrawal gets withdrawal details by ID or lists withdrawals by account.

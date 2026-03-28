@@ -47,6 +47,9 @@ var (
 	ErrSSOCallbackURLInvalid = errors.New("sso handler: callback URL must be a valid absolute URL")
 	// ErrSSODexIssuerInvalid is returned when the Dex issuer URL is not a valid absolute URL.
 	ErrSSODexIssuerInvalid = errors.New("sso handler: dex issuer URL must be an absolute URL with scheme and host")
+
+	// errNoMatchingAccount is returned when SSO identity resolution finds no matching account.
+	errNoMatchingAccount = errors.New("no matching account")
 )
 
 // IdentityResolver resolves an identity by email without password validation.
@@ -200,18 +203,34 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate PKCE code verifier (43-128 chars of unreserved URI chars per RFC 7636).
-	codeVerifier, err := generateCodeVerifier()
+	stateKey, codeChallenge, err := h.generatePKCEState(ctx, r, tenantID)
 	if err != nil {
-		h.logger.ErrorContext(ctx, "sso: failed to generate code verifier", "error", err)
+		h.logger.ErrorContext(ctx, "sso: failed to generate PKCE state", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to initiate SSO",
 		})
 		return
 	}
 
-	codeChallenge := computeCodeChallenge(codeVerifier)
+	tenantSlug, _ := tenant.SlugFromContext(ctx)
+	redirectURL := h.buildInitiateRedirectURL(tenantSlug, connectorID, stateKey, codeChallenge)
 
+	h.logger.InfoContext(ctx, "sso: initiating SSO flow",
+		"tenant_id", tenantID,
+		"connector_id", connectorID)
+
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// generatePKCEState generates PKCE parameters and stores the SSO state.
+// Returns the state key, code challenge, or an error.
+func (h *SSOHandler) generatePKCEState(ctx context.Context, r *http.Request, tenantID tenant.TenantID) (string, string, error) {
+	codeVerifier, err := generateCodeVerifier()
+	if err != nil {
+		return "", "", fmt.Errorf("generate code verifier: %w", err)
+	}
+
+	codeChallenge := computeCodeChallenge(codeVerifier)
 	returnURL := sanitizeReturnURL(r.URL.Query().Get("return_url"))
 
 	tenantSlug, _ := tenant.SlugFromContext(ctx)
@@ -224,17 +243,15 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 		ReturnURL:         returnURL,
 	})
 	if err != nil {
-		h.logger.ErrorContext(ctx, "sso: failed to store state", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to initiate SSO",
-		})
-		return
+		return "", "", fmt.Errorf("store state: %w", err)
 	}
 
-	// Build Dex authorization URL. When baseDomain is configured, the redirect
-	// uses a tenant-scoped URL so that the Dex MeridianConnector receives tenant
-	// context via the subdomain. Path-escape the connector ID to prevent
-	// path traversal (e.g., "../../admin" → "%2E%2E%2Fadmin").
+	return stateKey, codeChallenge, nil
+}
+
+// buildInitiateRedirectURL constructs the full Dex authorization redirect URL
+// with PKCE parameters, state, and scopes.
+func (h *SSOHandler) buildInitiateRedirectURL(tenantSlug, connectorID, stateKey, codeChallenge string) string {
 	authURL := h.buildDexAuthURL(tenantSlug, connectorID)
 	params := url.Values{
 		"client_id":             {h.clientID},
@@ -245,14 +262,7 @@ func (h *SSOHandler) HandleInitiate(w http.ResponseWriter, r *http.Request) {
 		"code_challenge":        {codeChallenge},
 		"code_challenge_method": {"S256"},
 	}
-
-	redirectURL := authURL + "?" + params.Encode()
-
-	h.logger.InfoContext(ctx, "sso: initiating SSO flow",
-		"tenant_id", tenantID,
-		"connector_id", connectorID)
-
-	http.Redirect(w, r, redirectURL, http.StatusFound)
+	return authURL + "?" + params.Encode()
 }
 
 // HandleCallback handles GET /api/auth/callback.
@@ -298,69 +308,10 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exchange authorization code for tokens with Dex.
-	idToken, err := h.exchangeCode(ctx, code, stateData.CodeVerifier)
+	// Exchange code, resolve identity, and sign JWT.
+	identity, tokenStr, err := h.exchangeAndResolve(ctx, code, stateData)
 	if err != nil {
-		h.logger.ErrorContext(ctx, "sso: token exchange failed",
-			"tenant_id", stateData.TenantID,
-			"error", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": "SSO token exchange failed",
-		})
-		return
-	}
-
-	// Parse the email from Dex's ID token (we trust the claims since we got them
-	// directly from the token endpoint over a server-to-server connection).
-	email, err := extractEmailFromIDToken(idToken)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "sso: failed to extract email from ID token",
-			"tenant_id", stateData.TenantID,
-			"error", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": "failed to process SSO identity",
-		})
-		return
-	}
-
-	// Resolve the identity in Meridian's identity store to get roles and tenant context.
-	tenantCtx := tenant.WithTenant(ctx, stateData.TenantID)
-	identity, found, err := h.resolver.Resolve(tenantCtx, email)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "sso: identity resolution error",
-			"tenant_id", stateData.TenantID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to resolve identity",
-		})
-		return
-	}
-	if !found {
-		h.logger.WarnContext(ctx, "sso: no matching identity for SSO email",
-			"tenant_id", stateData.TenantID)
-		writeJSON(w, http.StatusForbidden, map[string]string{
-			"error": "no matching account for this SSO identity",
-		})
-		return
-	}
-
-	// Sign Meridian JWT.
-	claims := connector.BuildClaims(identity, stateData.TenantID)
-	if stateData.TenantSlug != "" {
-		claims[tenant.TenantSlugKey] = stateData.TenantSlug
-	}
-	if stateData.TenantDisplayName != "" {
-		claims[tenant.TenantDisplayNameKey] = stateData.TenantDisplayName
-	}
-	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "sso: failed to sign token",
-			"tenant_id", stateData.TenantID,
-			"identity_id", identity.UserID,
-			"error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to create session",
-		})
+		h.handleCallbackError(ctx, w, stateData, err)
 		return
 	}
 
@@ -385,6 +336,99 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// callbackStage identifies which step of the SSO callback failed.
+type callbackStage int
+
+const (
+	callbackStageTokenExchange callbackStage = iota
+	callbackStageEmailExtract
+	callbackStageIdentityResolve
+	callbackStageIdentityNotFound
+	callbackStageSignToken
+)
+
+// callbackError wraps an error with the stage at which the callback failed.
+type callbackError struct {
+	stage callbackStage
+	err   error
+}
+
+func (e *callbackError) Error() string { return e.err.Error() }
+func (e *callbackError) Unwrap() error { return e.err }
+
+// exchangeAndResolve exchanges the authorization code for tokens, extracts the
+// email from the ID token, resolves the identity, and signs a Meridian JWT.
+func (h *SSOHandler) exchangeAndResolve(ctx context.Context, code string, state StateData) (connector.Identity, string, error) {
+	idToken, err := h.exchangeCode(ctx, code, state.CodeVerifier)
+	if err != nil {
+		return connector.Identity{}, "", &callbackError{stage: callbackStageTokenExchange, err: err}
+	}
+
+	email, err := extractEmailFromIDToken(idToken)
+	if err != nil {
+		return connector.Identity{}, "", &callbackError{stage: callbackStageEmailExtract, err: err}
+	}
+
+	tenantCtx := tenant.WithTenant(ctx, state.TenantID)
+	identity, found, err := h.resolver.Resolve(tenantCtx, email)
+	if err != nil {
+		return connector.Identity{}, "", &callbackError{stage: callbackStageIdentityResolve, err: err}
+	}
+	if !found {
+		return connector.Identity{}, "", &callbackError{stage: callbackStageIdentityNotFound, err: errNoMatchingAccount}
+	}
+
+	tokenStr, err := h.signCallbackToken(identity, state)
+	if err != nil {
+		return connector.Identity{}, "", &callbackError{stage: callbackStageSignToken, err: err}
+	}
+
+	return identity, tokenStr, nil
+}
+
+// signCallbackToken builds claims and signs a Meridian JWT for the SSO callback.
+func (h *SSOHandler) signCallbackToken(identity connector.Identity, state StateData) (string, error) {
+	claims := connector.BuildClaims(identity, state.TenantID)
+	if state.TenantSlug != "" {
+		claims[tenant.TenantSlugKey] = state.TenantSlug
+	}
+	if state.TenantDisplayName != "" {
+		claims[tenant.TenantDisplayNameKey] = state.TenantDisplayName
+	}
+	return h.signer.SignClaims(claims, h.tokenTTL)
+}
+
+// handleCallbackError maps a callbackError to the appropriate HTTP response.
+func (h *SSOHandler) handleCallbackError(ctx context.Context, w http.ResponseWriter, state StateData, err error) {
+	var cbErr *callbackError
+	if !errors.As(err, &cbErr) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	switch cbErr.stage {
+	case callbackStageTokenExchange:
+		h.logger.ErrorContext(ctx, "sso: token exchange failed",
+			"tenant_id", state.TenantID, "error", cbErr.err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "SSO token exchange failed"})
+	case callbackStageEmailExtract:
+		h.logger.ErrorContext(ctx, "sso: failed to extract email from ID token",
+			"tenant_id", state.TenantID, "error", cbErr.err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "failed to process SSO identity"})
+	case callbackStageIdentityResolve:
+		h.logger.ErrorContext(ctx, "sso: identity resolution error",
+			"tenant_id", state.TenantID, "error", cbErr.err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to resolve identity"})
+	case callbackStageIdentityNotFound:
+		h.logger.WarnContext(ctx, "sso: no matching identity for SSO email",
+			"tenant_id", state.TenantID)
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "no matching account for this SSO identity"})
+	case callbackStageSignToken:
+		h.logger.ErrorContext(ctx, "sso: failed to sign token",
+			"tenant_id", state.TenantID, "error", cbErr.err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create session"})
+	}
 }
 
 // buildDexAuthURL constructs the Dex authorization URL. When baseDomain is

@@ -88,16 +88,8 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 		return nil
 	}
 
-	knowledgeAt := ""
-	if node.KnowledgeAt != nil {
-		knowledgeAt = node.KnowledgeAt.Format(time.RFC3339)
-	}
-
-	failedStep := ""
-	if node.FailedStep != nil {
-		failedStep = fmt.Sprintf("step %d: %s (%s)",
-			node.FailedStep.Index, node.FailedStep.Error, node.FailedStep.ErrorCategory)
-	}
+	knowledgeAt := formatOptionalTime(node.KnowledgeAt)
+	failedStep := formatFailedStep(node.FailedStep)
 
 	if len(node.Steps) == 0 {
 		// Saga with no steps - write a single row
@@ -118,34 +110,10 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 	}
 
 	for _, step := range node.Steps {
-		executedAt := ""
-		if step.ExecutedAt != nil {
-			executedAt = step.ExecutedAt.Format(time.RFC3339)
+		if err := writeStepRow(w, node, step, failedStep, knowledgeAt, parentSagaID, depth); err != nil {
+			return err
 		}
 
-		stepError := ""
-		if step.Error != nil {
-			stepError = *step.Error
-		}
-
-		if err := w.Write([]string{
-			fmt.Sprintf("%d", depth),
-			node.SagaID.String(),
-			node.SagaName,
-			node.Status,
-			fmt.Sprintf("%d", step.Index),
-			step.Name,
-			step.Status,
-			executedAt,
-			stepError,
-			failedStep,
-			knowledgeAt,
-			parentSagaID,
-		}); err != nil {
-			return fmt.Errorf("write CSV row: %w", err)
-		}
-
-		// Recurse into child sagas
 		for _, child := range step.ChildSagas {
 			if err := flattenTree(w, child, node.SagaID.String(), depth+1); err != nil {
 				return err
@@ -154,4 +122,47 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 	}
 
 	return nil
+}
+
+// writeStepRow writes a single step row to the CSV writer.
+func writeStepRow(w *csv.Writer, node *saga.CausationTreeNode, step saga.StepNode, failedStep, knowledgeAt, parentSagaID string, depth int) error {
+	executedAt := formatOptionalTime(step.ExecutedAt)
+	stepError := ""
+	if step.Error != nil {
+		stepError = *step.Error
+	}
+
+	if err := w.Write([]string{
+		fmt.Sprintf("%d", depth),
+		node.SagaID.String(),
+		node.SagaName,
+		node.Status,
+		fmt.Sprintf("%d", step.Index),
+		step.Name,
+		step.Status,
+		executedAt,
+		stepError,
+		failedStep,
+		knowledgeAt,
+		parentSagaID,
+	}); err != nil {
+		return fmt.Errorf("write CSV row: %w", err)
+	}
+	return nil
+}
+
+// formatOptionalTime formats a *time.Time as RFC3339 or returns empty string if nil.
+func formatOptionalTime(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
+// formatFailedStep formats a failed step summary or returns empty string if nil.
+func formatFailedStep(fs *saga.FailedStep) string {
+	if fs == nil {
+		return ""
+	}
+	return fmt.Sprintf("step %d: %s (%s)", fs.Index, fs.Error, fs.ErrorCategory)
 }

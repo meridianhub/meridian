@@ -81,7 +81,6 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 //   - Future date: Service validates and returns INVALID_ARGUMENT error
 func getRateHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
-		// 1. Parse Starlark params using helper functions from shared/pkg/saga
 		fromCurrency, err := saga.RequireStringParam(params, "from_currency")
 		if err != nil {
 			return nil, err
@@ -94,29 +93,17 @@ func getRateHandler(client *Client) saga.Handler {
 
 		// Handle same currency case without calling the service
 		if fromCurrency == toCurrency {
-			return map[string]any{
-				"from_currency": fromCurrency,
-				"to_currency":   toCurrency,
-				"rate":          decimal.NewFromInt(1),
-				"rate_date":     time.Now(),
-				"source":        "IDENTITY",
-			}, nil
+			return buildIdentityRateResult(fromCurrency, toCurrency), nil
 		}
 
-		// rate_date is optional - defaults to current time
 		rateDate := time.Now()
 		if val, ok := params["rate_date"].(time.Time); ok {
 			rateDate = val
 		}
 
-		// 2. Prepare client context with saga metadata propagation
 		clientCtx := prepareClientContext(ctx)
-
-		// 3. Build dataset code from currency pair (e.g., "USD_EUR_FX")
 		datasetCode := fmt.Sprintf("%s_%s_FX", fromCurrency, toCurrency)
 
-		// 4. Call REAL gRPC client using GetRate for point-in-time lookup
-		// Resolution key is "spot" for standard FX rates
 		obs, err := client.GetRate(
 			clientCtx,
 			datasetCode,
@@ -128,20 +115,35 @@ func getRateHandler(client *Client) saga.Handler {
 			return nil, fmt.Errorf("market_information.get_rate: %w", err)
 		}
 
-		// 5. Convert response to Starlark format (map[string]any)
-		rate, err := decimal.NewFromString(obs.Value)
-		if err != nil {
-			return nil, fmt.Errorf("market_information.get_rate: invalid rate value: %w", err)
-		}
-
-		return map[string]any{
-			"from_currency": fromCurrency,
-			"to_currency":   toCurrency,
-			"rate":          rate,
-			"rate_date":     obs.ValidFrom.AsTime(),
-			"source":        obs.SourceId,
-		}, nil
+		return buildRateResult(fromCurrency, toCurrency, obs)
 	}
+}
+
+// buildIdentityRateResult returns a rate result for same-currency conversions (rate = 1.0).
+func buildIdentityRateResult(fromCurrency, toCurrency string) map[string]any {
+	return map[string]any{
+		"from_currency": fromCurrency,
+		"to_currency":   toCurrency,
+		"rate":          decimal.NewFromInt(1),
+		"rate_date":     time.Now(),
+		"source":        "IDENTITY",
+	}
+}
+
+// buildRateResult converts a gRPC observation response into the Starlark result map.
+func buildRateResult(fromCurrency, toCurrency string, obs *marketinformationv1.MarketPriceObservation) (map[string]any, error) {
+	rate, err := decimal.NewFromString(obs.Value)
+	if err != nil {
+		return nil, fmt.Errorf("market_information.get_rate: invalid rate value: %w", err)
+	}
+
+	return map[string]any{
+		"from_currency": fromCurrency,
+		"to_currency":   toCurrency,
+		"rate":          rate,
+		"rate_date":     obs.ValidFrom.AsTime(),
+		"source":        obs.SourceId,
+	}, nil
 }
 
 // prepareClientContext enriches the gRPC client context with saga metadata.

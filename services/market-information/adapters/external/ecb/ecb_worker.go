@@ -219,46 +219,74 @@ func (w *Worker) ingestRates(ctx context.Context) {
 // attemptIngestion performs a single ingestion attempt: fetch -> parse -> transform -> record.
 func (w *Worker) attemptIngestion(ctx context.Context, causationID string) error {
 	start := time.Now()
-
 	w.logger.Info("starting ECB rate ingestion", "causation_id", causationID)
 
-	// Fetch CSV from ECB
+	// Fetch and parse
+	observations, totalRates, err := w.fetchAndTransformRates(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Record observations
+	successCount, failCount, err := w.recordObservations(ctx, observations)
+	if err != nil {
+		return err
+	}
+
+	duration := time.Since(start)
+	w.logger.Info("ECB rate ingestion completed",
+		"causation_id", causationID,
+		"success_count", successCount,
+		"fail_count", failCount,
+		"total_rates", totalRates,
+		"duration", duration)
+
+	if failCount > 0 {
+		return fmt.Errorf("%w: %d/%d observations failed", ErrPartialIngestion, failCount, len(observations))
+	}
+
+	return nil
+}
+
+// fetchAndTransformRates fetches ECB CSV data, parses it, and transforms rates into observation requests.
+// Returns the observation requests, the total number of parsed rates, and any error.
+func (w *Worker) fetchAndTransformRates(ctx context.Context) ([]*marketinformationv1.RecordObservationRequest, int, error) {
 	body, err := w.client.FetchDailyRates(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch ECB rates: %w", err)
+		return nil, 0, fmt.Errorf("failed to fetch ECB rates: %w", err)
 	}
 	defer func() { _ = body.Close() }()
 
-	// Parse CSV
 	rates, err := w.parser.ParseCSV(body)
 	if err != nil {
-		return fmt.Errorf("failed to parse ECB CSV: %w", err)
+		return nil, 0, fmt.Errorf("failed to parse ECB CSV: %w", err)
 	}
 
 	w.logger.Debug("parsed ECB rates", "count", len(rates))
 
-	// Transform to observations
 	transformCfg := TransformConfig{
 		SourceCode:          w.config.SourceCode,
 		DatasetCodeTemplate: "%s_%s_FX",
 	}
-	observations := TransformToObservations(rates, transformCfg)
+	return TransformToObservations(rates, transformCfg), len(rates), nil
+}
 
-	// Record observations
+// recordObservations records each observation via gRPC, checking for shutdown between calls.
+// Returns success count, failure count, and an error if interrupted.
+func (w *Worker) recordObservations(ctx context.Context, observations []*marketinformationv1.RecordObservationRequest) (int, int, error) {
 	var successCount, failCount int
 	for _, obs := range observations {
-		// Check for shutdown or context cancellation before each gRPC call
 		select {
 		case <-ctx.Done():
 			w.logger.Warn("ingestion interrupted by context cancellation",
 				"processed", successCount,
 				"remaining", len(observations)-successCount-failCount)
-			return ctx.Err()
+			return successCount, failCount, ctx.Err()
 		case <-w.shutdown:
 			w.logger.Warn("ingestion interrupted by shutdown",
 				"processed", successCount,
 				"remaining", len(observations)-successCount-failCount)
-			return nil
+			return successCount, failCount, nil
 		default:
 		}
 
@@ -273,20 +301,7 @@ func (w *Worker) attemptIngestion(ctx context.Context, causationID string) error
 		}
 		successCount++
 	}
-
-	duration := time.Since(start)
-	w.logger.Info("ECB rate ingestion completed",
-		"causation_id", causationID,
-		"success_count", successCount,
-		"fail_count", failCount,
-		"total_rates", len(rates),
-		"duration", duration)
-
-	if failCount > 0 {
-		return fmt.Errorf("%w: %d/%d observations failed", ErrPartialIngestion, failCount, len(observations))
-	}
-
-	return nil
+	return successCount, failCount, nil
 }
 
 // IsRetryableError determines if an error should trigger a retry.

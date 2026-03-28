@@ -41,61 +41,11 @@ func (s *Service) ListInternalAccounts(ctx context.Context, req *pb.ListInternal
 		ibaobservability.RecordOperationDuration("list_internal_accounts", operationStatus, time.Since(start))
 	}()
 
-	// Build filter
-	filter := domain.ListFilter{
-		Limit:  50, // Default
-		Offset: 0,
-	}
-
-	// Apply behavior class filter
-	if req.BehaviorClassFilter != "" {
-		accountType := domain.AccountType(req.BehaviorClassFilter)
-		filter.AccountType = &accountType
-	}
-
-	// Apply instrument code filter
-	if req.InstrumentCodeFilter != "" {
-		filter.InstrumentCode = &req.InstrumentCodeFilter
-	}
-
-	// Apply status filter
-	if req.StatusFilter != pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_UNSPECIFIED {
-		accountStatus, err := protoToAccountStatus(req.StatusFilter)
-		if err == nil {
-			filter.Status = &accountStatus
-		}
-	}
-
-	// Apply clearing purpose filter
-	if req.ClearingPurposeFilter != pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED {
-		clearingPurpose, err := protoToClearingPurpose(req.ClearingPurposeFilter)
-		if err == nil {
-			filter.ClearingPurpose = &clearingPurpose
-		}
-	}
-
-	// Apply org party ID filter
-	if req.OrgPartyIdFilter != "" {
-		orgPartyID, err := uuid.Parse(req.OrgPartyIdFilter)
-		if err != nil {
-			operationStatus = operationStatusFailed
-			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id_filter: %v", err)
-		}
-		filter.OrgPartyID = &orgPartyID
-	}
-
-	// Apply pagination
-	if req.Pagination != nil {
-		if req.Pagination.PageSize > 0 {
-			filter.Limit = int(req.Pagination.PageSize)
-		}
-		// Parse page_token as offset (simple offset-based pagination)
-		if req.Pagination.PageToken != "" {
-			var offset int
-			if _, err := fmt.Sscanf(req.Pagination.PageToken, "%d", &offset); err == nil {
-				filter.Offset = offset
-			}
-		}
+	// Build filter from request
+	filter, err := buildListFilter(req)
+	if err != nil {
+		operationStatus = operationStatusFailed
+		return nil, err
 	}
 
 	// Query repository
@@ -123,4 +73,57 @@ func (s *Service) ListInternalAccounts(ctx context.Context, req *pb.ListInternal
 			NextPageToken: nextPageToken,
 		},
 	}, nil
+}
+
+// buildListFilter constructs a domain ListFilter from a proto request.
+func buildListFilter(req *pb.ListInternalAccountsRequest) (domain.ListFilter, error) {
+	filter := domain.ListFilter{
+		Limit:  50,
+		Offset: 0,
+	}
+
+	if req.BehaviorClassFilter != "" {
+		accountType := domain.AccountType(req.BehaviorClassFilter)
+		filter.AccountType = &accountType
+	}
+
+	if req.InstrumentCodeFilter != "" {
+		filter.InstrumentCode = &req.InstrumentCodeFilter
+	}
+
+	if req.StatusFilter != pb.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_UNSPECIFIED {
+		accountStatus, err := protoToAccountStatus(req.StatusFilter)
+		if err == nil {
+			filter.Status = &accountStatus
+		}
+	}
+
+	if req.ClearingPurposeFilter != pb.ClearingPurpose_CLEARING_PURPOSE_UNSPECIFIED {
+		clearingPurpose, err := protoToClearingPurpose(req.ClearingPurposeFilter)
+		if err == nil {
+			filter.ClearingPurpose = &clearingPurpose
+		}
+	}
+
+	if req.OrgPartyIdFilter != "" {
+		orgPartyID, err := uuid.Parse(req.OrgPartyIdFilter)
+		if err != nil {
+			return filter, status.Errorf(codes.InvalidArgument, "invalid org_party_id_filter: %v", err)
+		}
+		filter.OrgPartyID = &orgPartyID
+	}
+
+	if req.Pagination != nil {
+		if req.Pagination.PageSize > 0 {
+			filter.Limit = int(req.Pagination.PageSize)
+		}
+		if req.Pagination.PageToken != "" {
+			var offset int
+			if _, err := fmt.Sscanf(req.Pagination.PageToken, "%d", &offset); err == nil {
+				filter.Offset = offset
+			}
+		}
+	}
+
+	return filter, nil
 }

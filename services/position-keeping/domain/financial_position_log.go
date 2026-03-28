@@ -135,23 +135,11 @@ func NewFinancialPositionLogWithOpeningBalance(
 		return nil, ErrInvalidEffectiveDate
 	}
 
-	// Determine posting direction based on balance sign
-	var direction PostingDirection
-	var entryAmount Money
-	if openingBalance.IsNegative() {
-		direction = PostingDirectionDebit
-		entryAmount = openingBalance.Negate()
-	} else {
-		direction = PostingDirectionCredit
-		entryAmount = openingBalance
-	}
-
-	// Create the log with opening balance
 	log := &FinancialPositionLog{
 		LogID:                    uuid.New(),
 		AccountID:                accountID,
 		TransactionLogEntries:    make([]*TransactionLogEntry, 0),
-		TransactionLineage:       nil, // No lineage for opening balance
+		TransactionLineage:       nil,
 		AuditTrail:               make([]*AuditTrailEntry, 0),
 		StatusTracking:           NewStatusTracking(),
 		CreatedAt:                now,
@@ -161,25 +149,8 @@ func NewFinancialPositionLogWithOpeningBalance(
 		OpeningBalanceRecordedAt: now,
 	}
 
-	// Create opening balance transaction entry only if amount is non-zero
-	if !openingBalance.IsZero() {
-		entry, err := NewTransactionLogEntry(
-			uuid.New(), // New transaction ID for the opening balance
-			accountID,
-			entryAmount,
-			direction,
-			effectiveDate,
-			"Opening balance",
-			migrationReference,
-			TransactionSourceOpeningBalance,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		if err := log.AddEntry(entry); err != nil {
-			return nil, err
-		}
+	if err := addOpeningBalanceEntry(log, openingBalance, accountID, effectiveDate, migrationReference); err != nil {
+		return nil, err
 	}
 
 	// Mark the opening balance transaction as posted (it's already finalized)
@@ -189,6 +160,39 @@ func NewFinancialPositionLogWithOpeningBalance(
 	log.Version++
 
 	return log, nil
+}
+
+// addOpeningBalanceEntry creates and adds an opening balance transaction entry if amount is non-zero.
+func addOpeningBalanceEntry(log *FinancialPositionLog, openingBalance Money, accountID string, effectiveDate time.Time, migrationReference string) error {
+	if openingBalance.IsZero() {
+		return nil
+	}
+
+	direction, entryAmount := resolveOpeningBalanceDirection(openingBalance)
+
+	entry, err := NewTransactionLogEntry(
+		uuid.New(),
+		accountID,
+		entryAmount,
+		direction,
+		effectiveDate,
+		"Opening balance",
+		migrationReference,
+		TransactionSourceOpeningBalance,
+	)
+	if err != nil {
+		return err
+	}
+
+	return log.AddEntry(entry)
+}
+
+// resolveOpeningBalanceDirection determines posting direction and absolute amount from an opening balance.
+func resolveOpeningBalanceDirection(openingBalance Money) (PostingDirection, Money) {
+	if openingBalance.IsNegative() {
+		return PostingDirectionDebit, openingBalance.Negate()
+	}
+	return PostingDirectionCredit, openingBalance
 }
 
 // HasOpeningBalance returns true if the log was created with an opening balance.

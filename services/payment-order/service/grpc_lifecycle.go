@@ -70,19 +70,7 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 		return fmt.Errorf("failed to persist FAILED state: %w", err)
 	}
 
-	// Release lien if needed
-	if needsLienRelease && lienID != "" && s.currentAccountClient != nil {
-		_, err := s.currentAccountClient.TerminateLien(ctx, &currentaccountv1.TerminateLienRequest{
-			LienId: lienID,
-			Reason: fmt.Sprintf("Payment order %s failed: %s", po.ID.String(), reason),
-		})
-		if err != nil {
-			s.logger.Error("failed to release lien after failure",
-				"error", err,
-				"lien_id", lienID,
-				"payment_order_id", po.ID.String())
-		}
-	}
+	s.releaseLienIfNeeded(ctx, needsLienRelease, lienID, po.ID.String(), reason, "failed")
 
 	// Publish PaymentOrderFailed event
 	s.publishEvent(ctx, TopicPaymentOrderFailed, po.ID.String(), &eventsv1.PaymentOrderFailedEvent{
@@ -114,18 +102,15 @@ func (s *Service) failPaymentOrder(ctx context.Context, po *domain.PaymentOrder,
 
 // CancelPaymentOrder cancels a payment order before completion.
 func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentOrderRequest) (*pb.CancelPaymentOrderResponse, error) {
-	// Validate cancellation reason - required for audit purposes
 	if req.CancellationReason == "" {
 		return nil, status.Error(codes.InvalidArgument, "cancellation_reason is required")
 	}
 
-	// Parse payment order ID
 	poID, err := uuid.Parse(req.PaymentOrderId)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid payment order ID: %v", err)
 	}
 
-	// Retrieve payment order
 	po, err := s.repo.FindByID(ctx, poID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPaymentOrderNotFound) {
@@ -134,22 +119,18 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 		return nil, status.Error(codes.Internal, "failed to retrieve payment order")
 	}
 
-	// Check if already cancelled (idempotent)
 	if po.Status == domain.PaymentOrderStatusCancelled {
 		return &pb.CancelPaymentOrderResponse{PaymentOrder: toProto(po)}, nil
 	}
 
-	// Check if can be cancelled
 	if !po.CanCancel() {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"payment order cannot be cancelled in status %s", po.Status)
 	}
 
-	// Check if lien needs to be released
 	needsLienRelease := po.RequiresLienRelease()
 	lienID := po.LienID
 
-	// Cancel the payment order
 	if err := po.Cancel(req.CancellationReason); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to cancel payment order: %v", err)
 	}
@@ -158,21 +139,41 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 		return nil, status.Error(codes.Internal, "failed to update payment order")
 	}
 
-	// Release lien if needed
-	if needsLienRelease && lienID != "" && s.currentAccountClient != nil {
-		_, termErr := s.currentAccountClient.TerminateLien(ctx, &currentaccountv1.TerminateLienRequest{
-			LienId: lienID,
-			Reason: fmt.Sprintf("Payment order %s cancelled: %s", po.ID.String(), req.CancellationReason),
-		})
-		if termErr != nil {
-			s.logger.Error("failed to release lien after cancellation",
-				"error", termErr,
-				"lien_id", lienID)
-			// Continue - cancellation succeeded, lien release can be retried
-		}
-	}
+	s.releaseLienIfNeeded(ctx, needsLienRelease, lienID, po.ID.String(), req.CancellationReason, "cancelled")
 
-	// Publish PaymentOrderCancelled event
+	s.publishCancelledEvent(ctx, po, req, lienID)
+
+	s.logger.Info("payment order cancelled",
+		"payment_order_id", po.ID.String(),
+		"reason", req.CancellationReason,
+		"cancelled_by", req.CancelledBy,
+		"amount_cents", safeMinorUnits(po.Amount),
+		"currency", domain.CurrencyCode(po.Amount),
+		"idempotency_key", po.IdempotencyKey,
+		"correlation_id", po.CorrelationID)
+
+	return &pb.CancelPaymentOrderResponse{PaymentOrder: toProto(po)}, nil
+}
+
+// releaseLienIfNeeded terminates a lien if the payment order requires it.
+func (s *Service) releaseLienIfNeeded(ctx context.Context, needsRelease bool, lienID, paymentOrderID, reason, operation string) {
+	if !needsRelease || lienID == "" || s.currentAccountClient == nil {
+		return
+	}
+	_, err := s.currentAccountClient.TerminateLien(ctx, &currentaccountv1.TerminateLienRequest{
+		LienId: lienID,
+		Reason: fmt.Sprintf("Payment order %s %s: %s", paymentOrderID, operation, reason),
+	})
+	if err != nil {
+		s.logger.Error("failed to release lien after "+operation,
+			"error", err,
+			"lien_id", lienID,
+			"payment_order_id", paymentOrderID)
+	}
+}
+
+// publishCancelledEvent publishes the PaymentOrderCancelled event to Kafka.
+func (s *Service) publishCancelledEvent(ctx context.Context, po *domain.PaymentOrder, req *pb.CancelPaymentOrderRequest, lienID string) {
 	s.publishEvent(ctx, TopicPaymentOrderCancelled, po.ID.String(), &eventsv1.PaymentOrderCancelledEvent{
 		EventId:            uuid.New().String(),
 		PaymentOrderId:     po.ID.String(),
@@ -187,60 +188,106 @@ func (s *Service) CancelPaymentOrder(ctx context.Context, req *pb.CancelPaymentO
 		Version:            int64(po.Version),
 		IdempotencyKey:     po.IdempotencyKey,
 	})
-
-	s.logger.Info("payment order cancelled",
-		"payment_order_id", po.ID.String(),
-		"reason", req.CancellationReason,
-		"cancelled_by", req.CancelledBy,
-		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", domain.CurrencyCode(po.Amount),
-		"idempotency_key", po.IdempotencyKey,
-		"correlation_id", po.CorrelationID)
-
-	return &pb.CancelPaymentOrderResponse{
-		PaymentOrder: toProto(po),
-	}, nil
 }
 
 // ReversePaymentOrder reverses a completed payment order (post-completion compensation).
 // This creates compensating ledger entries and transitions the order to REVERSED.
 // Idempotent: returns success if already reversed.
 func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymentOrderRequest) (*pb.ReversePaymentOrderResponse, error) {
-	// Validate reversal reason - required for audit purposes
-	if req.ReversalReason == "" {
-		return nil, status.Error(codes.InvalidArgument, "reversal_reason is required")
+	if err := validateReverseRequest(req); err != nil {
+		return nil, err
 	}
 
-	// Validate reversed_by - required for audit purposes
-	if req.ReversedBy == "" {
-		return nil, status.Error(codes.InvalidArgument, "reversed_by is required")
-	}
-
-	// Parse payment order ID
 	poID, err := uuid.Parse(req.PaymentOrderId)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid payment order ID: %v", err)
 	}
 
+	idempKey := s.buildReversalIdempotencyKey(ctx, req.PaymentOrderId)
+
 	// Check Redis idempotency for reversal
-	// Use payment_order_id as the request ID since each payment order can only be reversed once
+	if resp, err := s.checkReversalIdempotency(ctx, idempKey, req.PaymentOrderId); err != nil {
+		return nil, err
+	} else if resp != nil {
+		return resp, nil
+	}
+
+	// Mark operation as pending (distributed lock)
+	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		s.logger.Error("failed to mark reversal operation pending", "error", err)
+		return nil, status.Error(codes.Internal, "failed to acquire reversal idempotency lock")
+	}
+
+	// Retrieve and validate payment order
+	po, err := s.fetchAndValidateForReversal(ctx, poID, idempKey, req.PaymentOrderId)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if already reversed (idempotent)
+	if po.Status == domain.PaymentOrderStatusReversed {
+		return &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
+	}
+
+	// Execute the reversal: ledger compensation, state transition, persistence
+	originalLedgerBookingID := po.LedgerBookingID
+	compensatingBookingID, err := s.executeReversal(ctx, po, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Publish PaymentOrderReversed event with compensating booking ID
+	s.publishReversedEvent(ctx, po, req, originalLedgerBookingID, compensatingBookingID)
+
+	s.logger.Info("payment order reversed",
+		"payment_order_id", po.ID.String(),
+		"reason", req.ReversalReason,
+		"reversed_by", req.ReversedBy,
+		"amount_cents", safeMinorUnits(po.Amount),
+		"currency", domain.CurrencyCode(po.Amount),
+		"original_ledger_booking_id", originalLedgerBookingID,
+		"compensating_booking_id", compensatingBookingID,
+		"correlation_id", po.CorrelationID)
+
+	// Store successful result in Redis for future idempotency checks
+	response := &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}
+	s.cacheIdempotencyResult(ctx, idempKey, response)
+
+	return response, nil
+}
+
+// validateReverseRequest validates the required fields on a reversal request.
+func validateReverseRequest(req *pb.ReversePaymentOrderRequest) error {
+	if req.ReversalReason == "" {
+		return status.Error(codes.InvalidArgument, "reversal_reason is required")
+	}
+	if req.ReversedBy == "" {
+		return status.Error(codes.InvalidArgument, "reversed_by is required")
+	}
+	return nil
+}
+
+// buildReversalIdempotencyKey constructs the idempotency key for a reversal operation.
+func (s *Service) buildReversalIdempotencyKey(ctx context.Context, paymentOrderID string) idempotency.Key {
 	tenantID, _ := tenant.FromContext(ctx)
-	idempKey := idempotency.Key{
+	return idempotency.Key{
 		TenantID:  string(tenantID),
 		Namespace: idempotencyNamespace,
 		Operation: "reverse",
-		EntityID:  req.PaymentOrderId,
-		RequestID: req.PaymentOrderId, // Payment order ID is the natural idempotency key for reversals
+		EntityID:  paymentOrderID,
+		RequestID: paymentOrderID,
 	}
+}
 
+// checkReversalIdempotency checks Redis for a cached reversal result.
+func (s *Service) checkReversalIdempotency(ctx context.Context, idempKey idempotency.Key, paymentOrderID string) (*pb.ReversePaymentOrderResponse, error) {
 	idempResult, err := s.idempotencyService.Check(ctx, idempKey)
-	// If operation already processed, return cached result
 	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
 		var cachedResp pb.ReversePaymentOrderResponse
 		unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
 		if unmarshalErr == nil {
 			s.logger.Info("returning cached reversal result from Redis",
-				"payment_order_id", req.PaymentOrderId)
+				"payment_order_id", paymentOrderID)
 			poobservability.RecordIdempotentRequest("reverse_payment_order_redis")
 			return &cachedResp, nil
 		}
@@ -250,64 +297,55 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		s.logger.Error("idempotency check failed", "error", err)
 		return nil, status.Error(codes.Internal, "failed to check idempotency")
 	}
+	return nil, nil //nolint:nilnil // nil,nil signals "no cached result, continue processing"
+}
 
-	// Mark operation as pending (distributed lock)
-	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
-		s.logger.Error("failed to mark reversal operation pending", "error", err)
-		return nil, status.Error(codes.Internal, "failed to acquire reversal idempotency lock")
-	}
-
-	// Retrieve payment order
+// fetchAndValidateForReversal retrieves the payment order and validates it can be reversed.
+func (s *Service) fetchAndValidateForReversal(ctx context.Context, poID uuid.UUID, idempKey idempotency.Key, paymentOrderIDStr string) (*domain.PaymentOrder, error) {
 	po, err := s.repo.FindByID(ctx, poID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPaymentOrderNotFound) {
-			s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("payment order not found: %s", req.PaymentOrderId))
-			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", req.PaymentOrderId)
+			s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("payment order not found: %s", paymentOrderIDStr))
+			return nil, status.Errorf(codes.NotFound, "payment order not found: %s", paymentOrderIDStr)
 		}
-		// Don't cache internal errors - allow retry on recovery
 		return nil, status.Error(codes.Internal, "failed to retrieve payment order")
 	}
 
-	// Check if already reversed (idempotent)
-	if po.Status == domain.PaymentOrderStatusReversed {
-		return &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
-	}
-
-	// Check if can be reversed
-	if !po.CanReverse() {
+	if po.Status != domain.PaymentOrderStatusReversed && !po.CanReverse() {
 		s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("payment order cannot be reversed in status %s", po.Status))
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"payment order cannot be reversed in status %s (only COMPLETED orders can be reversed)", po.Status)
 	}
 
-	// Store original ledger booking ID for the event
+	return po, nil
+}
+
+// executeReversal performs the ledger compensation, state transition, and persistence for a reversal.
+func (s *Service) executeReversal(ctx context.Context, po *domain.PaymentOrder, req *pb.ReversePaymentOrderRequest) (string, error) {
 	originalLedgerBookingID := po.LedgerBookingID
 
-	// Create compensating ledger entries if original posting exists
-	// This must happen before state transition to ensure ledger consistency
 	compensatingBookingID, err := s.reverseLedgerPosting(ctx, po, req.ReversalReason)
 	if err != nil {
 		s.logger.Error("failed to create compensating ledger entries for reversal",
 			"payment_order_id", po.ID.String(),
 			"original_ledger_booking_id", originalLedgerBookingID,
 			"error", err)
-		// Don't cache internal errors - allow retry on recovery
-		return nil, status.Errorf(codes.Internal, "failed to create compensating ledger entries: %v", err)
+		return "", status.Errorf(codes.Internal, "failed to create compensating ledger entries: %v", err)
 	}
 
-	// Reverse the payment order
 	if err := po.Reverse(req.ReversalReason); err != nil {
-		// Don't cache internal errors - allow retry on recovery
-		return nil, status.Errorf(codes.Internal, "failed to reverse payment order: %v", err)
+		return "", status.Errorf(codes.Internal, "failed to reverse payment order: %v", err)
 	}
 
-	// Update in database
 	if err := s.repo.Update(ctx, po); err != nil {
-		// Don't cache internal errors - allow retry on recovery
-		return nil, status.Error(codes.Internal, "failed to update payment order")
+		return "", status.Error(codes.Internal, "failed to update payment order")
 	}
 
-	// Publish PaymentOrderReversed event with compensating booking ID
+	return compensatingBookingID, nil
+}
+
+// publishReversedEvent publishes the PaymentOrderReversed event to Kafka.
+func (s *Service) publishReversedEvent(ctx context.Context, po *domain.PaymentOrder, req *pb.ReversePaymentOrderRequest, originalLedgerBookingID, compensatingBookingID string) {
 	s.publishEvent(ctx, TopicPaymentOrderReversed, po.ID.String(), &eventsv1.PaymentOrderReversedEvent{
 		EventId:                     uuid.New().String(),
 		PaymentOrderId:              po.ID.String(),
@@ -323,19 +361,10 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 		Version:                     int64(po.Version),
 		IdempotencyKey:              po.IdempotencyKey,
 	})
+}
 
-	s.logger.Info("payment order reversed",
-		"payment_order_id", po.ID.String(),
-		"reason", req.ReversalReason,
-		"reversed_by", req.ReversedBy,
-		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", domain.CurrencyCode(po.Amount),
-		"original_ledger_booking_id", originalLedgerBookingID,
-		"compensating_booking_id", compensatingBookingID,
-		"correlation_id", po.CorrelationID)
-
-	// Store successful result in Redis for future idempotency checks
-	response := &pb.ReversePaymentOrderResponse{PaymentOrder: toProto(po)}
+// cacheIdempotencyResult stores a successful result in Redis for future idempotency checks.
+func (s *Service) cacheIdempotencyResult(ctx context.Context, idempKey idempotency.Key, response proto.Message) {
 	responseData, marshalErr := proto.Marshal(response)
 	if marshalErr == nil {
 		storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
@@ -346,14 +375,11 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 			TTL:         idempotencyResultTTL,
 		})
 		if storeErr != nil {
-			s.logger.Error("failed to store reversal idempotency result", "error", storeErr)
-			// Continue - operation succeeded, caching is optimization
+			s.logger.Error("failed to store idempotency result", "error", storeErr)
 		}
 	} else {
-		s.logger.Error("failed to marshal reversal response for idempotency cache", "error", marshalErr)
+		s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
 	}
-
-	return response, nil
 }
 
 // reverseLedgerPosting creates reversal entries for a completed payment.
@@ -375,38 +401,16 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		return "", nil
 	}
 
-	// Get the gateway contra-account from configuration
-	gatewayID := extractGatewayIDFromRef(po.GatewayReferenceID)
-	contraAccountID, err := s.gatewayAccountConfig.GetContraAccount(gatewayID)
+	contraAccountID, currencyCode, err := s.validateReversalPrerequisites(po)
 	if err != nil {
-		return "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
-	}
-
-	// Extract instrument code from domain amount
-	currencyCode := domain.CurrencyCode(po.Amount)
-	if currencyCode == "" {
-		s.logger.Warn("unsupported currency for reversal posting",
-			"currency", currencyCode,
-			"payment_order_id", po.ID.String())
-		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, currencyCode)
+		return "", err
 	}
 
 	// Step 1: Create a BookingLog in PENDING status for the reversal
-	reversalBookingLogIDempKey := fmt.Sprintf("reversal-booking-log-%s", po.IdempotencyKey)
-	bookingLogResp, err := s.financialAccountingClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
-		FinancialAccountType:    "CURRENT",
-		ProductServiceReference: "payment-order-reversal",
-		BusinessUnitReference:   "payment-order-service",
-		ChartOfAccountsRules:    "payment-reversal",
-		BaseInstrumentCode:      currencyCode,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: reversalBookingLogIDempKey,
-		},
-	})
+	reversalBookingLogID, err := s.createReversalBookingLog(ctx, po, currencyCode)
 	if err != nil {
-		return "", fmt.Errorf("failed to create reversal booking log: %w", err)
+		return "", err
 	}
-	reversalBookingLogID := bookingLogResp.FinancialBookingLog.Id
 
 	s.logger.Debug("created reversal booking log",
 		"reversal_booking_log_id", reversalBookingLogID,
@@ -423,10 +427,80 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 	}
 	valueDate := timestamppb.Now()
 
+	// Steps 2-3: Create CREDIT and DEBIT reversal postings
+	if err := s.captureReversalPostings(ctx, po, reversalBookingLogID, postingAmount, valueDate, contraAccountID, amountCents); err != nil {
+		return "", err
+	}
+
+	// Step 4: Update BookingLog status to POSTED
+	if err := s.finalizeReversalBookingLog(ctx, po, reversalBookingLogID); err != nil {
+		return "", err
+	}
+
+	s.logger.Info("reversal ledger posting completed successfully",
+		"reversal_booking_log_id", reversalBookingLogID,
+		"original_booking_log_id", po.LedgerBookingID,
+		"payment_order_id", po.ID.String(),
+		"debtor_account", po.DebtorAccountID,
+		"contra_account", contraAccountID,
+		"amount_cents", amountCents,
+		"currency", currencyCode,
+		"reason", reason)
+
+	return reversalBookingLogID, nil
+}
+
+// validateReversalPrerequisites resolves the contra-account and validates the currency for a reversal.
+func (s *Service) validateReversalPrerequisites(po *domain.PaymentOrder) (string, string, error) {
+	gatewayID := extractGatewayIDFromRef(po.GatewayReferenceID)
+	contraAccountID, err := s.gatewayAccountConfig.GetContraAccount(gatewayID)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
+	}
+
+	currencyCode := domain.CurrencyCode(po.Amount)
+	if currencyCode == "" {
+		s.logger.Warn("unsupported currency for reversal posting",
+			"currency", currencyCode,
+			"payment_order_id", po.ID.String())
+		return "", "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, currencyCode)
+	}
+
+	return contraAccountID, currencyCode, nil
+}
+
+// createReversalBookingLog creates a BookingLog in PENDING status for the reversal.
+func (s *Service) createReversalBookingLog(ctx context.Context, po *domain.PaymentOrder, currencyCode string) (string, error) {
+	reversalBookingLogIDempKey := fmt.Sprintf("reversal-booking-log-%s", po.IdempotencyKey)
+	bookingLogResp, err := s.financialAccountingClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
+		FinancialAccountType:    "CURRENT",
+		ProductServiceReference: "payment-order-reversal",
+		BusinessUnitReference:   "payment-order-service",
+		ChartOfAccountsRules:    "payment-reversal",
+		BaseInstrumentCode:      currencyCode,
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: reversalBookingLogIDempKey,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create reversal booking log: %w", err)
+	}
+	return bookingLogResp.FinancialBookingLog.Id, nil
+}
+
+// captureReversalPostings creates the CREDIT and DEBIT reversal ledger postings.
+func (s *Service) captureReversalPostings(
+	ctx context.Context,
+	po *domain.PaymentOrder,
+	reversalBookingLogID string,
+	postingAmount *money.Money,
+	valueDate *timestamppb.Timestamp,
+	contraAccountID string,
+	amountCents int64,
+) error {
 	// Step 2: Create CREDIT posting (customer account - funds returning)
-	// This reverses the original DEBIT on the customer account
 	reversalCreditIdempKey := fmt.Sprintf("reversal-credit-%s", po.IdempotencyKey)
-	_, err = s.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+	_, err := s.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: reversalBookingLogID,
 		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
 		PostingAmount:         postingAmount,
@@ -445,7 +519,7 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 			"failed_step", "reversal_credit_posting",
 			"debtor_account", po.DebtorAccountID,
 			"error", err.Error())
-		return "", fmt.Errorf("failed to create reversal credit posting for account %s: %w", po.DebtorAccountID, err)
+		return fmt.Errorf("failed to create reversal credit posting for account %s: %w", po.DebtorAccountID, err)
 	}
 
 	s.logger.Debug("created reversal credit posting",
@@ -455,7 +529,6 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		"payment_order_id", po.ID.String())
 
 	// Step 3: Create DEBIT posting (gateway contra-account - reducing liability)
-	// This reverses the original CREDIT on the gateway contra-account
 	reversalDebitIdempKey := fmt.Sprintf("reversal-debit-%s", po.IdempotencyKey)
 	_, err = s.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: reversalBookingLogID,
@@ -478,7 +551,7 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 			"contra_account", contraAccountID,
 			"has_credit_posting", true,
 			"error", err.Error())
-		return "", fmt.Errorf("failed to create reversal debit posting for account %s: %w", contraAccountID, err)
+		return fmt.Errorf("failed to create reversal debit posting for account %s: %w", contraAccountID, err)
 	}
 
 	s.logger.Debug("created reversal debit posting",
@@ -487,8 +560,12 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		"amount_cents", amountCents,
 		"payment_order_id", po.ID.String())
 
-	// Step 4: Update BookingLog status to POSTED
-	_, err = s.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+	return nil
+}
+
+// finalizeReversalBookingLog updates the reversal booking log status to POSTED.
+func (s *Service) finalizeReversalBookingLog(ctx context.Context, po *domain.PaymentOrder, reversalBookingLogID string) error {
+	_, err := s.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     reversalBookingLogID,
 		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
 	})
@@ -504,18 +581,7 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 			"has_debit_posting", true,
 			"resolution", "manually update booking log status to POSTED",
 			"error", err.Error())
-		return "", fmt.Errorf("failed to update reversal booking log to POSTED: %w", err)
+		return fmt.Errorf("failed to update reversal booking log to POSTED: %w", err)
 	}
-
-	s.logger.Info("reversal ledger posting completed successfully",
-		"reversal_booking_log_id", reversalBookingLogID,
-		"original_booking_log_id", po.LedgerBookingID,
-		"payment_order_id", po.ID.String(),
-		"debtor_account", po.DebtorAccountID,
-		"contra_account", contraAccountID,
-		"amount_cents", amountCents,
-		"currency", currencyCode,
-		"reason", reason)
-
-	return reversalBookingLogID, nil
+	return nil
 }

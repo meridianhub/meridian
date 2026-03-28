@@ -414,7 +414,6 @@ func (v *ManifestValidator) validateAPITriggers(
 		path := strings.TrimPrefix(trigger, "api:")
 		sagaPath := fmt.Sprintf("sagas[%d].trigger", i)
 
-		// Validate format: must start with '/'
 		if !apiPathPattern.MatchString(path) {
 			addError(result, ValidationError{
 				Severity:     SeverityError,
@@ -428,37 +427,45 @@ func (v *ManifestValidator) validateAPITriggers(
 			continue
 		}
 
-		// Check uniqueness
-		if prevIdx, exists := seenPaths[path]; exists {
-			addError(result, ValidationError{
-				Severity:     SeverityError,
-				Path:         sagaPath,
-				Code:         "DUPLICATE_API_TRIGGER",
-				Message:      fmt.Sprintf("API path %q already bound to saga at sagas[%d]", path, prevIdx),
-				ResourceType: "saga",
-				ResourceID:   saga.GetName(),
-			})
-		} else {
-			seenPaths[path] = i
-		}
-
-		// Check existence in OpenAPI spec (only when spec is available)
-		if v.apiPathRegistry != nil && !v.apiPathRegistry[path] {
-			ve := ValidationError{
-				Severity:        SeverityError,
-				Path:            sagaPath,
-				Code:            "UNKNOWN_API_ENDPOINT",
-				Message:         fmt.Sprintf("API path %q is not defined in the OpenAPI spec", path),
-				AvailableFields: availablePaths,
-				ResourceType:    "saga",
-				ResourceID:      saga.GetName(),
-			}
-			if suggestion := findClosestMatch(path, availablePaths); suggestion != "" {
-				ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
-			}
-			addError(result, ve)
-		}
+		validateAPIPathUniqueness(path, sagaPath, saga.GetName(), seenPaths, i, result)
+		v.validateAPIPathExists(path, sagaPath, saga.GetName(), availablePaths, result)
 	}
+}
+
+// validateAPIPathUniqueness checks that an API trigger path is not already bound to another saga.
+func validateAPIPathUniqueness(path, sagaPath, sagaName string, seenPaths map[string]int, idx int, result *ValidationResult) {
+	if prevIdx, exists := seenPaths[path]; exists {
+		addError(result, ValidationError{
+			Severity:     SeverityError,
+			Path:         sagaPath,
+			Code:         "DUPLICATE_API_TRIGGER",
+			Message:      fmt.Sprintf("API path %q already bound to saga at sagas[%d]", path, prevIdx),
+			ResourceType: "saga",
+			ResourceID:   sagaName,
+		})
+	} else {
+		seenPaths[path] = idx
+	}
+}
+
+// validateAPIPathExists checks that an API trigger path exists in the OpenAPI spec.
+func (v *ManifestValidator) validateAPIPathExists(path, sagaPath, sagaName string, availablePaths []string, result *ValidationResult) {
+	if v.apiPathRegistry == nil || v.apiPathRegistry[path] {
+		return
+	}
+	ve := ValidationError{
+		Severity:        SeverityError,
+		Path:            sagaPath,
+		Code:            "UNKNOWN_API_ENDPOINT",
+		Message:         fmt.Sprintf("API path %q is not defined in the OpenAPI spec", path),
+		AvailableFields: availablePaths,
+		ResourceType:    "saga",
+		ResourceID:      sagaName,
+	}
+	if suggestion := findClosestMatch(path, availablePaths); suggestion != "" {
+		ve.Suggestion = fmt.Sprintf("Did you mean %q?", suggestion)
+	}
+	addError(result, ve)
 }
 
 // tryLoadOpenAPIPaths attempts to load API paths from api/openapi/meridian.swagger.json.

@@ -60,96 +60,22 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 	// Apply control action based on the action type
 	switch req.ControlAction {
 	case pb.ControlAction_CONTROL_ACTION_FREEZE:
-		// Validate reason length (domain layer also validates, but we provide clearer error message)
-		if len(req.Reason) < 10 {
-			operationStatus = "invalid_freeze_reason"
-			return nil, status.Errorf(codes.InvalidArgument, "freeze reason must be at least 10 characters, got %d", len(req.Reason))
-		}
-
-		account, err = account.Freeze(req.Reason)
+		account, operationStatus, err = s.applyFreezeAction(req, account)
 		if err != nil {
-			if errors.Is(err, domain.ErrInvalidStatusTransition) {
-				operationStatus = opStatusInvalidStatusTransition
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot freeze account in status %s: only ACTIVE accounts can be frozen", account.Status())
-			}
-			if errors.Is(err, domain.ErrInvalidFreezeReason) {
-				operationStatus = "invalid_freeze_reason"
-				return nil, status.Errorf(codes.InvalidArgument, "freeze reason must be at least 10 characters")
-			}
-			operationStatus = "freeze_failed"
-			return nil, status.Errorf(codes.Internal, "failed to freeze account: %v", err)
+			return nil, err
 		}
-
-		s.logger.Info("account frozen",
-			"account_id", req.AccountId,
-			"reason", req.Reason)
 
 	case pb.ControlAction_CONTROL_ACTION_UNFREEZE:
-		account, err = account.Unfreeze()
+		account, operationStatus, err = s.applyUnfreezeAction(req, account)
 		if err != nil {
-			if errors.Is(err, domain.ErrInvalidStatusTransition) {
-				operationStatus = opStatusInvalidStatusTransition
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot unfreeze account in status %s: only FROZEN accounts can be unfrozen", account.Status())
-			}
-			operationStatus = "unfreeze_failed"
-			return nil, status.Errorf(codes.Internal, "failed to unfreeze account: %v", err)
+			return nil, err
 		}
-
-		s.logger.Info("account unfrozen",
-			"account_id", req.AccountId)
 
 	case pb.ControlAction_CONTROL_ACTION_CLOSE:
-		// Hydrate account with balance from Position Keeping before close validation
-		account, err = s.hydrateAccountWithBalance(ctx, account)
+		account, operationStatus, err = s.applyCloseAction(ctx, req, account)
 		if err != nil {
-			operationStatus = opStatusRetrieveFailed
-			s.logger.Error("failed to hydrate account balance from Position Keeping for close validation",
-				"account_id", req.AccountId,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+			return nil, err
 		}
-
-		// Validate balance is zero before attempting close
-		if !account.Balance().IsZero() {
-			operationStatus = "non_zero_balance"
-			balanceCents, _ := account.Balance().ToMinorUnits()
-			return nil, status.Errorf(codes.FailedPrecondition, "cannot close account with non-zero balance: %d cents", balanceCents)
-		}
-
-		// Check for active liens (requires lienRepo)
-		if s.lienRepo != nil {
-			activeLienCount, err := s.lienRepo.CountActiveByAccountID(ctx, account.ID())
-			if err != nil {
-				operationStatus = "lien_check_failed"
-				s.logger.Error("failed to check active liens for account close",
-					"account_id", req.AccountId,
-					"error", err)
-				return nil, status.Errorf(codes.Internal, "failed to check active liens: %v", err)
-			}
-			if activeLienCount > 0 {
-				operationStatus = "active_liens_exist"
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot close account with %d active liens", activeLienCount)
-			}
-		}
-
-		// Attempt to close via domain (pass reason for audit trail)
-		account, err = account.Close(req.Reason)
-		if err != nil {
-			if errors.Is(err, domain.ErrInvalidStatusTransition) {
-				operationStatus = opStatusInvalidStatusTransition
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot close account in status %s: account is already closed", account.Status())
-			}
-			if errors.Is(err, domain.ErrNonZeroBalance) {
-				operationStatus = "non_zero_balance"
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot close account with non-zero balance")
-			}
-			operationStatus = "close_failed"
-			return nil, status.Errorf(codes.Internal, "failed to close account: %v", err)
-		}
-
-		s.logger.Info("account closed",
-			"account_id", req.AccountId,
-			"reason", req.Reason)
 
 	case pb.ControlAction_CONTROL_ACTION_UNSPECIFIED:
 		operationStatus = "unspecified_action"
@@ -190,6 +116,118 @@ func (s *Service) ControlCurrentAccount(ctx context.Context, req *pb.ControlCurr
 		Facility:        toProtoFacility(account),
 		ActionTimestamp: timestamppb.New(actionTimestamp),
 	}, nil
+}
+
+// applyFreezeAction validates and applies the FREEZE action to an account.
+func (s *Service) applyFreezeAction(req *pb.ControlCurrentAccountRequest, account domain.CurrentAccount) (domain.CurrentAccount, string, error) {
+	// Validate reason length (domain layer also validates, but we provide clearer error message)
+	if len(req.Reason) < 10 {
+		return account, "invalid_freeze_reason",
+			status.Errorf(codes.InvalidArgument, "freeze reason must be at least 10 characters, got %d", len(req.Reason))
+	}
+
+	frozen, err := account.Freeze(req.Reason)
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidStatusTransition) {
+			return account, opStatusInvalidStatusTransition,
+				status.Errorf(codes.FailedPrecondition, "cannot freeze account in status %s: only ACTIVE accounts can be frozen", account.Status())
+		}
+		if errors.Is(err, domain.ErrInvalidFreezeReason) {
+			return account, "invalid_freeze_reason",
+				status.Errorf(codes.InvalidArgument, "freeze reason must be at least 10 characters")
+		}
+		return account, "freeze_failed",
+			status.Errorf(codes.Internal, "failed to freeze account: %v", err)
+	}
+
+	s.logger.Info("account frozen",
+		"account_id", req.AccountId,
+		"reason", req.Reason)
+
+	return frozen, operationStatusSuccess, nil
+}
+
+// applyUnfreezeAction validates and applies the UNFREEZE action to an account.
+func (s *Service) applyUnfreezeAction(req *pb.ControlCurrentAccountRequest, account domain.CurrentAccount) (domain.CurrentAccount, string, error) {
+	unfrozen, err := account.Unfreeze()
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidStatusTransition) {
+			return account, opStatusInvalidStatusTransition,
+				status.Errorf(codes.FailedPrecondition, "cannot unfreeze account in status %s: only FROZEN accounts can be unfrozen", account.Status())
+		}
+		return account, "unfreeze_failed",
+			status.Errorf(codes.Internal, "failed to unfreeze account: %v", err)
+	}
+
+	s.logger.Info("account unfrozen",
+		"account_id", req.AccountId)
+
+	return unfrozen, operationStatusSuccess, nil
+}
+
+// applyCloseAction validates and applies the CLOSE action to an account.
+func (s *Service) applyCloseAction(ctx context.Context, req *pb.ControlCurrentAccountRequest, account domain.CurrentAccount) (domain.CurrentAccount, string, error) {
+	// Hydrate account with balance from Position Keeping before close validation
+	account, err := s.hydrateAccountWithBalance(ctx, account)
+	if err != nil {
+		s.logger.Error("failed to hydrate account balance from Position Keeping for close validation",
+			"account_id", req.AccountId,
+			"error", err)
+		return account, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+	}
+
+	// Validate balance is zero before attempting close
+	if !account.Balance().IsZero() {
+		balanceCents, _ := account.Balance().ToMinorUnits()
+		return account, "non_zero_balance",
+			status.Errorf(codes.FailedPrecondition, "cannot close account with non-zero balance: %d cents", balanceCents)
+	}
+
+	// Check for active liens (requires lienRepo)
+	if s.lienRepo != nil {
+		if opStatus, err := s.validateNoActiveLiens(ctx, req.AccountId, account); err != nil {
+			return account, opStatus, err
+		}
+	}
+
+	// Attempt to close via domain (pass reason for audit trail)
+	closed, err := account.Close(req.Reason)
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidStatusTransition) {
+			return account, opStatusInvalidStatusTransition,
+				status.Errorf(codes.FailedPrecondition, "cannot close account in status %s: account is already closed", account.Status())
+		}
+		if errors.Is(err, domain.ErrNonZeroBalance) {
+			return account, "non_zero_balance",
+				status.Errorf(codes.FailedPrecondition, "cannot close account with non-zero balance")
+		}
+		return account, "close_failed",
+			status.Errorf(codes.Internal, "failed to close account: %v", err)
+	}
+
+	s.logger.Info("account closed",
+		"account_id", req.AccountId,
+		"reason", req.Reason)
+
+	return closed, operationStatusSuccess, nil
+}
+
+// validateNoActiveLiens checks that no active liens exist on the account.
+func (s *Service) validateNoActiveLiens(ctx context.Context, accountID string, account domain.CurrentAccount) (string, error) {
+	activeLienCount, err := s.lienRepo.CountActiveByAccountID(ctx, account.ID())
+	if err != nil {
+		s.logger.Error("failed to check active liens for account close",
+			"account_id", accountID,
+			"error", err)
+		return "lien_check_failed",
+			status.Errorf(codes.Internal, "failed to check active liens: %v", err)
+	}
+	if activeLienCount > 0 {
+		return "active_liens_exist",
+			status.Errorf(codes.FailedPrecondition, "cannot close account with %d active liens", activeLienCount)
+	}
+	return "", nil
 }
 
 // saveWithOutboxEvent atomically persists the account state change and writes the

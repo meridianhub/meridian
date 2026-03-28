@@ -110,103 +110,130 @@ func NewDepositConsumer(config kafka.ConsumerConfig, postingService *service.Pos
 // Uses Redis-based idempotency to prevent duplicate ledger entries from
 // Kafka's at-least-once delivery semantics.
 func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *eventsv1.DepositEvent) error {
-	// Validate proto message
+	if err := dc.validateDepositEvent(event); err != nil {
+		return err
+	}
+
+	idempotencyKey := buildDepositIdempotencyKey(ctx, event)
+
+	// Check if already processed (fast path for duplicates)
+	if alreadyProcessed, err := dc.checkIdempotency(ctx, idempotencyKey); alreadyProcessed {
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	// Acquire distributed lock and re-check
+	lockToken, err := dc.acquireDepositLock(ctx, idempotencyKey)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dc.idempotency.Release(ctx, idempotencyKey, lockToken) }()
+
+	// Re-check after acquiring lock (double-check pattern)
+	if alreadyProcessed, err := dc.recheckIdempotency(ctx, idempotencyKey); alreadyProcessed {
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	return dc.processAndStoreResult(ctx, event, idempotencyKey)
+}
+
+// validateDepositEvent validates the proto message and required fields.
+func (dc *DepositConsumer) validateDepositEvent(event *eventsv1.DepositEvent) error {
 	if err := dc.validator.Validate(event); err != nil {
 		return fmt.Errorf("invalid deposit event: %w", err)
 	}
-
-	// Validate required fields to prevent nil pointer panics
 	if event.ValueDate == nil {
 		return ErrMissingValueDate
 	}
 	if event.Timestamp == nil {
 		return ErrMissingTimestamp
 	}
+	return nil
+}
 
-	// Build idempotency key for duplicate detection
-	idempotencyKey := idempotency.Key{
+// buildDepositIdempotencyKey constructs the idempotency key for a deposit event.
+func buildDepositIdempotencyKey(ctx context.Context, event *eventsv1.DepositEvent) idempotency.Key {
+	return idempotency.Key{
 		TenantID:  extractTenantID(ctx),
 		Namespace: "financial-accounting",
 		Operation: "process-deposit",
 		EntityID:  event.AccountId,
 		RequestID: event.CorrelationId,
 	}
+}
 
-	// Check if already processed (fast path for duplicates)
-	_, err := dc.idempotency.Check(ctx, idempotencyKey)
+// checkIdempotency checks if the operation was already processed.
+// Returns (true, nil) if already processed, (false, nil) if not found, or (false, err) on failure.
+func (dc *DepositConsumer) checkIdempotency(ctx context.Context, key idempotency.Key) (bool, error) {
+	_, err := dc.idempotency.Check(ctx, key)
 	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-		// Already processed - return success (idempotent)
-		return nil
+		return true, nil
 	}
 	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		return fmt.Errorf("idempotency check failed: %w", err)
+		return false, fmt.Errorf("idempotency check failed: %w", err)
 	}
+	return false, nil
+}
 
-	// Generate unique token for lock ownership
+// recheckIdempotency performs the post-lock idempotency re-check (double-check pattern).
+// Returns (true, nil) if already processed, (false, nil) if not found, or (false, err) on failure.
+func (dc *DepositConsumer) recheckIdempotency(ctx context.Context, key idempotency.Key) (bool, error) {
+	_, err := dc.idempotency.Check(ctx, key)
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		return false, fmt.Errorf("idempotency re-check failed: %w", err)
+	}
+	return false, nil
+}
+
+// acquireDepositLock acquires a distributed lock for the deposit event.
+func (dc *DepositConsumer) acquireDepositLock(ctx context.Context, key idempotency.Key) (string, error) {
 	lockToken := uuid.New().String()
-
-	// Acquire distributed lock atomically (uses SETNX - prevents race condition)
-	// MaxRetries=0 means if lock is held, return immediately with error
 	lockOpts := idempotency.LockOptions{
 		TTL:        lockTTL,
 		Token:      lockToken,
 		MaxRetries: 0,
 		RetryDelay: 0,
 	}
-	if err := dc.idempotency.Acquire(ctx, idempotencyKey, lockOpts); err != nil {
+	if err := dc.idempotency.Acquire(ctx, key, lockOpts); err != nil {
 		if errors.Is(err, idempotency.ErrLockAcquisitionFailed) {
-			return ErrConcurrentProcessing
+			return "", ErrConcurrentProcessing
 		}
-		return fmt.Errorf("failed to acquire lock: %w", err)
+		return "", fmt.Errorf("failed to acquire lock: %w", err)
 	}
+	return lockToken, nil
+}
 
-	// Ensure lock is released when done (best-effort cleanup)
-	defer func() {
-		_ = dc.idempotency.Release(ctx, idempotencyKey, lockToken)
-	}()
-
-	// Re-check after acquiring lock (double-check pattern)
-	// Another consumer may have completed processing between our initial check and lock acquisition
-	_, err = dc.idempotency.Check(ctx, idempotencyKey)
-	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-		return nil
-	}
-	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		return fmt.Errorf("idempotency re-check failed: %w", err)
-	}
-
-	// Convert proto timestamp to time.Time
-	valueDate := event.ValueDate.AsTime()
-
-	// Validate instrument code
+// processAndStoreResult validates the currency, processes the deposit, and stores the idempotency result.
+func (dc *DepositConsumer) processAndStoreResult(ctx context.Context, event *eventsv1.DepositEvent, key idempotency.Key) error {
 	currencyCode := event.InstrumentCode
 	if currencyCode == "" {
-		// Store failure result before returning error
-		dc.storeFailureResult(ctx, idempotencyKey, fmt.Sprintf("%v: %v", ErrInvalidCurrency, event.InstrumentCode))
+		dc.storeFailureResult(ctx, key, fmt.Sprintf("%v: %v", ErrInvalidCurrency, event.InstrumentCode))
 		return fmt.Errorf("%w: %v", ErrInvalidCurrency, event.InstrumentCode)
 	}
 
-	// Create service event
 	depositEvent := service.DepositEvent{
 		AccountID:     event.AccountId,
 		AmountCents:   event.AmountCents,
 		Currency:      currencyCode,
 		CorrelationID: event.CorrelationId,
-		ValueDate:     valueDate,
+		ValueDate:     event.ValueDate.AsTime(),
 	}
 
-	// Process through posting service
 	if err := dc.postingService.ProcessDeposit(ctx, depositEvent); err != nil {
-		// Store failure result
-		dc.storeFailureResult(ctx, idempotencyKey, err.Error())
+		dc.storeFailureResult(ctx, key, err.Error())
 		return fmt.Errorf("failed to process deposit: %w", err)
 	}
 
-	// Store success result
 	successResult := idempotency.Result{
-		Key:         idempotencyKey,
+		Key:         key,
 		Status:      idempotency.StatusCompleted,
-		Data:        nil, // No response data needed for events
+		Data:        nil,
 		Error:       "",
 		CompletedAt: time.Now(),
 		TTL:         successResultTTL,

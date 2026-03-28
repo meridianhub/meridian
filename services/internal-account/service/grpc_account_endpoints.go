@@ -72,47 +72,14 @@ func (s *Service) InitiateInternalAccount(ctx context.Context, req *pb.InitiateI
 
 	// Set product type fields on the account via builder rebuild
 	if productTypeCode != "" {
-		account = domain.NewInternalAccountBuilder().
-			WithID(account.ID()).
-			WithAccountID(account.AccountID()).
-			WithAccountCode(account.AccountCode()).
-			WithName(account.Name()).
-			WithAccountType(account.AccountType()).
-			WithClearingPurpose(account.ClearingPurpose()).
-			WithInstrumentCode(account.InstrumentCode()).
-			WithDimension(account.Dimension()).
-			WithStatus(account.Status()).
-			WithOrgPartyID(account.OrgPartyID()).
-			WithCounterparty(account.Counterparty()).
-			WithAttributes(account.Attributes()).
-			WithProductTypeCode(productTypeCode).
-			WithProductTypeVersion(productTypeVersion).
-			WithVersion(account.Version()).
-			WithCreatedAt(account.CreatedAt()).
-			WithUpdatedAt(account.UpdatedAt()).
-			Build()
+		account = rebuildWithProductType(account, productTypeCode, productTypeVersion)
 	}
 
 	// Handle counterparty details for NOSTRO/VOSTRO accounts
-	if req.CounterpartyDetails != nil {
-		counterparty, err := domain.NewCounterpartyDetailsWithOptions(
-			req.CounterpartyDetails.CounterpartyId,
-			req.CounterpartyDetails.CounterpartyName,
-			req.CounterpartyDetails.CounterpartyExternalRef,
-			req.CounterpartyDetails.Attributes,
-		)
-		if err != nil {
-			operationStatus = operationStatusFailed
-			return nil, status.Errorf(codes.InvalidArgument, "invalid counterparty details: %v", err)
-		}
-		account, err = account.UpdateCounterparty(counterparty)
-		if err != nil {
-			operationStatus = operationStatusFailed
-			return nil, mapDomainErrorToGRPC(err)
-		}
-	} else if accountType.RequiresCorrespondent() {
+	account, err = s.applyCounterpartyDetails(account, req.CounterpartyDetails, accountType)
+	if err != nil {
 		operationStatus = operationStatusFailed
-		return nil, status.Errorf(codes.InvalidArgument, "counterparty details required for %s accounts", accountType)
+		return nil, err
 	}
 
 	// Persist via repository (atomically with outbox event when publisher is configured)
@@ -308,6 +275,54 @@ func (s *Service) ControlInternalAccount(ctx context.Context, req *pb.ControlInt
 		Facility:        toProtoFacility(account),
 		ActionTimestamp: timestamppb.Now(),
 	}, nil
+}
+
+// rebuildWithProductType rebuilds an account with product type fields set.
+func rebuildWithProductType(account domain.InternalAccount, productTypeCode string, productTypeVersion int) domain.InternalAccount {
+	return domain.NewInternalAccountBuilder().
+		WithID(account.ID()).
+		WithAccountID(account.AccountID()).
+		WithAccountCode(account.AccountCode()).
+		WithName(account.Name()).
+		WithAccountType(account.AccountType()).
+		WithClearingPurpose(account.ClearingPurpose()).
+		WithInstrumentCode(account.InstrumentCode()).
+		WithDimension(account.Dimension()).
+		WithStatus(account.Status()).
+		WithOrgPartyID(account.OrgPartyID()).
+		WithCounterparty(account.Counterparty()).
+		WithAttributes(account.Attributes()).
+		WithProductTypeCode(productTypeCode).
+		WithProductTypeVersion(productTypeVersion).
+		WithVersion(account.Version()).
+		WithCreatedAt(account.CreatedAt()).
+		WithUpdatedAt(account.UpdatedAt()).
+		Build()
+}
+
+// applyCounterpartyDetails validates and applies counterparty details to the account.
+func (s *Service) applyCounterpartyDetails(account domain.InternalAccount, details *pb.CounterpartyDetails, accountType domain.AccountType) (domain.InternalAccount, error) {
+	if details != nil {
+		counterparty, err := domain.NewCounterpartyDetailsWithOptions(
+			details.CounterpartyId,
+			details.CounterpartyName,
+			details.CounterpartyExternalRef,
+			details.Attributes,
+		)
+		if err != nil {
+			return account, status.Errorf(codes.InvalidArgument, "invalid counterparty details: %v", err)
+		}
+		account, err = account.UpdateCounterparty(counterparty)
+		if err != nil {
+			return account, mapDomainErrorToGRPC(err)
+		}
+		return account, nil
+	}
+
+	if accountType.RequiresCorrespondent() {
+		return account, status.Errorf(codes.InvalidArgument, "counterparty details required for %s accounts", accountType)
+	}
+	return account, nil
 }
 
 // saveAccountWithEvent saves the account and optionally publishes a FacilityCreatedEvent to the outbox

@@ -177,73 +177,28 @@ func (s *OperationalGatewayService) DispatchInstruction(
 		return nil, err
 	}
 
-	// Validate required fields.
-	if req.InstructionType == "" {
-		return nil, status.Error(codes.InvalidArgument, "instruction_type is required")
-	}
-	if strings.HasPrefix(req.InstructionType, "payment.") {
-		return nil, status.Errorf(codes.InvalidArgument,
-			"payment instructions must use financial-gateway, not operational-gateway (instruction_type: %q)",
-			req.InstructionType)
-	}
-	if req.Payload == nil {
-		return nil, status.Error(codes.InvalidArgument, "payload is required")
-	}
-	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
-		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+	if err := validateDispatchInstructionRequest(req); err != nil {
+		return nil, err
 	}
 
-	// Convert payload proto -> domain map.
-	payload := structToMap(req.Payload)
-
-	// Build functional options.
-	opts := []domain.InstructionOption{
-		domain.WithPriority(protoToDomainPriority(req.Priority)),
-	}
-	if req.CorrelationId != "" {
-		opts = append(opts, domain.WithCorrelationID(req.CorrelationId))
-	}
-	if req.CausationId != "" {
-		opts = append(opts, domain.WithCausationID(req.CausationId))
-	}
-	if len(req.Metadata) > 0 {
-		opts = append(opts, domain.WithMetadata(req.Metadata))
-	}
-	if req.ScheduledAt != nil {
-		t := req.ScheduledAt.AsTime()
-		opts = append(opts, domain.WithScheduledAt(t))
-	}
-	if req.ExpiresAt != nil {
-		t := req.ExpiresAt.AsTime()
-		opts = append(opts, domain.WithExpiresAt(t))
-	}
-
-	// Convert the tenant ID string to a UUID for the domain model.
-	// The tenant.TenantID may be a UUID string (from JWT claims) or an alphanumeric slug.
-	// tenantIDToUUID produces a stable UUID in either case.
 	tenantUUID, parseErr := uuid.Parse(tenantIDToUUID(tid))
 	if parseErr != nil {
 		s.logger.Error("failed to parse tenant ID as UUID", "tenant_id", tid, "error", parseErr)
 		return nil, status.Error(codes.Internal, "invalid tenant context")
 	}
 
-	// Resolve provider connection: for dispatch, we don't require a connection_id upfront —
-	// the worker resolves it via InstructionRoute. We use uuid.Nil as the sentinel that
-	// the dispatcher replaces. uuid.Nil is a valid UUID string so it passes persistence
-	// layer parsing and is clearly distinguishable from a real connection ID.
 	instruction, err := domain.NewInstruction(
 		tenantUUID,
 		req.InstructionType,
 		uuid.Nil.String(),
-		payload,
-		opts...,
+		structToMap(req.Payload),
+		buildInstructionOptions(req)...,
 	)
 	if err != nil {
 		s.logger.Error("failed to create instruction domain object", "error", err)
 		return nil, status.Errorf(codes.InvalidArgument, "invalid instruction: %v", err)
 	}
 
-	// Assign a fresh UUID for this instruction.
 	instruction.ID = uuid.New()
 
 	if err := s.saveInstructionWithEvent(ctx, instruction, req.IdempotencyKey.Key, func(ctx context.Context, tx *gorm.DB, instr *domain.Instruction) error {
@@ -259,6 +214,48 @@ func (s *OperationalGatewayService) DispatchInstruction(
 	return &opgatewayv1.DispatchInstructionResponse{
 		Instruction: instructionToProto(instruction),
 	}, nil
+}
+
+// validateDispatchInstructionRequest validates required fields on the dispatch request.
+func validateDispatchInstructionRequest(req *opgatewayv1.DispatchInstructionRequest) error {
+	if req.InstructionType == "" {
+		return status.Error(codes.InvalidArgument, "instruction_type is required")
+	}
+	if strings.HasPrefix(req.InstructionType, "payment.") {
+		return status.Errorf(codes.InvalidArgument,
+			"payment instructions must use financial-gateway, not operational-gateway (instruction_type: %q)",
+			req.InstructionType)
+	}
+	if req.Payload == nil {
+		return status.Error(codes.InvalidArgument, "payload is required")
+	}
+	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" {
+		return status.Error(codes.InvalidArgument, "idempotency_key is required")
+	}
+	return nil
+}
+
+// buildInstructionOptions constructs domain InstructionOption slice from the dispatch request.
+func buildInstructionOptions(req *opgatewayv1.DispatchInstructionRequest) []domain.InstructionOption {
+	opts := []domain.InstructionOption{
+		domain.WithPriority(protoToDomainPriority(req.Priority)),
+	}
+	if req.CorrelationId != "" {
+		opts = append(opts, domain.WithCorrelationID(req.CorrelationId))
+	}
+	if req.CausationId != "" {
+		opts = append(opts, domain.WithCausationID(req.CausationId))
+	}
+	if len(req.Metadata) > 0 {
+		opts = append(opts, domain.WithMetadata(req.Metadata))
+	}
+	if req.ScheduledAt != nil {
+		opts = append(opts, domain.WithScheduledAt(req.ScheduledAt.AsTime()))
+	}
+	if req.ExpiresAt != nil {
+		opts = append(opts, domain.WithExpiresAt(req.ExpiresAt.AsTime()))
+	}
+	return opts
 }
 
 // CancelInstruction cancels a pending instruction.

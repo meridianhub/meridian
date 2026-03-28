@@ -175,64 +175,30 @@ type UpdateVerificationRequest struct {
 // UpdateVerification updates the status of a verification (typically called by webhook handler).
 // Emits PartyVerificationCompleted event when status transitions to a terminal state.
 func (s *VerificationService) UpdateVerification(ctx context.Context, req UpdateVerificationRequest) error {
-	// Validate status
-	status := verification.Status(req.Status)
-	if !status.IsValid() {
+	vStatus := verification.Status(req.Status)
+	if !vStatus.IsValid() {
 		return ErrInvalidVerificationStatusValue
 	}
 
-	// Find the verification by provider's ID
-	entity, err := s.verificationRepo.GetVerificationByProviderID(ctx, req.ProviderVerificationID)
+	entity, err := s.loadAndValidateVerification(ctx, req.ProviderVerificationID)
 	if err != nil {
-		s.logger.Error("failed to find verification",
-			"provider_verification_id", req.ProviderVerificationID,
-			"error", err)
 		return err
 	}
 
-	// Check if already in terminal state
-	currentStatus := verification.Status(entity.Status)
-	if isTerminalStatus(currentStatus) {
-		s.logger.Warn("verification already in terminal state",
-			"verification_id", entity.ID,
-			"current_status", entity.Status)
-		return ErrVerificationAlreadyCompleted
-	}
+	metadataJSON := marshalVerificationMetadata(req.Metadata)
 
-	// Update metadata if provided
-	var metadataJSON *string
-	if len(req.Metadata) > 0 {
-		jsonBytes, err := json.Marshal(req.Metadata)
-		if err != nil {
-			s.logger.Error("failed to marshal metadata",
-				"error", err)
-			return err
-		}
-		jsonStr := string(jsonBytes)
-		metadataJSON = &jsonStr
-	}
-
-	// Set completed_at if transitioning to terminal state
 	completedAt := req.CompletedAt
-	if isTerminalStatus(status) && completedAt == nil {
+	if isTerminalStatus(vStatus) && completedAt == nil {
 		now := time.Now()
 		completedAt = &now
 	}
 
-	// Update the verification status
 	err = s.verificationRepo.UpdateVerificationStatus(
-		ctx,
-		entity.ID,
-		req.Status,
-		req.RiskScore,
-		req.Reason,
-		completedAt,
-		entity.Version,
+		ctx, entity.ID, req.Status, req.RiskScore, req.Reason, completedAt, entity.Version,
 	)
 	if err != nil {
 		s.logger.Error("failed to update verification status",
-			"verification_id", entity.ID,
-			"error", err)
+			"verification_id", entity.ID, "error", err)
 		return err
 	}
 
@@ -242,44 +208,77 @@ func (s *VerificationService) UpdateVerification(ctx context.Context, req Update
 		"old_status", entity.Status,
 		"new_status", req.Status)
 
-	// Emit event if transitioning to terminal state
-	if isTerminalStatus(status) && s.eventPublisher != nil {
-		event := VerificationCompletedEvent{
-			EventID:        uuid.New().String(),
-			PartyID:        entity.PartyID.String(),
-			VerificationID: entity.VerificationID,
-			Provider:       entity.Provider,
-			Status:         req.Status,
-			RiskScore:      req.RiskScore,
-			Reason:         req.Reason,
-			CompletedAt:    *completedAt,
-			Metadata:       req.Metadata,
-		}
-
-		if err := s.eventPublisher.PublishVerificationCompleted(ctx, event); err != nil {
-			// Log error but don't fail the status update
-			// The event can be replayed from the audit log if needed
-			s.logger.Error("failed to publish verification completed event",
-				"verification_id", entity.ID,
-				"error", err)
-		} else {
-			s.logger.Info("verification completed event published",
-				"verification_id", entity.ID,
-				"event_id", event.EventID)
-		}
+	if isTerminalStatus(vStatus) {
+		s.publishVerificationCompleted(ctx, entity, req, *completedAt)
 	}
 
-	// Update metadata separately if provided
 	if metadataJSON != nil {
 		if err := s.verificationRepo.UpdateVerificationMetadata(ctx, entity.ID, *metadataJSON); err != nil {
 			s.logger.Error("failed to update verification metadata",
-				"verification_id", entity.ID,
-				"error", err)
-			// Don't fail the overall operation - metadata is supplementary
+				"verification_id", entity.ID, "error", err)
 		}
 	}
 
 	return nil
+}
+
+// loadAndValidateVerification finds a verification by provider ID and checks it is not already in a terminal state.
+func (s *VerificationService) loadAndValidateVerification(ctx context.Context, providerVerificationID string) (*persistence.PartyVerificationEntity, error) {
+	entity, err := s.verificationRepo.GetVerificationByProviderID(ctx, providerVerificationID)
+	if err != nil {
+		s.logger.Error("failed to find verification",
+			"provider_verification_id", providerVerificationID, "error", err)
+		return nil, err
+	}
+
+	currentStatus := verification.Status(entity.Status)
+	if isTerminalStatus(currentStatus) {
+		s.logger.Warn("verification already in terminal state",
+			"verification_id", entity.ID, "current_status", entity.Status)
+		return nil, ErrVerificationAlreadyCompleted
+	}
+
+	return entity, nil
+}
+
+// marshalVerificationMetadata marshals metadata to JSON string pointer. Returns nil if metadata is empty.
+func marshalVerificationMetadata(metadata map[string]string) *string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	jsonBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return nil
+	}
+	jsonStr := string(jsonBytes)
+	return &jsonStr
+}
+
+// publishVerificationCompleted emits a verification completed event. Errors are logged but not propagated.
+func (s *VerificationService) publishVerificationCompleted(ctx context.Context, entity *persistence.PartyVerificationEntity, req UpdateVerificationRequest, completedAt time.Time) {
+	if s.eventPublisher == nil {
+		return
+	}
+
+	event := VerificationCompletedEvent{
+		EventID:        uuid.New().String(),
+		PartyID:        entity.PartyID.String(),
+		VerificationID: entity.VerificationID,
+		Provider:       entity.Provider,
+		Status:         req.Status,
+		RiskScore:      req.RiskScore,
+		Reason:         req.Reason,
+		CompletedAt:    completedAt,
+		Metadata:       req.Metadata,
+	}
+
+	if err := s.eventPublisher.PublishVerificationCompleted(ctx, event); err != nil {
+		s.logger.Error("failed to publish verification completed event",
+			"verification_id", entity.ID, "error", err)
+	} else {
+		s.logger.Info("verification completed event published",
+			"verification_id", entity.ID, "event_id", event.EventID)
+	}
 }
 
 // GetVerification retrieves a verification by internal ID

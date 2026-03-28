@@ -34,43 +34,8 @@ func (r *PositionRepository) Insert(ctx context.Context, position *domain.Positi
 		return err
 	}
 
-	// Marshal attributes to JSON
-	var attributesJSON []byte
-	if position.Attributes != nil {
-		attributesJSON, err = json.Marshal(position.Attributes)
-		if err != nil {
-			return fmt.Errorf("failed to marshal attributes: %w", err)
-		}
-	}
-
-	userID := audit.GetUserFromContext(ctx)
-
-	query := `
-		INSERT INTO position (
-			id, created_at, created_by,
-			account_id, instrument_code, bucket_key, amount, dimension, attributes, reference_id
-		) VALUES (
-			$1, $2, $3,
-			$4, $5, $6, $7, $8, $9, $10
-		)`
-
-	// Handle nil reference_id
-	var refID interface{}
-	if position.ReferenceID != uuid.Nil {
-		refID = position.ReferenceID
-	}
-
-	_, err = tx.Exec(ctx, query,
-		position.ID, position.CreatedAt, userID,
-		position.AccountID, position.InstrumentCode, position.BucketKey,
-		position.Amount, position.Dimension, attributesJSON, refID,
-	)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
-			return domain.ErrConflict
-		}
-		return fmt.Errorf("failed to insert position: %w", err)
+	if err := r.InsertWithTx(ctx, tx, position); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -100,9 +65,21 @@ func (r *PositionRepository) InsertBatch(ctx context.Context, positions []*domai
 		return err
 	}
 
+	if err := r.bulkCopyPositions(ctx, tx, positions); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit batch transaction: %w", err)
+	}
+
+	return nil
+}
+
+// bulkCopyPositions uses COPY to bulk insert position rows.
+func (r *PositionRepository) bulkCopyPositions(ctx context.Context, tx pgx.Tx, positions []*domain.Position) error {
 	userID := audit.GetUserFromContext(ctx)
 
-	// Use COPY for bulk insert
 	copyCount, err := tx.CopyFrom(
 		ctx,
 		pgx.Identifier{"position"},
@@ -111,33 +88,12 @@ func (r *PositionRepository) InsertBatch(ctx context.Context, positions []*domai
 			"account_id", "instrument_code", "bucket_key", "amount", "dimension", "attributes", "reference_id",
 		},
 		pgx.CopyFromSlice(len(positions), func(i int) ([]any, error) {
-			pos := positions[i]
-
-			// Marshal attributes
-			var attrsJSON []byte
-			if pos.Attributes != nil {
-				var marshalErr error
-				attrsJSON, marshalErr = json.Marshal(pos.Attributes)
-				if marshalErr != nil {
-					return nil, fmt.Errorf("failed to marshal attributes for position %d: %w", i, marshalErr)
-				}
-			}
-
-			// Handle nil reference_id
-			var refID interface{}
-			if pos.ReferenceID != uuid.Nil {
-				refID = pos.ReferenceID
-			}
-
-			return []any{
-				pos.ID, pos.CreatedAt, userID,
-				pos.AccountID, pos.InstrumentCode, pos.BucketKey, pos.Amount, pos.Dimension, attrsJSON, refID,
-			}, nil
+			return buildPositionCopyRow(positions[i], userID)
 		}),
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return domain.ErrConflict
 		}
 		return fmt.Errorf("failed to bulk insert positions: %w", err)
@@ -147,11 +103,29 @@ func (r *PositionRepository) InsertBatch(ctx context.Context, positions []*domai
 		return fmt.Errorf("%w: expected %d positions but inserted %d", ErrPositionBulkInsertMismatch, len(positions), copyCount)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit batch transaction: %w", err)
+	return nil
+}
+
+// buildPositionCopyRow builds a COPY row for a single position.
+func buildPositionCopyRow(pos *domain.Position, userID string) ([]any, error) {
+	var attrsJSON []byte
+	if pos.Attributes != nil {
+		var err error
+		attrsJSON, err = json.Marshal(pos.Attributes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal attributes: %w", err)
+		}
 	}
 
-	return nil
+	var refID interface{}
+	if pos.ReferenceID != uuid.Nil {
+		refID = pos.ReferenceID
+	}
+
+	return []any{
+		pos.ID, pos.CreatedAt, userID,
+		pos.AccountID, pos.InstrumentCode, pos.BucketKey, pos.Amount, pos.Dimension, attrsJSON, refID,
+	}, nil
 }
 
 // FindByID retrieves a Position by its ID.

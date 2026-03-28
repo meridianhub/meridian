@@ -148,53 +148,15 @@ func (r *AccountResolver) GetSettlementClearingAccount(ctx context.Context, inst
 func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingType ClearingAccountType, instrumentCode string) (string, error) {
 	cacheKey := r.cacheKey(clearingType, instrumentCode)
 
-	// Check cache first (read lock)
-	r.mu.RLock()
-	if entry, ok := r.cache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
-		r.mu.RUnlock()
-		r.logger.Debug("cache hit for clearing account",
-			"clearing_type", clearingType,
-			"instrument_code", instrumentCode,
-			"account_id", entry.accountID)
-		poobservability.RecordClearingAccountCacheHit()
-		return entry.accountID, nil
+	if accountID, ok := r.checkCache(cacheKey, clearingType, instrumentCode); ok {
+		return accountID, nil
 	}
-	r.mu.RUnlock()
 
 	poobservability.RecordClearingAccountCacheMiss()
 
-	// Use singleflight to coalesce concurrent requests for the same cache key.
-	// This prevents cache stampede when multiple goroutines miss the cache simultaneously.
 	start := time.Now()
 	result, err, shared := r.sfGroup.Do(cacheKey, func() (interface{}, error) {
-		// Double-check cache after acquiring the singleflight "lock"
-		// Another goroutine might have already populated the cache
-		r.mu.RLock()
-		if entry, ok := r.cache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
-			r.mu.RUnlock()
-			return entry.accountID, nil
-		}
-		r.mu.RUnlock()
-
-		// Create a timeout context for the lookup to enable faster fallback
-		lookupCtx, cancel := context.WithTimeout(ctx, r.lookupTimeout)
-		defer cancel()
-
-		// Query the Internal Account service
-		accountID, err := r.queryInternalAccount(lookupCtx, clearingType, instrumentCode)
-		if err != nil {
-			return "", err
-		}
-
-		// Cache the result (write lock)
-		r.mu.Lock()
-		r.cache[cacheKey] = cacheEntry{
-			accountID: accountID,
-			expiresAt: time.Now().Add(r.cacheTTL),
-		}
-		r.mu.Unlock()
-
-		return accountID, nil
+		return r.fetchAndCacheClearingAccount(ctx, cacheKey, clearingType, instrumentCode)
 	})
 
 	if err != nil {
@@ -204,12 +166,9 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 
 	accountID, ok := result.(string)
 	if !ok {
-		// This should never happen as we control the singleflight function return type
 		return "", ErrAccountResolverInternalError
 	}
 
-	// Only record lookup duration for the primary request, not for shared waiters.
-	// Shared requests just waited for the primary, so their "duration" is actually wait time.
 	if !shared {
 		poobservability.RecordClearingAccountLookupDuration(time.Since(start))
 	}
@@ -220,6 +179,52 @@ func (r *AccountResolver) resolveClearingAccount(ctx context.Context, clearingTy
 		"account_id", accountID,
 		"duration_ms", time.Since(start).Milliseconds(),
 		"shared", shared)
+
+	return accountID, nil
+}
+
+// checkCache checks the in-memory cache for a clearing account entry.
+func (r *AccountResolver) checkCache(cacheKey string, clearingType ClearingAccountType, instrumentCode string) (string, bool) {
+	r.mu.RLock()
+	entry, ok := r.cache[cacheKey]
+	r.mu.RUnlock()
+
+	if ok && time.Now().Before(entry.expiresAt) {
+		r.logger.Debug("cache hit for clearing account",
+			"clearing_type", clearingType,
+			"instrument_code", instrumentCode,
+			"account_id", entry.accountID)
+		poobservability.RecordClearingAccountCacheHit()
+		return entry.accountID, true
+	}
+	return "", false
+}
+
+// fetchAndCacheClearingAccount queries the Internal Account service and caches the result.
+// Called within singleflight to prevent concurrent lookups for the same key.
+func (r *AccountResolver) fetchAndCacheClearingAccount(ctx context.Context, cacheKey string, clearingType ClearingAccountType, instrumentCode string) (string, error) {
+	// Double-check cache after acquiring the singleflight "lock"
+	r.mu.RLock()
+	if entry, ok := r.cache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
+		r.mu.RUnlock()
+		return entry.accountID, nil
+	}
+	r.mu.RUnlock()
+
+	lookupCtx, cancel := context.WithTimeout(ctx, r.lookupTimeout)
+	defer cancel()
+
+	accountID, err := r.queryInternalAccount(lookupCtx, clearingType, instrumentCode)
+	if err != nil {
+		return "", err
+	}
+
+	r.mu.Lock()
+	r.cache[cacheKey] = cacheEntry{
+		accountID: accountID,
+		expiresAt: time.Now().Add(r.cacheTTL),
+	}
+	r.mu.Unlock()
 
 	return accountID, nil
 }

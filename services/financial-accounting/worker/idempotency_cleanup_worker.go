@@ -214,80 +214,79 @@ func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
 	w.logger.Debug("starting cleanup iteration")
 	start := time.Now()
 
-	// Track metrics for this iteration
 	var totalProcessed, totalFailed int
 	var iterationErrors []error
-
-	// Track stale key count by service for gauge update
 	staleCountByService := make(map[string]int)
 
 	// Process in batches until no more stale keys found
-	for {
-		// Check for shutdown signal
-		select {
-		case <-ctx.Done():
-			w.updateStaleGauges(staleCountByService)
-			w.logIterationComplete(start, totalProcessed, totalFailed, iterationErrors)
-			return
-		case <-w.done:
-			w.updateStaleGauges(staleCountByService)
-			w.logIterationComplete(start, totalProcessed, totalFailed, iterationErrors)
-			return
-		default:
-		}
+	for !w.shouldStopIteration(ctx) {
 
-		// Scan for stale keys
 		staleKeys, err := w.cleaner.ScanStalePendingKeys(
-			ctx,
-			w.config.KeyPattern,
-			w.config.StaleThreshold,
-			w.config.BatchSize,
+			ctx, w.config.KeyPattern, w.config.StaleThreshold, w.config.BatchSize,
 		)
 		if err != nil {
 			w.logger.Error("failed to scan for stale keys", "error", err)
 			iterationErrors = append(iterationErrors, err)
 			break
 		}
-
 		if len(staleKeys) == 0 {
-			// No more stale keys found
 			break
 		}
 
-		w.logger.Info("found stale PENDING keys",
-			"count", len(staleKeys),
-			"batch_size", w.config.BatchSize)
+		processed, failed, errs := w.processStaleKeyBatch(ctx, staleKeys, staleCountByService)
+		totalProcessed += processed
+		totalFailed += failed
+		iterationErrors = append(iterationErrors, errs...)
 
-		// Count stale keys by service for metrics
-		for _, staleKey := range staleKeys {
-			service := w.getServiceFromKey(staleKey)
-			staleCountByService[service]++
-		}
-
-		// Process each stale key
-		for _, staleKey := range staleKeys {
-			if err := w.processStaleKey(ctx, staleKey); err != nil {
-				totalFailed++
-				iterationErrors = append(iterationErrors, err)
-			} else {
-				totalProcessed++
-				// Decrement stale count since we successfully processed it
-				service := w.getServiceFromKey(staleKey)
-				staleCountByService[service]--
-			}
-		}
-
-		// If we got fewer keys than batch size, we've processed all stale keys
 		if len(staleKeys) < w.config.BatchSize {
 			break
 		}
 	}
 
-	// Update stale pending gauge with remaining unprocessed stale keys.
-	// The gauge represents keys found minus keys successfully processed in this iteration.
-	// Failed keys remain in the count and will be retried in the next iteration.
 	w.updateStaleGauges(staleCountByService)
 	w.logIterationComplete(start, totalProcessed, totalFailed, iterationErrors)
+}
+
+// shouldStopIteration checks if the cleanup loop should stop due to shutdown signals.
+func (w *IdempotencyCleanupWorker) shouldStopIteration(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	case <-w.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// processStaleKeyBatch processes a batch of stale keys and updates service counts.
+// Returns the number of successfully processed keys, failed keys, and any errors.
+func (w *IdempotencyCleanupWorker) processStaleKeyBatch(
+	ctx context.Context,
+	staleKeys []idempotency.StalePendingKey,
+	staleCountByService map[string]int,
+) (processed, failed int, errs []error) {
+	w.logger.Info("found stale PENDING keys",
+		"count", len(staleKeys),
+		"batch_size", w.config.BatchSize)
+
+	// Count stale keys by service for metrics
+	for _, staleKey := range staleKeys {
+		service := w.getServiceFromKey(staleKey)
+		staleCountByService[service]++
+	}
+
+	for _, staleKey := range staleKeys {
+		if err := w.processStaleKey(ctx, staleKey); err != nil {
+			failed++
+			errs = append(errs, err)
+		} else {
+			processed++
+			service := w.getServiceFromKey(staleKey)
+			staleCountByService[service]--
+		}
+	}
+	return processed, failed, errs
 }
 
 // processStaleKey marks a single stale key as FAILED.

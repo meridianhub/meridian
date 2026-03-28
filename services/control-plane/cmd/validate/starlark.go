@@ -183,51 +183,60 @@ func buildStarlarkPredeclared(schemaReg *schema.Registry) (starlark.StringDict, 
 		predeclared[name] = module
 	}
 
-	// Add open mock modules for namespaces not covered by the schema.
-	// These are service namespaces used in cookbook patterns that either:
-	// (a) have no registered handlers yet (experimental/aspirational)
-	// (b) use a different service module name than what's registered
-	cookbookNamespaces := []string{
-		"current_account",
-		"financial_accounting",
-		"financial_gateway",
-		"internal_account",
-		"market_data",
-		"market_information",
-		"operational_gateway",
-		"party",
-		"position_keeping",
-		"reconciliation",
-		"reference_data",
-		"repository",
-		"valuation_engine",
-	}
+	registerCookbookNamespaces(predeclared)
+	registerStarlarkBuiltins(predeclared)
 
-	// Explicit allowlist of handlers not yet registered but used in cookbook scripts.
-	// Misspelled handler names NOT in this list will still fail validation.
-	openFallbackHandlers := map[string]map[string]struct{}{
-		"current_account": {
-			"evaluate_asset_valuation": {},
-			"execute_withdrawal":       {},
-		},
-		"party": {
-			"get": {},
-		},
-		"position_keeping": {
-			"get_balance":      {},
-			"list_accounts":    {},
-			"query_accounts":   {},
-			"query_logs":       {},
-			"query_positions":  {},
-			"retrieve_balance": {},
-		},
-		"reference_data": {
-			"get_account":      {},
-			"get_account_type": {},
-			"query":            {},
-		},
-	}
+	return predeclared, nil
+}
 
+// cookbookNamespaces lists service namespaces used in cookbook patterns that either:
+// (a) have no registered handlers yet (experimental/aspirational)
+// (b) use a different service module name than what's registered
+var cookbookNamespaces = []string{
+	"current_account",
+	"financial_accounting",
+	"financial_gateway",
+	"internal_account",
+	"market_data",
+	"market_information",
+	"operational_gateway",
+	"party",
+	"position_keeping",
+	"reconciliation",
+	"reference_data",
+	"repository",
+	"valuation_engine",
+}
+
+// openFallbackHandlers is the explicit allowlist of handlers not yet registered
+// but used in cookbook scripts. Misspelled handler names NOT in this list will
+// still fail validation.
+var openFallbackHandlers = map[string]map[string]struct{}{
+	"current_account": {
+		"evaluate_asset_valuation": {},
+		"execute_withdrawal":       {},
+	},
+	"party": {
+		"get": {},
+	},
+	"position_keeping": {
+		"get_balance":      {},
+		"list_accounts":    {},
+		"query_accounts":   {},
+		"query_logs":       {},
+		"query_positions":  {},
+		"retrieve_balance": {},
+	},
+	"reference_data": {
+		"get_account":      {},
+		"get_account_type": {},
+		"query":            {},
+	},
+}
+
+// registerCookbookNamespaces adds open mock modules for namespaces not covered by the
+// schema, and wraps registered modules with hybrid fallback for known unregistered handlers.
+func registerCookbookNamespaces(predeclared starlark.StringDict) {
 	for _, ns := range cookbookNamespaces {
 		if _, registered := predeclared[ns]; !registered {
 			predeclared[ns] = &openServiceModule{name: ns}
@@ -243,9 +252,11 @@ func buildStarlarkPredeclared(schemaReg *schema.Registry) (starlark.StringDict, 
 			}
 		}
 	}
+}
 
-	// Standard builtins
-
+// registerStarlarkBuiltins adds standard builtins (saga, step, Decimal, input_data)
+// to the predeclared dictionary.
+func registerStarlarkBuiltins(predeclared starlark.StringDict) {
 	// saga(name) returns a mock saga object
 	predeclared["saga"] = starlark.NewBuiltin("saga", func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
 		members := starlark.StringDict{"name": starlark.String("mock_saga")}
@@ -262,8 +273,6 @@ func buildStarlarkPredeclared(schemaReg *schema.Registry) (starlark.StringDict, 
 
 	// input_data is a permissive dict that returns sensible defaults for any key access.
 	predeclared["input_data"] = &permissiveInputDict{}
-
-	return predeclared, nil
 }
 
 // decimalBuiltin returns a Starlark builtin that converts string/int/float to Float.

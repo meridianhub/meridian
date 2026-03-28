@@ -40,48 +40,46 @@ func (s *Service) InviteUser(ctx context.Context, req *pb.InviteUserRequest) (*p
 	invitation, plaintextToken, err := domain.NewInvitation(identity.ID(), inviterID)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to create invitation",
-			"identity_id", identity.ID(),
-			"error", err)
+			"identity_id", identity.ID(), "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create invitation")
 	}
 
 	if err := s.repo.SaveIdentityWithInvitation(ctx, identity, invitation); err != nil {
 		s.logger.ErrorContext(ctx, "failed to save identity and invitation",
-			"identity_id", identity.ID(),
-			"invitation_id", invitation.ID(),
-			"error", err)
+			"identity_id", identity.ID(), "invitation_id", invitation.ID(), "error", err)
 		return nil, mapDomainError(err, "identity")
 	}
 
-	s.logger.InfoContext(ctx, "invitation created",
-		"identity_id", identity.ID())
-
+	s.logger.InfoContext(ctx, "invitation created", "identity_id", identity.ID())
 	s.queueInvitationEmail(ctx, identity, inviterID, plaintextToken, tenantID)
-
-	// Grant the initial role if specified.
-	if req.GetRole() != pb.Role_ROLE_UNSPECIFIED {
-		granterRole := s.getCallerHighestRole(ctx)
-		targetRole := protoRoleToDomain(req.GetRole())
-		assignment, roleErr := domain.NewRoleAssignment(tenantID, identity.ID(), inviterID, granterRole, targetRole)
-		if roleErr != nil {
-			s.logger.WarnContext(ctx, "failed to grant initial role during invitation",
-				"identity_id", identity.ID(),
-				"role", targetRole,
-				"error", roleErr)
-		} else {
-			if saveErr := s.repo.SaveRoleAssignment(ctx, assignment); saveErr != nil {
-				s.logger.WarnContext(ctx, "failed to save initial role assignment",
-					"identity_id", identity.ID(),
-					"error", saveErr)
-			}
-		}
-	}
+	s.grantInitialRole(ctx, req, tenantID, identity.ID(), inviterID)
 
 	return &pb.InviteUserResponse{
 		Invitation:      invitationToProto(invitation),
 		Identity:        identityToProto(identity),
 		InvitationToken: plaintextToken,
 	}, nil
+}
+
+// grantInitialRole attempts to assign the requested role to the invited identity.
+// Errors are logged but not propagated since the invitation itself already succeeded.
+func (s *Service) grantInitialRole(ctx context.Context, req *pb.InviteUserRequest, tenantID tenant.TenantID, identityID, inviterID uuid.UUID) {
+	if req.GetRole() == pb.Role_ROLE_UNSPECIFIED {
+		return
+	}
+
+	granterRole := s.getCallerHighestRole(ctx)
+	targetRole := protoRoleToDomain(req.GetRole())
+	assignment, roleErr := domain.NewRoleAssignment(tenantID, identityID, inviterID, granterRole, targetRole)
+	if roleErr != nil {
+		s.logger.WarnContext(ctx, "failed to grant initial role during invitation",
+			"identity_id", identityID, "role", targetRole, "error", roleErr)
+		return
+	}
+	if saveErr := s.repo.SaveRoleAssignment(ctx, assignment); saveErr != nil {
+		s.logger.WarnContext(ctx, "failed to save initial role assignment",
+			"identity_id", identityID, "error", saveErr)
+	}
 }
 
 // AcceptInvitation accepts a pending invitation and activates the identity.

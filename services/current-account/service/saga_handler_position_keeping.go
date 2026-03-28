@@ -9,6 +9,7 @@ import (
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -37,77 +38,23 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	// Extract required parameters
-	// Accept either position_id (schema primary) or account_id (legacy alias)
-	accountID, ok := params["position_id"].(string)
-	if !ok || accountID == "" {
-		accountID, ok = params["account_id"].(string)
-		if !ok || accountID == "" {
-			return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: position_id or account_id", errMissingParameter))
-		}
-	}
-
-	amount, err := requireDecimal(params, "amount")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	// Accept instrument_code (preferred) or currency (deprecated alias)
-	currency := optionalString(params, "instrument_code")
-	if currency == "" {
-		currency = optionalString(params, "currency")
-	}
-	if currency == "" {
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: instrument_code", errMissingParameter))
-	}
-
-	direction, err := requireString(params, "direction")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	transactionID, err := requireString(params, "transaction_id")
+	// Extract and validate parameters
+	accountID, amount, currency, direction, transactionID, err := validateInitiateLogParams(params)
 	if err != nil {
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
 	// Validate direction
-	var pbDirection commonpb.PostingDirection
-	switch direction {
-	case directionDebit:
-		pbDirection = commonpb.PostingDirection_POSTING_DIRECTION_DEBIT
-	case directionCredit:
-		pbDirection = commonpb.PostingDirection_POSTING_DIRECTION_CREDIT
-	default:
-		return nil, wrapHandlerError(handlerName, fmt.Errorf("%w: %s", errInvalidDirection, direction))
+	pbDirection, err := mapPostingDirection(direction)
+	if err != nil {
+		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	// Determine description based on direction
-	description := fmt.Sprintf("Deposit to account %s", accountID)
-	idempKeyPrefix := sagaTypeDeposit
-	if direction == directionDebit {
-		description = fmt.Sprintf("Withdrawal from account %s", accountID)
-		idempKeyPrefix = sagaTypeWithdrawal
-	}
+	// Determine description and idempotency key prefix based on direction
+	description, idempKeyPrefix := buildDirectionMetadata(direction, accountID)
 
 	// Extract optional valuation_analysis parameter
-	var attributes map[string]string
-	if valuationAnalysis, ok := params["valuation_analysis"]; ok && valuationAnalysis != nil {
-		// Marshal valuation_analysis to JSON for storage in attributes
-		bytes, marshalErr := json.Marshal(valuationAnalysis)
-		if marshalErr != nil {
-			deps.Logger.Warn("failed to marshal valuation_analysis",
-				"error", marshalErr,
-				"transaction_id", transactionID)
-		} else {
-			attributes = map[string]string{
-				"valuation_analysis": string(bytes),
-			}
-			deps.Logger.Debug("including valuation_analysis in position attributes",
-				"transaction_id", transactionID,
-				"analysis_size", len(bytes))
-		}
-	}
+	attributes := marshalValuationAnalysis(params, deps, transactionID)
 
 	deps.Logger.Info("executing position_keeping.initiate_log",
 		"account_id", accountID,
@@ -115,22 +62,18 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 		"direction", direction,
 		"has_valuation_analysis", attributes != nil)
 
-	// Create proto amount
-	protoAmount := decimalToMoneyAmount(amount, currency)
-
-	// Build transaction log entry
+	// Build and send the request
 	initialEntry := &positionkeepingv1.TransactionLogEntry{
 		EntryId:       uuid.New().String(),
 		TransactionId: transactionID,
 		AccountId:     accountID,
-		Amount:        protoAmount,
+		Amount:        decimalToMoneyAmount(amount, currency),
 		Direction:     pbDirection,
 		Timestamp:     timestamppb.Now(),
 		Description:   description,
 		Attributes:    attributes,
 	}
 
-	// Call Position Keeping service
 	if deps.PosKeepingClient == nil {
 		return nil, wrapHandlerError(handlerName, errPosKeepingClientNil)
 	}
@@ -164,6 +107,85 @@ func currentAccountPositionKeepingInitiateLog(ctx *saga.StarlarkContext, params 
 	}, nil
 }
 
+// validateInitiateLogParams extracts and validates parameters for initiate_log.
+func validateInitiateLogParams(params map[string]any) (string, decimal.Decimal, string, string, string, error) {
+	// Accept either position_id (schema primary) or account_id (legacy alias)
+	accountID, ok := params["position_id"].(string)
+	if !ok || accountID == "" {
+		accountID, ok = params["account_id"].(string)
+		if !ok || accountID == "" {
+			return "", decimal.Decimal{}, "", "", "", fmt.Errorf("%w: position_id or account_id", errMissingParameter)
+		}
+	}
+
+	amount, err := requireDecimal(params, "amount")
+	if err != nil {
+		return "", decimal.Decimal{}, "", "", "", err
+	}
+
+	// Accept instrument_code (preferred) or currency (deprecated alias)
+	currency := optionalString(params, "instrument_code")
+	if currency == "" {
+		currency = optionalString(params, "currency")
+	}
+	if currency == "" {
+		return "", decimal.Decimal{}, "", "", "", fmt.Errorf("%w: instrument_code", errMissingParameter)
+	}
+
+	direction, err := requireString(params, "direction")
+	if err != nil {
+		return "", decimal.Decimal{}, "", "", "", err
+	}
+
+	transactionID, err := requireString(params, "transaction_id")
+	if err != nil {
+		return "", decimal.Decimal{}, "", "", "", err
+	}
+
+	return accountID, amount, currency, direction, transactionID, nil
+}
+
+// mapPostingDirection converts a string direction to a proto PostingDirection.
+func mapPostingDirection(direction string) (commonpb.PostingDirection, error) {
+	switch direction {
+	case directionDebit:
+		return commonpb.PostingDirection_POSTING_DIRECTION_DEBIT, nil
+	case directionCredit:
+		return commonpb.PostingDirection_POSTING_DIRECTION_CREDIT, nil
+	default:
+		return 0, fmt.Errorf("%w: %s", errInvalidDirection, direction)
+	}
+}
+
+// buildDirectionMetadata returns the description and idempotency key prefix for a given direction.
+func buildDirectionMetadata(direction, accountID string) (string, string) {
+	if direction == directionDebit {
+		return fmt.Sprintf("Withdrawal from account %s", accountID), sagaTypeWithdrawal
+	}
+	return fmt.Sprintf("Deposit to account %s", accountID), sagaTypeDeposit
+}
+
+// marshalValuationAnalysis extracts and marshals the optional valuation_analysis parameter.
+func marshalValuationAnalysis(params map[string]any, deps *CurrentAccountHandlerDeps, transactionID string) map[string]string {
+	valuationAnalysis, ok := params["valuation_analysis"]
+	if !ok || valuationAnalysis == nil {
+		return nil
+	}
+	bytes, marshalErr := json.Marshal(valuationAnalysis)
+	if marshalErr != nil {
+		deps.Logger.Warn("failed to marshal valuation_analysis",
+			"error", marshalErr,
+			"transaction_id", transactionID)
+		return nil
+	}
+	deps.Logger.Debug("including valuation_analysis in position attributes",
+		"transaction_id", transactionID,
+		"analysis_size", len(bytes))
+	return map[string]string{
+		"valuation_analysis": string(bytes),
+	}
+}
+
 // currentAccountPositionKeepingCancelLog cancels a position log entry (compensation).
 //
 // Required params:
@@ -180,37 +202,13 @@ func currentAccountPositionKeepingCancelLog(ctx *saga.StarlarkContext, params ma
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	logID, err := requireString(params, "log_id")
+	// Extract required parameters
+	logID, version, transactionID, accountID, direction, err := validateCancelLogParams(params)
 	if err != nil {
 		return nil, wrapHandlerError(handlerName, err)
 	}
 
-	version, err := requireInt64(params, "version")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	transactionID, err := requireString(params, "transaction_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	accountID, err := requireString(params, "account_id")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	direction, err := requireString(params, "direction")
-	if err != nil {
-		return nil, wrapHandlerError(handlerName, err)
-	}
-
-	idempKeyPrefix := sagaTypeDeposit
-	sagaType := sagaTypeDeposit
-	if direction == directionDebit {
-		idempKeyPrefix = sagaTypeWithdrawal
-		sagaType = sagaTypeWithdrawal
-	}
+	_, sagaType := buildDirectionMetadata(direction, accountID)
 
 	if deps.PosKeepingClient == nil {
 		return nil, wrapHandlerError(handlerName, errPosKeepingClientNil)
@@ -221,27 +219,8 @@ func currentAccountPositionKeepingCancelLog(ctx *saga.StarlarkContext, params ma
 		"version", version,
 		"transaction_id", transactionID)
 
-	_, err = deps.PosKeepingClient.UpdateFinancialPositionLog(ctx,
-		&positionkeepingv1.UpdateFinancialPositionLogRequest{
-			LogId:   logID,
-			Version: version,
-			StatusUpdate: &positionkeepingv1.StatusTracking{
-				CurrentStatus:   commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
-				StatusUpdatedAt: timestamppb.Now(),
-				StatusReason:    fmt.Sprintf("Saga compensation for failed %s transaction %s", sagaType, transactionID),
-			},
-			AuditEntry: &positionkeepingv1.AuditTrailEntry{
-				AuditId:   uuid.New().String(),
-				Timestamp: timestamppb.Now(),
-				UserId:    "system",
-				Action:    "saga_compensation",
-				Details:   fmt.Sprintf("Cancelled position log due to %s saga failure for transaction %s", sagaType, transactionID),
-			},
-			IdempotencyKey: &commonpb.IdempotencyKey{
-				Key: fmt.Sprintf("compensate-%s-%s-%s", idempKeyPrefix, accountID, transactionID),
-			},
-		},
-	)
+	cancelReq := buildCancelLogRequest(logID, version, transactionID, accountID, sagaType)
+	_, err = deps.PosKeepingClient.UpdateFinancialPositionLog(ctx, cancelReq)
 	if err != nil {
 		caobservability.RecordExternalServiceError("position_keeping", "compensate_log")
 		return nil, wrapHandlerError(handlerName, fmt.Errorf("failed to compensate position log: %w", err))
@@ -256,4 +235,52 @@ func currentAccountPositionKeepingCancelLog(ctx *saga.StarlarkContext, params ma
 		"log_id": logID,
 		"status": "CANCELLED",
 	}, nil
+}
+
+// validateCancelLogParams extracts and validates parameters for cancel_log.
+func validateCancelLogParams(params map[string]any) (string, int64, string, string, string, error) {
+	logID, err := requireString(params, "log_id")
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+	version, err := requireInt64(params, "version")
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+	transactionID, err := requireString(params, "transaction_id")
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+	accountID, err := requireString(params, "account_id")
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+	direction, err := requireString(params, "direction")
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+	return logID, version, transactionID, accountID, direction, nil
+}
+
+// buildCancelLogRequest constructs the UpdateFinancialPositionLogRequest for cancellation.
+func buildCancelLogRequest(logID string, version int64, transactionID, accountID, sagaType string) *positionkeepingv1.UpdateFinancialPositionLogRequest {
+	return &positionkeepingv1.UpdateFinancialPositionLogRequest{
+		LogId:   logID,
+		Version: version,
+		StatusUpdate: &positionkeepingv1.StatusTracking{
+			CurrentStatus:   commonpb.TransactionStatus_TRANSACTION_STATUS_CANCELLED,
+			StatusUpdatedAt: timestamppb.Now(),
+			StatusReason:    fmt.Sprintf("Saga compensation for failed %s transaction %s", sagaType, transactionID),
+		},
+		AuditEntry: &positionkeepingv1.AuditTrailEntry{
+			AuditId:   uuid.New().String(),
+			Timestamp: timestamppb.Now(),
+			UserId:    "system",
+			Action:    "saga_compensation",
+			Details:   fmt.Sprintf("Cancelled position log due to %s saga failure for transaction %s", sagaType, transactionID),
+		},
+		IdempotencyKey: &commonpb.IdempotencyKey{
+			Key: fmt.Sprintf("compensate-%s-%s-%s", sagaType, accountID, transactionID),
+		},
+	}
 }

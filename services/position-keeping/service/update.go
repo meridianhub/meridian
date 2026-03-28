@@ -26,13 +26,11 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
 ) (resp *positionkeepingv1.UpdateFinancialPositionLogResponse, err error) {
-	// Parse and validate log ID
 	logID, err := parseUUID(req.GetLogId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid log_id: %v", err)
 	}
 
-	// Check idempotency and acquire lock if key provided
 	idempotencyKey, cachedResponse, err := s.checkUpdateIdempotencyAndAcquireLock(ctx, req, logID)
 	if err != nil {
 		return nil, err
@@ -41,7 +39,6 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 		return cachedResponse, nil
 	}
 
-	// Clean up pending idempotency key on error
 	if idempotencyKey != nil {
 		defer func() {
 			if err != nil {
@@ -50,12 +47,41 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 		}()
 	}
 
-	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
 		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
-	// Retrieve existing log
+	log, err := s.loadLogForUpdate(ctx, logID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateUpdateRequest(req, log); err != nil {
+		return nil, err
+	}
+
+	newEntryAdded, statusChanged, err := applyUpdateMutations(ctx, log, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.persistUpdate(ctx, log, req, logID, newEntryAdded, statusChanged); err != nil {
+		return nil, err
+	}
+
+	if idempotencyKey != nil {
+		if err := storeUpdateIdempotencyResult(ctx, s.idempotency, *idempotencyKey, log); err != nil {
+			return nil, err
+		}
+	}
+
+	return &positionkeepingv1.UpdateFinancialPositionLogResponse{
+		Log: toProtoFinancialPositionLog(log),
+	}, nil
+}
+
+// loadLogForUpdate retrieves a log by ID, returning gRPC status errors.
+func (s *PositionKeepingService) loadLogForUpdate(ctx context.Context, logID uuid.UUID) (*domain.FinancialPositionLog, error) {
 	log, err := s.repository.FindByID(ctx, logID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -63,76 +89,72 @@ func (s *PositionKeepingService) UpdateFinancialPositionLog(
 		}
 		return nil, status.Errorf(codes.Internal, "failed to retrieve financial position log: %v", err)
 	}
+	return log, nil
+}
 
-	// Validate request and check version
-	if err := validateUpdateRequest(req, log); err != nil {
-		return nil, err
-	}
-
-	// Track if we made any changes (for event publishing)
+// applyUpdateMutations applies new entry, status change, and audit entry mutations to the log.
+func applyUpdateMutations(
+	ctx context.Context,
+	log *domain.FinancialPositionLog,
+	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
+) (*domain.TransactionLogEntry, bool, error) {
 	var newEntryAdded *domain.TransactionLogEntry
 	statusChanged := false
 
-	// Add new transaction entry if provided
 	if req.NewEntry != nil {
 		entry, err := protoEntryToDomain(req.NewEntry)
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid new_entry: %v", err)
+			return nil, false, status.Errorf(codes.InvalidArgument, "invalid new_entry: %v", err)
 		}
-
 		if err := log.AddEntry(entry); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "failed to add transaction entry: %v", err)
+			return nil, false, status.Errorf(codes.InvalidArgument, "failed to add transaction entry: %v", err)
 		}
-
 		newEntryAdded = entry
 	}
 
-	// Update status if provided using domain lifecycle methods
 	if req.StatusUpdate != nil {
 		if err := applyStatusTransition(ctx, log, req); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		statusChanged = true
 	}
 
-	// Add audit trail entry if provided (and not already added by status lifecycle method)
 	if req.AuditEntry != nil && !statusChanged {
 		auditEntry, err := protoAuditEntryToDomain(ctx, req.AuditEntry)
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid audit_entry: %v", err)
+			return nil, false, status.Errorf(codes.InvalidArgument, "invalid audit_entry: %v", err)
 		}
-
 		if err := log.AddAuditEntry(auditEntry); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "failed to add audit entry: %v", err)
+			return nil, false, status.Errorf(codes.InvalidArgument, "failed to add audit entry: %v", err)
 		}
 	}
 
-	// Collect domain events for the changes
-	updateEvents := s.collectUpdateEvents(ctx, log, req, newEntryAdded, statusChanged)
+	return newEntryAdded, statusChanged, nil
+}
 
-	// Update the log in repository atomically with outbox event writes.
+// persistUpdate persists the updated log with outbox events, mapping errors to gRPC status.
+func (s *PositionKeepingService) persistUpdate(
+	ctx context.Context,
+	log *domain.FinancialPositionLog,
+	req *positionkeepingv1.UpdateFinancialPositionLogRequest,
+	logID uuid.UUID,
+	newEntryAdded *domain.TransactionLogEntry,
+	statusChanged bool,
+) error {
+	updateEvents := s.collectUpdateEvents(ctx, log, req, newEntryAdded, statusChanged)
 	outboxFn := s.outboxPublisher.BuildOutboxFn(ctx, updateEvents)
+
 	if err := s.repository.UpdateWithOutbox(ctx, log, outboxFn); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "financial position log not found: %s", logID)
+			return status.Errorf(codes.NotFound, "financial position log not found: %s", logID)
 		}
 		if errors.Is(err, domain.ErrOptimisticLock) {
-			return nil, status.Errorf(codes.Aborted, "version conflict during update: %v", err)
+			return status.Errorf(codes.Aborted, "version conflict during update: %v", err)
 		}
-		return nil, status.Errorf(codes.Internal, "failed to update financial position log: %v", err)
+		return status.Errorf(codes.Internal, "failed to update financial position log: %v", err)
 	}
 
-	// Store idempotency result if key was provided
-	if idempotencyKey != nil {
-		if err := storeUpdateIdempotencyResult(ctx, s.idempotency, *idempotencyKey, log); err != nil {
-			return nil, err
-		}
-	}
-
-	resp = &positionkeepingv1.UpdateFinancialPositionLogResponse{
-		Log: toProtoFinancialPositionLog(log),
-	}
-	return resp, nil
+	return nil
 }
 
 // checkUpdateIdempotencyAndAcquireLock checks for completed operations and acquires a pending lock.

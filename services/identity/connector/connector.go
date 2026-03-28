@@ -140,54 +140,13 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 	}
 
 	// Reject non-active accounts before any password check.
-	switch identity.Status() {
-	case domain.IdentityStatusLocked:
-		c.logger.InfoContext(ctx, "connector: login rejected — account locked",
-			"tenant_id", tenantID,
-			"identity_id", identity.ID())
-		return Identity{}, false, nil
-	case domain.IdentityStatusSuspended:
-		c.logger.InfoContext(ctx, "connector: login rejected — account suspended",
-			"tenant_id", tenantID,
-			"identity_id", identity.ID())
-		return Identity{}, false, nil
-	case domain.IdentityStatusPendingInvite:
-		c.logger.InfoContext(ctx, "connector: login rejected — account not yet activated",
-			"tenant_id", tenantID,
-			"identity_id", identity.ID())
-		return Identity{}, false, nil
-	case domain.IdentityStatusPendingVerification:
-		c.logger.InfoContext(ctx, "connector: login rejected — email not yet verified",
-			"tenant_id", tenantID,
-			"identity_id", identity.ID())
-		return Identity{}, false, domain.ErrEmailNotVerified
-	case domain.IdentityStatusActive:
-		// valid — proceed to password verification
-	default:
-		c.logger.WarnContext(ctx, "connector: login rejected — unknown account status",
-			"tenant_id", tenantID,
-			"identity_id", identity.ID(),
-			"status", identity.Status())
-		return Identity{}, false, nil
+	if rejected, rejErr := c.checkAccountStatus(ctx, identity, tenantID); rejected {
+		return Identity{}, false, rejErr
 	}
 
 	if err := credentials.ValidatePassword(password, identity.PasswordHash()); err != nil {
-		// Record the failed attempt; best-effort — do not surface save errors to caller.
-		_ = identity.RecordLoginAttempt(false)
-		justLocked := identity.IsLocked()
-		if saveErr := c.repo.Save(ctx, identity); saveErr != nil {
-			c.logger.ErrorContext(ctx, "connector: failed to persist failed login attempt",
-				"identity_id", identity.ID(),
-				"error", saveErr)
-		} else if justLocked {
-			// Queue lockout email only after the lock state is successfully persisted.
-			// If save failed, the lock was not committed and no notification should be sent.
-			c.queueLockoutEmail(ctx, identity, tenantID)
-		}
-		c.logger.InfoContext(ctx, "connector: invalid password",
-			"tenant_id", tenantID,
-			"identity_id", identity.ID())
-		return Identity{}, false, nil
+		c.handleFailedLogin(ctx, identity, tenantID)
+		return Identity{}, false, nil //nolint:nilerr // wrong password returns (false, nil) per contract - not an infrastructure error
 	}
 
 	// Record successful login; best-effort.
@@ -198,13 +157,57 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 			"error", saveErr)
 	}
 
-	// Resolve active role assignments → Dex groups.
+	return c.buildLoginIdentity(ctx, identity, tenantID)
+}
+
+// checkAccountStatus rejects non-active accounts. Returns (true, error) if rejected.
+func (c *Connector) checkAccountStatus(ctx context.Context, identity *domain.Identity, tenantID tenant.TenantID) (bool, error) {
+	switch identity.Status() {
+	case domain.IdentityStatusLocked:
+		c.logger.InfoContext(ctx, "connector: login rejected - account locked",
+			"tenant_id", tenantID, "identity_id", identity.ID())
+		return true, nil
+	case domain.IdentityStatusSuspended:
+		c.logger.InfoContext(ctx, "connector: login rejected - account suspended",
+			"tenant_id", tenantID, "identity_id", identity.ID())
+		return true, nil
+	case domain.IdentityStatusPendingInvite:
+		c.logger.InfoContext(ctx, "connector: login rejected - account not yet activated",
+			"tenant_id", tenantID, "identity_id", identity.ID())
+		return true, nil
+	case domain.IdentityStatusPendingVerification:
+		c.logger.InfoContext(ctx, "connector: login rejected - email not yet verified",
+			"tenant_id", tenantID, "identity_id", identity.ID())
+		return true, domain.ErrEmailNotVerified
+	case domain.IdentityStatusActive:
+		return false, nil
+	default:
+		c.logger.WarnContext(ctx, "connector: login rejected - unknown account status",
+			"tenant_id", tenantID, "identity_id", identity.ID(), "status", identity.Status())
+		return true, nil
+	}
+}
+
+// handleFailedLogin records a failed login attempt and queues a lockout email if the account was just locked.
+func (c *Connector) handleFailedLogin(ctx context.Context, identity *domain.Identity, tenantID tenant.TenantID) {
+	_ = identity.RecordLoginAttempt(false)
+	justLocked := identity.IsLocked()
+	if saveErr := c.repo.Save(ctx, identity); saveErr != nil {
+		c.logger.ErrorContext(ctx, "connector: failed to persist failed login attempt",
+			"identity_id", identity.ID(), "error", saveErr)
+	} else if justLocked {
+		c.queueLockoutEmail(ctx, identity, tenantID)
+	}
+	c.logger.InfoContext(ctx, "connector: invalid password",
+		"tenant_id", tenantID, "identity_id", identity.ID())
+}
+
+// buildLoginIdentity resolves roles and constructs the login Identity response.
+func (c *Connector) buildLoginIdentity(ctx context.Context, identity *domain.Identity, tenantID tenant.TenantID) (Identity, bool, error) {
 	groups, err := c.activeRoles(ctx, identity)
 	if err != nil {
-		// Non-fatal: log and proceed with empty groups rather than denying login.
 		c.logger.ErrorContext(ctx, "connector: failed to load role assignments",
-			"identity_id", identity.ID(),
-			"error", err)
+			"identity_id", identity.ID(), "error", err)
 		groups = []string{}
 	}
 
@@ -217,9 +220,7 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 	}
 
 	c.logger.InfoContext(ctx, "connector: login successful",
-		"tenant_id", tenantID,
-		"identity_id", identity.ID(),
-		"roles", groups)
+		"tenant_id", tenantID, "identity_id", identity.ID(), "roles", groups)
 
 	return connIdentity, true, nil
 }

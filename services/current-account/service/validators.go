@@ -118,36 +118,15 @@ func (s *Service) resolveProductType(
 				productTypeCode, cachedType.Definition.BehaviorClass)
 	}
 
-	// Evaluate CEL eligibility if an eligibility program is configured
-	if cachedType.EligibilityProgram != nil {
-		if opStatus, err := s.checkEligibility(ctx, cachedType, partyID, attributes, productTypeCode, accountID); err != nil {
-			return nil, opStatus, err
-		}
+	// Validate eligibility and attributes
+	if opStatus, err := s.validateProductTypeConstraints(ctx, cachedType, partyID, attributes, productTypeCode, accountID); err != nil {
+		return nil, opStatus, err
 	}
 
-	// Validate attributes against JSON Schema if schema is defined
-	if cachedType.CompiledSchema != nil {
-		attrs := attributes
-		if attrs == nil {
-			attrs = map[string]string{}
-		}
-		if err := validateAttributes(cachedType.CompiledSchema, attrs); err != nil {
-			return nil, "invalid_attributes",
-				status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
-		}
-	}
-
-	// Determine version
-	version := cachedType.Definition.Version
-	if productTypeVersion != nil {
-		requested := int(*productTypeVersion)
-		if requested > cachedType.Definition.Version {
-			return nil, "invalid_version",
-				status.Errorf(codes.InvalidArgument,
-					"requested version %d exceeds latest version %d for product type %s",
-					requested, cachedType.Definition.Version, productTypeCode)
-		}
-		version = requested
+	// Resolve version and build account options
+	version, opStatus, err := resolveProductTypeVersion(cachedType, productTypeVersion, productTypeCode)
+	if err != nil {
+		return nil, opStatus, err
 	}
 
 	opts := []domain.AccountOption{
@@ -162,6 +141,50 @@ func (s *Service) resolveProductType(
 		"account_id", accountID)
 
 	return &resolvedProductType{cachedType: cachedType, opts: opts}, "", nil
+}
+
+// validateProductTypeConstraints checks eligibility and attribute schema constraints.
+func (s *Service) validateProductTypeConstraints(
+	ctx context.Context,
+	cachedType *CachedAccountType,
+	partyID string,
+	attributes map[string]string,
+	productTypeCode, accountID string,
+) (string, error) {
+	if cachedType.EligibilityProgram != nil {
+		if opStatus, err := s.checkEligibility(ctx, cachedType, partyID, attributes, productTypeCode, accountID); err != nil {
+			return opStatus, err
+		}
+	}
+
+	if cachedType.CompiledSchema != nil {
+		attrs := attributes
+		if attrs == nil {
+			attrs = map[string]string{}
+		}
+		if err := validateAttributes(cachedType.CompiledSchema, attrs); err != nil {
+			return "invalid_attributes",
+				status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
+		}
+	}
+
+	return "", nil
+}
+
+// resolveProductTypeVersion determines the version to use, validating against the latest available.
+func resolveProductTypeVersion(cachedType *CachedAccountType, productTypeVersion *int32, productTypeCode string) (int, string, error) {
+	version := cachedType.Definition.Version
+	if productTypeVersion != nil {
+		requested := int(*productTypeVersion)
+		if requested > cachedType.Definition.Version {
+			return 0, "invalid_version",
+				status.Errorf(codes.InvalidArgument,
+					"requested version %d exceeds latest version %d for product type %s",
+					requested, cachedType.Definition.Version, productTypeCode)
+		}
+		version = requested
+	}
+	return version, "", nil
 }
 
 // checkEligibility evaluates CEL eligibility for a party against a product type.

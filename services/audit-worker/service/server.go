@@ -77,39 +77,13 @@ func (s *AuditService) ListAuditEntries(
 	}
 	_ = tenantID // used implicitly by WithGormTenantScope in the transaction
 
-	// Apply pagination defaults
-	pageSize := int(req.GetPageSize())
-	if pageSize == 0 {
-		pageSize = defaultPageSize
-	}
-	if pageSize > maxPageSize {
-		pageSize = maxPageSize
-	}
+	pageSize := clampPageSize(int(req.GetPageSize()))
 
 	var rows []auditLogRow
 
 	// Execute query within tenant-scoped transaction (sets search_path)
 	err := db.WithGormTenantTransaction(ctx, s.db, func(tx *gorm.DB) error {
-		query := tx.Table("audit_log").
-			Select("id, table_name, operation, record_id, old_values, new_values, created_at, changed_by").
-			Order("created_at DESC")
-
-		// Apply filters
-		if req.GetTableName() != "" {
-			query = query.Where("table_name = ?", req.GetTableName())
-		}
-		if req.GetOperation() != auditv1.AuditOperation_AUDIT_OPERATION_UNSPECIFIED {
-			opStr := domain.ProtoToOperation(req.GetOperation())
-			if opStr != "" {
-				query = query.Where("operation = ?", opStr)
-			}
-		}
-		if req.GetChangedBy() != "" {
-			query = query.Where("changed_by = ?", req.GetChangedBy())
-		}
-		if req.GetRecordId() != "" {
-			query = query.Where("record_id = ?", req.GetRecordId())
-		}
+		query := buildAuditQuery(tx, req)
 
 		// Handle cursor pagination
 		if req.GetPageToken() != "" {
@@ -132,7 +106,47 @@ func (s *AuditService) ListAuditEntries(
 		return nil, status.Errorf(codes.Internal, "failed to query audit log")
 	}
 
-	// Build response
+	return s.buildListResponse(ctx, rows, pageSize), nil
+}
+
+// clampPageSize applies pagination defaults and limits.
+func clampPageSize(pageSize int) int {
+	if pageSize == 0 {
+		pageSize = defaultPageSize
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+	return pageSize
+}
+
+// buildAuditQuery constructs the base audit log query with optional filters applied.
+func buildAuditQuery(tx *gorm.DB, req *auditv1.ListAuditEntriesRequest) *gorm.DB {
+	query := tx.Table("audit_log").
+		Select("id, table_name, operation, record_id, old_values, new_values, created_at, changed_by").
+		Order("created_at DESC")
+
+	if req.GetTableName() != "" {
+		query = query.Where("table_name = ?", req.GetTableName())
+	}
+	if req.GetOperation() != auditv1.AuditOperation_AUDIT_OPERATION_UNSPECIFIED {
+		opStr := domain.ProtoToOperation(req.GetOperation())
+		if opStr != "" {
+			query = query.Where("operation = ?", opStr)
+		}
+	}
+	if req.GetChangedBy() != "" {
+		query = query.Where("changed_by = ?", req.GetChangedBy())
+	}
+	if req.GetRecordId() != "" {
+		query = query.Where("record_id = ?", req.GetRecordId())
+	}
+
+	return query
+}
+
+// buildListResponse converts query rows into the paginated gRPC response.
+func (s *AuditService) buildListResponse(ctx context.Context, rows []auditLogRow, pageSize int) *auditv1.ListAuditEntriesResponse {
 	hasMore := len(rows) > pageSize
 	if hasMore {
 		rows = rows[:pageSize]
@@ -154,7 +168,7 @@ func (s *AuditService) ListAuditEntries(
 		resp.NextPageToken = encodeCursor(rows[len(rows)-1].CreatedAt)
 	}
 
-	return resp, nil
+	return resp
 }
 
 // rowToProto converts a database row to a protobuf AuditLogEntry.

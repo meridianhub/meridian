@@ -189,113 +189,61 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 
 // sendPagerDutyAlertWithRetry sends a PagerDuty alert with rate limiting, retry, and DLQ.
 func (a *AlertManager) sendPagerDutyAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
-	severity := observability.AlertSeverityCritical // Provisioning failures are critical
-
-	// Check rate limit
-	if a.rateLimiter != nil && !a.rateLimiter.Allow(AlertTypePagerDuty) {
-		a.logger.Warn("PagerDuty alert rate limited",
-			"tenant_id", tenant.ID,
-			"alert_type", AlertTypePagerDuty)
-		observability.RecordAlertSent(observability.AlertProviderPagerDuty, severity, observability.AlertStatusRateLimited)
-		return
-	}
-
-	// Build alert payload for potential DLQ storage
-	payload := a.buildAlertPayload(tenant)
-	firstAttempt := time.Now()
-
-	// Log payload at DEBUG level for troubleshooting
-	a.logger.Debug("sending PagerDuty alert",
-		"tenant_id", tenant.ID,
-		"summary", payload.Summary,
-		"dedup_key", payload.DedupKey,
-		"severity", payload.Severity)
-
-	// Create retry config using the shared retry package pattern
-	retryConfig := sharedclients.RetryConfig{
-		MaxRetries:          a.retryConfig.MaxRetries,
-		InitialInterval:     a.retryConfig.InitialBackoff,
-		MaxInterval:         a.retryConfig.MaxBackoff,
-		Multiplier:          2.0,
-		RandomizationFactor: 0.1, // Small jitter
-	}
-
-	attemptCount := 0
-	var lastErr error
-
-	err := sharedclients.Retry(ctx, retryConfig, func() error {
-		attemptCount++
-		lastErr = a.sendPagerDutyAlert(ctx, tenant)
-		if lastErr != nil {
-			a.logger.Warn("PagerDuty alert attempt failed",
-				"tenant_id", tenant.ID,
-				"attempt", attemptCount,
-				"error", lastErr)
-			// Mark as retryable for the retry logic
-			return a.wrapAsRetryable(lastErr)
-		}
-		return nil
-	})
-	if err != nil {
-		a.logger.Error("failed to send PagerDuty alert after retries",
-			"tenant_id", tenant.ID,
-			"attempts", attemptCount,
-			"error", lastErr)
-		observability.RecordAlertSent(observability.AlertProviderPagerDuty, severity, observability.AlertStatusError)
-
-		// Send to DLQ if configured
-		if a.dlq != nil {
-			a.dlq.Enqueue(FailedAlert{
-				AlertType:      AlertTypePagerDuty,
-				TenantID:       tenant.ID.String(),
-				Payload:        payload,
-				ErrorMessage:   lastErr.Error(),
-				FirstAttemptAt: firstAttempt,
-				LastAttemptAt:  time.Now(),
-				AttemptCount:   attemptCount,
-			})
-			a.logger.Info("PagerDuty alert sent to DLQ",
-				"tenant_id", tenant.ID,
-				"attempts", attemptCount)
-			// Update DLQ depth metric
-			observability.SetAlertDLQDepth(a.dlq.Len())
-		}
-	} else {
-		// Success
-		observability.RecordAlertSent(observability.AlertProviderPagerDuty, severity, observability.AlertStatusSuccess)
-	}
+	a.sendAlertWithRetry(ctx, tenant, AlertTypePagerDuty, observability.AlertProviderPagerDuty, "PagerDuty",
+		func() error { return a.sendPagerDutyAlert(ctx, tenant) })
 }
 
 // sendSlackAlertWithRetry sends a Slack alert with rate limiting, retry, and DLQ.
 func (a *AlertManager) sendSlackAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
-	severity := observability.AlertSeverityCritical // Provisioning failures are critical
+	a.sendAlertWithRetry(ctx, tenant, AlertTypeSlack, observability.AlertProviderSlack, "Slack",
+		func() error { return a.slackNotifier.NotifyProvisioningFailure(ctx, tenant) })
+}
+
+// sendAlertWithRetry is the shared implementation for sending alerts with rate limiting, retry, and DLQ.
+func (a *AlertManager) sendAlertWithRetry(ctx context.Context, tenant *domain.Tenant, alertType string, provider string, displayName string, sendFn func() error) {
+	severity := observability.AlertSeverityCritical
 
 	// Check rate limit
-	if a.rateLimiter != nil && !a.rateLimiter.Allow(AlertTypeSlack) {
-		a.logger.Warn("Slack alert rate limited",
+	if a.rateLimiter != nil && !a.rateLimiter.Allow(alertType) {
+		a.logger.Warn("alert rate limited",
 			"tenant_id", tenant.ID,
-			"alert_type", AlertTypeSlack)
-		observability.RecordAlertSent(observability.AlertProviderSlack, severity, observability.AlertStatusRateLimited)
+			"alert_type", alertType)
+		observability.RecordAlertSent(provider, severity, observability.AlertStatusRateLimited)
 		return
 	}
 
-	// Build alert payload for potential DLQ storage
 	payload := a.buildAlertPayload(tenant)
 	firstAttempt := time.Now()
 
-	// Log payload at DEBUG level for troubleshooting
-	a.logger.Debug("sending Slack alert",
+	a.logger.Debug("sending alert",
 		"tenant_id", tenant.ID,
-		"summary", payload.Summary,
-		"severity", payload.Severity)
+		"alert_type", alertType,
+		"summary", payload.Summary)
 
-	// Create retry config using the shared retry package pattern
+	attemptCount, lastErr := a.executeAlertWithRetry(ctx, tenant.ID, alertType, sendFn)
+
+	if lastErr != nil {
+		a.logger.Error(fmt.Sprintf("failed to send %s alert after retries", displayName),
+			"tenant_id", tenant.ID,
+			"alert_type", alertType,
+			"attempts", attemptCount,
+			"error", lastErr)
+		observability.RecordAlertSent(provider, severity, observability.AlertStatusError)
+		a.enqueueToDeadLetterQueue(alertType, tenant.ID.String(), payload, lastErr, firstAttempt, attemptCount)
+	} else {
+		observability.RecordAlertSent(provider, severity, observability.AlertStatusSuccess)
+	}
+}
+
+// executeAlertWithRetry runs the send function with exponential backoff retry.
+// Returns the attempt count and last error (nil on success).
+func (a *AlertManager) executeAlertWithRetry(ctx context.Context, tenantID fmt.Stringer, alertType string, sendFn func() error) (int, error) {
 	retryConfig := sharedclients.RetryConfig{
 		MaxRetries:          a.retryConfig.MaxRetries,
 		InitialInterval:     a.retryConfig.InitialBackoff,
 		MaxInterval:         a.retryConfig.MaxBackoff,
 		Multiplier:          2.0,
-		RandomizationFactor: 0.1, // Small jitter
+		RandomizationFactor: 0.1,
 	}
 
 	attemptCount := 0
@@ -303,45 +251,42 @@ func (a *AlertManager) sendSlackAlertWithRetry(ctx context.Context, tenant *doma
 
 	err := sharedclients.Retry(ctx, retryConfig, func() error {
 		attemptCount++
-		lastErr = a.slackNotifier.NotifyProvisioningFailure(ctx, tenant)
+		lastErr = sendFn()
 		if lastErr != nil {
-			a.logger.Warn("Slack alert attempt failed",
-				"tenant_id", tenant.ID,
+			a.logger.Warn("alert attempt failed",
+				"tenant_id", tenantID,
+				"alert_type", alertType,
 				"attempt", attemptCount,
 				"error", lastErr)
-			// Mark as retryable for the retry logic
 			return a.wrapAsRetryable(lastErr)
 		}
 		return nil
 	})
 	if err != nil {
-		a.logger.Error("failed to send Slack alert after retries",
-			"tenant_id", tenant.ID,
-			"attempts", attemptCount,
-			"error", lastErr)
-		observability.RecordAlertSent(observability.AlertProviderSlack, severity, observability.AlertStatusError)
-
-		// Send to DLQ if configured
-		if a.dlq != nil {
-			a.dlq.Enqueue(FailedAlert{
-				AlertType:      AlertTypeSlack,
-				TenantID:       tenant.ID.String(),
-				Payload:        payload,
-				ErrorMessage:   lastErr.Error(),
-				FirstAttemptAt: firstAttempt,
-				LastAttemptAt:  time.Now(),
-				AttemptCount:   attemptCount,
-			})
-			a.logger.Info("Slack alert sent to DLQ",
-				"tenant_id", tenant.ID,
-				"attempts", attemptCount)
-			// Update DLQ depth metric
-			observability.SetAlertDLQDepth(a.dlq.Len())
-		}
-	} else {
-		// Success
-		observability.RecordAlertSent(observability.AlertProviderSlack, severity, observability.AlertStatusSuccess)
+		return attemptCount, lastErr
 	}
+	return attemptCount, nil
+}
+
+// enqueueToDeadLetterQueue stores a failed alert in the DLQ for manual review.
+func (a *AlertManager) enqueueToDeadLetterQueue(alertType, tenantID string, payload AlertPayload, lastErr error, firstAttempt time.Time, attemptCount int) {
+	if a.dlq == nil {
+		return
+	}
+	a.dlq.Enqueue(FailedAlert{
+		AlertType:      alertType,
+		TenantID:       tenantID,
+		Payload:        payload,
+		ErrorMessage:   lastErr.Error(),
+		FirstAttemptAt: firstAttempt,
+		LastAttemptAt:  time.Now(),
+		AttemptCount:   attemptCount,
+	})
+	a.logger.Info("alert sent to DLQ",
+		"tenant_id", tenantID,
+		"alert_type", alertType,
+		"attempts", attemptCount)
+	observability.SetAlertDLQDepth(a.dlq.Len())
 }
 
 // buildAlertPayload creates an AlertPayload from a tenant for DLQ storage.

@@ -20,103 +20,122 @@ func createPaymentOrderLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.L
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		const handlerName = "payment_order.create_lien"
 
-		// Extract required parameters
-		accountID, err := requireStringParam(params, "account_id")
+		lienParams, err := validateCreateLienParams(params)
 		if err != nil {
 			return nil, wrapHandlerError(handlerName, err)
 		}
-
-		amountCents, err := requireInt64Param(params, "amount_cents")
-		if err != nil {
-			return nil, wrapHandlerError(handlerName, err)
-		}
-
-		currency, err := requireStringParam(params, "currency")
-		if err != nil {
-			return nil, wrapHandlerError(handlerName, err)
-		}
-
-		paymentOrderID, err := requireStringParam(params, "payment_order_id")
-		if err != nil {
-			return nil, wrapHandlerError(handlerName, err)
-		}
-
-		// Optional: instrument_code for bucket evaluation
-		instrumentCode := getStringParamOrEmpty(params, "instrument_code")
-		paymentAttributes := getMapParamOrEmpty(params, "payment_attributes")
 
 		logger.Info("creating lien with bucket evaluation",
 			"saga_execution_id", ctx.SagaExecutionID,
-			"payment_order_id", paymentOrderID,
-			"account_id", accountID,
-			"amount_cents", amountCents,
-			"currency", currency,
-			"instrument_code", instrumentCode,
+			"payment_order_id", lienParams.paymentOrderID,
+			"account_id", lienParams.accountID,
+			"amount_cents", lienParams.amountCents,
+			"currency", lienParams.currency,
+			"instrument_code", lienParams.instrumentCode,
 		)
 
-		// Check required dependency
 		if deps.CurrentAccountClient == nil {
 			return nil, wrapHandlerError(handlerName, ErrCurrentAccountClientNotConfigured)
 		}
 
 		// Evaluate bucket ID for bucket-aware solvency validation
-		bucketID, err := evaluateBucketIDForHandler(ctx.Context, deps, instrumentCode, paymentAttributes, paymentOrderID, logger)
+		bucketID, err := evaluateBucketIDForHandler(ctx.Context, deps, lienParams.instrumentCode, lienParams.paymentAttributes, lienParams.paymentOrderID, logger)
 		if err != nil {
-			// Log but continue - graceful degradation
 			logger.Warn("bucket evaluation failed, using default bucket",
-				"payment_order_id", paymentOrderID,
-				"instrument_code", instrumentCode,
+				"payment_order_id", lienParams.paymentOrderID,
+				"instrument_code", lienParams.instrumentCode,
 				"error", err)
 			bucketID = ""
 		}
 
-		// Build Money amount using domain types
-		amount := mustNewMoney(currency, amountCents)
+		lienRequest := buildInitiateLienRequest(lienParams, bucketID, logger)
 
-		// Build lien request
-		lienRequest := &currentaccountv1.InitiateLienRequest{
-			AccountId:             accountID,
-			Amount:                toMoneyAmount(amount),
-			PaymentOrderReference: paymentOrderID,
-		}
-		if bucketID != "" {
-			lienRequest.BucketId = bucketID
-			logger.Info("requesting bucket-scoped lien",
-				"payment_order_id", paymentOrderID,
-				"bucket_id", bucketID)
-		}
-
-		// Call current account service
 		resp, err := deps.CurrentAccountClient.InitiateLien(ctx.Context, lienRequest)
 		if err != nil {
 			return nil, wrapHandlerError(handlerName, fmt.Errorf("failed to create lien: %w", err))
 		}
 
-		// Validate response
 		if resp == nil || resp.Lien == nil || resp.Lien.LienId == "" {
 			return nil, wrapHandlerError(handlerName, ErrMalformedLienResponse)
 		}
 
 		logger.Info("lien created successfully",
 			"saga_execution_id", ctx.SagaExecutionID,
-			"payment_order_id", paymentOrderID,
+			"payment_order_id", lienParams.paymentOrderID,
 			"lien_id", resp.Lien.LienId,
 			"bucket_id", bucketID,
 		)
 
-		result := map[string]any{
-			"lien_id":   resp.Lien.LienId,
-			"bucket_id": bucketID,
-			"status":    "ACTIVE",
-		}
-
-		// Forward valuation_analysis if basis is present (atomic valuation audit trail)
-		if basis := resp.GetBasis(); basis != nil {
-			result["valuation_analysis"] = currentaccountclient.ConvertValuationAnalysisToMap(basis)
-		}
-
-		return result, nil
+		return buildCreateLienResult(resp, bucketID), nil
 	}
+}
+
+// createLienParams holds validated parameters for the create_lien handler.
+type createLienParams struct {
+	accountID         string
+	amountCents       int64
+	currency          string
+	paymentOrderID    string
+	instrumentCode    string
+	paymentAttributes map[string]string
+}
+
+// validateCreateLienParams extracts and validates required parameters for lien creation.
+func validateCreateLienParams(params map[string]any) (createLienParams, error) {
+	accountID, err := requireStringParam(params, "account_id")
+	if err != nil {
+		return createLienParams{}, err
+	}
+	amountCents, err := requireInt64Param(params, "amount_cents")
+	if err != nil {
+		return createLienParams{}, err
+	}
+	currency, err := requireStringParam(params, "currency")
+	if err != nil {
+		return createLienParams{}, err
+	}
+	paymentOrderID, err := requireStringParam(params, "payment_order_id")
+	if err != nil {
+		return createLienParams{}, err
+	}
+	return createLienParams{
+		accountID:         accountID,
+		amountCents:       amountCents,
+		currency:          currency,
+		paymentOrderID:    paymentOrderID,
+		instrumentCode:    getStringParamOrEmpty(params, "instrument_code"),
+		paymentAttributes: getMapParamOrEmpty(params, "payment_attributes"),
+	}, nil
+}
+
+// buildInitiateLienRequest constructs the InitiateLienRequest proto from validated parameters.
+func buildInitiateLienRequest(p createLienParams, bucketID string, logger *slog.Logger) *currentaccountv1.InitiateLienRequest {
+	amount := mustNewMoney(p.currency, p.amountCents)
+	req := &currentaccountv1.InitiateLienRequest{
+		AccountId:             p.accountID,
+		Amount:                toMoneyAmount(amount),
+		PaymentOrderReference: p.paymentOrderID,
+	}
+	if bucketID != "" {
+		req.BucketId = bucketID
+		logger.Info("requesting bucket-scoped lien",
+			"payment_order_id", p.paymentOrderID,
+			"bucket_id", bucketID)
+	}
+	return req
+}
+
+// buildCreateLienResult constructs the handler result map from a successful lien response.
+func buildCreateLienResult(resp *currentaccountv1.InitiateLienResponse, bucketID string) map[string]any {
+	result := map[string]any{
+		"lien_id":   resp.Lien.LienId,
+		"bucket_id": bucketID,
+		"status":    "ACTIVE",
+	}
+	if basis := resp.GetBasis(); basis != nil {
+		result["valuation_analysis"] = currentaccountclient.ConvertValuationAnalysisToMap(basis)
+	}
+	return result
 }
 
 // executeLienHandler creates a handler for the payment_order.execute_lien step.
@@ -136,45 +155,14 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 			"lien_id", lienID,
 		)
 
-		// Check required dependency
 		if deps.CurrentAccountClient == nil {
 			return nil, wrapHandlerError(handlerName, ErrCurrentAccountClientNotConfigured)
 		}
 
-		// Use configured retry config or default
-		retryConfig := deps.LienExecutionRetryConfig
-		if retryConfig == nil {
-			retryConfig = &sharedclients.RetryConfig{
-				MaxRetries:          DefaultLienExecutionMaxRetries,
-				InitialInterval:     500 * time.Millisecond,
-				MaxInterval:         defaults.DefaultRPCTimeout,
-				Multiplier:          2.0,
-				RandomizationFactor: 0.5,
-			}
-		}
+		retryConfig := buildLienRetryConfig(deps.LienExecutionRetryConfig)
 
-		var attempts int
-
-		err = sharedclients.Retry(ctx.Context, *retryConfig, func() error {
-			attempts++
-			poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeAttempt)
-			logger.Info("attempting lien execution", "attempt", attempts, "lien_id", lienID)
-
-			_, execErr := deps.CurrentAccountClient.ExecuteLien(ctx.Context, &currentaccountv1.ExecuteLienRequest{
-				LienId: lienID,
-			})
-			if execErr != nil {
-				poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeFailed)
-				logger.Warn("lien execution attempt failed",
-					"attempt", attempts,
-					"lien_id", lienID,
-					"error", execErr)
-				return execErr
-			}
-			return nil
-		})
+		attempts, err := executeLienWithRetries(ctx, deps, retryConfig, lienID, logger)
 		if err != nil {
-			// Record retry exhaustion metric - indicates payment may require manual reconciliation
 			poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeExhausted)
 			poobservability.RecordLienExecutionRetriesExhausted()
 			logger.Error("lien execution failed after retries",
@@ -200,6 +188,46 @@ func executeLienHandler(deps *PaymentOrderHandlerDeps, logger *slog.Logger) saga
 			},
 		}, nil
 	}
+}
+
+// buildLienRetryConfig returns the provided config or a sensible default.
+func buildLienRetryConfig(configured *sharedclients.RetryConfig) sharedclients.RetryConfig {
+	if configured != nil {
+		return *configured
+	}
+	return sharedclients.RetryConfig{
+		MaxRetries:          DefaultLienExecutionMaxRetries,
+		InitialInterval:     500 * time.Millisecond,
+		MaxInterval:         defaults.DefaultRPCTimeout,
+		Multiplier:          2.0,
+		RandomizationFactor: 0.5,
+	}
+}
+
+// executeLienWithRetries performs the lien execution with retry logic and metrics recording.
+func executeLienWithRetries(ctx *saga.StarlarkContext, deps *PaymentOrderHandlerDeps, retryConfig sharedclients.RetryConfig, lienID string, logger *slog.Logger) (int, error) {
+	var attempts int
+
+	err := sharedclients.Retry(ctx.Context, retryConfig, func() error {
+		attempts++
+		poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeAttempt)
+		logger.Info("attempting lien execution", "attempt", attempts, "lien_id", lienID)
+
+		_, execErr := deps.CurrentAccountClient.ExecuteLien(ctx.Context, &currentaccountv1.ExecuteLienRequest{
+			LienId: lienID,
+		})
+		if execErr != nil {
+			poobservability.RecordLienExecutionRetry(poobservability.LienRetryOutcomeFailed)
+			logger.Warn("lien execution attempt failed",
+				"attempt", attempts,
+				"lien_id", lienID,
+				"error", execErr)
+			return execErr
+		}
+		return nil
+	})
+
+	return attempts, err
 }
 
 // terminateLienHandler creates a handler for the payment_order.terminate_lien step.
@@ -259,44 +287,16 @@ func evaluateBucketIDForHandler(
 ) (string, error) {
 	start := time.Now()
 
-	// Skip if no instrument code
 	if instrumentCode == "" {
 		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
 		return "", nil
 	}
 
-	// Skip if reference data client not configured
-	if deps.ReferenceDataClient == nil {
-		logger.Debug("bucket evaluation skipped - reference data client not configured",
-			"payment_order_id", paymentOrderID)
-		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrNoClient)
-		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
+	expression, ok := fetchFungibilityExpression(ctx, deps, instrumentCode, paymentOrderID, logger)
+	if !ok {
 		return "", nil
 	}
 
-	// Fetch instrument definition
-	instrument, err := deps.ReferenceDataClient.RetrieveInstrument(ctx, instrumentCode)
-	if err != nil {
-		// Gracefully degrade if instrument not found or lookup fails
-		logger.Debug("failed to retrieve instrument, using default bucket",
-			"payment_order_id", paymentOrderID,
-			"instrument_code", instrumentCode,
-			"error", err)
-		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrInstrumentFetch)
-		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
-		return "", nil
-	}
-
-	// Check if instrument has fungibility expression
-	if instrument.FungibilityKeyExpression == "" {
-		logger.Debug("instrument has no fungibility expression, using default bucket",
-			"payment_order_id", paymentOrderID,
-			"instrument_code", instrumentCode)
-		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
-		return "", nil
-	}
-
-	// Skip if bucket evaluator not configured
 	if deps.BucketEvaluator == nil {
 		logger.Debug("bucket evaluation skipped - bucket evaluator not configured",
 			"payment_order_id", paymentOrderID)
@@ -305,18 +305,14 @@ func evaluateBucketIDForHandler(
 		return "", nil
 	}
 
-	// Evaluate the bucket ID
-	bucketID, err := deps.BucketEvaluator.Evaluate(ctx, instrument.FungibilityKeyExpression, BucketEvalContext{
+	bucketID, err := deps.BucketEvaluator.Evaluate(ctx, expression, BucketEvalContext{
 		InstrumentCode: instrumentCode,
 		Attributes:     paymentAttributes,
 	})
 
-	// Record duration for successful or failed evaluations (not skipped)
 	poobservability.RecordBucketEvaluationDuration(time.Since(start))
 
 	if err != nil {
-		// Gracefully degrade to default bucket on CEL evaluation failures
-		// (e.g., missing required attributes, invalid expressions)
 		logger.Warn("bucket evaluation failed, using default bucket",
 			"payment_order_id", paymentOrderID,
 			"instrument_code", instrumentCode,
@@ -333,4 +329,37 @@ func evaluateBucketIDForHandler(
 	poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSuccess)
 
 	return bucketID, nil
+}
+
+// fetchFungibilityExpression retrieves the CEL expression for bucket evaluation from the instrument definition.
+// Returns the expression and true if evaluation should proceed, or empty string and false if it should be skipped.
+func fetchFungibilityExpression(ctx context.Context, deps *PaymentOrderHandlerDeps, instrumentCode, paymentOrderID string, logger *slog.Logger) (string, bool) {
+	if deps.ReferenceDataClient == nil {
+		logger.Debug("bucket evaluation skipped - reference data client not configured",
+			"payment_order_id", paymentOrderID)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrNoClient)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
+		return "", false
+	}
+
+	instrument, err := deps.ReferenceDataClient.RetrieveInstrument(ctx, instrumentCode)
+	if err != nil {
+		logger.Debug("failed to retrieve instrument, using default bucket",
+			"payment_order_id", paymentOrderID,
+			"instrument_code", instrumentCode,
+			"error", err)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrInstrumentFetch)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
+		return "", false
+	}
+
+	if instrument.FungibilityKeyExpression == "" {
+		logger.Debug("instrument has no fungibility expression, using default bucket",
+			"payment_order_id", paymentOrderID,
+			"instrument_code", instrumentCode)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
+		return "", false
+	}
+
+	return instrument.FungibilityKeyExpression, true
 }

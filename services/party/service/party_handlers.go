@@ -22,102 +22,18 @@ import (
 
 // RegisterParty creates a new party in the reference data directory
 func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyRequest) (*pb.RegisterPartyResponse, error) {
-	// === Input validation (fail-fast) ===
-
-	// Validate party type
-	partyType, err := protoToPartyType(req.PartyType)
+	partyType, extRefType, err := validateRegisterPartyInput(req)
 	if err != nil {
-		s.logger.Error("invalid party type",
-			"party_type", req.PartyType.String(),
-			"error", err)
-		return nil, status.Errorf(codes.InvalidArgument, "invalid party type: %v", err)
+		return nil, err
 	}
 
-	// Validate external reference and type consistency
-	if req.ExternalReferenceType != pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED && req.ExternalReference == "" {
-		s.logger.Error("external reference type provided without reference",
-			"external_reference_type", req.ExternalReferenceType.String())
-		return nil, status.Errorf(codes.InvalidArgument, "external reference required when type is specified")
-	}
-
-	// Validate external reference type if external reference is provided
-	var extRefType domain.ExternalReferenceType
-	if req.ExternalReference != "" {
-		extRefType, err = protoToExternalRefType(req.ExternalReferenceType)
-		if err != nil {
-			s.logger.Error("invalid external reference type",
-				"external_reference_type", req.ExternalReferenceType.String(),
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "invalid external reference type: %v", err)
-		}
-	}
-
-	// === Domain object creation ===
-
-	party, err := domain.NewParty(partyType, req.LegalName)
+	party, err := s.buildNewParty(ctx, req, partyType)
 	if err != nil {
-		s.logger.Error("failed to create party",
-			"party_type", partyType,
-			"error", err)
-		return nil, status.Errorf(codes.InvalidArgument, "failed to create party: %v", err)
+		return nil, err
 	}
 
-	// Set optional display name
-	if req.DisplayName != "" {
-		if err := party.SetDisplayName(req.DisplayName); err != nil {
-			s.logger.Error("invalid display name",
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "invalid display name: %v", err)
-		}
-	}
-
-	// Set optional attributes if provided at registration time.
-	if len(req.Attributes) > 0 {
-		party.SetAttributes(protoAttributesToDomain(req.Attributes))
-	}
-
-	// === Attribute validation ===
-
-	// Validate attributes against the tenant's PartyTypeDefinition schema and CEL rules.
-	// Validation is skipped when no validator is configured or no tenant context is present.
-	if s.attributeValidator != nil {
-		if tid, ok := tenant.FromContext(ctx); ok {
-			if err := s.attributeValidator.ValidateAttributes(ctx, tid.String(), string(partyType), party); err != nil {
-				s.logger.Warn("attribute validation failed during registration",
-					"party_type", partyType,
-					"tenant_id", tid.String(),
-					"error", err)
-				return nil, status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
-			}
-		}
-	}
-
-	// === External reference handling ===
-
-	if req.ExternalReference != "" {
-		// Check for duplicate external reference
-		existing, err := s.repo.FindByExternalReference(ctx, req.ExternalReference, string(extRefType))
-		if err != nil && !errors.Is(err, persistence.ErrPartyNotFound) {
-			s.logger.Error("failed to check external reference uniqueness",
-				"external_reference_type", extRefType,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to check external reference: %v", err)
-		}
-		if existing != nil {
-			s.logger.Warn("duplicate external reference",
-				"external_reference_type", extRefType,
-				"existing_party_id", existing.ID().String())
-			return nil, status.Errorf(codes.AlreadyExists,
-				"party with external reference of type %s already exists",
-				extRefType)
-		}
-
-		if err := party.SetExternalReference(req.ExternalReference, extRefType); err != nil {
-			s.logger.Error("invalid external reference",
-				"external_reference_type", extRefType,
-				"error", err)
-			return nil, status.Errorf(codes.InvalidArgument, "invalid external reference: %v", err)
-		}
+	if err := s.applyExternalReference(ctx, party, req.ExternalReference, extRefType); err != nil {
+		return nil, err
 	}
 
 	// Save party and publish event atomically
@@ -156,6 +72,100 @@ func (s *Service) RegisterParty(ctx context.Context, req *pb.RegisterPartyReques
 	return &pb.RegisterPartyResponse{
 		Party: domainToProto(party),
 	}, nil
+}
+
+// validateRegisterPartyInput validates and parses the party type and external reference type from the request.
+func validateRegisterPartyInput(req *pb.RegisterPartyRequest) (domain.PartyType, domain.ExternalReferenceType, error) {
+	partyType, err := protoToPartyType(req.PartyType)
+	if err != nil {
+		return "", "", status.Errorf(codes.InvalidArgument, "invalid party type: %v", err)
+	}
+
+	if req.ExternalReferenceType != pb.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_UNSPECIFIED && req.ExternalReference == "" {
+		return "", "", status.Errorf(codes.InvalidArgument, "external reference required when type is specified")
+	}
+
+	var extRefType domain.ExternalReferenceType
+	if req.ExternalReference != "" {
+		extRefType, err = protoToExternalRefType(req.ExternalReferenceType)
+		if err != nil {
+			return "", "", status.Errorf(codes.InvalidArgument, "invalid external reference type: %v", err)
+		}
+	}
+
+	return partyType, extRefType, nil
+}
+
+// buildNewParty creates a domain Party from the request, applying optional fields and attribute validation.
+func (s *Service) buildNewParty(ctx context.Context, req *pb.RegisterPartyRequest, partyType domain.PartyType) (*domain.Party, error) {
+	party, err := domain.NewParty(partyType, req.LegalName)
+	if err != nil {
+		s.logger.Error("failed to create party", "party_type", partyType, "error", err)
+		return nil, status.Errorf(codes.InvalidArgument, "failed to create party: %v", err)
+	}
+
+	if req.DisplayName != "" {
+		if err := party.SetDisplayName(req.DisplayName); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid display name: %v", err)
+		}
+	}
+
+	if len(req.Attributes) > 0 {
+		party.SetAttributes(protoAttributesToDomain(req.Attributes))
+	}
+
+	if err := s.validatePartyAttributes(ctx, party, partyType); err != nil {
+		return nil, err
+	}
+
+	return party, nil
+}
+
+// validatePartyAttributes validates attributes against the tenant's PartyTypeDefinition schema and CEL rules.
+// Validation is skipped when no validator is configured or no tenant context is present.
+func (s *Service) validatePartyAttributes(ctx context.Context, party *domain.Party, partyType domain.PartyType) error {
+	if s.attributeValidator == nil {
+		return nil
+	}
+	tid, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil
+	}
+	if err := s.attributeValidator.ValidateAttributes(ctx, tid.String(), string(partyType), party); err != nil {
+		s.logger.Warn("attribute validation failed",
+			"party_type", partyType,
+			"tenant_id", tid.String(),
+			"error", err)
+		return status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
+	}
+	return nil
+}
+
+// applyExternalReference checks for duplicates and sets the external reference on the party.
+// No-op if externalRef is empty.
+func (s *Service) applyExternalReference(ctx context.Context, party *domain.Party, externalRef string, extRefType domain.ExternalReferenceType) error {
+	if externalRef == "" {
+		return nil
+	}
+
+	existing, err := s.repo.FindByExternalReference(ctx, externalRef, string(extRefType))
+	if err != nil && !errors.Is(err, persistence.ErrPartyNotFound) {
+		s.logger.Error("failed to check external reference uniqueness",
+			"external_reference_type", extRefType, "error", err)
+		return status.Errorf(codes.Internal, "failed to check external reference: %v", err)
+	}
+	if existing != nil {
+		s.logger.Warn("duplicate external reference",
+			"external_reference_type", extRefType,
+			"existing_party_id", existing.ID().String())
+		return status.Errorf(codes.AlreadyExists,
+			"party with external reference of type %s already exists", extRefType)
+	}
+
+	if err := party.SetExternalReference(externalRef, extRefType); err != nil {
+		return status.Errorf(codes.InvalidArgument, "invalid external reference: %v", err)
+	}
+	return nil
 }
 
 // RetrieveParty gets party details by ID
@@ -249,70 +259,19 @@ func (s *Service) ListParties(ctx context.Context, req *pb.ListPartiesRequest) (
 
 // UpdateParty updates party details with field mask support for partial updates
 func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (*pb.UpdatePartyResponse, error) {
-	// Parse party ID
-	partyID, err := uuid.Parse(req.PartyId)
+	party, err := s.loadPartyForUpdate(ctx, req.PartyId, int64(req.Version))
 	if err != nil {
-		s.logger.Error("invalid party ID format", "party_id", req.PartyId, "error", err)
-		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
+		return nil, err
 	}
 
-	// Load existing party with pessimistic lock for consistent read-modify-write
-	party, err := s.repo.FindByIDForUpdate(ctx, partyID)
+	attributesUpdated, err := s.applyUpdateFields(party, req)
 	if err != nil {
-		if errors.Is(err, persistence.ErrPartyNotFound) {
-			s.logger.Warn("party not found", "party_id", req.PartyId)
-			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
-		}
-		s.logger.Error("failed to retrieve party", "party_id", req.PartyId, "error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
+		return nil, err
 	}
 
-	// Verify version for optimistic locking (defense in depth)
-	// #nosec G115 - Version is bounded by database constraints
-	if req.Version > 0 && party.Version() != int64(req.Version) {
-		s.logger.Warn("version conflict", "party_id", req.PartyId, "expected", req.Version, "actual", party.Version())
-		return nil, status.Errorf(codes.Aborted, "version conflict: party was modified by another transaction")
-	}
-
-	// Apply field mask updates
-	attributesUpdated := false
-	if req.UpdateMask != nil && len(req.UpdateMask.Paths) > 0 {
-		for _, path := range req.UpdateMask.Paths {
-			if path == "attributes" {
-				attributesUpdated = true
-			}
-			if err := s.applyFieldUpdate(party, path, req); err != nil {
-				s.logger.Error("failed to apply field update", "field", path, "error", err)
-				return nil, status.Errorf(codes.InvalidArgument, "failed to update field %s: %v", path, err)
-			}
-		}
-	} else {
-		// No field mask - update all non-empty fields
-		if req.DisplayName != "" {
-			if err := party.SetDisplayName(req.DisplayName); err != nil {
-				s.logger.Error("invalid display name", "error", err)
-				return nil, status.Errorf(codes.InvalidArgument, "invalid display name: %v", err)
-			}
-		}
-		if len(req.Attributes) > 0 {
-			party.SetAttributes(protoAttributesToDomain(req.Attributes))
-			attributesUpdated = true
-		}
-	}
-
-	// Validate attributes if they were updated and a validator is configured.
-	// Validation is skipped when no validator is configured or no tenant context is present.
-	if attributesUpdated && s.attributeValidator != nil {
-		if tid, ok := tenant.FromContext(ctx); ok {
-			partyType := string(party.PartyType())
-			if err := s.attributeValidator.ValidateAttributes(ctx, tid.String(), partyType, party); err != nil {
-				s.logger.Warn("attribute validation failed during update",
-					"party_id", req.PartyId,
-					"party_type", partyType,
-					"tenant_id", tid.String(),
-					"error", err)
-				return nil, status.Errorf(codes.InvalidArgument, "attribute validation failed: %v", err)
-			}
+	if attributesUpdated {
+		if err := s.validatePartyAttributes(ctx, party, party.PartyType()); err != nil {
+			return nil, err
 		}
 	}
 
@@ -347,6 +306,61 @@ func (s *Service) UpdateParty(ctx context.Context, req *pb.UpdatePartyRequest) (
 	}, nil
 }
 
+// loadPartyForUpdate loads a party with a pessimistic lock and verifies the optimistic locking version.
+// Pass version <= 0 to skip the version check.
+func (s *Service) loadPartyForUpdate(ctx context.Context, partyID string, version int64) (*domain.Party, error) {
+	id, err := uuid.Parse(partyID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
+	}
+
+	party, err := s.repo.FindByIDForUpdate(ctx, id)
+	if err != nil {
+		if errors.Is(err, persistence.ErrPartyNotFound) {
+			return nil, status.Errorf(codes.NotFound, "party not found: %s", partyID)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
+	}
+
+	// #nosec G115 - Version is bounded by database constraints
+	if version > 0 && party.Version() != version {
+		s.logger.Warn("version conflict", "party_id", partyID, "expected", version, "actual", party.Version())
+		return nil, status.Errorf(codes.Aborted, "version conflict: party was modified by another transaction")
+	}
+
+	return party, nil
+}
+
+// applyUpdateFields applies field mask or full-field updates to the party.
+// Returns true if attributes were updated.
+func (s *Service) applyUpdateFields(party *domain.Party, req *pb.UpdatePartyRequest) (bool, error) {
+	attributesUpdated := false
+
+	if req.UpdateMask != nil && len(req.UpdateMask.Paths) > 0 {
+		for _, path := range req.UpdateMask.Paths {
+			if path == "attributes" {
+				attributesUpdated = true
+			}
+			if err := s.applyFieldUpdate(party, path, req); err != nil {
+				s.logger.Error("failed to apply field update", "field", path, "error", err)
+				return false, status.Errorf(codes.InvalidArgument, "failed to update field %s: %v", path, err)
+			}
+		}
+	} else {
+		if req.DisplayName != "" {
+			if err := party.SetDisplayName(req.DisplayName); err != nil {
+				return false, status.Errorf(codes.InvalidArgument, "invalid display name: %v", err)
+			}
+		}
+		if len(req.Attributes) > 0 {
+			party.SetAttributes(protoAttributesToDomain(req.Attributes))
+			attributesUpdated = true
+		}
+	}
+
+	return attributesUpdated, nil
+}
+
 // applyFieldUpdate applies a single field update based on field mask path
 func (s *Service) applyFieldUpdate(party *domain.Party, path string, req *pb.UpdatePartyRequest) error {
 	switch path {
@@ -364,47 +378,27 @@ func (s *Service) applyFieldUpdate(party *domain.Party, path string, req *pb.Upd
 
 // ControlParty manages party lifecycle with state machine enforcement
 func (s *Service) ControlParty(ctx context.Context, req *pb.ControlPartyRequest) (*pb.ControlPartyResponse, error) {
-	// Parse party ID
-	partyID, err := uuid.Parse(req.PartyId)
-	if err != nil {
-		s.logger.Error("invalid party ID format", "party_id", req.PartyId, "error", err)
-		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
-	}
-
-	// Convert control action to domain type
 	action, err := protoToControlAction(req.ControlAction)
 	if err != nil {
-		s.logger.Error("invalid control action", "action", req.ControlAction.String(), "error", err)
 		return nil, status.Errorf(codes.InvalidArgument, "invalid control action: %v", err)
 	}
 
-	// Load existing party
-	party, err := s.repo.FindByIDForUpdate(ctx, partyID)
+	party, err := s.loadPartyForUpdate(ctx, req.PartyId, 0)
 	if err != nil {
-		if errors.Is(err, persistence.ErrPartyNotFound) {
-			s.logger.Warn("party not found", "party_id", req.PartyId)
-			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
-		}
-		s.logger.Error("failed to retrieve party", "party_id", req.PartyId, "error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve party: %v", err)
+		return nil, err
 	}
 
-	// Apply control action (state machine enforced in domain)
 	if err := party.ControlParty(action, req.Reason); err != nil {
 		s.logger.Error("failed to apply control action",
-			"party_id", req.PartyId,
-			"action", action,
-			"error", err)
+			"party_id", req.PartyId, "action", action, "error", err)
 		return nil, status.Errorf(codes.FailedPrecondition, "invalid status transition: %v", err)
 	}
 
-	// Set actor_id in context for audit trail if provided
 	saveCtx := ctx
 	if req.ActorId != "" {
 		saveCtx = context.WithValue(ctx, auth.UserIDContextKey, req.ActorId)
 	}
 
-	// Persist updated party and publish control event atomically
 	actionTime := time.Now().UTC()
 	if err := s.savePartyWithEvent(saveCtx, party, func(tx *gorm.DB) error {
 		event := &eventsv1.PartyControlledEvent{
