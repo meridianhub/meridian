@@ -68,21 +68,38 @@ var (
 //	defer cleanup()
 //	err := RegisterStarlarkHandlers(registry, client)
 func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
-	handlers := map[string]struct {
-		handler  saga.Handler
-		metadata saga.HandlerMetadata
-	}{
+	if err := registerBookingLogHandlers(registry, client); err != nil {
+		return err
+	}
+	return registerPostingHandlers(registry, client)
+}
+
+type starlarkHandlerEntry struct {
+	handler  saga.Handler
+	metadata saga.HandlerMetadata
+}
+
+func registerHandlerMap(registry *saga.HandlerRegistry, handlers map[string]starlarkHandlerEntry) error {
+	for name, h := range handlers {
+		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
+			return fmt.Errorf("failed to register %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func registerBookingLogHandlers(registry *saga.HandlerRegistry, client *Client) error {
+	return registerHandlerMap(registry, map[string]starlarkHandlerEntry{
 		"financial_accounting.initiate_booking_log": {
 			handler: initiateBookingLogHandler(client),
 			metadata: saga.HandlerMetadata{
 				Category:             saga.HandlerCategorySettlement,
 				Description:          "Initiate a booking log for a deposit or withdrawal transaction",
 				CompensationStrategy: "none",
-				// Financial Accounting produces Money instruments through bookkeeping
-				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
-				ProtoRequestType:    (*financialaccountingv1.InitiateFinancialBookingLogRequest)(nil),
-				ProtoResponseType:   (*financialaccountingv1.InitiateFinancialBookingLogResponse)(nil),
-				Version:             1,
+				ProducesInstruments:  []string{"USD", "EUR", "GBP", "NZD"},
+				ProtoRequestType:     (*financialaccountingv1.InitiateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:    (*financialaccountingv1.InitiateFinancialBookingLogResponse)(nil),
+				Version:              1,
 			},
 		},
 		"financial_accounting.update_booking_log": {
@@ -91,13 +108,29 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Category:             saga.HandlerCategorySettlement,
 				Description:          "Update the status of an existing booking log",
 				CompensationStrategy: "none",
-				// Updates don't produce new instruments, just modify existing logs
-				ProducesInstruments: []string{},
-				ProtoRequestType:    (*financialaccountingv1.UpdateFinancialBookingLogRequest)(nil),
-				ProtoResponseType:   (*financialaccountingv1.UpdateFinancialBookingLogResponse)(nil),
-				Version:             1,
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*financialaccountingv1.UpdateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:    (*financialaccountingv1.UpdateFinancialBookingLogResponse)(nil),
+				Version:              1,
 			},
 		},
+		"financial_accounting.create_booking": {
+			handler: createBookingHandler(client),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategorySettlement,
+				Description:          "Create a booking log entry for audit purposes",
+				CompensationStrategy: "none",
+				ProducesInstruments:  []string{"USD", "EUR", "GBP", "NZD"},
+				ProtoRequestType:     (*financialaccountingv1.InitiateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:    (*financialaccountingv1.InitiateFinancialBookingLogResponse)(nil),
+				Version:              1,
+			},
+		},
+	})
+}
+
+func registerPostingHandlers(registry *saga.HandlerRegistry, client *Client) error {
+	return registerHandlerMap(registry, map[string]starlarkHandlerEntry{
 		"financial_accounting.capture_posting": {
 			handler: capturePostingHandler(client),
 			metadata: saga.HandlerMetadata{
@@ -105,7 +138,6 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Description:         "Capture a single-sided posting entry within a booking log",
 				Compensate:          "financial_accounting.compensate_posting",
 				HasAutoCompensation: true,
-				// Capturing a posting creates a Money instrument entry
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
 				ProtoRequestType:    (*financialaccountingv1.CaptureLedgerPostingRequest)(nil),
 				ProtoResponseType:   (*financialaccountingv1.CaptureLedgerPostingResponse)(nil),
@@ -122,24 +154,10 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Category:             saga.HandlerCategorySettlement,
 				Description:          "Compensate (reverse) a captured posting entry",
 				CompensationStrategy: "none",
-				// Compensation doesn't produce instruments, it reverses them
-				ProducesInstruments: []string{},
-				ProtoRequestType:    (*financialaccountingv1.UpdateLedgerPostingRequest)(nil),
-				ProtoResponseType:   (*financialaccountingv1.UpdateLedgerPostingResponse)(nil),
-				Version:             1,
-			},
-		},
-		"financial_accounting.create_booking": {
-			handler: createBookingHandler(client),
-			metadata: saga.HandlerMetadata{
-				Category:             saga.HandlerCategorySettlement,
-				Description:          "Create a booking log entry for audit purposes",
-				CompensationStrategy: "none",
-				// Creating a booking log produces Money instruments
-				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
-				ProtoRequestType:    (*financialaccountingv1.InitiateFinancialBookingLogRequest)(nil),
-				ProtoResponseType:   (*financialaccountingv1.InitiateFinancialBookingLogResponse)(nil),
-				Version:             1,
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*financialaccountingv1.UpdateLedgerPostingRequest)(nil),
+				ProtoResponseType:    (*financialaccountingv1.UpdateLedgerPostingResponse)(nil),
+				Version:              1,
 			},
 		},
 		"financial_accounting.post_entries": {
@@ -149,10 +167,8 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Description:         "Post double-entry accounting entries to the ledger",
 				Compensate:          "financial_accounting.reverse_entries",
 				HasAutoCompensation: true,
-				// Posting entries creates Money instrument movements
 				ProducesInstruments: []string{"USD", "EUR", "GBP", "NZD"},
-				// No single proto type: this handler iterates over entries calling CaptureLedgerPosting per entry
-				Version: 1,
+				Version:             1,
 			},
 		},
 		"financial_accounting.reverse_entries": {
@@ -161,21 +177,13 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 				Category:             saga.HandlerCategorySettlement,
 				Description:          "Reverse previously posted accounting entries (compensation handler)",
 				CompensationStrategy: "none",
-				// Reversal cancels the booking log; no new instruments are produced
-				ProducesInstruments: []string{},
-				ProtoRequestType:    (*financialaccountingv1.UpdateFinancialBookingLogRequest)(nil),
-				ProtoResponseType:   (*financialaccountingv1.UpdateFinancialBookingLogResponse)(nil),
-				Version:             1,
+				ProducesInstruments:  []string{},
+				ProtoRequestType:     (*financialaccountingv1.UpdateFinancialBookingLogRequest)(nil),
+				ProtoResponseType:    (*financialaccountingv1.UpdateFinancialBookingLogResponse)(nil),
+				Version:              1,
 			},
 		},
-	}
-
-	for name, h := range handlers {
-		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
-			return fmt.Errorf("failed to register %s: %w", name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // initiateBookingLogHandler creates a new financial booking log via gRPC.

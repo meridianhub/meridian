@@ -101,12 +101,28 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry, opts ...Regi
 		notifHandler = options.notificationHandler
 	}
 
-	handlers := []struct {
-		name     string
-		handler  saga.Handler
-		metadata *saga.HandlerMetadata
-	}{
-		// Position Keeping handlers (global namespace)
+	handlers := currentAccountCoreHandlers(notifHandler)
+	handlers = append(handlers, currentAccountStubHandlers()...)
+
+	for _, h := range handlers {
+		if err := registry.RegisterWithMetadata(h.name, h.handler, h.metadata); err != nil {
+			return fmt.Errorf("failed to register handler %s: %w", h.name, err)
+		}
+	}
+	return nil
+}
+
+type handlerEntry struct {
+	name     string
+	handler  saga.Handler
+	metadata *saga.HandlerMetadata
+}
+
+// currentAccountCoreHandlers returns the implemented handlers for position keeping,
+// financial accounting, and current account domain operations.
+func currentAccountCoreHandlers(notifHandler saga.Handler) []handlerEntry {
+	return []handlerEntry{
+		// Position Keeping handlers
 		{"position_keeping.initiate_log", currentAccountPositionKeepingInitiateLog, &saga.HandlerMetadata{
 			Category:             saga.HandlerCategoryIngestion,
 			CompensationStrategy: "auto",
@@ -122,7 +138,7 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry, opts ...Regi
 			CompensationStrategy: "none",
 		}},
 
-		// Financial Accounting handlers (global namespace)
+		// Financial Accounting handlers
 		{"financial_accounting.post_entries", stubNotImplemented("financial_accounting.post_entries"), nil},
 		{"financial_accounting.reverse_entries", stubNotImplemented("financial_accounting.reverse_entries"), nil},
 		{"financial_accounting.create_booking", stubNotImplemented("financial_accounting.create_booking"), nil},
@@ -147,17 +163,20 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry, opts ...Regi
 
 		// Current Account domain handlers
 		{"current_account.save", currentAccountRepositorySave, nil},
-
-		// Control handler (stub - implemented in client package for cross-service use)
 		{"current_account.control", stubNotImplemented("current_account.control"), nil},
-
-		// Lien handlers (stubs - not yet implemented but required by schema)
 		{"current_account.create_lien", stubNotImplemented("current_account.create_lien"), nil},
 		{"current_account.execute_lien", stubNotImplemented("current_account.execute_lien"), nil},
 		{"current_account.terminate_lien", stubNotImplemented("current_account.terminate_lien"), nil},
 
-		// Platform-wide handlers (stubs - defined in schema for other services)
+		// Notification
 		{"notification.send", notifHandler, nil},
+	}
+}
+
+// currentAccountStubHandlers returns stub handlers for cross-service operations
+// that are defined in the schema but implemented by other services.
+func currentAccountStubHandlers() []handlerEntry {
+	return []handlerEntry{
 		{"payment_order.create_lien", stubNotImplemented("payment_order.create_lien"), nil},
 		{"payment_order.execute_lien", stubNotImplemented("payment_order.execute_lien"), nil},
 		{"payment_order.post_ledger_entries", stubNotImplemented("payment_order.post_ledger_entries"), nil},
@@ -165,55 +184,31 @@ func RegisterCurrentAccountHandlers(registry *saga.HandlerRegistry, opts ...Regi
 		{"payment_order.terminate_lien", stubNotImplemented("payment_order.terminate_lien"), nil},
 		{"repository.save", stubNotImplemented("repository.save"), nil},
 		{"valuation_engine.valuate", stubNotImplemented("valuation_engine.valuate"), nil},
-
-		// Reconciliation handlers (stubs - defined in schema for reconciliation service)
 		{"reconciliation.initiate_run", stubNotImplemented("reconciliation.initiate_run"), nil},
 		{"reconciliation.execute_run", stubNotImplemented("reconciliation.execute_run"), nil},
 		{"reconciliation.retrieve_run", stubNotImplemented("reconciliation.retrieve_run"), nil},
 		{"reconciliation.cancel_run", stubNotImplemented("reconciliation.cancel_run"), nil},
 		{"reconciliation.assert_balance", stubNotImplemented("reconciliation.assert_balance"), nil},
 		{"reconciliation.initiate_dispute", stubNotImplemented("reconciliation.initiate_dispute"), nil},
-
-		// Party handlers (stubs - defined in schema for party service)
 		{"party.get_default_payment_method", stubNotImplemented("party.get_default_payment_method"), nil},
-
-		// Operational Gateway handlers (stubs - defined in schema for operational gateway service)
 		{"operational_gateway.dispatch_instruction", stubNotImplemented("operational_gateway.dispatch_instruction"), nil},
 		{"operational_gateway.cancel_instruction", stubNotImplemented("operational_gateway.cancel_instruction"), nil},
 		{"operational_gateway.get_instruction", stubNotImplemented("operational_gateway.get_instruction"), nil},
-
-		// Financial Gateway handlers (stubs - defined in schema for financial gateway service)
 		{"financial_gateway.dispatch_payment", stubNotImplemented("financial_gateway.dispatch_payment"), nil},
 		{"financial_gateway.cancel_payment", stubNotImplemented("financial_gateway.cancel_payment"), nil},
 		{"financial_gateway.dispatch_refund", stubNotImplemented("financial_gateway.dispatch_refund"), nil},
-
-		// Forecasting handlers (stubs - defined in schema for forecasting service)
 		{"forecasting.compute_forward_curve", stubNotImplemented("forecasting.compute_forward_curve"), nil},
-
-		// Market Information handlers (stubs - defined in schema for market information service)
 		{"market_information.publish_observation", stubNotImplemented("market_information.publish_observation"), nil},
 		{"market_information.query_latest", stubNotImplemented("market_information.query_latest"), nil},
 		{"market_information.manage_dataset", stubNotImplemented("market_information.manage_dataset"), nil},
-
-		// Reference Data handlers (stubs - defined in schema for reference data service)
 		{"reference_data.register_instrument", stubNotImplemented("reference_data.register_instrument"), nil},
 		{"reference_data.delete_instrument", stubNotImplemented("reference_data.delete_instrument"), nil},
 		{"reference_data.register_account_type", stubNotImplemented("reference_data.register_account_type"), nil},
 		{"reference_data.delete_account_type", stubNotImplemented("reference_data.delete_account_type"), nil},
 		{"reference_data.register_valuation_rule", stubNotImplemented("reference_data.register_valuation_rule"), nil},
 		{"reference_data.register_saga_definition", stubNotImplemented("reference_data.register_saga_definition"), nil},
-
-		// Internal Account handlers (stubs - defined in schema for internal account service)
 		{"internal_account.initiate", stubNotImplemented("internal_account.initiate"), nil},
 	}
-
-	for _, h := range handlers {
-		if err := registry.RegisterWithMetadata(h.name, h.handler, h.metadata); err != nil {
-			return fmt.Errorf("failed to register handler %s: %w", h.name, err)
-		}
-	}
-
-	return nil
 }
 
 // getDeps extracts handler dependencies from the StarlarkContext.

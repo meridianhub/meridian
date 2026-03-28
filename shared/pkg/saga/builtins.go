@@ -60,37 +60,29 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 	}
 
 	builtins := make(starlark.StringDict)
+	addSafeUniverseBuiltins(builtins, logger)
+	addDSLCoreBuiltins(builtins, logger)
+	addCELBuiltin(builtins)
+	addResolverBuiltins(builtins)
+	addCompositionBuiltins(builtins)
 
-	// Copy safe builtins from Starlark Universe
+	// BLOCKED functions are simply not added to the builtins dict
+	// load(), time.now(), random(), exec(), compile(), open(), http are all absent
+
+	return builtins
+}
+
+// addSafeUniverseBuiltins copies whitelisted builtins from starlark.Universe
+// and overrides print to route to the audit logger.
+func addSafeUniverseBuiltins(builtins starlark.StringDict, logger *slog.Logger) {
 	safeFunctions := []string{
-		"True",
-		"False",
-		"None",
-		"len",
-		"str",
-		"int",
-		"float", // Safe for computation, but Decimal preferred for financial
-		"bool",
-		"list",
-		"dict",
-		"tuple",
-		"range",
-		"enumerate",
-		"zip",
-		"sorted",
-		"reversed",
-		"min",
-		"max",
-		"abs",
-		"any",
-		"all",
-		"hasattr",
-		"getattr",
-		"dir",
-		"type",
-		"repr",
-		"hash",
-		"print", // Will be overridden with audit-logging version
+		"True", "False", "None",
+		"len", "str", "int", "float", "bool",
+		"list", "dict", "tuple", "range",
+		"enumerate", "zip", "sorted", "reversed",
+		"min", "max", "abs", "any", "all",
+		"hasattr", "getattr", "dir", "type", "repr", "hash",
+		"print", // Will be overridden below
 	}
 
 	for _, name := range safeFunctions {
@@ -99,7 +91,6 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		}
 	}
 
-	// Override print to route to audit logger
 	builtins["print"] = starlark.NewBuiltin("print", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
 		var msg string
 		for i, arg := range args {
@@ -111,43 +102,56 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		logger.Info("saga script print", "message", msg, "thread", thread.Name)
 		return starlark.None, nil
 	})
+}
 
-	// Add DSL functions
-
-	// Decimal - arbitrary precision decimal type
+// addDSLCoreBuiltins registers the saga DSL primitives: Decimal, saga, step, posting, fail, log.
+func addDSLCoreBuiltins(builtins starlark.StringDict, logger *slog.Logger) {
 	builtins["Decimal"] = DecimalBuiltin()
 
-	// saga - define a saga
 	builtins["saga"] = starlark.NewBuiltin("saga", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var name string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "name", &name); err != nil {
 			return nil, err
 		}
-		// Return a saga definition object (placeholder implementation)
 		return &sagaDefinitionValue{name: name}, nil
 	})
 
-	// step - define a saga step
 	builtins["step"] = starlark.NewBuiltin("step", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var name string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "name", &name); err != nil {
 			return nil, err
 		}
-		// Return a step definition object (placeholder implementation)
 		return &stepDefinitionValue{name: name}, nil
 	})
 
-	// posting - create a ledger posting
 	builtins["posting"] = starlark.NewBuiltin("posting", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var debit, credit, amount string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "debit", &debit, "credit", &credit, "amount", &amount); err != nil {
 			return nil, err
 		}
-		// Return a posting object (placeholder implementation)
 		return &postingValue{debit: debit, credit: credit, amount: amount}, nil
 	})
 
-	// cel_eval - evaluate a CEL expression
+	builtins["fail"] = starlark.NewBuiltin("fail", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var message string
+		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "message", &message); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %s", ErrSagaFailed, message)
+	})
+
+	builtins["log"] = starlark.NewBuiltin("log", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var message string
+		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "message", &message); err != nil {
+			return nil, err
+		}
+		logger.Info("saga log", "message", message, "thread", thread.Name)
+		return starlark.None, nil
+	})
+}
+
+// addCELBuiltin registers the cel_eval function for evaluating CEL expressions within sagas.
+func addCELBuiltin(builtins starlark.StringDict) {
 	builtins["cel_eval"] = starlark.NewBuiltin("cel_eval", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var expression string
 		var inputDict *starlark.Dict
@@ -155,23 +159,16 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 			return nil, err
 		}
 
-		// Get StarlarkContext from thread local storage
-		ctxVal := thread.Local("saga.StarlarkContext")
-		if ctxVal == nil {
-			return nil, fmt.Errorf("cel_eval: %w", ErrMissingStarlarkContext)
-		}
-		starlarkCtx, ok := ctxVal.(*StarlarkContext)
-		if !ok {
-			return nil, fmt.Errorf("cel_eval: %w", ErrInvalidStarlarkContext)
+		starlarkCtx, err := getStarlarkContext(thread, "cel_eval")
+		if err != nil {
+			return nil, err
 		}
 
-		// Create CEL evaluator
 		evaluator, err := NewCELEvaluator()
 		if err != nil {
 			return nil, fmt.Errorf("cel_eval: %w", err)
 		}
 
-		// Build evaluation context with saga metadata
 		variables := map[string]interface{}{
 			"ctx": map[string]interface{}{
 				"saga_execution_id": starlarkCtx.SagaExecutionID.String(),
@@ -179,7 +176,6 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 			},
 		}
 
-		// Add optional input variables if provided
 		if inputDict != nil {
 			inputMap := make(map[string]interface{})
 			for _, item := range inputDict.Items() {
@@ -192,7 +188,6 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 			variables["input"] = inputMap
 		}
 
-		// Evaluate expression
 		result, err := evaluator.Eval(expression, variables)
 		if err != nil {
 			return nil, fmt.Errorf("cel_eval: %w", err)
@@ -200,124 +195,85 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 
 		return goToStarlark(result), nil
 	})
+}
 
-	// resolve_account - resolve account ID from reference
-	// Supports both simple references (e.g., "ACC-001") and composite references
-	// (e.g., "party:<party_id>:org:<org_id>:currency:<code>") for org-scoped account resolution.
-	// Composite references are validated before being passed to the ReferenceDataClient.
-	builtins["resolve_account"] = starlark.NewBuiltin("resolve_account", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+// addResolverBuiltins registers resolve_account, resolve_instrument, and build_org_account_ref.
+func addResolverBuiltins(builtins starlark.StringDict) {
+	builtins["resolve_account"] = resolveAccountBuiltin()
+	builtins["resolve_instrument"] = resolveInstrumentBuiltin()
+	builtins["build_org_account_ref"] = buildOrgAccountRefBuiltin()
+}
+
+func resolveAccountBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("resolve_account", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var reference string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "reference", &reference); err != nil {
 			return nil, err
 		}
 
-		// Validate composite reference format if it contains colons
 		if strings.Contains(reference, ":") {
 			if _, err := ParseCompositeAccountRef(reference); err != nil {
 				return nil, fmt.Errorf("resolve_account: %w", err)
 			}
 		}
 
-		// Get StarlarkContext from thread
-		ctxVal := thread.Local("saga.StarlarkContext")
-		if ctxVal == nil {
-			return nil, fmt.Errorf("resolve_account: %w", ErrMissingStarlarkContext)
-		}
-		starlarkCtx, ok := ctxVal.(*StarlarkContext)
-		if !ok {
-			return nil, fmt.Errorf("resolve_account: %w", ErrInvalidStarlarkContext)
+		starlarkCtx, err := getStarlarkContext(thread, "resolve_account")
+		if err != nil {
+			return nil, err
 		}
 
-		// Check lookup cache for deterministic replay (FR-34)
-		cacheKey := "account:" + reference
-		if starlarkCtx.LookupCache != nil {
-			if cached, found := starlarkCtx.LookupCache.Get(cacheKey); found {
-				if accountID, ok := cached.(string); ok {
-					return starlark.String(accountID), nil
-				}
-			}
+		if val, ok := cachedLookup(starlarkCtx, "account:"+reference); ok {
+			return starlark.String(val), nil
 		}
 
-		// Get reference-data client from thread
-		clientVal := thread.Local("saga.ReferenceDataClient")
-		if clientVal == nil {
-			return nil, fmt.Errorf("resolve_account: %w", ErrMissingClient)
-		}
-		refDataClient, ok := clientVal.(ReferenceDataClient)
-		if !ok {
-			return nil, fmt.Errorf("resolve_account: %w", ErrInvalidClientType)
+		refDataClient, err := getRefDataClient(thread, "resolve_account")
+		if err != nil {
+			return nil, err
 		}
 
-		// Query reference-data service with bi-temporal KnowledgeAt
 		accountID, err := refDataClient.ResolveAccount(starlarkCtx.Context, reference, starlarkCtx.KnowledgeAt)
 		if err != nil {
 			return nil, fmt.Errorf("resolve_account(%q): %w", reference, err)
 		}
 
-		// Cache result for replay
-		if starlarkCtx.LookupCache != nil {
-			starlarkCtx.LookupCache.Set(cacheKey, accountID)
-		}
-
+		cacheLookup(starlarkCtx, "account:"+reference, accountID)
 		return starlark.String(accountID), nil
 	})
+}
 
-	// resolve_instrument - resolve instrument ID from reference
-	builtins["resolve_instrument"] = starlark.NewBuiltin("resolve_instrument", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func resolveInstrumentBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("resolve_instrument", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var reference string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "reference", &reference); err != nil {
 			return nil, err
 		}
 
-		// Get StarlarkContext from thread
-		ctxVal := thread.Local("saga.StarlarkContext")
-		if ctxVal == nil {
-			return nil, fmt.Errorf("resolve_instrument: %w", ErrMissingStarlarkContext)
-		}
-		starlarkCtx, ok := ctxVal.(*StarlarkContext)
-		if !ok {
-			return nil, fmt.Errorf("resolve_instrument: %w", ErrInvalidStarlarkContext)
+		starlarkCtx, err := getStarlarkContext(thread, "resolve_instrument")
+		if err != nil {
+			return nil, err
 		}
 
-		// Check cache
-		cacheKey := "instrument:" + reference
-		if starlarkCtx.LookupCache != nil {
-			if cached, found := starlarkCtx.LookupCache.Get(cacheKey); found {
-				if instrumentID, ok := cached.(string); ok {
-					return starlark.String(instrumentID), nil
-				}
-			}
+		if val, ok := cachedLookup(starlarkCtx, "instrument:"+reference); ok {
+			return starlark.String(val), nil
 		}
 
-		// Get reference-data client from thread
-		clientVal := thread.Local("saga.ReferenceDataClient")
-		if clientVal == nil {
-			return nil, fmt.Errorf("resolve_instrument: %w", ErrMissingClient)
-		}
-		refDataClient, ok := clientVal.(ReferenceDataClient)
-		if !ok {
-			return nil, fmt.Errorf("resolve_instrument: %w", ErrInvalidClientType)
+		refDataClient, err := getRefDataClient(thread, "resolve_instrument")
+		if err != nil {
+			return nil, err
 		}
 
-		// Query with KnowledgeAt for bi-temporal lookup
 		instrumentID, err := refDataClient.ResolveInstrument(starlarkCtx.Context, reference, starlarkCtx.KnowledgeAt)
 		if err != nil {
 			return nil, fmt.Errorf("resolve_instrument(%q): %w", reference, err)
 		}
 
-		// Cache result
-		if starlarkCtx.LookupCache != nil {
-			starlarkCtx.LookupCache.Set(cacheKey, instrumentID)
-		}
-
+		cacheLookup(starlarkCtx, "instrument:"+reference, instrumentID)
 		return starlark.String(instrumentID), nil
 	})
+}
 
-	// build_org_account_ref - build a composite account reference for org-scoped resolution
-	// Returns a properly formatted composite reference string:
-	//   party:<party_id>:org:<org_id>:currency:<currency_code>
-	// This prevents manual string concatenation errors in saga scripts.
-	builtins["build_org_account_ref"] = starlark.NewBuiltin("build_org_account_ref", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+func buildOrgAccountRefBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("build_org_account_ref", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var partyID, orgID, currency string
 		if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 			"party_id", &partyID,
@@ -340,73 +296,60 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 		ref := BuildCompositeAccountRef(partyID, orgID, currency)
 		return starlark.String(ref), nil
 	})
+}
 
-	// invoke_saga - invoke a child saga
+// cachedLookup checks the StarlarkContext lookup cache for a previously resolved value.
+func cachedLookup(ctx *StarlarkContext, cacheKey string) (string, bool) {
+	if ctx.LookupCache == nil {
+		return "", false
+	}
+	cached, found := ctx.LookupCache.Get(cacheKey)
+	if !found {
+		return "", false
+	}
+	val, ok := cached.(string)
+	return val, ok
+}
+
+// cacheLookup stores a resolved value in the StarlarkContext lookup cache.
+func cacheLookup(ctx *StarlarkContext, cacheKey, value string) {
+	if ctx.LookupCache != nil {
+		ctx.LookupCache.Set(cacheKey, value)
+	}
+}
+
+// addCompositionBuiltins registers invoke_saga for child saga invocation.
+func addCompositionBuiltins(builtins starlark.StringDict) {
 	builtins["invoke_saga"] = starlark.NewBuiltin("invoke_saga", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var sagaName string
 		inputDict := starlark.NewDict(0)
-
-		if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-			"saga_name", &sagaName,
-			"input?", &inputDict,
-		); err != nil {
+		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "saga_name", &sagaName, "input?", &inputDict); err != nil {
 			return nil, err
 		}
 
-		// Get StarlarkContext
-		ctxVal := thread.Local("saga.StarlarkContext")
-		if ctxVal == nil {
-			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingStarlarkContext)
+		starlarkCtx, err := getStarlarkContext(thread, "invoke_saga")
+		if err != nil {
+			return nil, err
 		}
-		starlarkCtx, ok := ctxVal.(*StarlarkContext)
-		if !ok {
-			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidStarlarkContext)
+		composer, err := getThreadLocal[*Composer](thread, "saga.Composer", "invoke_saga")
+		if err != nil {
+			return nil, err
 		}
-
-		// Get Composer from thread
-		composerVal := thread.Local("saga.Composer")
-		if composerVal == nil {
-			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingClient)
-		}
-		composer, ok := composerVal.(*Composer)
-		if !ok {
-			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidClientType)
+		stack, err := getThreadLocal[*CallStack](thread, "saga.CallStack", "invoke_saga")
+		if err != nil {
+			return nil, err
 		}
 
-		// Get CallStack for nesting tracking
-		stackVal := thread.Local("saga.CallStack")
-		if stackVal == nil {
-			return nil, fmt.Errorf("invoke_saga: %w", ErrMissingClient)
-		}
-		stack, ok := stackVal.(*CallStack)
-		if !ok {
-			return nil, fmt.Errorf("invoke_saga: %w", ErrInvalidClientType)
+		input, err := starlarkDictToGoMap(inputDict, "invoke_saga")
+		if err != nil {
+			return nil, err
 		}
 
-		// Convert Starlark dict to Go map
-		input := make(map[string]interface{})
-		for _, item := range inputDict.Items() {
-			key, ok := item[0].(starlark.String)
-			if !ok {
-				return nil, fmt.Errorf("invoke_saga: %w: input keys must be strings, got %s", ErrInvalidParameterType, item[0].Type())
-			}
-			input[string(key)] = convertStarlarkToGo(item[1])
-		}
-
-		// Invoke child saga with scope inheritance and circular detection
-		result, err := composer.InvokeSaga(
-			starlarkCtx.Context,
-			sagaName,
-			input,
-			starlarkCtx.PartyScope, // Inherit parent scope - child cannot escalate
-			stack,
-		)
+		result, err := composer.InvokeSaga(starlarkCtx.Context, sagaName, input, starlarkCtx.PartyScope, stack)
 		if err != nil {
 			return nil, fmt.Errorf("invoke_saga(%q): %w", sagaName, err)
 		}
 
-		// Return sagaResultValue from composition.go
-		// goToStarlark handles map[string]interface{} -> *starlark.Dict conversion
 		outputDict, ok := goToStarlark(result.Output).(*starlark.Dict)
 		if !ok {
 			outputDict = starlark.NewDict(0)
@@ -418,30 +361,59 @@ func NewRestrictedBuiltins(logger *slog.Logger) starlark.StringDict {
 			stepsCompleted: result.StepsCompleted,
 		}, nil
 	})
+}
 
-	// fail - explicitly fail the saga
-	builtins["fail"] = starlark.NewBuiltin("fail", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-		var message string
-		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "message", &message); err != nil {
-			return nil, err
+// getThreadLocal extracts a typed value from thread local storage.
+func getThreadLocal[T any](thread *starlark.Thread, key, caller string) (T, error) {
+	var zero T
+	val := thread.Local(key)
+	if val == nil {
+		return zero, fmt.Errorf("%s: %w", caller, ErrMissingClient)
+	}
+	typed, ok := val.(T)
+	if !ok {
+		return zero, fmt.Errorf("%s: %w", caller, ErrInvalidClientType)
+	}
+	return typed, nil
+}
+
+// starlarkDictToGoMap converts a Starlark dict to a Go map[string]interface{}.
+func starlarkDictToGoMap(dict *starlark.Dict, caller string) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+	for _, item := range dict.Items() {
+		key, ok := item[0].(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("%s: %w: input keys must be strings, got %s", caller, ErrInvalidParameterType, item[0].Type())
 		}
-		return nil, fmt.Errorf("%w: %s", ErrSagaFailed, message)
-	})
+		result[string(key)] = convertStarlarkToGo(item[1])
+	}
+	return result, nil
+}
 
-	// log - log a message to audit logger
-	builtins["log"] = starlark.NewBuiltin("log", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-		var message string
-		if err := starlark.UnpackArgs(b.Name(), args, kwargs, "message", &message); err != nil {
-			return nil, err
-		}
-		logger.Info("saga log", "message", message, "thread", thread.Name)
-		return starlark.None, nil
-	})
+// getStarlarkContext extracts the StarlarkContext from thread local storage.
+func getStarlarkContext(thread *starlark.Thread, caller string) (*StarlarkContext, error) {
+	ctxVal := thread.Local("saga.StarlarkContext")
+	if ctxVal == nil {
+		return nil, fmt.Errorf("%s: %w", caller, ErrMissingStarlarkContext)
+	}
+	starlarkCtx, ok := ctxVal.(*StarlarkContext)
+	if !ok {
+		return nil, fmt.Errorf("%s: %w", caller, ErrInvalidStarlarkContext)
+	}
+	return starlarkCtx, nil
+}
 
-	// BLOCKED functions are simply not added to the builtins dict
-	// load(), time.now(), random(), exec(), compile(), open(), http are all absent
-
-	return builtins
+// getRefDataClient extracts the ReferenceDataClient from thread local storage.
+func getRefDataClient(thread *starlark.Thread, caller string) (ReferenceDataClient, error) {
+	clientVal := thread.Local("saga.ReferenceDataClient")
+	if clientVal == nil {
+		return nil, fmt.Errorf("%s: %w", caller, ErrMissingClient)
+	}
+	refDataClient, ok := clientVal.(ReferenceDataClient)
+	if !ok {
+		return nil, fmt.Errorf("%s: %w", caller, ErrInvalidClientType)
+	}
+	return refDataClient, nil
 }
 
 // sagaDefinitionValue represents a saga definition in Starlark.

@@ -430,13 +430,25 @@ func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (string, error
 // format expected by the Starlark saga runner.
 func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]interface{} {
 	sagaInput := map[string]interface{}{
-		"manifest_version": input.ManifestVersion,
+		"manifest_version":    input.ManifestVersion,
+		"instruments":         convertInstruments(input.Instruments),
+		"account_types":       convertAccountTypes(input.AccountTypes),
+		"market_data_sources": convertMarketDataSources(input.MarketDataSources),
+		"market_data_sets":    convertMarketDataSets(input.MarketDataSets),
+		"valuation_rules":     convertValuationRules(input.ValuationRules),
+		"organizations":       convertOrganizations(input.Organizations),
+		"internal_accounts":   convertInternalAccounts(input.InternalAccounts),
+		"saga_definitions":    convertSagaDefinitions(input.SagaDefinitions),
+		"provider_connections": convertProviderConnections(input.ProviderConnections),
+		"instruction_routes":  convertInstructionRoutes(input.InstructionRoutes),
 	}
+	return sagaInput
+}
 
-	// Convert instruments
-	instruments := make([]interface{}, len(input.Instruments))
-	for i, inst := range input.Instruments {
-		instruments[i] = map[string]interface{}{
+func convertInstruments(instruments []InstrumentInput) []interface{} {
+	result := make([]interface{}, len(instruments))
+	for i, inst := range instruments {
+		result[i] = map[string]interface{}{
 			"code":           inst.Code,
 			"display_name":   inst.DisplayName,
 			"dimension":      inst.Dimension,
@@ -444,11 +456,12 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"description":    inst.Description,
 		}
 	}
-	sagaInput["instruments"] = instruments
+	return result
+}
 
-	// Convert account types
-	accountTypes := make([]interface{}, len(input.AccountTypes))
-	for i, at := range input.AccountTypes {
+func convertAccountTypes(accountTypes []AccountTypeInput) []interface{} {
+	result := make([]interface{}, len(accountTypes))
+	for i, at := range accountTypes {
 		vmethods := make([]interface{}, len(at.ValuationMethods))
 		for j, vm := range at.ValuationMethods {
 			vmethods[j] = map[string]interface{}{
@@ -456,7 +469,7 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 				"method_name":      vm.MethodName,
 			}
 		}
-		accountTypes[i] = map[string]interface{}{
+		result[i] = map[string]interface{}{
 			"code":                      at.Code,
 			"display_name":              at.DisplayName,
 			"description":               at.Description,
@@ -472,24 +485,26 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"valuation_methods":         vmethods,
 		}
 	}
-	sagaInput["account_types"] = accountTypes
+	return result
+}
 
-	// Convert market data sources
-	marketSources := make([]interface{}, len(input.MarketDataSources))
-	for i, src := range input.MarketDataSources {
-		marketSources[i] = map[string]interface{}{
+func convertMarketDataSources(sources []MarketDataSourceInput) []interface{} {
+	result := make([]interface{}, len(sources))
+	for i, src := range sources {
+		result[i] = map[string]interface{}{
 			"code":        src.Code,
 			"name":        src.Name,
 			"description": src.Description,
 			"trust_level": src.TrustLevel,
 		}
 	}
-	sagaInput["market_data_sources"] = marketSources
+	return result
+}
 
-	// Convert market data sets
-	marketDataSets := make([]interface{}, len(input.MarketDataSets))
-	for i, ds := range input.MarketDataSets {
-		marketDataSets[i] = map[string]interface{}{
+func convertMarketDataSets(dataSets []MarketDataSetInput) []interface{} {
+	result := make([]interface{}, len(dataSets))
+	for i, ds := range dataSets {
+		result[i] = map[string]interface{}{
 			"code":                      ds.Code,
 			"category":                  ds.Category,
 			"unit":                      ds.Unit,
@@ -500,12 +515,13 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"resolution_key_expression": ds.ResolutionKeyExpression,
 		}
 	}
-	sagaInput["market_data_sets"] = marketDataSets
+	return result
+}
 
-	// Convert valuation rules
-	valuationRules := make([]interface{}, len(input.ValuationRules))
-	for i, vr := range input.ValuationRules {
-		valuationRules[i] = map[string]interface{}{
+func convertValuationRules(rules []ValuationRuleInput) []interface{} {
+	result := make([]interface{}, len(rules))
+	for i, vr := range rules {
+		result[i] = map[string]interface{}{
 			"from_instrument": vr.FromInstrument,
 			"to_instrument":   vr.ToInstrument,
 			"rule_type":       vr.RuleType,
@@ -513,16 +529,17 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"description":     vr.Description,
 		}
 	}
-	sagaInput["valuation_rules"] = valuationRules
+	return result
+}
 
-	// Convert organizations
-	organizations := make([]interface{}, len(input.Organizations))
-	for i, org := range input.Organizations {
+func convertOrganizations(organizations []OrganizationInput) []interface{} {
+	result := make([]interface{}, len(organizations))
+	for i, org := range organizations {
 		attrs := make(map[string]interface{}, len(org.Attributes))
 		for k, v := range org.Attributes {
 			attrs[k] = v
 		}
-		organizations[i] = map[string]interface{}{
+		result[i] = map[string]interface{}{
 			"code":                    org.Code,
 			"name":                    org.Name,
 			"legal_name":              org.LegalName,
@@ -533,12 +550,13 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"attributes":              attrs,
 		}
 	}
-	sagaInput["organizations"] = organizations
+	return result
+}
 
-	// Convert internal accounts
-	internalAccounts := make([]interface{}, len(input.InternalAccounts))
-	for i, ia := range input.InternalAccounts {
-		internalAccounts[i] = map[string]interface{}{
+func convertInternalAccounts(accounts []InternalAccountInput) []interface{} {
+	result := make([]interface{}, len(accounts))
+	for i, ia := range accounts {
+		result[i] = map[string]interface{}{
 			"code":               ia.Code,
 			"account_type":       ia.AccountType,
 			"instrument_code":    ia.InstrumentCode,
@@ -546,12 +564,13 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"description":        ia.Description,
 		}
 	}
-	sagaInput["internal_accounts"] = internalAccounts
+	return result
+}
 
-	// Convert saga definitions
-	sagaDefs := make([]interface{}, len(input.SagaDefinitions))
-	for i, sd := range input.SagaDefinitions {
-		sagaDefs[i] = map[string]interface{}{
+func convertSagaDefinitions(defs []SagaDefinitionInput) []interface{} {
+	result := make([]interface{}, len(defs))
+	for i, sd := range defs {
+		result[i] = map[string]interface{}{
 			"name":         sd.Name,
 			"display_name": sd.DisplayName,
 			"description":  sd.Description,
@@ -559,12 +578,13 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"version":      sd.Version,
 		}
 	}
-	sagaInput["saga_definitions"] = sagaDefs
+	return result
+}
 
-	// Convert provider connections
-	providerConns := make([]interface{}, len(input.ProviderConnections))
-	for i, pc := range input.ProviderConnections {
-		providerConns[i] = map[string]interface{}{
+func convertProviderConnections(conns []ProviderConnectionInput) []interface{} {
+	result := make([]interface{}, len(conns))
+	for i, pc := range conns {
+		result[i] = map[string]interface{}{
 			"connection_id":     pc.ConnectionID,
 			"provider_name":     pc.ProviderName,
 			"provider_type":     pc.ProviderType,
@@ -576,12 +596,13 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"rate_limit_config": pc.RateLimitConfig,
 		}
 	}
-	sagaInput["provider_connections"] = providerConns
+	return result
+}
 
-	// Convert instruction routes
-	routes := make([]interface{}, len(input.InstructionRoutes))
-	for i, r := range input.InstructionRoutes {
-		routes[i] = map[string]interface{}{
+func convertInstructionRoutes(routes []InstructionRouteInput) []interface{} {
+	result := make([]interface{}, len(routes))
+	for i, r := range routes {
+		result[i] = map[string]interface{}{
 			"instruction_type":       r.InstructionType,
 			"connection_id":          r.ConnectionID,
 			"fallback_connection_id": r.FallbackConnectionID,
@@ -591,9 +612,7 @@ func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]
 			"path_template":          r.PathTemplate,
 		}
 	}
-	sagaInput["instruction_routes"] = routes
-
-	return sagaInput
+	return result
 }
 
 // parseManifestVersion extracts the leading numeric portion of a version string.
