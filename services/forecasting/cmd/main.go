@@ -70,10 +70,11 @@ func main() {
 
 // forecastingDeps holds initialized dependencies for the forecasting service.
 type forecastingDeps struct {
-	dbPool     *pgxpool.Pool
-	mdsCleanup func() error
-	svc        *handler.Service
-	scheduler  *scheduler.CronScheduler
+	dbPool      *pgxpool.Pool
+	redisClient *redis.Client
+	mdsCleanup  func() error
+	svc         *handler.Service
+	scheduler   *scheduler.CronScheduler
 }
 
 func run(logger *slog.Logger) error {
@@ -96,6 +97,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer deps.dbPool.Close()
+	defer func() { _ = deps.redisClient.Close() }()
 	defer func() { _ = deps.mdsCleanup() }()
 
 	// Create gRPC server, register services, and start listening
@@ -133,7 +135,7 @@ func initDependencies(ctx context.Context, logger *slog.Logger) (*forecastingDep
 		return nil, err
 	}
 
-	cronScheduler, err := createScheduler(dbPool, repo, forecastingSvc, logger) //nolint:contextcheck // NewPgExecutionStore manages its own context
+	cronScheduler, redisClient, err := createScheduler(dbPool, repo, forecastingSvc, logger) //nolint:contextcheck // NewPgExecutionStore manages its own context
 	if err != nil {
 		_ = mdsCleanup()
 		dbPool.Close()
@@ -141,10 +143,11 @@ func initDependencies(ctx context.Context, logger *slog.Logger) (*forecastingDep
 	}
 
 	return &forecastingDeps{
-		dbPool:     dbPool,
-		mdsCleanup: mdsCleanup,
-		svc:        forecastingSvc,
-		scheduler:  cronScheduler,
+		dbPool:      dbPool,
+		redisClient: redisClient,
+		mdsCleanup:  mdsCleanup,
+		svc:         forecastingSvc,
+		scheduler:   cronScheduler,
 	}, nil
 }
 
@@ -187,7 +190,7 @@ func createForecastingService(repo *persistence.StrategyRepository, mdsClient *m
 }
 
 // createScheduler builds the cron scheduler with Redis distributed locking and execution store.
-func createScheduler(dbPool *pgxpool.Pool, repo *persistence.StrategyRepository, forecastingSvc *handler.Service, logger *slog.Logger) (*scheduler.CronScheduler, error) {
+func createScheduler(dbPool *pgxpool.Pool, repo *persistence.StrategyRepository, forecastingSvc *handler.Service, logger *slog.Logger) (*scheduler.CronScheduler, *redis.Client, error) {
 	redisAddr := env.GetEnvOrDefault("REDIS_ADDR", "localhost:6379")
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: redisAddr,
@@ -238,7 +241,7 @@ func createScheduler(dbPool *pgxpool.Pool, repo *persistence.StrategyRepository,
 		},
 		logger,
 		cronSchedulerOpts...,
-	), nil
+	), redisClient, nil
 }
 
 // startAndAwaitShutdown starts the gRPC server, cron scheduler, and HTTP server,
