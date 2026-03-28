@@ -30,8 +30,16 @@ import (
 // envValueTrue is the string value for enabled environment variables.
 const envValueTrue = "true"
 
-// ErrContainerCloseFailures is returned when one or more resources fail to close during shutdown.
-var ErrContainerCloseFailures = errors.New("one or more container resources failed to close")
+// Sentinel errors for container and worker configuration validation.
+var (
+	ErrContainerCloseFailures = errors.New("one or more container resources failed to close")
+	errInvalidPollInterval    = errors.New("poll interval must be >= 1s")
+	errInvalidMaxRetries      = errors.New("max retries must be >= 0 and <= 20")
+	errInvalidRetryBaseDelay  = errors.New("retry base delay must be > 0")
+	errInvalidRetryMaxDelay   = errors.New("retry max delay must be > 0")
+	errInvalidRetryDelayRange = errors.New("retry base delay must be < retry max delay")
+	errInvalidMaxConcurrent   = errors.New("max concurrent must be >= 1 and <= 100")
+)
 
 // Container holds all application dependencies for the tenant service.
 type Container struct {
@@ -403,22 +411,22 @@ func loadWorkerConfig() (workerConfig, error) {
 	}
 
 	if config.PollInterval < 1*time.Second {
-		return workerConfig{}, fmt.Errorf("poll interval must be >= 1s: got %s", config.PollInterval)
+		return workerConfig{}, fmt.Errorf("%w: got %s", errInvalidPollInterval, config.PollInterval)
 	}
 	if config.MaxRetries < 0 || config.MaxRetries > 20 {
-		return workerConfig{}, fmt.Errorf("max retries must be >= 0 and <= 20: got %d", config.MaxRetries)
+		return workerConfig{}, fmt.Errorf("%w: got %d", errInvalidMaxRetries, config.MaxRetries)
 	}
 	if config.RetryBaseDelay <= 0 {
-		return workerConfig{}, fmt.Errorf("retry base delay must be > 0: got %s", config.RetryBaseDelay)
+		return workerConfig{}, fmt.Errorf("%w: got %s", errInvalidRetryBaseDelay, config.RetryBaseDelay)
 	}
 	if config.RetryMaxDelay <= 0 {
-		return workerConfig{}, fmt.Errorf("retry max delay must be > 0: got %s", config.RetryMaxDelay)
+		return workerConfig{}, fmt.Errorf("%w: got %s", errInvalidRetryMaxDelay, config.RetryMaxDelay)
 	}
 	if config.RetryBaseDelay >= config.RetryMaxDelay {
-		return workerConfig{}, fmt.Errorf("retry base delay must be < retry max delay: base=%s, max=%s", config.RetryBaseDelay, config.RetryMaxDelay)
+		return workerConfig{}, fmt.Errorf("%w: base=%s, max=%s", errInvalidRetryDelayRange, config.RetryBaseDelay, config.RetryMaxDelay)
 	}
 	if config.MaxConcurrent < 1 || config.MaxConcurrent > 100 {
-		return workerConfig{}, fmt.Errorf("max concurrent must be >= 1 and <= 100: got %d", config.MaxConcurrent)
+		return workerConfig{}, fmt.Errorf("%w: got %d", errInvalidMaxConcurrent, config.MaxConcurrent)
 	}
 
 	slog.Info("worker configuration loaded",

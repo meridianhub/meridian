@@ -44,7 +44,7 @@ type Container struct {
 	kafkaProducer   *kafka.ProtoProducer
 
 	// Domain
-	EventPublisher         *service.OutboxEventPublisher
+	EventPublisher          *service.OutboxEventPublisher
 	MarketInformationServer *service.Server
 }
 

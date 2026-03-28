@@ -230,7 +230,7 @@ func (c *Container) initServiceClients(_ context.Context) error {
 	namespace := env.GetEnvOrDefault("K8S_NAMESPACE", "default")
 
 	// Register current-account handlers (for self-referential operations in sagas)
-	currentAcctClient, currentAcctCleanup, clientErr := currentaccountclient.New(currentaccountclient.Config{
+	currentAcctClient, currentAcctCleanup, clientErr := currentaccountclient.New(currentaccountclient.Config{ //nolint:contextcheck // uses background dial
 		ServiceName: currentaccountclient.ServiceName,
 		Namespace:   namespace,
 		Port:        ports.CurrentAccount,
@@ -242,7 +242,7 @@ func (c *Container) initServiceClients(_ context.Context) error {
 			"error", clientErr)
 	} else {
 		c.cleanups = append(c.cleanups, currentAcctCleanup)
-		if regErr := currentaccountclient.RegisterStarlarkHandlers(c.HandlerRegistry, currentAcctClient); regErr != nil {
+		if regErr := currentaccountclient.RegisterStarlarkHandlers(c.HandlerRegistry, currentAcctClient); regErr != nil { //nolint:contextcheck // no ctx needed
 			c.Logger.Warn("failed to register current-account handlers", "error", regErr)
 		}
 	}

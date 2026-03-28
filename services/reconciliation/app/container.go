@@ -258,11 +258,21 @@ func (c *Container) initServiceDeps() ([]service.Option, error) {
 		c.Logger.Warn("balance assertor not configured: position keeping client unavailable")
 	}
 
+	// Wire variance detection and valuation components
+	varianceOpts := c.wireVarianceComponents()
+	serviceOpts = append(serviceOpts, varianceOpts...)
+
+	return serviceOpts, nil
+}
+
+// wireVarianceComponents creates the variance detector, valuator, and account party resolver,
+// returning the corresponding service options.
+func (c *Container) wireVarianceComponents() []service.Option {
+	var opts []service.Option
+
 	// Wire VarianceDetector (depends on repos only, always available)
 	detector := service.NewVarianceDetector(c.RunRepo, c.SnapshotRepo, c.VarianceRepo)
-	serviceOpts = append(serviceOpts,
-		service.WithVarianceDetector(detector.DetectVariances),
-	)
+	opts = append(opts, service.WithVarianceDetector(detector.DetectVariances))
 
 	// Wire VarianceValuator with valuation engine and reference data provider
 	valuationEngine, refDataProvider := c.buildValuationComponents()
@@ -291,11 +301,9 @@ func (c *Container) initServiceDeps() ([]service.Option, error) {
 	}
 
 	valuator := service.NewVarianceValuator(valuationEngine, refDataProvider, partyResolver, c.VarianceRepo, c.RunRepo)
-	serviceOpts = append(serviceOpts,
-		service.WithVarianceValuator(valuator.ValueVariances),
-	)
+	opts = append(opts, service.WithVarianceValuator(valuator.ValueVariances))
 
-	return serviceOpts, nil
+	return opts
 }
 
 // buildValuationComponents creates the valuation engine and reference data provider.
