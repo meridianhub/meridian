@@ -583,8 +583,11 @@ func (c *Container) Close() {
 		c.Logger.Info("outbox worker stopped")
 	}
 
-	// Close Kafka producer
+	// Flush and close Kafka producer
 	if c.kafkaProducer != nil {
+		if remaining := c.kafkaProducer.FlushWithTimeout(5000); remaining > 0 {
+			c.Logger.Warn("some messages not delivered before close", "remaining", remaining)
+		}
 		c.kafkaProducer.Close()
 		c.Logger.Info("kafka producer closed")
 	}
