@@ -160,26 +160,16 @@ func initServices(dbPool *pgxpool.Pool, logger *slog.Logger) (*refDataServices, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create instrument registry: %w", err)
 	}
-	logger.Info("instrument registry initialized")
-
 	compiler, err := refcel.NewCompiler()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CEL compiler: %w", err)
 	}
-	logger.Info("CEL compiler initialized")
-
 	nodeRepo := node.NewPostgresRepository(dbPool)
-	logger.Info("node repository initialized")
-
 	sagaRegistry := saga.NewPostgresRegistry(dbPool, nil)
-	logger.Info("saga registry initialized")
-
 	accountTypeRegistry, err := accounttype.NewPostgresRegistry(dbPool)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create account type registry: %w", err)
 	}
-	logger.Info("account type registry initialized")
-
 	mappingRepo := mapping.NewPostgresRepository(dbPool)
 	mappingCELCompiler, err := sharedcel.NewCompiler()
 	if err != nil {
@@ -189,7 +179,7 @@ func initServices(dbPool *pgxpool.Pool, logger *slog.Logger) (*refDataServices, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create mapping validator: %w", err)
 	}
-	logger.Info("mapping repository and validator initialized")
+	logger.Info("repositories initialized")
 
 	refDataSvc, err := handler.NewService(instrumentRegistry, compiler, logger)
 	if err != nil {
@@ -208,7 +198,6 @@ func initServices(dbPool *pgxpool.Pool, logger *slog.Logger) (*refDataServices, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create mapping service: %w", err)
 	}
-
 	logger.Info("gRPC service handlers initialized")
 
 	return &refDataServices{
@@ -230,7 +219,7 @@ func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *
 
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
-		Build()
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
@@ -250,7 +239,7 @@ func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *
 
 	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.ReferenceData))
 	address := fmt.Sprintf(":%s", port)
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address) //nolint:contextcheck // listener intentionally outlives request contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to listen on %s: %w", address, err)
 	}

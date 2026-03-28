@@ -247,7 +247,7 @@ func initInfrastructure(ctx context.Context, grpcPort int, logger *slog.Logger) 
 
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithoutAuth().
-		Build()
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		conns.closeAll(logger)
 		return nil, fmt.Errorf("failed to build grpc server: %w", err)
@@ -342,7 +342,7 @@ func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, ht
 		extraGWOpts = append(extraGWOpts, adminOpt)
 	}
 
-	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, infra.conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...)
+	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, infra.conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...) //nolint:contextcheck // BuildAuthMiddleware manages its own context
 	if err != nil {
 		return nil, nil, fmt.Errorf("gateway init: %w", err)
 	}

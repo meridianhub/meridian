@@ -70,13 +70,13 @@ func main() {
 
 // partyDeps holds initialized services and dependencies for the party service.
 type partyDeps struct {
-	partyService    *service.Service
-	repo            *persistence.Repository
-	outboxRepo      *events.PostgresOutboxRepository
-	verificationSvc *service.VerificationService
-	verificationCfg *config.VerificationConfig
+	partyService     *service.Service
+	repo             *persistence.Repository
+	outboxRepo       *events.PostgresOutboxRepository
+	verificationSvc  *service.VerificationService
+	verificationCfg  *config.VerificationConfig
 	verificationRepo *persistence.VerificationRepository
-	provider        verification.Provider
+	provider         verification.Provider
 }
 
 func run(logger *slog.Logger) error {
@@ -242,7 +242,7 @@ func initInfra(ctx context.Context, logger *slog.Logger) (*observability.Tracer,
 	dbConfig.Logger = logger
 	db, err := bootstrap.NewDatabase(ctx, dbConfig)
 	if err != nil {
-		bootstrap.ShutdownTracer(tracer, logger)
+		bootstrap.ShutdownTracer(tracer, logger) //nolint:contextcheck // ShutdownTracer manages its own context
 		return nil, nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 	logger.Info("database connection established")
@@ -287,7 +287,7 @@ func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *
 
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
-		Build()
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
@@ -306,7 +306,7 @@ func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *
 
 	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.Party))
 	address := fmt.Sprintf(":%s", port)
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address) //nolint:contextcheck // listener intentionally outlives request contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to listen on %s: %w", address, err)
 	}
@@ -328,45 +328,12 @@ func startVerificationHTTPServer(deps *partyDeps, orchestrator *bootstrap.Shutdo
 		return fmt.Errorf("failed to create timeout handler: %w", err)
 	}
 	go timeoutHandler.Run(timeoutCtx)
+	orchestrator.AddCleanup(func() error { timeoutCancel(); return nil })
 
-	orchestrator.AddCleanup(func() error {
-		timeoutCancel()
-		return nil
-	})
-
-	httpMux := http.NewServeMux()
-
-	webhookHandler, err := httpAdapter.NewVerificationWebhookHandler(
-		httpAdapter.VerificationWebhookHandlerConfig{
-			VerificationService: deps.verificationSvc,
-			HMACSecrets: map[string][]byte{
-				"default": []byte(deps.verificationCfg.WebhookSecret),
-				"stripe":  []byte(deps.verificationCfg.WebhookSecret),
-			},
-			Logger: logger,
-		},
-	)
+	httpMux, err := buildVerificationMux(deps, logger)
 	if err != nil {
-		return fmt.Errorf("failed to create webhook handler: %w", err)
+		return err
 	}
-
-	if strings.ToLower(deps.verificationCfg.Provider) == "stripe" {
-		stripeAdapter, err := httpAdapter.NewStripeWebhookAdapter(
-			httpAdapter.StripeWebhookAdapterConfig{
-				InnerHandler:    webhookHandler,
-				WebhookSecret:   []byte(deps.verificationCfg.StripeWebhookSecret),
-				InnerHMACSecret: []byte(deps.verificationCfg.WebhookSecret),
-				Logger:          logger,
-			},
-		)
-		if err != nil {
-			return bootstrap.Permanent(fmt.Errorf("failed to create stripe webhook adapter: %w", err))
-		}
-		httpMux.Handle("/webhooks/verification/stripe", stripeAdapter)
-	}
-
-	httpMux.HandleFunc("/webhooks/verification/", webhookHandler.HandleWebhook)
-	httpMux.HandleFunc("/health", newHTTPHealthHandler(deps.verificationCfg))
 
 	httpPort := env.GetEnvOrDefault("HTTP_PORT", "8081")
 	httpServer := &http.Server{
@@ -391,8 +358,44 @@ func startVerificationHTTPServer(deps *partyDeps, orchestrator *bootstrap.Shutdo
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	})
-
 	return nil
+}
+
+// buildVerificationMux creates the HTTP mux with webhook and health handlers for verification.
+func buildVerificationMux(deps *partyDeps, logger *slog.Logger) (*http.ServeMux, error) {
+	webhookHandler, err := httpAdapter.NewVerificationWebhookHandler(
+		httpAdapter.VerificationWebhookHandlerConfig{
+			VerificationService: deps.verificationSvc,
+			HMACSecrets: map[string][]byte{
+				"default": []byte(deps.verificationCfg.WebhookSecret),
+				"stripe":  []byte(deps.verificationCfg.WebhookSecret),
+			},
+			Logger: logger,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create webhook handler: %w", err)
+	}
+
+	httpMux := http.NewServeMux()
+	if strings.ToLower(deps.verificationCfg.Provider) == "stripe" {
+		stripeAdapter, err := httpAdapter.NewStripeWebhookAdapter(
+			httpAdapter.StripeWebhookAdapterConfig{
+				InnerHandler:    webhookHandler,
+				WebhookSecret:   []byte(deps.verificationCfg.StripeWebhookSecret),
+				InnerHMACSecret: []byte(deps.verificationCfg.WebhookSecret),
+				Logger:          logger,
+			},
+		)
+		if err != nil {
+			return nil, bootstrap.Permanent(fmt.Errorf("failed to create stripe webhook adapter: %w", err))
+		}
+		httpMux.Handle("/webhooks/verification/stripe", stripeAdapter)
+	}
+
+	httpMux.HandleFunc("/webhooks/verification/", webhookHandler.HandleWebhook)
+	httpMux.HandleFunc("/health", newHTTPHealthHandler(deps.verificationCfg))
+	return httpMux, nil
 }
 
 // partyRepoAdapter adapts persistence.Repository to satisfy

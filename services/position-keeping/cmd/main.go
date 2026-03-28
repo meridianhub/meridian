@@ -211,7 +211,7 @@ func setupGRPCServer(ctx context.Context, config *app.Config, container *app.Con
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(container.AuthInterceptor).
 		WithUnaryInterceptor(interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration)).
-		Build()
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		return nil, nil, bootstrap.Permanent(fmt.Errorf("failed to build grpc server: %w", err))
 	}
@@ -233,7 +233,7 @@ func setupGRPCServer(ctx context.Context, config *app.Config, container *app.Con
 		"services", []string{"PositionKeepingService", "Health", "Reflection"})
 
 	grpcAddress := fmt.Sprintf(":%s", config.Server.Port)
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", grpcAddress)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", grpcAddress) //nolint:contextcheck // listener intentionally outlives request contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
@@ -309,8 +309,21 @@ func awaitAndShutdown(
 
 	logger.Info("shutting down servers...")
 	runCancel()
+	shutdownWorkers(container, outboxShutdownCh, kafkaCleanupCh, compactionWorkerCancel, logger)
 
-	// Shutdown outbox worker
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // shutdown uses dedicated timeout context
+		logger.Error("HTTP server shutdown error", "error", err)
+	} else {
+		logger.Info("HTTP server stopped gracefully")
+	}
+	gracefulStopGRPC(shutdownCtx, grpcServer, logger) //nolint:contextcheck // shutdown uses dedicated timeout context
+	return runErr
+}
+
+// shutdownWorkers stops the outbox worker, Kafka producer, and compaction worker.
+func shutdownWorkers(container *app.Container, outboxShutdownCh, kafkaCleanupCh chan func(), compactionWorkerCancel context.CancelFunc, logger *slog.Logger) {
 	select {
 	case shutdownFn := <-outboxShutdownCh:
 		logger.Info("stopping event outbox worker...")
@@ -318,15 +331,11 @@ func awaitAndShutdown(
 		logger.Info("event outbox worker stopped")
 	default:
 	}
-
-	// Close the lazily-resolved Kafka producer
 	select {
 	case cleanupFn := <-kafkaCleanupCh:
 		cleanupFn()
 	default:
 	}
-
-	// Shutdown compaction worker
 	if container.CompactionWorker != nil {
 		logger.Info("stopping compaction worker...")
 		if compactionWorkerCancel != nil {
@@ -335,22 +344,15 @@ func awaitAndShutdown(
 		container.CompactionWorker.Stop()
 		logger.Info("compaction worker stopped")
 	}
+}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
-	defer cancel()
-
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("HTTP server shutdown error", "error", err)
-	} else {
-		logger.Info("HTTP server stopped gracefully")
-	}
-
+// gracefulStopGRPC attempts a graceful gRPC server stop with timeout fallback.
+func gracefulStopGRPC(shutdownCtx context.Context, grpcServer *grpc.Server, logger *slog.Logger) {
 	stopped := make(chan struct{})
 	go func() {
 		grpcServer.GracefulStop()
 		close(stopped)
 	}()
-
 	select {
 	case <-stopped:
 		logger.Info("gRPC server stopped gracefully")
@@ -358,8 +360,6 @@ func awaitAndShutdown(
 		logger.Warn("graceful shutdown timeout, forcing stop")
 		grpcServer.Stop()
 	}
-
-	return runErr
 }
 
 // startOutboxWorker initializes and starts the event outbox worker with lazy Kafka resolution.

@@ -111,59 +111,29 @@ func run(logger *slog.Logger) error {
 // initDependencies creates the database pool, MDS client, forecast runner, service handler,
 // and cron scheduler with all their sub-dependencies.
 func initDependencies(ctx context.Context, logger *slog.Logger) (*forecastingDeps, error) {
-	// Database
-	dbURL := env.GetEnvOrDefault("DATABASE_URL",
-		"postgres://meridian_user@localhost:26257/meridian_forecasting?sslmode=disable")
-	dbPool, err := pgxpool.New(ctx, dbURL)
+	dbPool, err := initDatabasePool(ctx, logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create database connection pool: %w", err)
+		return nil, err
 	}
-	if err := dbPool.Ping(ctx); err != nil {
-		dbPool.Close()
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-	logger.Info("database connection established", "url", dbURL)
-
 	repo := persistence.NewStrategyRepository(dbPool)
 	logger.Info("strategy repository initialized")
 
-	// MDS client
 	mdsTarget := env.GetEnvOrDefault("MDS_TARGET", "market-information:50051")
-	mdsClient, mdsCleanup, err := misclient.New(ctx, misclient.Config{
-		Target: mdsTarget,
-	})
+	mdsClient, mdsCleanup, err := misclient.New(ctx, misclient.Config{Target: mdsTarget})
 	if err != nil {
 		dbPool.Close()
 		return nil, fmt.Errorf("failed to create MDS client: %w", err)
 	}
 	logger.Info("MDS client initialized", "target", mdsTarget)
 
-	// Adapters and forecast runner
-	misAdapter := mds.NewMISAdapter(mdsClient)
-	mdsPublisher := mds.NewPublisherAdapter(mdsClient)
-	refDataClient := &mds.NoOpRefDataClient{}
-
-	runner, err := starlark.NewForecastRunner(starlark.ForecastRunnerConfig{
-		MISClient: misAdapter,
-		RefData:   refDataClient,
-		Logger:    logger,
-	})
+	forecastingSvc, err := createForecastingService(repo, mdsClient, logger)
 	if err != nil {
 		_ = mdsCleanup()
 		dbPool.Close()
-		return nil, fmt.Errorf("failed to create forecast runner: %w", err)
+		return nil, err
 	}
 
-	forecastingSvc, err := handler.NewService(repo, runner, mdsPublisher, logger)
-	if err != nil {
-		_ = mdsCleanup()
-		dbPool.Close()
-		return nil, fmt.Errorf("failed to create forecasting service: %w", err)
-	}
-	logger.Info("forecasting service handler initialized")
-
-	// Scheduler
-	cronScheduler, err := createScheduler(dbPool, repo, forecastingSvc, logger)
+	cronScheduler, err := createScheduler(dbPool, repo, forecastingSvc, logger) //nolint:contextcheck // NewPgExecutionStore manages its own context
 	if err != nil {
 		_ = mdsCleanup()
 		dbPool.Close()
@@ -176,6 +146,44 @@ func initDependencies(ctx context.Context, logger *slog.Logger) (*forecastingDep
 		svc:        forecastingSvc,
 		scheduler:  cronScheduler,
 	}, nil
+}
+
+// initDatabasePool creates and validates a pgxpool connection for the forecasting service.
+func initDatabasePool(ctx context.Context, logger *slog.Logger) (*pgxpool.Pool, error) {
+	dbURL := env.GetEnvOrDefault("DATABASE_URL",
+		"postgres://meridian_user@localhost:26257/meridian_forecasting?sslmode=disable")
+	dbPool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create database connection pool: %w", err)
+	}
+	if err := dbPool.Ping(ctx); err != nil {
+		dbPool.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+	logger.Info("database connection established", "url", dbURL)
+	return dbPool, nil
+}
+
+// createForecastingService builds the forecast runner and service handler from MDS client adapters.
+func createForecastingService(repo *persistence.StrategyRepository, mdsClient *misclient.Client, logger *slog.Logger) (*handler.Service, error) {
+	misAdapter := mds.NewMISAdapter(mdsClient)
+	mdsPublisher := mds.NewPublisherAdapter(mdsClient)
+
+	runner, err := starlark.NewForecastRunner(starlark.ForecastRunnerConfig{
+		MISClient: misAdapter,
+		RefData:   &mds.NoOpRefDataClient{},
+		Logger:    logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create forecast runner: %w", err)
+	}
+
+	svc, err := handler.NewService(repo, runner, mdsPublisher, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create forecasting service: %w", err)
+	}
+	logger.Info("forecasting service handler initialized")
+	return svc, nil
 }
 
 // createScheduler builds the cron scheduler with Redis distributed locking and execution store.
@@ -287,7 +295,7 @@ func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *
 
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
-		Build()
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
@@ -303,7 +311,7 @@ func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *
 
 	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.Forecasting))
 	address := fmt.Sprintf(":%s", port)
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address) //nolint:contextcheck // listener intentionally outlives request contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to listen on %s: %w", address, err)
 	}
