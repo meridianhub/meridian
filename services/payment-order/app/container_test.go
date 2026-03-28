@@ -81,15 +81,14 @@ func TestContainer_initRepositories_WithNilDB(t *testing.T) {
 func TestContainer_initKafka_NoBootstrapServers(t *testing.T) {
 	t.Setenv("KAFKA_BOOTSTRAP_SERVERS", "")
 	t.Setenv("KAFKA_BROKERS", "")
+	t.Setenv("ENVIRONMENT", "development")
 
 	c := &Container{
 		Config: testServiceConfig(),
 		Logger: testLogger(),
 	}
 
-	assert.NotPanics(t, func() {
-		c.initKafka(context.Background())
-	})
+	c.initKafka(context.Background())
 
 	assert.Nil(t, c.kafkaProducer)
 	assert.Empty(t, c.BootstrapServers)

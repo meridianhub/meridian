@@ -54,6 +54,7 @@ func TestContainer_initRepositories_WithNilDB(t *testing.T) {
 
 func TestContainer_initKafka_NoBootstrapServers(t *testing.T) {
 	t.Setenv("KAFKA_BOOTSTRAP_SERVERS", "")
+	t.Setenv("ENVIRONMENT", "development")
 
 	c := &Container{
 		Logger: testLogger(),
