@@ -475,7 +475,8 @@ func TestWireScheduler_NilRedis_ReturnsNil(t *testing.T) {
 		},
 	}
 
-	scheduler := app.WireScheduler(context.Background(), cfg, nil, logger)
+	scheduler, cleanup := app.WireScheduler(context.Background(), cfg, nil, logger)
+	defer cleanup()
 	assert.Nil(t, scheduler, "scheduler should be nil when Redis client is nil")
 }
 
@@ -503,7 +504,8 @@ func TestWireScheduler_InvalidDatabaseURL_ReturnsNil(t *testing.T) {
 		},
 	}
 
-	scheduler := app.WireScheduler(context.Background(), cfg, redisClient, logger)
+	scheduler, wireCleanup := app.WireScheduler(context.Background(), cfg, redisClient, logger)
+	defer wireCleanup()
 	assert.Nil(t, scheduler, "scheduler should be nil when database URL is invalid")
 }
 
@@ -547,7 +549,8 @@ func TestWireScheduler_ValidConfig_ReturnsScheduler(t *testing.T) {
 		},
 	}
 
-	scheduler := app.WireScheduler(context.Background(), cfg, redisClient, logger)
+	scheduler, wireCleanup := app.WireScheduler(context.Background(), cfg, redisClient, logger)
+	defer wireCleanup()
 	assert.NotNil(t, scheduler, "scheduler should be created with valid config")
 
 	// Clean up - stop the scheduler before test ends

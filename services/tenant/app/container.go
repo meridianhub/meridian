@@ -30,10 +30,9 @@ import (
 // envValueTrue is the string value for enabled environment variables.
 const envValueTrue = "true"
 
-// Sentinel errors for container and worker configuration validation.
+// Sentinel errors for worker configuration validation.
 var (
-	ErrContainerCloseFailures = errors.New("one or more container resources failed to close")
-	errInvalidPollInterval    = errors.New("poll interval must be >= 1s")
+	errInvalidPollInterval = errors.New("poll interval must be >= 1s")
 	errInvalidMaxRetries      = errors.New("max retries must be >= 0 and <= 20")
 	errInvalidRetryBaseDelay  = errors.New("retry base delay must be > 0")
 	errInvalidRetryMaxDelay   = errors.New("retry max delay must be > 0")
@@ -73,8 +72,9 @@ type Container struct {
 	// Workers
 	ProvisioningWorker *worker.ProvisioningWorker
 
-	// Cleanup functions (executed in reverse order)
-	cleanups []func()
+	// Internal lifecycle
+	cancelRegistry context.CancelFunc
+	cleanups       []func()
 }
 
 // NewContainer creates and initializes a new dependency injection container.
@@ -311,7 +311,10 @@ func (c *Container) initService(ctx context.Context) {
 		RefreshInterval: 60 * time.Second,
 		Logger:          c.Logger,
 	})
-	c.CachedRegistry.Start(ctx)
+
+	registryCtx, cancel := context.WithCancel(ctx)
+	c.cancelRegistry = cancel
+	c.CachedRegistry.Start(registryCtx)
 
 	c.Logger.Info("cached tenant registry started",
 		"refresh_interval", "60s")
@@ -370,9 +373,13 @@ func (c *Container) initAuth(ctx context.Context) error {
 // Close gracefully shuts down all container resources in reverse initialization order.
 func (c *Container) Close() {
 	c.Logger.Info("closing container resources...")
-	var errs []error
 
-	// Stop provisioning worker first
+	// Cancel the cached registry refresh goroutine first
+	if c.cancelRegistry != nil {
+		c.cancelRegistry()
+	}
+
+	// Stop provisioning worker
 	if c.ProvisioningWorker != nil {
 		c.Logger.Info("stopping provisioning worker...")
 		c.ProvisioningWorker.Stop()
@@ -390,13 +397,7 @@ func (c *Container) Close() {
 	// Shutdown tracer
 	bootstrap.ShutdownTracer(c.Tracer, c.Logger)
 
-	if len(errs) > 0 {
-		c.Logger.Error("container close completed with errors",
-			"error_count", len(errs),
-			"errors", errors.Join(errs...))
-	} else {
-		c.Logger.Info("container resources closed")
-	}
+	c.Logger.Info("container resources closed")
 }
 
 // loadWorkerConfig loads worker configuration from environment variables with defaults.

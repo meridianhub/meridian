@@ -70,6 +70,9 @@ type Container struct {
 	// Scheduler (may be nil if disabled or Redis unavailable)
 	CronScheduler *scheduler.CronScheduler
 
+	// Internal connections (exposed for test helpers)
+	refDataConn *grpc.ClientConn
+
 	// Cleanup functions for gRPC connections and pgx pools
 	cleanups []func()
 }
@@ -348,6 +351,7 @@ func (c *Container) buildValuationComponents() (valuation.Engine, service.Refere
 		if connErr != nil {
 			c.Logger.Warn("failed to create reference data gRPC client", "error", connErr)
 		} else {
+			c.refDataConn = refDataConn
 			c.cleanups = append(c.cleanups, func() {
 				if err := refDataConn.Close(); err != nil {
 					c.Logger.Error("failed to close reference data connection", "error", err)
@@ -499,15 +503,22 @@ func (c *Container) initAuth(ctx context.Context) error {
 }
 
 // WireScheduler creates and configures a CronScheduler with all its dependencies.
-// This is exported for use in tests. Returns nil if any required dependency is not available.
-func WireScheduler(ctx context.Context, cfg *config.Config, redisClient *redis.Client, logger *slog.Logger) *scheduler.CronScheduler {
+// This is exported for use in tests. Returns nil scheduler if any required dependency
+// is not available. The returned cleanup function releases resources (pgx pool, gRPC connections)
+// registered during scheduler wiring.
+func WireScheduler(ctx context.Context, cfg *config.Config, redisClient *redis.Client, logger *slog.Logger) (*scheduler.CronScheduler, func()) {
 	c := &Container{
 		Config:      cfg,
 		Logger:      logger,
 		RedisClient: redisClient,
 	}
 	c.initScheduler(ctx)
-	return c.CronScheduler
+	cleanup := func() {
+		for i := len(c.cleanups) - 1; i >= 0; i-- {
+			c.cleanups[i]()
+		}
+	}
+	return c.CronScheduler, cleanup
 }
 
 // BuildValuationComponents creates the real valuation engine and reference data provider.
@@ -518,25 +529,7 @@ func BuildValuationComponents(cfg *config.Config, logger *slog.Logger) (valuatio
 		Logger: logger,
 	}
 	engine, provider := c.buildValuationComponents()
-
-	// Extract connection from cleanups if one was created
-	var conn *grpc.ClientConn
-	if len(c.cleanups) > 0 {
-		// The last cleanup is the reference data connection closer
-		// Return the connection for the caller to manage
-		// We need to re-create it since the cleanup holds a closure
-		if cfg.Services.ReferenceDataURL != "" {
-			var connErr error
-			conn, connErr = grpc.NewClient(
-				cfg.Services.ReferenceDataURL,
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
-			)
-			if connErr != nil {
-				logger.Warn("failed to create reference data gRPC client for test", "error", connErr)
-			}
-		}
-	}
-	return engine, provider, conn
+	return engine, provider, c.refDataConn
 }
 
 // Close gracefully shuts down all container resources.

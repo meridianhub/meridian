@@ -120,7 +120,7 @@ func (c *Container) initDatabase(ctx context.Context) error {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 	c.DBPool = dbPool
-	c.Logger.Info("database connection established", "url", dbURL)
+	c.Logger.Info("database connection established")
 
 	// GORM for outbox pattern
 	gormDBConfig := bootstrap.DefaultDatabaseConfig()
