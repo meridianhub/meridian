@@ -68,7 +68,7 @@ func TestContainer_initRepositories_WithNilDB(t *testing.T) {
 }
 
 func TestContainer_initRedis_FallbackToNoop(t *testing.T) {
-	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("REDIS_URL", "redis://localhost:1") // unreachable port
 	t.Setenv("ENVIRONMENT", "development")
 
 	c := &Container{
