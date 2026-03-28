@@ -3,6 +3,7 @@ package provisioner
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -133,62 +134,13 @@ func (p *PostgresProvisioner) reconcileTenantMigrations(ctx context.Context, ten
 
 	// Check each service for new migrations
 	for _, svc := range p.config.Services {
-		// Get the current version for this service by name (not index)
-		// This handles cases where services are added/removed from config after provisioning
-		svcStatus := status.getServiceStatus(svc.Name)
-		currentVersion := ""
-		if svcStatus != nil {
-			currentVersion = svcStatus.MigrationVersion
-		}
-
-		// Warn if service has no recorded version - could indicate config drift
-		if currentVersion == "" {
-			logger.Warn("service has no recorded migration version, skipping reconciliation",
-				"service", svc.Name,
-				"hint", "this may indicate the service was added after initial provisioning")
-			continue
-		}
-
-		// Read all migration files
-		migrations, err := p.readMigrationFiles(svc.MigrationPath)
+		applied, err := p.reconcileServiceMigrations(ctx, status, svc, schemaName, logger)
 		if err != nil {
-			return anyMigrationsApplied, fmt.Errorf("read migrations for %s: %w", svc.Name, err)
+			return anyMigrationsApplied, err
 		}
-
-		// Filter migrations newer than current version
-		newMigrations := filterMigrationsAfter(migrations, currentVersion)
-
-		if len(newMigrations) == 0 {
-			logger.Debug("no new migrations for service", "service", svc.Name)
-			continue
+		if applied {
+			anyMigrationsApplied = true
 		}
-
-		logger.Info("applying new migrations",
-			"service", svc.Name,
-			"current_version", currentVersion,
-			"new_migration_count", len(newMigrations))
-
-		// Get the database connection for this service
-		serviceDB, ok := p.serviceDbs[svc.Name]
-		if !ok {
-			return anyMigrationsApplied, fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
-		}
-
-		// Apply new migrations
-		latestVersion, err := p.applyMigrationList(ctx, serviceDB, schemaName, newMigrations)
-		if err != nil {
-			return anyMigrationsApplied, fmt.Errorf("apply migrations for %s: %w", svc.Name, err)
-		}
-
-		// Update service status by name
-		if svcStatus != nil {
-			svcStatus.MigrationVersion = latestVersion
-		}
-		anyMigrationsApplied = true
-
-		logger.Debug("service migrations applied",
-			"service", svc.Name,
-			"new_version", latestVersion)
 	}
 
 	// Save updated status if any migrations were applied
@@ -200,6 +152,59 @@ func (p *PostgresProvisioner) reconcileTenantMigrations(ctx context.Context, ten
 	}
 
 	return anyMigrationsApplied, nil
+}
+
+// reconcileServiceMigrations applies new migrations for a single service in a tenant schema.
+// Returns true if any migrations were applied.
+func (p *PostgresProvisioner) reconcileServiceMigrations(ctx context.Context, status *ProvisioningStatus, svc ServiceConfig, schemaName string, logger *slog.Logger) (bool, error) {
+	svcStatus := status.getServiceStatus(svc.Name)
+	currentVersion := ""
+	if svcStatus != nil {
+		currentVersion = svcStatus.MigrationVersion
+	}
+
+	if currentVersion == "" {
+		logger.Warn("service has no recorded migration version, skipping reconciliation",
+			"service", svc.Name,
+			"hint", "this may indicate the service was added after initial provisioning")
+		return false, nil
+	}
+
+	migrations, err := p.readMigrationFiles(svc.MigrationPath)
+	if err != nil {
+		return false, fmt.Errorf("read migrations for %s: %w", svc.Name, err)
+	}
+
+	newMigrations := filterMigrationsAfter(migrations, currentVersion)
+	if len(newMigrations) == 0 {
+		logger.Debug("no new migrations for service", "service", svc.Name)
+		return false, nil
+	}
+
+	logger.Info("applying new migrations",
+		"service", svc.Name,
+		"current_version", currentVersion,
+		"new_migration_count", len(newMigrations))
+
+	serviceDB, ok := p.serviceDbs[svc.Name]
+	if !ok {
+		return false, fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
+	}
+
+	latestVersion, err := p.applyMigrationList(ctx, serviceDB, schemaName, newMigrations)
+	if err != nil {
+		return false, fmt.Errorf("apply migrations for %s: %w", svc.Name, err)
+	}
+
+	if svcStatus != nil {
+		svcStatus.MigrationVersion = latestVersion
+	}
+
+	logger.Debug("service migrations applied",
+		"service", svc.Name,
+		"new_version", latestVersion)
+
+	return true, nil
 }
 
 // filterMigrationsAfter returns migrations with version > currentVersion.

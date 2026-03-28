@@ -105,12 +105,10 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 	logger.Info("starting schema provisioning", "services_count", len(p.config.Services))
 
 	// Validate and prepare provisioning status.
-	// IDEMPOTENCY: If tenant is already 'active', prepareProvisioningStatus returns
-	// errAlreadyProvisioned, and we return nil (success) without any modifications.
 	status, err := p.prepareProvisioningStatus(ctx, tenantID)
 	if errors.Is(err, errAlreadyProvisioned) {
 		logger.Info("schema already provisioned, skipping")
-		return nil // Idempotent: already provisioned, no-op success
+		return nil
 	}
 	if err != nil {
 		logger.Error("failed to prepare provisioning status", "error", err)
@@ -124,6 +122,29 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 		defer cancel()
 	}
 
+	if err := p.createAndMigrateSchemas(ctx, tenantID, status, logger); err != nil {
+		return err
+	}
+
+	// Mark as active
+	status.State = StateActive
+	status.UpdatedAt = timeNow()
+	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+		logger.Error("failed to save final status", "error", err)
+		return fmt.Errorf("save final status: %w", err)
+	}
+
+	// Run post-provisioning hooks (e.g., saga seeding).
+	p.runPostProvisioningHooks(ctx, tenantID, logger)
+
+	logger.Info("schema provisioning completed",
+		"duration_ms", time.Since(startTime).Milliseconds(),
+		"services_count", len(p.config.Services))
+	return nil
+}
+
+// createAndMigrateSchemas creates org schemas in all service databases and applies migrations.
+func (p *PostgresProvisioner) createAndMigrateSchemas(ctx context.Context, tenantID tenant.TenantID, status *ProvisioningStatus, logger *slog.Logger) error {
 	// Check context before expensive operations
 	if ctx.Err() != nil {
 		logger.Warn("context cancelled before schema creation")
@@ -132,8 +153,7 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 	}
 
 	// Create the schema IN EACH SERVICE DATABASE.
-	// IDEMPOTENCY: Uses CREATE SCHEMA IF NOT EXISTS (see createSchemaInDB), so this is
-	// safe to call multiple times - existing schemas are silently skipped.
+	// IDEMPOTENCY: Uses CREATE SCHEMA IF NOT EXISTS (see createSchemaInDB).
 	schemaName := tenantID.SchemaName()
 	for _, svc := range p.config.Services {
 		serviceDB := p.serviceDbs[svc.Name]
@@ -153,21 +173,6 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 		return err
 	}
 
-	// Mark as active
-	status.State = StateActive
-	status.UpdatedAt = timeNow()
-	if err := p.saveProvisioningStatus(ctx, status); err != nil {
-		logger.Error("failed to save final status", "error", err)
-		return fmt.Errorf("save final status: %w", err)
-	}
-
-	// Run post-provisioning hooks (e.g., saga seeding).
-	// Hook failures are logged but do NOT fail provisioning since schemas are ready.
-	p.runPostProvisioningHooks(ctx, tenantID, logger)
-
-	logger.Info("schema provisioning completed",
-		"duration_ms", time.Since(startTime).Milliseconds(),
-		"services_count", len(p.config.Services))
 	return nil
 }
 
@@ -245,82 +250,18 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 			return ErrProvisioningTimeout
 		}
 
-		// Skip services that are already successfully provisioned (e.g., during
-		// re-provisioning to add a new service to an active tenant).
+		// Skip services that are already successfully provisioned
 		if i < len(status.Services) && status.Services[i].State == ServiceStateMigrated {
 			logger.Debug("service already provisioned, skipping", "service", svc.Name)
 			continue
 		}
 
-		// Get the database connection for this service
-		serviceDB, ok := p.serviceDbs[svc.Name]
-		if !ok {
-			logger.Error("service database not found", "service", svc.Name)
-			observability.IncrementServiceFailure(svc.Name)
-			p.markProvisioningFailed(ctx, status, fmt.Sprintf("no database connection for service: %s", svc.Name))
-			return fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
-		}
-
-		logger.Debug("provisioning service",
-			"service", svc.Name,
-			"migration_path", svc.MigrationPath,
-			"database_url", maskDatabaseURL(svc.DatabaseURL))
-
-		// Update service status to created
-		status.Services[i].State = ServiceStateCreated
-		status.UpdatedAt = timeNow()
-		if err := p.saveProvisioningStatus(ctx, status); err != nil {
-			logger.Warn("failed to save intermediate status", "error", err, "service", svc.Name)
-		}
-
-		// Apply migrations through circuit breaker
-		breaker := p.circuitBreakers.GetBreaker(svc.Name)
-		version, err := p.applyMigrationsWithCircuitBreaker(ctx, breaker, serviceDB, schemaName, svc, logger)
-
-		// Handle circuit breaker specific errors
-		if errors.Is(err, gobreaker.ErrOpenState) {
-			retryAfter := timeNow().Add(BreakerTimeout)
-			logger.Warn("circuit breaker open, skipping service",
-				"service", svc.Name,
-				"breaker_state", "open",
-				"retry_after", retryAfter.Format(time.RFC3339))
-			observability.IncrementServiceFailure(svc.Name)
-			status.Services[i].State = ServiceStateCircuitOpen
-			status.Services[i].ErrorMessage = fmt.Sprintf(
-				"circuit breaker open for %s: too many recent failures. Retry after %s",
-				svc.Name, retryAfter.Format(time.RFC3339))
-			skippedServices = append(skippedServices, svc.Name)
-			continue // Skip this service but continue with others
-		}
-		if errors.Is(err, gobreaker.ErrTooManyRequests) {
-			logger.Info("circuit breaker half-open, too many test requests",
-				"service", svc.Name,
-				"breaker_state", "half-open",
-				"max_requests", BreakerMaxRequests)
-			observability.IncrementServiceFailure(svc.Name)
-			status.Services[i].State = ServiceStateCircuitOpen
-			status.Services[i].ErrorMessage = fmt.Sprintf(
-				"circuit breaker half-open for %s: max test requests (%d) exceeded. Waiting for test results",
-				svc.Name, BreakerMaxRequests)
-			skippedServices = append(skippedServices, svc.Name)
-			continue // Skip this service but continue with others
-		}
-
+		skipped, err := p.provisionSingleService(ctx, status, i, svc, schemaName, logger)
 		if err != nil {
-			logger.Error("service migration failed", "service", svc.Name, "error", err)
-			observability.IncrementServiceFailure(svc.Name)
-			status.Services[i].State = ServiceStateFailed
-			status.Services[i].ErrorMessage = err.Error()
-			p.markProvisioningFailed(ctx, status, fmt.Sprintf("%s migrations failed: %v", svc.Name, err))
-			return fmt.Errorf("%w: %s: %v", ErrMigrationFailed, svc.Name, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
+			return err
 		}
-
-		logger.Debug("service migration completed", "service", svc.Name, "version", version)
-		status.Services[i].State = ServiceStateMigrated
-		status.Services[i].MigrationVersion = version
-		status.UpdatedAt = timeNow()
-		if err := p.saveProvisioningStatus(ctx, status); err != nil {
-			logger.Warn("failed to save migration status", "error", err, "service", svc.Name)
+		if skipped {
+			skippedServices = append(skippedServices, svc.Name)
 		}
 	}
 
@@ -333,6 +274,91 @@ func (p *PostgresProvisioner) provisionAllServices(ctx context.Context, status *
 	}
 
 	return nil
+}
+
+// provisionSingleService provisions one service: resolves DB, applies migrations via circuit breaker.
+// Returns (true, nil) if the service was skipped due to circuit breaker, (false, nil) on success,
+// or (false, error) on fatal failure.
+func (p *PostgresProvisioner) provisionSingleService(ctx context.Context, status *ProvisioningStatus, idx int, svc ServiceConfig, schemaName string, logger *slog.Logger) (bool, error) {
+	// Get the database connection for this service
+	serviceDB, ok := p.serviceDbs[svc.Name]
+	if !ok {
+		logger.Error("service database not found", "service", svc.Name)
+		observability.IncrementServiceFailure(svc.Name)
+		p.markProvisioningFailed(ctx, status, fmt.Sprintf("no database connection for service: %s", svc.Name))
+		return false, fmt.Errorf("%w: %s", ErrServiceDatabaseNotFound, svc.Name)
+	}
+
+	logger.Debug("provisioning service",
+		"service", svc.Name,
+		"migration_path", svc.MigrationPath,
+		"database_url", maskDatabaseURL(svc.DatabaseURL))
+
+	// Update service status to created
+	status.Services[idx].State = ServiceStateCreated
+	status.UpdatedAt = timeNow()
+	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+		logger.Warn("failed to save intermediate status", "error", err, "service", svc.Name)
+	}
+
+	// Apply migrations through circuit breaker
+	breaker := p.circuitBreakers.GetBreaker(svc.Name)
+	version, err := p.applyMigrationsWithCircuitBreaker(ctx, breaker, serviceDB, schemaName, svc, logger)
+
+	// Handle circuit breaker specific errors
+	if skipped := p.handleCircuitBreakerError(err, status, idx, svc, logger); skipped {
+		return true, nil
+	}
+
+	if err != nil {
+		logger.Error("service migration failed", "service", svc.Name, "error", err)
+		observability.IncrementServiceFailure(svc.Name)
+		status.Services[idx].State = ServiceStateFailed
+		status.Services[idx].ErrorMessage = err.Error()
+		p.markProvisioningFailed(ctx, status, fmt.Sprintf("%s migrations failed: %v", svc.Name, err))
+		return false, fmt.Errorf("%w: %s: %v", ErrMigrationFailed, svc.Name, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
+	}
+
+	logger.Debug("service migration completed", "service", svc.Name, "version", version)
+	status.Services[idx].State = ServiceStateMigrated
+	status.Services[idx].MigrationVersion = version
+	status.UpdatedAt = timeNow()
+	if err := p.saveProvisioningStatus(ctx, status); err != nil {
+		logger.Warn("failed to save migration status", "error", err, "service", svc.Name)
+	}
+
+	return false, nil
+}
+
+// handleCircuitBreakerError checks if an error is a circuit breaker error and updates status accordingly.
+// Returns true if the service was skipped (circuit breaker open/half-open), false otherwise.
+func (p *PostgresProvisioner) handleCircuitBreakerError(err error, status *ProvisioningStatus, idx int, svc ServiceConfig, logger *slog.Logger) bool {
+	if errors.Is(err, gobreaker.ErrOpenState) {
+		retryAfter := timeNow().Add(BreakerTimeout)
+		logger.Warn("circuit breaker open, skipping service",
+			"service", svc.Name,
+			"breaker_state", "open",
+			"retry_after", retryAfter.Format(time.RFC3339))
+		observability.IncrementServiceFailure(svc.Name)
+		status.Services[idx].State = ServiceStateCircuitOpen
+		status.Services[idx].ErrorMessage = fmt.Sprintf(
+			"circuit breaker open for %s: too many recent failures. Retry after %s",
+			svc.Name, retryAfter.Format(time.RFC3339))
+		return true
+	}
+	if errors.Is(err, gobreaker.ErrTooManyRequests) {
+		logger.Info("circuit breaker half-open, too many test requests",
+			"service", svc.Name,
+			"breaker_state", "half-open",
+			"max_requests", BreakerMaxRequests)
+		observability.IncrementServiceFailure(svc.Name)
+		status.Services[idx].State = ServiceStateCircuitOpen
+		status.Services[idx].ErrorMessage = fmt.Sprintf(
+			"circuit breaker half-open for %s: max test requests (%d) exceeded. Waiting for test results",
+			svc.Name, BreakerMaxRequests)
+		return true
+	}
+	return false
 }
 
 // applyMigrationsWithCircuitBreaker wraps the migration execution with circuit breaker protection.

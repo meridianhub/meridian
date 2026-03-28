@@ -99,65 +99,51 @@ func NewProvisioningWorker(
 		return nil, ErrInvalidPollInterval
 	}
 
-	// Default alert interval to 15 minutes if not specified
-	alertInterval := config.AlertInterval
-	if alertInterval <= 0 {
-		alertInterval = 15 * time.Minute
-	}
-
-	// Default alert threshold to 1 hour if not specified
-	alertThreshold := config.AlertThreshold
-	if alertThreshold <= 0 {
-		alertThreshold = 1 * time.Hour
-	}
-
-	// Default recovery threshold to 5 minutes if not specified
-	// This is the time a tenant can be in PROVISIONING status before being
-	// considered stuck and eligible for recovery on worker startup.
-	recoveryThreshold := config.RecoveryThreshold
-	if recoveryThreshold <= 0 {
-		recoveryThreshold = 5 * time.Minute
-	}
-
-	// Default max retries to 5 if not specified
-	maxRetries := config.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 5
-	}
-
-	// Default retry base delay to 2 seconds if not specified
-	retryBaseDelay := config.RetryBaseDelay
-	if retryBaseDelay <= 0 {
-		retryBaseDelay = 2 * time.Second
-	}
-
-	// Default retry max delay to RPC timeout if not specified
-	retryMaxDelay := config.RetryMaxDelay
-	if retryMaxDelay <= 0 {
-		retryMaxDelay = defaults.DefaultRPCTimeout
-	}
-
-	// Default max concurrent to 10 if not specified
-	maxConcurrent := config.MaxConcurrent
-	if maxConcurrent <= 0 {
-		maxConcurrent = 10
-	}
+	resolved := applyConfigDefaults(config)
 
 	return &ProvisioningWorker{
 		repo:              repo,
 		provisioner:       provisioner,
 		alertManager:      NewAlertManager(repo, logger),
 		pollInterval:      config.PollInterval,
-		alertInterval:     alertInterval,
-		alertThreshold:    alertThreshold,
-		recoveryThreshold: recoveryThreshold,
-		maxRetries:        maxRetries,
-		retryBaseDelay:    retryBaseDelay,
-		retryMaxDelay:     retryMaxDelay,
-		maxConcurrent:     maxConcurrent,
+		alertInterval:     resolved.AlertInterval,
+		alertThreshold:    resolved.AlertThreshold,
+		recoveryThreshold: resolved.RecoveryThreshold,
+		maxRetries:        resolved.MaxRetries,
+		retryBaseDelay:    resolved.RetryBaseDelay,
+		retryMaxDelay:     resolved.RetryMaxDelay,
+		maxConcurrent:     resolved.MaxConcurrent,
 		logger:            logger,
 		done:              make(chan struct{}),
 	}, nil
+}
+
+// applyConfigDefaults fills zero-valued config fields with sensible defaults.
+func applyConfigDefaults(config Config) Config {
+	if config.AlertInterval <= 0 {
+		config.AlertInterval = 15 * time.Minute
+	}
+	if config.AlertThreshold <= 0 {
+		config.AlertThreshold = 1 * time.Hour
+	}
+	// Recovery threshold: time a tenant can be in PROVISIONING status before being
+	// considered stuck and eligible for recovery on worker startup.
+	if config.RecoveryThreshold <= 0 {
+		config.RecoveryThreshold = 5 * time.Minute
+	}
+	if config.MaxRetries <= 0 {
+		config.MaxRetries = 5
+	}
+	if config.RetryBaseDelay <= 0 {
+		config.RetryBaseDelay = 2 * time.Second
+	}
+	if config.RetryMaxDelay <= 0 {
+		config.RetryMaxDelay = defaults.DefaultRPCTimeout
+	}
+	if config.MaxConcurrent <= 0 {
+		config.MaxConcurrent = 10
+	}
+	return config
 }
 
 // Start begins the polling loop to process pending tenant provisioning.
@@ -321,62 +307,51 @@ func (w *ProvisioningWorker) processPendingTenants(ctx context.Context) {
 	}
 
 	w.logger.Info("found pending tenants", "count", len(tenants))
-
-	// Record queue depth before processing
 	observability.SetProvisioningQueueDepth(len(tenants))
 
 	// Process each tenant with optimistic locking
 	for _, tenant := range tenants {
-		// Attempt to claim the tenant by updating its status to PROVISIONING
-		_, err := w.repo.UpdateStatus(ctx, tenant.ID, domain.StatusProvisioning, tenant.Version)
-		if err != nil {
-			// Check if this is a version conflict (another worker claimed it first)
-			if errors.Is(err, persistence.ErrVersionConflict) {
-				// Expected during concurrent operation - debug level logging
-				w.logger.Debug("tenant already claimed by another worker",
-					"tenant_id", tenant.ID,
-					"expected_version", tenant.Version)
-				continue
-			}
-			// Unexpected error - warn level logging
-			w.logger.Warn("failed to claim tenant for provisioning",
-				"tenant_id", tenant.ID,
-				"version", tenant.Version,
-				"error", err)
-			continue
+		w.claimAndProvisionTenant(ctx, tenant)
+	}
+}
+
+// claimAndProvisionTenant attempts to claim a pending tenant via optimistic locking
+// and spawns a background goroutine for provisioning on success.
+func (w *ProvisioningWorker) claimAndProvisionTenant(ctx context.Context, t *domain.Tenant) {
+	// Attempt to claim the tenant by updating its status to PROVISIONING
+	_, err := w.repo.UpdateStatus(ctx, t.ID, domain.StatusProvisioning, t.Version)
+	if err != nil {
+		if errors.Is(err, persistence.ErrVersionConflict) {
+			w.logger.Debug("tenant already claimed by another worker",
+				"tenant_id", t.ID,
+				"expected_version", t.Version)
+			return
 		}
-
-		// Successfully claimed - spawn goroutine to provision
-		w.logger.Info("claimed tenant for provisioning",
-			"tenant_id", tenant.ID,
-			"schema", tenant.SchemaName())
-
-		// Atomically check stopping + wg.Add under stoppingMu to prevent
-		// a race where Stop() calls wg.Wait() between our check and Add.
-		//
-		// Note: When the stopping branch is taken, the tenant remains in PROVISIONING
-		// status but won't be provisioned in this session. On restart, RecoverStuckTenants
-		// (called during Start()) resets stale PROVISIONING tenants back to
-		// PROVISIONING_PENDING so they can be picked up by the next polling cycle.
-		w.stoppingMu.Lock()
-		if w.stopping.Load() {
-			w.stoppingMu.Unlock()
-			w.logger.Warn("not spawning provisioning goroutine - worker is stopping",
-				"tenant_id", tenant.ID)
-			continue
-		}
-		w.wg.Add(1)
-		w.stoppingMu.Unlock()
-
-		// Spawn provisioning in background with detached context
-		// We use context.WithoutCancel to prevent parent cancellation from stopping provisioning
-		go w.provisionTenantWithRetry(context.WithoutCancel(ctx), tenant.ID)
+		w.logger.Warn("failed to claim tenant for provisioning",
+			"tenant_id", t.ID,
+			"version", t.Version,
+			"error", err)
+		return
 	}
 
-	// Note: We intentionally do NOT reset queue depth to 0 here.
-	// The next poll cycle will set the accurate count of PROVISIONING_PENDING tenants.
-	// Resetting to 0 could cause misleading dashboard values if this function
-	// is called again before all goroutines complete.
+	w.logger.Info("claimed tenant for provisioning",
+		"tenant_id", t.ID,
+		"schema", t.SchemaName())
+
+	// Atomically check stopping + wg.Add under stoppingMu to prevent
+	// a race where Stop() calls wg.Wait() between our check and Add.
+	w.stoppingMu.Lock()
+	if w.stopping.Load() {
+		w.stoppingMu.Unlock()
+		w.logger.Warn("not spawning provisioning goroutine - worker is stopping",
+			"tenant_id", t.ID)
+		return
+	}
+	w.wg.Add(1)
+	w.stoppingMu.Unlock()
+
+	// Spawn provisioning in background with detached context
+	go w.provisionTenantWithRetry(context.WithoutCancel(ctx), t.ID)
 }
 
 // Retry configuration constants for provisioning with exponential backoff.

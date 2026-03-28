@@ -29,39 +29,75 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		return nil, status.Errorf(codes.InvalidArgument, "invalid tenant ID: %v", err)
 	}
 
-	// Convert metadata from protobuf Struct
+	// Validate slug if provided
+	if err := s.validateSlugAvailability(ctx, req.Slug); err != nil {
+		return nil, err
+	}
+
+	// Build domain tenant
+	tenant := s.buildTenantFromRequest(tenantID, req)
+
+	// Register Party in BIAN Party Reference Data Directory (if client configured)
+	if err := s.registerPartyForTenant(ctx, req, tenant); err != nil {
+		return nil, err
+	}
+
+	// Persist tenant with initial status (provisioning or active)
+	if err := s.persistNewTenant(ctx, req, tenant); err != nil {
+		return nil, err
+	}
+
+	s.logger.Info("tenant created",
+		"tenant_id", tenant.ID.String(),
+		"display_name", tenant.DisplayName,
+		"settlement_asset", tenant.SettlementAsset,
+		"status", tenant.Status,
+		"party_id", tenant.PartyID)
+
+	// Best-effort post-creation tasks (cache, provisioning status)
+	s.postTenantCreation(ctx, tenantID, tenant)
+
+	return &pb.InitiateTenantResponse{
+		Tenant:           s.toProto(tenant),
+		ProvisioningHint: provisioningHintFromStatus(tenant.Status),
+	}, nil
+}
+
+// validateSlugAvailability validates slug format and checks availability.
+// Returns nil if slug is empty (not provided).
+func (s *Service) validateSlugAvailability(ctx context.Context, slug string) error {
+	if slug == "" {
+		return nil
+	}
+	if err := domain.ValidateSlug(slug); err != nil {
+		return status.Errorf(codes.InvalidArgument, "invalid slug: %v", err)
+	}
+	available, err := s.repo.IsSlugAvailable(ctx, slug)
+	if err != nil {
+		s.logger.Error("failed to check slug availability",
+			"slug", slug,
+			"error", err)
+		return status.Errorf(codes.Internal, "failed to check slug availability")
+	}
+	if !available {
+		return status.Errorf(codes.AlreadyExists, "slug %s is already taken", slug)
+	}
+	return nil
+}
+
+// buildTenantFromRequest creates a domain tenant from the initiate request.
+func (s *Service) buildTenantFromRequest(tenantID tenant.TenantID, req *pb.InitiateTenantRequest) *domain.Tenant {
 	var metadata map[string]interface{}
 	if req.Metadata != nil {
 		metadata = req.Metadata.AsMap()
 	}
 
-	// Determine initial status based on whether provisioning is configured
 	initialStatus := domain.StatusActive
 	if s.provisioner != nil {
 		initialStatus = domain.StatusProvisioningPending
 	}
 
-	// Validate slug if provided
-	if req.Slug != "" {
-		if err := domain.ValidateSlug(req.Slug); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid slug: %v", err)
-		}
-
-		// Check slug availability
-		available, err := s.repo.IsSlugAvailable(ctx, req.Slug)
-		if err != nil {
-			s.logger.Error("failed to check slug availability",
-				"slug", req.Slug,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to check slug availability")
-		}
-		if !available {
-			return nil, status.Errorf(codes.AlreadyExists, "slug %s is already taken", req.Slug)
-		}
-	}
-
-	// Create domain tenant
-	tenant := &domain.Tenant{
+	return &domain.Tenant{
 		ID:              tenantID,
 		Slug:            req.Slug,
 		DisplayName:     req.DisplayName,
@@ -72,88 +108,81 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 		Metadata:        metadata,
 		Version:         1,
 	}
+}
 
-	// Register corresponding Party in BIAN Party Reference Data Directory (if client configured).
-	//
-	// Note: If Party registration succeeds but tenant creation fails, an orphaned Party record
-	// may exist. This is acceptable eventual consistency - orphaned parties can be cleaned up
-	// operationally via the Party service, and the ExternalReference field allows correlation.
-	// A saga pattern with compensation could be added if stricter atomicity is required.
-	if s.partyClient != nil {
-		party, err := s.partyClient.RegisterParty(ctx, &partyv1.RegisterPartyRequest{
-			PartyType:         partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
-			LegalName:         req.DisplayName,
-			DisplayName:       req.DisplayName,
-			ExternalReference: req.TenantId, // Bidirectional link: Party -> Tenant
-		})
-		if err != nil {
-			s.logger.Error("failed to register party for tenant",
-				"tenant_id", req.TenantId,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "failed to register party for tenant: %v", err)
-		}
-		tenant.PartyID = party.PartyId
-		s.logger.Info("registered party for tenant",
-			"tenant_id", req.TenantId,
-			"party_id", tenant.PartyID)
-	} else {
+// registerPartyForTenant registers a corresponding Party in the BIAN Party Reference Data Directory.
+//
+// Note: If Party registration succeeds but tenant creation fails, an orphaned Party record
+// may exist. This is acceptable eventual consistency - orphaned parties can be cleaned up
+// operationally via the Party service, and the ExternalReference field allows correlation.
+func (s *Service) registerPartyForTenant(ctx context.Context, req *pb.InitiateTenantRequest, t *domain.Tenant) error {
+	if s.partyClient == nil {
 		s.logger.Debug("party client not configured - skipping party registration",
 			"tenant_id", req.TenantId)
+		return nil
 	}
+	party, err := s.partyClient.RegisterParty(ctx, &partyv1.RegisterPartyRequest{
+		PartyType:         partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName:         req.DisplayName,
+		DisplayName:       req.DisplayName,
+		ExternalReference: req.TenantId,
+	})
+	if err != nil {
+		s.logger.Error("failed to register party for tenant",
+			"tenant_id", req.TenantId,
+			"error", err)
+		return status.Errorf(codes.Internal, "failed to register party for tenant: %v", err)
+	}
+	t.PartyID = party.PartyId
+	s.logger.Info("registered party for tenant",
+		"tenant_id", req.TenantId,
+		"party_id", t.PartyID)
+	return nil
+}
 
-	// Persist tenant with initial status (provisioning or active)
-	if err := s.repo.Create(ctx, tenant); err != nil {
+// persistNewTenant saves the tenant to the repository and maps persistence errors to gRPC codes.
+func (s *Service) persistNewTenant(ctx context.Context, req *pb.InitiateTenantRequest, t *domain.Tenant) error {
+	if err := s.repo.Create(ctx, t); err != nil {
 		if errors.Is(err, persistence.ErrTenantExists) {
-			return nil, status.Errorf(codes.AlreadyExists, "tenant %s already exists", req.TenantId)
+			return status.Errorf(codes.AlreadyExists, "tenant %s already exists", req.TenantId)
 		}
 		if errors.Is(err, persistence.ErrSubdomainTaken) {
-			return nil, status.Errorf(codes.AlreadyExists, "subdomain %s is already taken", req.Subdomain)
+			return status.Errorf(codes.AlreadyExists, "subdomain %s is already taken", req.Subdomain)
 		}
 		if errors.Is(err, persistence.ErrSlugTaken) {
-			return nil, status.Errorf(codes.AlreadyExists, "slug %s is already taken", req.Slug)
+			return status.Errorf(codes.AlreadyExists, "slug %s is already taken", req.Slug)
 		}
 		s.logger.Error("failed to create tenant",
 			"tenant_id", req.TenantId,
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to create tenant")
+		return status.Errorf(codes.Internal, "failed to create tenant")
 	}
+	return nil
+}
 
-	s.logger.Info("tenant created",
-		"tenant_id", tenant.ID.String(),
-		"display_name", tenant.DisplayName,
-		"settlement_asset", tenant.SettlementAsset,
-		"status", tenant.Status,
-		"party_id", tenant.PartyID)
-
-	// Pre-populate cache for newly created tenant (best-effort)
-	// This optimizes the first slug lookup after tenant creation
-	if s.slugCache != nil && tenant.Slug != "" {
-		if err := s.slugCache.Set(ctx, tenant.Slug, tenant.ID); err != nil {
+// postTenantCreation handles best-effort tasks after tenant creation:
+// slug cache population and provisioning status initialization.
+func (s *Service) postTenantCreation(ctx context.Context, tenantID tenant.TenantID, t *domain.Tenant) {
+	// Pre-populate slug cache (best-effort)
+	if s.slugCache != nil && t.Slug != "" {
+		if err := s.slugCache.Set(ctx, t.Slug, t.ID); err != nil {
 			s.logger.Warn("failed to pre-populate slug cache for new tenant",
-				"tenant_id", tenant.ID.String(),
-				"slug", tenant.Slug,
+				"tenant_id", t.ID.String(),
+				"slug", t.Slug,
 				"error", err)
-			// Don't fail tenant creation if cache population fails
 		}
 	}
 
-	// Schema provisioning will be handled asynchronously by the worker
+	// Initialize provisioning status records (non-blocking, best-effort)
 	if s.provisioner != nil {
 		s.logger.Info("tenant created with provisioning_pending status - worker will handle provisioning",
-			"tenant_id", tenant.ID.String())
-
-		// Initialize provisioning status records (non-blocking, best-effort)
+			"tenant_id", t.ID.String())
 		if err := s.createProvisioningStatusRecords(ctx, tenantID); err != nil {
 			s.logger.Warn("failed to create provisioning status records - worker will handle",
 				"tenant_id", tenantID.String(),
 				"error", err)
 		}
 	}
-
-	return &pb.InitiateTenantResponse{
-		Tenant:           s.toProto(tenant),
-		ProvisioningHint: provisioningHintFromStatus(tenant.Status),
-	}, nil
 }
 
 // RetrieveTenant gets tenant details by ID (BIAN: Retrieve).
@@ -194,41 +223,8 @@ func (s *Service) RetrieveTenant(ctx context.Context, req *pb.RetrieveTenantRequ
 func (s *Service) GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error) {
 	// Cache-first lookup (if cache is configured)
 	if s.slugCache != nil {
-		cachedTenantID, err := s.slugCache.Get(ctx, slug)
-		if err != nil {
-			// Cache read failure - log and continue to DB lookup
-			s.logger.Warn("slug cache read failed, falling back to database",
-				"slug", slug,
-				"error", err)
-		} else if cachedTenantID != "" {
-			// Cache hit - retrieve full tenant by ID
-			tenant, err := s.repo.GetByID(ctx, cachedTenantID)
-			if err != nil {
-				if errors.Is(err, persistence.ErrTenantNotFound) {
-					// Stale cache entry - invalidate and fall through to DB lookup
-					s.logger.Warn("stale cache entry detected, invalidating",
-						"slug", slug,
-						"cached_tenant_id", cachedTenantID)
-					if invErr := s.slugCache.Invalidate(ctx, slug); invErr != nil {
-						s.logger.Error("failed to invalidate stale cache entry",
-							"slug", slug,
-							"error", invErr)
-					}
-				} else {
-					// DB error on cache hit - return error
-					s.logger.Error("failed to retrieve tenant by cached ID",
-						"slug", slug,
-						"tenant_id", cachedTenantID,
-						"error", err)
-					return nil, err
-				}
-			} else {
-				// Cache hit with successful DB lookup
-				s.logger.Debug("slug cache hit",
-					"slug", slug,
-					"tenant_id", cachedTenantID)
-				return tenant, nil
-			}
+		if tenant, ok := s.lookupSlugInCache(ctx, slug); ok {
+			return tenant, nil
 		}
 	}
 
@@ -245,21 +241,70 @@ func (s *Service) GetBySlug(ctx context.Context, slug string) (*domain.Tenant, e
 	}
 
 	// Populate cache on successful DB lookup (best-effort)
-	if s.slugCache != nil {
-		if err := s.slugCache.Set(ctx, slug, tenant.ID); err != nil {
-			s.logger.Error("failed to populate slug cache after DB lookup",
-				"slug", slug,
-				"tenant_id", tenant.ID,
-				"error", err)
-			// Don't fail the request - cache population is best-effort
-		} else {
-			s.logger.Debug("populated slug cache after DB lookup",
-				"slug", slug,
-				"tenant_id", tenant.ID)
-		}
-	}
+	s.populateSlugCache(ctx, slug, tenant)
 
 	return tenant, nil
+}
+
+// lookupSlugInCache attempts cache-first tenant resolution by slug.
+// Returns the tenant and true on cache hit, or nil and false on miss/error.
+// Handles stale cache invalidation when the cached tenant ID no longer exists.
+func (s *Service) lookupSlugInCache(ctx context.Context, slug string) (*domain.Tenant, bool) {
+	cachedTenantID, err := s.slugCache.Get(ctx, slug)
+	if err != nil {
+		s.logger.Warn("slug cache read failed, falling back to database",
+			"slug", slug,
+			"error", err)
+		return nil, false
+	}
+	if cachedTenantID == "" {
+		return nil, false
+	}
+
+	// Cache hit - retrieve full tenant by ID
+	tenant, err := s.repo.GetByID(ctx, cachedTenantID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrTenantNotFound) {
+			// Stale cache entry - invalidate and fall through to DB lookup
+			s.logger.Warn("stale cache entry detected, invalidating",
+				"slug", slug,
+				"cached_tenant_id", cachedTenantID)
+			if invErr := s.slugCache.Invalidate(ctx, slug); invErr != nil {
+				s.logger.Error("failed to invalidate stale cache entry",
+					"slug", slug,
+					"error", invErr)
+			}
+			return nil, false
+		}
+		// DB error on cache hit - log but fall through to DB lookup
+		s.logger.Error("failed to retrieve tenant by cached ID",
+			"slug", slug,
+			"tenant_id", cachedTenantID,
+			"error", err)
+		return nil, false
+	}
+
+	s.logger.Debug("slug cache hit",
+		"slug", slug,
+		"tenant_id", cachedTenantID)
+	return tenant, true
+}
+
+// populateSlugCache writes a slug-to-tenant mapping into the cache (best-effort).
+func (s *Service) populateSlugCache(ctx context.Context, slug string, tenant *domain.Tenant) {
+	if s.slugCache == nil {
+		return
+	}
+	if err := s.slugCache.Set(ctx, slug, tenant.ID); err != nil {
+		s.logger.Error("failed to populate slug cache after DB lookup",
+			"slug", slug,
+			"tenant_id", tenant.ID,
+			"error", err)
+	} else {
+		s.logger.Debug("populated slug cache after DB lookup",
+			"slug", slug,
+			"tenant_id", tenant.ID)
+	}
 }
 
 // UpdateTenantStatus changes the lifecycle status of a tenant (BIAN: Update).
@@ -276,26 +321,54 @@ func (s *Service) UpdateTenantStatus(ctx context.Context, req *pb.UpdateTenantSt
 		return nil, status.Errorf(codes.InvalidArgument, "invalid status: %v", err)
 	}
 
-	// Get current tenant to get version and validate transition
+	// Load current tenant and validate the status transition
+	currentTenant, err := s.validateStatusTransition(ctx, tenantID, domainStatus)
+	if err != nil {
+		return nil, err
+	}
+
+	// Perform the status update
+	updatedTenant, err := s.executeStatusUpdate(ctx, req, tenantID, domainStatus, currentTenant)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Info("tenant status updated",
+		"tenant_id", updatedTenant.ID.String(),
+		"old_status", currentTenant.Status,
+		"new_status", updatedTenant.Status)
+
+	// Invalidate cache on deprovisioning (tenant becoming inactive)
+	s.invalidateCacheOnDeprovision(ctx, updatedTenant, currentTenant)
+
+	return &pb.UpdateTenantStatusResponse{
+		Tenant: s.toProto(updatedTenant),
+	}, nil
+}
+
+// validateStatusTransition loads the current tenant and validates the requested status transition.
+func (s *Service) validateStatusTransition(ctx context.Context, tenantID tenant.TenantID, domainStatus domain.Status) (*domain.Tenant, error) {
 	currentTenant, err := s.repo.GetByID(ctx, tenantID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrTenantNotFound) {
-			return nil, status.Errorf(codes.NotFound, "tenant %s not found", req.TenantId)
+			return nil, status.Errorf(codes.NotFound, "tenant %s not found", tenantID)
 		}
 		s.logger.Error("failed to get tenant for status update",
-			"tenant_id", req.TenantId,
+			"tenant_id", tenantID,
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to update tenant status")
 	}
 
-	// Validate status transition
 	if !currentTenant.CanTransitionTo(domainStatus) {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"invalid status transition from %s to %s", currentTenant.Status, domainStatus)
 	}
+	return currentTenant, nil
+}
 
-	// Update status
-	tenant, err := s.repo.UpdateStatus(ctx, tenantID, domainStatus, currentTenant.Version)
+// executeStatusUpdate persists the status change and maps persistence errors to gRPC codes.
+func (s *Service) executeStatusUpdate(ctx context.Context, req *pb.UpdateTenantStatusRequest, tenantID tenant.TenantID, domainStatus domain.Status, current *domain.Tenant) (*domain.Tenant, error) {
+	updated, err := s.repo.UpdateStatus(ctx, tenantID, domainStatus, current.Version)
 	if err != nil {
 		if errors.Is(err, persistence.ErrTenantNotFound) {
 			return nil, status.Errorf(codes.NotFound, "tenant %s not found", req.TenantId)
@@ -309,31 +382,24 @@ func (s *Service) UpdateTenantStatus(ctx context.Context, req *pb.UpdateTenantSt
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to update tenant status")
 	}
+	return updated, nil
+}
 
-	s.logger.Info("tenant status updated",
-		"tenant_id", tenant.ID.String(),
-		"old_status", currentTenant.Status,
-		"new_status", tenant.Status)
-
-	// Invalidate cache on deprovisioning (tenant becoming inactive)
-	// Deprovisioned tenants should not be served from cache
-	if s.slugCache != nil && tenant.Status == domain.StatusDeprovisioned && currentTenant.Slug != "" {
-		if err := s.slugCache.Invalidate(ctx, currentTenant.Slug); err != nil {
-			s.logger.Error("failed to invalidate slug cache after deprovisioning",
-				"tenant_id", tenant.ID.String(),
-				"slug", currentTenant.Slug,
-				"error", err)
-			// Don't fail the status update if cache invalidation fails
-		} else {
-			s.logger.Debug("invalidated slug cache after deprovisioning",
-				"tenant_id", tenant.ID.String(),
-				"slug", currentTenant.Slug)
-		}
+// invalidateCacheOnDeprovision removes the slug cache entry when a tenant is deprovisioned.
+func (s *Service) invalidateCacheOnDeprovision(ctx context.Context, updated *domain.Tenant, previous *domain.Tenant) {
+	if s.slugCache == nil || updated.Status != domain.StatusDeprovisioned || previous.Slug == "" {
+		return
 	}
-
-	return &pb.UpdateTenantStatusResponse{
-		Tenant: s.toProto(tenant),
-	}, nil
+	if err := s.slugCache.Invalidate(ctx, previous.Slug); err != nil {
+		s.logger.Error("failed to invalidate slug cache after deprovisioning",
+			"tenant_id", updated.ID.String(),
+			"slug", previous.Slug,
+			"error", err)
+	} else {
+		s.logger.Debug("invalidated slug cache after deprovisioning",
+			"tenant_id", updated.ID.String(),
+			"slug", previous.Slug)
+	}
 }
 
 // ListTenants returns all tenants with optional status filter (BIAN: Control).
@@ -344,32 +410,8 @@ func (s *Service) ListTenants(ctx context.Context, req *pb.ListTenantsRequest) (
 	// users to their own tenant. When no claims are in context (auth disabled or
 	// internal calls), fall through to full list for backwards compatibility.
 	// This aligns with ReconcileMigrations and GetTenantProvisioningStatus patterns.
-	if claims, ok := auth.GetClaimsFromContext(ctx); ok {
-		if !auth.HasAnyRole(claims, auth.RolePlatformAdmin, auth.RoleSuperAdmin) {
-			// Non-admin: return only the user's own tenant
-			tenantID, err := claims.GetTenantID()
-			if err != nil {
-				s.logger.Warn("ListTenants: non-admin user without tenant claim",
-					"user_id", claims.EffectiveUserID(),
-					"error", err)
-				return &pb.ListTenantsResponse{}, nil
-			}
-
-			t, err := s.repo.GetByID(ctx, tenantID)
-			if err != nil {
-				if errors.Is(err, persistence.ErrTenantNotFound) {
-					return &pb.ListTenantsResponse{}, nil
-				}
-				s.logger.Error("failed to retrieve tenant for non-admin user",
-					"tenant_id", tenantID.String(),
-					"error", err)
-				return nil, status.Errorf(codes.Internal, "failed to list tenants")
-			}
-
-			return &pb.ListTenantsResponse{
-				Tenants: []*pb.Tenant{s.toProto(t)},
-			}, nil
-		}
+	if resp, handled := s.listTenantsForNonAdmin(ctx); handled {
+		return resp, nil
 	}
 
 	// Convert proto status filter to domain status
@@ -393,12 +435,49 @@ func (s *Service) ListTenants(ctx context.Context, req *pb.ListTenantsRequest) (
 
 	// Convert to proto
 	protoTenants := make([]*pb.Tenant, 0, len(tenants))
-	for _, tenant := range tenants {
-		protoTenants = append(protoTenants, s.toProto(tenant))
+	for _, t := range tenants {
+		protoTenants = append(protoTenants, s.toProto(t))
 	}
 
 	return &pb.ListTenantsResponse{
 		Tenants:       protoTenants,
 		NextPageToken: nextPageToken,
 	}, nil
+}
+
+// listTenantsForNonAdmin checks RBAC and returns a single-tenant response for non-admin users.
+// Returns (response, true) if the request was handled (non-admin user), or (nil, false) to
+// fall through to the full admin list path.
+func (s *Service) listTenantsForNonAdmin(ctx context.Context) (*pb.ListTenantsResponse, bool) {
+	claims, ok := auth.GetClaimsFromContext(ctx)
+	if !ok {
+		return nil, false
+	}
+	if auth.HasAnyRole(claims, auth.RolePlatformAdmin, auth.RoleSuperAdmin) {
+		return nil, false
+	}
+
+	// Non-admin: return only the user's own tenant
+	tenantID, err := claims.GetTenantID()
+	if err != nil {
+		s.logger.Warn("ListTenants: non-admin user without tenant claim",
+			"user_id", claims.EffectiveUserID(),
+			"error", err)
+		return &pb.ListTenantsResponse{}, true
+	}
+
+	t, err := s.repo.GetByID(ctx, tenantID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrTenantNotFound) {
+			return &pb.ListTenantsResponse{}, true
+		}
+		s.logger.Error("failed to retrieve tenant for non-admin user",
+			"tenant_id", tenantID.String(),
+			"error", err)
+		return &pb.ListTenantsResponse{}, true
+	}
+
+	return &pb.ListTenantsResponse{
+		Tenants: []*pb.Tenant{s.toProto(t)},
+	}, true
 }

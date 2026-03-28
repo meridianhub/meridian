@@ -6,6 +6,7 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
+	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
@@ -111,28 +112,9 @@ func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTe
 	s.logger.Debug("getting tenant provisioning status",
 		"tenant_id", req.TenantId)
 
-	// Authorization check - when auth middleware is configured, enforce tenant isolation.
-	// When no claims are present (e.g., unified binary without auth middleware), skip
-	// authorization consistent with other tenant endpoints like RetrieveTenant.
-	claims, ok := auth.GetClaimsFromContext(ctx)
-	if ok {
-		// Check authorization: either tenant-scoped access OR platform admin role
-		hasAdminRole := claims.HasRole(auth.RolePlatformAdmin.String()) || claims.HasRole(auth.RoleSuperAdmin.String())
-		hasTenantAccess := claims.HasTenantID() && claims.TenantID == req.TenantId
-
-		if !hasAdminRole && !hasTenantAccess {
-			s.logger.Warn("unauthorized provisioning status query attempt",
-				"user_id", claims.UserID,
-				"requested_tenant", req.TenantId,
-				"user_tenant", claims.TenantID,
-				"roles", claims.Roles)
-			return nil, status.Error(codes.PermissionDenied, "access denied: must be tenant owner or platform administrator")
-		}
-
-		s.logger.Debug("provisioning status query authorized",
-			"user_id", claims.UserID,
-			"tenant_id", req.TenantId,
-			"admin_access", hasAdminRole)
+	// Authorization check
+	if err := s.authorizeProvisioningStatusQuery(ctx, req.TenantId); err != nil {
+		return nil, err
 	}
 
 	// Validate tenant ID
@@ -153,38 +135,10 @@ func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTe
 		return nil, status.Errorf(codes.Internal, "failed to retrieve tenant")
 	}
 
-	// Query tenant_provisioning_status table for all service records
-	provisioningStatuses, err := s.repo.FindProvisioningStatusByTenantID(ctx, req.TenantId)
+	// Build per-service status response
+	serviceStatuses, err := s.buildServiceProvisioningStatuses(ctx, req.TenantId)
 	if err != nil {
-		s.logger.Error("failed to retrieve provisioning status records",
-			"tenant_id", req.TenantId,
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve provisioning status")
-	}
-
-	// Build ServiceProvisioningStatus slice from database results
-	serviceStatuses := make([]*pb.ServiceProvisioningStatus, 0, len(provisioningStatuses))
-	for _, ps := range provisioningStatuses {
-		serviceStatus := &pb.ServiceProvisioningStatus{
-			ServiceName:      ps.ServiceName,
-			Status:           s.toProtoServiceStatus(ps.Status),
-			MigrationVersion: ps.MigrationVersion,
-		}
-
-		// Set optional error_message
-		if ps.ErrorMessage != nil {
-			serviceStatus.ErrorMessage = *ps.ErrorMessage
-		}
-
-		// Set optional timestamps
-		if ps.StartedAt != nil {
-			serviceStatus.StartedAt = timestamppb.New(*ps.StartedAt)
-		}
-		if ps.CompletedAt != nil {
-			serviceStatus.CompletedAt = timestamppb.New(*ps.CompletedAt)
-		}
-
-		serviceStatuses = append(serviceStatuses, serviceStatus)
+		return nil, err
 	}
 
 	s.logger.Debug("tenant provisioning status retrieved",
@@ -192,11 +146,73 @@ func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTe
 		"overall_status", tenant.Status,
 		"service_count", len(serviceStatuses))
 
-	// Construct response
 	return &pb.GetTenantProvisioningStatusResponse{
 		TenantId:      req.TenantId,
 		OverallStatus: s.toProtoStatus(tenant.Status),
 		Services:      serviceStatuses,
 		ErrorMessage:  tenant.ErrorMessage,
 	}, nil
+}
+
+// authorizeProvisioningStatusQuery enforces tenant isolation for provisioning status queries.
+// When no claims are present (auth disabled), access is allowed for backwards compatibility.
+func (s *Service) authorizeProvisioningStatusQuery(ctx context.Context, requestedTenantID string) error {
+	claims, ok := auth.GetClaimsFromContext(ctx)
+	if !ok {
+		return nil
+	}
+
+	hasAdminRole := claims.HasRole(auth.RolePlatformAdmin.String()) || claims.HasRole(auth.RoleSuperAdmin.String())
+	hasTenantAccess := claims.HasTenantID() && claims.TenantID == requestedTenantID
+
+	if !hasAdminRole && !hasTenantAccess {
+		s.logger.Warn("unauthorized provisioning status query attempt",
+			"user_id", claims.UserID,
+			"requested_tenant", requestedTenantID,
+			"user_tenant", claims.TenantID,
+			"roles", claims.Roles)
+		return status.Error(codes.PermissionDenied, "access denied: must be tenant owner or platform administrator")
+	}
+
+	s.logger.Debug("provisioning status query authorized",
+		"user_id", claims.UserID,
+		"tenant_id", requestedTenantID,
+		"admin_access", hasAdminRole)
+	return nil
+}
+
+// buildServiceProvisioningStatuses queries and maps per-service provisioning records to proto.
+func (s *Service) buildServiceProvisioningStatuses(ctx context.Context, tenantID string) ([]*pb.ServiceProvisioningStatus, error) {
+	provisioningStatuses, err := s.repo.FindProvisioningStatusByTenantID(ctx, tenantID)
+	if err != nil {
+		s.logger.Error("failed to retrieve provisioning status records",
+			"tenant_id", tenantID,
+			"error", err)
+		return nil, status.Errorf(codes.Internal, "failed to retrieve provisioning status")
+	}
+
+	serviceStatuses := make([]*pb.ServiceProvisioningStatus, 0, len(provisioningStatuses))
+	for _, ps := range provisioningStatuses {
+		serviceStatuses = append(serviceStatuses, s.mapProvisioningStatusToProto(ps))
+	}
+	return serviceStatuses, nil
+}
+
+// mapProvisioningStatusToProto converts a domain provisioning status to its proto representation.
+func (s *Service) mapProvisioningStatusToProto(ps domain.ProvisioningStatus) *pb.ServiceProvisioningStatus {
+	sps := &pb.ServiceProvisioningStatus{
+		ServiceName:      ps.ServiceName,
+		Status:           s.toProtoServiceStatus(ps.Status),
+		MigrationVersion: ps.MigrationVersion,
+	}
+	if ps.ErrorMessage != nil {
+		sps.ErrorMessage = *ps.ErrorMessage
+	}
+	if ps.StartedAt != nil {
+		sps.StartedAt = timestamppb.New(*ps.StartedAt)
+	}
+	if ps.CompletedAt != nil {
+		sps.CompletedAt = timestamppb.New(*ps.CompletedAt)
+	}
+	return sps
 }

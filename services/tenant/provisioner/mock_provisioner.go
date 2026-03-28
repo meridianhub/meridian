@@ -76,22 +76,7 @@ func NewMockProvisioner(services []ServiceConfig) *MockProvisioner {
 // This is acceptable for testing purposes where the callback mechanism provides deterministic
 // control over the test flow.
 func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.TenantID) error {
-	m.mu.Lock()
-
-	// Record the call
-	m.ProvisioningCalls = append(m.ProvisioningCalls, tenantID)
-
-	// Calculate attempt count for this tenant before releasing lock
-	attemptCount := 0
-	for _, calledID := range m.ProvisioningCalls {
-		if calledID.String() == tenantID.String() {
-			attemptCount++
-		}
-	}
-
-	// Capture callback before releasing lock
-	callback := m.OnProvisionAttempt
-	m.mu.Unlock()
+	attemptCount, callback := m.recordProvisioningCall(tenantID)
 
 	// Invoke callback outside lock to allow test code to modify state (e.g., ClearFailure)
 	if callback != nil {
@@ -107,10 +92,7 @@ func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.
 		return ErrProvisioningInProgress
 	}
 
-	// Simulate delay if configured.
-	// NOTE: Lock is held during sleep intentionally for test simplicity.
-	// This prevents concurrent test access but may cause test timeouts if delay is long.
-	// For production implementations, consider releasing lock during I/O operations.
+	// Simulate delay if configured
 	if m.ProvisioningDelay > 0 {
 		select {
 		case <-ctx.Done():
@@ -119,9 +101,32 @@ func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.
 		}
 	}
 
+	return m.simulateProvisioning(tenantID)
+}
+
+// recordProvisioningCall records the call and calculates attempt count.
+// Returns the attempt count and captured callback. Releases the lock before returning.
+func (m *MockProvisioner) recordProvisioningCall(tenantID tenant.TenantID) (int, func(string, int)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.ProvisioningCalls = append(m.ProvisioningCalls, tenantID)
+
+	attemptCount := 0
+	for _, calledID := range m.ProvisioningCalls {
+		if calledID.String() == tenantID.String() {
+			attemptCount++
+		}
+	}
+
+	return attemptCount, m.OnProvisionAttempt
+}
+
+// simulateProvisioning handles the mock provisioning result (failure, idempotent, or success).
+// Must be called with m.mu held.
+func (m *MockProvisioner) simulateProvisioning(tenantID tenant.TenantID) error {
 	// Check for simulated failure
 	if err, shouldFail := m.FailProvisioningFor[tenantID.String()]; shouldFail {
-		// Create failed status
 		m.statuses[tenantID.String()] = &ProvisioningStatus{
 			TenantID:     tenantID,
 			State:        StateFailed,
@@ -133,9 +138,8 @@ func (m *MockProvisioner) ProvisionSchemas(ctx context.Context, tenantID tenant.
 		return err
 	}
 
-	// Check if already provisioned
+	// Idempotent: already provisioned, no-op
 	if status, exists := m.statuses[tenantID.String()]; exists && status.State == StateActive {
-		// Idempotent: already provisioned, no-op
 		return nil
 	}
 
