@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
@@ -426,7 +427,7 @@ func (c *Container) initializeIdempotency() error {
 		if env.IsProduction() {
 			c.Logger.Error("CRITICAL: Redis unavailable in production - failing fast",
 				"environment", os.Getenv("ENVIRONMENT"))
-			return ErrRedisRequiredInProduction
+			return bootstrap.Permanent(ErrRedisRequiredInProduction)
 		}
 		c.Logger.Warn("Redis not available at startup, using noop idempotency service - DEVELOPMENT ONLY",
 			"environment", os.Getenv("ENVIRONMENT"))
