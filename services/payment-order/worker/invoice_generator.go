@@ -187,7 +187,7 @@ func (g *InvoiceGenerator) generatePartyInvoice(
 	}
 
 	if len(lineItems) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil invoice signals no billable items for this account
 	}
 
 	*sequenceNum++

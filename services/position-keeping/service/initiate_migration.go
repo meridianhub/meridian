@@ -222,7 +222,7 @@ func (s *PositionKeepingService) handleMigrationIdempotencyResult(
 
 	case idempotency.StatusFailed:
 		// Allow retry for failed operations
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil response signals retry-allowed for failed idempotent ops
 
 	default:
 		return nil, status.Errorf(codes.Internal, "unexpected idempotency status: %s", result.Status)
