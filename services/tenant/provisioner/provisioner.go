@@ -55,6 +55,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -441,24 +442,45 @@ func DefaultConfig() *Config {
 // Pattern: {SERVICE_NAME}_DATABASE_URL (uppercase with hyphens replaced by underscores)
 // Example: PARTY_DATABASE_URL, CURRENT_ACCOUNT_DATABASE_URL
 //
-// If the environment variable is not set, falls back to a constructed URL:
-// postgres://meridian_{service}_user@cockroachdb:26257/meridian_{service}?sslmode=disable
+// Fallback order:
+//  1. Service-specific env var (e.g. PARTY_DATABASE_URL)
+//  2. DATABASE_URL with the database name replaced to meridian_{service}
+//  3. Hardcoded local dev URL: postgres://meridian_{service}_user@localhost:26257/meridian_{service}
 func getServiceDatabaseURL(serviceName string) string {
 	envKey := strings.ToUpper(strings.ReplaceAll(serviceName, "-", "_")) + "_DATABASE_URL"
-	url := os.Getenv(envKey)
-	if url != "" {
-		return url
+	if envURL := os.Getenv(envKey); envURL != "" {
+		return envURL
 	}
 
-	// Fallback to constructed URL for backward compatibility.
-	// WARNING: Fallback URLs use sslmode=disable which is only suitable for local dev.
-	// In production, always set explicit DATABASE_URL environment variables with
-	// appropriate SSL settings (e.g., sslmode=verify-full).
-	slog.Warn("using fallback database URL (not recommended for production)",
+	dbName := "meridian_" + strings.ReplaceAll(serviceName, "-", "_")
+
+	// Derive from DATABASE_URL by replacing the database name component.
+	// This ensures the provisioner uses the same host/port/credentials as
+	// the rest of the application (e.g. postgres:5432 on demo, cockroachdb:26257 in prod).
+	if baseURL := os.Getenv("DATABASE_URL"); baseURL != "" {
+		derived, err := deriveServiceURL(baseURL, dbName)
+		if err == nil {
+			return derived
+		}
+		slog.Warn("failed to derive service URL from DATABASE_URL, using hardcoded fallback",
+			"service", serviceName, "error", err)
+	}
+
+	// Hardcoded fallback for local development without DATABASE_URL.
+	slog.Warn("using hardcoded fallback database URL (local dev only)",
 		"service", serviceName,
 		"env_var", envKey,
-		"hint", "Set "+envKey+" environment variable with appropriate SSL settings")
-	dbName := "meridian_" + strings.ReplaceAll(serviceName, "-", "_")
+		"hint", "Set DATABASE_URL or "+envKey+" environment variable")
 	user := dbName + "_user"
-	return fmt.Sprintf("postgres://%s@cockroachdb:26257/%s?sslmode=disable", user, dbName)
+	return fmt.Sprintf("postgres://%s@localhost:26257/%s?sslmode=disable", user, dbName)
+}
+
+// deriveServiceURL replaces the database name in a base DSN URL.
+func deriveServiceURL(baseURL, database string) (string, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse base URL: %w", err)
+	}
+	parsed.Path = "/" + database
+	return parsed.String(), nil
 }

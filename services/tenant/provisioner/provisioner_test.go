@@ -438,16 +438,24 @@ func TestMockProvisioner_Reset(t *testing.T) {
 }
 
 func TestGetServiceDatabaseURL(t *testing.T) {
-	t.Run("returns env var when set", func(t *testing.T) {
+	t.Run("returns service-specific env var when set", func(t *testing.T) {
 		t.Setenv("PARTY_DATABASE_URL", "postgres://test:test@localhost:5432/party")
 		url := getServiceDatabaseURL("party")
 		assert.Equal(t, "postgres://test:test@localhost:5432/party", url)
 	})
 
-	t.Run("returns fallback URL when env var not set", func(t *testing.T) {
+	t.Run("derives from DATABASE_URL when service env var not set", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user:pass@postgres:5432/meridian?sslmode=disable")
+		url := getServiceDatabaseURL("party")
+		assert.Contains(t, url, "postgres:5432")
+		assert.Contains(t, url, "/meridian_party")
+		assert.Contains(t, url, "user:pass")
+	})
+
+	t.Run("returns hardcoded fallback when no env vars set", func(t *testing.T) {
 		url := getServiceDatabaseURL("party")
 		assert.Contains(t, url, "meridian_party")
-		assert.Contains(t, url, "cockroachdb:26257")
+		assert.Contains(t, url, "localhost:26257")
 	})
 
 	t.Run("handles hyphens in service name", func(t *testing.T) {
@@ -456,9 +464,18 @@ func TestGetServiceDatabaseURL(t *testing.T) {
 		assert.Equal(t, "postgres://test@localhost/ca", url)
 	})
 
-	t.Run("fallback with hyphens replaced", func(t *testing.T) {
+	t.Run("derives with hyphens replaced", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user@myhost:5432/db?sslmode=disable")
 		url := getServiceDatabaseURL("current-account")
 		assert.Contains(t, url, "meridian_current_account")
+		assert.Contains(t, url, "myhost:5432")
+	})
+
+	t.Run("service-specific env var takes priority over DATABASE_URL", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user@postgres:5432/db?sslmode=disable")
+		t.Setenv("PARTY_DATABASE_URL", "postgres://specific@other:9999/party_db")
+		url := getServiceDatabaseURL("party")
+		assert.Equal(t, "postgres://specific@other:9999/party_db", url)
 	})
 }
 
