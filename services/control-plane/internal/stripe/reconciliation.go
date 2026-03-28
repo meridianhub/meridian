@@ -117,7 +117,7 @@ func (s *ReconciliationService) RunDailyReconciliation(ctx context.Context, date
 
 	chargeMap, chargeIDs, stripeTotalCents := buildChargeIndex(charges)
 
-	ledgerMap, ledgerTotalCents, err := s.fetchAndIndexLedgerEntries(ctx, chargeIDs)
+	ledgerMap, ledgerEntryCount, ledgerTotalCents, err := s.fetchAndIndexLedgerEntries(ctx, chargeIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (s *ReconciliationService) RunDailyReconciliation(ctx context.Context, date
 	report := &ReconciliationReport{
 		Date:                     from,
 		StripeChargeCount:        len(charges),
-		LedgerEntryCount:         len(ledgerMap),
+		LedgerEntryCount:         ledgerEntryCount,
 		StripeTotalCents:         stripeTotalCents,
 		LedgerTotalCents:         ledgerTotalCents,
 		VarianceCents:            varianceCents,
@@ -159,13 +159,14 @@ func buildChargeIndex(charges []ChargeRecord) (map[string]*ChargeRecord, []strin
 }
 
 // fetchAndIndexLedgerEntries fetches ledger entries matching chargeIDs and builds a lookup map.
-func (s *ReconciliationService) fetchAndIndexLedgerEntries(ctx context.Context, chargeIDs []string) (map[string]*LedgerRecord, int64, error) {
+// Returns the map, raw entry count (pre-deduplication), total cents, and any error.
+func (s *ReconciliationService) fetchAndIndexLedgerEntries(ctx context.Context, chargeIDs []string) (map[string]*LedgerRecord, int, int64, error) {
 	if len(chargeIDs) == 0 {
-		return make(map[string]*LedgerRecord), 0, nil
+		return make(map[string]*LedgerRecord), 0, 0, nil
 	}
 	ledgerEntries, err := s.ledgerSource.ListEntriesByExternalRef(ctx, chargeIDs)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to fetch ledger entries: %w", err)
+		return nil, 0, 0, fmt.Errorf("failed to fetch ledger entries: %w", err)
 	}
 	ledgerMap := make(map[string]*LedgerRecord, len(ledgerEntries))
 	var totalCents int64
@@ -173,7 +174,7 @@ func (s *ReconciliationService) fetchAndIndexLedgerEntries(ctx context.Context, 
 		ledgerMap[ledgerEntries[i].ExternalReferenceID] = &ledgerEntries[i]
 		totalCents += ledgerEntries[i].AmountCents
 	}
-	return ledgerMap, totalCents, nil
+	return ledgerMap, len(ledgerEntries), totalCents, nil
 }
 
 // findMissingEntries identifies charges missing in ledger and ledger entries missing in Stripe.

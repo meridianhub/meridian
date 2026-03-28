@@ -131,7 +131,8 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	lastErr error,
 	logger *slog.Logger,
 ) {
-	updateCtx := buildFreshContext(parentCtx, lienStatusUpdateTimeout)
+	updateCtx, cancel := buildFreshContext(parentCtx, lienStatusUpdateTimeout)
+	defer cancel()
 
 	// Acquire distributed lock if configured
 	if !o.acquireLienLock(updateCtx, paymentOrderID, logger) {
@@ -188,13 +189,12 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 }
 
 // buildFreshContext creates a fresh background context with tenant propagation.
-func buildFreshContext(parentCtx context.Context, timeout time.Duration) context.Context {
+func buildFreshContext(parentCtx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx := context.Background()
 	if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
 		ctx = tenant.WithTenant(ctx, tenantID)
 	}
-	ctx, _ = context.WithTimeout(ctx, timeout) //nolint:govet // cancel deferred by caller's overall flow
-	return ctx
+	return context.WithTimeout(ctx, timeout)
 }
 
 // acquireLienLock acquires a distributed lock for lien status updates. Returns false if lock contention prevents proceeding.
