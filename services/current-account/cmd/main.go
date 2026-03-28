@@ -61,14 +61,17 @@ func run(logger *slog.Logger) error {
 	// Use a run-scoped context so lazy resolution goroutines stop when run() returns
 	// (e.g., during RunWithRetry retries or shutdown).
 	ctx, runCancel := context.WithCancel(context.Background())
-	defer runCancel()
 
 	// Initialize dependency container
 	container, err := app.NewContainer(ctx, logger, Version)
 	if err != nil {
+		runCancel()
 		return err
 	}
-	defer container.Close()
+	defer func() {
+		runCancel()
+		container.Close()
+	}()
 
 	// Initialize Kafka producer lazily for outbox worker (optional - graceful degradation).
 	// Channels communicate the outbox stop function and Kafka cleanup function back to the

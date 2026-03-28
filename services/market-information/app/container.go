@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gorm.io/gorm"
@@ -154,10 +153,7 @@ func (c *Container) initKafka(ctx context.Context) error {
 		Compression:      "snappy",
 	})
 	if err != nil {
-		c.Logger.Warn("failed to create Kafka producer for outbox worker",
-			"error", err,
-			"environment", os.Getenv("ENVIRONMENT"))
-		return nil
+		return fmt.Errorf("failed to create Kafka producer for outbox worker: %w", err)
 	}
 
 	c.kafkaProducer = producer

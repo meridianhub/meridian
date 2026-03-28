@@ -27,9 +27,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/ports"
 )
 
-// ErrContainerCloseFailures is returned when one or more resources fail to close.
-var ErrContainerCloseFailures = errors.New("container close encountered failures")
-
 // ErrRedisRequiredInProduction is returned when Redis is unavailable in production environments.
 var ErrRedisRequiredInProduction = errors.New("redis required for idempotency in production environment")
 
@@ -189,10 +186,12 @@ func (c *Container) initServiceClients(_ context.Context) error {
 	// Load account configuration for clearing accounts (enables double-entry bookkeeping).
 	// If not configured, the service operates in single-entry mode without clearing account postings.
 	accountConfig, cfgErr := config.LoadAccountConfig()
-	if cfgErr != nil {
+	if errors.Is(cfgErr, config.ErrEmptyDepositClearingAccountID) {
 		c.Logger.Warn("account configuration not loaded, operating in single-entry mode",
 			"error", cfgErr)
 		accountConfig = nil
+	} else if cfgErr != nil {
+		return fmt.Errorf("failed to load account configuration: %w", cfgErr)
 	} else {
 		c.Logger.Info("account configuration loaded",
 			"deposit_clearing_account_id", accountConfig.DepositClearingAccountID)

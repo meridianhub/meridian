@@ -116,13 +116,16 @@ func NewContainer(ctx context.Context, logger *slog.Logger, version string) (*Co
 
 	c.initService(ctx)
 
-	if err := c.initProvisioningWorker(ctx); err != nil {
+	if err := c.initProvisioningWorker(); err != nil {
 		return nil, err
 	}
 
 	if err := c.initAuth(ctx); err != nil {
 		return nil, err
 	}
+
+	// Start background workers only after all initialization succeeds.
+	c.startProvisioningWorker(ctx)
 
 	succeeded = true
 	logger.Info("dependency container initialized successfully")
@@ -320,8 +323,9 @@ func (c *Container) initService(ctx context.Context) {
 		"refresh_interval", "60s")
 }
 
-// initProvisioningWorker creates and starts the provisioning worker if schema provisioning is enabled.
-func (c *Container) initProvisioningWorker(ctx context.Context) error {
+// initProvisioningWorker creates the provisioning worker if schema provisioning is enabled.
+// The worker is not started here - call startProvisioningWorker after all initialization succeeds.
+func (c *Container) initProvisioningWorker() error {
 	if c.SchemaProvisioner == nil {
 		c.Logger.Info("provisioning worker disabled",
 			"hint", "set SCHEMA_PROVISIONING_ENABLED=true to enable background provisioning")
@@ -350,12 +354,16 @@ func (c *Container) initProvisioningWorker(ctx context.Context) error {
 	}
 
 	c.ProvisioningWorker = pw
-
-	// Start worker in background goroutine
-	go pw.Start(ctx)
-
-	c.Logger.Info("provisioning worker started")
 	return nil
+}
+
+// startProvisioningWorker starts the provisioning worker in a background goroutine.
+func (c *Container) startProvisioningWorker(ctx context.Context) {
+	if c.ProvisioningWorker == nil {
+		return
+	}
+	go c.ProvisioningWorker.Start(ctx)
+	c.Logger.Info("provisioning worker started")
 }
 
 // initAuth initializes the auth interceptor.
