@@ -2,21 +2,38 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	currentaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
+	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
+	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/messaging"
 	"github.com/meridianhub/meridian/services/position-keeping/adapters/persistence"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
+	"github.com/meridianhub/meridian/services/position-keeping/observability"
+	"github.com/meridianhub/meridian/services/position-keeping/service"
+	"github.com/meridianhub/meridian/services/position-keeping/worker"
+	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
-	"github.com/meridianhub/meridian/shared/platform/observability"
+	pkobservability "github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
+
+// ErrRedisRequiredInProduction is returned when Redis is unavailable in production environments.
+var ErrRedisRequiredInProduction = errors.New("redis required for idempotency in production environment")
 
 // Container holds all application dependencies
 type Container struct {
@@ -26,7 +43,7 @@ type Container struct {
 	// Infrastructure
 	DBPool          *pgxpool.Pool
 	RedisClient     *redis.Client
-	Tracer          *observability.Tracer
+	Tracer          *pkobservability.Tracer
 	AuthInterceptor *auth.Interceptor
 	kafkaProducer   *kafka.ProtoProducer // internal, for cleanup
 	auditPublisher  *audit.Publisher     // internal, for cleanup
@@ -41,6 +58,18 @@ type Container struct {
 
 	// Event Outbox
 	OutboxRepository *events.PgxOutboxRepository
+
+	// Idempotency
+	IdempotencyService idempotency.Service
+
+	// Account Validation
+	ServiceOpts []service.Option
+
+	// Compaction Worker
+	CompactionWorker *worker.CompactionWorker
+
+	// gRPC connections for cleanup
+	grpcConns []*grpc.ClientConn
 }
 
 // NewContainer creates and initializes a new dependency injection container
@@ -49,6 +78,18 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 		Config: config,
 		Logger: logger,
 	}
+
+	// If initialization fails partway, close already-initialized resources.
+	succeeded := false
+	defer func() { //nolint:contextcheck // Close manages its own shutdown contexts
+		if !succeeded {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
+			defer cancel()
+			if err := container.Close(shutdownCtx); err != nil {
+				logger.Error("failed to close container during init cleanup", "error", err)
+			}
+		}
+	}()
 
 	// Initialize dependencies in order
 	if err := container.initializeTracer(ctx); err != nil {
@@ -80,6 +121,17 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 
 	container.initializeOutboxPublisher()
 
+	if err := container.initializeIdempotency(); err != nil {
+		return nil, err
+	}
+
+	if err := container.initializeAccountValidation(); err != nil { //nolint:contextcheck // instrument resolver manages its own gRPC connections
+		return nil, err
+	}
+
+	container.initializeCompactionWorker()
+
+	succeeded = true
 	logger.Info("dependency container initialized successfully")
 
 	return container, nil
@@ -93,7 +145,7 @@ func (c *Container) initializeTracer(ctx context.Context) error {
 		return nil
 	}
 
-	tracerConfig, err := observability.DefaultConfig()
+	tracerConfig, err := pkobservability.DefaultConfig()
 	if err != nil {
 		return fmt.Errorf("failed to create tracer config: %w", err)
 	}
@@ -106,7 +158,7 @@ func (c *Container) initializeTracer(ctx context.Context) error {
 		WithOTLPEndpoint(c.Config.Observability.OTLPEndpoint).
 		WithSamplingRate(c.Config.Observability.SamplingRate)
 
-	tracer, err := observability.NewTracer(ctx, tracerConfig)
+	tracer, err := pkobservability.NewTracer(ctx, tracerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create tracer: %w", err)
 	}
@@ -360,6 +412,216 @@ func (c *Container) KafkaProducer() *kafka.ProtoProducer {
 	return c.kafkaProducer
 }
 
+// initializeIdempotency creates the idempotency service.
+// In production, Redis is required (fails fast). In non-production, falls back to NoopService.
+func (c *Container) initializeIdempotency() error {
+	if c.RedisClient != nil {
+		c.IdempotencyService = idempotency.NewRedisService(c.RedisClient)
+		observability.SetNoopIdempotencyActive(false)
+		c.Logger.Info("idempotency service enabled with Redis")
+		return nil
+	}
+
+	if c.Config.Redis.Enabled {
+		// Redis is configured but was not available at container startup
+		if env.IsProduction() {
+			c.Logger.Error("CRITICAL: Redis unavailable in production - failing fast",
+				"environment", os.Getenv("ENVIRONMENT"))
+			return bootstrap.Permanent(ErrRedisRequiredInProduction)
+		}
+		c.Logger.Warn("Redis not available at startup, using noop idempotency service - DEVELOPMENT ONLY",
+			"environment", os.Getenv("ENVIRONMENT"))
+	} else {
+		c.Logger.Warn("Redis not configured, using noop idempotency service - DEVELOPMENT ONLY",
+			"environment", os.Getenv("ENVIRONMENT"))
+	}
+
+	c.IdempotencyService = idempotency.NewNoopService(c.Logger)
+	observability.SetNoopIdempotencyActive(true)
+	observability.RecordServiceDegradation(observability.ComponentIdempotency, observability.DegradationReasonStartupFallback)
+	return nil
+}
+
+// initializeAccountValidation creates account validators, appending service options to ServiceOpts.
+func (c *Container) initializeAccountValidation() error {
+	if !c.Config.AccountValidation.Enabled {
+		c.Logger.Info("account validation disabled")
+		return c.initializeInstrumentResolver()
+	}
+
+	currentAccountValidator, err := c.createCurrentAccountValidator()
+	if err != nil {
+		return err
+	}
+
+	internalAccountValidator, err := c.createInternalAccountValidator()
+	if err != nil {
+		return err
+	}
+
+	compositeValidator, compositeErr := service.NewCompositeAccountValidator(service.CompositeAccountValidatorConfig{
+		CurrentAccountValidator:  currentAccountValidator,
+		InternalAccountValidator: internalAccountValidator,
+		Logger:                   c.Logger,
+	})
+	if compositeErr != nil {
+		return fmt.Errorf("failed to create composite account validator: %w", compositeErr)
+	}
+
+	c.ServiceOpts = append(c.ServiceOpts,
+		service.WithAccountValidator(compositeValidator),
+		service.WithAccountValidationEnabled(true),
+	)
+
+	c.Logger.Info("account validation enabled",
+		"current_account_url", c.Config.AccountValidation.CurrentAccountServiceURL,
+		"internal_account_url", c.Config.AccountValidation.InternalAccountServiceURL,
+		"cache_ttl", c.Config.AccountValidation.CacheTTL)
+
+	return c.initializeInstrumentResolver()
+}
+
+// createCurrentAccountValidator creates the Current Account validator if URL is configured.
+func (c *Container) createCurrentAccountValidator() (*service.CurrentAccountValidator, error) {
+	if c.Config.AccountValidation.CurrentAccountServiceURL == "" {
+		return nil, nil //nolint:nilnil // nil validator is valid when URL not configured
+	}
+
+	conn, connErr := grpc.NewClient(
+		c.Config.AccountValidation.CurrentAccountServiceURL,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if connErr != nil {
+		return nil, fmt.Errorf("failed to create current account client at %s: %w",
+			c.Config.AccountValidation.CurrentAccountServiceURL, connErr)
+	}
+	c.grpcConns = append(c.grpcConns, conn)
+
+	client := currentaccountv1.NewCurrentAccountServiceClient(conn)
+	validator, validatorErr := service.NewCurrentAccountValidator(service.CurrentAccountValidatorConfig{
+		Client:        &CurrentAccountClientAdapter{Client: client},
+		Logger:        c.Logger,
+		CacheTTL:      c.Config.AccountValidation.CacheTTL,
+		LookupTimeout: c.Config.AccountValidation.ConnectionTimeout,
+	})
+	if validatorErr != nil {
+		return nil, fmt.Errorf("failed to create current account validator: %w", validatorErr)
+	}
+	c.Logger.Info("current account validator configured",
+		"url", c.Config.AccountValidation.CurrentAccountServiceURL)
+	return validator, nil
+}
+
+// createInternalAccountValidator creates the Internal Account validator if URL is configured.
+func (c *Container) createInternalAccountValidator() (*service.InternalAccountValidator, error) {
+	if c.Config.AccountValidation.InternalAccountServiceURL == "" {
+		return nil, nil //nolint:nilnil // nil validator is valid when URL not configured
+	}
+
+	conn, connErr := grpc.NewClient(
+		c.Config.AccountValidation.InternalAccountServiceURL,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if connErr != nil {
+		return nil, fmt.Errorf("failed to create internal account client at %s: %w",
+			c.Config.AccountValidation.InternalAccountServiceURL, connErr)
+	}
+	c.grpcConns = append(c.grpcConns, conn)
+
+	client := internalaccountv1.NewInternalAccountServiceClient(conn)
+	validator, validatorErr := service.NewInternalAccountValidator(service.InternalAccountValidatorConfig{
+		Client:        &InternalAccountClientAdapter{Client: client},
+		Logger:        c.Logger,
+		CacheTTL:      c.Config.AccountValidation.CacheTTL,
+		LookupTimeout: c.Config.AccountValidation.ConnectionTimeout,
+	})
+	if validatorErr != nil {
+		return nil, fmt.Errorf("failed to create internal account validator: %w", validatorErr)
+	}
+	c.Logger.Info("internal account validator configured",
+		"url", c.Config.AccountValidation.InternalAccountServiceURL)
+	return validator, nil
+}
+
+// initializeInstrumentResolver initializes the Reference Data InstrumentResolver (optional).
+func (c *Container) initializeInstrumentResolver() error {
+	if c.Config.ReferenceData.ServiceURL == "" {
+		c.Logger.Info("instrument resolver disabled (REFERENCE_DATA_SERVICE_URL not configured)")
+		return nil
+	}
+
+	conn, connErr := grpc.NewClient(
+		c.Config.ReferenceData.ServiceURL,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if connErr != nil {
+		return fmt.Errorf("failed to create reference data client at %s: %w",
+			c.Config.ReferenceData.ServiceURL, connErr)
+	}
+	c.grpcConns = append(c.grpcConns, conn)
+
+	refDataClient := referencedatav1.NewReferenceDataServiceClient(conn)
+	dataSource := refdata.NewGRPCDataSource(refDataClient)
+	cachedResolver := refdata.NewCachedResolver(dataSource, refdata.CachedResolverConfig{
+		Logger: c.Logger,
+	})
+
+	ctx := context.Background()
+	if preloadErr := cachedResolver.Preload(ctx); preloadErr != nil {
+		c.Logger.Warn("failed to preload instrument cache from reference data, will resolve on demand",
+			"error", preloadErr)
+	}
+
+	c.ServiceOpts = append(c.ServiceOpts, service.WithInstrumentResolver(cachedResolver))
+	c.Logger.Info("instrument resolver configured",
+		"url", c.Config.ReferenceData.ServiceURL)
+	return nil
+}
+
+// initializeCompactionWorker creates the background compaction worker (if enabled).
+func (c *Container) initializeCompactionWorker() {
+	if !c.Config.Compaction.Enabled {
+		c.Logger.Info("compaction worker disabled")
+		return
+	}
+
+	compactionConfig := worker.CompactionConfig{
+		RunInterval:       c.Config.Compaction.RunInterval,
+		FragmentThreshold: c.Config.Compaction.FragmentThreshold,
+		BatchSize:         c.Config.Compaction.BatchSize,
+	}
+	compactionWorker, workerErr := worker.NewCompactionWorker(c.DBPool, compactionConfig, c.Logger)
+	if workerErr != nil {
+		c.Logger.Error("failed to create compaction worker", "error", workerErr)
+		return
+	}
+	c.CompactionWorker = compactionWorker
+	c.Logger.Info("compaction worker enabled",
+		"run_interval", c.Config.Compaction.RunInterval,
+		"fragment_threshold", c.Config.Compaction.FragmentThreshold,
+		"batch_size", c.Config.Compaction.BatchSize)
+}
+
+// CurrentAccountClientAdapter adapts the generated gRPC client to the service.CurrentAccountClient interface.
+type CurrentAccountClientAdapter struct {
+	Client currentaccountv1.CurrentAccountServiceClient
+}
+
+// RetrieveCurrentAccount implements service.CurrentAccountClient by delegating to the generated client.
+func (a *CurrentAccountClientAdapter) RetrieveCurrentAccount(ctx context.Context, req *currentaccountv1.RetrieveCurrentAccountRequest) (*currentaccountv1.RetrieveCurrentAccountResponse, error) {
+	return a.Client.RetrieveCurrentAccount(ctx, req)
+}
+
+// InternalAccountClientAdapter adapts the generated gRPC client to the service.InternalAccountClient interface.
+type InternalAccountClientAdapter struct {
+	Client internalaccountv1.InternalAccountServiceClient
+}
+
+// RetrieveInternalAccount implements service.InternalAccountClient by delegating to the generated client.
+func (a *InternalAccountClientAdapter) RetrieveInternalAccount(ctx context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+	return a.Client.RetrieveInternalAccount(ctx, req)
+}
+
 // Close gracefully closes all resources in the container
 func (c *Container) Close(ctx context.Context) error {
 	c.Logger.Info("closing container resources...")
@@ -388,6 +650,14 @@ func (c *Container) Close(ctx context.Context) error {
 		}
 		c.kafkaProducer.Close()
 		c.Logger.Info("kafka producer closed")
+	}
+
+	// Close gRPC connections (account validators, reference data)
+	for _, conn := range c.grpcConns {
+		if err := conn.Close(); err != nil {
+			c.Logger.Error("failed to close gRPC connection", "error", err)
+			errs = append(errs, fmt.Errorf("grpc connection close: %w", err))
+		}
 	}
 
 	// Close database pool
