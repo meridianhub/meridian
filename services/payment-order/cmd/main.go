@@ -22,6 +22,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/meridianhub/meridian/shared/platform/ports"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -59,6 +60,14 @@ func main() {
 	logger.Info("service stopped gracefully")
 }
 
+// paymentOrderServers holds the initialized servers and consumer for the run lifecycle.
+type paymentOrderServers struct {
+	grpcServer           *grpc.Server
+	grpcListener         net.Listener
+	httpServer           *webhookhttp.Server
+	paymentEventConsumer *pomessaging.PaymentEventConsumer
+}
+
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
 
@@ -76,7 +85,30 @@ func run(logger *slog.Logger) error {
 	}
 	defer container.Close()
 
-	// Create payment order service
+	// Create services and servers
+	paymentOrderService, err := createPaymentOrderService(container, &svcConfig, logger)
+	if err != nil {
+		return err
+	}
+
+	servers, err := setupServers(ctx, container, &svcConfig, paymentOrderService, logger)
+	if err != nil {
+		return err
+	}
+	if servers.paymentEventConsumer != nil {
+		defer func() {
+			if err := servers.paymentEventConsumer.Close(); err != nil {
+				logger.Error("failed to close payment event consumer", "error", err)
+			}
+		}()
+	}
+
+	// Start all servers and workers, then wait for shutdown
+	return startAndAwaitShutdown(ctx, &svcConfig, container, servers, logger)
+}
+
+// createPaymentOrderService creates the main payment order service with all dependencies.
+func createPaymentOrderService(container *app.Container, svcConfig *config.ServiceConfig, logger *slog.Logger) (*service.Service, error) {
 	paymentOrderService, err := service.NewServiceWithConfig(service.Config{
 		Repository:                container.PaymentOrderRepo,
 		CurrentAccountClient:      container.CurrentAccountClient,
@@ -95,29 +127,29 @@ func run(logger *slog.Logger) error {
 		SagaOrchestrationEnabled:  svcConfig.SagaOrchestrationEnabled,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create payment order service: %w", err)
+		return nil, fmt.Errorf("failed to create payment order service: %w", err)
 	}
 
 	logger.Info("saga orchestration configuration",
 		"saga_orchestration_enabled", svcConfig.SagaOrchestrationEnabled)
 
-	// Create gRPC server with interceptor chain
-	// Order is handled by bootstrap: tracing -> auth -> recovery
+	return paymentOrderService, nil
+}
+
+// setupServers creates gRPC, HTTP, and Kafka consumer servers.
+func setupServers(ctx context.Context, container *app.Container, svcConfig *config.ServiceConfig, paymentOrderService *service.Service, logger *slog.Logger) (*paymentOrderServers, error) {
+	// Create gRPC server
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
 		WithAuthInterceptor(container.AuthInterceptor).
 		Build()
 	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
+		return nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
 
 	// Register gRPC services
 	pb.RegisterPaymentOrderServiceServer(grpcServer, paymentOrderService)
-
-	// Register billing gRPC service. Email outbox is nil until the email worker
-	// is wired into this service; ResendInvoiceEmail returns Unavailable until then.
-	billingGRPCService := service.NewBillingService(container.BillingRepo, nil /* emailRepo */, logger)
+	billingGRPCService := service.NewBillingService(container.BillingRepo, nil, logger)
 	billingpb.RegisterBillingServiceServer(grpcServer, billingGRPCService)
-
 	grpc_health_v1.RegisterHealthServer(grpcServer, &simpleHealthServer{})
 	reflection.Register(grpcServer)
 	logger.Info("gRPC services registered")
@@ -125,10 +157,9 @@ func run(logger *slog.Logger) error {
 	// Create HTTP webhook handler
 	hmacSecret := []byte(env.GetEnvOrDefault("WEBHOOK_HMAC_SECRET", ""))
 	if len(hmacSecret) == 0 {
-		return bootstrap.Permanent(app.ErrMissingHMACSecret)
+		return nil, bootstrap.Permanent(app.ErrMissingHMACSecret)
 	}
 
-	// Create a gRPC client wrapper for the local service
 	localServiceClient := &localPaymentOrderClient{service: paymentOrderService}
 
 	webhookHandler, err := webhookhttp.NewWebhookHandler(webhookhttp.WebhookHandlerConfig{
@@ -137,10 +168,9 @@ func run(logger *slog.Logger) error {
 		Logger:              logger,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create webhook handler: %w", err)
+		return nil, fmt.Errorf("failed to create webhook handler: %w", err)
 	}
 
-	// Create HTTP server
 	httpPort := env.GetEnvAsInt("HTTP_PORT", ports.Gateway)
 	httpServer, err := webhookhttp.NewServer(webhookhttp.ServerConfig{
 		Port:               httpPort,
@@ -150,22 +180,18 @@ func run(logger *slog.Logger) error {
 		RateLimitBurst:     env.GetEnvAsInt("HTTP_RATE_LIMIT_BURST", 200),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP server: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP server: %w", err)
 	}
-
-	// Get gRPC port
-	grpcPort := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.PaymentOrder))
-	grpcAddress := fmt.Sprintf(":%s", grpcPort)
 
 	// Create gRPC listener
+	grpcPort := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.PaymentOrder))
+	grpcAddress := fmt.Sprintf(":%s", grpcPort)
 	grpcListener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", grpcAddress)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
+		return nil, fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
 
-	// Construct the financial-gateway payment event consumer before starting servers
-	// so that any initialization error causes an early return without leaving
-	// running goroutines/listeners behind.
+	// Create payment event consumer (optional)
 	var paymentEventConsumer *pomessaging.PaymentEventConsumer
 	if container.BootstrapServers != "" {
 		paymentEventConsumer, err = pomessaging.NewPaymentEventConsumerWithKafka(
@@ -180,40 +206,44 @@ func run(logger *slog.Logger) error {
 			logger,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to create payment event consumer: %w", err)
+			_ = grpcListener.Close()
+			return nil, fmt.Errorf("failed to create payment event consumer: %w", err)
 		}
-		defer func() {
-			if err := paymentEventConsumer.Close(); err != nil {
-				logger.Error("failed to close payment event consumer", "error", err)
-			}
-		}()
 	} else {
 		logger.Warn("payment event consumer disabled - KAFKA_BOOTSTRAP_SERVERS not set")
 	}
 
-	// Channel to collect server errors (gRPC + HTTP + payment event consumer).
+	_ = svcConfig // used in caller for billing config
+
+	return &paymentOrderServers{
+		grpcServer:           grpcServer,
+		grpcListener:         grpcListener,
+		httpServer:           httpServer,
+		paymentEventConsumer: paymentEventConsumer,
+	}, nil
+}
+
+// startAndAwaitShutdown starts all servers and workers, waits for shutdown, and cleans up.
+func startAndAwaitShutdown(ctx context.Context, svcConfig *config.ServiceConfig, container *app.Container, servers *paymentOrderServers, logger *slog.Logger) error {
 	serverErrors := make(chan error, 3)
 
-	// Start gRPC server in background
 	go func() {
-		logger.Info("starting gRPC server", "address", grpcAddress)
-		if err := grpcServer.Serve(grpcListener); err != nil {
+		logger.Info("starting gRPC server", "address", servers.grpcListener.Addr().String())
+		if err := servers.grpcServer.Serve(servers.grpcListener); err != nil {
 			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
 		}
 	}()
 
-	// Start HTTP server in background
 	go func() {
-		logger.Info("starting HTTP server", "port", httpPort)
-		if err := httpServer.Start(); err != nil {
+		logger.Info("starting HTTP server")
+		if err := servers.httpServer.Start(); err != nil {
 			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
-	// Start payment event consumer after servers are up.
-	if paymentEventConsumer != nil {
+	if servers.paymentEventConsumer != nil {
 		go func() {
-			if err := paymentEventConsumer.Start(
+			if err := servers.paymentEventConsumer.Start(
 				"financial-gateway.payment-captured.v1",
 				"financial-gateway.payment-failed.v1",
 			); err != nil {
@@ -235,14 +265,12 @@ func run(logger *slog.Logger) error {
 				logger.Error("billing scheduler error", "error", err)
 			}
 		}()
-
 		go func() {
 			defer billingWg.Done()
 			if err := container.DunningWorker.Start(workerCtx); err != nil {
 				logger.Error("dunning worker error", "error", err)
 			}
 		}()
-
 		logger.Info("billing workers started")
 	}
 
@@ -257,9 +285,6 @@ func run(logger *slog.Logger) error {
 	case err := <-serverErrors:
 		logger.Error("server error", "error", err)
 		runErr = err
-
-		// Prefer graceful exit if a shutdown signal is already pending.
-		// Without this, RunWithRetry would retry despite SIGTERM intent.
 		select {
 		case sig := <-sigChan:
 			logger.Info("received signal during error handling, treating as shutdown", "signal", sig)
@@ -268,15 +293,12 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
-	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("shutting down servers...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 	defer cancel()
 
-	// Stop billing workers and wait for goroutines to exit before database close.
-	// Cancel the worker context first to unblock Start() select loops, then
-	// call Stop() to signal internal shutdown channels and drain in-flight work.
+	// Stop billing workers
 	if svcConfig.BillingEnabled && container.BillingCronScheduler != nil && container.DunningWorker != nil {
 		logger.Info("stopping billing workers...")
 		workerCancel()
@@ -286,21 +308,18 @@ func run(logger *slog.Logger) error {
 		logger.Info("billing workers stopped")
 	}
 
-	// Stop payment event consumer before closing connections
-	if paymentEventConsumer != nil {
-		paymentEventConsumer.Stop()
+	if servers.paymentEventConsumer != nil {
+		servers.paymentEventConsumer.Stop()
 		logger.Info("payment event consumer stopped")
 	}
 
-	// Shutdown HTTP server (stop accepting new webhooks)
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+	if err := servers.httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("failed to shutdown HTTP server", "error", err)
 	}
 
-	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
 	go func() {
-		grpcServer.GracefulStop()
+		servers.grpcServer.GracefulStop()
 		close(stopped)
 	}()
 
@@ -309,7 +328,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("servers stopped gracefully")
 	case <-shutdownCtx.Done():
 		logger.Warn("graceful shutdown timeout, forcing stop")
-		grpcServer.Stop()
+		servers.grpcServer.Stop()
 	}
 
 	return runErr

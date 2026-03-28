@@ -135,74 +135,57 @@ func run(logger *slog.Logger) error {
 		"enable_mds_output", config.EnableMDSOutput,
 		"mds_service_addr", config.MDSServiceAddr)
 
-	// Create readiness tracker
+	// Create readiness tracker and HTTP server
 	var (
 		readiness   = &readinessState{}
 		readinessMu = &sync.RWMutex{}
 	)
-
-	// Create HTTP server for health checks and metrics
 	httpServer := createHTTPServer(config.HTTPPort, readiness, readinessMu, logger)
+	serverErrors, httpCleanup := launchHTTPServer(httpServer, logger)
+	defer httpCleanup()
 
-	// Start HTTP server in background
-	serverErrors := make(chan error, 1)
-	go func() {
-		logger.Info("starting HTTP server for health checks and metrics",
-			"address", httpServer.Addr)
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("HTTP server error", "error", err)
-			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
-		}
-	}()
-
-	// Ensure the HTTP listener is released if init fails and RunWithRetry restarts.
-	// On the happy path, httpServer.Shutdown in the shutdown block closes it first,
-	// so the deferred Close sees ErrServerClosed (which we ignore).
-	defer func() {
-		if err := httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Warn("failed to close HTTP server", "error", err)
-		}
-	}()
-
-	// Initialize Position Keeping client
-	logger.Info("initializing position keeping client", "endpoint", config.PositionKeepingEndpoint)
-
-	// Parse port from endpoint (format: "host:port")
-	// Handle Kubernetes DNS names like "position-keeping.default.svc.cluster.local:50053"
-	var pkPort int
-	if lastColon := strings.LastIndex(config.PositionKeepingEndpoint, ":"); lastColon != -1 {
-		if _, err := fmt.Sscanf(config.PositionKeepingEndpoint[lastColon:], ":%d", &pkPort); err != nil || pkPort == 0 {
-			// Default to ports.PositionKeeping if parsing fails
-			pkPort = ports.PositionKeeping
-			logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default - verify endpoint format is 'host:port'",
-				"endpoint", config.PositionKeepingEndpoint,
-				"default_port", pkPort,
-				"implication", "gRPC connection may fail if Position Keeping service uses a different port")
-		}
-	} else {
-		// No colon found, use default port
-		pkPort = ports.PositionKeeping
-		logger.Warn("no port found in POSITION_KEEPING_ENDPOINT, using default - verify endpoint includes port number",
-			"endpoint", config.PositionKeepingEndpoint,
-			"default_port", pkPort,
-			"implication", "gRPC connection may fail if Position Keeping service uses a different port")
-	}
-
-	pkClient, err := grpc.NewPositionKeepingClient(&grpc.ClientConfig{
-		ServiceName: "position-keeping",
-		Namespace:   env.GetEnvOrDefault("K8S_NAMESPACE", "default"),
-		Port:        pkPort,
-		Timeout:     5 * time.Second,
-		Logger:      logger,
-	})
+	// Initialize upstream clients and Kafka consumer
+	pkClient, consumer, mdPublisher, mdsConn, err := initConsumerPipeline(config, logger)
 	if err != nil {
-		return fmt.Errorf("failed to create position keeping client: %w", err)
+		return err
 	}
 	defer func() {
 		if err := pkClient.Close(); err != nil {
 			logger.Error("failed to close position keeping client", "error", err)
 		}
 	}()
+	defer func() {
+		if err := consumer.Close(); err != nil {
+			logger.Error("failed to close audit consumer", "error", err)
+		}
+	}()
+
+	// Start consuming in background
+	consumerErrors := make(chan error, 1)
+	go func() {
+		logger.Info("starting audit event consumption")
+		if err := consumer.Start(config.AuditTopics); err != nil {
+			logger.Error("consumer error", "error", err)
+			consumerErrors <- fmt.Errorf("consumer error: %w", err)
+			return
+		}
+		readinessMu.Lock()
+		readiness.consumerInitialized = true
+		readinessMu.Unlock()
+		logger.Info("audit consumer ready")
+	}()
+
+	return awaitAndShutdown(httpServer, consumer, mdPublisher, mdsConn, serverErrors, consumerErrors, logger)
+}
+
+// initConsumerPipeline creates the Position Keeping client, optional MDS publisher,
+// and Kafka audit consumer.
+func initConsumerPipeline(config *app.Config, logger *slog.Logger) (*grpc.PositionKeepingGRPCClient, *messaging.AuditConsumer, *mds.MarketDataPublisher, *grpclib.ClientConn, error) {
+	// Initialize Position Keeping client
+	pkClient, err := initPKClient(config, logger)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 
 	// Initialize MDS publisher (optional, controlled by feature flag)
 	var consumerOpts []messaging.AuditConsumerOption
@@ -228,30 +211,12 @@ func run(logger *slog.Logger) error {
 			"mds_service_addr", config.MDSServiceAddr)
 	}
 
-	// Parse tenant zero ID (permanent error if invalid)
-	tenantZeroID, err := uuid.Parse(config.TenantZeroID)
+	// Parse tenant mapping and create transformer
+	transformer, err := createTransformer(config, logger)
 	if err != nil {
-		return bootstrap.Permanent(fmt.Errorf("invalid TENANT_ZERO_ID: %w", err))
+		_ = pkClient.Close()
+		return nil, nil, nil, nil, err
 	}
-
-	// Load tenant-to-account mapping from configuration (permanent error if invalid)
-	tenantAccountMap, err := domain.ParseTenantAccountMapping(config.TenantAccountMapping)
-	if err != nil {
-		return bootstrap.Permanent(fmt.Errorf("failed to load tenant account mapping: %w", err))
-	}
-
-	// Ensure tenant-zero maps to itself if not explicitly configured
-	if _, exists := tenantAccountMap[tenantZeroID]; !exists {
-		logger.Info("tenant-zero not found in TENANT_ACCOUNT_MAPPING, mapping to itself",
-			"tenant_zero_id", tenantZeroID)
-		tenantAccountMap[tenantZeroID] = tenantZeroID
-	}
-
-	logger.Info("tenant account mapping loaded",
-		"mapping_count", len(tenantAccountMap))
-
-	// Initialize transformer with tenant account mapping
-	transformer := auditdomain.NewAuditEventTransformer(tenantAccountMap)
 
 	// Initialize Kafka consumer
 	logger.Info("initializing kafka consumer",
@@ -263,42 +228,104 @@ func run(logger *slog.Logger) error {
 		GroupID:          config.ConsumerGroupID,
 		ClientID:         "event-router",
 		AutoOffsetReset:  "earliest",
-		EnableAutoCommit: false, // Manual commit for at-least-once semantics
+		EnableAutoCommit: false,
 	}
 
 	consumer, err := messaging.NewAuditConsumer(kafkaConfig, transformer, pkClient, consumerOpts...)
 	if err != nil {
-		return fmt.Errorf("failed to create audit consumer: %w", err)
+		_ = pkClient.Close()
+		return nil, nil, nil, nil, fmt.Errorf("failed to create audit consumer: %w", err)
 	}
-	defer func() {
-		if err := consumer.Close(); err != nil {
-			logger.Error("failed to close audit consumer", "error", err)
-		}
-	}()
 
-	// Start consuming in background
-	consumerErrors := make(chan error, 1)
+	return pkClient, consumer, mdPublisher, mdsConn, nil
+}
+
+// launchHTTPServer starts the HTTP server in a background goroutine and returns
+// an error channel and a cleanup function that closes the server.
+func launchHTTPServer(httpServer *http.Server, logger *slog.Logger) (chan error, func()) {
+	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Info("starting audit event consumption")
-		if err := consumer.Start(config.AuditTopics); err != nil {
-			logger.Error("consumer error", "error", err)
-			consumerErrors <- fmt.Errorf("consumer error: %w", err)
-			return
+		logger.Info("starting HTTP server for health checks and metrics",
+			"address", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("HTTP server error", "error", err)
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
-
-		// Mark consumer as initialized for readiness probe after successful start.
-		// NOTE: For MVP, we set readiness after Subscribe() returns successfully.
-		// This doesn't guarantee actual Kafka connectivity, but indicates the
-		// consumer is ready to process messages when Kafka becomes available.
-		// In production, consider using consumer.Assignment() callback or metrics
-		// to verify actual partition assignment before marking ready.
-		readinessMu.Lock()
-		readiness.consumerInitialized = true
-		readinessMu.Unlock()
-		logger.Info("audit consumer ready")
 	}()
+	cleanup := func() {
+		if err := httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Warn("failed to close HTTP server", "error", err)
+		}
+	}
+	return serverErrors, cleanup
+}
 
-	// Wait for interrupt signal, server error, or consumer error
+// createTransformer parses tenant-zero ID and account mapping, then creates the audit event transformer.
+func createTransformer(config *app.Config, logger *slog.Logger) (*auditdomain.AuditEventTransformer, error) {
+	tenantZeroID, err := uuid.Parse(config.TenantZeroID)
+	if err != nil {
+		return nil, bootstrap.Permanent(fmt.Errorf("invalid TENANT_ZERO_ID: %w", err))
+	}
+
+	tenantAccountMap, err := domain.ParseTenantAccountMapping(config.TenantAccountMapping)
+	if err != nil {
+		return nil, bootstrap.Permanent(fmt.Errorf("failed to load tenant account mapping: %w", err))
+	}
+
+	if _, exists := tenantAccountMap[tenantZeroID]; !exists {
+		logger.Info("tenant-zero not found in TENANT_ACCOUNT_MAPPING, mapping to itself",
+			"tenant_zero_id", tenantZeroID)
+		tenantAccountMap[tenantZeroID] = tenantZeroID
+	}
+	logger.Info("tenant account mapping loaded", "mapping_count", len(tenantAccountMap))
+
+	return auditdomain.NewAuditEventTransformer(tenantAccountMap), nil
+}
+
+// initPKClient creates the Position Keeping gRPC client.
+func initPKClient(config *app.Config, logger *slog.Logger) (*grpc.PositionKeepingGRPCClient, error) {
+	logger.Info("initializing position keeping client", "endpoint", config.PositionKeepingEndpoint)
+
+	var pkPort int
+	if lastColon := strings.LastIndex(config.PositionKeepingEndpoint, ":"); lastColon != -1 {
+		if _, err := fmt.Sscanf(config.PositionKeepingEndpoint[lastColon:], ":%d", &pkPort); err != nil || pkPort == 0 {
+			pkPort = ports.PositionKeeping
+			logger.Warn("failed to parse port from POSITION_KEEPING_ENDPOINT, using default - verify endpoint format is 'host:port'",
+				"endpoint", config.PositionKeepingEndpoint,
+				"default_port", pkPort,
+				"implication", "gRPC connection may fail if Position Keeping service uses a different port")
+		}
+	} else {
+		pkPort = ports.PositionKeeping
+		logger.Warn("no port found in POSITION_KEEPING_ENDPOINT, using default - verify endpoint includes port number",
+			"endpoint", config.PositionKeepingEndpoint,
+			"default_port", pkPort,
+			"implication", "gRPC connection may fail if Position Keeping service uses a different port")
+	}
+
+	pkClient, err := grpc.NewPositionKeepingClient(&grpc.ClientConfig{
+		ServiceName: "position-keeping",
+		Namespace:   env.GetEnvOrDefault("K8S_NAMESPACE", "default"),
+		Port:        pkPort,
+		Timeout:     5 * time.Second,
+		Logger:      logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create position keeping client: %w", err)
+	}
+
+	return pkClient, nil
+}
+
+// awaitAndShutdown waits for a shutdown signal or error, then gracefully stops all components.
+func awaitAndShutdown(
+	httpServer *http.Server,
+	consumer *messaging.AuditConsumer,
+	mdPublisher *mds.MarketDataPublisher,
+	mdsConn *grpclib.ClientConn,
+	serverErrors, consumerErrors chan error,
+	logger *slog.Logger,
+) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
@@ -314,19 +341,15 @@ func run(logger *slog.Logger) error {
 		runErr = fmt.Errorf("consumer error: %w", err)
 	}
 
-	// Graceful shutdown (runs for both signal and error paths)
 	logger.Info("shutting down server...")
 
-	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultRPCTimeout)
 	defer cancel()
 
-	// Stop Kafka consumer first to drain in-flight messages
 	logger.Info("stopping kafka consumer...")
 	consumer.Stop()
 	logger.Info("kafka consumer stopped")
 
-	// Flush pending MDS aggregations and close gRPC connection
 	if mdPublisher != nil {
 		logger.Info("flushing MDS publisher...")
 		mdPublisher.Stop()
@@ -338,7 +361,6 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
-	// Shutdown HTTP server
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)
 	} else {

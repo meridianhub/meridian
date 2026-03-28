@@ -25,6 +25,7 @@ import (
 	pkobservability "github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -104,8 +105,6 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
 	}
-
-	// Override observability config with build info
 	config.Observability.ServiceVersion = Version
 
 	logger.Info("configuration loaded",
@@ -125,7 +124,6 @@ func run(logger *slog.Logger) error {
 			logger.Error("failed to close container", "error", err)
 		}
 	}()
-
 	logger.Info("dependency container initialized")
 
 	// Initialize and start event outbox worker (if Kafka enabled).
@@ -134,19 +132,56 @@ func run(logger *slog.Logger) error {
 	startOutboxWorker(ctx, container, config, logger, outboxShutdownCh, kafkaCleanupCh)
 
 	// Start compaction worker in background (if enabled)
-	var compactionWorkerCancel context.CancelFunc
-	if container.CompactionWorker != nil {
-		var compactionWorkerCtx context.Context
-		compactionWorkerCtx, compactionWorkerCancel = context.WithCancel(context.Background())
+	compactionWorkerCancel := startCompactionWorkerAsync(container, logger)
+	if compactionWorkerCancel != nil {
 		defer compactionWorkerCancel()
-		go func() {
-			if err := container.CompactionWorker.Start(compactionWorkerCtx); err != nil {
-				logger.Error("compaction worker error", "error", err)
-			}
-		}()
 	}
 
-	// Create gRPC service
+	// Create gRPC server, register services, and start listening
+	grpcServer, listener, err := setupGRPCServer(ctx, config, container, logger)
+	if err != nil {
+		return err
+	}
+
+	// Start HTTP and gRPC servers
+	httpErrors := make(chan error, 1)
+	httpServer := startHTTPServer(config, container, logger, httpErrors)
+	grpcErrors := serveGRPCAsync(grpcServer, listener, logger)
+
+	return awaitAndShutdown(ctx, config, grpcServer, httpServer, container,
+		outboxShutdownCh, kafkaCleanupCh, compactionWorkerCancel,
+		grpcErrors, httpErrors, runCancel, logger)
+}
+
+// startCompactionWorkerAsync starts the compaction worker in a background goroutine if enabled.
+// Returns a cancel function to stop the worker, or nil if no worker was started.
+func startCompactionWorkerAsync(container *app.Container, logger *slog.Logger) context.CancelFunc {
+	if container.CompactionWorker == nil {
+		return nil
+	}
+	compactionCtx, cancel := context.WithCancel(context.Background())
+	go func() {
+		if err := container.CompactionWorker.Start(compactionCtx); err != nil {
+			logger.Error("compaction worker error", "error", err)
+		}
+	}()
+	return cancel
+}
+
+// serveGRPCAsync starts the gRPC server in a background goroutine and returns an error channel.
+func serveGRPCAsync(grpcServer *grpc.Server, listener net.Listener, logger *slog.Logger) chan error {
+	grpcErrors := make(chan error, 1)
+	go func() {
+		logger.Info("starting gRPC server", "address", listener.Addr().String())
+		if err := grpcServer.Serve(listener); err != nil {
+			grpcErrors <- err
+		}
+	}()
+	return grpcErrors
+}
+
+// setupGRPCServer creates the gRPC server, registers services, and creates the TCP listener.
+func setupGRPCServer(ctx context.Context, config *app.Config, container *app.Container, logger *slog.Logger) (*grpc.Server, net.Listener, error) {
 	positionKeepingService, err := service.NewPositionKeepingService(
 		container.PositionLogRepository,
 		container.MeasurementRepository,
@@ -156,13 +191,10 @@ func run(logger *slog.Logger) error {
 		container.ServiceOpts...,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create position keeping service: %w", err)
+		return nil, nil, fmt.Errorf("failed to create position keeping service: %w", err)
 	}
-
 	logger.Info("position keeping service initialized")
 
-	// Create gRPC server using GrpcServerBuilder for consistent interceptor ordering.
-	// If tracing is disabled (no OTLP endpoint), create a no-op tracer for the builder.
 	tracer := container.Tracer
 	if tracer == nil {
 		var tracerErr error
@@ -172,20 +204,18 @@ func run(logger *slog.Logger) error {
 			Enabled:      false,
 		})
 		if tracerErr != nil {
-			return fmt.Errorf("failed to create no-op tracer: %w", tracerErr)
+			return nil, nil, fmt.Errorf("failed to create no-op tracer: %w", tracerErr)
 		}
 	}
 
-	// WithAuthInterceptor accepts nil (auth disabled in config - tenant extraction only).
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(container.AuthInterceptor).
 		WithUnaryInterceptor(interceptors.MetricsInterceptor(grpcRequestsTotal, grpcRequestDuration)).
 		Build()
 	if err != nil {
-		return bootstrap.Permanent(fmt.Errorf("failed to build grpc server: %w", err))
+		return nil, nil, bootstrap.Permanent(fmt.Errorf("failed to build grpc server: %w", err))
 	}
 
-	// Create health check aggregator (used by both gRPC and HTTP)
 	healthCheckers := []health.Checker{
 		observability.NewPgxPoolChecker(container.DBPool),
 	}
@@ -194,7 +224,6 @@ func run(logger *slog.Logger) error {
 	}
 	healthAggregator := health.NewAggregator(healthCheckers)
 
-	// Register gRPC services
 	pb.RegisterPositionKeepingServiceServer(grpcServer, positionKeepingService)
 	healthServer := newHealthServer(healthAggregator, logger)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
@@ -203,7 +232,25 @@ func run(logger *slog.Logger) error {
 	logger.Info("gRPC services registered",
 		"services", []string{"PositionKeepingService", "Health", "Reflection"})
 
-	// Start HTTP server for health checks and metrics
+	grpcAddress := fmt.Sprintf(":%s", config.Server.Port)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", grpcAddress)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
+	}
+
+	return grpcServer, listener, nil
+}
+
+// startHTTPServer creates and starts the HTTP server for health checks and metrics.
+func startHTTPServer(config *app.Config, container *app.Container, logger *slog.Logger, httpErrors chan error) *http.Server {
+	healthCheckers := []health.Checker{
+		observability.NewPgxPoolChecker(container.DBPool),
+	}
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+
 	httpMux := http.NewServeMux()
 	healthHandler := health.NewHTTPHandler(healthAggregator)
 	healthHandler.RegisterHandlers(httpMux)
@@ -221,7 +268,6 @@ func run(logger *slog.Logger) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	httpErrors := make(chan error, 1)
 	go func() {
 		logger.Info("starting HTTP server for health and metrics",
 			"address", httpServer.Addr)
@@ -230,22 +276,22 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Create and start gRPC server
-	grpcAddress := fmt.Sprintf(":%s", config.Server.Port)
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", grpcAddress)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
-	}
+	return httpServer
+}
 
-	grpcErrors := make(chan error, 1)
-	go func() {
-		logger.Info("starting gRPC server", "address", grpcAddress)
-		if err := grpcServer.Serve(listener); err != nil {
-			grpcErrors <- err
-		}
-	}()
-
-	// Wait for interrupt signal or server error
+// awaitAndShutdown waits for a shutdown signal or server error, then orchestrates graceful shutdown.
+func awaitAndShutdown(
+	_ context.Context,
+	config *app.Config,
+	grpcServer *grpc.Server,
+	httpServer *http.Server,
+	container *app.Container,
+	outboxShutdownCh, kafkaCleanupCh chan func(),
+	compactionWorkerCancel context.CancelFunc,
+	grpcErrors, httpErrors chan error,
+	runCancel context.CancelFunc,
+	logger *slog.Logger,
+) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
@@ -261,7 +307,6 @@ func run(logger *slog.Logger) error {
 		runErr = fmt.Errorf("HTTP server error: %w", err)
 	}
 
-	// Graceful shutdown
 	logger.Info("shutting down servers...")
 	runCancel()
 
@@ -291,18 +336,15 @@ func run(logger *slog.Logger) error {
 		logger.Info("compaction worker stopped")
 	}
 
-	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
 	defer cancel()
 
-	// Shutdown HTTP server
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)
 	} else {
 		logger.Info("HTTP server stopped gracefully")
 	}
 
-	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
 	go func() {
 		grpcServer.GracefulStop()
