@@ -240,13 +240,14 @@ func (o *PaymentOrchestrator) capturePosting(
 		IdempotencyKey:        &commonpb.IdempotencyKey{Key: idempKey},
 	})
 	if err != nil {
-		fields := []any{
+		fields := make([]any, 0, 10+len(extraLogFields)+2)
+		fields = append(fields,
 			"booking_log_id", bookingLogID,
 			"booking_log_status", "PENDING",
 			"payment_order_id", po.ID.String(),
 			"failed_step", failedStep,
 			"posting_flow", postingFlow,
-		}
+		)
 		fields = append(fields, extraLogFields...)
 		fields = append(fields, "error", err.Error())
 		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after posting failure", fields...)
@@ -271,14 +272,15 @@ func (o *PaymentOrchestrator) finalizeBookingLog(ctx context.Context, po *domain
 		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
 	})
 	if err != nil {
-		fields := []any{
+		fields := make([]any, 0, 12+len(extraLogFields)+4)
+		fields = append(fields,
 			"booking_log_id", bookingLogID,
 			"booking_log_status", "PENDING",
 			"target_status", "POSTED",
 			"payment_order_id", po.ID.String(),
 			"failed_step", "status_update",
 			"posting_flow", postingFlow,
-		}
+		)
 		fields = append(fields, extraLogFields...)
 		fields = append(fields,
 			"resolution", "manually update booking log status to POSTED",
