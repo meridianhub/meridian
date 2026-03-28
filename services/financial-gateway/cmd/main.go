@@ -26,11 +26,13 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"gorm.io/gorm"
 )
 
 // ErrMissingDatabaseURL is returned when the DATABASE_URL environment variable is not set.
@@ -90,8 +92,39 @@ func run(logger *slog.Logger) error {
 	defer bootstrap.ShutdownTracer(tracer, logger)
 
 	// Initialize database connection.
+	db, err := initDatabase(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer bootstrap.CloseDatabase(db, logger)
+
+	// Create gRPC server, register services, and create listener.
+	grpcServer, listener, err := setupGRPCServer(ctx, tracer, cfg, logger)
+	if err != nil {
+		return err
+	}
+	listenerClosed := false
+	defer func() {
+		if !listenerClosed {
+			_ = listener.Close()
+		}
+	}()
+
+	// Set up Stripe webhook receiver and outbox worker.
+	httpServer, err := setupStripeWebhook(ctx, cfg, db, listener, logger)
+	if err != nil {
+		return err
+	}
+
+	// Start servers and await shutdown.
+	listenerClosed = true
+	return startServersAndAwait(grpcServer, listener, httpServer, runCancel, logger)
+}
+
+// initDatabase validates and opens the database connection.
+func initDatabase(ctx context.Context, cfg config.Config, logger *slog.Logger) (*gorm.DB, error) {
 	if cfg.DatabaseURL == "" {
-		return bootstrap.Permanent(ErrMissingDatabaseURL)
+		return nil, bootstrap.Permanent(ErrMissingDatabaseURL)
 	}
 
 	dbCfg := bootstrap.DefaultDatabaseConfig()
@@ -100,79 +133,63 @@ func run(logger *slog.Logger) error {
 
 	db, err := bootstrap.NewDatabase(ctx, dbCfg)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer bootstrap.CloseDatabase(db, logger)
-
 	logger.Info("database connection established")
+	return db, nil
+}
 
-	// Initialize auth interceptor.
+// setupGRPCServer creates the gRPC server, registers services, and creates the TCP listener.
+func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, cfg config.Config, logger *slog.Logger) (*grpc.Server, net.Listener, error) {
 	authConfig := bootstrap.DefaultAuthConfig(logger)
 	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
 	if err != nil {
-		return fmt.Errorf("failed to initialize auth: %w", err)
+		return nil, nil, fmt.Errorf("failed to initialize auth: %w", err)
 	}
 
-	// Create gRPC server.
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
-		Build()
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
+		return nil, nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
 
-	// Initialize and register FinancialGatewayService.
-	svcCfg := service.Config{
-		Logger: logger,
-	}
-
+	svcCfg := service.Config{Logger: logger}
 	gatewaySvc, err := service.NewFinancialGatewayService(svcCfg)
 	if err != nil {
-		return fmt.Errorf("failed to create financial gateway service: %w", err)
+		return nil, nil, fmt.Errorf("failed to create financial gateway service: %w", err)
 	}
 	financialgatewayv1.RegisterFinancialGatewayServiceServer(grpcServer, gatewaySvc)
 
-	// Register health check.
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	// Register reflection for debugging.
 	reflection.Register(grpcServer)
-
 	logger.Info("gRPC services registered")
 
-	// Create gRPC listener before serving to fail fast if port is unavailable.
 	grpcAddress := fmt.Sprintf(":%s", cfg.GRPCPort)
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", grpcAddress)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
+		return nil, nil, fmt.Errorf("failed to listen on %s: %w", grpcAddress, err)
 	}
-	// Close the listener if any subsequent setup fails (before grpcServer.Serve takes ownership).
-	listenerClosed := false
-	defer func() {
-		if !listenerClosed {
-			_ = listener.Close()
-		}
-	}()
 
-	// --- Stripe webhook receiver setup ---
+	return grpcServer, listener, nil
+}
 
-	// Require Stripe API key for the client factory.
+// setupStripeWebhook configures the Stripe webhook handler, outbox worker, and HTTP server.
+func setupStripeWebhook(ctx context.Context, cfg config.Config, db *gorm.DB, _ net.Listener, logger *slog.Logger) (*http.Server, error) {
 	if cfg.StripeSecretKey == "" {
-		return bootstrap.Permanent(ErrMissingStripeAPIKey)
+		return nil, bootstrap.Permanent(ErrMissingStripeAPIKey)
 	}
 
-	// Build the per-tenant Stripe config provider.
-	// When CONTROL_PLANE_ADDR is set, use ManifestTenantConfigProvider to fetch
-	// per-tenant webhook secrets from control-plane manifests.
-	// Otherwise fall back to a single-tenant env-var provider for local dev.
 	tenantConfigProvider, controlPlaneConn, err := createTenantConfigProvider(cfg, logger)
 	if err != nil {
-		return fmt.Errorf("failed to create tenant config provider: %w", err)
+		return nil, fmt.Errorf("failed to create tenant config provider: %w", err)
 	}
 	if controlPlaneConn != nil {
-		defer func() {
+		// Connection closed when run() context is cancelled via defer in the caller.
+		go func() {
+			<-ctx.Done()
 			if closeErr := controlPlaneConn.Close(); closeErr != nil {
 				logger.Error("failed to close control-plane connection", "error", closeErr)
 			}
@@ -184,44 +201,12 @@ func run(logger *slog.Logger) error {
 
 	clientFactory, err := stripeadapter.NewClientFactory(stripeCfg, tenantConfigProvider, logger)
 	if err != nil {
-		return fmt.Errorf("failed to create stripe client factory: %w", err)
+		return nil, fmt.Errorf("failed to create stripe client factory: %w", err)
 	}
 
-	// Initialize the outbox publisher and worker for webhook domain events.
-	// Events written to the outbox within the same DB transaction are published
-	// to Kafka asynchronously by the background worker.
 	outboxPublisher := events.NewOutboxPublisher("financial-gateway")
+	startOutboxWorker(ctx, db, logger)
 
-	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
-	if bootstrapServers == "" {
-		bootstrapServers = env.GetEnvOrDefault("KAFKA_BROKERS", "")
-	}
-	if bootstrapServers != "" {
-		outboxRepo := events.NewPostgresOutboxRepository(db)
-		producer, kafkaErr := kafka.NewProtoProducer(kafka.ProducerConfig{
-			BootstrapServers: bootstrapServers,
-			ClientID:         "financial-gateway-outbox-worker",
-			Acks:             "all",
-			Retries:          3,
-			Compression:      "snappy",
-		})
-		if kafkaErr != nil {
-			logger.Warn("failed to create Kafka producer for outbox worker", "error", kafkaErr)
-		} else {
-			defer producer.Close()
-			workerConfig := events.DefaultWorkerConfig("financial-gateway")
-			outboxWorker := events.NewWorker(outboxRepo, producer, workerConfig, logger)
-			outboxWorker.Start(ctx)
-			defer outboxWorker.Stop()
-			logger.Info("outbox worker started", "bootstrap_servers", bootstrapServers)
-		}
-	} else {
-		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set (events will accumulate in outbox)")
-	}
-
-	// Create the webhook handler.
-	// The handler validates Stripe-Signature, maps events to domain protos,
-	// and publishes them to the transactional outbox.
 	webhookHandler := webhookhttp.NewWebhookHandler(webhookhttp.WebhookHandlerConfig{
 		ClientFactory:   clientFactory,
 		OutboxPublisher: outboxPublisher,
@@ -229,46 +214,36 @@ func run(logger *slog.Logger) error {
 		Logger:          logger,
 	})
 
-	// Create HTTP mux and register the Stripe webhook endpoint.
 	mux := http.NewServeMux()
-	// Tenant ID is embedded in the URL path so Stripe can be configured to call
-	// per-tenant endpoints (e.g. /webhooks/stripe/acme-corp). The handler
-	// extracts the tenant from r.PathValue("tenantID") and injects it into ctx.
 	mux.HandleFunc("POST /webhooks/stripe/{tenantID}", webhookHandler.HandleStripeWebhook)
 
 	httpAddress := fmt.Sprintf(":%s", cfg.HTTPPort)
-	httpServer := &http.Server{
+	return &http.Server{
 		Addr:              httpAddress,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
-	}
+	}, nil
+}
 
-	// Channel to collect server errors.
+// startServersAndAwait launches the gRPC and HTTP servers, then waits for a shutdown signal.
+func startServersAndAwait(grpcServer *grpc.Server, listener net.Listener, httpServer *http.Server, runCancel context.CancelFunc, logger *slog.Logger) error {
 	serverErrors := make(chan error, 2)
-
-	// Start gRPC server in background.
-	// grpcServer.Serve takes ownership of the listener; mark it so the deferred
-	// close does not double-close on normal shutdown.
-	listenerClosed = true
 	go func() {
-		logger.Info("starting gRPC server", "address", grpcAddress)
+		logger.Info("starting gRPC server", "address", listener.Addr().String())
 		if err := grpcServer.Serve(listener); err != nil {
 			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
 		}
 	}()
-
-	// Start HTTP webhook server in background.
 	go func() {
-		logger.Info("starting HTTP webhook server", "address", httpAddress)
+		logger.Info("starting HTTP webhook server", "address", httpServer.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
 
-	// Wait for shutdown signal.
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 	orchestrator.AddCleanup(func() error {
 		runCancel()
@@ -281,6 +256,43 @@ func run(logger *slog.Logger) error {
 	})
 
 	return orchestrator.Wait(serverErrors)
+}
+
+// startOutboxWorker initializes the Kafka outbox worker if KAFKA_BOOTSTRAP_SERVERS is configured.
+func startOutboxWorker(ctx context.Context, db *gorm.DB, logger *slog.Logger) {
+	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
+	if bootstrapServers == "" {
+		bootstrapServers = env.GetEnvOrDefault("KAFKA_BROKERS", "")
+	}
+	if bootstrapServers == "" {
+		logger.Warn("outbox worker disabled - KAFKA_BOOTSTRAP_SERVERS not set (events will accumulate in outbox)")
+		return
+	}
+
+	outboxRepo := events.NewPostgresOutboxRepository(db)
+	producer, kafkaErr := kafka.NewProtoProducer(kafka.ProducerConfig{
+		BootstrapServers: bootstrapServers,
+		ClientID:         "financial-gateway-outbox-worker",
+		Acks:             "all",
+		Retries:          3,
+		Compression:      "snappy",
+	})
+	if kafkaErr != nil {
+		logger.Warn("failed to create Kafka producer for outbox worker", "error", kafkaErr)
+		return
+	}
+
+	workerConfig := events.DefaultWorkerConfig("financial-gateway")
+	outboxWorker := events.NewWorker(outboxRepo, producer, workerConfig, logger)
+	outboxWorker.Start(ctx)
+	logger.Info("outbox worker started", "bootstrap_servers", bootstrapServers)
+
+	// Stop worker and producer when context is cancelled.
+	go func() {
+		<-ctx.Done()
+		outboxWorker.Stop()
+		producer.Close()
+	}()
 }
 
 // createTenantConfigProvider builds the TenantConfigProvider.

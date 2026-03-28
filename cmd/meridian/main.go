@@ -33,11 +33,14 @@ import (
 	masterbootstrap "github.com/meridianhub/meridian/internal/bootstrap"
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
+	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
+	tenantworker "github.com/meridianhub/meridian/services/tenant/worker"
 	"github.com/meridianhub/meridian/shared/pkg/dispatch"
 	"github.com/meridianhub/meridian/shared/pkg/email"
 	emailworker "github.com/meridianhub/meridian/shared/pkg/email/worker"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -46,6 +49,7 @@ import (
 
 	pkdomain "github.com/meridianhub/meridian/services/position-keeping/domain"
 
+	"google.golang.org/grpc"
 	"gorm.io/gorm"
 )
 
@@ -147,192 +151,217 @@ func connectPgxPool(ctx context.Context, dsn string, logger *slog.Logger) (*pgxp
 	return pool, nil
 }
 
+// unifiedInfra holds shared infrastructure components initialized during startup.
+type unifiedInfra struct {
+	baseDSN         string
+	conns           *serviceConns
+	tracer          *observability.Tracer
+	grpcServer      *grpc.Server
+	idempotencySvc  *idempotency.PostgresService
+	faEventPub      *noopFAPublisher
+	pkEventPub      pkdomain.EventPublisher
+	outboxPublisher *events.OutboxPublisher
+	outboxRepo      *events.PostgresOutboxRepository
+	loopback        *loopbackClients
+	provIface       tenantprovisioner.SchemaProvisioner
+	schemaProv      *tenantprovisioner.PostgresProvisioner
+}
+
 func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	ctx := context.Background()
+	logger.Info("starting meridian unified binary", "grpc_port", grpcPort, "http_port", httpPort)
 
-	logger.Info("starting meridian unified binary",
-		"grpc_port", grpcPort,
-		"http_port", httpPort)
-
-	// ─── Shared Infrastructure ───────────────────────────────────────────
-
-	// Per-service database connections derived from a base DSN.
-	// Each service connects to its own database as defined by migrations.ServiceDatabases.
-	baseDSN := env.GetEnvOrDefault("DATABASE_URL",
-		"postgres://root@localhost:26257/defaultdb?sslmode=disable")
-	conns, err := newServiceConns(ctx, baseDSN, logger)
+	// Initialize shared infrastructure
+	infra, err := initInfrastructure(ctx, grpcPort, logger)
 	if err != nil {
-		return fmt.Errorf("service connections: %w", err)
+		return err
 	}
-	defer conns.closeAll(logger)
+	defer infra.conns.closeAll(logger)
+	defer infra.loopback.closeAll()
 
-	// No-op tracer (tracing disabled in unified dev mode)
-	tracer, err := observability.NewTracer(ctx, observability.TracerConfig{
-		ServiceName:  "meridian-unified",
-		OTLPEndpoint: "localhost:4317",
-		Enabled:      false,
-	})
-	if err != nil {
-		return fmt.Errorf("tracer: %w", err)
-	}
-
-	// Shared gRPC server (no auth for unified dev mode — auth handled at HTTP gateway)
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
-		WithoutAuth().
-		Build()
-	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
-	}
-
-	// Idempotency service backed by the platform pgxpool (no Redis required in dev)
-	idempotencySvc := idempotency.NewPostgresService(conns.pgxPool("control-plane"))
-	if err := idempotencySvc.EnsureTable(ctx); err != nil {
-		return fmt.Errorf("idempotency table: %w", err)
-	}
-
-	// Noop event publishers for FA and PK (no Kafka in dev)
-	faEventPublisher := &noopFAPublisher{}
-	pkEventPublisher := pkdomain.NewNoOpEventPublisher()
-
-	// Outbox publisher and repo (writes to FA database, no Kafka worker in dev)
-	outboxPublisher := events.NewOutboxPublisher("unified")
-	outboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("financial-accounting"))
-
-	// Service-to-service auth credentials (opt-in via SERVICE_AUTH_ENABLED=true).
-	svcAuthCfg := platformauth.NewServiceAuthConfigFromEnv()
-	svcCreds, err := svcAuthCfg.NewCredentials()
-	if err != nil {
-		return fmt.Errorf("service auth credentials: %w", err)
-	}
-
-	// Loopback gRPC clients for inter-service communication within the unified binary.
-	// grpc.NewClient is lazy — connects on first RPC, after the server is listening.
-	loopback, err := newLoopbackClients(ctx, grpcPort, svcCreds)
-	if err != nil {
-		return fmt.Errorf("loopback clients: %w", err)
-	}
-	defer loopback.closeAll()
-
-	// ─── Schema Provisioner (optional, shared by tenant service + worker) ─
-
-	schemaProvisioner, err := createSchemaProvisioner(baseDSN, conns.gormDB("tenant"), logger)
-	if err != nil {
-		return fmt.Errorf("schema provisioner: %w", err)
-	}
-
-	// Guard against Go nil interface gotcha: a nil *PostgresProvisioner assigned
-	// to a SchemaProvisioner interface becomes non-nil (type set, value nil).
-	// Downstream code checks `provisioner != nil` to decide behavior, so we must
-	// keep the interface itself nil when provisioning is disabled.
-	var provIface tenantprovisioner.SchemaProvisioner
-	if schemaProvisioner != nil {
-		provIface = schemaProvisioner
-	}
-
-	// ─── Register All Services ──────────────────────────────────────────
-
-	auditWorker, err := registerServices(ctx, grpcServer, conns, idempotencySvc, faEventPublisher, pkEventPublisher, outboxPublisher, outboxRepo, loopback, provIface, tracer, logger)
+	// Register all services on the shared gRPC server
+	auditWorker, err := registerServices(ctx, infra.grpcServer, infra.conns, infra.idempotencySvc, infra.faEventPub, infra.pkEventPub, infra.outboxPublisher, infra.outboxRepo, infra.loopback, infra.provIface, infra.tracer, logger)
 	if err != nil {
 		return err
 	}
 
-	// ─── Provisioning Worker (optional) ─────────────────────────────────
-
-	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, schemaProvisioner, conns.gormDB("tenant"), conns.gormDB("identity"), logger)
+	// Start workers
+	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, infra.schemaProv, infra.conns.gormDB("tenant"), infra.conns.gormDB("identity"), logger)
 	if err != nil {
 		return fmt.Errorf("provisioning worker: %w", err)
 	}
 	if provisionerCleanup != nil {
 		defer provisionerCleanup()
 	}
+	emailWorker := startEmailWorker(ctx, infra.conns.gormDB("payment-order"), logger)
 
-	// ─── Email Dispatch Worker (optional) ───────────────────────────────
-
-	emailWorker := startEmailWorker(ctx, conns.gormDB("payment-order"), logger)
-
-	// ─── Start gRPC Server ───────────────────────────────────────────────
-
+	// Start gRPC server
 	grpcAddr := fmt.Sprintf(":%d", grpcPort)
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", grpcAddr, err)
 	}
-
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("gRPC server starting", "address", grpcAddr)
-		if err := grpcServer.Serve(listener); err != nil {
+		if err := infra.grpcServer.Serve(listener); err != nil {
 			serverErrors <- err
 		}
 	}()
 
-	// ─── Start Gateway HTTP Server ───────────────────────────────────────
-
-	platformDSN, err := replaceDSNDatabase(baseDSN, "meridian_platform")
+	// Start gateway HTTP server
+	gwServer, routerCancel, err := setupAndStartGateway(ctx, infra, grpcPort, httpPort, logger)
 	if err != nil {
-		return fmt.Errorf("platform DSN: %w", err)
+		return err
 	}
-
-	eventRouter, extraGWOpts := wireEventStream(conns.gormDB("financial-accounting"), logger)
-
-	// Embedded Dex OIDC server (opt-in via DEX_ISSUER).
-	dexOpt, err := wireEmbeddedDex(ctx, conns.gormDB("identity"), logger)
-	if err != nil {
-		return fmt.Errorf("embedded dex: %w", err)
-	}
-	extraGWOpts = append(extraGWOpts, dexOpt)
-
-	// Wire BFF auth handler: Meridian-signed JWTs for password login.
-	// The identity connector validates credentials directly against the identity domain.
-	bffSigner, bffAuthOpts := wireBFFAuth(conns.gormDB("identity"), logger)
-	extraGWOpts = append(extraGWOpts, bffAuthOpts...)
-
-	// Wire self-service registration handler (public endpoint, no auth required).
-	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
-	emailOutboxRepo := email.NewPostgresOutboxRepository(conns.gormDB("payment-order"))
-	if regOpt := wireRegistration(conns.gormDB("identity"), conns.gormDB("tenant"), loopback.rawConn, baseDomain, emailOutboxRepo, logger); regOpt != nil {
-		extraGWOpts = append(extraGWOpts, regOpt)
-	}
-
-	// Wire email verification handler (public endpoint, token auth).
-	if verifyOpt := wireVerification(conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); verifyOpt != nil {
-		extraGWOpts = append(extraGWOpts, verifyOpt)
-	}
-
-	// Wire password reset handler (public endpoint, token auth).
-	if resetOpt := wirePasswordReset(conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); resetOpt != nil {
-		extraGWOpts = append(extraGWOpts, resetOpt)
-	}
-
-	// Wire Resend webhook handler (public endpoint, Svix signature auth).
-	if webhookOpt := wireResendWebhook(conns.gormDB("payment-order"), logger); webhookOpt != nil {
-		extraGWOpts = append(extraGWOpts, webhookOpt)
-	}
-
-	// Wire admin identity management handler (requires admin role).
-	if adminOpt := wireAdminHandler(conns.gormDB("identity"), logger); adminOpt != nil {
-		extraGWOpts = append(extraGWOpts, adminOpt)
-	}
-
-	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...)
-	if err != nil {
-		return fmt.Errorf("gateway init: %w", err)
-	}
-
-	gatewayErrors := make(chan error, 1)
-
-	// Start event router in background (consumes from EventSource and publishes to FanOut).
-	routerCancel := startEventRouter(ctx, eventRouter, logger)
 	defer routerCancel()
-
+	gatewayErrors := make(chan error, 1)
 	go func() {
 		if err := gwServer.Start(context.Background()); err != nil {
 			gatewayErrors <- err
 		}
 	}()
 
-	// ─── Graceful Shutdown ───────────────────────────────────────────────
+	return awaitAndShutdown(infra.grpcServer, gwServer, auditWorker, provisioningWorker, emailWorker, serverErrors, gatewayErrors, logger)
+}
 
+// initInfrastructure creates all shared infrastructure: database connections, tracer,
+// gRPC server, idempotency service, event publishers, loopback clients, and schema provisioner.
+func initInfrastructure(ctx context.Context, grpcPort int, logger *slog.Logger) (*unifiedInfra, error) {
+	baseDSN := env.GetEnvOrDefault("DATABASE_URL",
+		"postgres://root@localhost:26257/defaultdb?sslmode=disable")
+	conns, err := newServiceConns(ctx, baseDSN, logger)
+	if err != nil {
+		return nil, fmt.Errorf("service connections: %w", err)
+	}
+
+	tracer, err := observability.NewTracer(ctx, observability.TracerConfig{
+		ServiceName:  "meridian-unified",
+		OTLPEndpoint: "localhost:4317",
+		Enabled:      false,
+	})
+	if err != nil {
+		conns.closeAll(logger)
+		return nil, fmt.Errorf("tracer: %w", err)
+	}
+
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
+		WithoutAuth().
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
+	if err != nil {
+		conns.closeAll(logger)
+		return nil, fmt.Errorf("failed to build grpc server: %w", err)
+	}
+
+	idempotencySvc := idempotency.NewPostgresService(conns.pgxPool("control-plane"))
+	if err := idempotencySvc.EnsureTable(ctx); err != nil {
+		conns.closeAll(logger)
+		return nil, fmt.Errorf("idempotency table: %w", err)
+	}
+
+	infra := &unifiedInfra{
+		baseDSN:         baseDSN,
+		conns:           conns,
+		tracer:          tracer,
+		grpcServer:      grpcServer,
+		idempotencySvc:  idempotencySvc,
+		faEventPub:      &noopFAPublisher{},
+		pkEventPub:      pkdomain.NewNoOpEventPublisher(),
+		outboxPublisher: events.NewOutboxPublisher("unified"),
+		outboxRepo:      events.NewPostgresOutboxRepository(conns.gormDB("financial-accounting")),
+	}
+
+	if err := initLoopbackAndProvisioner(ctx, infra, grpcPort, logger); err != nil {
+		return nil, err
+	}
+	return infra, nil
+}
+
+// initLoopbackAndProvisioner creates loopback clients and schema provisioner for the unified infra.
+func initLoopbackAndProvisioner(ctx context.Context, infra *unifiedInfra, grpcPort int, logger *slog.Logger) error {
+	svcAuthCfg := platformauth.NewServiceAuthConfigFromEnv()
+	svcCreds, err := svcAuthCfg.NewCredentials()
+	if err != nil {
+		infra.conns.closeAll(logger)
+		return fmt.Errorf("service auth credentials: %w", err)
+	}
+
+	loopback, err := newLoopbackClients(ctx, grpcPort, svcCreds)
+	if err != nil {
+		infra.conns.closeAll(logger)
+		return fmt.Errorf("loopback clients: %w", err)
+	}
+	infra.loopback = loopback
+
+	schemaProvisioner, err := createSchemaProvisioner(infra.baseDSN, infra.conns.gormDB("tenant"), logger)
+	if err != nil {
+		loopback.closeAll()
+		infra.conns.closeAll(logger)
+		return fmt.Errorf("schema provisioner: %w", err)
+	}
+	infra.schemaProv = schemaProvisioner
+	if schemaProvisioner != nil {
+		infra.provIface = schemaProvisioner
+	}
+	return nil
+}
+
+// setupAndStartGateway wires all gateway HTTP handlers and creates the gateway server.
+func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, httpPort int, logger *slog.Logger) (*gateway.Server, context.CancelFunc, error) {
+	platformDSN, err := replaceDSNDatabase(infra.baseDSN, "meridian_platform")
+	if err != nil {
+		return nil, nil, fmt.Errorf("platform DSN: %w", err)
+	}
+
+	eventRouter, extraGWOpts := wireEventStream(infra.conns.gormDB("financial-accounting"), logger)
+
+	dexOpt, err := wireEmbeddedDex(ctx, infra.conns.gormDB("identity"), logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("embedded dex: %w", err)
+	}
+	extraGWOpts = append(extraGWOpts, dexOpt)
+
+	bffSigner, bffAuthOpts := wireBFFAuth(infra.conns.gormDB("identity"), logger)
+	extraGWOpts = append(extraGWOpts, bffAuthOpts...)
+
+	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
+	emailOutboxRepo := email.NewPostgresOutboxRepository(infra.conns.gormDB("payment-order"))
+	if regOpt := wireRegistration(infra.conns.gormDB("identity"), infra.conns.gormDB("tenant"), infra.loopback.rawConn, baseDomain, emailOutboxRepo, logger); regOpt != nil {
+		extraGWOpts = append(extraGWOpts, regOpt)
+	}
+	if verifyOpt := wireVerification(infra.conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); verifyOpt != nil {
+		extraGWOpts = append(extraGWOpts, verifyOpt)
+	}
+	if resetOpt := wirePasswordReset(infra.conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); resetOpt != nil {
+		extraGWOpts = append(extraGWOpts, resetOpt)
+	}
+	if webhookOpt := wireResendWebhook(infra.conns.gormDB("payment-order"), logger); webhookOpt != nil {
+		extraGWOpts = append(extraGWOpts, webhookOpt)
+	}
+	if adminOpt := wireAdminHandler(infra.conns.gormDB("identity"), logger); adminOpt != nil {
+		extraGWOpts = append(extraGWOpts, adminOpt)
+	}
+
+	gwServer, err := wireGateway(grpcPort, httpPort, platformDSN, infra.conns.gormDB("tenant"), bffSigner, logger, extraGWOpts...) //nolint:contextcheck // BuildAuthMiddleware manages its own context
+	if err != nil {
+		return nil, nil, fmt.Errorf("gateway init: %w", err)
+	}
+
+	routerCancel := startEventRouter(ctx, eventRouter, logger)
+
+	return gwServer, routerCancel, nil
+}
+
+// awaitAndShutdown waits for a shutdown signal or server error, then gracefully stops all components.
+func awaitAndShutdown(
+	grpcServer *grpc.Server,
+	gwServer *gateway.Server,
+	auditWorker *audit.MultiTenantWorker,
+	provisioningWorker *tenantworker.ProvisioningWorker,
+	emailWorker *dispatch.Worker[*emailworker.OutboxInstruction],
+	serverErrors, gatewayErrors chan error,
+	logger *slog.Logger,
+) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
